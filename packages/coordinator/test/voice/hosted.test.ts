@@ -45,29 +45,30 @@ function wav(dataBytes: number, fill = 0): Uint8Array {
   return Uint8Array.from([...header, ...Array.from({ length: dataBytes }, () => fill)]);
 }
 
-/** A vendor account: the voices it holds by id and name, and a record of what it was asked. */
+/** One account per vendor: the voices each holds by id and name, and a record of what was asked. */
 function fakeSlots(failRemove = false) {
   const saves: Array<{ provider: string; key: string; name: string; bytes: number; contentType: string }> = [];
   const removes: Array<{ provider: string; key: string; voiceId: string }> = [];
-  const account = new Map<string, string>();
+  const accounts = new Map<string, Map<string, string>>();
+  const accountOf = (provider: string) => accounts.get(provider) ?? accounts.set(provider, new Map()).get(provider)!;
   let counter = 0;
   const slots: HostedVoiceSlots = {
     save: async (provider, key, input, signal) => {
       signal?.throwIfAborted();
       saves.push({ provider, key, name: input.name, bytes: input.clip.length, contentType: input.contentType });
       const voiceId = `voc_${++counter}`;
-      account.set(voiceId, input.name);
+      accountOf(provider).set(voiceId, input.name);
       return { voiceId };
     },
     remove: async (provider, key, voiceId) => {
       removes.push({ provider, key, voiceId });
       if (failRemove) throw new Error("breezeblue: synthesis failed — HTTP 500");
-      account.delete(voiceId);
+      accountOf(provider).delete(voiceId);
     },
-    find: async (_provider, _key, name, signal) => { signal?.throwIfAborted(); return [...account.entries()].find(([, held]) => held === name)?.[0] ?? null; },
-    has: async (_provider, _key, voiceId) => account.has(voiceId),
+    find: async (provider, _key, name, signal) => { signal?.throwIfAborted(); return [...accountOf(provider).entries()].find(([, held]) => held === name)?.[0] ?? null; },
+    has: async (provider, _key, voiceId) => accountOf(provider).has(voiceId),
   };
-  return { slots, saves, removes, account };
+  return { slots, saves, removes, account: accountOf("breezeblue") };
 }
 
 describe("what the library remembers of each hosted reader (SPEC-046 R-13, R-16)", () => {

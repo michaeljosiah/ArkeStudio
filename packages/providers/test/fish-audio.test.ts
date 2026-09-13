@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { FISH_DELIVERY } from "@arke-studio/contracts";
+import { billableCharacters, estimateMicroUsd, FISH_DELIVERY } from "@arke-studio/contracts";
 import { FishAudioClient, FISH_CATALOGUE_PAGES, FISH_MODEL } from "../src/clients/fishaudio.js";
 import { SHIPPED_MANIFEST } from "../src/manifest-data.js";
 import { createProviderClients, PROVIDER_DECLARATIONS } from "../src/registry.js";
@@ -119,6 +119,21 @@ describe("Fish Audio · S2.1-Pro as a hosted reader (SPEC-046 §2.9)", () => {
     await assert.rejects(new FishAudioClient(async () => new Response(null, { status: 200 })).deleteVoice("k", "../model"), ProviderRequestRejectedError);
   });
 
+  it("finds the account's own model by its exact hash-named title, and reads whether a model is still held (R-13)", async () => {
+    const r = recording(() => json(200, { items: [
+      { _id: "m_near", title: "Harbour glass · 0123456789ab (old)", type: "tts" },
+      { _id: "m_exact", title: "Harbour glass · 0123456789ab", type: "tts" },
+    ], has_more: false }));
+    assert.equal(await new FishAudioClient(r.fetchImpl).findVoice("k", "Harbour glass · 0123456789ab"), "m_exact");
+    assert.equal(r.calls[0]?.url, "https://api.fish.audio/model?self=true&title=Harbour%20glass%20%C2%B7%200123456789ab&page_size=100");
+    assert.equal(await new FishAudioClient(async () => json(200, { items: [] })).findVoice("k", "x"), null);
+    const held = recording((url) => url.endsWith("/model/m_1") ? json(200, { _id: "m_1", state: "trained" }) : json(404, { status: 404, message: "Model not found" }));
+    assert.equal(await new FishAudioClient(held.fetchImpl).hasVoice("k", "m_1"), true);
+    assert.equal(await new FishAudioClient(held.fetchImpl).hasVoice("k", "m_gone"), false);
+    assert.equal(await new FishAudioClient(async () => json(403, { status: 403, message: "Forbidden" })).hasVoice("k", "m_theirs"), false, "another account's model is not held");
+    await assert.rejects(new FishAudioClient(async () => json(500, { status: 500, message: "x" })).hasVoice("k", "m_1"));
+  });
+
   it("lists the licensed public library, most used first, page after page to a bound, with languages and tags as attributes (R-32)", async () => {
     const page = (n: number, hasMore: boolean) => json(200, { items: [
       { _id: `m${n}`, type: "tts", title: `Narrator ${n}`, languages: ["en"], tags: ["Narration", "Calm"], licensed: true, task_count: 1000 - n },
@@ -141,19 +156,27 @@ describe("Fish Audio · S2.1-Pro as a hosted reader (SPEC-046 §2.9)", () => {
     assert.deepEqual(PROVIDER_DECLARATIONS["fishaudio"], { supportsIdempotencyKey: false, supportsLookupByKey: false, supportsListRecent: false, reportsCost: false });
     const scopes: ProviderTransportScope[] = [];
     const answer: FetchLike = async (url, init) =>
-      init?.method === "DELETE" ? new Response(null, { status: 200 }) : url.endsWith("/model") ? json(201, { _id: "m_wrapped", state: "trained" }) : new Response(WAV, { status: 200 });
+      init?.method === "DELETE" ? new Response(null, { status: 200 })
+        : url.endsWith("/model") ? json(201, { _id: "m_wrapped", state: "trained" })
+        : url.endsWith("/model/m_wrapped") ? json(200, { _id: "m_wrapped", state: "trained" })
+        : new Response(WAV, { status: 200 });
     const clients = createProviderClients({ fetch: answer, transport: { run: (scope, operation) => { scopes.push(scope); return operation(answer); } } });
     const fish = clients.fishaudio as VoiceSlotClient;
     assert.deepEqual(await fish.saveVoice("k", { name: "x", clip: WAV, contentType: "audio/wav" }), { voiceId: "m_wrapped" });
+    assert.equal(await fish.hasVoice("k", "m_wrapped"), true);
     await fish.deleteVoice("k", "m_wrapped");
-    assert.deepEqual(scopes.map((scope) => scope.operation), ["save-voice", "delete-voice"]);
+    assert.deepEqual(scopes.map((scope) => scope.operation), ["save-voice", "lookup-voice", "delete-voice"]);
   });
 
   it("the row is honest: the vendor's model behind a stable id, fifteen micro-dollars a character, our own cap, every delivery as a phrase", () => {
     const row = SHIPPED_MANIFEST.models.find((m) => m.id === FISH_MODEL)!;
     assert.equal(row.provider, "fishaudio");
     assert.equal(row.providerModelId, "s2.1-pro");
-    assert.deepEqual(row.pricing, { kind: "perCharacter", microUsdPerCharacter: 15 });
+    assert.deepEqual(row.pricing, { kind: "perCharacter", microUsdPerCharacter: 15, unit: "utf8-byte" });
+    // Bytes, as the bill is: a CJK line costs three times its length, an accented word one more.
+    assert.equal(billableCharacters(row, "Bell Watch."), 11);
+    assert.equal(billableCharacters(row, "鐘の見張り"), 15);
+    assert.equal(estimateMicroUsd(row, { characters: billableCharacters(row, "naïve") }), 90);
     assert.equal(row.limits.audioFormat, "wav");
     assert.equal(row.limits.maxPromptChars, 2000);
     assert.deepEqual(row.limits.deliveries, ["measured", "whispered", "breaking", "cold", "warm", "urgent"]);

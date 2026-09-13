@@ -179,6 +179,32 @@ export class FishAudioClient implements ProviderClient, VoiceCatalogueClient, Vo
     if (res.status >= 400) throw await this.failure(res);
   }
 
+  /**
+   * The account's own model saved under exactly this title (R-13): the library titles a model
+   * with the clip's hash, so a save whose answer never landed is found here rather than made
+   * again. `title` filters by text match, so the title is checked exactly.
+   */
+  async findVoice(key: string, name: string): Promise<string | null> {
+    const { status, body } = await jsonRequest(
+      this.fetchImpl, this.id,
+      `${this.baseUrl}/model?self=true&title=${encodeURIComponent(name)}&page_size=100`,
+      { headers: this.headers(key) },
+    );
+    if (status >= 400) return null;
+    const items = (body as { items?: Array<Record<string, unknown>> } | null)?.items ?? [];
+    const match = items.find((v) => v["title"] === name && typeof v["_id"] === "string");
+    return match ? (match["_id"] as string) : null;
+  }
+
+  /** Whether the account still holds the model: one deleted on fish.audio, or owned by another account, reads false. */
+  async hasVoice(key: string, voiceId: string): Promise<boolean> {
+    if (!/^[A-Za-z0-9_-]+$/.test(voiceId)) return false;
+    const res = await this.fetchImpl(`${this.baseUrl}/model/${encodeURIComponent(voiceId)}`, { headers: this.headers(key) });
+    if (res.status === 404 || res.status === 403) return false;
+    if (res.status >= 400) throw await this.failure(res);
+    return true;
+  }
+
   async poll(_key: string, _remoteId: string): Promise<PollResult> {
     return { state: "failed", error: "fishaudio: synchronous results must be returned by submit" };
   }

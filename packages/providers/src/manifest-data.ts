@@ -260,8 +260,8 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       // Read 2026-09-13: https://docs.fish.audio/developer-guide/models-pricing/pricing-and-rate-limits
       // — $15 per million UTF-8 bytes on `s2.1-pro`, Fish's recommended production model (83
       // languages, `[bracket]` natural-language cues, multi-speaker). A byte is a character for
-      // Latin text and up to three for CJK, so this per-character figure is exact for English and
-      // under by up to three times for Chinese, Japanese or Korean (SPEC-046 R-8). The 2,000-character
+      // Latin text and up to three for CJK, so `unit: "utf8-byte"` makes the estimate count bytes
+      // as the bill does (SPEC-046 R-8). The 2,000-character
       // cap is OURS: Fish publishes no text limit and chunks internally (`chunk_length` 100–300).
       // Direction is a phrase in the text — Fish's S2 reads `[whispering]` as language, not a
       // control token — declared in the contract's FISH_DELIVERY table in the default bracket
@@ -273,7 +273,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       id: "fish-s2.1-pro", providerModelId: "s2.1-pro", provider: "fishaudio", capability: "voice-tts", displayName: "Fish Audio S2.1 Pro",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false },
       limits: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], audioFormat: "wav", maxPromptChars: 2000 },
-      pricing: { kind: "perCharacter", microUsdPerCharacter: 15 },
+      pricing: { kind: "perCharacter", microUsdPerCharacter: 15, unit: "utf8-byte" },
       cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: { min: 0.7, max: 1.3 },
         pause: "best-effort-audio-tag", emphasis: "unsupported", breath: "best-effort-audio-tag", outputTimestamps: "none",
         deliveryMappings: FISH_DELIVERY },
