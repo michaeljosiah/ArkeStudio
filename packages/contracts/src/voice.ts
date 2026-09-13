@@ -214,6 +214,8 @@ export const ClonedVoiceSchema = z
             voiceId: z.string().min(1).optional(),
             clipHash: z.string().min(1).optional(),
             savedAt: z.string().min(1).optional(),
+            /** Replaced copies the vendor has not yet confirmed removed: tried again at the next read (R-15). */
+            stale: z.array(z.string().min(1)).optional(),
           })
           .passthrough(),
       )

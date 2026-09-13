@@ -458,7 +458,30 @@ export async function recordVoiceReader(
   store: WorldStore,
   voiceId: string,
   provider: string,
-  patch: { confirmedAt?: string; voiceId?: string; clipHash?: string; savedAt?: string },
+  patch: { confirmedAt?: string; voiceId?: string; clipHash?: string; savedAt?: string; stale?: string[] },
+): Promise<void> {
+  // Read, patch and commit as one: two overlapping records — a confirmation for one reader while
+  // another's slot flow lands — would both read the file before either committed, and the second
+  // would reach the commit with a stale base hash and fail (codex on PR 1153). One at a time per
+  // store; the commit's own serialisation is below this and cannot see the read.
+  const previous = readerWrites.get(store) ?? Promise.resolve();
+  const run = previous.then(() => recordVoiceReaderNow(store, voiceId, provider, patch), () => recordVoiceReaderNow(store, voiceId, provider, patch));
+  const settled = run.then(() => undefined, () => undefined);
+  readerWrites.set(store, settled);
+  try {
+    await run;
+  } finally {
+    if (readerWrites.get(store) === settled) readerWrites.delete(store);
+  }
+}
+
+const readerWrites = new WeakMap<WorldStore, Promise<void>>();
+
+async function recordVoiceReaderNow(
+  store: WorldStore,
+  voiceId: string,
+  provider: string,
+  patch: { confirmedAt?: string; voiceId?: string; clipHash?: string; savedAt?: string; stale?: string[] },
 ): Promise<void> {
   const existingRaw = await readLibraryRaw(store);
   if (existingRaw === null) throw new Error("the voice library is missing");
@@ -467,7 +490,10 @@ export async function recordVoiceReader(
   if (!entry) throw new Error("that cloned voice is no longer in this world");
   const remote = (typeof entry["remote"] === "object" && entry["remote"] !== null ? entry["remote"] : {}) as Record<string, Record<string, unknown>>;
   const current = typeof remote[provider] === "object" && remote[provider] !== null ? remote[provider] : {};
-  entry["remote"] = { ...remote, [provider]: { ...current, ...patch } };
+  const next: Record<string, unknown> = { ...current, ...patch };
+  // An emptied stale list is no list: the key comes off rather than sitting as `[]` forever.
+  if (Array.isArray(next["stale"]) && next["stale"].length === 0) delete next["stale"];
+  entry["remote"] = { ...remote, [provider]: next };
   await store.commit({
     kind: "voice-reader",
     source: "app",

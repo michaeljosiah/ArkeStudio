@@ -527,12 +527,12 @@ export function captureProviderClient(
   // (the cast in desktop main once hid exactly that).
   const slots = client as Partial<VoiceSlotClient>;
   if (slots.saveVoice)
-    wrapped.saveVoice = (key, input) => run("save-voice", undefined, () => slots.saveVoice!.call(client, key, input));
+    wrapped.saveVoice = (key, input, signal) => run("save-voice", undefined, () => slots.saveVoice!.call(client, key, input, signal));
   if (slots.deleteVoice)
-    wrapped.deleteVoice = (key, voiceId) => run("delete-voice", undefined, () => slots.deleteVoice!.call(client, key, voiceId));
+    wrapped.deleteVoice = (key, voiceId, signal) => run("delete-voice", undefined, () => slots.deleteVoice!.call(client, key, voiceId, signal));
   if (slots.findVoice)
-    wrapped.findVoice = (key, name) => run("lookup-voice", undefined, () => slots.findVoice!.call(client, key, name));
+    wrapped.findVoice = (key, name, signal) => run("lookup-voice", undefined, () => slots.findVoice!.call(client, key, name, signal));
   if (slots.hasVoice)
-    wrapped.hasVoice = (key, voiceId) => run("lookup-voice", undefined, () => slots.hasVoice!.call(client, key, voiceId));
+    wrapped.hasVoice = (key, voiceId, signal) => run("lookup-voice", undefined, () => slots.hasVoice!.call(client, key, voiceId, signal));
   return wrapped;
 }

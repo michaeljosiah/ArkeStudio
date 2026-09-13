@@ -2274,6 +2274,36 @@ describe("artifact verification (R-12, R-13, D12)", () => {
 });
 
 describe("cancellation (R-14, R-15, D10)", () => {
+  it("cancels a clip read in flight: the read gets the job's signal and a cancel ends as cancelled, not failed (codex on PR 1153)", async () => {
+    // A hosted reader's clip read can save a slot on the vendor's account, so it must take the
+    // cancellation like reference preparation does — before, no controller was registered
+    // until submit, and a cancelled job could still upload the recording and bill a slot.
+    const fake = new FakeProvider({});
+    let reading: AbortSignal | undefined;
+    let reads = 0;
+    const h = await makeHarness({ fake }, {
+      readVoiceReference: (_worldId, _provider, _model, _voiceId, signal) => new Promise((_resolve, reject) => {
+        reads += 1;
+        reading = signal;
+        signal?.addEventListener("abort", () => reject(signal.reason ?? new Error("aborted")), { once: true });
+      }),
+    });
+    await h.queue.start();
+    const job = await h.queue.enqueue({ ...INPUT, capability: "voice-tts", params: { voiceId: "harbour", text: "A line." }, voiceReference: true });
+    await until(() => reading !== undefined, "the clip read to start", FOLD_MS);
+    await h.queue.cancel(job.id);
+    assert.equal(reading?.aborted, true, "the read was told to stop");
+    await until(() => foldedJob(h, job.id)?.status === "cancelled", "the job to fold to cancelled", FOLD_MS);
+    assert.equal(foldedJob(h, job.id)?.error, null);
+    assert.equal(fake.submitCount, 0);
+    // The aborted run must not put the job back for a second read: between the abort and the
+    // cancel's terminal write the job is still "queued", and a requeue there dispatched it again
+    // with nobody left to abort the second run.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(reads, 1, "one read, aborted; never a second");
+    h.queue.dispose();
+  });
+
   it("does not warn about a charge when queued remote work never reached the provider", async () => {
     const fake = new FakeProvider({});
     fake.pollState = "running";

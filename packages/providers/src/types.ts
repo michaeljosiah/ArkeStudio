@@ -284,12 +284,13 @@ export interface VoiceSlotClient extends ProviderClient {
   saveVoice(
     key: string,
     input: { name: string; clip: Uint8Array; contentType: "audio/wav" | "audio/mpeg"; language?: string },
+    signal?: AbortSignal,
   ): Promise<{ voiceId: string }>;
-  deleteVoice(key: string, voiceId: string): Promise<void>;
+  deleteVoice(key: string, voiceId: string, signal?: AbortSignal): Promise<void>;
   /** The id of the account's own voice saved under exactly this name, or null when the listing answered and holds none; a listing that fails throws. */
-  findVoice(key: string, name: string): Promise<string | null>;
+  findVoice(key: string, name: string, signal?: AbortSignal): Promise<string | null>;
   /** Whether the account still holds the voice: gone, or another account's, is false — never a throw. */
-  hasVoice(key: string, voiceId: string): Promise<boolean>;
+  hasVoice(key: string, voiceId: string, signal?: AbortSignal): Promise<boolean>;
 }
 
 export interface ProviderClient {

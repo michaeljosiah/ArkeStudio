@@ -186,17 +186,17 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
    * this side writes a transcript. Saving consumes a voice slot (5 · 20 · 50 · 300 by plan) and a
    * flat per-clone charge the docs do not quantify; a full plan is a rejection with the count.
    */
-  async saveVoice(key: string, input: { name: string; clip: Uint8Array; contentType: "audio/wav" | "audio/mpeg"; language?: string }): Promise<{ voiceId: string }> {
+  async saveVoice(key: string, input: { name: string; clip: Uint8Array; contentType: "audio/wav" | "audio/mpeg"; language?: string }, signal?: AbortSignal): Promise<{ voiceId: string }> {
     const form = new FormData();
     form.append("name", input.name.slice(0, 80));
     if (input.language !== undefined) form.append("language_code", input.language);
     form.append("files", new Blob([new Uint8Array(input.clip)], { type: input.contentType }), input.contentType === "audio/wav" ? "voice.wav" : "voice.mp3");
-    const preview = await this.fetchImpl(`${this.baseUrl}/v1/voice-previews/clone`, { method: "POST", headers: { "xi-api-key": key }, body: form });
+    const preview = await this.fetchImpl(`${this.baseUrl}/v1/voice-previews/clone`, { method: "POST", headers: { "xi-api-key": key }, body: form, ...(signal ? { signal } : {}) });
     if (preview.status >= 400) throw await this.failure(preview);
     const generated = ((await preview.json().catch(() => null)) as { generated_voice_id?: unknown } | null)?.generated_voice_id;
     if (typeof generated !== "string" || generated === "") throw new Error("breezeblue: the clone preview carried no generated_voice_id");
     const saved = await this.fetchImpl(`${this.baseUrl}/v1/voice-previews/${encodeURIComponent(generated)}/save`, {
-      method: "POST", headers: this.headers(key), body: JSON.stringify({ voice_name: input.name.slice(0, 80), language_code: input.language ?? "en" }),
+      method: "POST", headers: this.headers(key), body: JSON.stringify({ voice_name: input.name.slice(0, 80), language_code: input.language ?? "en" }), ...(signal ? { signal } : {}),
     });
     if (saved.status >= 400) throw await this.failure(saved);
     const voiceId = ((await saved.json().catch(() => null)) as { voice_id?: unknown } | null)?.voice_id;
@@ -205,9 +205,9 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
   }
 
   /** Remove a saved voice (R-15). A voice already gone is not an error: the outcome is the same. */
-  async deleteVoice(key: string, voiceId: string): Promise<void> {
+  async deleteVoice(key: string, voiceId: string, signal?: AbortSignal): Promise<void> {
     if (!/^[A-Za-z0-9_-]+$/.test(voiceId)) throw new ProviderRequestRejectedError("breezeblue: not a voice id");
-    const res = await this.fetchImpl(`${this.baseUrl}/v1/voices/${encodeURIComponent(voiceId)}`, { method: "DELETE", headers: { "xi-api-key": key } });
+    const res = await this.fetchImpl(`${this.baseUrl}/v1/voices/${encodeURIComponent(voiceId)}`, { method: "DELETE", headers: { "xi-api-key": key }, ...(signal ? { signal } : {}) });
     if (res.status === 404) return;
     if (res.status >= 400) throw await this.failure(res);
   }
@@ -219,8 +219,8 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
    * listing that fails is thrown, never read as "none": an unanswered listing after an
    * uncertain save is exactly when a second save would charge twice (codex on PR 1153).
    */
-  async findVoice(key: string, name: string): Promise<string | null> {
-    const res = await this.fetchImpl(`${this.baseUrl}/v1/voices?voice_type=personal&search=${encodeURIComponent(name)}&page_size=100`, { headers: this.headers(key) });
+  async findVoice(key: string, name: string, signal?: AbortSignal): Promise<string | null> {
+    const res = await this.fetchImpl(`${this.baseUrl}/v1/voices?voice_type=personal&search=${encodeURIComponent(name)}&page_size=100`, { headers: this.headers(key), ...(signal ? { signal } : {}) });
     if (res.status >= 400) throw await this.failure(res);
     const body = (await res.json().catch(() => null)) as { voices?: Array<Record<string, unknown>> } | null;
     const match = (body?.voices ?? []).find((v) => v["name"] === name && typeof v["voice_id"] === "string");
@@ -228,9 +228,9 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
   }
 
   /** Whether the account still holds the voice: a slot deleted in Breeze's console, or one saved under another account's key, reads false. */
-  async hasVoice(key: string, voiceId: string): Promise<boolean> {
+  async hasVoice(key: string, voiceId: string, signal?: AbortSignal): Promise<boolean> {
     if (!/^[A-Za-z0-9_-]+$/.test(voiceId)) return false;
-    const res = await this.fetchImpl(`${this.baseUrl}/v1/voices/${encodeURIComponent(voiceId)}`, { headers: { "xi-api-key": key } });
+    const res = await this.fetchImpl(`${this.baseUrl}/v1/voices/${encodeURIComponent(voiceId)}`, { headers: { "xi-api-key": key }, ...(signal ? { signal } : {}) });
     if (res.status === 404 || res.status === 403) return false;
     if (res.status >= 400) throw await this.failure(res);
     return true;

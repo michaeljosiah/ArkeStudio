@@ -52,7 +52,8 @@ function fakeSlots(failRemove = false) {
   const account = new Map<string, string>();
   let counter = 0;
   const slots: HostedVoiceSlots = {
-    save: async (provider, key, input) => {
+    save: async (provider, key, input, signal) => {
+      signal?.throwIfAborted();
       saves.push({ provider, key, name: input.name, bytes: input.clip.length, contentType: input.contentType });
       const voiceId = `voc_${++counter}`;
       account.set(voiceId, input.name);
@@ -63,7 +64,7 @@ function fakeSlots(failRemove = false) {
       if (failRemove) throw new Error("breezeblue: synthesis failed — HTTP 500");
       account.delete(voiceId);
     },
-    find: async (_provider, _key, name) => [...account.entries()].find(([, held]) => held === name)?.[0] ?? null,
+    find: async (_provider, _key, name, signal) => { signal?.throwIfAborted(); return [...account.entries()].find(([, held]) => held === name)?.[0] ?? null; },
     has: async (_provider, _key, voiceId) => account.has(voiceId),
   };
   return { slots, saves, removes, account };
@@ -229,6 +230,68 @@ describe("what the library remembers of each hosted reader (SPEC-046 R-13, R-16)
       assert.equal(kept.remoteVoiceId, "voc_1", "the failing fake counts from one");
       assert.deepEqual(failing.removes, [{ provider: "breezeblue", key: "k", voiceId: "voc_orphan" }]);
       assert.equal(voice().remote?.["breezeblue"]?.voiceId, "voc_1");
+    });
+  });
+
+  it("a replaced slot the vendor would not remove stays on the entry as stale and is tried again at the next read (R-15)", async () => {
+    await withClonedVoice(async ({ store, dir, voice }) => {
+      const first = await clipFor(store, voice());
+      assert.ok(first);
+      await recordVoiceReader(store, "harbour-glass", "breezeblue", { confirmedAt: CLOCK() });
+      const vendor = fakeSlots(true);
+      const deps = { getKey: async () => "k", slots: vendor.slots, now: CLOCK };
+      await prepareHostedClip(store, "breezeblue", "breeze-tts-2", voice(), first, deps);
+      await writeFile(toExtendedLength(join(dir, "voices", "harbour-glass.wav")), wav(96, 1));
+      const second = await clipFor(store, voice());
+      assert.ok(second);
+      const remade = await prepareHostedClip(store, "breezeblue", "breeze-tts-2", voice(), second, deps);
+      assert.equal(remade.remoteVoiceId, "voc_2");
+      assert.deepEqual(voice().remote?.["breezeblue"]?.stale, ["voc_1"], "the handle is kept, not dropped with the failure");
+      assert.deepEqual(vendor.removes.map((r) => r.voiceId), ["voc_1"]);
+      // The vendor answers next time: the stale copy goes, and the record says so.
+      vendor.slots.remove = async (provider, key, voiceId) => { vendor.removes.push({ provider, key, voiceId }); vendor.account.delete(voiceId); };
+      const again = await prepareHostedClip(store, "breezeblue", "breeze-tts-2", voice(), second, deps);
+      assert.equal(again.remoteVoiceId, "voc_2");
+      assert.deepEqual(vendor.removes.map((r) => r.voiceId), ["voc_1", "voc_1"]);
+      assert.equal(voice().remote?.["breezeblue"]?.stale, undefined, "an emptied list comes off the entry");
+      assert.equal(vendor.saves.length, 2, "no slot was made for a retry of a removal");
+    });
+  });
+
+  it("a cancelled job saves nothing: the signal stops the flow before the save and the record (codex on PR 1153)", async () => {
+    await withClonedVoice(async ({ store, voice }) => {
+      const clip = await clipFor(store, voice());
+      assert.ok(clip);
+      await recordVoiceReader(store, "harbour-glass", "breezeblue", { confirmedAt: CLOCK() });
+      const { slots, saves } = fakeSlots();
+      const controller = new AbortController();
+      const seen: Array<AbortSignal | undefined> = [];
+      const find = slots.find;
+      // The cancel lands while the listing is in flight — the moment a save would follow.
+      slots.find = async (provider, key, name, signal) => { seen.push(signal); controller.abort(); return find(provider, key, name, signal); };
+      await assert.rejects(
+        prepareHostedClip(store, "breezeblue", "breeze-tts-2", voice(), clip, { getKey: async () => "k", slots, signal: controller.signal, now: CLOCK }),
+        (err: unknown) => err instanceof Error && err.name === "AbortError",
+      );
+      assert.equal(saves.length, 0, "nothing left for the vendor after the person said stop");
+      assert.equal(voice().remote?.["breezeblue"]?.voiceId, undefined, "and nothing was recorded");
+      assert.equal(seen[0], controller.signal, "the vendor call itself carries the job's signal");
+      const already = new AbortController();
+      already.abort();
+      await assert.rejects(prepareHostedClip(store, "breezeblue", "breeze-tts-2", voice(), clip, { getKey: async () => "k", slots, signal: already.signal, now: CLOCK }));
+      assert.equal(saves.length, 0);
+    });
+  });
+
+  it("two readers' records landing together both land: the read and the commit are one serialised step (codex on PR 1153)", async () => {
+    await withClonedVoice(async ({ store, voice }) => {
+      await Promise.all([
+        recordVoiceReader(store, "harbour-glass", "mistral", { confirmedAt: CLOCK() }),
+        recordVoiceReader(store, "harbour-glass", "breezeblue", { confirmedAt: CLOCK(), voiceId: "voc_9" }),
+        recordVoiceReader(store, "harbour-glass", "fishaudio", { confirmedAt: CLOCK() }),
+      ]);
+      assert.deepEqual(Object.keys(voice().remote ?? {}).sort(), ["breezeblue", "fishaudio", "mistral"]);
+      assert.equal(voice().remote?.["breezeblue"]?.voiceId, "voc_9");
     });
   });
 

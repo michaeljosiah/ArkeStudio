@@ -1125,8 +1125,9 @@ export class Coordinator {
         requestId: input.requestId,
         worldId: input.worldId,
         command: input.command,
-        // The vendor and the voice: a page with two cloned voices asks about each by name.
-        destinationLabel: `${vendor.label} · ${input.reader.voice.name}`,
+        // The vendor and the voice: a page with two cloned voices asks about each by name. The
+        // name is bounded because the frame's label is (512), and a clone's name is not.
+        destinationLabel: `${vendor.label} · ${input.reader.voice.name.slice(0, 120)}`,
         confirmationToken: token,
         destinationNotice: vendor.notice,
       });
@@ -2143,7 +2144,7 @@ export class Coordinator {
               if(!store||store.worldId!==worldId) throw new Error("the owning world is unavailable");
               return read(store);
             },
-            readVoiceReference: async (worldId, provider, model, voiceId) => {
+            readVoiceReference: async (worldId, provider, model, voiceId, signal) => {
               const prepare = async (store: WorldStore) => {
                 const source = voiceSourceFor(store.getBundle().clonedVoices, provider, model, voiceId);
                 if (source.kind !== "cloned") {
@@ -2160,6 +2161,7 @@ export class Coordinator {
                 return prepareHostedClip(store, provider, model, source.voice, clip, {
                   getKey: async (id) => (this.credentials ? this.credentials.get(id as ProviderId) : null),
                   ...(this.opts.hostedVoiceSlots !== undefined ? { slots: this.opts.hostedVoiceSlots } : {}),
+                  ...(signal !== undefined ? { signal } : {}),
                   now: () => this.nowIso(),
                 });
               };

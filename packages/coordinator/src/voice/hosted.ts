@@ -73,19 +73,25 @@ export function hostedSlotName(voice: Pick<ClonedVoice, "name">, clipHash: strin
   return `${voice.name.slice(0, 60)} · ${clipHash.replace(/^sha256:/, "").slice(0, 12)}`;
 }
 
-/** Vendor-side voice state, wired by the host with the provider clients that hold the calls. */
+/**
+ * Vendor-side voice state, wired by the host with the provider clients that hold the calls.
+ * Every call takes the job's cancellation: a save that is aborted uploads nothing further and
+ * bills no slot after the person said stop.
+ */
 export interface HostedVoiceSlots {
-  save(provider: string, key: string, input: { name: string; clip: Uint8Array; contentType: "audio/wav" | "audio/mpeg"; language?: string }): Promise<{ voiceId: string }>;
-  remove(provider: string, key: string, voiceId: string): Promise<void>;
+  save(provider: string, key: string, input: { name: string; clip: Uint8Array; contentType: "audio/wav" | "audio/mpeg"; language?: string }, signal?: AbortSignal): Promise<{ voiceId: string }>;
+  remove(provider: string, key: string, voiceId: string, signal?: AbortSignal): Promise<void>;
   /** The id of the account's voice saved under exactly this name, or null; a listing that fails throws. */
-  find(provider: string, key: string, name: string): Promise<string | null>;
+  find(provider: string, key: string, name: string, signal?: AbortSignal): Promise<string | null>;
   /** Whether the account still holds this voice — gone, or another account's, reads false. */
-  has(provider: string, key: string, voiceId: string): Promise<boolean>;
+  has(provider: string, key: string, voiceId: string, signal?: AbortSignal): Promise<boolean>;
 }
 
 export interface PrepareHostedClipDeps {
   getKey(provider: string): Promise<string | null>;
   slots?: HostedVoiceSlots;
+  /** The job's cancellation, checked before anything is saved or recorded. */
+  signal?: AbortSignal;
   now(): string;
 }
 
@@ -123,9 +129,10 @@ async function serialised<T>(key: string, work: () => Promise<T>): Promise<T> {
  * account before it is used, and the account before a slot is made: a recorded slot the account
  * no longer holds (deleted in the vendor's console, or a key rotated to another account) is
  * remade rather than sent to fail on every read; a slot the account holds under the hash-named
- * title is reused rather than made twice. The old slot is removed on a best-effort basis when a
- * re-recorded clip replaces it, because a copy the person cannot see counting against their
- * plan is the outcome R-15 exists to prevent.
+ * title is reused rather than made twice. The old slot is removed when a re-recorded clip
+ * replaces it, and until the vendor confirms it gone its id stays on the entry as `stale` and is
+ * tried again at the next read — the id is the only handle there is on a copy the person cannot
+ * see counting against their plan, which is the outcome R-15 exists to prevent.
  */
 export async function prepareHostedClip(
   store: WorldStore,
@@ -146,24 +153,49 @@ export async function prepareHostedClip(
   const slots = deps.slots;
   if (slots === undefined) throw new Error(`${label} voice slots are not configured in this build.`);
   const hash = clipHashOf(clip);
+  const signal = deps.signal;
   return serialised(`${provider}:${voice.id}`, async () => {
+    signal?.throwIfAborted();
     // The entry as it is now, not as it was when this read began: a flow that waited its turn
     // reads the slot the flow before it recorded.
     const current = store.getBundle().clonedVoices.find((entry) => entry.id === voice.id) ?? voice;
     const held = current.remote?.[provider];
-    if (held?.voiceId !== undefined && held.clipHash === hash && (await slots.has(provider, key, held.voiceId))) {
+    const stale = held?.stale ?? [];
+    const remaining = await removeStale(slots, provider, key, stale, signal);
+    if (held?.voiceId !== undefined && held.clipHash === hash && (await slots.has(provider, key, held.voiceId, signal))) {
+      if (remaining.length !== stale.length) await recordVoiceReader(store, voice.id, provider, { stale: remaining });
       return { ...clip, remoteVoiceId: held.voiceId };
     }
     const name = hostedSlotName(current, hash);
     // A listing that fails throws through here and the read fails with the reason: it is not
     // read as "no slot", because a save after an unanswered listing is the duplicate charge the
     // listing exists to prevent. Only a listing that answered "none" is followed by a save.
-    const found = await slots.find(provider, key, name);
-    const voiceId = found ?? (await slots.save(provider, key, { name, clip: clip.data, contentType: clip.contentType })).voiceId;
-    await recordVoiceReader(store, voice.id, provider, { voiceId, clipHash: hash, savedAt: deps.now() });
-    if (held?.voiceId !== undefined && held.voiceId !== voiceId) {
-      await slots.remove(provider, key, held.voiceId).catch(() => undefined);
-    }
+    const found = await slots.find(provider, key, name, signal);
+    signal?.throwIfAborted();
+    const voiceId = found ?? (await slots.save(provider, key, { name, clip: clip.data, contentType: clip.contentType }, signal)).voiceId;
+    const replaced = held?.voiceId !== undefined && held.voiceId !== voiceId ? [held.voiceId] : [];
+    // Recorded before the old slot is removed, with the old id kept as stale until it is: a
+    // cancellation or a crash between the two loses no handle.
+    await recordVoiceReader(store, voice.id, provider, { voiceId, clipHash: hash, savedAt: deps.now(), stale: [...remaining, ...replaced] });
+    const left = await removeStale(slots, provider, key, [...remaining, ...replaced], signal);
+    if (left.length !== remaining.length + replaced.length) await recordVoiceReader(store, voice.id, provider, { stale: left });
     return { ...clip, remoteVoiceId: voiceId };
   });
+}
+
+/** Remove what can be removed; the ids the vendor did not confirm gone come back to be kept. */
+async function removeStale(slots: HostedVoiceSlots, provider: string, key: string, ids: readonly string[], signal: AbortSignal | undefined): Promise<string[]> {
+  const kept: string[] = [];
+  for (const id of ids) {
+    if (signal?.aborted) {
+      kept.push(id);
+      continue;
+    }
+    try {
+      await slots.remove(provider, key, id, signal);
+    } catch {
+      kept.push(id);
+    }
+  }
+  return kept;
 }

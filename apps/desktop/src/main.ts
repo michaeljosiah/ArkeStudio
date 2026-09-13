@@ -1297,21 +1297,21 @@ async function initialize(): Promise<{ port: number }> {
     },
     // Breeze keeps a cloned voice as a slot on the account; the library asks for it here (SPEC-046 R-13).
     hostedVoiceSlots: {
-      save: (provider, key, input) => {
+      save: (provider, key, input, signal) => {
         if (provider !== "breezeblue") return Promise.reject(new Error(`${provider} keeps no voice slots`));
-        return (providerClients.breezeblue as VoiceSlotClient).saveVoice(key, input);
+        return (providerClients.breezeblue as VoiceSlotClient).saveVoice(key, input, signal);
       },
-      remove: (provider, key, voiceId) => {
+      remove: (provider, key, voiceId, signal) => {
         if (provider !== "breezeblue") return Promise.resolve();
-        return (providerClients.breezeblue as VoiceSlotClient).deleteVoice(key, voiceId);
+        return (providerClients.breezeblue as VoiceSlotClient).deleteVoice(key, voiceId, signal);
       },
-      find: (provider, key, name) => {
+      find: (provider, key, name, signal) => {
         if (provider !== "breezeblue") return Promise.resolve(null);
-        return (providerClients.breezeblue as VoiceSlotClient).findVoice(key, name);
+        return (providerClients.breezeblue as VoiceSlotClient).findVoice(key, name, signal);
       },
-      has: (provider, key, voiceId) => {
+      has: (provider, key, voiceId, signal) => {
         if (provider !== "breezeblue") return Promise.resolve(false);
-        return (providerClients.breezeblue as VoiceSlotClient).hasVoice(key, voiceId);
+        return (providerClients.breezeblue as VoiceSlotClient).hasVoice(key, voiceId, signal);
       },
     },
     comfyui: {
