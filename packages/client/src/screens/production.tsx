@@ -249,46 +249,7 @@ import {
   reorderChapters,
 } from "../lib/store.js";
 import { continuityRows, continuityRowStamp, rememberChaptersView, rememberedChaptersView, type ChaptersView } from "../lib/continuity.js";
-
-/** Production screens (§2.9), composed to the prototype frames 11a/14a/11b/24a/25a/25b/10b. */
-
-// ---- small shared pieces ---------------------------------------------------
-
-/** Render @mentions the way the prototype does: quiet mono chips inside prose. */
-export function Mentions({ text }: { text: string }) {
-  const parts = text.split(/(@[A-Za-z0-9-]+)/g);
-  return (
-    <>
-      {parts.map((p, i) =>
-        p.startsWith("@") ? (
-          <span key={i} className="fy-mention">
-            {p}
-          </span>
-        ) : (
-          <span key={i}>{p}</span>
-        ),
-      )}
-    </>
-  );
-}
-
-/** Deterministic decorative waveform — seeded by the label, no randomness. */
-export function Wave({ seed, width = 290, height = 16 }: { seed: string; width?: number; height?: number }) {
-  const bars: ReactNode[] = [];
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  for (let x = 0; x + 3 <= width; x += 8) {
-    h = (h * 1103515245 + 12345) >>> 0;
-    const t = (h % 1000) / 1000;
-    const bar = 3 + t * (height - 4);
-    bars.push(<rect key={x} x={x} y={(height - bar) / 2} width={3} height={bar} rx={1.5} />);
-  }
-  return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden>
-      <g fill="currentColor">{bars}</g>
-    </svg>
-  );
-}
+import { Wave } from "../components/wave.js";
 
 /** A take's playable bytes and poster, resolved through a segment's backing pass when needed. */
 export function takeMediaView(
@@ -8520,3 +8481,6 @@ function ContactSheet({
     </div>
   );
 }
+
+export { Mentions } from "../components/mentions.js";
+export { Wave } from "../components/wave.js";
