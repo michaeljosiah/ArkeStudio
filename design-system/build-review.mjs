@@ -102,7 +102,13 @@ const SCREENS = [
     notes: ["Turn 146: the manuscript as blocks, a state a block, the block's direction and its takes beside it, the dock directing the chapter. Not built."] },
   { group: "Around it", screen: "Audiobook (story)", frame: "146a", route: "#/w/:worldId/p/:prodId/story/audiobook", status: "drawn", checked: "2026-09-13",
     controls: ["Read the book", "Export"],
-    notes: ["Turn 146: the door — <code>Narrator · Cast</code>, a row a chapter with its state, one priced batch (146c) and the export sheet (146d). Not built."] },
+    notes: ["Turn 146: the door — <code>Narrator · Cast</code>, a row a chapter with its state, one primary for the batch. Not built."] },
+  { group: "Around it", screen: "Read the book dialog (story)", frame: "146c", route: "#/w/:worldId/p/:prodId/story/audiobook?read=1", status: "drawn", checked: "2026-09-13",
+    controls: ["Confirm 9,400 characters · $0.94", "Cancel"],
+    notes: ["Turn 146: the price asked once — each voice with its reader and its characters, the narrator's share free, a speaker with no voice in warning, where the words go. Not built."] },
+  { group: "Around it", screen: "Export audiobook sheet (story)", frame: "146d", route: "#/w/:worldId/p/:prodId/story/audiobook?export=1", status: "drawn", checked: "2026-09-13",
+    controls: ["Chapter files", "Book", "Retail", "As made", "Read the rest · 9 chapters · $0.94", "Show in folder", "Export 6 chapters"],
+    notes: ["Turn 146: chapter files or a book, the retail profile as data, chapters left out counted with the dashed door, the delivered folder. Not built."] },
 ];
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
