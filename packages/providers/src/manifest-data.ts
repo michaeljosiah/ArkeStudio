@@ -1,4 +1,4 @@
-import { BREEZE_DELIVERY, ModelManifestSchema, type ModelManifest } from "@arke-studio/contracts";
+import { BREEZE_DELIVERY, FISH_DELIVERY, ModelManifestSchema, type ModelManifest } from "@arke-studio/contracts";
 import { COMFYUI_MANIFEST_MODELS } from "./comfyui/recipes.js";
 import { FAL_MODELS, FAL_ENDPOINTS, FAL_EDIT_ENDPOINTS } from "./fal-catalogue.generated.js";
 
@@ -14,7 +14,7 @@ import { FAL_MODELS, FAL_ENDPOINTS, FAL_EDIT_ENDPOINTS } from "./fal-catalogue.g
  * Prices are integer micro-dollars (R-14).
  */
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 25,
+  manifestVersion: 26,
   dialogueGuidance: [],
   generated: "2026-09-13",
   /**
@@ -255,6 +255,28 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
         // The one table (contracts `BREEZE_DELIVERY`): the bench path reads its numbers and words
         // through `deliveryParams` and `breezeDirection`, the performance path through this row.
         deliveryMappings: BREEZE_DELIVERY },
+    },
+    {
+      // Read 2026-09-13: https://docs.fish.audio/developer-guide/models-pricing/pricing-and-rate-limits
+      // — $15 per million UTF-8 bytes on `s2.1-pro`, Fish's recommended production model (83
+      // languages, `[bracket]` natural-language cues, multi-speaker). A byte is a character for
+      // Latin text and up to three for CJK, so this per-character figure is exact for English and
+      // under by up to three times for Chinese, Japanese or Korean (SPEC-046 R-8). The 2,000-character
+      // cap is OURS: Fish publishes no text limit and chunks internally (`chunk_length` 100–300).
+      // Direction is a phrase in the text — Fish's S2 reads `[whispering]` as language, not a
+      // control token — declared in the contract's FISH_DELIVERY table in the default bracket
+      // syntax; every phrase is unprobed and the listen tunes them (R-22). Speed is `prosody.speed`
+      // 0.5–2.0, held to the plan's range. Emphasis stays unsupported until the probe shows what
+      // capitalisation, or a `[emphasis]` cue, does (R-20). The free twin `s2.1-pro-free` is the
+      // same model at $0 under fair use with no guarantees; it is not a row until the probe says
+      // what "fair use" is on a scene's worth of lines.
+      id: "fish-s2.1-pro", providerModelId: "s2.1-pro", provider: "fishaudio", capability: "voice-tts", displayName: "Fish Audio S2.1 Pro",
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+      limits: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], audioFormat: "wav", maxPromptChars: 2000 },
+      pricing: { kind: "perCharacter", microUsdPerCharacter: 15 },
+      cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: { min: 0.7, max: 1.3 },
+        pause: "best-effort-audio-tag", emphasis: "unsupported", breath: "best-effort-audio-tag", outputTimestamps: "none",
+        deliveryMappings: FISH_DELIVERY },
     },
     {
       cadence: { deliveries: ["measured", "urgent"], speed: null, pause: "unsupported", emphasis: "unsupported", breath: "unsupported", outputTimestamps: "none",

@@ -37,6 +37,7 @@ export {
 } from "./comfyui/recipes.js";
 export { redactComfyUiBody } from "./comfyui/redact.js";
 export { BreezeBlueClient, BREEZE_MODEL } from "./clients/breezeblue.js";
+export { FishAudioClient, FISH_MODEL, FISH_PROVIDER_MODEL } from "./clients/fishaudio.js";
 export { ElevenLabsClient } from "./clients/elevenlabs.js";
 export { FalClient } from "./clients/fal.js";
 export { HiggsfieldClient } from "./clients/higgsfield.js";

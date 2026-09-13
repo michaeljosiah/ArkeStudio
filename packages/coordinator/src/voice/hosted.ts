@@ -10,9 +10,9 @@ import { clipHashOf, recordVoiceReader } from "./library.js";
  * A vendor is a destination like a remote ComfyUI engine is: the same confirmation frame, asked
  * once per voice per vendor and then remembered on the library entry, with the vendor's own
  * terms as read on 2026-09-13 and no more (R-16, R-17). Below that, the one difference between
- * the two readers: Mistral takes the bytes with every call and keeps nothing; Breeze keeps them
- * as a voice slot on the account, which the library remembers with the clip's hash so a
- * re-recorded clip is cloned again rather than read from a stale slot (R-13).
+ * the readers: Mistral takes the bytes with every call and keeps nothing; Breeze and Fish keep
+ * them on the account — a voice slot, a voice model — which the library remembers with the
+ * clip's hash so a re-recorded clip is cloned again rather than read from a stale copy (R-13).
  */
 
 export interface HostedReaderDestination {
@@ -36,6 +36,15 @@ const DESTINATIONS: Record<string, HostedReaderDestination> = {
     // slot on the person's behalf (R-15 waits on that command). What is true is said instead.
     notice:
       "The recording is saved as a voice on the account, transcribed and trimmed to 30 seconds by the service. It stays on the account until removed there; re-recording the clip here replaces it.",
+    keepsSlot: true,
+  },
+  fishaudio: {
+    label: "Fish Audio",
+    // Fish's terms (read 2026-09-13): content may be used to develop, train or enhance its
+    // models; content is kept as long as its systems need it; deleted content may not be fully
+    // removable from its records. Said as read, because the person is choosing with it.
+    notice:
+      "The recording is saved as a private voice model on the account, transcribed by the service, and stays there until removed on the account. Fish Audio's terms allow uploaded content to be used to train its models and say deleted content may not be fully removed from its records.",
     keepsSlot: true,
   },
 };

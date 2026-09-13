@@ -9,6 +9,8 @@ import {
   DELIVERIES,
   deliveryParams,
   extractVoiceAttributes,
+  FISH_DELIVERY,
+  fishDirection,
   HOSTED_VOICE_READERS,
   isClonedVoice,
   isHostedVoiceReader,
@@ -494,6 +496,15 @@ describe("the hosted readers' deliveries (SPEC-046 R-19, R-22)", () => {
     assert.equal(breezeDirection("whispered").tag, "whispers");
     assert.ok(breezeDirection("whispered").instruction, "a tag never travels alone: the line's language may not be known");
     assert.equal(breezeDirection("cold").tag, undefined);
+  });
+  it("Fish takes every delivery as a phrase in the text, and carries no numbers for it (§2.9)", () => {
+    for (const delivery of DELIVERIES) {
+      assert.deepEqual(deliveryParams("fishaudio", delivery), { ok: true, params: {} });
+      assert.ok(fishDirection(delivery).tag.length > 0, `${delivery} has a phrase`);
+      assert.equal(FISH_DELIVERY[delivery].tag, fishDirection(delivery).tag);
+    }
+    assert.equal(fishDirection("whispered").tag, "whispering");
+    assert.equal(HOSTED_VOICE_READERS["fishaudio"], "fish-s2.1-pro");
   });
 });
 

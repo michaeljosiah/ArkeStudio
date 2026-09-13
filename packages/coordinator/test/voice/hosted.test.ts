@@ -8,7 +8,7 @@ import { until } from "../wait.js";
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { clipFor, cloneVoice, clipHashOf, recordVoiceReader } from "../../src/voice/library.js";
-import { hostedReaderDestination, hostedSlotName, hostedUploadConfirmed, hostedUploadToken, prepareHostedClip, type HostedVoiceSlots } from "../../src/voice/hosted.js";
+import { hostedReaderDestination, hostedReaderKeepsSlot, hostedSlotName, hostedUploadConfirmed, hostedUploadToken, prepareHostedClip, type HostedVoiceSlots } from "../../src/voice/hosted.js";
 import { toExtendedLength } from "../../src/world/paths.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -354,6 +354,23 @@ describe("what the library remembers of each hosted reader (SPEC-046 R-13, R-16)
       assert.equal(voice().remote?.["breezeblue"]?.voiceId, "voc_1");
     });
   });
+
+  it("Fish keeps a voice model the same way, under its own key on the entry, beside Breeze's (§2.9)", async () => {
+    assert.deepEqual(["mistral", "breezeblue", "fishaudio"].map(hostedReaderKeepsSlot), [false, true, true]);
+    await withClonedVoice(async ({ store, voice }) => {
+      const clip = await clipFor(store, voice());
+      assert.ok(clip);
+      await assert.rejects(prepareHostedClip(store, "fishaudio", "fish-s2.1-pro", voice(), clip, { getKey: async () => "k", now: CLOCK }), /not been confirmed for Fish Audio/);
+      await recordVoiceReader(store, "harbour-glass", "fishaudio", { confirmedAt: CLOCK() });
+      await assert.rejects(prepareHostedClip(store, "fishaudio", "fish-s2.1-pro", voice(), clip, { getKey: async () => null, now: CLOCK }), /Fish Audio has no key/);
+      const { slots, saves } = fakeSlots();
+      const made = await prepareHostedClip(store, "fishaudio", "fish-s2.1-pro", voice(), clip, { getKey: async () => "k", slots, now: CLOCK });
+      assert.equal(made.remoteVoiceId, "voc_1");
+      assert.deepEqual(saves.map((save) => [save.provider, save.name]), [["fishaudio", hostedSlotName(voice(), clipHashOf(clip))]]);
+      assert.deepEqual(voice().remote?.["fishaudio"], { confirmedAt: CLOCK(), voiceId: "voc_1", clipHash: clipHashOf(clip), savedAt: CLOCK() });
+      assert.equal(voice().remote?.["breezeblue"], undefined, "one reader's copy says nothing about another's");
+    });
+  });
 });
 
 const VOXTRAL: ManifestModel = {
@@ -366,6 +383,7 @@ const VOXTRAL: ManifestModel = {
   pricing: { kind: "unmetered" },
 };
 const BREEZE: ManifestModel = { ...VOXTRAL, id: "breeze-tts-2", provider: "breezeblue", displayName: "Breeze TTS 2" };
+const FISH: ManifestModel = { ...VOXTRAL, id: "fish-s2.1-pro", provider: "fishaudio", displayName: "Fish Audio S2.1 Pro" };
 
 /**
  * A world with one cloned voice, a coordinator with both hosted readers keyed and wired to fake
@@ -386,6 +404,8 @@ async function harness() {
   mistral.artifacts = [{ name: "speech.wav", contentType: "audio/wav", data: wav(8) }];
   const breeze = new FakeProvider();
   breeze.artifacts = [{ name: "speech.wav", contentType: "audio/wav", data: wav(8) }];
+  const fish = new FakeProvider();
+  fish.artifacts = [{ name: "speech.wav", contentType: "audio/wav", data: wav(8) }];
   const { slots, saves, removes } = fakeSlots();
   const coordinator = new Coordinator({
     provider,
@@ -395,12 +415,12 @@ async function harness() {
     appRoot: root,
     cipher: devCipher(),
     credentialsFileName: "credentials.dev.dat",
-    manifest: { manifestVersion: 1, generated: "2026-09-13", models: [VOXTRAL, BREEZE] },
+    manifest: { manifestVersion: 1, generated: "2026-09-13", models: [VOXTRAL, BREEZE, FISH] },
     voice: {
       sidecar: null,
       localPresets: [],
       cloudSources: [],
-      hostedReaders: [{ provider: "mistral", model: VOXTRAL.id }, { provider: "breezeblue", model: BREEZE.id }],
+      hostedReaders: [{ provider: "mistral", model: VOXTRAL.id }, { provider: "breezeblue", model: BREEZE.id }, { provider: "fishaudio", model: FISH.id }],
     },
     hostedVoiceSlots: slots,
     comfyui: {
@@ -418,26 +438,26 @@ async function harness() {
         dispose: async () => {},
       } as never,
     },
-    dispatchClients: { mistral, breezeblue: breeze },
+    dispatchClients: { mistral, breezeblue: breeze, fishaudio: fish },
     observeEvent: (event) => events.push(event),
   });
   const send = (message: ClientMessage) =>
     (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
-  const preview = (readerProvider: "mistral" | "breezeblue", voiceUploadConfirmedFor?: string) =>
+  const preview = (readerProvider: "mistral" | "breezeblue" | "fishaudio", voiceUploadConfirmedFor?: string) =>
     send({
       kind: "voice-preview",
       requestId: REQUEST,
       worldId: WORLD_ID,
       sheetId: "maren-kest",
       provider: readerProvider,
-      model: readerProvider === "mistral" ? VOXTRAL.id : BREEZE.id,
+      model: readerProvider === "mistral" ? VOXTRAL.id : readerProvider === "breezeblue" ? BREEZE.id : FISH.id,
       voiceId: "harbour",
       ...(voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor } : {}),
     });
   const asked = () => events.filter((event) => event.type === "voice.upload-confirmation-required");
   const library = async () =>
     (JSON.parse(await readFile(join(worldDir, "voices", "voices.json"), "utf8")) as { voices: Array<{ remote?: Record<string, Record<string, string>> }> }).voices[0]!;
-  return { coordinator, events, mistral, breeze, saves, removes, send, preview, asked, library };
+  return { coordinator, events, mistral, breeze, fish, saves, removes, send, preview, asked, library };
 }
 
 describe("a vendor is a destination (SPEC-046 R-16, R-17)", () => {
@@ -448,6 +468,7 @@ describe("a vendor is a destination (SPEC-046 R-16, R-17)", () => {
       await h.coordinator.start(0);
       await h.send({ kind: "set-credential", provider: "mistral", key: "mistral-test-key" });
       await h.send({ kind: "set-credential", provider: "breezeblue", key: "breeze-test-key" });
+      await h.send({ kind: "set-credential", provider: "fishaudio", key: "fish-test-key" });
 
       await h.preview("mistral");
       const first = h.asked()[0];
@@ -508,6 +529,22 @@ describe("a vendor is a destination (SPEC-046 R-16, R-17)", () => {
       assert.match(entry.remote?.["breezeblue"]?.["clipHash"] ?? "", /^sha256:[0-9a-f]{64}$/);
       assert.deepEqual(Object.keys(entry.remote?.["mistral"] ?? {}), ["confirmedAt"], "the other reader's record is untouched");
       assert.equal(h.removes.length, 0);
+
+      // Fish is a third vendor with its own terms — the ones that say the clip may train its models.
+      h.events.length = 0;
+      await h.preview("fishaudio");
+      const third = h.asked()[0];
+      assert.ok(third && third.type === "voice.upload-confirmation-required");
+      assert.equal(third.destinationLabel, "Fish Audio · Harbour");
+      assert.equal(third.confirmationToken, "vendor:fishaudio:harbour");
+      assert.match(third.destinationNotice ?? "", /train its models/);
+      h.events.length = 0;
+      await h.preview("fishaudio", "vendor:fishaudio:harbour");
+      assert.equal(h.asked().length, 0);
+      await until(() => h.fish.submitCount === 1, "the confirmed read to reach Fish");
+      assert.equal((h.fish.submittedVoiceReference as { remoteVoiceId?: string } | null)?.remoteVoiceId, "voc_2", "a model of its own, not Breeze's slot");
+      assert.deepEqual(h.saves.map((save) => [save.provider, save.key]), [["breezeblue", "breeze-test-key"], ["fishaudio", "fish-test-key"]]);
+      assert.equal((await h.library()).remote?.["fishaudio"]?.["voiceId"], "voc_2");
     } finally {
       await h.coordinator.stop();
     }
