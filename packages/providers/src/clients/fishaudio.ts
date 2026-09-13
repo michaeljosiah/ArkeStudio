@@ -17,6 +17,8 @@ import {
 /** The manifest row's stable id, and the model Fish serves behind it (the `model` header). */
 export const FISH_MODEL = HOSTED_VOICE_READERS["fishaudio"]!;
 export const FISH_PROVIDER_MODEL = "s2.1-pro";
+/** Our cap on one read's text (SPEC-046 R-9): Fish publishes none. The row declares it; the client enforces it. */
+export const FISH_TEXT_CAP = 2000;
 /** How much of the public library the picker gets: three pages of the most-used licensed voices. */
 export const FISH_CATALOGUE_PAGES = 3;
 
@@ -89,6 +91,9 @@ export class FishAudioClient implements ProviderClient, VoiceCatalogueClient, Vo
     if (request.capability !== "voice-tts") throw new ProviderRequestRejectedError("fishaudio: unsupported synthesis capability");
     const text = String(request.params["text"] ?? "");
     if (text.trim() === "") throw new ProviderRequestRejectedError("fishaudio: there is no text to read");
+    if (text.length > FISH_TEXT_CAP) {
+      throw new ProviderRequestRejectedError(`fishaudio: the line is ${text.length - FISH_TEXT_CAP} characters over the ${FISH_TEXT_CAP} this reader takes — read it in parts`);
+    }
     // A cloned voice reads from the model the host ensured (R-13); a library preset by its own id.
     const voiceId = request.voiceReference !== undefined
       ? (request.voiceReference.remoteVoiceId ?? "")
@@ -188,8 +193,11 @@ export class FishAudioClient implements ProviderClient, VoiceCatalogueClient, Vo
   async findVoice(key: string, name: string, signal?: AbortSignal): Promise<string | null> {
     const res = await this.fetchImpl(`${this.baseUrl}/model?self=true&title=${encodeURIComponent(name)}&page_size=100`, { headers: this.headers(key), ...(signal ? { signal } : {}) });
     if (res.status >= 400) throw await this.failure(res);
-    const body = (await res.json().catch(() => null)) as { items?: Array<Record<string, unknown>> } | null;
-    const match = (body?.items ?? []).find((v) => v["title"] === name && typeof v["_id"] === "string");
+    const body = (await res.json().catch(() => null)) as { items?: unknown } | null;
+    // A 2xx that is not a list has not answered either: `null` means the account listed and
+    // holds none, and a save follows only that.
+    if (!Array.isArray(body?.items)) throw new Error("fishaudio: the model listing was not a list");
+    const match = (body.items as Array<Record<string, unknown>>).find((v) => v["title"] === name && typeof v["_id"] === "string");
     return match ? (match["_id"] as string) : null;
   }
 

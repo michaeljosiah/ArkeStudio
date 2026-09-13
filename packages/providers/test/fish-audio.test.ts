@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { billableCharacters, estimateMicroUsd, FISH_DELIVERY } from "@arke-studio/contracts";
-import { FishAudioClient, FISH_CATALOGUE_PAGES, FISH_MODEL } from "../src/clients/fishaudio.js";
+import { billableCharacters, estimateMicroUsd, FISH_DELIVERY, modelPriceCopy } from "@arke-studio/contracts";
+import { FishAudioClient, FISH_CATALOGUE_PAGES, FISH_MODEL, FISH_TEXT_CAP } from "../src/clients/fishaudio.js";
 import { SHIPPED_MANIFEST } from "../src/manifest-data.js";
 import { createProviderClients, PROVIDER_DECLARATIONS } from "../src/registry.js";
 import { ProviderAuthError, ProviderBusyError, ProviderRequestRejectedError, type FetchLike, type ProviderTransportScope, type VoiceSlotClient } from "../src/types.js";
@@ -88,6 +88,7 @@ describe("Fish Audio · S2.1-Pro as a hosted reader (SPEC-046 §2.9)", () => {
     await assert.rejects(at(429, "Rate limit exceeded"), (err: unknown) => err instanceof ProviderBusyError && err.submissionRejected === true);
     await assert.rejects(at(503, "high load"), (err: unknown) => err instanceof Error && !(err instanceof ProviderBusyError) && !(err instanceof ProviderRequestRejectedError));
     await assert.rejects(new FishAudioClient(async () => new Response(Uint8Array.from([1, 2, 3]), { status: 200 })).submit("k", line({ text: "x", voiceId: "m" })), /not a WAV file/);
+    await assert.rejects(new FishAudioClient(async () => new Response(WAV, { status: 200 })).submit("k", line({ text: "x".repeat(FISH_TEXT_CAP + 1), voiceId: "m" })), /1 characters over/);
   });
 
   it("saves a clip as a private voice model in one multipart call, transcribed by the service, and reads the id back (§2.9)", async () => {
@@ -128,6 +129,7 @@ describe("Fish Audio · S2.1-Pro as a hosted reader (SPEC-046 §2.9)", () => {
     assert.equal(r.calls[0]?.url, "https://api.fish.audio/model?self=true&title=Harbour%20glass%20%C2%B7%200123456789ab&page_size=100");
     assert.equal(await new FishAudioClient(async () => json(200, { items: [] })).findVoice("k", "x"), null);
     await assert.rejects(new FishAudioClient(async () => json(429, { status: 429, message: "Rate limit exceeded" })).findVoice("k", "x"), ProviderBusyError, "a failed listing is not none");
+    await assert.rejects(new FishAudioClient(async () => json(200, { total: 0 })).findVoice("k", "x"), /not a list/, "nor is a 2xx that is not a list");
     const held = recording((url) => url.endsWith("/model/m_1") ? json(200, { _id: "m_1", state: "trained" }) : json(404, { status: 404, message: "Model not found" }));
     assert.equal(await new FishAudioClient(held.fetchImpl).hasVoice("k", "m_1"), true);
     assert.equal(await new FishAudioClient(held.fetchImpl).hasVoice("k", "m_gone"), false);
@@ -174,6 +176,8 @@ describe("Fish Audio · S2.1-Pro as a hosted reader (SPEC-046 §2.9)", () => {
     assert.equal(row.provider, "fishaudio");
     assert.equal(row.providerModelId, "s2.1-pro");
     assert.deepEqual(row.pricing, { kind: "perCharacter", microUsdPerCharacter: 15, unit: "utf8-byte" });
+    assert.equal(modelPriceCopy(row), "$15.00 / M bytes", "the catalogue quotes the unit the estimate counts");
+    assert.equal(row.limits.maxPromptChars, FISH_TEXT_CAP);
     // Bytes, as the bill is: a CJK line costs three times its length, an accented word one more.
     assert.equal(billableCharacters(row, "Bell Watch."), 11);
     assert.equal(billableCharacters(row, "鐘の見張り"), 15);
