@@ -331,6 +331,35 @@ describe("live harness model controls (#1123, #1124)", () => {
     await press("Clear production default");
   });
 
+  it("keeps retained idle models unverified until fresh catalog state arrives", async () => {
+    const state = modelState();
+    await mount(state, <><AgentsPanel />{conversation()}</>);
+    await choose("Language model", OPUS);
+    await act(async () => __setStateForTest({ ...state, app: { ...state.app, harnessModelStatus: { status: "idle" } } }));
+    assert.match(container.textContent!, /Models need to be refreshed/);
+    assert.doesNotMatch(container.textContent!, /3 models from Claude Code/);
+    for (const label of ["Model for world-builder", "Model for stage-designer", "Language model"]) {
+      const options = [...select(label).options];
+      assert.equal(options.find(option => option.value === OPUS)!.hasAttribute("disabled"), true, label);
+      assert.equal(options.find(option => option.value === "")!.hasAttribute("disabled"), false, "clearing remains available");
+    }
+    const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.trim() === label)!;
+    assert.equal(button("Explain the scene").disabled, true);
+    assert.equal(button("Remember for this production").disabled, true);
+    assert.equal(button("Clear production default").disabled, false);
+    const requests = sent.filter(message => message.kind === "list-harness-models").length;
+    await press("Retry models");
+    assert.equal(sent.filter(message => message.kind === "list-harness-models").length, requests + 1);
+    await act(async () => __setStateForTest({ ...state, app: { ...state.app,
+      harnessModelStatus: { status: "ready" }, harnessModels: [state.app.harnessModels[1]!],
+    } }));
+    assert.match(container.textContent!, /1 models from Claude Code/);
+    assert.equal([...select("Language model").options].find(option => option.value === OPUS)!.hasAttribute("disabled"), false);
+    assert.equal(button("Explain the scene").disabled, false);
+    await press("Remember for this production");
+    assert.ok(sent.some(message => message.kind === "set-production-model" && message.modelId === OPUS));
+  });
+
   it("labels a pending engine separately and routes Codex executable controls to Codex", async () => {
     const state = modelState();
     state.app.harness = {

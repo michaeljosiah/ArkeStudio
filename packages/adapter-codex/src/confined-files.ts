@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { access, lstat, mkdir, open, readdir, realpath, rename, unlink, type FileHandle } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
-import { WINDOWS_FILES_SOURCE } from "./windows-files.js";
+import { WINDOWS_FILES_BOOTSTRAP, WINDOWS_FILES_SOURCE } from "./windows-files.js";
 
 export interface FileIdentity { dev: string; ino: string }
 export interface FileEntry { name: string; directory: boolean }
@@ -54,7 +54,7 @@ export class WindowsFiles {
   private failure: Error | null = null;
   private buffer = "";
   private closed = false;
-  private startupStage: "launch" | "bootstrap" | "source" | "encoding" | "native" = "launch";
+  private startupStage: "launch" | "bootstrap" | "transport" | "source" | "parsed" | "entered" | "native" = "launch";
   private stderrCategory: "none" | "syntax" | "security" | "encoding" | "runtime" | "other" = "none";
   private stderrTail = "";
   private readySeen = false;
@@ -65,8 +65,9 @@ export class WindowsFiles {
     // Static inline source, JSON data on stdin, no profile/module/credential inheritance.
     // Keep argv below CreateProcess's 32,767-character ceiling. Only this fixed bootstrap
     // executes source; the first pipe frame is our static broker, all later frames are JSON.
-    const bootstrap = "$ErrorActionPreference='Stop'; function Report-ArkeStartupError($e) { $d=$e.Exception.GetType().FullName+' '+$e.FullyQualifiedErrorId+' '+$e.Exception.Message; $c=if($d -match 'PSSecurityException|UnauthorizedAccess|ExecutionPolicy|ConstrainedLanguage|blocked by'){ 'security' } elseif($d -match 'InputEncoding|OutputEncoding|InvalidHandle|handle is invalid'){ 'encoding' } elseif($d -match 'ParseException|ParserError|UnexpectedToken'){ 'syntax' } else { 'runtime' }; [Console]::Out.WriteLine('{\"startupError\":true,\"category\":\"'+$c+'\"}') }; try { [Console]::Out.WriteLine('{\"startup\":\"bootstrap\"}'); $s=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadLine())); [Console]::Out.WriteLine('{\"startup\":\"source\"}'); & ([ScriptBlock]::Create($s)) } catch { Report-ArkeStartupError $_; exit 1 }";
-    this.child = spawn(command, args ?? ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(bootstrap, "utf16le").toString("base64")], {
+    // One private UTF-8 reader spans both frames; changing Console.InputEncoding would
+    // discard prefetched bytes and invoke console-host code-page APIs for these pipes.
+    this.child = spawn(command, args ?? ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(WINDOWS_FILES_BOOTSTRAP, "utf16le").toString("base64")], {
       windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
       env: { SystemRoot: process.env["SystemRoot"], WINDIR: process.env["WINDIR"], TEMP: process.env["TEMP"], TMP: process.env["TMP"], PATH: dirname(powershell()) },
     });
@@ -85,7 +86,7 @@ export class WindowsFiles {
         const line = this.buffer.slice(0, end); this.buffer = this.buffer.slice(end + 1);
         try {
           const message = JSON.parse(line) as Record<string, unknown>;
-          if (message.startup === "bootstrap" || message.startup === "source" || message.startup === "encoding" || message.startup === "native") {
+          if (message.startup === "bootstrap" || message.startup === "transport" || message.startup === "source" || message.startup === "parsed" || message.startup === "entered" || message.startup === "native") {
             this.startupStage = message.startup; continue;
           }
           if (message.startupError === true) {

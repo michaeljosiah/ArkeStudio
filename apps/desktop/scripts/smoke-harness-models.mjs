@@ -27,7 +27,13 @@ const adapter = {
   id: "claude", capabilities: () => new Set(["events", "models"]),
   init: async () => { ready = true; },
   readiness: () => ({ ready, ...(ready ? {} : { reason: "not initialized" }) }),
-  listModels: async () => models,
+  listModels: async () => {
+    // Optional fixture latency exercises controls while a real asynchronous catalog is loading.
+    if (process.env.ARKE_SMOKE_CATALOG_DELAY_MS) {
+      await new Promise(resolve => setTimeout(resolve, Number(process.env.ARKE_SMOKE_CATALOG_DELAY_MS)));
+    }
+    return models;
+  },
   streamEvents: () => ({ async *[Symbol.asyncIterator]() { yield* []; } }),
   createSession: async () => { throw new Error("The controls smoke must not generate"); },
   sendMessage: async () => { throw new Error("The controls smoke must not generate"); },
@@ -52,6 +58,7 @@ try {
   const child = spawn(require("electron"), [join(dir, "main.cjs")], {
     windowsHide: true, stdio: ["ignore", "inherit", "inherit"],
     env: { ...process.env, ARKE_SMOKE_CONFIG: JSON.stringify({ port, token, worldId, dir,
+      catalogDelayMs: Number(process.env.ARKE_SMOKE_CATALOG_DELAY_MS ?? 0),
       preload: join(root, "apps", "desktop", "dist", "preload.cjs"),
       page: join(root, "packages", "client", "dist", "index.html"),
     }) },
@@ -98,11 +105,33 @@ async function electronMain() {
       if (await js(condition)) return;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    throw new Error(`Timed out: ${condition}\n${await js("document.body.innerText")}`);
+    const controls = await js(`({
+      selects: [...document.querySelectorAll('select')].map(element => ({ label: element.getAttribute('aria-label'),
+        value: element.value, disabled: element.disabled, optionDisabled: element.selectedOptions[0]?.disabled })),
+      buttons: [...document.querySelectorAll('button')].map(element => ({ label: element.textContent.trim(), disabled: element.disabled })),
+      statuses: [...document.querySelectorAll('[role=status]')].map(element => element.textContent),
+    })`);
+    throw new Error(`Timed out: ${condition}\nControls: ${JSON.stringify(controls)}\n${await js("document.body.innerText")}`);
   };
   const choose = async (label, value) => {
-    await until(`document.querySelector('select[aria-label="${label}"] option[value="${value}"]') !== null`);
-    await js(`{ const element = document.querySelector('select[aria-label="${label}"]'); element.value = ${JSON.stringify(value)}; element.dispatchEvent(new Event('change', {bubbles:true})); }`);
+    // An option retained during refresh exists but cannot be chosen. Check and act in the same
+    // renderer turn so a loading snapshot cannot slip between readiness and the interaction.
+    await until(`(() => {
+      const element = document.querySelector(${JSON.stringify(`select[aria-label="${label}"]`)});
+      const option = [...(element?.options ?? [])].find(option => option.value === ${JSON.stringify(value)});
+      if (!element || element.disabled || !option || option.disabled) return false;
+      element.value = ${JSON.stringify(value)};
+      element.dispatchEvent(new Event('change', {bubbles:true}));
+      return true;
+    })()`);
+  };
+  const click = async label => {
+    await until(`(() => {
+      const button = [...document.querySelectorAll('button')].find(button => button.textContent.trim() === ${JSON.stringify(label)});
+      if (!button || button.disabled) return false;
+      button.click();
+      return true;
+    })()`);
   };
   const shot = async name => {
     await js("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
@@ -133,9 +162,16 @@ async function electronMain() {
   await shot("harness-pending-restart");
   await js(`location.hash = '/w/${config.worldId}/p/saltlight/story'`);
   await until("document.querySelector('select[aria-label=\"Language model\"]') !== null");
+  if (config.catalogDelayMs) {
+    await js("window.arke.send(JSON.stringify({kind:'list-harness-models'}))");
+    await until("document.body.innerText.includes('Loading models from Claude Code')");
+  }
   await choose("Language model", "anthropic/claude-fable-live[1m]");
-  await until("document.body.innerText.includes('Remember for this production')");
-  await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Remember for this production').click()");
+  if (config.catalogDelayMs) {
+    await js("window.arke.send(JSON.stringify({kind:'list-harness-models'}))");
+    await until("[...document.querySelectorAll('button')].some(button => button.textContent.trim() === 'Remember for this production' && button.disabled)");
+  }
+  await click("Remember for this production");
   await until("document.body.innerText.includes('Clear production default')");
   await shot("production-model");
   await window.webContents.reload();

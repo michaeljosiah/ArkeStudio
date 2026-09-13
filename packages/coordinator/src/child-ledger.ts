@@ -50,11 +50,11 @@ export type ProcessProbe = (pids: number[]) => Promise<Map<number, ProcessInfo>>
 export interface ReapReport {
   /** Records whose child was verified ours and killed. */
   reaped: ChildRecord[];
-  /** Records kept because their owner is still alive. */
+  /** Records kept because their owner is alive or cleanup could not be completed. */
   kept: number;
   /** Records dropped without a kill: the child was already gone or its pid was reused. */
   cleared: number;
-  /** Set when the sweep could not probe processes and therefore touched nothing. */
+  /** Set when process inspection failed or one or more kills failed; affected records remain. */
   skipped?: string;
 }
 
@@ -307,6 +307,7 @@ export class ChildLedger {
       }
       const keep: ChildRecord[] = [];
       const reaped: ChildRecord[] = [];
+      let failedKills = 0;
       for (const rec of records) {
         const owner = probed.get(rec.ownerPid);
         const ownerAlive =
@@ -324,13 +325,22 @@ export class ChildLedger {
           (child.startedAt === null ||
             Math.abs(child.startedAt - rec.recordedAt) <= CHILD_START_TOLERANCE_MS);
         if (isOurs) {
-          await this.kill(rec.pid);
+          try { await this.kill(rec.pid); }
+          catch {
+            // A bounded taskkill timeout or spawn failure is a failed cleanup, not a
+            // failed application startup. Keep this identity for a later sweep and
+            // continue checking the other records without claiming this child was reaped.
+            keep.push(rec); failedKills++;
+            continue;
+          }
           reaped.push(rec);
         }
         // Not ours (gone, or the pid now belongs to a stranger): drop the record, touch nothing.
       }
       await this.write(keep);
-      return { reaped, kept: keep.length, cleared: records.length - keep.length - reaped.length };
+      return { reaped, kept: keep.length, cleared: records.length - keep.length - reaped.length,
+        ...(failedKills ? { skipped: `Could not stop ${failedKills} recorded child process${failedKills === 1 ? "" : "es"}; ownership retained for a later sweep.` } : {}),
+      };
     });
   }
 }

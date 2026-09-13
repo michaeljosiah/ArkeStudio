@@ -112,6 +112,11 @@ describe("coordinator harness/model routing (#1122)", () => {
       adapter.ready = false;
       await until(() => test.coordinator.getState().app.health.harness.status === "unavailable", "owned harness process failure");
       assert.equal(test.coordinator.getState().app.harnessModelStatus.status, "idle", "process failure invalidates the retained catalog");
+      adapter.list = async () => [MODELS[1]!];
+      adapter.ready = true;
+      await until(() => test.coordinator.getState().app.harnessModels.length === 1, "automatic catalog refresh after readiness recovers");
+      assert.deepEqual(test.coordinator.getState().app.harnessModels, [MODELS[1]!]);
+      assert.equal(test.coordinator.getState().app.harnessModelStatus.status, "ready");
     } finally { await test.close(); }
     assert.equal(adapter.disposeCalls, 1);
   });
@@ -139,17 +144,20 @@ describe("coordinator harness/model routing (#1122)", () => {
     } finally { await test.close(); }
   });
 
-  it("marks catalog state stale when an owned process recovers between health polls", async () => {
+  it("automatically refreshes the displayed catalog when an owned process recovers between health polls", async () => {
     const test = await fixture();
     try {
       await until(() => test.coordinator.getState().app.health.harness.status === "healthy", "owned harness readiness");
       await test.send({ kind: "list-harness-models" });
       assert.equal(test.coordinator.getState().app.harnessModelStatus.status, "ready");
-      test.adapter.list = async () => [MODELS[1]!];
+      let resolve!: (models: ModelInfo[]) => void;
+      test.adapter.list = () => new Promise(done => { resolve = done; });
       test.adapter.revision++;
-      await until(() => test.coordinator.getState().app.harnessModelStatus.status === "idle", "replacement catalog invalidation");
+      await until(() => test.coordinator.getState().app.harnessModelStatus.status === "loading", "automatic replacement catalog discovery");
       assert.equal(test.coordinator.getState().app.health.harness.status, "healthy");
-      await test.send({ kind: "list-harness-models" });
+      assert.deepEqual(test.coordinator.getState().app.harnessModels, MODELS, "old names remain visible while being reverified");
+      resolve([MODELS[1]!]);
+      await until(() => test.coordinator.getState().app.harnessModelStatus.status === "ready", "replacement catalog publication without a user command");
       assert.deepEqual(test.coordinator.getState().app.harnessModels, [MODELS[1]!]);
     } finally { await test.close(); }
   });

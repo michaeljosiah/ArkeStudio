@@ -72,8 +72,10 @@ test("Unicode paths and large binary reads survive the private helper protocol",
   const files = await ConfinedFiles.create(f.root, f.identity, new AbortController().signal);
   try {
     assert.deepEqual(await files.read(name), bytes);
-    await files.write("nested/日本.txt", "héllo 日本");
-    assert.equal((await files.read("nested/日本.txt")).toString(), "héllo 日本");
+    const text = "héllo 日本\n".repeat(32768);
+    await files.write("nested/日本.txt", text);
+    assert.equal((await files.read("nested/日本.txt")).toString(), text);
+    assert.deepEqual((await files.list("nested")).sort((a, b) => a.name.localeCompare(b.name)), [{ name: "draft.txt", directory: false }, { name: "日本.txt", directory: false }]);
     await assert.rejects(files.read(name, 1024), /session read limit/);
   } finally { await files.close(); }
 });

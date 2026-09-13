@@ -171,6 +171,30 @@ test("measured context windows remain scoped to the selected canonical model", a
   assert.equal(f.adapter.knownInputTokenLimit(), null); assert.ok(f.adapter.lifecycleRevision() > measuredRevision);
 });
 
+test("recovery discards the previous process's measured window for the same canonical model", async t => {
+  let spawns = 0; let stopCurrent = () => {};
+  const f = await fixture("changed-window-after-recovery", {
+    onSpawn: async child => { spawns++; stopCurrent = () => { child.kill(); }; },
+    killProcess: async child => {
+      if (child.exitCode === null && child.signalCode === null) { const closed = once(child, "close"); child.kill(); await closed; }
+    },
+  }); t.after(f.cleanup);
+  const old = await f.adapter.createSession({ cwd: f.root, purpose: "ask" });
+  await f.adapter.sendMessage({ sessionId: old.sessionId, parts: [{ type: "text", text: "measure current profile" }] });
+  assert.equal((await f.adapter.listModels()).find(model => model.id === "image-model")?.inputTokenLimit, 100000);
+  const revision = f.adapter.lifecycleRevision();
+  await writeFile(join(f.root, "restart-state"), "next process uses a smaller profile window");
+  stopCurrent();
+  await eventually(() => spawns === 2 && f.adapter.readiness().ready);
+  assert.ok(f.adapter.lifecycleRevision() > revision);
+  const replacementModel = (await f.adapter.listModels()).find(model => model.id === "image-model");
+  assert.ok(replacementModel); assert.equal(replacementModel.inputTokenLimit, undefined);
+  const fresh = await f.adapter.createSession({ cwd: f.root, purpose: "ask" });
+  await f.adapter.sendMessage({ sessionId: fresh.sessionId, parts: [{ type: "text", text: "measure replacement profile" }] });
+  assert.equal((await f.adapter.listModels()).find(model => model.id === "image-model")?.inputTokenLimit, 8000);
+  assert.equal(f.adapter.knownInputTokenLimit(), null);
+});
+
 for (const scenario of ["timeout-once", "reject-once"]) test(`${scenario}: recovery waits for disposal and admits new work without replaying the old turn`, async t => {
   let spawns = 0; let kills = 0; let release!: () => void; let cleanupStarted!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });

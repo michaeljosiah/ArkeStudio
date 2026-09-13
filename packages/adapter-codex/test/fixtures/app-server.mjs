@@ -22,7 +22,7 @@ createInterface({ input: process.stdin }).on('line', line => {
     else result(id, {});
   }
   else if (method === 'config/read') {
-    result(id, { config: { model_provider: 'openai', mcp_servers: { 'unsafe.name': { command: 'sentinel-secret' } } } });
+    result(id, { config: { model_provider: 'openai', mcp_servers: { 'unsafe.name': { command: 'sentinel-secret' } }, ...(scenario === 'changed-window-after-recovery' ? { model_context_window: recovered ? 8000 : 100000 } : {}) } });
     if (scenario === 'recovery-exits-after-init' && recovered) setTimeout(() => process.exit(1), 40);
   }
   else if (method === 'model/list') {
@@ -59,7 +59,7 @@ createInterface({ input: process.stdin }).on('line', line => {
     notify('item/agentMessage/delta', { ...base, itemId: 'one', delta: 'Hello' });
     notify('item/agentMessage/delta', { ...base, itemId: 'one', delta: ' world' });
     notify('item/completed', { ...base, item: { id: 'one', type: 'agentMessage', phase: 'commentary', text: 'Hello world' } });
-    notify('thread/tokenUsage/updated', { ...base, tokenUsage: { total: { totalTokens: 42 }, modelContextWindow: scenario === 'different-windows' && thread.model === 'text-only' ? 8000 : 100000 } });
+    notify('thread/tokenUsage/updated', { ...base, tokenUsage: { total: { totalTokens: 42 }, modelContextWindow: (scenario === 'different-windows' && thread.model === 'text-only') || (scenario === 'changed-window-after-recovery' && recovered) ? 8000 : 100000 } });
     setTimeout(() => {
       notify('item/agentMessage/delta', { ...base, itemId: 'two', delta: 'Second item' });
       notify('item/completed', { ...base, item: { id: 'two', type: 'agentMessage', phase: 'final_answer', text: '{"reply":"Second item"}' } });

@@ -4,15 +4,45 @@
  * leave an unprotected Node operation running. No model text is interpreted as code.
  * Reflection.Emit avoids Add-Type's compiler children and packaging/runtime dependencies.
  */
+export const WINDOWS_FILES_BOOTSTRAP = String.raw`
+$ErrorActionPreference = 'Stop'
+$reader = $null
+$writer = $null
+function Report-ArkeStartupError($e) {
+  $d = $e.Exception.GetType().FullName + ' ' + $e.FullyQualifiedErrorId + ' ' + $e.Exception.Message
+  $c = if ($d -match 'PSSecurityException|UnauthorizedAccess|ExecutionPolicy|ConstrainedLanguage|blocked by') { 'security' }
+    elseif ($d -match 'InputEncoding|OutputEncoding|InvalidHandle|handle is invalid') { 'encoding' }
+    elseif ($d -match 'ParseException|ParserError|UnexpectedToken') { 'syntax' }
+    else { 'runtime' }
+  $message = '{"startupError":true,"category":"' + $c + '"}'
+  if ($writer) { $writer.WriteLine($message) } else { [Console]::Out.WriteLine($message) }
+}
+try {
+  [Console]::Out.WriteLine('{"startup":"bootstrap"}')
+  $utf8 = [Text.UTF8Encoding]::new($false)
+  $reader = [IO.StreamReader]::new([Console]::OpenStandardInput(), $utf8, $false, 65536)
+  $writer = [IO.StreamWriter]::new([Console]::OpenStandardOutput(), $utf8, 65536)
+  $writer.AutoFlush = $true
+  $writer.WriteLine('{"startup":"transport"}')
+  $s = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($reader.ReadLine()))
+  $writer.WriteLine('{"startup":"source"}')
+  $script = [ScriptBlock]::Create($s)
+  $writer.WriteLine('{"startup":"parsed"}')
+  & $script
+} catch { Report-ArkeStartupError $_; exit 1 }
+finally {
+  if ($writer) { $writer.Dispose() }
+  if ($reader) { $reader.Dispose() }
+}
+`;
+
 export const WINDOWS_FILES_SOURCE = String.raw`
+$writer.WriteLine('{"startup":"entered"}')
 $ErrorActionPreference = 'Stop'
 $pins = @{}
 $k = $null
 try {
   $ProgressPreference = 'SilentlyContinue'
-  [Console]::InputEncoding = New-Object Text.UTF8Encoding($false)
-  [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
-  [Console]::Out.WriteLine('{"startup":"encoding"}')
   $asm = [AppDomain]::CurrentDomain.DefineDynamicAssembly((New-Object Reflection.AssemblyName('ArkeFiles')), [Reflection.Emit.AssemblyBuilderAccess]::Run)
   $type = $asm.DefineDynamicModule('ArkeFilesModule', $false).DefineType('ArkeFiles', 'Public, Class')
   $ctor = [Runtime.InteropServices.DllImportAttribute].GetConstructor([string])
@@ -31,7 +61,7 @@ try {
     $m.SetCustomAttribute((New-Object Reflection.Emit.CustomAttributeBuilder($ctor, @($dll), $fields, @($true, [Runtime.InteropServices.CharSet]::Unicode))))
   }
   $k = $type.CreateType()
-  [Console]::Out.WriteLine('{"startup":"native"}')
+  $writer.WriteLine('{"startup":"native"}')
   function Fail { throw 'Denied by Arke Studio confinement.' }
   function Info([IntPtr]$handle) {
     $p = [Runtime.InteropServices.Marshal]::AllocHGlobal(52)
@@ -111,8 +141,8 @@ try {
     try { $info = Info $h; if ($info.directory -or $info.links -ne 1) { Fail } }
     finally { [void]$k::CloseHandle($h) }
   }
-  [Console]::Out.WriteLine('{"ready":true}')
-  while ($null -ne ($line = [Console]::In.ReadLine())) {
+  $writer.WriteLine('{"ready":true}')
+  while ($null -ne ($line = $reader.ReadLine())) {
     try {
       $r = ConvertFrom-Json -InputObject $line
       if ($r.op -eq 'close') { break }
@@ -213,10 +243,10 @@ try {
         } finally { if ($h -ne [IntPtr]::Zero -and -not $safe) { [void]$k::CloseHandle($h) } }
       }
       else { Fail }
-      [Console]::Out.WriteLine((@{ result = $result } | ConvertTo-Json -Depth 6 -Compress))
+      $writer.WriteLine((@{ result = $result } | ConvertTo-Json -Depth 6 -Compress))
     } catch {
       $message = if ($_.Exception.Message -match 'session read limit|proposed file exceeds|local Windows volume|directory handle limit') { $_.Exception.Message } else { 'Denied by Arke Studio confinement.' }
-      [Console]::Out.WriteLine((@{ error = $message } | ConvertTo-Json -Compress))
+      $writer.WriteLine((@{ error = $message } | ConvertTo-Json -Compress))
     }
   }
 } catch {

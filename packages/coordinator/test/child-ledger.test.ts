@@ -99,7 +99,7 @@ describe("ChildLedger", () => {
     assert.deepEqual((await readChildren(path)).map((c) => c.pid), [2222]);
   });
 
-  it("preserves ownership when a kill command rejects", async () => {
+  it("preserves ownership and allows startup to continue when a kill command rejects", async () => {
     const path = await tempLedgerPath();
     const owned = record(2222, { ownerPid: 1111, recordedAt: 1000 });
     const ledger = new ChildLedger(path, {
@@ -107,8 +107,35 @@ describe("ChildLedger", () => {
       kill: async () => { throw new Error("Process inspection timed out."); },
     });
     await ledger.record(owned);
-    await assert.rejects(ledger.reapStale(), /timed out/);
+    const report = await ledger.reapStale();
+    assert.deepEqual(report.reaped, []);
+    assert.equal(report.kept, 1);
+    assert.equal(report.cleared, 0);
+    assert.match(report.skipped!, /Could not stop 1 recorded child process/);
     assert.deepEqual(await readChildren(path), [owned]);
+  });
+
+  it("continues the sweep after a failed kill and retries only retained orphan records", async () => {
+    const path = await tempLedgerPath();
+    const first = record(2222, { ownerPid: 1111, recordedAt: 1000 });
+    const second = record(3333, { ownerPid: 1111, recordedAt: 1000 });
+    const gone = record(4444, { ownerPid: 1111, recordedAt: 1000 });
+    const killed: number[] = []; let refuse = true;
+    const ledger = new ChildLedger(path, {
+      probe: async () => new Map([first, second].map(row => [row.pid, { pid: row.pid, image: row.image, startedAt: 1000 }])),
+      kill: async pid => { killed.push(pid); if (pid === first.pid && refuse) throw new Error("taskkill could not start"); },
+    });
+    for (const row of [first, second, gone]) await ledger.record(row);
+    const report = await ledger.reapStale();
+    assert.deepEqual(killed, [first.pid, second.pid]);
+    assert.deepEqual(report.reaped, [second]);
+    assert.equal(report.kept, 1); assert.equal(report.cleared, 1);
+    assert.match(report.skipped!, /ownership retained/);
+    assert.deepEqual(await readChildren(path), [first]);
+    refuse = false;
+    assert.deepEqual(await ledger.reapStale(), { reaped: [first], kept: 0, cleared: 0 });
+    assert.deepEqual(killed, [first.pid, second.pid, first.pid]);
+    assert.deepEqual(await readChildren(path), []);
   });
 
   it("re-recording a pid replaces the old record", async () => {

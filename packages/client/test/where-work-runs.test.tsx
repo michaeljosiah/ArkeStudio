@@ -206,6 +206,8 @@ describe("language work reads the production's choice (#587)", () => {
         ...base.app,
         manifest: { ...base.app.manifest!, models: [...base.app.manifest!.models, LANGUAGE] },
         harnessModels: [{ id: "gemma4:12b", provider: LANGUAGE.provider, displayName: LANGUAGE.displayName }],
+        harnessModelStatus: { status: "ready" },
+        health: { ...base.app.health, harness: { status: "healthy" } },
       },
     };
   }

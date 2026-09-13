@@ -38,6 +38,8 @@ A test holds onto behaviour: it renders a component or a route and reads the DOM
 
 Client tests use workspace-relative paths and must run with `packages/client` as cwd. Workspace npm scripts set that cwd for you. Check worktree-local package resolution before trusting cross-package results; see [worktree rules](../../CLAUDE.md#worktrees).
 
+Windows CI shard 2 first checks the Codex file helper's private pipe with the Unicode/binary transfer regression. This bounded preflight reports a native startup failure before the dependent adapter sessions each spend their own startup timeout; the full file-access suite still runs in the normal test gate.
+
 ## Fixtures and cleanup
 
 Client `test/fixture-state.ts` provides fixture state; navigation samples are in `src/screens/registry.ts`. Read an adjacent screen test for DOM/store setup. Coordinator tests commonly copy world fixtures into temporary directories and inject providers or clocks. Reuse `test/queue/fake-provider.ts` for suitable queue scenarios and adjacent domain helpers rather than calling paid providers in ordinary regression tests.
@@ -88,6 +90,8 @@ After building, `node --import tsx apps/desktop/scripts/smoke-harness-models.mjs
 the real sandboxed file-page controls, saved agent/production models, reload and pending engine
 selection against a real coordinator with scripted discovery. It makes no generation call and
 retains screenshots in its printed disposable directory for visual inspection.
+Set `ARKE_SMOKE_CATALOG_DELAY_MS=1500` to also exercise model selection and saving while
+catalog refreshes temporarily disable those controls.
 
 ## Desktop appearance
 

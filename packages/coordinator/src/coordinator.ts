@@ -2963,6 +2963,7 @@ export class Coordinator {
         this.modelCatalogValue?.invalidate();
         this.emit({ at: this.nowIso(), type: "health.changed", component: "harness",
           status: ready.ready ? "healthy" : "unavailable", ...(ready.reason ? { reason: ready.reason } : {}) });
+        if (ready.ready && this.modelCatalogValue) this.trackBackground(this.modelCatalogValue.get().catch(() => {}));
         if (ready.ready) void this.vendorAuth.refresh({ patient: true }).catch(() => {});
       }).catch((error: unknown) => {
         if (this.stopping) return;
@@ -2979,17 +2980,24 @@ export class Coordinator {
         if (this.stopping) return;
         const readiness = this.opts.adapter!.readiness();
         const revision = this.opts.adapter!.lifecycleRevision?.();
-        if (previousRevision !== revision) {
+        const revisionChanged = previousRevision !== revision;
+        if (revisionChanged) {
           previousRevision = revision;
           this.modelCatalogValue?.invalidate();
         }
         if (this.readModel.getState().app.health.harness.status === "starting") return;
         const status = readiness.ready ? "healthy" : "unavailable";
-        if (previousReadiness.ready !== readiness.ready || previousReadiness.reason !== readiness.reason) {
+        const readinessChanged = previousReadiness.ready !== readiness.ready || previousReadiness.reason !== readiness.reason;
+        if (readinessChanged) {
           previousReadiness = { ...readiness };
           this.emit({ at: this.nowIso(), type: "health.changed", component: "harness", status,
             ...(readiness.reason ? { reason: readiness.reason } : {}) });
           if (!readiness.ready) this.modelCatalogValue?.invalidate();
+        }
+        // Mounted pickers may observe healthy → healthy across a restart. Refresh the catalog
+        // here, where that lifecycle is known, rather than waiting for another UI command.
+        if (readiness.ready && this.modelCatalogValue && (revisionChanged || readinessChanged)) {
+          this.trackBackground(this.modelCatalogValue.get().catch(() => {}));
         }
       }, 1_000);
       healthTimer.unref();

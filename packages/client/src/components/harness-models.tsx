@@ -55,7 +55,7 @@ export function HarnessModelOptions({
   const byProvider = new Map<string, ModelInfo[]>();
   for (const model of models) byProvider.set(model.provider, [...(byProvider.get(model.provider) ?? []), model]);
   const checking = state?.app.health.harness.status !== "healthy" ||
-    state?.app.harnessModelStatus?.status === "loading" || state?.app.harnessModelStatus?.status === "error";
+    state?.app.harnessModelStatus?.status !== "ready";
   return (
     <>
       {selected && (!resolved || harnessModelReference(resolved) !== selected) && (
@@ -94,13 +94,13 @@ export function HarnessModelStatus({ state }: { state: ClientState | null }) {
       ? status.reason ?? "Model discovery failed."
       : !healthy
         ? state?.app.health.harness.reason ?? "The harness is not running."
-        : models.length === 0
-          ? status?.status === "ready" ? "The harness returned no models." : "Model discovery has not started."
-          : `${models.length} models from ${runningHarnessLabel(state)}`;
+        : status?.status !== "ready"
+          ? models.length > 0 ? "Models need to be refreshed." : "Model discovery has not started."
+          : models.length === 0 ? "The harness returned no models." : `${models.length} models from ${runningHarnessLabel(state)}`;
   return (
     <div className="fy-set__note" role="status">
       {message}
-      {status?.status !== "loading" && (status?.status === "error" || models.length === 0) && (
+      {status?.status !== "loading" && (status?.status !== "ready" || models.length === 0) && (
         <> <button type="button" className="fy-set__link" onClick={() => listHarnessModels()}>Retry models</button></>
       )}
     </div>
