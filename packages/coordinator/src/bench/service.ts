@@ -1109,7 +1109,7 @@ export function planBenchDispatch(
           // No container control: the concrete model declares its format and every downstream
           // layer consumes that same value.
         },
-        estimatedMicroUsd: estimateMicroUsd(model, { characters: billableCharacters(model, composer.brief) }),
+        estimatedMicroUsd: estimateMicroUsd(model, { characters: billableCharacters(model, composer.brief, voiceSettings !== null ? params.delivery : undefined) }),
         landing: { dir: sessionMediaDir(session.id, takeId) },
         ...(voiceSource.kind === "cloned" ? { voiceReference: true } : {}),
       });

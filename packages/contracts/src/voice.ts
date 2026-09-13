@@ -522,6 +522,19 @@ export function deliveryParams(provider: string, delivery: Delivery): DeliveryMa
   return { ok: false, reason: `${provider} has no declared delivery mapping — the read will use provider defaults` };
 }
 
+/**
+ * The readers the performance path — Generate a line (SPEC-044 R-14) — can generate with today.
+ * A hosted reader's row declares a cadence like these do, but the performance path has no
+ * upload confirmation or voice-reference seam of its own yet (SPEC-046 G, issue 1149), so the
+ * door that opens on a cadence declaration checks this too, or it opens onto a refusal
+ * (codex on PR 1156). One list, read by the door and by the gate that refuses.
+ */
+export const PERFORMANCE_GENERATION_PROVIDERS: readonly string[] = ["kokoro", "elevenlabs"];
+
+export function supportsPerformanceGeneration(model: Pick<ManifestModel, "provider" | "capability" | "cadence"> | null | undefined): boolean {
+  return model !== null && model !== undefined && model.capability === "voice-tts" && model.cadence !== undefined && PERFORMANCE_GENERATION_PROVIDERS.includes(model.provider);
+}
+
 /** Deliveries a concrete model may offer before enqueue; absent means provider defaults only. */
 export function supportedDeliveries(model: Pick<ManifestModel, "limits"> | null | undefined): readonly Delivery[] {
   return model?.limits.deliveries ?? [];

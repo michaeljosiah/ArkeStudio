@@ -21,7 +21,7 @@ import {
   voiceSourceFor,
 } from "../src/voice.js";
 import { ClientMessageSchema } from "../src/frames.js";
-import { billableCharacters, ModelManifestSchema } from "../src/manifest.js";
+import { billableCharacters, ModelManifestSchema, type ManifestModel } from "../src/manifest.js";
 import { DomainEventSchema } from "../src/events.js";
 import { VoiceAssignmentSchema } from "../src/world.js";
 import { voiceJobIsCandidatePreview, voiceJobReadIdentity } from "../src/job.js";
@@ -561,6 +561,17 @@ describe("what a vendor bills as a character (SPEC-046 R-8)", () => {
     assert.equal(billableCharacters(row("utf8-byte"), line), new TextEncoder().encode(line).length);
     assert.equal(billableCharacters(row("utf8-byte"), "naïve"), 6);
     assert.equal(billableCharacters({ pricing: { kind: "unmetered" } }, line), line.length, "a row without per-character pricing counts characters");
+  });
+  it("a delivery the row carries as a tag is billed as text, in the row's own ink", () => {
+    const cadence: NonNullable<ManifestModel["cadence"]> = { deliveries: ["whispered", "cold"], speed: null, pause: "unsupported", emphasis: "unsupported", breath: "unsupported", outputTimestamps: "none",
+      deliveryMappings: { whispered: { settings: {}, tag: "whispers" }, cold: { settings: {}, instruction: "Coldly." } } };
+    const paren = { ...row("cjk-double"), cadence: { ...cadence, tagSyntax: "paren" as const } };
+    const bracket = { ...row("utf8-byte"), cadence };
+    assert.equal(billableCharacters(paren, "Wait here."), 10);
+    assert.equal(billableCharacters(paren, "Wait here.", "whispered"), "(whispers) Wait here.".length);
+    assert.equal(billableCharacters(bracket, "Wait here.", "whispered"), "[whispers] Wait here.".length);
+    assert.equal(billableCharacters(paren, "Wait here.", "cold"), 10, "a sentence beside the text is not in the text");
+    assert.equal(billableCharacters(paren, "Wait here.", "urgent"), 10, "a delivery the row does not map adds nothing");
   });
   it("the unit is a row field the manifest accepts and nothing else is", () => {
     const base = { manifestVersion: 1, generated: "2026-09-13", models: [{

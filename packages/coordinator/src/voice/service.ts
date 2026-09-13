@@ -779,7 +779,7 @@ export function voiceLineRequest(input: {
       ...(input.deliveryParams !== null ? { voiceSettings: input.deliveryParams } : {}),
       ...(input.deliveryNotice !== null ? { deliveryNotice: input.deliveryNotice } : {}),
     },
-    estimatedMicroUsd: estimateMicroUsd(input.model, { characters: billableCharacters(input.model, input.text) }),
+    estimatedMicroUsd: estimateMicroUsd(input.model, { characters: billableCharacters(input.model, input.text, input.delivery) }),
     landing: { dir: `productions/${input.productionId}/audio` },
     ...(input.voiceReference === true ? { voiceReference: true } : {}),
     ...(input.voiceUploadConfirmedFor !== undefined
