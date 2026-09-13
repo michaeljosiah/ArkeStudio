@@ -1838,6 +1838,31 @@ describe("retry classification (R-7, R-9, D5)", () => {
     h.queue.dispose();
   });
 
+  it("a witnessed busy answer from a cloud client with no idempotency key is retried, not held (codex on PR 1153)", async () => {
+    // A hosted reader's 429: transient by its own declaration, and the response proves nothing
+    // was synthesised. Without `submissionRejected` that combination fell into the uncertainty
+    // branch and sat in needs-reconciliation for a full generation pool.
+    const fake = new FakeProvider();
+    fake.submitError = Object.assign(new Error("breezeblue: pool full — retry after 3s (HTTP 429)"), { failureClass: "transient" });
+    fake.submissionRejected = true;
+    fake.submitErrorTimes = 2;
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the busy answers to be retried through", FOLD_MS);
+    assert.equal(fake.submitCount, 3);
+    h.queue.dispose();
+    // The same class without the proof is still the queue's uncertainty: held, not retried.
+    const unwitnessed = new FakeProvider();
+    unwitnessed.submitError = Object.assign(new Error("breezeblue: interrupted (HTTP 503)"), { failureClass: "transient" });
+    const h2 = await makeHarness({ fake: unwitnessed });
+    await h2.queue.start();
+    const held = await h2.queue.enqueue(INPUT);
+    await until(() => foldedJob(h2, held.id)?.status === "needs-reconciliation", "the unwitnessed answer to hold", FOLD_MS);
+    assert.equal(unwitnessed.submitCount, 1);
+    h2.queue.dispose();
+  });
+
   it("an error that declares itself transient is backed off, and the class survives giving up", async () => {
     // A local engine whose card has no room for the recipe (#692). Its message matches no
     // pattern, so only the class the client declared makes it a retry — and the failed row has
@@ -2249,6 +2274,84 @@ describe("artifact verification (R-12, R-13, D12)", () => {
 });
 
 describe("cancellation (R-14, R-15, D10)", () => {
+  it("a revoked key met in the clip read pauses the lane and keeps the job queued, like a submit's credential fault (codex on PR 1156)", async () => {
+    const fake = new FakeProvider({});
+    const h = await makeHarness({ fake }, {
+      readVoiceReference: async () => { throw Object.assign(new Error("breezeblue: the credential was rejected — Authentication required. (HTTP 401)"), { submissionRejected: true }); },
+    });
+    await h.queue.start();
+    const job = await h.queue.enqueue({ ...INPUT, capability: "voice-tts", params: { voiceId: "harbour", text: "A line." }, voiceReference: true });
+    await until(() => h.queue.queueStatus("fake").paused, "the lane to pause on the credential fault", FOLD_MS);
+    assert.equal(foldedJob(h, job.id)?.status, "queued", "the job waits for the key, it is not failed");
+    assert.equal(foldedJob(h, job.id)?.failureClass, "provider-fault");
+    assert.equal(h.faults.length, 1, "the fault is published once");
+    assert.equal(fake.submitCount, 0);
+    h.queue.dispose();
+  });
+
+  it("a busy vendor met in the clip read is retried on bounded backoff, not failed on the spot (codex on PR 1153)", async () => {
+    const fake = new FakeProvider({});
+    fake.inlineArtifacts = [{ name: "speech.wav", contentType: "audio/wav", data: Uint8Array.from([0x52, 0x49, 0x46, 0x46, 38, 0, 0, 0, 0x57, 0x41, 0x56, 0x45, 0x66, 0x6d, 0x74, 0x20, 16, 0, 0, 0, 1, 0, 1, 0, 0x44, 0xac, 0, 0, 0x88, 0x58, 1, 0, 2, 0, 16, 0, 0x64, 0x61, 0x74, 0x61, 2, 0, 0, 0, 0, 0]) }];
+    let reads = 0;
+    const h = await makeHarness({ fake }, {
+      readVoiceReference: async () => {
+        reads += 1;
+        // The listing answers 429 twice — the pool is full — then the slot is there.
+        if (reads <= 2) throw Object.assign(new Error("breezeblue: Rate limit exceeded. — retry after 1s (HTTP 429)"), { failureClass: "transient", submissionRejected: true });
+        return { name: "harbour.wav", contentType: "audio/wav" as const, data: Uint8Array.from([1, 2, 3]), remoteVoiceId: "voc_1" };
+      },
+    });
+    await h.queue.start();
+    const job = await h.queue.enqueue({ ...INPUT, capability: "voice-tts", params: { voiceId: "harbour", text: "A line." }, voiceReference: true });
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the read to come round after the pool clears", FOLD_MS);
+    assert.equal(reads, 3);
+    assert.equal(fake.submitCount, 1);
+    assert.equal(foldedJob(h, job.id)?.attempt, 3, "each preparation retry counts as an attempt, so the bound holds");
+    h.queue.dispose();
+    // And the bound: a vendor that never clears fails with the class kept, after the attempts.
+    const stuck = new FakeProvider({});
+    const h2 = await makeHarness({ fake: stuck }, {
+      readVoiceReference: async () => { throw Object.assign(new Error("breezeblue: pool full (HTTP 429)"), { failureClass: "transient", submissionRejected: true }); },
+    });
+    await h2.queue.start();
+    const job2 = await h2.queue.enqueue({ ...INPUT, capability: "voice-tts", params: { voiceId: "harbour", text: "A line." }, voiceReference: true });
+    await until(() => foldedJob(h2, job2.id)?.status === "failed", "the read to give up", FOLD_MS);
+    assert.match(foldedJob(h2, job2.id)?.error ?? "", /^gave up after 3 attempts/);
+    assert.equal(foldedJob(h2, job2.id)?.failureClass, "transient");
+    assert.equal(stuck.submitCount, 0);
+    h2.queue.dispose();
+  });
+
+  it("cancels a clip read in flight: the read gets the job's signal and a cancel ends as cancelled, not failed (codex on PR 1153)", async () => {
+    // A hosted reader's clip read can save a slot on the vendor's account, so it must take the
+    // cancellation like reference preparation does — before, no controller was registered
+    // until submit, and a cancelled job could still upload the recording and bill a slot.
+    const fake = new FakeProvider({});
+    let reading: AbortSignal | undefined;
+    let reads = 0;
+    const h = await makeHarness({ fake }, {
+      readVoiceReference: (_worldId, _provider, _model, _voiceId, signal) => new Promise((_resolve, reject) => {
+        reads += 1;
+        reading = signal;
+        signal?.addEventListener("abort", () => reject(signal.reason ?? new Error("aborted")), { once: true });
+      }),
+    });
+    await h.queue.start();
+    const job = await h.queue.enqueue({ ...INPUT, capability: "voice-tts", params: { voiceId: "harbour", text: "A line." }, voiceReference: true });
+    await until(() => reading !== undefined, "the clip read to start", FOLD_MS);
+    await h.queue.cancel(job.id);
+    assert.equal(reading?.aborted, true, "the read was told to stop");
+    await until(() => foldedJob(h, job.id)?.status === "cancelled", "the job to fold to cancelled", FOLD_MS);
+    assert.equal(foldedJob(h, job.id)?.error, null);
+    assert.equal(fake.submitCount, 0);
+    // The aborted run must not put the job back for a second read: between the abort and the
+    // cancel's terminal write the job is still "queued", and a requeue there dispatched it again
+    // with nobody left to abort the second run.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(reads, 1, "one read, aborted; never a second");
+    h.queue.dispose();
+  });
+
   it("does not warn about a charge when queued remote work never reached the provider", async () => {
     const fake = new FakeProvider({});
     fake.pollState = "running";

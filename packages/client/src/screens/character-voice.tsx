@@ -481,6 +481,7 @@ function ChooseVoiceDialog({
   const [uploadConfirmation, setUploadConfirmation] = useState<{
     destinationLabel: string;
     confirmationToken: string;
+    destinationNotice?: string;
     key: string;
   } | null>(null);
   const assignedModel = sheet.voice
@@ -509,6 +510,7 @@ function ChooseVoiceDialog({
         setUploadConfirmation({
           destinationLabel: confirmation.destinationLabel,
           confirmationToken: confirmation.confirmationToken,
+          ...(confirmation.destinationNotice !== undefined ? { destinationNotice: confirmation.destinationNotice } : {}),
           key,
         });
       }),
@@ -605,6 +607,7 @@ function ChooseVoiceDialog({
         {uploadConfirmation && (
           <RemoteVoiceUploadConfirmation
             destinationLabel={uploadConfirmation.destinationLabel}
+            destinationNotice={uploadConfirmation.destinationNotice}
             onCancel={() => {
               setRequests((current) => {
                 const next = { ...current };

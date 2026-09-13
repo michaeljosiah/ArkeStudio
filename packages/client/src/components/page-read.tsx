@@ -37,7 +37,7 @@ export interface PageRead {
   /** Present only while a charged read is waiting to be answered; `voices` names each cloud voice the words would go to. */
   cost: { characters: number; priced: string; voices: string[]; confirm: () => void } | null;
   /** Present while a cloned voice's recording waits for leave to go to a remote engine (turn 130). */
-  upload: { destination: string; confirm: () => void } | null;
+  upload: { destination: string; notice?: string; confirm: () => void } | null;
   begin: () => void;
   stop: () => void;
   skip: (direction: 1 | -1) => void;
@@ -80,7 +80,7 @@ export function usePageRead(input: {
    * the coordinator asks once, by request, before anything is priced or queued; the answer is
    * kept for the run, because the price asked next is answered by the same frame.
    */
-  const [upload, setUpload] = useState<{ destination: string; token: string } | null>(null);
+  const [upload, setUpload] = useState<{ destination: string; token: string; notice?: string } | null>(null);
   const uploadAllowed = useRef<string | null>(null);
   const voiceAudio = useVoiceAudio();
   const parts = useVoiceParts()[run ?? ""];
@@ -115,7 +115,8 @@ export function usePageRead(input: {
     () =>
       subscribeVoiceUploadConfirmations((confirmation) => {
         if (confirmation.requestId !== live.current) return;
-        setUpload({ destination: confirmation.destinationLabel, token: confirmation.confirmationToken });
+        setUpload({ destination: confirmation.destinationLabel, token: confirmation.confirmationToken,
+          ...(confirmation.destinationNotice !== undefined ? { notice: confirmation.destinationNotice } : {}) });
       }),
     [],
   );
@@ -178,6 +179,7 @@ export function usePageRead(input: {
       run !== null && upload !== null
         ? {
             destination: upload.destination,
+            ...(upload.notice !== undefined ? { notice: upload.notice } : {}),
             confirm: () => {
               uploadAllowed.current = upload.token;
               setUpload(null);
@@ -248,7 +250,7 @@ const ROW = { display: "inline-flex", alignItems: "center", gap: "var(--space-2)
 export function PageReadControl({ read, label }: { read: PageRead; label: string }) {
   if (!read.reading) return <Button onClick={read.begin}>{label}</Button>;
   if (read.upload) {
-    return <RemoteVoiceUploadConfirmation destinationLabel={read.upload.destination} onCancel={read.stop} onConfirm={read.upload.confirm} />;
+    return <RemoteVoiceUploadConfirmation destinationLabel={read.upload.destination} destinationNotice={read.upload.notice} onCancel={read.stop} onConfirm={read.upload.confirm} />;
   }
   if (read.cost) {
     return (

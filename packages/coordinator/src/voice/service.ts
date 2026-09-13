@@ -3,8 +3,10 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   clonedVoiceCandidates,
+  cloudReaderCandidates,
   normalizeSpeechText,
   KOKORO_VOICE_MODEL,
+  billableCharacters,
   estimateMicroUsd,
   extractVoiceAttributes,
   previewLineFor,
@@ -12,6 +14,7 @@ import {
   isGraphScene,
   splitBible,
   type ClonedVoice,
+  type Delivery,
   type DomainEvent,
   type ManifestModel,
   type ModelManifest,
@@ -65,6 +68,14 @@ export interface VoiceServiceDeps {
   sidecar: SidecarLike | null;
   localPresets: VoiceCandidate[];
   cloudSources: CloudVoiceSource[];
+  /**
+   * The hosted readers of the world's cloned voices (SPEC-046 R-10): a keyed one offers every
+   * library voice as a candidate of its own — the same id, its provider and row — beside the
+   * recipe's. Unkeyed, it offers nothing, like an unkeyed cloud catalogue.
+   */
+  hostedReaders?: Array<{ provider: string; model: string }>;
+  /** Why a keyed reader cannot read now — a rejected key, a fault — carried onto its candidates. */
+  readerAvailability?: (provider: string) => { unavailableReason?: string };
   getKey: (provider: string) => Promise<string | null>;
   emit: (event: DomainEvent) => void;
   clock?: () => string;
@@ -457,7 +468,7 @@ export class VoiceService {
       const health = await this.deps.sidecar.health().catch(() => null);
       const speechEngine = health === null ? "unknown" : health.engineStatus.kokoro.ready ? "ready" : "down";
       if (speechEngine === "down") {
-        return [...(await this.cloudVoices()), ...clonedVoiceCandidates(clonedVoices, clonedAvailability)];
+        return [...(await this.cloudVoices()), ...clonedVoiceCandidates(clonedVoices, clonedAvailability), ...(await this.hostedReaderCandidates(clonedVoices))];
       }
       const live = await this.deps.sidecar.listVoices().catch(() => []);
       if (live.length > 0) {
@@ -475,7 +486,17 @@ export class VoiceService {
         }));
       }
     }
-    return [...(await this.cloudVoices()), ...local, ...clonedVoiceCandidates(clonedVoices, clonedAvailability)];
+    return [...(await this.cloudVoices()), ...local, ...clonedVoiceCandidates(clonedVoices, clonedAvailability), ...(await this.hostedReaderCandidates(clonedVoices))];
+  }
+
+  /** The library's voices through each keyed hosted reader (SPEC-046 R-10). */
+  private async hostedReaderCandidates(clonedVoices: readonly ClonedVoice[]): Promise<VoiceCandidate[]> {
+    const out: VoiceCandidate[] = [];
+    for (const reader of this.deps.hostedReaders ?? []) {
+      if ((await this.deps.getKey(reader.provider)) === null) continue;
+      out.push(...cloudReaderCandidates(clonedVoices, reader, this.deps.readerAvailability?.(reader.provider) ?? {}));
+    }
+    return out;
   }
 
   /** The keyed cloud catalogues, which are unaffected by whatever the local engine is doing. */
@@ -510,7 +531,7 @@ export class VoiceService {
             entry.capability === "voice-tts",
         );
         return model
-          ? [[voiceTargetKey(candidate), estimateMicroUsd(model, { characters: line.text.length })]]
+          ? [[voiceTargetKey(candidate), estimateMicroUsd(model, { characters: billableCharacters(model, line.text) })]]
           : [];
       }),
     );
@@ -678,7 +699,7 @@ export class VoiceService {
         ...(voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor } : {}),
         // Unmetered rows estimate at zero, so a local preview states no price where a cloud one
         // states an exact figure (turn 70). No branch needed — the manifest already says which.
-        estimatedMicroUsd: estimateMicroUsd(model, { characters: normalized.length }),
+        estimatedMicroUsd: estimateMicroUsd(model, { characters: billableCharacters(model, normalized) }),
         // Landed under its cache key, so reopening the picker replays without a call (R-10).
         landing: { dir: PREVIEW_CACHE_DIR, name },
       },
@@ -729,6 +750,10 @@ export function voiceLineRequest(input: {
   shotId: string;
   sheet: Sheet;
   text: string;
+  /** The delivery's name, for a reader that takes direction as words as well as numbers (SPEC-046 R-22). */
+  delivery?: Delivery;
+  /** The line's language when stated (ISO 639-1); nothing states one yet (issue 1163), and the estimate follows R-23 without it. */
+  language?: string;
   deliveryParams: Record<string, number> | null;
   deliveryNotice: string | null;
   model: ManifestModel;
@@ -752,10 +777,12 @@ export function voiceLineRequest(input: {
       voiceId: voice.voiceId,
       text: input.text,
       audioFormat: voiceFormatForModel(input.model),
+      ...(input.delivery !== undefined ? { delivery: input.delivery } : {}),
+      ...(input.language !== undefined ? { language: input.language } : {}),
       ...(input.deliveryParams !== null ? { voiceSettings: input.deliveryParams } : {}),
       ...(input.deliveryNotice !== null ? { deliveryNotice: input.deliveryNotice } : {}),
     },
-    estimatedMicroUsd: estimateMicroUsd(input.model, { characters: input.text.length }),
+    estimatedMicroUsd: estimateMicroUsd(input.model, { characters: billableCharacters(input.model, input.text, input.delivery, input.language) }),
     landing: { dir: `productions/${input.productionId}/audio` },
     ...(input.voiceReference === true ? { voiceReference: true } : {}),
     ...(input.voiceUploadConfirmedFor !== undefined

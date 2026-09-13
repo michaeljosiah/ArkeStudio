@@ -185,4 +185,25 @@ describe("the character dialog (SPEC-044 R-11..R-16)", () => {
     assert.equal(closes.count, 2);
     assert.deepEqual(writes, []);
   });
+
+  it("opens the priced Generate door only on a reader the performance path can generate with (codex on PR 1156)", async () => {
+    // A hosted reader's row declares a cadence like ElevenLabs' does, but the performance path
+    // has no upload confirmation of its own yet (SPEC-046 G): the door points at the Voice page
+    // rather than onto a refusal.
+    const row = (id: string, provider: string) => ({
+      id, provider, capability: "voice-tts", displayName: id, accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: { audioFormat: "wav" },
+      pricing: { kind: "perCharacter", microUsdPerCharacter: 100 },
+      cadence: { deliveries: ["measured"], speed: null, pause: "unsupported", emphasis: "unsupported", breath: "unsupported", outputTimestamps: "none", deliveryMappings: { measured: { settings: {} } } },
+    });
+    const withVoice = (provider: string, model: string) => {
+      const state = stateFor({ voice: { kind: "sample" } });
+      state.app.manifest!.models.push(row("eleven_multilingual_v2", "elevenlabs") as never, row("voxtral-mini-tts", "mistral") as never);
+      state.world!.sheets.find((sheet) => sheet.id === "maren-kest")!.voice = { provider, model, voiceId: "harbour", label: "Harbour", assignedAtVersion: 4 } as never;
+      return state;
+    };
+    const eleven = await mount(withVoice("elevenlabs", "eleven_multilingual_v2"));
+    assert.match(card(eleven.container, cards(eleven.container, "Voice").at(-1)![0]!).getAttribute("aria-label") ?? "", /^Generate a line · \$/, "priced: the path can generate with it");
+    const voxtral = await mount(withVoice("mistral", "voxtral-mini-tts"));
+    assert.equal(cards(voxtral.container, "Voice").at(-1)?.[0], "Generate a line · Voice page");
+  });
 });

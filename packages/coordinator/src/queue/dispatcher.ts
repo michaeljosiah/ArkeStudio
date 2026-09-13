@@ -53,6 +53,8 @@ export interface DispatchVoiceReference {
   name: string;
   contentType: "audio/wav" | "audio/mpeg";
   data: Uint8Array;
+  /** For a hosted reader that keeps the clip on its account: the id it keeps it under (SPEC-046 R-13). */
+  remoteVoiceId?: string;
 }
 
 /** The footage a continuation extends (SPEC-019 R-50), resolved immediately before submit. */
@@ -171,7 +173,7 @@ export interface JobQueueOptions {
   }>;
   readImageReferences?: (worldId: string, paths: readonly string[]) => Promise<DispatchImageReference[]>;
   /** Resolve a durable voice id into ephemeral confined bytes immediately before provider I/O. */
-  readVoiceReference?: (worldId: string, provider: string, model: string, voiceId: string) => Promise<DispatchVoiceReference>;
+  readVoiceReference?: (worldId: string, provider: string, model: string, voiceId: string, signal?: AbortSignal) => Promise<DispatchVoiceReference>;
   /**
    * Resolve the footage a continuation extends into bytes, cutting a pass segment out of its
    * backing file first where the predecessor is one (SPEC-019 R-50, T-32).
@@ -633,7 +635,10 @@ export class JobQueue {
         lane.inFlight.delete(runKey);
         this.retiredEngineRuns.delete(this.engineRunKey(job));
         const current = this.jobs.get(job.id);
-        if (current?.status === "queued" && !lane.fifo.includes(job.id)) lane.fifo.push(job.id);
+        // A job whose pre-submit phase was aborted by a cancel is still "queued" for the tick
+        // between the abort and the cancel's terminal write; putting it back would dispatch it
+        // again with nobody left to abort the second run (the clip read found this).
+        if (current?.status === "queued" && !this.cancelling.has(job.id) && !lane.fifo.includes(job.id)) lane.fifo.push(job.id);
         this.pump(provider);
         // Read after the pump, not before: a job the pump just started is in flight, and a retry
         // sitting out its backoff is still in the FIFO. Only a lane with nothing running and
@@ -896,16 +901,51 @@ export class JobQueue {
         await this.terminalize(job, "failed", "voice reference transport is not configured");
         return;
       }
+      // A hosted reader's clip read can create a slot on the vendor's account (SPEC-046 R-13),
+      // so it takes the job's cancellation like reference preparation does: a cancel or a
+      // shutdown while the save is pending aborts the call rather than letting the recording
+      // leave and a slot bill after the person said stop (codex on PR 1153).
+      const reading = new AbortController();
+      this.submitAborts.set(job.id, reading);
       try {
-        voiceReference = await this.opts.readVoiceReference(job.worldId, job.provider, job.model, voiceId);
+        voiceReference = await this.opts.readVoiceReference(job.worldId, job.provider, job.model, voiceId, reading.signal);
       } catch (error) {
-        await this.terminalize(
-          job,
-          "failed",
-          describeCoordinatorError(error),
-        );
+        if (!this.disposed && !this.cancelling.has(job.id) && this.stillQueued(job)) {
+          const message = describeCoordinatorError(error);
+          // A hosted reader's clip read talks to the vendor before submit, so a revoked key
+          // shows up here first: the job was never wrong, the credential was (R-8). Back to
+          // queued behind a paused lane, as a submit's credential fault is — not a failed job
+          // per queued read (codex on PR 1156).
+          const klass = classifyError(error);
+          if (klass === "provider-fault") {
+            await this.transition({ ...job, status: "queued", failureClass: "provider-fault", error: message, updatedAt: this.clock() });
+            this.lane(job.provider).fifo.unshift(job.id);
+            this.pauseLane(job.provider, "fault", message);
+            return;
+          }
+          // A busy vendor met before submit — a full pool on the listing, the slot save the probe
+          // saw answer 429 — is the same bounded backoff a submit gets. The retry counts as an
+          // attempt so the bound holds; nothing was sent, so nothing is held for reconciliation.
+          if (klass === "transient") {
+            if (isRateLimit(error)) this.noteRateLimit(job.provider);
+            const attempt = job.attempt + 1;
+            if (attempt >= this.maxAttempts) {
+              await this.terminalize(job, "failed", `gave up after ${attempt} attempts: ${message}`, undefined, klass);
+              return;
+            }
+            await this.transition({ ...job, status: "queued", attempt, failureClass: klass, error: message, updatedAt: this.clock() });
+            const lane = this.lane(job.provider);
+            lane.notBefore.set(job.id, Date.now() + backoffMs(attempt, this.backoffBaseMs, this.backoffCapMs, this.rng));
+            lane.fifo.push(job.id);
+            return;
+          }
+          await this.terminalize(job, "failed", message);
+        }
         return;
+      } finally {
+        if (this.submitAborts.get(job.id) === reading) this.submitAborts.delete(job.id);
       }
+      if (this.disposed || !this.stillQueued(job)) return;
     }
     // The footage a continuation extends, resolved last of the three (SPEC-019 R-50). A failure
     // here is terminal rather than a lane pause: the predecessor is named on the job and cannot
