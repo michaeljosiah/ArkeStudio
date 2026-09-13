@@ -15,6 +15,10 @@ import {
 
 /** The manifest row's id. There is no `providerModelId`: Breeze routes by language (SPEC-046 §2.4). */
 export const BREEZE_MODEL = HOSTED_VOICE_READERS["breezeblue"]!;
+/** The vendor's cap on one request's text, tag included (probed 2026-09-13: 1,001 → 422). */
+export const BREEZE_TEXT_CAP = 1000;
+/** How much of the ~6,900-voice public catalogue the picker gets: three pages of Breeze's trend rank. */
+export const BREEZE_CATALOGUE_PAGES = 3;
 
 /**
  * Breeze's error envelope: `{ ok: false, code, detail, error }`. The code is what decides the
@@ -121,9 +125,17 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
     const settings = isNumberRecord(request.params["voiceSettings"]) ? request.params["voiceSettings"] : {};
     const language = typeof request.params["language"] === "string" && /^[A-Za-z]{2}$/.test(request.params["language"]) ? request.params["language"].toLowerCase() : undefined;
     // Tags are per language on Breeze — parentheses in English, the language's own word in
-    // brackets elsewhere. Without a known English line the tag stays out and the sentence
-    // carries the delivery alone (R-23); nothing here translates a tag.
-    const tagged = direction.tag !== undefined && (language === undefined || language === "en") ? `(${direction.tag}) ${text}` : text;
+    // brackets elsewhere. The tag goes in only when the line is stated to be English; unknown is
+    // not English, and a French line read with `(whispers)` spoken aloud is paid output wasted
+    // (R-23, codex on PR 1153). The sentence carries the delivery whatever the language.
+    const tagged = direction.tag !== undefined && language === "en" ? `(${direction.tag}) ${text}` : text;
+    // The tag counts against the vendor's cap, and the caller measured the text without it: a
+    // 995-character whisper is refused here, named, rather than as a 422 after the wire.
+    if (tagged.length > BREEZE_TEXT_CAP) {
+      throw new ProviderRequestRejectedError(
+        `breezeblue: the line is ${tagged.length - BREEZE_TEXT_CAP} characters over Breeze's ${BREEZE_TEXT_CAP}${tagged !== text ? ` once the (${direction.tag}) tag is counted` : ""} — shorten it`,
+      );
+    }
     const remoteId = `breezeblue-${++this.counter}-${Date.now()}`;
     const res = await this.fetchImpl(`${this.baseUrl}/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=wav`, {
       method: "POST",
@@ -159,7 +171,10 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
     if (res.status === 402) return new ProviderRequestRejectedError(`breezeblue: the account cannot pay for this read — ${message}; top up on breezeblue.ai`);
     if (TRANSIENT_CODES.has(code)) {
       const wait = res.headers.get("retry-after");
-      return new ProviderBusyError(`breezeblue: ${said || code || "busy"}${wait ? ` — retry after ${wait}s` : ""} (HTTP ${res.status})`);
+      // A 4xx witnessed the refusal — the pool was full, nothing ran. A 5xx with a retryable
+      // code is the vendor's word that it is safe to try again, which is not the same as proof
+      // that nothing was charged; that one is held for the person, as every 5xx is.
+      return new ProviderBusyError(`breezeblue: ${said || code || "busy"}${wait ? ` — retry after ${wait}s` : ""} (HTTP ${res.status})`, { witnessed: res.status < 500 });
     }
     if (res.status >= 500) return new Error(`breezeblue: synthesis failed — ${message}`);
     return new ProviderRequestRejectedError(`breezeblue: synthesis failed — ${message}`);
@@ -212,19 +227,28 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
   /**
    * The public catalogue as picker candidates (SPEC-046 R-32): the voice's language, accent,
    * gender, age band, tones and category become attributes `rankVoices` can match. The live
-   * catalogue holds ~6,900 public voices (read 2026-09-13) in pages of 100 ordered by Breeze's
-   * own trend rank, so one page is what the picker gets — a bounded, ranked slice, not the
-   * whole shelf. Saved voices — the account's own clones — are `visibility: private` and left
-   * out; the library addresses those by its own ids.
+   * catalogue holds ~6,900 public voices (read 2026-09-13) at 100 a page, and the default
+   * listing is newest-first — so this asks for the vendor's own trend rank and follows the pages
+   * for a bounded run: the picker gets the most popular few hundred, a ranked slice stated as
+   * such, not the whole shelf and not the newest hundred (codex on PR 1153). A page that fails
+   * ends the run with what was read. Saved voices — the account's own clones — are
+   * `visibility: private` and left out; the library addresses those by its own ids.
    */
   async listVoicesCatalog(key: string): Promise<
     Array<{ provider: string; model: string; voiceId: string; label: string; attributes: string[]; local: boolean; canClone: boolean }>
   > {
-    const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/v1/voices?page_size=100`, {
-      headers: this.headers(key),
-    });
-    if (status >= 400) return [];
-    const voices = (body as { voices?: Array<Record<string, unknown>> } | null)?.voices ?? [];
+    const voices: Array<Record<string, unknown>> = [];
+    for (let page = 1; page <= BREEZE_CATALOGUE_PAGES; page += 1) {
+      const { status, body } = await jsonRequest(
+        this.fetchImpl, this.id,
+        `${this.baseUrl}/v1/voices?voice_type=default&sort=trend&sort_direction=desc&page_size=100&page=${page}`,
+        { headers: this.headers(key) },
+      ).catch(() => ({ status: 599, body: null }));
+      if (status >= 400) break;
+      const listed = (body as { voices?: Array<Record<string, unknown>>; has_more?: unknown } | null);
+      voices.push(...(listed?.voices ?? []));
+      if (listed?.has_more !== true) break;
+    }
     return voices
       .filter((v) => typeof v["voice_id"] === "string" && typeof v["name"] === "string" && (v["visibility"] === undefined || v["visibility"] === "public"))
       .map((v) => ({

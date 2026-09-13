@@ -1838,6 +1838,31 @@ describe("retry classification (R-7, R-9, D5)", () => {
     h.queue.dispose();
   });
 
+  it("a witnessed busy answer from a cloud client with no idempotency key is retried, not held (codex on PR 1153)", async () => {
+    // A hosted reader's 429: transient by its own declaration, and the response proves nothing
+    // was synthesised. Without `submissionRejected` that combination fell into the uncertainty
+    // branch and sat in needs-reconciliation for a full generation pool.
+    const fake = new FakeProvider();
+    fake.submitError = Object.assign(new Error("breezeblue: pool full — retry after 3s (HTTP 429)"), { failureClass: "transient" });
+    fake.submissionRejected = true;
+    fake.submitErrorTimes = 2;
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the busy answers to be retried through", FOLD_MS);
+    assert.equal(fake.submitCount, 3);
+    h.queue.dispose();
+    // The same class without the proof is still the queue's uncertainty: held, not retried.
+    const unwitnessed = new FakeProvider();
+    unwitnessed.submitError = Object.assign(new Error("breezeblue: interrupted (HTTP 503)"), { failureClass: "transient" });
+    const h2 = await makeHarness({ fake: unwitnessed });
+    await h2.queue.start();
+    const held = await h2.queue.enqueue(INPUT);
+    await until(() => foldedJob(h2, held.id)?.status === "needs-reconciliation", "the unwitnessed answer to hold", FOLD_MS);
+    assert.equal(unwitnessed.submitCount, 1);
+    h2.queue.dispose();
+  });
+
   it("an error that declares itself transient is backed off, and the class survives giving up", async () => {
     // A local engine whose card has no room for the recipe (#692). Its message matches no
     // pattern, so only the class the client declared makes it a retry — and the failed row has

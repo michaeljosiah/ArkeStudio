@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { BREEZE_DELIVERY } from "@arke-studio/contracts";
-import { BreezeBlueClient, BREEZE_MODEL } from "../src/clients/breezeblue.js";
+import { BreezeBlueClient, BREEZE_CATALOGUE_PAGES, BREEZE_MODEL, BREEZE_TEXT_CAP } from "../src/clients/breezeblue.js";
 import { MistralClient, VOXTRAL_MODEL, VOXTRAL_PRESETS } from "../src/clients/mistral.js";
 import { SHIPPED_MANIFEST } from "../src/manifest-data.js";
 import { createProviderClients, PROVIDER_DECLARATIONS } from "../src/registry.js";
@@ -87,7 +87,9 @@ describe("Mistral · Voxtral TTS as a hosted reader (SPEC-046 §2.3)", () => {
     await assert.rejects(new MistralClient(async () => json(401, {})).submit("k", line), ProviderAuthError);
     await assert.rejects(new MistralClient(async () => json(422, { detail: [{ msg: "input too long" }] })).submit("k", line),
       (err: unknown) => err instanceof ProviderRequestRejectedError && /input too long/.test(err.message));
-    await assert.rejects(new MistralClient(async () => json(429, {})).submit("k", line), ProviderBusyError);
+    // Witnessed: the 429 proves nothing was synthesised, so the queue retries rather than holds.
+    await assert.rejects(new MistralClient(async () => json(429, {})).submit("k", line),
+      (err: unknown) => err instanceof ProviderBusyError && err.submissionRejected === true);
     await assert.rejects(new MistralClient(async () => json(200, { audio_data: b64(Uint8Array.from([1, 2, 3])) })).submit("k", line), /not a WAV file/);
     await assert.rejects(new MistralClient(async () => json(200, {})).submit("k", line), /no audio_data/);
   });
@@ -131,15 +133,22 @@ describe("BreezeBlue · Breeze TTS 2 as a hosted reader (SPEC-046 §2.4)", () =>
     assert.ok(!r.calls[0]!.url.includes("k="));
   });
 
-  it("places a delivery as its words: a tag in the text where Breeze has one, a sentence beside it where it does not (R-22)", async () => {
+  it("places a delivery as its words: a tag in a line stated to be English, and the sentence beside it either way (R-22)", async () => {
     const r = recording(() => new Response(WAV, { status: 200 }));
     const client = new BreezeBlueClient(r.fetchImpl);
     await client.submit("k", { model: BREEZE_MODEL, capability: "voice-tts",
-      params: { text: "Do not open it.", voiceId: "voc_1", delivery: "whispered", voiceSettings: { guidance_scale: 4 } } });
+      params: { text: "Do not open it.", voiceId: "voc_1", delivery: "whispered", language: "en", voiceSettings: { guidance_scale: 4 } } });
     let body = r.body();
     assert.equal(body["text"], "(whispers) Do not open it.");
-    assert.equal(body["instructions"], undefined);
+    assert.equal(body["instructions"], BREEZE_DELIVERY.whispered.instruction);
     assert.deepEqual(body["voice_settings"], { guidance_scale: 4 });
+    // No language stated is not English: the tag stays out and the sentence carries the delivery.
+    await client.submit("k", { model: BREEZE_MODEL, capability: "voice-tts",
+      params: { text: "Do not open it.", voiceId: "voc_1", delivery: "whispered" } });
+    body = r.body();
+    assert.equal(body["text"], "Do not open it.");
+    assert.equal(body["instructions"], BREEZE_DELIVERY.whispered.instruction);
+    assert.equal(body["language_code"], undefined);
     await client.submit("k", { model: BREEZE_MODEL, capability: "voice-tts",
       params: { text: "Do not open it.", voiceId: "voc_1", delivery: "cold", voiceSettings: BREEZE_DELIVERY.cold.settings } });
     body = r.body();
@@ -167,9 +176,12 @@ describe("BreezeBlue · Breeze TTS 2 as a hosted reader (SPEC-046 §2.4)", () =>
     const line = { model: BREEZE_MODEL, capability: "voice-tts" as const, params: { text: "x", voiceId: "voc_1" } };
     const at = (status: number, code: string, detail: string, headers: Record<string, string> = {}) =>
       new BreezeBlueClient(async () => json(status, { ok: false, code, detail, error: detail }, headers)).submit("k", line);
+    // A witnessed 429 is transient AND a rejected submission: the queue retries it on backoff
+    // rather than holding it for reconciliation. A 5xx is transient without that proof.
     await assert.rejects(at(429, "GENERATION_CONCURRENCY_EXCEEDED", "Your plan's concurrent generation limit was reached.", { "retry-after": "3" }),
-      (err: unknown) => err instanceof ProviderBusyError && /retry after 3s/.test(err.message));
-    await assert.rejects(at(503, "GENERATION_CAPACITY_EXCEEDED", "Generation capacity is currently exhausted."), ProviderBusyError);
+      (err: unknown) => err instanceof ProviderBusyError && /retry after 3s/.test(err.message) && err.submissionRejected === true);
+    await assert.rejects(at(503, "GENERATION_CAPACITY_EXCEEDED", "Generation capacity is currently exhausted."),
+      (err: unknown) => err instanceof ProviderBusyError && err.submissionRejected === undefined);
     await assert.rejects(at(402, "BILLING_INSUFFICIENT_CREDITS", "Insufficient credits."),
       (err: unknown) => err instanceof ProviderRequestRejectedError && /cannot pay/.test(err.message) && /top up/.test(err.message));
     await assert.rejects(at(401, "AUTH_REQUIRED", "Authentication required."), ProviderAuthError);
@@ -177,6 +189,19 @@ describe("BreezeBlue · Breeze TTS 2 as a hosted reader (SPEC-046 §2.4)", () =>
       (err: unknown) => err instanceof ProviderRequestRejectedError && /text: too long/.test(err.message));
     await assert.rejects(at(500, "UPSTREAM_GENERATION_SERVICE_ERROR", "Generation service request failed."),
       (err: unknown) => err instanceof Error && !(err instanceof ProviderBusyError) && !(err instanceof ProviderRequestRejectedError));
+  });
+
+  it("counts the tag against the vendor's cap before the wire, and names the overrun", async () => {
+    let called = 0;
+    const client = new BreezeBlueClient(async () => { called += 1; return new Response(WAV, { status: 200 }); });
+    const line = (chars: number, delivery?: string, language?: string) =>
+      client.submit("k", { model: BREEZE_MODEL, capability: "voice-tts", params: { text: "x".repeat(chars), voiceId: "voc_1", ...(delivery ? { delivery } : {}), ...(language ? { language } : {}) } });
+    await line(BREEZE_TEXT_CAP);
+    await assert.rejects(line(BREEZE_TEXT_CAP + 1), (err: unknown) => err instanceof ProviderRequestRejectedError && /1 characters over/.test(err.message));
+    // 995 characters pass the caller's cap; "(whispers) " makes 1,006 on the wire.
+    await assert.rejects(line(995, "whispered", "en"), (err: unknown) => err instanceof ProviderRequestRejectedError && /6 characters over .* once the \(whispers\) tag is counted/.test(err.message));
+    await line(995, "whispered");
+    assert.equal(called, 2);
   });
 
   it("refuses a bare clip: a cloned voice reads from a slot the library saved, not from bytes in the call (R-13)", async () => {
@@ -242,16 +267,27 @@ describe("BreezeBlue · Breeze TTS 2 as a hosted reader (SPEC-046 §2.4)", () =>
     await assert.rejects(new BreezeBlueClient(async () => new Response(null, { status: 204 })).deleteVoice("k", "../voices"), ProviderRequestRejectedError);
   });
 
-  it("lists the public catalogue with its metadata as attributes and leaves saved voices out (R-32)", async () => {
-    const r = recording(() => json(200, { voices: [
-      { voice_id: "voc_a", name: "Ada", origin: "designed", voice_type: "default", visibility: "public", language_code: "en", accent: "british",
+  it("lists the public catalogue by trend, page after page to a bound, with its metadata as attributes and saved voices left out (R-32)", async () => {
+    const page = (n: number, hasMore: boolean) => json(200, { voices: [
+      { voice_id: `voc_a${n}`, name: `Ada ${n}`, origin: "designed", voice_type: "default", visibility: "public", language_code: "en", accent: "british",
         gender: "female", age: "middle_aged", tone: ["calm", "warm"], primary_category_code: "narration", tags: ["Narration"] },
-      { voice_id: "voc_b", name: "Mine", origin: "cloned", voice_type: "custom", visibility: "private", language_code: "en" },
-    ], has_more: true, total: 6898, page: 1, page_size: 100 }));
+      { voice_id: `voc_b${n}`, name: "Mine", origin: "cloned", voice_type: "custom", visibility: "private", language_code: "en" },
+    ], has_more: hasMore, total: 6898, page: n, page_size: 100 });
+    const r = recording((url) => page(Number(/page=(\d+)/.exec(url)?.[1]), url.includes("page=1")));
     const voices = await new BreezeBlueClient(r.fetchImpl).listVoicesCatalog("k");
-    assert.equal(r.calls[0]?.url, "https://api.breeze.blue/v1/voices?page_size=100");
-    assert.deepEqual(voices, [{ provider: "breezeblue", model: BREEZE_MODEL, voiceId: "voc_a", label: "Ada",
-      attributes: ["en", "british", "female", "middle_aged", "narration", "calm", "warm", "narration"], local: false, canClone: false }]);
+    assert.deepEqual(r.calls.map((call) => call.url), [
+      "https://api.breeze.blue/v1/voices?voice_type=default&sort=trend&sort_direction=desc&page_size=100&page=1",
+      "https://api.breeze.blue/v1/voices?voice_type=default&sort=trend&sort_direction=desc&page_size=100&page=2",
+    ], "the second page said there was no more");
+    assert.deepEqual(voices, [1, 2].map((n) => ({ provider: "breezeblue", model: BREEZE_MODEL, voiceId: `voc_a${n}`, label: `Ada ${n}`,
+      attributes: ["en", "british", "female", "middle_aged", "narration", "calm", "warm", "narration"], local: false, canClone: false })));
+    // A catalogue that never ends is read to the bound and no further.
+    const endless = recording((url) => page(Number(/page=(\d+)/.exec(url)?.[1]), true));
+    assert.equal((await new BreezeBlueClient(endless.fetchImpl).listVoicesCatalog("k")).length, BREEZE_CATALOGUE_PAGES);
+    assert.equal(endless.calls.length, BREEZE_CATALOGUE_PAGES);
+    // A page that fails ends the run with what was read, not with nothing.
+    const flaky = recording((url) => (url.includes("page=2") ? json(500, { ok: false, code: "INTERNAL_ERROR" }) : page(1, true)));
+    assert.equal((await new BreezeBlueClient(flaky.fetchImpl).listVoicesCatalog("k")).length, 1);
   });
 });
 

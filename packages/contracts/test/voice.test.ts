@@ -489,7 +489,8 @@ describe("the hosted readers' deliveries (SPEC-046 R-19, R-22)", () => {
       const words = breezeDirection(delivery);
       assert.ok(words.tag !== undefined || words.instruction !== undefined, `${delivery} has neither a tag nor a sentence`);
     }
-    assert.deepEqual(breezeDirection("whispered"), { tag: "whispers" });
+    assert.equal(breezeDirection("whispered").tag, "whispers");
+    assert.ok(breezeDirection("whispered").instruction, "a tag never travels alone: the line's language may not be known");
     assert.equal(breezeDirection("cold").tag, undefined);
   });
 });

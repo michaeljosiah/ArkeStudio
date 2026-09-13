@@ -476,7 +476,9 @@ const KOKORO_DELIVERY: Partial<Record<Delivery, Record<string, number>>> = {
  */
 export const BREEZE_DELIVERY: Record<Delivery, { settings: { guidance_scale: number }; tag?: string; instruction?: string }> = {
   measured: { settings: { guidance_scale: 4 }, instruction: "Read it evenly, at a steady pace." },
-  whispered: { settings: { guidance_scale: 4 }, tag: "whispers" },
+  // The sentence rides beside the tag so a line whose language is not known still carries the
+  // delivery: the tag goes only into a line stated to be English (R-23).
+  whispered: { settings: { guidance_scale: 4 }, tag: "whispers", instruction: "Whisper it — hushed and close, barely voiced." },
   breaking: { settings: { guidance_scale: 4 }, tag: "sobs", instruction: "The voice is breaking; the words come through tears." },
   cold: { settings: { guidance_scale: 4 }, instruction: "Say it coldly — flat, distant, without warmth." },
   warm: { settings: { guidance_scale: 4 }, instruction: "Say it warmly and gently, close and kind." },

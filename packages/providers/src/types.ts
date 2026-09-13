@@ -178,10 +178,19 @@ export class ProviderRequestRejectedError extends Error {
  */
 export class ProviderBusyError extends Error {
   readonly failureClass = "transient" as const;
+  /**
+   * Set when a response proved the request was not taken — a witnessed 429, a "not ready" 425.
+   * Without it the queue cannot tell this from a call that vanished mid-flight, and a cloud
+   * client with no idempotency key is held for the person to reconcile instead of retried on
+   * backoff (codex on PR 1153). A full card names no status and leaves it unset; so does a 5xx,
+   * because a response alone does not prove paid work was rejected.
+   */
+  readonly submissionRejected?: true;
 
-  constructor(message: string) {
+  constructor(message: string, options: { witnessed?: boolean } = {}) {
     super(message);
     this.name = "ProviderBusyError";
+    if (options.witnessed === true) this.submissionRejected = true;
   }
 }
 

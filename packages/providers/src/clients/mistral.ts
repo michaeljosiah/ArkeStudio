@@ -139,7 +139,7 @@ export class MistralClient implements ProviderClient, VoiceCatalogueClient {
         `mistral: refused this line — its moderation, or a plan without text-to-speech — “${firstWords(text)}”`,
       );
     }
-    if (res.status === 429) throw new ProviderBusyError(`mistral: the workspace's rate limit was reached (HTTP 429)`);
+    if (res.status === 429) throw new ProviderBusyError(`mistral: the workspace's rate limit was reached (HTTP 429)`, { witnessed: true });
     if (res.status >= 500) throw new Error(`mistral: synthesis failed (HTTP ${res.status})`);
     if (res.status >= 400) throw new ProviderRequestRejectedError(`mistral: synthesis failed (HTTP ${res.status})${await detail(res)}`);
     // JSON with base64 inside, not audio bytes (§2.2). The WAV header is checked here because a
