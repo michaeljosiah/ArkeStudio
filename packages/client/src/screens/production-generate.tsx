@@ -51,7 +51,7 @@ import {
   subscribeQueueResults,
   subscribeVoiceUploadConfirmations,
 } from "../lib/store.js";
-import { decisionTone, EpisodePicker } from "./production.js";
+import { decisionTone, EpisodePicker } from "./production-shell.js";
 import { carriedSubjects } from "./production-cast.js";
 
 /** A take's playable bytes and poster, resolved through a segment's backing pass when needed. */
