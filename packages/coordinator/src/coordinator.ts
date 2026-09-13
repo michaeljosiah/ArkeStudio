@@ -3297,6 +3297,7 @@ export class Coordinator {
       const actions = await recoverConversationActions(this.conversationActionLifecycleOptions(store));
       if (
         outcome.repaired.length > 0 ||
+        outcome.inputQueues.length > 0 ||
         outcome.sweptTombstones.length > 0 ||
         wrapUps.repaired.length > 0 ||
         actions.prepared > 0 ||
@@ -3309,6 +3310,7 @@ export class Coordinator {
           level: "info",
           event: "world-chat.recovered",
           runs: outcome.repaired.length,
+          inputQueues: outcome.inputQueues.length,
           tombstones: outcome.sweptTombstones.length,
           wrapUps: wrapUps.repaired.length,
           actionPreparations: actions.prepared,

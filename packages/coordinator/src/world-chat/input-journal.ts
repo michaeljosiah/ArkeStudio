@@ -28,6 +28,7 @@ export class WorldChatInputError extends Error {
 type InputWorld = Pick<WorldStore, "dir" | "closingSignal" | "ownedWrite" | "raiseSchemaBoundary">;
 type WithoutTransition<T> = T extends InputStoredEvent ? Omit<T, "queueRevision" | "commandDigest"> : never;
 type Change = WithoutTransition<InputStoredEvent>;
+type ChangeBuilder = (state: { queue: WorldChatInputQueue; events: WorldChatEventEnvelope[]; at: string }) => Change;
 export interface InputJournalReceipt {
   event: InputStoredEvent;
   sequence: number;
@@ -65,6 +66,9 @@ export class WorldChatInputJournal {
       if ((request.subject !== undefined && stableJson(request.subject) !== stableJson(constraints.subject)) ||
         (request.replyOnly !== undefined && request.replyOnly !== constraints.replyOnly)) {
         throw new WorldChatInputError("conflict", "The captured constraints do not match this message.");
+      }
+      if (request.modelId !== undefined && request.modelId !== routing.modelId) {
+        throw new WorldChatInputError("conflict", "The captured model does not match this message.");
       }
       const attachments = request.attachmentIds.map(id => {
         const attachment = view.attachments.find(one => one.id === id);
@@ -157,7 +161,7 @@ export class WorldChatInputJournal {
   }
 
   private async change(operationId: string, command: unknown,
-    build: (state: { queue: WorldChatInputQueue; events: WorldChatEventEnvelope[]; at: string }) => Change,
+    build: ChangeBuilder,
   ): Promise<InputJournalReceipt> {
     if (operationId.length > 700 || !/^[a-z-]+:.+$/s.test(operationId)) {
       throw new WorldChatInputError("conflict", "The input operation identity is invalid.");
@@ -165,50 +169,62 @@ export class WorldChatInputJournal {
     const requestId = `world-chat-input:${operationId}`;
     const commandDigest = inputCommandDigest(command);
     if (this.world.closingSignal.aborted) throw new WorldChatInputError("unavailable", "This world closed.");
+    // Refused commands must not upgrade the world. Preflight appends no input event; reads may
+    // repair an old torn tail, so they still belong under ownership. Repeat it after the boundary
+    // because lifecycle, queue and context state can change while that commit is in flight.
+    await this.world.ownedWrite(() => this.preflight(requestId, commandDigest, build));
     // The boundary uses the world's commit queue; ownedWrite uses the same queue, so this must
     // happen before entering it. Ownership is checked again by ownedWrite, including after close.
     await this.world.raiseSchemaBoundary(WORLD_CHAT_INPUT_SCHEMA_VERSION, "world-chat-input");
     return this.world.ownedWrite(async () => {
       for (;;) {
-        if (this.world.closingSignal.aborted) throw new WorldChatInputError("unavailable", "This world closed.");
-        if (!await this.log.readMeta()) throw new WorldChatInputError("unavailable", "That conversation is no longer here.");
-        const { events, problems } = await this.log.read();
-        // Deletion's intent and our append use the same sequence fence. Whichever commits
-        // first makes the other recheck, before a receipt or the directory rename can happen.
-        if (events.some(one => one.event.type === "deletion.intent-recorded")) {
-          throw new WorldChatInputError("unavailable", "This conversation is being deleted.");
-        }
-        const folded = foldWorldChatInputs(events);
-        if (problems.some(one => one.kind !== "torn-tail") || folded.problems.length) throw new WorldChatInputError("integrity", "This conversation's input history needs repair.");
-        const original = events.find(envelope => envelope.requestId === requestId);
-        if (original) {
-          if (!isInputEvent(original.event) || original.event.commandDigest !== commandDigest) {
-            throw new WorldChatInputError("conflict", "That submission identity was already used for different content.");
-          }
+        const prepared = await this.preflight(requestId, commandDigest, build);
+        if (prepared.deduplicated) {
           // A prior failed fsync can leave a readable event. Reconfirm durability before issuing
           // a receipt; merely finding the line is not enough to allow a native side effect.
-          await this.log.append(original.event, { at: this.now(), requestId });
-          return { event: original.event, sequence: original.seq, queue: folded.queue, deduplicated: true };
+          await this.log.append(prepared.event, { at: this.now(), requestId });
+          return prepared;
         }
-        const at = this.now();
-        const event = WorldChatStoredEventSchema.parse({ ...build({ queue: folded.queue, events, at }),
-          queueRevision: folded.queue.revision + 1, commandDigest });
-        if (!isInputEvent(event)) throw new WorldChatInputError("integrity", "Expected an input transition.");
-        const seq = events.reduce((max, envelope) => Math.max(max, envelope.seq), 0);
-        const proposed: WorldChatEventEnvelope = { schemaVersion: 1, seq: seq + 1, eventId: newId("wce"), at, requestId, event };
-        const advanced = foldWorldChatInputs([...events, proposed]);
-        if (advanced.problems.length) throw new WorldChatInputError("stale", advanced.problems[0]!.detail);
         try {
-          const result = await this.log.append(event, { at, requestId, expectedSeq: seq });
+          const result = await this.log.append(prepared.event, { at: this.now(), requestId, expectedSeq: prepared.sequence - 1 });
           // Non-input writers share the append queue. A sequence conflict repeats preflight;
           // a disk error does not: its outcome may be uncertain and needs an explicit retry.
           if (result.deduplicated) continue;
-          return { event, sequence: result.envelope.seq, queue: advanced.queue, deduplicated: false };
+          return prepared;
         } catch (error) {
           if (error instanceof ConversationSequenceError) continue;
           throw error;
         }
       }
     });
+  }
+
+  private async preflight(requestId: string, commandDigest: string, build: ChangeBuilder): Promise<InputJournalReceipt> {
+    if (this.world.closingSignal.aborted) throw new WorldChatInputError("unavailable", "This world closed.");
+    if (!await this.log.readMeta()) throw new WorldChatInputError("unavailable", "That conversation is no longer here.");
+    const { events, problems } = await this.log.read();
+    // Deletion's intent and our append use the same sequence fence. Whichever commits
+    // first makes the other recheck, before a receipt or the directory rename can happen.
+    if (events.some(one => one.event.type === "deletion.intent-recorded")) {
+      throw new WorldChatInputError("unavailable", "This conversation is being deleted.");
+    }
+    const folded = foldWorldChatInputs(events);
+    if (problems.some(one => one.kind !== "torn-tail") || folded.problems.length) throw new WorldChatInputError("integrity", "This conversation's input history needs repair.");
+    const original = events.find(envelope => envelope.requestId === requestId);
+    if (original) {
+      if (!isInputEvent(original.event) || original.event.commandDigest !== commandDigest) {
+        throw new WorldChatInputError("conflict", "That submission identity was already used for different content.");
+      }
+      return { event: original.event, sequence: original.seq, queue: folded.queue, deduplicated: true };
+    }
+    const at = this.now();
+    const event = WorldChatStoredEventSchema.parse({ ...build({ queue: folded.queue, events, at }),
+      queueRevision: folded.queue.revision + 1, commandDigest });
+    if (!isInputEvent(event)) throw new WorldChatInputError("integrity", "Expected an input transition.");
+    const seq = events.reduce((max, envelope) => Math.max(max, envelope.seq), 0);
+    const proposed: WorldChatEventEnvelope = { schemaVersion: 1, seq: seq + 1, eventId: newId("wce"), at, requestId, event };
+    const advanced = foldWorldChatInputs([...events, proposed]);
+    if (advanced.problems.length) throw new WorldChatInputError("stale", advanced.problems[0]!.detail);
+    return { event, sequence: proposed.seq, queue: advanced.queue, deduplicated: false };
   }
 }

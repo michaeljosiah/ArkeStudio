@@ -39,11 +39,10 @@ async function preparedRun(journal: WorldChatInputJournal, overrides: Partial<Wo
 async function setup() {
   const dir = await tempDir("arke-input-journal-");
   const closing = new AbortController();
-  let boundary = 1;
+  let boundary = 22;
   const world = { dir, closingSignal: closing.signal,
     async raiseSchemaBoundary(version: number) { boundary = Math.max(boundary, version); },
     async ownedWrite<T>(fn: () => Promise<T>): Promise<T> {
-      assert.equal(boundary, WORLD_CHAT_INPUT_SCHEMA_VERSION, "compatibility fence precedes journal writes");
       if (closing.signal.aborted) throw new Error("world closed");
       return fn();
     },
@@ -52,7 +51,7 @@ async function setup() {
   const journal = new WorldChatInputJournal(world, id, () => AT);
   await journal.log.create(id, AT);
   await journal.log.append({ type: "conversation.created", title: "Direction", entryContext: { kind: "world" } }, { at: AT });
-  return { journal, world, closing, id, other: () => new WorldChatInputJournal(world, id, () => AT) };
+  return { journal, world, closing, id, get boundary() { return boundary; }, other: () => new WorldChatInputJournal(world, id, () => AT) };
 }
 
 async function active() {
@@ -71,8 +70,14 @@ async function active() {
 }
 
 describe("durable additional conversation inputs (SPEC-045)", () => {
-  it("records one input for concurrent duplicate submissions without inventing a transcript turn", async () => {
-    const { journal, other, id } = await setup();
+  it("records one input for concurrent duplicate submissions without inventing a transcript turn", async t => {
+    const state = await setup();
+    const { journal, other, id } = state;
+    const append = WorldChatStore.prototype.append;
+    t.mock.method(WorldChatStore.prototype, "append", function (this: WorldChatStore, ...args: Parameters<typeof append>) {
+      if (this.dir === journal.log.dir) assert.equal(state.boundary, WORLD_CHAT_INPUT_SCHEMA_VERSION, "compatibility fence precedes journal writes");
+      return append.apply(this, args);
+    });
     const input = request();
     const results = await Promise.all([journal, other(), other()].map(one => one.record(input, CAPTURE)));
     assert.equal(results.filter(one => !one.deduplicated).length, 1);
@@ -113,6 +118,51 @@ describe("durable additional conversation inputs (SPEC-045)", () => {
     assert.equal((await journal.read()).inputs.length, 10);
     assert.equal(WorldChatInputRequestSchema.safeParse(request("x".repeat(16_001))).success, false);
     assert.equal(WorldChatInputRequestSchema.safeParse(request("   ")).success, false);
+  });
+
+  it("does not raise compatibility for an input refused during preflight", async () => {
+    for (const condition of ["archived", "deleted", "corrupted", "full", "missing", "closed"] as const) {
+      const state = await setup();
+      const service = new WorldChatService(state.world.dir, () => AT);
+      if (condition === "archived") await service.archive(state.id);
+      if (condition === "deleted") await state.journal.log.append({ type: "deletion.intent-recorded", requestId: "delete" }, { at: AT });
+      if (condition === "corrupted") await appendFile(state.journal.log.eventsPath, "{invalid event}\n", "utf8");
+      if (condition === "full") for (let index = 0; index < WORLD_CHAT_INPUT_BOUNDS.unresolved; index++) {
+        await state.journal.record(request(`Waiting ${index}`), CAPTURE);
+      }
+      if (condition === "closed") state.closing.abort();
+      const journal = condition === "missing" ? new WorldChatInputJournal(state.world, newId("cv"), () => AT) : state.journal;
+      const before = await readFile(state.journal.log.eventsPath, "utf8");
+      let boundaries = 0;
+      state.world.raiseSchemaBoundary = async () => { boundaries++; };
+      await assert.rejects(journal.record(request(), CAPTURE));
+      assert.equal(boundaries, 0, `${condition} admission must not upgrade the world`);
+      assert.equal(await readFile(state.journal.log.eventsPath, "utf8"), before);
+    }
+  });
+
+  it("rechecks admission after the compatibility commit allows another lifecycle operation", async () => {
+    const state = await setup();
+    const raise = state.world.raiseSchemaBoundary;
+    state.world.raiseSchemaBoundary = async version => {
+      await raise(version);
+      await new WorldChatService(state.world.dir, () => AT).archive(state.id);
+    };
+    await assert.rejects(state.journal.record(request(), CAPTURE), /Restore or reopen/);
+    assert.equal((await state.journal.read()).inputs.length, 0);
+    assert.equal(state.boundary, WORLD_CHAT_INPUT_SCHEMA_VERSION);
+  });
+
+  it("rejects an explicit model that differs from captured routing before admission", async () => {
+    const state = await setup();
+    const input = request("Use this model", { modelId: ROUTING.modelId });
+    for (const modelId of [null, "different-model"]) {
+      await assert.rejects(state.journal.record(input, { ...CAPTURE, routing: { ...ROUTING, modelId } }), /captured model does not match/);
+    }
+    assert.equal(state.boundary, 22);
+    assert.equal((await state.journal.read()).inputs.length, 0);
+    const accepted = await state.journal.record(input, CAPTURE);
+    assert.equal(accepted.queue.inputs[0]?.input.routing.modelId, input.modelId);
   });
 
   it("preserves a Stop pause across new admissions and revision-checks Remove and Continue", async () => {
@@ -352,6 +402,7 @@ describe("durable additional conversation inputs (SPEC-045)", () => {
     const first = await recoverConversations(state.world.dir, () => AT);
     const recovered = await state.journal.read();
     assert.deepEqual(first.repaired, [state.id]);
+    assert.deepEqual(first.inputQueues, [state.id]);
     assert.equal(recovered.inputs[0]?.status, "uncertain");
     assert.equal(recovered.pauseReason, "delivery-unknown");
     const bytes = await readFile(state.journal.log.eventsPath, "utf8");
@@ -359,7 +410,10 @@ describe("durable additional conversation inputs (SPEC-045)", () => {
     assert.equal(await readFile(state.journal.log.eventsPath, "utf8"), bytes);
     const parked = await setup();
     await parked.journal.record(request(), CAPTURE);
-    await recoverConversations(parked.world.dir, () => AT);
+    const parkedRecovery = await recoverConversations(parked.world.dir, () => AT);
+    assert.deepEqual(parkedRecovery.repaired, [], "pausing waiting input does not repair a run");
+    assert.deepEqual(parkedRecovery.inputQueues, [parked.id]);
+    assert.deepEqual((await recoverConversations(parked.world.dir, () => AT)).inputQueues, []);
     assert.equal((await parked.journal.read()).pauseReason, "restart");
   });
 

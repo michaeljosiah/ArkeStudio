@@ -379,9 +379,15 @@ export class WorldChatRunner {
    * are read back out of the log and asked again under a fresh run on the same turn.
    */
   async retry(store: WorldChatStore, conversationId: ConversationId, turnId: TurnId): Promise<TurnOutcome> {
-    const { events } = await store.read();
+    const { events, problems } = await store.read();
     const meta = await store.readMeta();
-    const view = foldConversation(conversationId, meta?.createdAt ?? this.deps.now(), events).view;
+    const folded = foldConversation(conversationId, meta?.createdAt ?? this.deps.now(), events);
+    // A rejected promotion may still contain plausible run/constraint metadata. Never recover
+    // authority from damaged history, even when the original message remains readable.
+    if ([...problems, ...folded.problems].some(one => one.kind !== "torn-tail")) {
+      return { status: "failed", reason: "This conversation's history needs repair before retrying." };
+    }
+    const view = folded.view;
     const original = view.messages.find((m) => m.turnId === turnId && m.role === "user");
     if (!original) return { status: "failed", reason: "that turn is not in this conversation" };
     if (view.messages.some((m) => m.turnId === turnId && m.role === "studio")) {

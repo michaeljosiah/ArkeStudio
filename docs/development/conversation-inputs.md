@@ -16,9 +16,9 @@ This is the first implementation slice of [issue #1138](https://github.com/micha
 
 ## What the journal guarantees
 
-`WorldChatInputJournal` requires the owning world's write and compatibility operations. It raises world schema 23 before writing the first input event, then verifies ownership through `ownedWrite`. These operations remain separate because the boundary commit and owned write use the same world queue. A closed or unwritable world cannot admit new input.
+`WorldChatInputJournal` requires the owning world's write and compatibility operations. It checks admission under ownership before raising world schema 23, so an already invalid command does not upgrade the world. It repeats validation under `ownedWrite` after the boundary and before writing the input event. These operations remain separate because the boundary commit and owned write use the same world queue. A closed or unwritable world cannot admit new input.
 
-Admission retains the original submission identity, text, requested delivery/run, resolved constraints, routing and attachment hashes. Inputs start without a turn id. Repeated submission content returns the original durable receipt; changed content under that identity is refused. Each conversation accepts at most ten unresolved inputs, with the existing 16,000-character and twenty-attachment limits.
+Admission retains the original submission identity, text, requested delivery/run, resolved constraints, routing and attachment hashes. Explicit model, subject and reply-only selections must match their capture. Inputs start without a turn id. Repeated submission content returns the original durable receipt; changed content under that identity is refused. Each conversation accepts at most ten unresolved inputs, with the existing 16,000-character and twenty-attachment limits.
 
 The conversation append queue and expected log sequence arbitrate concurrent journal instances. Each transition validates the latest state; a sequence conflict repeats preflight. A disk error does not automatically repeat a write. Duplicate receipts flush the existing log again because a readable event may survive an earlier failed `fsync`. Torn-tail replacement is also flushed before rename. These are the existing local-filesystem crash guarantees, not a new claim about directory persistence or network filesystems.
 
@@ -30,7 +30,7 @@ Queued, accepted and uncertain inputs are excluded from transcript evidence. Con
 
 Unresolved inputs block conversation deletion and wrap-up. Both lifecycle intents commit against the sequence read during preflight, and input admission refuses a durable deletion intent or an unfinished wrap-up intent. This closes both sides of the race before a receipt, proposal staging or directory removal can occur.
 
-The transcript places confirmed direction at its original native-offer sequence, which is within the targeted run. Late reconciliation therefore appears before that run's reply, and paging before the reply still includes its corrections. Checkpoints retain that same ordering.
+The transcript places confirmed direction at its original native-offer sequence, which is within the targeted run. Late reconciliation therefore appears before that run's reply, and paging before the reply still includes its corrections. Checkpoints retain that same ordering. Retry refuses damaged history before reading model or constraint metadata from it.
 
 The journal has no dispatch loop and holds no lock across a native call. Wiring normal sends, completion, Stop, readiness/ownership changes and automatic advancement through one scheduler remains necessary before exposing the feature. Final run/input provenance and approval fencing, repair/retry integration, transport receipts and shared composer behavior also remain on #1138. Passing the journal tests does not satisfy the end-to-end native-engine requirement.
 

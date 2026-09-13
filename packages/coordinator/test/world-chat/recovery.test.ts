@@ -151,6 +151,6 @@ describe("startup recovery", () => {
 
   it("opens a world that has no conversations at all", async () => {
     const outcome = await recoverConversations(await tempDir("arke-recovery-"), NOW);
-    assert.deepEqual(outcome, { repaired: [], sweptTombstones: [] });
+    assert.deepEqual(outcome, { repaired: [], inputQueues: [], sweptTombstones: [] });
   });
 });
