@@ -291,6 +291,29 @@ describe("taking a turn", () => {
     assert.equal(released.length, 1, "a failed turn still gives back its lease");
   });
 
+  it("refuses Retry when an invalid promotion could replace the original constraints or model", async () => {
+    const prompts: string[] = [];
+    const createdModels: Array<string | undefined> = [];
+    const h = await setup(fakeAdapter(["bad", "bad"], { prompts }), { createdModels });
+    const outcome = await h.runner.send(h.store, h.conversationId, "Only discuss this passage", [],
+      { kind: "passage", chapterId: "neap", paragraph: 2, text: "Six, and the tide" }, "original-model", true);
+    assert.equal(outcome.status, "failed");
+    const started = (await h.store.read()).events.find(one => one.event.type === "turn.started");
+    assert.ok(started?.event.type === "turn.started");
+    const invalidRun = { ...started.event.run, id: newId("run"), model: "different-model" };
+    await h.store.append({ type: "input.promoted", messageId: started.event.message.id, turnId: invalidRun.turnId,
+      runId: invalidRun.id, run: invalidRun, message: started.event.message, constraints: { replyOnly: false },
+      queueRevision: 1, commandDigest: `sha256:${"a".repeat(64)}` }, { at: AT });
+    const before = (await h.store.read()).events;
+    const sent = [...prompts], models = [...createdModels];
+    const retried = await h.runner.retry(h.store, h.conversationId, invalidRun.turnId);
+    assert.equal(retried.status, "failed");
+    assert.match(retried.status === "failed" ? retried.reason : "", /history needs repair/);
+    assert.deepEqual(prompts, sent, "damaged history cannot start another model call");
+    assert.deepEqual(createdModels, models, "the invalid model never creates a session");
+    assert.deepEqual((await h.store.read()).events, before, "no retry or replacement constraints are recorded");
+  });
+
   it("pins the resolved production model, records it, and refuses without substitution", async () => {
     const createdModels: Array<string | undefined> = [];
     const chosen: Array<string | undefined> = [];

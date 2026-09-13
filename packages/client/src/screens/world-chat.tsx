@@ -92,6 +92,7 @@ const WHY_NOT_DELETABLE: Record<WorldChatDeletionBlock, string> = {
   "wrap-up-in-flight": "it is being turned into proposals",
   "unresolved-proposals": "its proposals are still waiting",
   "pending-actions": "its actions are still waiting",
+  "pending-inputs": "its messages are still waiting for delivery",
 };
 
 /**

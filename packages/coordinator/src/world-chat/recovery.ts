@@ -5,6 +5,7 @@ import { toExtendedLength } from "../world/paths.js";
 import { foldConversation } from "./fold.js";
 import { conversationsDir, WorldChatStore } from "./store.js";
 import { preserveConversationActionTombstones } from "../arke-actions/tombstones.js";
+import { recoverWorldChatInputs } from "./input-recovery.js";
 
 /**
  * What startup has to put right before anything new can happen (#70 phase 1, §7.2).
@@ -25,6 +26,8 @@ import { preserveConversationActionTombstones } from "../arke-actions/tombstones
 export interface RecoveryOutcome {
   /** Conversations whose interrupted run was made durable on this pass. */
   repaired: string[];
+  /** Conversations whose queued or uncertain input state was recovered on this pass. */
+  inputQueues: string[];
   /** Tombstoned directories a previous deletion left behind, now removed. */
   sweptTombstones: string[];
 }
@@ -33,7 +36,7 @@ export async function recoverConversations(
   worldPath: string,
   now: () => string = () => new Date().toISOString(),
 ): Promise<RecoveryOutcome> {
-  const outcome: RecoveryOutcome = { repaired: [], sweptTombstones: [] };
+  const outcome: RecoveryOutcome = { repaired: [], inputQueues: [], sweptTombstones: [] };
   const root = conversationsDir(worldPath);
 
   let entries: string[];
@@ -49,23 +52,26 @@ export async function recoverConversations(
       continue;
     }
     if (entry.startsWith(".")) continue;
-    if (await repairInterruptedRun(join(root, entry), now)) outcome.repaired.push(entry);
+    const repaired = await repairConversation(join(root, entry), now);
+    if (repaired.run) outcome.repaired.push(entry);
+    if (repaired.inputs) outcome.inputQueues.push(entry);
   }
   return outcome;
 }
 
-/** Returns true when this pass wrote a terminal event that was previously missing. */
-async function repairInterruptedRun(dir: string, now: () => string): Promise<boolean> {
+/** Input-state repair and interrupted-run repair are independent recovery outcomes. */
+async function repairConversation(dir: string, now: () => string): Promise<{ run: boolean; inputs: boolean }> {
   const store = new WorldChatStore(dir);
   const meta = await store.readMeta();
-  if (!meta) return false;
+  if (!meta) return { run: false, inputs: false };
 
+  const inputsRepaired = await recoverWorldChatInputs(store, now);
   const { events } = await store.read();
   const folded = foldConversation(meta.id, meta.createdAt, events);
-  if (!folded.needsInterruptedRunRepair) return false;
+  if (!folded.needsInterruptedRunRepair) return { run: false, inputs: inputsRepaired };
 
   const run = folded.view.activeRun;
-  if (!run) return false;
+  if (!run) return { run: false, inputs: inputsRepaired };
 
   // The fold has already set the status; persisting the same run record is what makes it true
   // for the next reader, and what stops a second pass finding anything to repair.
@@ -76,7 +82,7 @@ async function repairInterruptedRun(dir: string, now: () => string): Promise<boo
     safeDetail: run.safeDetail ?? "the app closed mid-turn",
   };
   await store.append({ type: "run.finished", run: terminal }, { at: now() });
-  return true;
+  return { run: true, inputs: inputsRepaired };
 }
 
 /**

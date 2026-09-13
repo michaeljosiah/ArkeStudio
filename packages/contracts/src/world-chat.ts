@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  WorldChatInputBoundarySchema, WorldChatInputConstraintsSchema, WorldChatInputEventSchemas,
+  WorldChatInputPromotionSchema, WorldChatInputQueueViewSchema,
+} from "./world-chat-input.js";
 import { ProductionSetupStateSchema, ProductionSetupUpdateSchema } from "./production-setup.js";
 import {
   ArtifactIdSchema,
@@ -102,6 +106,7 @@ export const WorldChatDeletionBlockSchema = z.enum([
   "wrap-up-in-flight",
   "unresolved-proposals",
   "pending-actions",
+  "pending-inputs",
 ]);
 export type WorldChatDeletionBlock = z.infer<typeof WorldChatDeletionBlockSchema>;
 
@@ -282,6 +287,8 @@ export const WorldChatRunSchema = z
     harnessSessionId: z.string().min(1).optional(),
     harnessCleanup: z.enum(["not-required", "pending", "confirmed", "unsupported", "unconfirmed"]),
     contextDigest: Sha256Schema,
+    /** Closed input provenance for a run that supports SPEC-045 steering. */
+    inputBoundary: WorldChatInputBoundarySchema.optional(),
     startedAt: IsoDateTimeSchema,
     endedAt: IsoDateTimeSchema.optional(),
     /** Operator-safe detail. Never carries message, candidate or world content. */
@@ -1083,6 +1090,12 @@ export type FrameRunOutcomeReport = z.infer<typeof FrameRunOutcomeReportSchema>;
  * never landed, and the panel would then describe changes that do not exist.
  */
 export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
+  ...WorldChatInputEventSchemas,
+  WorldChatInputPromotionSchema.extend({
+    message: WorldChatMessageSchema,
+    run: WorldChatRunSchema,
+    constraints: WorldChatInputConstraintsSchema,
+  }).strict(),
   z.object({ type: z.literal("production-setup.updated"), state: ProductionSetupStateSchema }).strict(),
   z
     .object({
@@ -1436,6 +1449,8 @@ export const WorldChatLoadedSchema = z
     /** Set when a sent-back proposal reopened this conversation. Survives checkpointing. */
     reopened: z.boolean().optional(),
     messages: z.array(WorldChatMessageSchema),
+    /** Absent for conversations that have never used additional input. */
+    inputQueue: WorldChatInputQueueViewSchema.optional(),
     /** True when older messages exist before `messages[0]`. */
     hasMore: z.boolean(),
     candidates: z.array(WorldChangeCandidateSchema),
