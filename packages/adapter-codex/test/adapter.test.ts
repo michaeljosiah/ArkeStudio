@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -83,6 +83,14 @@ test("native asynchronous question notification fails the turn without showing a
   assert.ok(f.events.some(event => event.type === "tool.refused")); assert.ok(f.events.some(event => event.type === "session.error"));
   assert.equal(f.events.some(event => event.type === "message.completed" || event.type === "message.delta" || event.type === "tool.activity"), false);
   assert.ok((await f.requests()).some(request => request.method === "turn/interrupt"));
+});
+
+test("an unsolicited tool callback before turn identity is established cannot edit the proposal", async t => {
+  const f = await fixture("wrong-callback"); t.after(f.cleanup);
+  const session = await f.adapter.createSession({ cwd: f.root, purpose: "authoring" });
+  await f.adapter.sendMessage({ sessionId: session.sessionId, parts: [{ type: "text", text: "normal turn" }] });
+  assert.ok((await f.requests()).find(request => request.id === "wrong-request")?.error);
+  await assert.rejects(access(join(f.root, "should-not-exist.txt")), /ENOENT/);
 });
 
 for (const scenario of ["exit", "malformed"]) test(`process ${scenario} settles pending turn and readiness`, async t => {

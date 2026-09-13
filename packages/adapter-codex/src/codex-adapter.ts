@@ -263,6 +263,9 @@ export class CodexAdapter implements HarnessAdapter {
       return;
     }
     if (!turn || !id || session.retiredTurns.has(id) || (turn.id !== null && turn.id !== id)) return;
+    // Only the turn/start response or turn/started establishes identity. An unsolicited tool
+    // callback or text item arriving first cannot appoint itself this session's active turn.
+    if (turn.id === null && method !== "turn/started") return;
     turn.id ??= id;
     const incoming = object(params.item);
     if ((incoming.type === "agentMessage" && (incoming.delivery === "async" || Array.isArray(incoming.questions))) ||
@@ -309,7 +312,7 @@ export class CodexAdapter implements HarnessAdapter {
   private async serverRequest(method: string, params: JsonObject): Promise<{ result: unknown; delivered?: () => void }> {
     this.opts.onTrace?.({ at: "codex.server-request", method, namespace: params.namespace, tool: params.tool });
     const session = typeof params.threadId === "string" ? this.sessions.get(params.threadId) : undefined;
-    if (method !== "item/tool/call" || !session?.turn || params.namespace !== "arke" || typeof params.tool !== "string" || typeof params.turnId !== "string" || session.retiredTurns.has(params.turnId) || (session.turn.id !== null && session.turn.id !== params.turnId)) {
+    if (method !== "item/tool/call" || !session?.turn || params.namespace !== "arke" || typeof params.tool !== "string" || typeof params.turnId !== "string" || session.retiredTurns.has(params.turnId) || session.turn.id === null || session.turn.id !== params.turnId) {
       if (session) this.emit({ type: "tool.refused", sessionId: session.id, tool: typeof params.tool === "string" ? params.tool : method, summary: "refused a tool outside this session's capabilities" });
       throw new ConfinementError();
     }

@@ -21,13 +21,18 @@ const MAX_FILE = 16 * 1024 * 1024;
 const MAX_TEXT = 128 * 1024;
 const textResult = (text: string): ToolResult => ({ success: true, contentItems: [{ type: "inputText", text }] });
 export class ConfinementError extends Error { constructor() { super("Denied by Arke Studio confinement."); } }
+function nativePath(path: string): string {
+  if (process.platform !== "win32") return path;
+  if (path.startsWith("\\\\?\\UNC\\")) return `\\\\${path.slice(8)}`;
+  return path.startsWith("\\\\?\\") ? path.slice(4) : path;
+}
 export function within(root: string, target: string): boolean {
-  const fold = (value: string) => process.platform === "win32" ? value.toLowerCase() : value;
+  const fold = (value: string) => process.platform === "win32" ? nativePath(value).toLowerCase() : value;
   const base = fold(root); const path = fold(target);
   return path === base || path.startsWith(base.endsWith(sep) ? base : base + sep);
 }
 export async function resolveRoot(cwd: string): Promise<string> {
-  const root = await realpath(cwd);
+  const root = nativePath(await realpath(cwd));
   if (!(await lstat(root)).isDirectory()) throw new Error("Codex needs a session directory.");
   return root;
 }
@@ -35,7 +40,8 @@ export async function resolveRoot(cwd: string): Promise<string> {
 /** Refuse linked path segments before opening. Search uses this for every discovered leaf too. */
 export async function confinedPath(root: string, raw: string, write = false): Promise<string> {
   if (!raw || raw.includes("\0")) throw new ConfinementError();
-  const target = isAbsolute(raw) ? resolve(raw) : resolve(root, raw);
+  const normal = nativePath(raw);
+  const target = isAbsolute(normal) ? resolve(normal) : resolve(root, normal);
   if (!within(root, target) || !within(root, await realpath(root))) throw new ConfinementError();
   const parts = relative(root, target).split(sep).filter(Boolean);
   let current = root;

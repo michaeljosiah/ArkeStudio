@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   findHarnessModel, harnessModelDisabled, harnessModelManifestEntry, harnessModelReference,
-  ManifestModelSchema, ModelInfoSchema, type ModelInfo,
+  ManifestModelSchema, ModelInfoSchema, effectiveHarnessEngine, type ModelInfo,
 } from "../src/index.js";
 
 const legacy = (id: string, providerModelId = id, provider: "anthropic" | "openai" = "anthropic") => ManifestModelSchema.parse({
@@ -11,6 +11,14 @@ const legacy = (id: string, providerModelId = id, provider: "anthropic" | "opena
 });
 const opus: ModelInfo = { id: "claude-example[1m]", provider: "anthropic", aliases: ["opus[1m]", "default"], isDefault: true };
 const sonnet: ModelInfo = { id: "claude-other", provider: "anthropic", aliases: ["sonnet"] };
+
+it("an explicit launch override chooses one engine and an invalid override preserves settings", () => {
+  assert.equal(effectiveHarnessEngine("claude", "opencode"), "opencode");
+  assert.equal(effectiveHarnessEngine("codex", "claude"), "claude");
+  assert.equal(effectiveHarnessEngine("opencode", "codex"), "codex");
+  assert.equal(effectiveHarnessEngine("claude", "unknown"), "claude");
+  assert.equal(effectiveHarnessEngine("codex"), "codex");
+});
 
 describe("harness model identity", () => {
   it("keeps provider and opaque model ids separate, including unknown providers and slashes", () => {

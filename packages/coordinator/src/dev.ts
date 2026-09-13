@@ -168,7 +168,7 @@ const coordinator = new Coordinator({
   authoring: { agentForPurpose, roster: ROSTER, skillFor },
   ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
   ...(wiring.unavailableReason ? { harnessUnavailableReason: wiring.unavailableReason } : {}),
-  ...(process.env["ARKE_HARNESS"] ? { harnessEngineOverride: chosenHarness } : {}),
+  ...(process.env["ARKE_HARNESS"] === chosenHarness ? { harnessEngineOverride: chosenHarness } : {}),
   relaunchHarness: wiring.relaunchHarness,
   // SPEC-030 R-6: no Electron shell here, so the platform opener carries the vendor's page.
   openExternal: (url) => {

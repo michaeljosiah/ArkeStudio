@@ -29,6 +29,7 @@ createInterface({ input: process.stdin }).on('line', line => {
   else if (method === 'turn/start') {
     const thread = threads.get(params.threadId); thread.turn = `turn-${++sequence}`;
     const base = { threadId: thread.id, turnId: thread.turn };
+    if (scenario === 'wrong-callback') write({ id: 'wrong-request', method: 'item/tool/call', params: { threadId: thread.id, turnId: 'unsolicited-turn', callId: 'wrong-call', namespace: 'arke', tool: 'write', arguments: { path: 'should-not-exist.txt', content: 'wrong turn' } } });
     notify('turn/started', { threadId: thread.id, turn: { id: thread.turn } });
     const respond = () => result(id, { turn: { id: thread.turn } });
     if (scenario === 'slow-turn') { setTimeout(respond, 100); return; }

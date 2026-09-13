@@ -1139,7 +1139,7 @@ async function initialize(): Promise<{ port: number }> {
     authoring: { agentForPurpose, roster: ROSTER, skillFor },
     ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
     ...(wiring.unavailableReason ? { harnessUnavailableReason: wiring.unavailableReason } : {}),
-    ...(process.env["ARKE_HARNESS"] ? { harnessEngineOverride: chosenHarness } : {}),
+    ...(process.env["ARKE_HARNESS"] === chosenHarness ? { harnessEngineOverride: chosenHarness } : {}),
     // Stored LLM keys reach the harness as spawn environment (SPEC-005 D5) — under v2's
     // redirected profile this is the only credential path there is (issue 327 §2).
     relaunchHarness: wiring.relaunchHarness,

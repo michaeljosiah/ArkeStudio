@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile, link } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, toNamespacedPath } from "node:path";
 import { createServer } from "node:http";
 import { confinementFor } from "@arke-studio/contracts";
 import { confinedPath, discoverWorldTools, executeTool, resolveRoot, toolsFor, worldRequest, type ToolSession } from "../src/tools.js";
@@ -76,6 +76,14 @@ test("outside paths, sibling prefix collisions, symlinks, nested search links an
   await assert.rejects(f.run("read", { path: "hard.txt" }), /confinement/);
   await assert.rejects(f.run("write", { path: "hard.txt", content: "bad" }), /confinement/);
   assert.equal(await readFile(join(f.base, "secret.txt"), "utf8"), "SECRET_MUST_NOT_LEAK");
+});
+
+test("Windows extended paths retain the same containment boundary", { skip: process.platform !== "win32" }, async t => {
+  const f = await fixture(); t.after(() => rm(f.base, { recursive: true, force: true }));
+  await writeFile(join(f.root, "inside.txt"), "inside");
+  const read = await f.run("read", { path: toNamespacedPath(join(f.root, "inside.txt")) });
+  assert.deepEqual(read.result.contentItems, [{ type: "inputText", text: "inside" }]);
+  await assert.rejects(f.run("read", { path: toNamespacedPath(join(f.base, "secret.txt")) }), /confinement/);
 });
 
 test("world tools retain exact lease, citation blocks and research policy; closed lease never falls back", async t => {
