@@ -1931,7 +1931,7 @@ export function SettingsHarnessScreen() {
   const generation = state?.app.harnessInfo?.generation;
   const runningEngine = generation === "claude" || generation === "codex"
     ? generation
-    : generation === "v1" || generation === "v2" ? "opencode" : null;
+    : generation === "v1" || generation === "v2" ? "opencode" : harness?.launchEngine ?? null;
   const harnessHealth = state?.app.health.harness;
   const activeStatus = harnessHealth?.status === "healthy" ? "running now"
     : harnessHealth?.status === "starting" ? "starting" : "unavailable";
@@ -2120,7 +2120,7 @@ function HarnessPane({
       <div className="fy-set__row">
         <div className="fy-set__name fy-set__name--wide">
           <div className="fy-set__title">
-            {selected ? active ? running ? "Runs the authoring work" : "Selected harness" : "Selected for the next restart" : running ? "Running until restart" : harness.installed ? "Available for authoring" : "Not available for authoring"}
+            {active && !running ? health?.status === "starting" ? "Starting harness" : "Harness unavailable" : selected ? active ? "Runs the authoring work" : "Selected for the next restart" : running ? "Running until restart" : harness.installed ? "Available for authoring" : "Not available for authoring"}
           </div>
           <div className="fy-set__caps">
             {active && !running

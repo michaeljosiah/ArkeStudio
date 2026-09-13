@@ -49,6 +49,7 @@ import {
   type Capability,
   type ClientMessage,
   type HarnessAvailability,
+  type HarnessEngine,
   type ClientState,
   type DomainEvent,
   type HarnessAdapter,
@@ -349,7 +350,7 @@ import {
   MIN_CLONE_SECONDS,
   wavSeconds,
 } from "./voice/library.js";
-import { atomicWriteFile } from "./world/atomic.js";
+import { atomicWriteFile, serializeFileMutation } from "./world/atomic.js";
 import { BibleStaleError, readBible, restoreBible, saveBible } from "./world/bible.js";
 import { changesForEntity } from "./world/change-writer.js";
 import { classify, CommitPlanError, MEDIA_HAS_VIDEO_SCHEMA_VERSION } from "./world/commit.js";
@@ -764,6 +765,8 @@ export interface CoordinatorOptions {
   relaunchHarness?: (credentials: Record<string, string | undefined>) => Promise<void>;
   harnessUnavailableReason?: string;
   harnessEngineOverride?: import("@arke-studio/contracts").HarnessEngine;
+  /** The host's effective launch choice, even if discovery failed before producing metadata. */
+  harnessLaunchEngine?: HarnessEngine;
   /** Shared with provider-call capture so known credentials are scrubbed from owner-visible payloads. */
   secretRegistry?: SecretRegistry;
   providerCalls?: ProviderCallStore;
@@ -1793,6 +1796,21 @@ export class Coordinator {
   }
   /** Per-agent model and brief overrides, as last read from settings. */
   private agentOverrides: Record<string, { model?: string; brief?: string }> | undefined;
+  private launchEngine: HarnessEngine | undefined;
+  private readonly validatedSettingChanges = new Map<string, symbol>();
+
+  /** A reset or later choice must outrank a selection still waiting for its catalog. */
+  private beginValidatedSettingChange(key: string) {
+    const token = Symbol();
+    this.validatedSettingChanges.set(key, token);
+    const current = () => this.validatedSettingChanges.get(key) === token && !this.stopping;
+    return {
+      current,
+      finish: () => {
+        if (this.validatedSettingChanges.get(key) === token) this.validatedSettingChanges.delete(key);
+      },
+    };
+  }
 
   /**
    * The model family the next authoring session drafts for (SPEC-019 R-16), cached the way the
@@ -3422,6 +3440,12 @@ export class Coordinator {
     }
     const manifest = this.opts.manifest ?? null;
     const settings = this.appSettings ? await this.appSettings.load() : null;
+    // Capture this before commands can change the saved preference. Failed discovery has no
+    // harnessInfo, but Settings must still attach its health failure to the engine we tried.
+    const generation = this.opts.harnessInfo?.generation;
+    this.launchEngine = generation === "claude" || generation === "codex" ? generation
+      : generation === "v1" || generation === "v2" ? "opencode"
+      : this.opts.harnessLaunchEngine ?? this.opts.harnessEngineOverride ?? settings?.harness.engine ?? "opencode";
     // Read once here so the first session of the run already carries the user's choices —
     // not the second, after something happened to touch settings.
     this.agentOverrides = settings?.agents;
@@ -6853,20 +6877,32 @@ export class Coordinator {
       }
       case "set-agent-config": {
         if (!this.appSettings) return;
-        const selected = msg.model ? await this.validateLanguageModel(msg.model, msg.agent === "stage-designer") : undefined;
-        if (selected?.reason) {
-          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: selected.reason });
-          return;
+        const modelChange = msg.model !== undefined
+          ? this.beginValidatedSettingChange(JSON.stringify(["agent", msg.agent, "model"])) : undefined;
+        const briefChange = msg.brief !== undefined
+          ? this.beginValidatedSettingChange(JSON.stringify(["agent", msg.agent, "brief"])) : undefined;
+        try {
+          const selected = msg.model ? await this.validateLanguageModel(msg.model, msg.agent === "stage-designer") : undefined;
+          const applyModel = modelChange?.current();
+          const applyBrief = briefChange?.current();
+          if (!applyModel && !applyBrief) return;
+          if (applyModel && selected?.reason) {
+            this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: selected.reason });
+            return;
+          }
+          const settings = await this.appSettings.setAgent(msg.agent, {
+            ...(applyModel ? { model: selected?.sessionModel ?? msg.model } : {}),
+            ...(applyBrief ? { brief: msg.brief } : {}),
+          });
+          this.agentOverrides = settings.agents;
+          // Sessions already open keep the config they were started with; the next one picks
+          // this up. Said plainly in the UI rather than pretended away.
+          this.refreshAgents(settings.agents);
+          this.transport.broadcastSnapshot();
+        } finally {
+          modelChange?.finish();
+          briefChange?.finish();
         }
-        const settings = await this.appSettings.setAgent(msg.agent, {
-          ...(msg.model !== undefined ? { model: selected?.sessionModel ?? msg.model } : {}),
-          ...(msg.brief !== undefined ? { brief: msg.brief } : {}),
-        });
-        this.agentOverrides = settings.agents;
-        // Sessions already open keep the config they were started with; the next one picks
-        // this up. Said plainly in the UI rather than pretended away.
-        this.refreshAgents(settings.agents);
-        this.transport.broadcastSnapshot();
         return;
       }
       case "list-harness-models": {
@@ -8317,23 +8353,32 @@ export class Coordinator {
       }
       case "set-production-model": {
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
+        if (!store || store.worldId !== msg.worldId) return;
+        const change = this.beginValidatedSettingChange(JSON.stringify(["production", store.dir, msg.productionId, msg.capability]));
         try {
           const selected = msg.capability === "llm" && msg.modelId
             ? await this.validateLanguageModel(msg.modelId) : undefined;
+          if (!change.current() || !this.stillOpen(store)) return;
           if (selected?.reason) {
             this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: selected.reason });
             return;
           }
-          await setProductionModel(store, msg.productionId, msg.capability, selected?.sessionModel ?? msg.modelId);
+          // Capabilities share one file. Queue the short read/commit, not catalog discovery,
+          // so a clear can land immediately and independent capability edits cannot collide.
+          await serializeFileMutation(join(store.dir, "productions", msg.productionId, "production.json"), async () => {
+            if (!change.current() || !this.stillOpen(store)) return;
+            await setProductionModel(store, msg.productionId, msg.capability, selected?.sessionModel ?? msg.modelId);
+          });
         } catch (err) {
           void this.appLog?.append({
             kind: "production-edit.refused",
             reason: err instanceof Error ? err.message : String(err),
             detail: { productionId: msg.productionId, capability: msg.capability, modelId: msg.modelId },
           });
+        } finally {
+          change.finish();
         }
-        await this.refreshWorldSnapshot(msg.worldId);
+        this.refreshIfStillOpen(store);
         return;
       }
       case "compile-scene-board":
@@ -15940,7 +15985,8 @@ export class Coordinator {
     this.emit({
       at: new Date().toISOString(),
       type: "harness.status",
-      harness: { engine, harnesses, claudePath, codexPath, launchOverride: this.opts.harnessEngineOverride ?? null },
+      harness: { engine, harnesses, claudePath, codexPath,
+        launchOverride: this.opts.harnessEngineOverride ?? null, launchEngine: this.launchEngine },
     });
   }
 

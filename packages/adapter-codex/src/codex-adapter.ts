@@ -6,6 +6,7 @@ import {
   type Readiness, type SendMessageInput, type SendReceipt, type SessionConfigInput, type SessionRef,
 } from "@arke-studio/contracts";
 import { CodexRpc, object, type JsonObject } from "./rpc.js";
+import { captureRootIdentity } from "./confined-files.js";
 import { ConfinementError, discoverWorldTools, executeTool, resolveRoot, toolsFor, type ToolSession } from "./tools.js";
 
 export interface CodexAdapterOptions {
@@ -199,7 +200,7 @@ export class CodexAdapter implements HarnessAdapter {
     if (!selected) throw new Error("Codex did not report a default model. Choose a model before starting this agent.");
     if (member.name === "stage-designer" && selected.inputModalities && !selected.inputModalities.includes("image")) throw new Error("This Codex model cannot inspect Stage images.");
     const researchWeb = member.name !== "stage-designer" && prepared.researchWeb === true;
-    const toolSession: ToolSession = { root, confinement: confinementFor(member, { web: researchWeb }), worldQueryUrl: prepared.worldQueryUrl, worldTools: new Map(), inputModalities: selected.inputModalities };
+    const toolSession: ToolSession = { root, rootIdentity: await captureRootIdentity(root, input.signal), confinement: confinementFor(member, { web: researchWeb }), worldQueryUrl: prepared.worldQueryUrl, worldTools: new Map(), inputModalities: selected.inputModalities };
     await discoverWorldTools(toolSession, input.signal);
     const skill = sessionSkillForAgent(member.name, prepared);
     const prompt = agentPromptFor({ ...member, researchWeb, ...(override?.brief !== undefined ? { brief: override.brief } : {}), ...(skill ? { skill } : {}) });

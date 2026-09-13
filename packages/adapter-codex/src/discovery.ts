@@ -3,6 +3,7 @@ import { access, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { HarnessAvailability } from "@arke-studio/contracts";
+import { fileConfinementUnavailable } from "./confined-files.js";
 
 /** First release verified with agents.enabled and direct image-capable dynamic tools (#1125). */
 export const CODEX_MIN_VERSION = "0.154.0";
@@ -47,6 +48,8 @@ export function codexServerArgs(command: string): string[] {
 }
 
 export async function discoverCodex(opts: CodexDiscoveryOptions = {}): Promise<CodexDiscovery> {
+  const confinementReason = await fileConfinementUnavailable();
+  if (confinementReason) return { found: null, reason: confinementReason, version: null };
   const run = opts.runCommand ?? runCommand;
   const exists = opts.exists ?? executable;
   const candidates: { command: string; source: "configured" | "path" }[] = [];

@@ -84,6 +84,8 @@ Claude Code and Codex use your own installation and login. Codex requires 0.154.
 with its companion code-mode host in the same installation. If PATH discovery misses it,
 choose the executable in Settings. An unavailable selected engine remains unavailable until
 you repair it or choose another; it does not silently switch engines.
+Codex's confined file tools support local Windows volumes and Linux with `/proc/self/fd`
+available. Windows uses its built-in PowerShell for the private file-access helper.
 
 For development, `ARKE_HARNESS=opencode|claude|codex` overrides the saved engine as a whole.
 `ARKE_CLAUDE_CMD` and `ARKE_CODEX_CMD` override executable discovery. Settings discloses an

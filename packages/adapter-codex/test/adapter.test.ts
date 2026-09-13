@@ -113,7 +113,12 @@ test("cancellation during creation consumes preparation and archives late epheme
   const f = await fixture("slow-create"); t.after(f.cleanup);
   const abort = new AbortController(); f.adapter.prepareSession({ preparationId: "cancel" });
   const create = f.adapter.createSession({ cwd: f.root, purpose: "ask", preparationId: "cancel", signal: abort.signal });
-  setTimeout(() => abort.abort(), 40);
+  // Reach the protocol boundary rather than depending on root-capability startup speed.
+  const deadline = Date.now() + 30_000;
+  while (!(await f.requests()).some(request => request.method === "thread/start")) {
+    assert.ok(Date.now() < deadline, "session did not reach thread/start"); await delay(10);
+  }
+  abort.abort();
   await assert.rejects(create, /cancelled/); await delay(180);
   assert.ok((await f.requests()).some(request => request.method === "thread/archive"));
 });

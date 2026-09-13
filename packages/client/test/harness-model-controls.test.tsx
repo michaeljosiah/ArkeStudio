@@ -332,4 +332,46 @@ describe("live harness model controls (#1123, #1124)", () => {
     await press("Advanced · which model runs each writing agent");
     assert.match(container.textContent!, /models from Claude Code/, "the pending selection must not relabel the running catalog");
   });
+
+  it("shows a failed launch without metadata on its attempted engine after the saved choice changes", async () => {
+    const state = modelState();
+    state.app.harnessInfo = null;
+    state.app.health.harness = { status: "unavailable", reason: "Claude Code could not start. Check its executable." };
+    state.app.harness = {
+      engine: "claude", launchEngine: "claude", claudePath: null, codexPath: null,
+      harnesses: [OPENCODE_AVAILABILITY,
+        { ...OPENCODE_AVAILABILITY, id: "claude", label: "Claude Code", bundled: false, installed: false, blocked: "Claude Code was not found." },
+        { ...OPENCODE_AVAILABILITY, id: "codex", label: "Codex", bundled: false }],
+    };
+    await mount(state, <SettingsHarnessScreen />, "/settings/harness?harness=claude");
+    const tab = (label: string) => [...container.querySelectorAll('[role="tab"]')].find(element => element.textContent!.includes(label))!;
+    assert.match(tab("Claude Code").textContent!, /unavailable/);
+    assert.match(container.textContent!, /Harness unavailable/);
+    assert.match(container.textContent!, /Claude Code could not start/);
+    assert.doesNotMatch(container.textContent!, /next restart/);
+    await act(async () => __setStateForTest({ ...state, app: { ...state.app, harness: { ...state.app.harness!, engine: "codex" } } }));
+    assert.match(tab("Claude Code").textContent!, /unavailable/);
+    assert.match(tab("Codex").textContent!, /next restart/);
+    assert.match(container.textContent!, /Claude Code could not start/, "the launch failure stays attached to Claude after selecting Codex");
+    assert.match(container.textContent!, /Harness unavailable/);
+  });
+
+  it("attaches a failed environment-selected launch to that engine even with another saved preference", async () => {
+    const state = modelState();
+    state.app.harnessInfo = null;
+    state.app.health.harness = { status: "unavailable", reason: "Codex could not initialize. Sign in and restart." };
+    state.app.harness = {
+      engine: "claude", launchEngine: "codex", launchOverride: "codex", claudePath: null, codexPath: null,
+      harnesses: [OPENCODE_AVAILABILITY,
+        { ...OPENCODE_AVAILABILITY, id: "claude", label: "Claude Code", bundled: false },
+        { ...OPENCODE_AVAILABILITY, id: "codex", label: "Codex", bundled: false }],
+    };
+    await mount(state, <SettingsHarnessScreen />, "/settings/harness?harness=codex");
+    const tabs = [...container.querySelectorAll('[role="tab"]')];
+    assert.match(tabs.find(tab => tab.textContent!.includes("Codex"))!.textContent!, /unavailable/);
+    assert.match(tabs.find(tab => tab.textContent!.includes("Claude Code"))!.textContent!, /next restart/);
+    assert.match(container.textContent!, /Codex could not initialize/);
+    assert.match(container.textContent!, /ARKE_HARNESS selects Codex at launch/);
+    assert.doesNotMatch(container.textContent!, /Selected for the next restart/);
+  });
 });

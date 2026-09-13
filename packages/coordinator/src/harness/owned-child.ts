@@ -1,4 +1,4 @@
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { basename } from "node:path";
 import { killTree, listDescendants, ownerStamp, platformProbe, type DescendantInfo } from "../child-ledger.js";
 import { leashChildToParent } from "../job-leash.js";
@@ -11,6 +11,8 @@ interface OwnedChildDeps extends SupervisorDeps {
   snapshotMs?: number;
   snapshotTimeoutMs?: number;
   listDescendants?: (rootPid: number, signal?: AbortSignal) => Promise<DescendantInfo[]>;
+  /** Test hosts with synthetic pids must not arm real process-exit kills. */
+  registerExitBackstop?: (callback: () => void) => () => void;
 }
 interface TrackedChild {
   descendants: Map<number, DescendantInfo>;
@@ -18,6 +20,53 @@ interface TrackedChild {
   snapshotAbort?: AbortController;
   timer?: ReturnType<typeof setTimeout>;
   stopping?: Promise<void>;
+  removeExitBackstop?: () => void;
+}
+
+/** The process is already leaving: no promise or ordinary disposal hook can run here. */
+function registerOwnedExitBackstop(
+  child: ChildProcessWithoutNullStreams, state: TrackedChild, platform: NodeJS.Platform,
+  register?: OwnedChildDeps["registerExitBackstop"],
+): () => void {
+  const pid = child.pid!;
+  const stop = () => {
+    if (platform !== "win32") {
+      // The stdio adapter starts a private, detached process group. Its helper can outlive
+      // the app-server leader, so the group stays the target even after the leader exits.
+      try { process.kill(-pid, "SIGKILL"); }
+      catch { if (child.exitCode === null && child.signalCode === null) { try { child.kill("SIGKILL"); } catch { /* already gone */ } } }
+      return;
+    }
+    if (child.exitCode === null && child.signalCode === null) {
+      spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true, timeout: 5000 });
+      // A refused or timed-out tree kill still leaves our own process handle available.
+      try { child.kill("SIGKILL"); } catch { /* already gone */ }
+    }
+    const expected = [...state.descendants.values()].filter(row => row.startedAt !== null);
+    if (!expected.length) return;
+    // A wrapper may already have exited. Check every saved helper's image AND creation
+    // time before touching its pid; a stale snapshot never authorizes killing a new owner.
+    const script = [
+      "$ErrorActionPreference = 'Stop'",
+      `$expected = @(ConvertFrom-Json -InputObject '${JSON.stringify(expected).replace(/'/g, "''")}')`,
+      "$filter = ($expected | ForEach-Object { 'ProcessId=' + [int]$_.pid }) -join ' OR '",
+      "$rows = @(Get-CimInstance Win32_Process -Filter $filter)",
+      "foreach ($entry in $expected) {",
+      "  $row = $rows | Where-Object { $_.ProcessId -eq [int]$entry.pid } | Select-Object -First 1",
+      "  if ($null -eq $row -or $null -eq $row.CreationDate) { continue }",
+      "  $started = ([System.DateTimeOffset]$row.CreationDate).ToUnixTimeMilliseconds()",
+      "  if ($row.Name.ToLowerInvariant() -ceq [string]$entry.image -and [Math]::Abs($started - [double]$entry.startedAt) -le 5000) {",
+      "    Stop-Process -Id ([int]$entry.pid) -Force -ErrorAction SilentlyContinue",
+      "  }",
+      "}",
+    ].join("\n");
+    const shell = `${process.env["SystemRoot"] ?? "C:\\Windows"}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+    spawnSync(shell, ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
+      { stdio: "ignore", windowsHide: true, timeout: 30_000 });
+  };
+  if (register) return register(stop);
+  process.once("exit", stop);
+  return () => { process.removeListener("exit", stop); };
 }
 
 /**
@@ -86,6 +135,9 @@ export function ownedChildHooks(
         // Rpc spawns a detached process group on POSIX, so a helper remains reachable after
         // the app-server exits. Killing only its already-dead leader would strand the helper.
         try { process.kill(-pid, "SIGKILL"); } catch { if (live(child)) await kill(pid); }
+        // The group has already received its terminal signal; do not keep a stale group id
+        // armed while asynchronous ledger writes finish.
+        state.removeExitBackstop?.();
       } else if (live(child)) {
         await kill(pid).catch(() => trace("harness.child-tree-kill-failed"));
         // taskkill can time out or be refused. The ChildProcess still holds our own process
@@ -115,6 +167,7 @@ export function ownedChildHooks(
         } catch { trace("harness.descendant-reap-failed"); }
       }
       if (!live(child)) await release(pid);
+      state.removeExitBackstop?.();
     });
     return state.stopping;
   };
@@ -123,6 +176,9 @@ export function ownedChildHooks(
       if (!child.pid) return;
       const state: TrackedChild = { descendants: new Map(), snapshot: Promise.resolve() };
       children.set(child, state);
+      // Register before the first await. process.exit() bypasses normal host shutdown even
+      // while ledger ownership or the Windows Job Object is still being established.
+      state.removeExitBackstop = registerOwnedExitBackstop(child, state, platform, deps.registerExitBackstop);
       child.once("exit", () => {
         void killProcess(child).then(() => release(child.pid!), () => trace("harness.child-cleanup-failed"));
       });

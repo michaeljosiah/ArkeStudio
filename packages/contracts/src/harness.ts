@@ -61,6 +61,8 @@ export const HarnessStatusSchema = z
     codexPath: z.string().nullable().default(null),
     /** A host environment override outranks the saved engine at every launch. */
     launchOverride: HarnessEngineSchema.nullable().optional(),
+    /** The engine attempted at startup, retained even if it failed before producing metadata. */
+    launchEngine: HarnessEngineSchema.optional(),
   })
   .strict();
 export type HarnessStatus = z.infer<typeof HarnessStatusSchema>;

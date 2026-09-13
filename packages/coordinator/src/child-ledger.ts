@@ -141,7 +141,9 @@ export function runCollect(
       finish(error);
     };
     const abort = () => stop(new Error("Process inspection was cancelled."));
-    const timer = setTimeout(() => stop(new Error("Process inspection timed out.")), opts.timeoutMs ?? 10_000);
+    // A loaded Windows runner can spend ten seconds starting PowerShell before CIM answers.
+    // Individual startup callers can impose a shorter cancellable budget of their own.
+    const timer = setTimeout(() => stop(new Error("Process inspection timed out.")), opts.timeoutMs ?? 30_000);
     opts.signal?.addEventListener("abort", abort, { once: true });
     child.stdout?.on("data", (c: Buffer) => (out += c.toString()));
     child.stderr?.on("data", (c: Buffer) => (err += c.toString()));

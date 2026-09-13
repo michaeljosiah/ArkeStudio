@@ -167,6 +167,7 @@ const coordinator = new Coordinator({
   setup: nodeSetupDeps(),
   authoring: { agentForPurpose, roster: ROSTER, skillFor },
   ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
+  harnessLaunchEngine: chosenHarness,
   ...(wiring.unavailableReason ? { harnessUnavailableReason: wiring.unavailableReason } : {}),
   ...(process.env["ARKE_HARNESS"] === chosenHarness ? { harnessEngineOverride: chosenHarness } : {}),
   relaunchHarness: wiring.relaunchHarness,

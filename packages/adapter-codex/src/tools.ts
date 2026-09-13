@@ -1,8 +1,7 @@
-import { lstat, mkdir, open, readdir, realpath, rename, unlink } from "node:fs/promises";
-import { constants } from "node:fs";
-import { randomUUID } from "node:crypto";
 import { inflateSync } from "node:zlib";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, join, relative } from "node:path";
+import { ConfinedFiles, ConfinementError, confinedTarget, type FileIdentity } from "./confined-files.js";
+export { ConfinementError, resolveRoot, within } from "./confined-files.js";
 import { permits, type AgentConfinement } from "@arke-studio/contracts";
 import { object, type JsonObject } from "./rpc.js";
 
@@ -11,55 +10,15 @@ export type ToolContent = { type: "inputText"; text: string } | { type: "inputIm
 export interface ToolResult { success: boolean; contentItems: ToolContent[] }
 export interface ToolSession {
   root: string;
+  rootIdentity: FileIdentity;
   confinement: AgentConfinement;
   worldQueryUrl?: string;
   worldTools: Map<string, DynamicFunction>;
   inputModalities?: ("text" | "image")[];
 }
 export interface ExecutedTool { result: ToolResult; summary?: string }
-const MAX_FILE = 16 * 1024 * 1024;
 const MAX_TEXT = 128 * 1024;
 const textResult = (text: string): ToolResult => ({ success: true, contentItems: [{ type: "inputText", text }] });
-export class ConfinementError extends Error { constructor() { super("Denied by Arke Studio confinement."); } }
-function nativePath(path: string): string {
-  if (process.platform !== "win32") return path;
-  if (path.startsWith("\\\\?\\UNC\\")) return `\\\\${path.slice(8)}`;
-  return path.startsWith("\\\\?\\") ? path.slice(4) : path;
-}
-export function within(root: string, target: string): boolean {
-  const fold = (value: string) => process.platform === "win32" ? nativePath(value).toLowerCase() : value;
-  const base = fold(root); const path = fold(target);
-  return path === base || path.startsWith(base.endsWith(sep) ? base : base + sep);
-}
-export async function resolveRoot(cwd: string): Promise<string> {
-  const root = nativePath(await realpath(cwd));
-  if (!(await lstat(root)).isDirectory()) throw new Error("Codex needs a session directory.");
-  return root;
-}
-
-/** Refuse linked path segments before opening. Search uses this for every discovered leaf too. */
-export async function confinedPath(root: string, raw: string, write = false): Promise<string> {
-  if (!raw || raw.includes("\0")) throw new ConfinementError();
-  const normal = nativePath(raw);
-  const target = isAbsolute(normal) ? resolve(normal) : resolve(root, normal);
-  if (!within(root, target) || !within(root, await realpath(root))) throw new ConfinementError();
-  const parts = relative(root, target).split(sep).filter(Boolean);
-  let current = root;
-  for (let i = 0; i < parts.length; i++) {
-    current = join(current, parts[i]!);
-    try {
-      const stat = await lstat(current);
-      if (stat.isSymbolicLink() || (stat.isFile() && stat.nlink > 1)) throw new ConfinementError();
-      if (!within(root, await realpath(current))) throw new ConfinementError();
-      if (i < parts.length - 1 && !stat.isDirectory()) throw new ConfinementError();
-    } catch (error) {
-      if (write && object(error).code === "ENOENT") break;
-      throw error;
-    }
-  }
-  return target;
-}
-
 function schema(properties: JsonObject, required: string[]): JsonObject { return { type: "object", properties, required, additionalProperties: false }; }
 const string = { type: "string" };
 const FILE_TOOLS: DynamicFunction[] = [
@@ -156,42 +115,6 @@ function validatePng(bytes: Buffer): void {
   const inflated = inflateSync(Buffer.concat(imageData), { maxOutputLength: 128 * 1024 * 1024 });
   if (header[12] === 0 && inflated.length !== height * (1 + Math.ceil(width * channels! * depth / 8))) invalid();
 }
-async function readBytes(root: string, raw: string): Promise<Buffer> {
-  const path = await confinedPath(root, raw);
-  const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-  try {
-    const stat = await handle.stat();
-    if (!stat.isFile() || stat.nlink > 1 || stat.size > MAX_FILE) throw new Error("This file cannot be read by the session (not a regular file or over 16 MB).");
-    // Bound the read itself, since another writer may grow a file after the stat.
-    const chunks: Buffer[] = []; let total = 0;
-    for (;;) {
-      const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, MAX_FILE + 1 - total));
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
-      if (!bytesRead) return Buffer.concat(chunks, total);
-      total += bytesRead; if (total > MAX_FILE) throw new Error("This file exceeds the session read limit.");
-      chunks.push(buffer.subarray(0, bytesRead));
-    }
-  } finally { await handle.close(); }
-}
-
-async function writeText(root: string, raw: string, content: string, signal: AbortSignal): Promise<void> {
-  if (Buffer.byteLength(content) > MAX_FILE) throw new Error("The proposed file exceeds 16 MB.");
-  const path = await confinedPath(root, raw, true);
-  signal.throwIfAborted();
-  await mkdir(dirname(path), { recursive: true });
-  await confinedPath(root, raw, true);
-  signal.throwIfAborted();
-  const temporary = join(dirname(path), `.arke-codex-write-${randomUUID()}.tmp`);
-  const handle = await open(temporary, "wx", 0o600);
-  try {
-    signal.throwIfAborted(); await handle.writeFile(content, "utf8");
-    await handle.close();
-    await confinedPath(root, raw, true); signal.throwIfAborted();
-    // Replace atomically: interruption must not leave an existing proposal file truncated.
-    await rename(temporary, path);
-  } finally { await handle.close(); await unlink(temporary).catch(() => {}); }
-}
-
 const rootQueues = new Map<string, Promise<void>>();
 export async function executeTool(session: ToolSession, name: string, args: JsonObject, signal: AbortSignal): Promise<ExecutedTool> {
   // The whole edit read/replace is one operation, including across sessions sharing a proposal.
@@ -215,8 +138,14 @@ async function executeOneTool(session: ToolSession, name: string, args: JsonObje
     if (!Array.isArray(result.content) || result.content.some(item => object(item).type !== "text" || typeof object(item).text !== "string")) throw new Error("World-query returned unsupported content.");
     return { result: { success: result.isError !== true, contentItems: result.content.map(item => ({ type: "inputText", text: object(item).text as string })) }, ...(result.isError === true ? {} : { summary: `read the world: ${name.slice(6).replaceAll("_", " ")}` }) };
   }
+  const files = await ConfinedFiles.create(session.root, session.rootIdentity, signal);
+  try { return await executeFileTool(session, files, name, args, signal); }
+  finally { await files.close(); }
+}
+
+async function executeFileTool(session: ToolSession, files: ConfinedFiles, name: string, args: JsonObject, signal: AbortSignal): Promise<ExecutedTool> {
   if (name === "read") {
-    const raw = argument(args, "path"); const bytes = await readBytes(session.root, raw); signal.throwIfAborted();
+    const raw = argument(args, "path"); const bytes = await files.read(raw); signal.throwIfAborted();
     const mime = imageType(bytes);
     if (mime && session.inputModalities && !session.inputModalities.includes("image")) throw new Error("This model does not accept image input.");
     if (mime) return { result: { success: true, contentItems: [{ type: "inputText", text: `Read image ${basename(raw)}.` }, { type: "inputImage", imageUrl: `data:${mime};base64,${bytes.toString("base64")}` }] }, summary: `read ${basename(raw)}` };
@@ -225,23 +154,24 @@ async function executeOneTool(session: ToolSession, name: string, args: JsonObje
     return { result: textResult(source.slice(offset, offset + limit) + (offset + limit < source.length ? `\n[More text remains; continue at offset ${offset + limit}.]` : "")), summary: `read ${basename(raw)}` };
   }
   if (name === "list") {
-    const path = await confinedPath(session.root, args.path === undefined ? "." : argument(args, "path"));
-    const entries = await readdir(path, { withFileTypes: true }); signal.throwIfAborted();
-    return { result: textResult(entries.filter(entry => !entry.isSymbolicLink()).slice(0, 1000).map(entry => entry.name + (entry.isDirectory() ? "/" : "")).join("\n")), summary: "listed the proposal" };
+    const entries = await files.list(args.path === undefined ? "." : argument(args, "path")); signal.throwIfAborted();
+    return { result: textResult(entries.slice(0, 1000).map(entry => entry.name + (entry.directory ? "/" : "")).join("\n")), summary: "listed the proposal" };
   }
   if (name === "search") {
     const query = argument(args, "query"); if (!query || query.length > 1000) throw new Error("Search needs 1 to 1000 characters.");
     const limit = bounded(args.limit, 30, 100, 1); const found: string[] = [];
-    const start = await confinedPath(session.root, args.path === undefined ? "." : argument(args, "path"));
+    const start = confinedTarget(session.root, args.path === undefined ? "." : argument(args, "path"));
     let examined = 0;
     const walk = async (path: string): Promise<void> => {
-      for (const entry of await readdir(path, { withFileTypes: true })) {
+      for (const entry of await files.list(path)) {
         signal.throwIfAborted(); if (++examined > 3000 || found.length >= limit) return;
-        if (entry.isSymbolicLink()) continue;
-        const target = await confinedPath(session.root, join(path, entry.name));
-        if (entry.isDirectory()) await walk(target);
-        else if (entry.isFile() && (await lstat(target)).size <= 1024 * 1024) {
-          const bytes = await readBytes(session.root, target); if (bytes.includes(0) || imageType(bytes)) continue;
+        const target = join(path, entry.name);
+        if (entry.directory) await walk(target);
+        else {
+          let bytes: Buffer;
+          try { bytes = await files.read(target, 1024 * 1024); }
+          catch (error) { if (error instanceof Error && /session read limit|confinement/.test(error.message)) continue; throw error; }
+          if (bytes.includes(0) || imageType(bytes)) continue;
           const lines = bytes.toString("utf8").split(/\r?\n/);
           for (let i = 0; i < lines.length && found.length < limit; i++) if (lines[i]!.includes(query)) found.push(`${relative(session.root, target)}:${i + 1}: ${lines[i]!.slice(0, 1000)}`);
         }
@@ -252,10 +182,10 @@ async function executeOneTool(session: ToolSession, name: string, args: JsonObje
   }
   const raw = argument(args, "path"); let content: string;
   if (name === "edit") {
-    const original = (await readBytes(session.root, raw)).toString("utf8"); const old = argument(args, "oldText");
+    const original = (await files.read(raw)).toString("utf8"); const old = argument(args, "oldText");
     if (!old || original.indexOf(old) < 0 || original.indexOf(old) !== original.lastIndexOf(old)) throw new Error("Edit needs exactly one matching passage.");
     content = original.replace(old, () => argument(args, "newText"));
   } else content = argument(args, "content");
-  signal.throwIfAborted(); await writeText(session.root, raw, content, signal);
+  signal.throwIfAborted(); await files.write(raw, content);
   return { result: textResult(`Updated ${basename(raw)}.`), summary: `edited ${basename(raw)}` };
 }

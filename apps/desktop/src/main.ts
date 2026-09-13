@@ -1138,6 +1138,7 @@ async function initialize(): Promise<{ port: number }> {
     sampleWorldPath: app.isPackaged ? join(process.resourcesPath, "sample-world") : null,
     authoring: { agentForPurpose, roster: ROSTER, skillFor },
     ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
+    harnessLaunchEngine: chosenHarness,
     ...(wiring.unavailableReason ? { harnessUnavailableReason: wiring.unavailableReason } : {}),
     ...(process.env["ARKE_HARNESS"] === chosenHarness ? { harnessEngineOverride: chosenHarness } : {}),
     // Stored LLM keys reach the harness as spawn environment (SPEC-005 D5) — under v2's
@@ -1188,10 +1189,12 @@ async function initialize(): Promise<{ port: number }> {
       const parent = window;
       if (!parent) return null;
       const result = await dialog.showOpenDialog(parent, {
-        title: "Choose the Codex executable",
+        title: process.platform === "win32" ? "Choose the Codex executable (.exe)" : "Choose the Codex executable",
         buttonLabel: "Use this Codex",
         properties: ["openFile"],
-        filters: [{ name: "Codex", extensions: ["exe", "cmd", "bat"] }, { name: "All files", extensions: ["*"] }],
+        filters: process.platform === "win32"
+          ? [{ name: "Codex executable", extensions: ["exe"] }]
+          : [{ name: "All files", extensions: ["*"] }],
       });
       return result.canceled ? null : (result.filePaths[0] ?? null);
     },

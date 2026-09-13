@@ -176,6 +176,66 @@ describe("coordinator harness/model routing (#1122)", () => {
     } finally { await test.close(); }
   });
 
+  for (const oldModel of [CHAT, "missing/model"]) {
+    it(`keeps later agent clears and brief edits after validating ${oldModel}`, async () => {
+      const test = await fixture({ agents: { "world-builder": { model: TEXT } } });
+      try {
+        let resolve!: (models: ModelInfo[]) => void;
+        test.adapter.list = () => new Promise(done => { resolve = done; });
+        const oldChoice = test.send({ kind: "set-agent-config", agent: "world-builder", model: oldModel, brief: "Old brief" });
+        await until(() => test.coordinator.getState().app.harnessModelStatus.status === "loading", "delayed agent validation");
+        const otherAgent = test.send({ kind: "set-agent-config", agent: "stage-designer", model: STAGE });
+        await test.send({ kind: "set-agent-config", agent: "world-builder", model: null, brief: "Latest brief" });
+        assert.deepEqual((await test.settings()).agents?.["world-builder"], { brief: "Latest brief" }, "clear does not wait for model discovery");
+        resolve(MODELS);
+        await Promise.all([oldChoice, otherAgent]);
+        assert.deepEqual((await test.settings()).agents?.["world-builder"], { brief: "Latest brief" });
+        assert.equal((await test.settings()).agents?.["stage-designer"]?.model, STAGE, "another agent has an independent choice");
+        assert.equal(test.events.filter(event => event.type === "command.failed").length, 0, "a superseded invalid choice must not report a stale failure");
+      } finally { await test.close(); }
+    });
+  }
+
+  it("supersedes agent fields independently while model discovery is pending", async () => {
+    const test = await fixture();
+    try {
+      let resolve!: (models: ModelInfo[]) => void;
+      test.adapter.list = () => new Promise(done => { resolve = done; });
+      const oldChoice = test.send({ kind: "set-agent-config", agent: "world-builder", model: CHAT, brief: "Keep this brief" });
+      await until(() => test.coordinator.getState().app.harnessModelStatus.status === "loading", "delayed agent choice");
+      const latestChoice = test.send({ kind: "set-agent-config", agent: "world-builder", model: CUSTOM });
+      const stageChoice = test.send({ kind: "set-agent-config", agent: "stage-designer", model: STAGE, brief: "Old Stage brief" });
+      await test.send({ kind: "set-agent-config", agent: "stage-designer", brief: "Latest Stage brief" });
+      resolve(MODELS);
+      await Promise.all([oldChoice, latestChoice, stageChoice]);
+      assert.deepEqual((await test.settings()).agents?.["world-builder"], { model: CUSTOM, brief: "Keep this brief" });
+      assert.deepEqual((await test.settings()).agents?.["stage-designer"], { model: STAGE, brief: "Latest Stage brief" });
+    } finally { await test.close(); }
+  });
+
+  for (const latestModel of [null, CUSTOM]) {
+    it(`keeps a later production ${latestModel === null ? "clear" : "choice"} after delayed model validation`, async () => {
+      const test = await fixture({ production: TEXT });
+      try {
+        let resolve!: (models: ModelInfo[]) => void;
+        test.adapter.list = () => new Promise(done => { resolve = done; });
+        const oldChoice = test.send({ kind: "set-production-model", worldId: WORLD_ID, productionId: "saltlight", capability: "llm", modelId: CHAT });
+        await until(() => test.coordinator.getState().app.harnessModelStatus.status === "loading", "delayed production validation");
+        const latestChoice = test.send({ kind: "set-production-model", worldId: WORLD_ID, productionId: "saltlight", capability: "llm", modelId: latestModel });
+        if (latestModel === null) {
+          await latestChoice;
+          assert.equal(test.provider.openStore()!.getBundle().productions.find(production => production.meta.id === "saltlight")!.meta.models?.llm, undefined, "clear completes during discovery");
+        }
+        await test.send({ kind: "set-production-model", worldId: WORLD_ID, productionId: "saltlight", capability: "image", modelId: "image/independent" });
+        resolve(MODELS);
+        await Promise.all([oldChoice, latestChoice]);
+        const models = JSON.parse(await readFile(join(test.worldDir, "productions", "saltlight", "production.json"), "utf8")).models;
+        assert.equal(models.llm, latestModel ?? undefined);
+        assert.equal(models.image, "image/independent", "other capabilities are not superseded by a language model choice");
+      } finally { await test.close(); }
+    });
+  }
+
   it("runs Stage with its image-capable override even when the production uses a text-only model", async () => {
     const test = await fixture({ production: TEXT, agents: { "stage-designer": { model: STAGE, brief: "Stage brief." } } });
     try {

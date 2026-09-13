@@ -5,13 +5,15 @@ import { tmpdir } from "node:os";
 import { join, toNamespacedPath } from "node:path";
 import { createServer } from "node:http";
 import { confinementFor } from "@arke-studio/contracts";
-import { confinedPath, discoverWorldTools, executeTool, resolveRoot, toolsFor, worldRequest, type ToolSession } from "../src/tools.js";
+import { captureRootIdentity, confinedTarget } from "../src/confined-files.js";
+import { discoverWorldTools, executeTool, resolveRoot, toolsFor, worldRequest, type ToolSession } from "../src/tools.js";
 
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAZklEQVR42u3QQREAAAQAMEm89T/9yOHssQKLzprPQoAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECLhvAVR6kdJApJA8AAAAAElFTkSuQmCC", "base64");
 async function fixture(readOnly = false) {
   const base = await mkdtemp(join(tmpdir(), "arke-codex-tools-")); const root = join(base, "proposal");
   await mkdir(root); await writeFile(join(base, "secret.txt"), "SECRET_MUST_NOT_LEAK");
-  const session: ToolSession = { root: await resolveRoot(root), confinement: confinementFor({ readOnly }), worldTools: new Map() };
+  const canonical = await resolveRoot(root);
+  const session: ToolSession = { root: canonical, rootIdentity: await captureRootIdentity(canonical), confinement: confinementFor({ readOnly }), worldTools: new Map() };
   return { base, root, session, run: (name: string, args: Record<string, unknown>) => executeTool(session, name, args, new AbortController().signal) };
 }
 
@@ -67,7 +69,7 @@ test("outside paths, sibling prefix collisions, symlinks, nested search links an
   await assert.rejects(f.run("read", { path: "../secret.txt" }), /confinement/);
   await assert.rejects(f.run("write", { path: "../new.txt", content: "bad" }), /confinement/);
   const sibling = join(f.base, "proposal-extra"); await mkdir(sibling); await writeFile(join(sibling, "secret.txt"), "SECRET_MUST_NOT_LEAK");
-  await assert.rejects(confinedPath(f.session.root, join(sibling, "secret.txt")), /confinement/);
+  assert.throws(() => confinedTarget(f.session.root, join(sibling, "secret.txt")), /confinement/);
   await symlink(sibling, join(f.root, "external"), process.platform === "win32" ? "junction" : "dir");
   await assert.rejects(f.run("read", { path: "external/secret.txt" }), /confinement/);
   await assert.rejects(f.run("write", { path: "external/new.txt", content: "bad" }), /confinement/);
