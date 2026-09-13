@@ -17,12 +17,15 @@ export function foldWorldChatInputs(events: readonly WorldChatEventEnvelope[]) {
   const problems: WorldChatProblem[] = [];
   const acceptedSequences = new Set<number>();
   const running = new Map<string, { turnId: string; sessionId?: string }>();
+  const runIds = new Set<string>();
+  const turnIds = new Set<string>();
   for (const { event, seq } of events) {
     if (isInputEvent(event)) {
       let problem: string | undefined;
       if (event.type === "input.promoted") {
         const row = queue.inputs.find(one => one.input.messageId === event.messageId);
         if (running.size > 0) problem = "An input was promoted while a run was still active.";
+        else if (runIds.has(event.runId) || turnIds.has(event.turnId)) problem = "A promoted input must start a new primary turn and run.";
         else if (!row || event.messageId !== event.message.id || event.turnId !== event.message.turnId ||
           event.turnId !== event.run.turnId || event.runId !== event.run.id || event.message.role !== "user" ||
           event.run.status !== "running" || event.message.text !== row.input.request.text ||
@@ -47,9 +50,15 @@ export function foldWorldChatInputs(events: readonly WorldChatEventEnvelope[]) {
         problems.push({ kind: "interior-corruption", atSeq: seq, detail: advanced.problem });
       } else {
         acceptedSequences.add(seq);
-        if (event.type === "input.promoted") running.set(event.runId, { turnId: event.turnId });
+        if (event.type === "input.promoted") {
+          running.set(event.runId, { turnId: event.turnId });
+          runIds.add(event.runId);
+          turnIds.add(event.turnId);
+        }
       }
     } else if (event.type === "turn.started" || event.type === "run.retry-started") {
+      runIds.add(event.run.id);
+      turnIds.add(event.run.turnId);
       running.set(event.run.id, { turnId: event.run.turnId,
         ...(event.run.harnessSessionId ? { sessionId: event.run.harnessSessionId } : {}),
       });
@@ -57,14 +66,18 @@ export function foldWorldChatInputs(events: readonly WorldChatEventEnvelope[]) {
       const run = running.get(event.runId);
       if (run) running.set(event.runId, { ...run, sessionId: event.harnessSessionId });
     } else if (event.type === "run.finished" || event.type === "turn.completed") {
-      running.delete(event.run.id);
+      runIds.add(event.run.id);
+      turnIds.add(event.run.turnId);
+      if (event.run.status !== "running") running.delete(event.run.id);
       // The terminal event is itself durable: failure cannot leave automatic queue advancement enabled.
-      if (event.run.status !== "completed" && unresolvedWorldChatInputs(queue).length > 0 && queue.pauseReason === null) {
-        queue = { ...queue, revision: queue.revision + 1, pauseReason: event.run.status === "cancelled" ? "stopped" :
-          event.run.status === "timeout" ? "timeout" : event.run.status === "budget-exceeded" ? "budget-exceeded" : "failed" };
+      if (event.run.status !== "completed" && unresolvedWorldChatInputs(queue).length > 0 && queue.pauseReason !== "integrity") {
+        queue = { ...queue, revision: queue.revision + 1, pauseReason: queue.pauseReason ?? (event.run.status === "cancelled" ? "stopped" :
+          event.run.status === "timeout" ? "timeout" : event.run.status === "budget-exceeded" ? "budget-exceeded" : "failed") };
       }
-    } else if (event.type === "conversation.archived" && queue.inputs.length > 0 && queue.pauseReason === null) {
-      queue = { ...queue, revision: queue.revision + 1, pauseReason: "archived" };
+    } else if (event.type === "conversation.archived" && queue.inputs.length > 0 && queue.pauseReason !== "integrity") {
+      // Even an already paused queue moves revision: a delayed Continue from before archiving
+      // must not wake it after someone restores the conversation.
+      queue = { ...queue, revision: queue.revision + 1, pauseReason: queue.pauseReason ?? "archived" };
     }
   }
   return { queue, problems, acceptedSequences, running };

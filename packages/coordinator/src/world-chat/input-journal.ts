@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import {
-  WorldChatInputAttemptSchema, WorldChatInputConstraintsSchema, WorldChatInputRequestSchema,
+  ConversationIdSchema, WorldChatInputAttemptSchema, WorldChatInputConstraintsSchema, WorldChatInputRequestSchema,
   WorldChatInputRoutingSchema, WorldChatRunSchema, WorldChatStoredEventSchema,
   WORLD_CHAT_INPUT_SCHEMA_VERSION, newId, worldChatInputRouting,
   type ConversationId, type WorldChatEventEnvelope, type WorldChatInputAttempt,
@@ -12,6 +12,7 @@ import { stableJson } from "../arke-actions/digest.js";
 import { foldConversation } from "./fold.js";
 import { foldWorldChatInputs, isInputEvent, type InputStoredEvent } from "./input-fold.js";
 import { conversationDir, ConversationSequenceError, WorldChatStore } from "./store.js";
+import { openIntentOf } from "./wrapup-recovery.js";
 
 export function inputCommandDigest(command: unknown): string {
   return `sha256:${createHash("sha256").update(stableJson(command)).digest("hex")}`;
@@ -44,7 +45,7 @@ export class WorldChatInputJournal {
   readonly log: WorldChatStore;
   constructor(private readonly world: InputWorld, readonly conversationId: ConversationId,
     private readonly now: () => string = () => new Date().toISOString()) {
-    this.log = new WorldChatStore(conversationDir(world.dir, conversationId));
+    this.log = new WorldChatStore(conversationDir(world.dir, ConversationIdSchema.parse(conversationId)));
   }
 
   async read(): Promise<WorldChatInputQueue> {
@@ -59,8 +60,7 @@ export class WorldChatInputJournal {
     const routing = WorldChatInputRoutingSchema.parse(capture.routing);
     const constraints = WorldChatInputConstraintsSchema.parse(capture.constraints);
     return this.change(`record:${request.submissionId}`, request, ({ events, at }) => {
-      const view = foldConversation(this.conversationId, at, events, { messageLimit: Number.MAX_SAFE_INTEGER }).view;
-      if (view.status !== "open") throw new WorldChatInputError("unavailable", "Restore or reopen this conversation before adding a message.");
+      const view = this.openView(events, at);
       if ((request.subject !== undefined && stableJson(request.subject) !== stableJson(constraints.subject)) ||
         (request.replyOnly !== undefined && request.replyOnly !== constraints.replyOnly)) {
         throw new WorldChatInputError("conflict", "The captured constraints do not match this message.");
@@ -84,8 +84,7 @@ export class WorldChatInputJournal {
     return this.change(`control:${operationId}`, { kind: "continue", expectedRevision, routing: capturedRouting }, ({ queue, events }) => {
       this.expectRevision(queue, expectedRevision);
       if (foldWorldChatInputs(events).running.size > 0) throw new WorldChatInputError("unavailable", "Wait for the active reply to settle before continuing.");
-      const view = foldConversation(this.conversationId, this.now(), events).view;
-      if (view.status !== "open") throw new WorldChatInputError("unavailable", "Restore this conversation before continuing.");
+      this.openView(events, this.now());
       return { type: "input-queue.resumed", routing: capturedRouting };
     });
   }
@@ -99,8 +98,9 @@ export class WorldChatInputJournal {
 
   offer(messageId: string, expectedRevision: number, attempt: WorldChatInputAttempt, operationId: string): Promise<InputJournalReceipt> {
     const capturedAttempt = WorldChatInputAttemptSchema.parse(attempt);
-    return this.change(`native:${operationId}`, { kind: "offer", messageId, expectedRevision, attempt: capturedAttempt }, ({ queue }) => {
+    return this.change(`native:${operationId}`, { kind: "offer", messageId, expectedRevision, attempt: capturedAttempt }, ({ queue, events, at }) => {
       this.expectRevision(queue, expectedRevision);
+      this.openView(events, at);
       return { type: "input.offer-started", messageId, attempt: capturedAttempt };
     });
   }
@@ -127,8 +127,10 @@ export class WorldChatInputJournal {
         (capturedRun.model ?? null) !== capturedRouting.modelId) {
         throw new WorldChatInputError("stale", "The writing engine or model changed. Review the target before continuing.");
       }
-      const view = foldConversation(this.conversationId, this.now(), events).view;
-      if (view.status !== "open") throw new WorldChatInputError("unavailable", "Restore this conversation before continuing.");
+      const view = this.openView(events, this.now());
+      if (capturedRun.basedOnConversationSeq !== view.seq) {
+        throw new WorldChatInputError("stale", "The conversation changed. Rebuild the queued reply's context before starting it.");
+      }
       for (const captured of row.input.attachments) {
         if (!view.attachments.some(one => one.id === captured.id && one.contentHash === captured.contentHash)) {
           throw new WorldChatInputError("stale", "A queued attachment changed. The input was left waiting.");
@@ -144,6 +146,13 @@ export class WorldChatInputJournal {
 
   private expectRevision(queue: WorldChatInputQueue, expected: number): void {
     if (queue.revision !== expected) throw new WorldChatInputError("stale", "The queued messages changed. Look again before continuing.");
+  }
+
+  private openView(events: WorldChatEventEnvelope[], at: string) {
+    if (openIntentOf(events)) throw new WorldChatInputError("unavailable", "Wait for this conversation's wrap-up to finish.");
+    const view = foldConversation(this.conversationId, at, events).view;
+    if (view.status !== "open") throw new WorldChatInputError("unavailable", "Restore or reopen this conversation before adding a message.");
+    return view;
   }
 
   private async change(operationId: string, command: unknown,
@@ -163,6 +172,11 @@ export class WorldChatInputJournal {
         if (this.world.closingSignal.aborted) throw new WorldChatInputError("unavailable", "This world closed.");
         if (!await this.log.readMeta()) throw new WorldChatInputError("unavailable", "That conversation is no longer here.");
         const { events, problems } = await this.log.read();
+        // Deletion's intent and our append use the same sequence fence. Whichever commits
+        // first makes the other recheck, before a receipt or the directory rename can happen.
+        if (events.some(one => one.event.type === "deletion.intent-recorded")) {
+          throw new WorldChatInputError("unavailable", "This conversation is being deleted.");
+        }
         const folded = foldWorldChatInputs(events);
         if (problems.length || folded.problems.length) throw new WorldChatInputError("integrity", "This conversation's input history needs repair.");
         const original = events.find(envelope => envelope.requestId === requestId);

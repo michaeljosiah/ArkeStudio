@@ -21,6 +21,7 @@ import { materialiseDuplicateChoice } from "../../src/world-chat/materialise.js"
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { rejectPoint, returnToRail, savePoint, wrapUp, WrapUpError } from "../../src/world-chat/wrapup.js";
 import { WorldStore } from "../../src/world/store.js";
+import { WorldChatInputJournal } from "../../src/world-chat/input-journal.js";
 import { closeOnCleanup } from "../tmp.js";
 import { makeTempWorld } from "../world/helpers.js";
 
@@ -886,6 +887,31 @@ describe("what wrap-up refuses", () => {
       (err: unknown) => err instanceof WrapUpError && err.reason === "stale",
     );
     await w.store.close();
+  });
+
+  it("does not stage proposals when an input arrives between preflight and wrap-up intent", async t => {
+    const w = await world();
+    try {
+      const seq = await withCandidates(w.log, [candidate()]);
+      const journal = new WorldChatInputJournal(w.store, w.conversationId, NOW);
+      const append = WorldChatStore.prototype.append;
+      let admitted = false;
+      t.mock.method(WorldChatStore.prototype, "append", async function (this: WorldChatStore, ...args: Parameters<typeof append>) {
+        if (this.dir === w.log.dir && args[0].type === "wrapup.intent-recorded" && !admitted) {
+          admitted = true;
+          await journal.record({ submissionId: "before-wrap-up", text: "One more direction", attachmentIds: [], delivery: "next", expectedRunId: null },
+            { routing: { adapter: "fake", modelId: null, fingerprint: `sha256:${"a".repeat(64)}` }, constraints: { replyOnly: false } });
+        }
+        return append.apply(this, args);
+      });
+      await assert.rejects(wrapUp({ store: w.store, gate: w.gate, conversationId: w.conversationId,
+        requestId: "wrap-lost-admission-race", expectedConversationSeq: seq, now: NOW }),
+      (error: unknown) => error instanceof WrapUpError && error.reason === "stale");
+      assert.equal(admitted, true);
+      assert.deepEqual(await w.ours(), []);
+      assert.equal((await journal.read()).inputs.length, 1);
+      assert.equal((await w.log.read()).events.some(one => one.event.type === "wrapup.intent-recorded"), false);
+    } finally { await w.store.close(); }
   });
 
   it("leaves no proposal behind when a change cannot be written", async () => {

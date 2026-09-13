@@ -289,6 +289,7 @@ export class WorldChatStore {
             } finally {
               await handle.close();
             }
+            this.writer.tail = current;
             result = { envelope: existing, deduplicated: true };
             return;
           }

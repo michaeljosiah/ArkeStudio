@@ -69,23 +69,32 @@ async function refreshConversationSummaryOnce(
   const messages: Array<Pick<WorldChatMessage, "id" | "role" | "text">> = [];
   const inputs = foldWorldChatInputs(events);
   if (inputs.problems.length) return false;
+  const completed = new Map(events.flatMap(({ event, seq }) => event.type === "turn.completed" ? [[event.run.id, seq] as const] : []));
+  const summarisedIds = new Set(events.flatMap(({ event }) => event.type === "summary.updated" ? event.sourceMessageIds : []));
+  let lateInclusion = false;
+  let includedThroughSeq = 0;
   let turnCount = 0;
   for (const envelope of events) {
-    if (envelope.seq <= through || envelope.seq > throughSeq) continue;
-    if (envelope.event.type === "turn.started" ||
-      (envelope.event.type === "input.promoted" && inputs.acceptedSequences.has(envelope.seq))) messages.push(envelope.event.message);
-    if (envelope.event.type === "input.included" && inputs.acceptedSequences.has(envelope.seq)) {
+    const inWindow = envelope.seq > through && envelope.seq <= throughSeq;
+    if (inWindow && (envelope.event.type === "turn.started" ||
+      (envelope.event.type === "input.promoted" && inputs.acceptedSequences.has(envelope.seq)))) messages.push(envelope.event.message);
+    if (envelope.event.type === "input.included" && inputs.acceptedSequences.has(envelope.seq) &&
+      completed.has(envelope.event.attempt.runId) && !summarisedIds.has(envelope.event.messageId)) {
       const messageId = envelope.event.messageId;
       const input = inputs.queue.inputs.find(row => row.input.messageId === messageId)?.input;
       if (input) messages.push({ id: messageId, role: "user", text: input.request.text });
+      includedThroughSeq = Math.max(includedThroughSeq, envelope.seq);
+      lateInclusion ||= envelope.seq > completed.get(envelope.event.attempt.runId)!;
     }
-    if (envelope.event.type === "turn.completed") {
+    if (inWindow && envelope.event.type === "turn.completed") {
       messages.push(envelope.event.message);
       turnCount++;
     }
   }
   const recentTurnsLength = messages.reduce((sum, message) => sum + message.text.length, 0);
-  if (!shouldSummarise({ turnCount, recentTurnsLength })) return false;
+  // Reconciliation may arrive after completion or even after its summary. Include it once
+  // without advancing the normal boundary past a later turn that is still running.
+  if (!lateInclusion && !shouldSummarise({ turnCount, recentTurnsLength })) return false;
 
   const text = await summarise({
     ...(previous?.event.type === "summary.updated" ? { previousSummary: previous.event.text } : {}),
@@ -99,7 +108,7 @@ async function refreshConversationSummaryOnce(
   });
   await store.append(
     { type: "summary.updated", ...summary, sourceMessageIds: [...summary.sourceMessageIds] },
-    { at: new Date().toISOString(), requestId: `conversation-summary:${throughSeq}` },
+    { at: new Date().toISOString(), requestId: `conversation-summary:${throughSeq}:${includedThroughSeq}` },
   );
   return true;
 }

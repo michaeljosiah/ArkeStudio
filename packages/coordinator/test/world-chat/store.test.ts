@@ -237,6 +237,23 @@ describe("world chat store", () => {
     await assert.rejects(s.append(event, { at: AT, requestId: "same-submission" }), ConversationIntegrityError);
   });
 
+  it("restores the foreign-write guard when an uncertain append is reconfirmed", async () => {
+    const s = await store();
+    const event = message("original direction");
+    await s.append(message("before"), { at: AT });
+    const probe = await open(s.eventsPath, "r");
+    const handles = Object.getPrototypeOf(probe) as { sync: () => Promise<void> };
+    await probe.close();
+    const real = handles.sync;
+    handles.sync = async () => { throw new Error("sync failed"); };
+    try {
+      await assert.rejects(s.append(event, { at: AT, requestId: "reconfirm" }), /sync failed/);
+    } finally { handles.sync = real; }
+    assert.equal((await s.append(event, { at: AT, requestId: "reconfirm" })).deduplicated, true);
+    await writeFile(s.eventsPath, (await readFile(s.eventsPath, "utf8")).replace("original direction", "changed direction!"));
+    await assert.rejects(s.append(message("after"), { at: AT }), ConversationIntegrityError);
+  });
+
   it("refuses to append when something else has written to the log", async () => {
     const s = await store();
     await s.append(message("ours"), { at: AT });

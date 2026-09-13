@@ -3,7 +3,7 @@ import { WorldChatSubjectSchema } from "./editor-request.js";
 import { ChatAttachmentIdSchema, IsoDateTimeSchema, MessageIdSchema, RunIdSchema, Sha256Schema, TurnIdSchema } from "./ids.js";
 
 /** SPEC-045: inputs exist before they belong to a turn. Never invent a turn to store a queue row. */
-export const WORLD_CHAT_INPUT_BOUNDS = { text: 16_000, attachments: 20, unresolved: 10 } as const;
+export const WORLD_CHAT_INPUT_BOUNDS = { text: 16_000, attachments: 20, unresolved: 10, settled: 10 } as const;
 export const WORLD_CHAT_INPUT_SCHEMA_VERSION = 23;
 
 export const WorldChatInputRequestSchema = z.object({
@@ -123,8 +123,10 @@ export const WorldChatInputQueueViewSchema = z.object({
 export type WorldChatInputQueueView = z.infer<typeof WorldChatInputQueueViewSchema>;
 
 export function projectWorldChatInputQueue(queue: WorldChatInputQueue): WorldChatInputQueueView {
+  const pending = new Set(unresolvedWorldChatInputs(queue));
+  const recent = new Set(queue.inputs.filter(row => !pending.has(row)).slice(-WORLD_CHAT_INPUT_BOUNDS.settled));
   return { revision: queue.revision, pauseReason: queue.pauseReason,
-    inputs: queue.inputs.map(({ attempt, boundary: _boundary, ...row }) => ({
+    inputs: queue.inputs.filter(row => pending.has(row) || recent.has(row)).map(({ attempt, boundary: _boundary, ...row }) => ({
       ...row, removable: row.status === "queued" && attempt === undefined,
     })),
   };
