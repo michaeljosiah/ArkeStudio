@@ -97,6 +97,18 @@ const SCREENS = [
   { group: "Around it", screen: "Chapter (story)", frame: "126a", route: "#/w/:worldId/p/:prodId/chapters/:id", status: "built", checked: "2026-09-07",
     controls: ["Read the chapter"],
     notes: ["Story mode for novelists, turns 126–131, PRs 877–933: the chapter read, typed into and heard, beside what it draws on."] },
+  { group: "Around it", screen: "Chapter · audiobook view (story)", frame: "146b", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drawn", checked: "2026-09-13",
+    controls: ["Read the chapter", "Direct this chapter"],
+    notes: ["Turn 146: the manuscript as blocks, a state a block, the block's direction and its takes beside it, the dock directing the chapter. Not built."] },
+  { group: "Around it", screen: "Audiobook (story)", frame: "146a", route: "#/w/:worldId/p/:prodId/story/audiobook", status: "drawn", checked: "2026-09-13",
+    controls: ["Read the book", "Export"],
+    notes: ["Turn 146: the door — <code>Narrator · Cast</code>, a row a chapter with its state, one primary for the batch. Not built."] },
+  { group: "Around it", screen: "Read the book dialog (story)", frame: "146c", route: "#/w/:worldId/p/:prodId/story/audiobook?read=1", status: "drawn", checked: "2026-09-13",
+    controls: ["Confirm 9,400 characters · $0.94", "Cancel"],
+    notes: ["Turn 146: the price asked once — each voice with its reader and its characters, the narrator's share free, a speaker with no voice in warning, where the words go. Not built."] },
+  { group: "Around it", screen: "Export audiobook sheet (story)", frame: "146d", route: "#/w/:worldId/p/:prodId/story/audiobook?export=1", status: "drawn", checked: "2026-09-13",
+    controls: ["Chapter files", "Book", "Retail", "As made", "Read the rest · 9 chapters · $0.94", "Show in folder", "Export 6 chapters"],
+    notes: ["Turn 146: chapter files or a book, the retail profile as data, chapters left out counted with the dashed door, the delivered folder. Not built."] },
 ];
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
@@ -223,14 +235,17 @@ const screensHtml = sections.map((s) => {
     </section>`;
   }
   const width = s.root.match(/width:\s*(\d+)px/)?.[1] ?? "1360";
-  const rules = s.rules.length ? `<div class="rules"><div class="rules__head">Binding · turn <a href="Arke%20Studio.dc.html#t${s.turn}">${s.turn}</a> <span>${s.turnName}</span></div>${s.rules.map((r) => `<p class="dv-rule">${r}</p>`).join("")}</div>` : "";
+  // A rule copied out of the master keeps its `#126a` links; on this page those ids do not
+  // exist, so the anchors are pointed back at the master (codex on PR 1164).
+  const toMaster = (markup) => markup.replace(/href="#/g, 'href="Arke%20Studio.dc.html#');
+  const rules = s.rules.length ? `<div class="rules"><div class="rules__head">Binding · turn <a href="Arke%20Studio.dc.html#t${s.turn}">${s.turn}</a> <span>${toMaster(s.turnName)}</span></div>${s.rules.map((r) => `<p class="dv-rule">${toMaster(r)}</p>`).join("")}</div>` : "";
   return `
     <section class="screen" id="${esc(slug(s.screen))}">
       <div class="screen__head">
         <div><h2>${esc(s.screen)}</h2><div class="screen__meta"><span class="tag tag--${s.status}">${status}</span><code>${esc(s.route)}</code><span>checked ${s.checked}</span></div></div>
         <a class="screen__frame" href="Arke%20Studio.dc.html#${s.frame}">${s.frame} in the master →</a>
       </div>
-      <p class="screen__caption">${s.caption}</p>
+      <p class="screen__caption">${toMaster(s.caption)}</p>
       <div class="stage" data-width="${width}"><div class="stage__scale" style="width:${width}px">${s.root}</div></div>
       <div class="built built--${s.status}"><div class="built__head"><span class="tag tag--${s.status}">${status}</span><span class="built__label">what shipped</span></div>${notes}</div>
       ${rules}
