@@ -77,6 +77,33 @@ test("parallel edits retain both changes and a cancelled queued write changes no
   assert.equal(await readFile(join(f.root, "draft.txt"), "utf8"), "ALPHA BETA");
 });
 
+test("text edits refuse image and binary bytes without changing the file", async t => {
+  const f = await fixture(); t.after(() => rm(f.base, { recursive: true, force: true }));
+  // A complete 1x1 JPEG, including its JFIF metadata and encoded image data.
+  const jpeg = Buffer.from("/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD8qqKKKAP/2Q==", "base64");
+  for (const [name, bytes, oldText] of [
+    ["image.png", png, "IHDR"],
+    ["image.jpg", jpeg, "JFIF"],
+    ["truncated.png", Buffer.concat([png.subarray(0, 8), Buffer.from("target")]), "target"],
+    ["truncated.gif", Buffer.from("GIF89a target"), "target"],
+    ["null-bytes.bin", Buffer.from("before\0target after"), "target"],
+    ["invalid-utf8.bin", Buffer.from([0xc0, 0xaf, ...Buffer.from("target")]), "target"],
+  ] as const) {
+    await writeFile(join(f.root, name), bytes);
+    await assert.rejects(f.run("edit", { path: name, oldText, newText: "changed" }), /Only UTF-8 text files/, name);
+    assert.deepEqual(await readFile(join(f.root, name)), bytes, `${name} remains byte-identical`);
+  }
+});
+
+test("text edits preserve valid Unicode, a BOM and line endings", async t => {
+  const f = await fixture(); t.after(() => rm(f.base, { recursive: true, force: true }));
+  const original = "\ufeffcafé 猫 👩‍🚀 \ufffd\t\r\nThe stage awaits.\r\n";
+  await writeFile(join(f.root, "unicode.txt"), original);
+  const result = await f.run("edit", { path: "unicode.txt", oldText: "猫", newText: "犬" });
+  assert.equal(result.result.success, true);
+  assert.deepEqual(await readFile(join(f.root, "unicode.txt")), Buffer.from(original.replace("猫", "犬")));
+});
+
 test("outside paths, sibling prefix collisions, symlinks, nested search links and hardlinks do not expose contents", async t => {
   const f = await fixture(); t.after(() => rm(f.base, { recursive: true, force: true }));
   await assert.rejects(f.run("read", { path: "../secret.txt" }), /confinement/);

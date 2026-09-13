@@ -9,7 +9,7 @@ export interface WireModel {
   disabled?: boolean;
   enabled?: boolean;
   limit?: { context?: number; input?: number };
-  capabilities?: { input?: string[] | { text?: boolean; image?: boolean } };
+  capabilities?: { input?: string[] | Record<string, boolean | undefined> };
 }
 
 export function modelEnabled(model: WireModel): boolean {
@@ -20,8 +20,10 @@ export function modelMetadata(model: WireModel): Pick<ModelInfo, "displayName" |
   const input = model.capabilities?.input;
   const inputModalities = Array.isArray(input)
     ? input.filter((value): value is "text" | "image" => value === "text" || value === "image")
-    : input && typeof input.text === "boolean" && typeof input.image === "boolean"
-      ? (["text", "image"] as const).filter((value) => input[value])
+    // Sparse compatible catalogs still supply evidence. Preserve their explicit true
+    // values; false-only evidence must not become an unknown, unrestricted model.
+    : input && Object.values(input).some(value => typeof value === "boolean")
+      ? (["text", "image"] as const).filter((value) => input[value] === true)
       : undefined;
   const limit = model.limit?.input ?? model.limit?.context;
   return {

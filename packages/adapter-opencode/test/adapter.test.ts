@@ -457,12 +457,18 @@ describe("listing what the harness can run", () => {
   it("carries measured v1 modalities and input limits while dropping disabled rows", async () => {
     stub.configProviders = { providers: [{ id: "custom-provider", models: {
       "team/model:tag": { name: "Custom", capabilities: { input: { text: true, image: false } }, limit: { input: 32_000, context: 64_000 } },
+      "sparse-text": { capabilities: { input: { text: true } } },
+      "sparse-image": { capabilities: { input: { image: true } } },
+      "sparse-false": { capabilities: { input: { image: false } } },
       "unknown-capabilities": { limit: { context: 16_000 } },
       "disabled": { disabled: true },
       "deprecated": { status: "deprecated" },
     } }] };
     assert.deepEqual(await adapter.listModels(), [
       { id: "team/model:tag", provider: "custom-provider", displayName: "Custom", inputModalities: ["text"], inputTokenLimit: 32_000 },
+      { id: "sparse-text", provider: "custom-provider", inputModalities: ["text"] },
+      { id: "sparse-image", provider: "custom-provider", inputModalities: ["image"] },
+      { id: "sparse-false", provider: "custom-provider", inputModalities: [] },
       { id: "unknown-capabilities", provider: "custom-provider", inputTokenLimit: 16_000 },
     ]);
   });

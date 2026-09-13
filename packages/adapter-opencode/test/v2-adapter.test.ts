@@ -452,16 +452,22 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
       stub.models = [
         { id: "gpt-5.4-mini", providerID: "openai", name: "GPT-5.4 mini", limit: { context: 400_000, input: 272_000 }, capabilities: { input: ["text", "image"] } },
         { id: "old-model", providerID: "openai", limit: { context: 8_000 } },
+        { id: "sparse-text", providerID: "openai", capabilities: { input: { text: true } } },
+        { id: "sparse-image", providerID: "openai", capabilities: { input: { image: true } } },
+        { id: "sparse-false", providerID: "openai", capabilities: { input: { text: false } } },
         { id: "disabled", providerID: "openai", disabled: true },
         { id: "unavailable", providerID: "openai", enabled: false },
         { id: "deprecated", providerID: "openai", status: "deprecated" },
       ];
       stub.defaultModel = { id: "gpt-5.4-mini", providerID: "openai" };
       const models = await adapter.listModels();
-      assert.equal(models.length, 2);
+      assert.equal(models.length, 5);
       const def = models.find((m) => m.isDefault);
       assert.equal(def?.id, "gpt-5.4-mini");
       assert.deepEqual(def?.inputModalities, ["text", "image"]);
+      assert.deepEqual(models.find(model => model.id === "sparse-text")?.inputModalities, ["text"]);
+      assert.deepEqual(models.find(model => model.id === "sparse-image")?.inputModalities, ["image"]);
+      assert.deepEqual(models.find(model => model.id === "sparse-false")?.inputModalities, []);
       assert.equal(def?.inputTokenLimit, 272_000);
       assert.equal(adapter.knownInputTokenLimit(), 272_000, "input beats context when the provider states both");
       stub.models = [];

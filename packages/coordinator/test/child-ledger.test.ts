@@ -7,6 +7,7 @@ import { tempDir } from "./tmp.js";
 import { until, untilAsync } from "./wait.js";
 import {
   ChildLedger,
+  listDescendants,
   ownerStamp,
   platformProbe,
   runCollect,
@@ -268,6 +269,19 @@ describe("ChildLedger", () => {
         `start ${me.startedAt} vs expected ${expected}`,
       );
     }
+  });
+
+  it("listDescendants reports an owned child's image, creation time and parent", { skip: process.platform !== "win32" }, async () => {
+    const spawnedAt = Date.now();
+    const child = spawnIdle();
+    try {
+      const found = (await listDescendants(process.pid)).find(row => row.pid === child.pid);
+      assert.ok(found, "the native process table must include the spawned child");
+      assert.equal(found.parentPid, process.pid);
+      assert.equal(found.image, nodeImage);
+      assert.ok(found.startedAt !== null, "native child identity must include creation time");
+      assert.ok(Math.abs(found.startedAt - spawnedAt) < 15_000);
+    } finally { child.kill("SIGKILL"); }
   });
 
   it("survives a corrupt ledger file", async () => {

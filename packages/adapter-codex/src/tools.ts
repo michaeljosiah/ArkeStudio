@@ -1,4 +1,5 @@
 import { inflateSync } from "node:zlib";
+import { isUtf8 } from "node:buffer";
 import { basename, join, relative } from "node:path";
 import { ConfinedFiles, ConfinementError, confinedTarget, type FileIdentity } from "./confined-files.js";
 export { ConfinementError, resolveRoot, within } from "./confined-files.js";
@@ -26,7 +27,7 @@ const FILE_TOOLS: DynamicFunction[] = [
   { type: "function", name: "list", description: "List one directory in this session. Links are excluded.", inputSchema: schema({ path: string }, []) },
   { type: "function", name: "search", description: "Find literal text inside this session's text files. No shell or regular expressions. Results include file names and line numbers.", inputSchema: schema({ query: string, path: string, limit: { type: "integer", minimum: 1, maximum: 100 } }, ["query"]) },
   { type: "function", name: "write", description: "Write a UTF-8 file inside this session. Creates parent directories. Only proposal files may be changed.", inputSchema: schema({ path: string, content: string }, ["path", "content"]) },
-  { type: "function", name: "edit", description: "Replace exactly one matching text passage inside a session file. Refuses zero or multiple matches.", inputSchema: schema({ path: string, oldText: string, newText: string }, ["path", "oldText", "newText"]) },
+  { type: "function", name: "edit", description: "Replace exactly one matching passage inside a session's UTF-8 text file. Refuses binary files and zero or multiple matches.", inputSchema: schema({ path: string, oldText: string, newText: string }, ["path", "oldText", "newText"]) },
 ];
 const INTENTS = { read: "read", list: "list", search: "search", write: "edit", edit: "edit" } as const;
 
@@ -184,7 +185,11 @@ async function executeFileTool(session: ToolSession, files: ConfinedFiles, name:
   }
   const raw = argument(args, "path"); let content: string;
   if (name === "edit") {
-    const original = (await files.read(raw)).toString("utf8"); const old = argument(args, "oldText");
+    const bytes = await files.read(raw);
+    // Decoding arbitrary bytes replaces invalid sequences and would corrupt the rest of
+    // an asset even when the requested passage matches. Validate before any mutation.
+    if (bytes.includes(0) || !isUtf8(bytes) || imageType(bytes)) throw new Error("Only UTF-8 text files can be edited.");
+    const original = bytes.toString("utf8"); const old = argument(args, "oldText");
     if (!old || original.indexOf(old) < 0 || original.indexOf(old) !== original.lastIndexOf(old)) throw new Error("Edit needs exactly one matching passage.");
     content = original.replace(old, () => argument(args, "newText"));
   } else content = argument(args, "content");

@@ -1,6 +1,6 @@
 import { spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { basename } from "node:path";
-import { killTree, listDescendants, ownerStamp, platformProbe, type DescendantInfo } from "../child-ledger.js";
+import { killTree, listDescendants, ownerStamp, platformProbe, windowsProcessPreamble, type DescendantInfo } from "../child-ledger.js";
 import { leashChildToParent } from "../job-leash.js";
 import type { SupervisorDeps } from "../supervisor.js";
 
@@ -47,16 +47,17 @@ function registerOwnedExitBackstop(
     // A wrapper may already have exited. Check every saved helper's image AND creation
     // time before touching its pid; a stale snapshot never authorizes killing a new owner.
     const script = [
-      "$ErrorActionPreference = 'Stop'",
-      `$expected = @(ConvertFrom-Json -InputObject '${JSON.stringify(expected).replace(/'/g, "''")}')`,
-      "$filter = ($expected | ForEach-Object { 'ProcessId=' + [int]$_.pid }) -join ' OR '",
-      "$rows = @(Get-CimInstance Win32_Process -Filter $filter)",
+      windowsProcessPreamble(true),
+      `$expected = @(Microsoft.PowerShell.Utility\\ConvertFrom-Json -InputObject '${JSON.stringify(expected).replace(/'/g, "''")}')`,
+      "$filter = (@(foreach ($entry in $expected) { 'ProcessId=' + [int]$entry.pid })) -join ' OR '",
+      "$rows = @(CimCmdlets\\Get-CimInstance Win32_Process -Filter $filter)",
       "foreach ($entry in $expected) {",
-      "  $row = $rows | Where-Object { $_.ProcessId -eq [int]$entry.pid } | Select-Object -First 1",
+      "  $row = $null",
+      "  foreach ($candidate in $rows) { if ($candidate.ProcessId -eq [int]$entry.pid) { $row = $candidate; break } }",
       "  if ($null -eq $row -or $null -eq $row.CreationDate) { continue }",
       "  $started = ([System.DateTimeOffset]$row.CreationDate).ToUnixTimeMilliseconds()",
       "  if ($row.Name.ToLowerInvariant() -ceq [string]$entry.image -and [Math]::Abs($started - [double]$entry.startedAt) -le 5000) {",
-      "    Stop-Process -Id ([int]$entry.pid) -Force -ErrorAction SilentlyContinue",
+      "    Microsoft.PowerShell.Management\\Stop-Process -Id ([int]$entry.pid) -Force -ErrorAction SilentlyContinue",
       "  }",
       "}",
     ].join("\n");

@@ -74,15 +74,27 @@ export function ownerStamp(): { ownerPid: number; ownerStartedAt: number } {
 const validPids = (pids: number[]): number[] =>
   [...new Set(pids)].filter((p) => Number.isSafeInteger(p) && p > 0);
 
+/** Fixed OS modules only: unqualified first-use discovery can stall a fresh Windows host. */
+export function windowsProcessPreamble(includeManagement = false): string {
+  // CimCmdlets' OS manifest uses Utility's Set-Alias while loading.
+  const modules = ["Microsoft.PowerShell.Utility", "CimCmdlets", ...(includeManagement ? ["Microsoft.PowerShell.Management"] : [])];
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    "$PSModuleAutoLoadingPreference = 'None'",
+    "$ProgressPreference = 'SilentlyContinue'",
+    ...modules.map(name => `Microsoft.PowerShell.Core\\Import-Module -Name ([IO.Path]::Combine($PSHOME, 'Modules\\${name}\\${name}.psd1')) -ErrorAction Stop`),
+  ].join("\n");
+}
+
 /** One CIM query for the whole batch; name and creation time back the pid-reuse guards. */
 async function probeWin32(pids: number[]): Promise<Map<number, ProcessInfo>> {
   const filter = pids.map((p) => `ProcessId=${p}`).join(" OR ");
   const script = [
-    "$ErrorActionPreference = 'Stop'",
-    `$rows = @(Get-CimInstance Win32_Process -Filter '${filter}' | ForEach-Object {`,
-    "  [pscustomobject]@{ p = [int]$_.ProcessId; n = [string]$_.Name; s = if ($_.CreationDate) { ([System.DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() } else { $null } }",
+    windowsProcessPreamble(),
+    `$rows = @(foreach ($row in @(CimCmdlets\\Get-CimInstance Win32_Process -Filter '${filter}')) {`,
+    "  [pscustomobject]@{ p = [int]$row.ProcessId; n = [string]$row.Name; s = if ($row.CreationDate) { ([System.DateTimeOffset]$row.CreationDate).ToUnixTimeMilliseconds() } else { $null } }",
     "})",
-    "ConvertTo-Json -Compress -InputObject $rows",
+    "Microsoft.PowerShell.Utility\\ConvertTo-Json -Compress -InputObject $rows",
   ].join("\n");
   const stdout = await runCollect(
     powershellPath(),
@@ -178,11 +190,11 @@ export async function listDescendants(rootPid: number, signal?: AbortSignal): Pr
   // so the tree walk happens here. Dead parents keep their pid in ParentProcessId, which is
   // exactly what makes orphaned grandchildren findable.
   const script = [
-    "$ErrorActionPreference = 'Stop'",
-    "$rows = @(Get-CimInstance Win32_Process | ForEach-Object {",
-    "  [pscustomobject]@{ p = [int]$_.ProcessId; pp = [int]$_.ParentProcessId; n = [string]$_.Name; s = if ($_.CreationDate) { ([System.DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() } else { $null } }",
+    windowsProcessPreamble(),
+    "$rows = @(foreach ($row in @(CimCmdlets\\Get-CimInstance Win32_Process)) {",
+    "  [pscustomobject]@{ p = [int]$row.ProcessId; pp = [int]$row.ParentProcessId; n = [string]$row.Name; s = if ($row.CreationDate) { ([System.DateTimeOffset]$row.CreationDate).ToUnixTimeMilliseconds() } else { $null } }",
     "})",
-    "ConvertTo-Json -Compress -InputObject $rows",
+    "Microsoft.PowerShell.Utility\\ConvertTo-Json -Compress -InputObject $rows",
   ].join("\n");
   const stdout = await runCollect(
     powershellPath(),
