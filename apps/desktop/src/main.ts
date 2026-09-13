@@ -54,6 +54,7 @@ import {
   probeRuntime,
   SHIPPED_MANIFEST,
   BREEZE_MODEL,
+  FISH_MODEL,
   VOXTRAL_MODEL,
   type VoiceCatalogueClient,
   type VoiceSlotClient,
@@ -87,6 +88,7 @@ import {
   comfyUiWeightsComponentId,
   ROSTER,
   skillFor,
+  type ProviderId,
   type ThemePreference,
   type VoiceRuntimeFailure,
   type VoiceRuntimeStatus,
@@ -1295,23 +1297,28 @@ async function initialize(): Promise<{ port: number }> {
       externallyPresent: async (entryId) =>
         entryId === "comfyui-runtime" ? comfyUiEngine.externallySelected() : false,
     },
-    // Breeze keeps a cloned voice as a slot on the account; the library asks for it here (SPEC-046 R-13).
+    // Breeze and Fish keep a cloned voice on the account — a slot, a model; the library asks for
+    // it here (SPEC-046 R-13). A reader whose client carries no slot calls keeps none.
     hostedVoiceSlots: {
       save: (provider, key, input, signal) => {
-        if (provider !== "breezeblue") return Promise.reject(new Error(`${provider} keeps no voice slots`));
-        return (providerClients.breezeblue as VoiceSlotClient).saveVoice(key, input, signal);
+        const client = providerClients[provider as ProviderId] as Partial<VoiceSlotClient> | undefined;
+        if (client?.saveVoice === undefined) return Promise.reject(new Error(`${provider} keeps no voice slots`));
+        return client.saveVoice(key, input, signal);
       },
       remove: (provider, key, voiceId, signal) => {
-        if (provider !== "breezeblue") return Promise.resolve();
-        return (providerClients.breezeblue as VoiceSlotClient).deleteVoice(key, voiceId, signal);
+        const client = providerClients[provider as ProviderId] as Partial<VoiceSlotClient> | undefined;
+        if (client?.deleteVoice === undefined) return Promise.resolve();
+        return client.deleteVoice(key, voiceId, signal);
       },
       find: (provider, key, name, signal) => {
-        if (provider !== "breezeblue") return Promise.resolve(null);
-        return (providerClients.breezeblue as VoiceSlotClient).findVoice(key, name, signal);
+        const client = providerClients[provider as ProviderId] as Partial<VoiceSlotClient> | undefined;
+        if (client?.findVoice === undefined) return Promise.resolve(null);
+        return client.findVoice(key, name, signal);
       },
       has: (provider, key, voiceId, signal) => {
-        if (provider !== "breezeblue") return Promise.resolve(false);
-        return (providerClients.breezeblue as VoiceSlotClient).hasVoice(key, voiceId, signal);
+        const client = providerClients[provider as ProviderId] as Partial<VoiceSlotClient> | undefined;
+        if (client?.hasVoice === undefined) return Promise.resolve(false);
+        return client.hasVoice(key, voiceId, signal);
       },
     },
     comfyui: {
@@ -1417,11 +1424,16 @@ async function initialize(): Promise<{ port: number }> {
           provider: "breezeblue",
           list: (key: string) => (providerClients.breezeblue as VoiceCatalogueClient).listVoicesCatalog(key),
         },
+        {
+          provider: "fishaudio",
+          list: (key: string) => (providerClients.fishaudio as VoiceCatalogueClient).listVoicesCatalog(key),
+        },
       ],
       // And the library's own voices read through them (R-10), when keyed.
       hostedReaders: [
         { provider: "mistral", model: VOXTRAL_MODEL },
         { provider: "breezeblue", model: BREEZE_MODEL },
+        { provider: "fishaudio", model: FISH_MODEL },
       ],
     },
     observeEvent: (event) => {

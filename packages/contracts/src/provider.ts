@@ -39,6 +39,7 @@ export const ProviderIdSchema = z.enum([
   "elevenlabs",
   "mistral",
   "breezeblue",
+  "fishaudio",
   "ollama",
   "kokoro",
   "whispercpp",
@@ -128,6 +129,12 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
   },
   breezeblue: {
     displayName: "BreezeBlue",
+    capabilities: ["voice-tts", "voice-clone"],
+    local: false,
+    credential: "in-app",
+  },
+  fishaudio: {
+    displayName: "Fish Audio",
     capabilities: ["voice-tts", "voice-clone"],
     local: false,
     credential: "in-app",

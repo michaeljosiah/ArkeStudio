@@ -241,6 +241,7 @@ export const ELEVENLABS_VOICE_MODEL = "eleven_multilingual_v2" as const;
 export const HOSTED_VOICE_READERS: Readonly<Record<string, string>> = {
   mistral: "voxtral-mini-tts",
   breezeblue: "breeze-tts-2",
+  fishaudio: "fish-s2.1-pro",
 };
 
 export function isHostedVoiceReader(provider: string, model?: string): boolean {
@@ -501,6 +502,26 @@ export function breezeDirection(delivery: Delivery): { tag?: string; instruction
   return { ...(tag !== undefined ? { tag } : {}), ...(instruction !== undefined ? { instruction } : {}) };
 }
 
+/**
+ * Fish Audio's S2.1 takes direction as a `[bracket]` phrase in the text — natural language, not
+ * a fixed set, read by the model like the rest of the line (SPEC-046 §2.9). No settings travel:
+ * `temperature` and `top_p` are sampling knobs, not a delivery, and stay at the vendor's
+ * defaults. Every phrase here is unprobed; the listen tunes them, and nothing else should.
+ */
+export const FISH_DELIVERY: Record<Delivery, { settings: Record<string, number>; tag: string }> = {
+  measured: { settings: {}, tag: "calm and even, at a steady pace" },
+  whispered: { settings: {}, tag: "whispering" },
+  breaking: { settings: {}, tag: "voice breaking, through tears" },
+  cold: { settings: {}, tag: "cold and flat, without warmth" },
+  warm: { settings: {}, tag: "warm and gentle" },
+  urgent: { settings: {}, tag: "urgent, fast and pressing" },
+};
+
+/** The phrase a Fish read carries for a delivery, placed in the text by the client. */
+export function fishDirection(delivery: Delivery): { tag: string } {
+  return { tag: FISH_DELIVERY[delivery].tag };
+}
+
 export type DeliveryMapping =
   | { ok: true; params: Record<string, number> }
   | { ok: false; reason: string };
@@ -529,6 +550,8 @@ export function deliveryParams(provider: string, delivery: Delivery): DeliveryMa
     };
   }
   if (provider === "breezeblue") return { ok: true, params: BREEZE_DELIVERY[delivery].settings };
+  // Fish's direction is words in the text (FISH_DELIVERY); there are no numbers to carry.
+  if (provider === "fishaudio") return { ok: true, params: FISH_DELIVERY[delivery].settings };
   return { ok: false, reason: `${provider} has no declared delivery mapping — the read will use provider defaults` };
 }
 

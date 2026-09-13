@@ -8,6 +8,7 @@ import {
   type ProgressSocket,
 } from "./clients/comfyui.js";
 import { BreezeBlueClient } from "./clients/breezeblue.js";
+import { FishAudioClient } from "./clients/fishaudio.js";
 import { ElevenLabsClient } from "./clients/elevenlabs.js";
 import { FalClient } from "./clients/fal.js";
 import { HiggsfieldClient } from "./clients/higgsfield.js";
@@ -118,6 +119,7 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
     // `cloudSources`, not through anything here.
     mistral: captureProviderClient("mistral", (fetch) => new MistralClient(fetch), fetchImpl, capture, undefined, transport),
     breezeblue: captureProviderClient("breezeblue", (fetch) => new BreezeBlueClient(fetch), fetchImpl, capture, undefined, transport),
+    fishaudio: captureProviderClient("fishaudio", (fetch) => new FishAudioClient(fetch), fetchImpl, capture, undefined, transport),
     ollama: captureProviderClient("ollama", (fetch) => new OllamaClient(fetch), fetchImpl, capture),
     ...(deps.voxa === undefined
       ? {}

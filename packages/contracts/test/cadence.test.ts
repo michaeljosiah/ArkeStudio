@@ -68,3 +68,25 @@ it("a paren row writes Breeze's tags and lifts the delivery's sentence out of th
   assert.equal(bracket.providerText, "Wait [long pause]  here. [inhales deeply] ");
   assert.equal(bracket.instructions, undefined);
 });
+
+it("a Fish row carries the delivery as a bracket phrase in the text and nothing beside it (SPEC-046 §2.9)", () => {
+  // Fish's S2 reads `[whispering]` as language: the same bracket ink as ElevenLabs' cues, with
+  // the delivery's phrase in front of the line and no instruction field to lift it into.
+  const fish: Pick<ManifestModel, "id" | "provider" | "cadence"> = { id: "fish-s2.1-pro", provider: "fishaudio", cadence: {
+    deliveries: ["measured", "whispered", "breaking"], speed: { min: 0.7, max: 1.3 }, pause: "best-effort-audio-tag", emphasis: "unsupported",
+    breath: "best-effort-audio-tag", outputTimestamps: "none", deliveryMappings: {
+      measured: { settings: {}, tag: "calm and even" },
+      whispered: { settings: {}, tag: "whispering" },
+      breaking: { settings: {}, tag: "voice breaking, through tears" } } } };
+  const text = "Wait here.";
+  const cues: CadencePlan["cues"] = [{ kind: "pause", at: 4, length: "long" }];
+  const whispered = mapCadence(text, hash(text), { ...plan(text, cues), delivery: "whispered" }, fish);
+  assert.equal(whispered.providerText, "[whispering] Wait [long pause]  here.");
+  assert.equal(whispered.instructions, undefined);
+  assert.equal(whispered.controls[0]?.status, "best-effort");
+  assert.equal(whispered.controls[0]?.method, "audio tag and declared settings");
+  assert.deepEqual(whispered.voiceSettings, { speed: 1 });
+  const breaking = mapCadence(text, hash(text), { ...plan(text), delivery: "breaking", speed: 0.8 }, fish);
+  assert.equal(breaking.providerText, "[voice breaking, through tears] Wait here.");
+  assert.deepEqual(breaking.voiceSettings, { speed: 0.8 });
+});
