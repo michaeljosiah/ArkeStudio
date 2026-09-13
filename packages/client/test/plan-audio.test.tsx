@@ -151,6 +151,33 @@ describe("the monitor mix survives a re-render", () => {
     timeRef.current = 0;
   });
 
+  it("keeps the same element when the clip it plays is moved along the lane", async () => {
+    const container = dom.document.createElement("div");
+    let root: Root;
+    await act(async () => {
+      root = createRoot(container as unknown as HTMLElement);
+      root.render(<Harness plan={bedPlan()} playing at={1} />);
+    });
+    await act(async () => {
+      runFrame();
+    });
+    assert.equal(made.length, 1);
+
+    // The bed nudged half a second later: the same file, in a new place.
+    const moved = bedPlan();
+    moved.audio[0]!.startSec = 0.5;
+    moved.audio[0]!.endSec = 12.5;
+    await act(async () => {
+      root!.render(<Harness plan={moved} playing at={1} />);
+    });
+    await act(async () => {
+      runFrame();
+    });
+
+    assert.equal(made.length, 1, `the move fetched the file again (${made.length} elements for one clip)`);
+    assert.equal(made[0]!.pauses, 0, "and it did not stop to do it");
+  });
+
   it("does not stop the sound when the plan is rebuilt with the same content", async () => {
     const container = dom.document.createElement("div");
     let root: Root;

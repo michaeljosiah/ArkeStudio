@@ -97,7 +97,16 @@ export function usePlanAudio(opts: {
     const graph = voices.current;
     if (ctx === null || guard === null) return;
     guard.threshold.value = plan?.mix.limiterCeilingDb ?? -1;
-    const wanted = new Map<string, RenderAudioItem>((plan?.audio ?? []).map((item, index) => [`${item.clipId ?? index}:${item.path}:${item.startSec}`, item]));
+    /*
+     * Keyed by what the element is, not by where the clip sits.
+     *
+     * `startSec` used to be part of this, so nudging a bed half a second along the lane made a
+     * key nothing matched: the voice was torn down and a fresh `<audio>` refetched the same file
+     * from the coordinator, which is a hole in the monitor for as long as the load takes. Where
+     * a clip is, is the window the tick already reads off `item` every frame — updated in place
+     * below — and the only change the element itself cannot absorb is a change of file.
+     */
+    const wanted = new Map<string, RenderAudioItem>((plan?.audio ?? []).map((item, index) => [`${item.clipId ?? index}:${item.path}`, item]));
     for (const [key, voice] of graph) {
       if (wanted.has(key)) continue;
       voice.element.pause();
