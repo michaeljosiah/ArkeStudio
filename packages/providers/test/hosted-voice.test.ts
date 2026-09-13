@@ -60,6 +60,26 @@ describe("Mistral · Voxtral TTS as a hosted reader (SPEC-046 §2.3)", () => {
     assert.match((await client.poll("k", result.remoteId)).error ?? "", /returned by submit/);
   });
 
+  it("a short clip's base64 is summarised in the call history like a long one — never the recording itself", async () => {
+    // The capture summariser recognises a media-named field by length; a recording small
+    // enough to encode under 4 KB used to land verbatim in calls.jsonl (codex on PR 1153).
+    const started: unknown[] = [];
+    const tracked = new Set<Promise<void>>();
+    const capture: ProviderCallCapture = {
+      track: (task) => { tracked.add(task); void task.finally(() => tracked.delete(task)).catch(() => {}); },
+      start: async (input) => { started.push(input.body); return `pc_${"0".repeat(26)}`; },
+      respond: async () => {}, finish: async () => {}, fail: async () => {},
+    };
+    const clients = createProviderClients({ fetch: async () => json(200, { audio_data: b64(WAV) }), capture });
+    const tiny = Uint8Array.from({ length: 300 }, (_, i) => i % 251);
+    await clients.mistral!.submit("k", { model: VOXTRAL_MODEL, capability: "voice-tts", params: { text: "x", voiceId: "harbour" }, voiceReference: { name: "a.wav", contentType: "audio/wav", data: tiny } });
+    await Promise.allSettled(tracked);
+    const body = started[0] as { ref_audio?: unknown };
+    assert.deepEqual(Object.keys(body.ref_audio as object).sort(), ["binary", "sha256", "sizeBytes"]);
+    assert.equal((body.ref_audio as { sizeBytes: number }).sizeBytes, 300);
+    assert.ok(!JSON.stringify(started).includes(b64(tiny).slice(0, 40)), "not a byte of the recording is in the record");
+  });
+
   it("reads a cloned voice by sending its clip with the call, and never a voice id beside it (D2)", async () => {
     const r = recording(() => json(200, { audio_data: b64(WAV) }));
     const clip = Uint8Array.from([1, 2, 3, 4]);

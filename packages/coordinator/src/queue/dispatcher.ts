@@ -911,7 +911,35 @@ export class JobQueue {
         voiceReference = await this.opts.readVoiceReference(job.worldId, job.provider, job.model, voiceId, reading.signal);
       } catch (error) {
         if (!this.disposed && !this.cancelling.has(job.id) && this.stillQueued(job)) {
-          await this.terminalize(job, "failed", describeCoordinatorError(error));
+          const message = describeCoordinatorError(error);
+          // A hosted reader's clip read talks to the vendor before submit, so a revoked key
+          // shows up here first: the job was never wrong, the credential was (R-8). Back to
+          // queued behind a paused lane, as a submit's credential fault is — not a failed job
+          // per queued read (codex on PR 1156).
+          const klass = classifyError(error);
+          if (klass === "provider-fault") {
+            await this.transition({ ...job, status: "queued", failureClass: "provider-fault", error: message, updatedAt: this.clock() });
+            this.lane(job.provider).fifo.unshift(job.id);
+            this.pauseLane(job.provider, "fault", message);
+            return;
+          }
+          // A busy vendor met before submit — a full pool on the listing, the slot save the probe
+          // saw answer 429 — is the same bounded backoff a submit gets. The retry counts as an
+          // attempt so the bound holds; nothing was sent, so nothing is held for reconciliation.
+          if (klass === "transient") {
+            if (isRateLimit(error)) this.noteRateLimit(job.provider);
+            const attempt = job.attempt + 1;
+            if (attempt >= this.maxAttempts) {
+              await this.terminalize(job, "failed", `gave up after ${attempt} attempts: ${message}`, undefined, klass);
+              return;
+            }
+            await this.transition({ ...job, status: "queued", attempt, failureClass: klass, error: message, updatedAt: this.clock() });
+            const lane = this.lane(job.provider);
+            lane.notBefore.set(job.id, Date.now() + backoffMs(attempt, this.backoffBaseMs, this.backoffCapMs, this.rng));
+            lane.fifo.push(job.id);
+            return;
+          }
+          await this.terminalize(job, "failed", message);
         }
         return;
       } finally {

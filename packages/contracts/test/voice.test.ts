@@ -577,8 +577,13 @@ describe("what a vendor bills as a character (SPEC-046 R-8)", () => {
     const paren = { ...row("cjk-double"), cadence: { ...cadence, tagSyntax: "paren" as const } };
     const bracket = { ...row("utf8-byte"), cadence };
     assert.equal(billableCharacters(paren, "Wait here."), 10);
-    assert.equal(billableCharacters(paren, "Wait here.", "whispered"), "(whispers) Wait here.".length);
+    // A paren vendor's English tag goes only into a line stated to be English (R-23): the
+    // estimate counts it only then. A bracket phrase is read in any language and always counts.
+    assert.equal(billableCharacters(paren, "Wait here.", "whispered", "en"), "(whispers) Wait here.".length);
+    assert.equal(billableCharacters(paren, "Wait here.", "whispered"), 10, "no language stated: no tag sent, none counted");
+    assert.equal(billableCharacters(paren, "Wait here.", "whispered", "fr"), 10);
     assert.equal(billableCharacters(bracket, "Wait here.", "whispered"), "[whispers] Wait here.".length);
+    assert.equal(billableCharacters(bracket, "Wait here.", "whispered", "fr"), "[whispers] Wait here.".length);
     assert.equal(billableCharacters(paren, "Wait here.", "cold"), 10, "a sentence beside the text is not in the text");
     assert.equal(billableCharacters(paren, "Wait here.", "urgent"), 10, "a delivery the row does not map adds nothing");
   });

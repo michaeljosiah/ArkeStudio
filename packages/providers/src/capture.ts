@@ -134,7 +134,12 @@ function summarizeMedia(value: unknown, key = ""): unknown {
     // hashing: provenance describes the decoded bytes, not a base64 decoder's view of the URI.
     const uri = /^data:([^;,]*)(?:;[^,]*)?,([\s\S]*)$/i.exec(value);
     if (/^data:/i.test(value) && !uri) return { binary: true, unavailable: "malformed-media" };
-    if (uri || /(?:b64|base64)/i.test(key) || (/(?:audio|image|video)/i.test(key) && value.length > 4096)) {
+    // A media-named field is media when it is long, or when it is plainly base64 at any length:
+    // a cloned recording small enough to encode under 4 KB is still the recording, and
+    // `ref_audio` carries one on every Mistral read (codex on PR 1153). A short media-named
+    // word like `audio_format: "wav"` is not base64 and stays as it is.
+    const base64Shaped = value.length >= 64 && /^[A-Za-z0-9+/]+={0,2}$/.test(value);
+    if (uri || /(?:b64|base64)/i.test(key) || (/(?:audio|image|video)/i.test(key) && (value.length > 4096 || base64Shaped))) {
       let bytes: Buffer;
       try {
         bytes = uri

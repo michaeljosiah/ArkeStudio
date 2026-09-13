@@ -752,6 +752,8 @@ export function voiceLineRequest(input: {
   text: string;
   /** The delivery's name, for a reader that takes direction as words as well as numbers (SPEC-046 R-22). */
   delivery?: Delivery;
+  /** The line's language when stated (ISO 639-1); nothing states one yet (issue 1163), and the estimate follows R-23 without it. */
+  language?: string;
   deliveryParams: Record<string, number> | null;
   deliveryNotice: string | null;
   model: ManifestModel;
@@ -776,10 +778,11 @@ export function voiceLineRequest(input: {
       text: input.text,
       audioFormat: voiceFormatForModel(input.model),
       ...(input.delivery !== undefined ? { delivery: input.delivery } : {}),
+      ...(input.language !== undefined ? { language: input.language } : {}),
       ...(input.deliveryParams !== null ? { voiceSettings: input.deliveryParams } : {}),
       ...(input.deliveryNotice !== null ? { deliveryNotice: input.deliveryNotice } : {}),
     },
-    estimatedMicroUsd: estimateMicroUsd(input.model, { characters: billableCharacters(input.model, input.text, input.delivery) }),
+    estimatedMicroUsd: estimateMicroUsd(input.model, { characters: billableCharacters(input.model, input.text, input.delivery, input.language) }),
     landing: { dir: `productions/${input.productionId}/audio` },
     ...(input.voiceReference === true ? { voiceReference: true } : {}),
     ...(input.voiceUploadConfirmedFor !== undefined
