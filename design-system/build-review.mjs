@@ -97,6 +97,12 @@ const SCREENS = [
   { group: "Around it", screen: "Chapter (story)", frame: "126a", route: "#/w/:worldId/p/:prodId/chapters/:id", status: "built", checked: "2026-09-07",
     controls: ["Read the chapter"],
     notes: ["Story mode for novelists, turns 126–131, PRs 877–933: the chapter read, typed into and heard, beside what it draws on."] },
+  { group: "Around it", screen: "Chapter · audiobook view (story)", frame: "146b", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drawn", checked: "2026-09-13",
+    controls: ["Read the chapter", "Direct this chapter"],
+    notes: ["Turn 146: the manuscript as blocks, a state a block, the block's direction and its takes beside it, the dock directing the chapter. Not built."] },
+  { group: "Around it", screen: "Audiobook (story)", frame: "146a", route: "#/w/:worldId/p/:prodId/story/audiobook", status: "drawn", checked: "2026-09-13",
+    controls: ["Read the book", "Export"],
+    notes: ["Turn 146: the door — <code>Narrator · Cast</code>, a row a chapter with its state, one priced batch (146c) and the export sheet (146d). Not built."] },
 ];
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
