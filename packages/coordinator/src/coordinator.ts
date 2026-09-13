@@ -51,6 +51,7 @@ import {
   type HarnessAvailability,
   type HarnessEngine,
   type ClientState,
+  type ClonedVoice,
   type DomainEvent,
   type HarnessAdapter,
   type PermissionRequest,
@@ -106,6 +107,7 @@ import {
   voiceJobPart,
   voiceJobIsCandidatePreview,
   CLONED_VOICE_MODEL,
+  CLONED_VOICE_PROVIDER,
   type LedgerEntry,
   type ModelManifest,
   type ProviderId,
@@ -348,8 +350,10 @@ import {
   clipFor,
   cloneVoice,
   MIN_CLONE_SECONDS,
+  recordVoiceReader,
   wavSeconds,
 } from "./voice/library.js";
+import { hostedReaderDestination, hostedUploadConfirmed, prepareHostedClip, type HostedVoiceSlots } from "./voice/hosted.js";
 import { atomicWriteFile, serializeFileMutation } from "./world/atomic.js";
 import { BibleStaleError, readBible, restoreBible, saveBible } from "./world/bible.js";
 import { changesForEntity } from "./world/change-writer.js";
@@ -805,6 +809,12 @@ export interface CoordinatorOptions {
     chooseModelsDir?: () => Promise<string | null>;
   };
   /**
+   * Vendor-side voice state for the hosted readers (SPEC-046 R-13): the calls that save a clip
+   * into a Breeze voice slot and remove it, wired by the host from the provider clients. Absent
+   * where no hosted reader is wired; a Breeze read then refuses with the reason.
+   */
+  hostedVoiceSlots?: HostedVoiceSlots;
+  /**
    * Catalogue entries the host derives from data this package must not own — the per-recipe
    * weight entries, built from the provider layer's recipe facts (SPEC-021 §2.4).
    */
@@ -882,6 +892,8 @@ export interface CoordinatorOptions {
     dispose?: () => void;
     localPresets: VoiceCandidate[];
     cloudSources: CloudVoiceSource[];
+    /** The hosted readers of the library's voices, offered as candidates when keyed (SPEC-046 R-10). */
+    hostedReaders?: Array<{ provider: string; model: string }>;
   };
 }
 
@@ -1080,13 +1092,43 @@ export class Coordinator {
     return { local };
   }
 
-  /** Stop before readiness, clip reads, reservations or jobs when a cloned clip would leave. */
-  private requireVoiceUploadConfirmation(input: {
+  /**
+   * Stop before readiness, clip reads, reservations or jobs when a cloned clip would leave.
+   *
+   * Two kinds of destination (SPEC-046 R-16). A remote ComfyUI engine is asked per request, as
+   * before. A hosted reader — a vendor — is asked once per voice per vendor: the answer is written
+   * onto the library entry the moment it is given, here, so a read with three cloned voices asks
+   * three times at most and never twice for the same one. `reader` names the voice and the
+   * provider it is about to be read through; without it only the engine destination applies.
+   */
+  private async requireVoiceUploadConfirmation(input: {
     worldId: string;
     requestId: string;
     command: QueueCommand;
     voiceUploadConfirmedFor?: string;
-  }): boolean {
+    reader?: { store: WorldStore; provider: string; voice: ClonedVoice };
+  }): Promise<boolean> {
+    const vendor = input.reader ? hostedReaderDestination(input.reader.provider) : null;
+    if (input.reader && vendor) {
+      if (hostedUploadConfirmed(input.reader.voice, input.reader.provider)) return false;
+      if (input.voiceUploadConfirmedFor === vendor.token) {
+        await recordVoiceReader(input.reader.store, input.reader.voice.id, input.reader.provider, { confirmedAt: this.nowIso() });
+        return false;
+      }
+      this.emit({
+        at: this.nowIso(),
+        type: "voice.upload-confirmation-required",
+        requestId: input.requestId,
+        worldId: input.worldId,
+        command: input.command,
+        destinationLabel: vendor.label,
+        confirmationToken: vendor.token,
+        destinationNotice: vendor.notice,
+      });
+      return true;
+    }
+    // A hosted reader's clip never goes to the engine; only the recipe's does.
+    if (input.reader && input.reader.provider !== CLONED_VOICE_PROVIDER) return false;
     const destination = this.opts.comfyui?.service.voiceUploadDestination() ?? null;
     if (destination === null) return false;
     if (input.voiceUploadConfirmedFor === destination.token) return false;
@@ -1495,7 +1537,8 @@ export class Coordinator {
     const manifest = this.opts.manifest;
     const modelOf = (voice: { provider: string; model: string }) =>
       manifest?.models.find((candidate) => candidate.provider === voice.provider && candidate.id === voice.model && candidate.capability === "voice-tts") ?? null;
-    const narration = { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId, label: narrator.label ?? narrator.voiceId, cloned: false };
+    const narration: { provider: string; model: string; voiceId: string; label: string; cloned: boolean; clonedVoice?: ClonedVoice } =
+      { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId, label: narrator.label ?? narrator.voiceId, cloned: false };
     // Each block's voice: the sheet's assignment when the manifest knows its model, the
     // catalogue says it can speak now and, for a cloned voice, its recording is still there;
     // else the narrator (R-46).
@@ -1510,7 +1553,8 @@ export class Coordinator {
         const source = voiceSourceFor(clonedVoices, assigned.provider, model, assigned.voiceId);
         if (source.kind === "missing-clone") return narration;
         if (source.kind === "cloned" && (await clipFor(store, source.voice)) === null) return narration;
-        return { provider: assigned.provider, model, voiceId: assigned.voiceId, label: assigned.label ?? listed.label, cloned: source.kind === "cloned" };
+        return { provider: assigned.provider, model, voiceId: assigned.voiceId, label: assigned.label ?? listed.label, cloned: source.kind === "cloned",
+          ...(source.kind === "cloned" ? { clonedVoice: source.voice } : {}) };
       }),
     );
     const isLocal = (voice: { provider: string; model: string }) => voice.provider === "kokoro" && voice.model === "kokoro-82m";
@@ -1555,16 +1599,22 @@ export class Coordinator {
     if (misses.length > 0) {
       // A cloned voice's recording goes with its job (SPEC-022): a remote engine is confirmed as
       // the table read confirms it, once, before anything is priced or queued (codex on PR 914).
-      if (
-        misses.some((index) => speaking[index]!.cloned) &&
-        this.requireVoiceUploadConfirmation({
-          worldId,
-          requestId,
-          command: input.frameKind,
-          ...(input.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: input.voiceUploadConfirmedFor } : {}),
-        })
-      )
-        return;
+      // A hosted reader is confirmed per voice and per vendor (SPEC-046 R-16), so each cloned
+      // voice among the misses is asked about in turn; an answer already given is remembered.
+      for (const index of misses) {
+        const voice = speaking[index]!;
+        if (!voice.cloned) continue;
+        if (
+          await this.requireVoiceUploadConfirmation({
+            worldId,
+            requestId,
+            command: input.frameKind,
+            ...(input.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: input.voiceUploadConfirmedFor } : {}),
+            ...(voice.clonedVoice !== undefined ? { reader: { store, provider: voice.provider, voice: voice.clonedVoice } } : {}),
+          })
+        )
+          return;
+      }
       const estimate = misses.reduce((sum, index) => sum + estimateMicroUsd(cloud[index]!.model, { characters: blocks[index]!.text.length }), 0);
       const token = createHash("sha256")
         .update(["voiced", subject.id, String(subject.version), ...misses.map((index) => cloud[index]!.file)].join("\n"))
@@ -2100,7 +2150,13 @@ export class Coordinator {
                     "That voice's recording is missing or unsafe — re-clone it, or choose another voice.",
                   );
                 }
-                return clip;
+                // A hosted reader (SPEC-046 §2.3, §2.4): refused unless the person confirmed this
+                // vendor for this voice; Breeze reads from the slot the library keeps for it.
+                return prepareHostedClip(store, provider, model, source.voice, clip, {
+                  getKey: async (id) => (this.credentials ? this.credentials.get(id as ProviderId) : null),
+                  ...(this.opts.hostedVoiceSlots !== undefined ? { slots: this.opts.hostedVoiceSlots } : {}),
+                  now: () => this.nowIso(),
+                });
               };
               if (this.opts.provider.withWorldStore) {
                 return this.opts.provider.withWorldStore(worldId, prepare);
@@ -2241,6 +2297,7 @@ export class Coordinator {
           sidecar: opts.voice.sidecar,
           localPresets: opts.voice.localPresets,
           cloudSources: opts.voice.cloudSources,
+          ...(opts.voice.hostedReaders !== undefined ? { hostedReaders: opts.voice.hostedReaders } : {}),
           getKey: async (provider) =>
             this.credentials ? this.credentials.get(provider as ProviderId) : null,
           emit: (event) => this.emit(event),
@@ -10073,18 +10130,25 @@ export class Coordinator {
         const hasClonedVoice = plan.inputs.some(
           (input) => input.provider === "comfyui" && input.voiceReference === true,
         );
-        if (
-          hasClonedVoice &&
-          this.requireVoiceUploadConfirmation({
-            worldId: msg.worldId,
-            requestId: msg.requestId,
-            command: msg.kind,
-            ...(msg.voiceUploadConfirmedFor !== undefined
-              ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
-              : {}),
-          })
-        )
-          return;
+        // Every cloned read on the bench asks about its destination — the engine for the recipe,
+        // the vendor for a hosted reader (SPEC-046 R-16) — before anything is priced or queued.
+        for (const planned of plan.inputs) {
+          if (planned.voiceReference !== true) continue;
+          const voiceId = typeof planned.params["voiceId"] === "string" ? planned.params["voiceId"] : "";
+          const source = voiceSourceFor(store.getBundle().clonedVoices, planned.provider, planned.model, voiceId);
+          if (
+            await this.requireVoiceUploadConfirmation({
+              worldId: msg.worldId,
+              requestId: msg.requestId,
+              command: msg.kind,
+              ...(msg.voiceUploadConfirmedFor !== undefined
+                ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
+                : {}),
+              ...(source.kind === "cloned" ? { reader: { store, provider: planned.provider, voice: source.voice } } : {}),
+            })
+          )
+            return;
+        }
         if (hasClonedVoice) {
           const availability = await this.comfyUiVoiceAvailability();
           if (availability.unavailableReason !== undefined) {
@@ -11416,14 +11480,15 @@ export class Coordinator {
         const source = voiceSourceFor(bundle.clonedVoices, voice.provider, model.id, voice.voiceId);
         if (
           source.kind === "cloned" &&
-          this.requireVoiceUploadConfirmation({
+          (await this.requireVoiceUploadConfirmation({
             worldId: msg.worldId,
             requestId: msg.requestId,
             command: msg.kind,
             ...(msg.voiceUploadConfirmedFor !== undefined
               ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
               : {}),
-          })
+            reader: { store, provider: voice.provider, voice: source.voice },
+          }))
         )
           return;
         if (model.provider === "comfyui") {
@@ -11526,14 +11591,15 @@ export class Coordinator {
         const source = voiceSourceFor(bundle.clonedVoices, msg.provider, msg.model, msg.voiceId);
         if (
           source.kind === "cloned" &&
-          this.requireVoiceUploadConfirmation({
+          (await this.requireVoiceUploadConfirmation({
             worldId: msg.worldId,
             requestId: msg.requestId,
             command: msg.kind,
             ...(msg.voiceUploadConfirmedFor !== undefined
               ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
               : {}),
-          })
+            reader: { store, provider: msg.provider, voice: source.voice },
+          }))
         )
           return;
         const candidate = (

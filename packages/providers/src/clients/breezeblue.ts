@@ -1,4 +1,4 @@
-import { breezeDirection, DeliverySchema, type CapabilityProbe, type ClientDeclarations } from "@arke-studio/contracts";
+import { breezeDirection, DeliverySchema, HOSTED_VOICE_READERS, type CapabilityProbe, type ClientDeclarations } from "@arke-studio/contracts";
 import { jsonRequest, tryProbe } from "./http.js";
 import {
   ProviderAuthError,
@@ -14,7 +14,7 @@ import {
 } from "../types.js";
 
 /** The manifest row's id. There is no `providerModelId`: Breeze routes by language (SPEC-046 §2.4). */
-export const BREEZE_MODEL = "breeze-tts-2";
+export const BREEZE_MODEL = HOSTED_VOICE_READERS["breezeblue"]!;
 
 /**
  * Breeze's error envelope: `{ ok: false, code, detail, error }`. The code is what decides the
@@ -27,7 +27,7 @@ type BreezeError = { ok?: boolean; code?: string; detail?: string; error?: strin
 const TRANSIENT_CODES = new Set([
   "GENERATION_CONCURRENCY_EXCEEDED", "RATE_LIMITED", "GENERATION_CAPACITY_EXCEEDED", "DISPATCH_TIMEOUT",
   "GENERATION_INTERRUPTED", "GENERATION_FAILED", "GENERATION_INVALID_RESPONSE", "UPSTREAM_GENERATION_ERROR",
-  "GENERATION_TIMEOUT", "UPSTREAM_TIMEOUT", "INTERNAL_ERROR", "GENERATION_NOT_READY",
+  "GENERATION_TIMEOUT", "UPSTREAM_TIMEOUT", "INTERNAL_ERROR", "GENERATION_NOT_READY", "VOICE_CLONE_FAILED",
 ]);
 
 /**
@@ -104,7 +104,11 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
     if (request.capability !== "voice-tts") throw new ProviderRequestRejectedError("breezeblue: unsupported synthesis capability");
     const text = String(request.params["text"] ?? "");
     if (text.trim() === "") throw new ProviderRequestRejectedError("breezeblue: there is no text to read");
-    const voiceId = typeof request.params["voiceId"] === "string" ? request.params["voiceId"] : "";
+    // A cloned voice reads from the slot the host ensured (R-13); a preset reads from its own id.
+    // A clip with no slot behind it is not something Breeze can speak from in one call.
+    const voiceId = request.voiceReference !== undefined
+      ? (request.voiceReference.remoteVoiceId ?? "")
+      : typeof request.params["voiceId"] === "string" ? request.params["voiceId"] : "";
     if (voiceId === "" || !/^[A-Za-z0-9_-]+$/.test(voiceId)) {
       throw new ProviderRequestRejectedError(
         request.voiceReference !== undefined
@@ -148,7 +152,10 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
     const code = typeof body?.code === "string" ? body.code : "";
     const said = typeof body?.detail === "string" && body.detail.trim() !== "" ? body.detail.trim() : typeof body?.error === "string" ? body.error.trim() : "";
     const message = said === "" ? `HTTP ${res.status}` : `${said} (HTTP ${res.status})`;
-    if (res.status === 401 || res.status === 403) return new ProviderAuthError("breezeblue", `breezeblue: the credential was rejected — ${message}`);
+    // A 403 is a bad key only when Breeze's own code says so (`AUTH_*`); its bare `FORBIDDEN` is
+    // a refusal of this request, and reporting that as a rejected credential sends the person to
+    // Settings to fix a key that is fine — the failure R-24 names for Mistral's 403.
+    if (res.status === 401 || (res.status === 403 && code.startsWith("AUTH_"))) return new ProviderAuthError("breezeblue", `breezeblue: the credential was rejected — ${message}`);
     if (res.status === 402) return new ProviderRequestRejectedError(`breezeblue: the account cannot pay for this read — ${message}; top up on breezeblue.ai`);
     if (TRANSIENT_CODES.has(code)) {
       const wait = res.headers.get("retry-after");
@@ -156,6 +163,38 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
     }
     if (res.status >= 500) return new Error(`breezeblue: synthesis failed — ${message}`);
     return new ProviderRequestRejectedError(`breezeblue: synthesis failed — ${message}`);
+  }
+
+  /**
+   * Save a clip as a voice on the account — Breeze's two-step clone, preview then save (SPEC-046
+   * §2.4). The service transcribes the first sixty seconds and keeps at most thirty, so nothing on
+   * this side writes a transcript. Saving consumes a voice slot (5 · 20 · 50 · 300 by plan) and a
+   * flat per-clone charge the docs do not quantify; a full plan is a rejection with the count.
+   */
+  async saveVoice(key: string, input: { name: string; clip: Uint8Array; contentType: "audio/wav" | "audio/mpeg"; language?: string }): Promise<{ voiceId: string }> {
+    const form = new FormData();
+    form.append("name", input.name.slice(0, 80));
+    if (input.language !== undefined) form.append("language_code", input.language);
+    form.append("files", new Blob([new Uint8Array(input.clip)], { type: input.contentType }), input.contentType === "audio/wav" ? "voice.wav" : "voice.mp3");
+    const preview = await this.fetchImpl(`${this.baseUrl}/v1/voice-previews/clone`, { method: "POST", headers: { "xi-api-key": key }, body: form });
+    if (preview.status >= 400) throw await this.failure(preview);
+    const generated = ((await preview.json().catch(() => null)) as { generated_voice_id?: unknown } | null)?.generated_voice_id;
+    if (typeof generated !== "string" || generated === "") throw new Error("breezeblue: the clone preview carried no generated_voice_id");
+    const saved = await this.fetchImpl(`${this.baseUrl}/v1/voice-previews/${encodeURIComponent(generated)}/save`, {
+      method: "POST", headers: this.headers(key), body: JSON.stringify({ voice_name: input.name.slice(0, 80), language_code: input.language ?? "en" }),
+    });
+    if (saved.status >= 400) throw await this.failure(saved);
+    const voiceId = ((await saved.json().catch(() => null)) as { voice_id?: unknown } | null)?.voice_id;
+    if (typeof voiceId !== "string" || voiceId === "") throw new Error("breezeblue: saving the voice returned no voice_id");
+    return { voiceId };
+  }
+
+  /** Remove a saved voice (R-15). A voice already gone is not an error: the outcome is the same. */
+  async deleteVoice(key: string, voiceId: string): Promise<void> {
+    if (!/^[A-Za-z0-9_-]+$/.test(voiceId)) throw new ProviderRequestRejectedError("breezeblue: not a voice id");
+    const res = await this.fetchImpl(`${this.baseUrl}/v1/voices/${encodeURIComponent(voiceId)}`, { method: "DELETE", headers: { "xi-api-key": key } });
+    if (res.status === 404) return;
+    if (res.status >= 400) throw await this.failure(res);
   }
 
   async poll(_key: string, _remoteId: string): Promise<PollResult> {

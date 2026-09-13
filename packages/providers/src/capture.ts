@@ -17,6 +17,8 @@ import type {
   ProviderClient,
   ProviderOperation,
   ProviderTransport,
+  VoiceCatalogueClient,
+  VoiceSlotClient,
 } from "./types.js";
 
 interface Scope extends ProviderCallContext {
@@ -502,10 +504,17 @@ export function captureProviderClient(
             run("list-recent", context, () => client.listRecent!(key, context)),
         }
       : {}),
-  } as ProviderClient & { listVoicesCatalog?: (key: string) => Promise<unknown> };
-  const catalogue = (client as ProviderClient & { listVoicesCatalog?: (key: string) => Promise<unknown> })
-    .listVoicesCatalog;
+  } as ProviderClient & Partial<Pick<VoiceCatalogueClient, "listVoicesCatalog">> & Partial<Pick<VoiceSlotClient, "saveVoice" | "deleteVoice">>;
+  const catalogue = (client as Partial<VoiceCatalogueClient>).listVoicesCatalog;
   if (catalogue)
     wrapped.listVoicesCatalog = (key) => run("list-voices", undefined, () => catalogue.call(client, key));
+  // The voice-slot calls ride the same seam, so a saved clip is in calls.jsonl like every other
+  // request that leaves — and so the host cannot reach a method the wrapper forgot to carry
+  // (the cast in desktop main once hid exactly that).
+  const slots = client as Partial<VoiceSlotClient>;
+  if (slots.saveVoice)
+    wrapped.saveVoice = (key, input) => run("save-voice", undefined, () => slots.saveVoice!.call(client, key, input));
+  if (slots.deleteVoice)
+    wrapped.deleteVoice = (key, voiceId) => run("delete-voice", undefined, () => slots.deleteVoice!.call(client, key, voiceId));
   return wrapped;
 }

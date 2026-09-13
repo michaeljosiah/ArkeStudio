@@ -22,6 +22,8 @@ export const VoiceCandidateSchema = z
     /** Whether the selected execution target is this machine. */
     local: z.boolean(),
     canClone: z.boolean(),
+    /** The library voice this candidate reads, for a hosted reader or the recipe (SPEC-046 R-10). */
+    readsClone: z.string().min(1).optional(),
     /** Why this concrete target cannot execute now. Existing assignments remain visible with it. */
     unavailableReason: z.string().min(1).optional(),
   })
@@ -193,6 +195,30 @@ export const ClonedVoiceSchema = z
     /** Recorded once, at capture. False on an entry written before it was asked for. */
     consent: z.boolean().default(false),
     created: z.string().default(""),
+    /**
+     * What each hosted reader holds of this voice (SPEC-046 R-13, R-16), keyed by provider id.
+     * `confirmedAt` is the once-per-vendor answer to "send this recording?"; a reader that keeps
+     * the clip on the account — Breeze's voice slot — records the id it keeps it under and the
+     * hash of the clip it was made from, so a re-recorded clip is cloned again rather than read
+     * from a stale slot. Mistral holds nothing: the clip rides with every call.
+     *
+     * As lenient as the rest of the entry: a hand-edited or newer-build `remote` reads as absent
+     * — the person is asked again and a slot is made again — rather than dropping the voice.
+     */
+    remote: z
+      .record(
+        z.string().min(1),
+        z
+          .object({
+            confirmedAt: z.string().min(1).optional(),
+            voiceId: z.string().min(1).optional(),
+            clipHash: z.string().min(1).optional(),
+            savedAt: z.string().min(1).optional(),
+          })
+          .passthrough(),
+      )
+      .optional()
+      .catch(undefined),
   })
   .passthrough();
 export type ClonedVoice = z.infer<typeof ClonedVoiceSchema>;
@@ -201,6 +227,22 @@ export const CLONED_VOICE_PROVIDER = "comfyui" as const;
 export const CLONED_VOICE_MODEL = "comfyui-cloned-voice" as const;
 export const KOKORO_VOICE_MODEL = "kokoro-82m" as const;
 export const ELEVENLABS_VOICE_MODEL = "eleven_multilingual_v2" as const;
+
+/**
+ * The hosted readers of the world's cloned voices (SPEC-046 D1): one voice, several readers. A
+ * library voice addressed as `{provider, model, voiceId}` with one of these rows is the same
+ * recording read in the cloud — the recipe row reads it on this machine. Provider id → the one
+ * `voice-tts` manifest row that reads a clip there.
+ */
+export const HOSTED_VOICE_READERS: Readonly<Record<string, string>> = {
+  mistral: "voxtral-mini-tts",
+  breezeblue: "breeze-tts-2",
+};
+
+export function isHostedVoiceReader(provider: string, model?: string): boolean {
+  const row = HOSTED_VOICE_READERS[provider];
+  return row !== undefined && (model === undefined || model === row);
+}
 
 /** Cloned voice narration is intentionally unsupported until long-form queue chunking exists. */
 export function supportsVoiceUse(
@@ -224,13 +266,45 @@ export function voiceSourceFor(
   model: string,
   voiceId: string,
 ): VoiceSourceResolution {
-  if (provider !== CLONED_VOICE_PROVIDER || model !== CLONED_VOICE_MODEL) return { kind: "catalogue" };
-  const voice = voices.find((candidate) => candidate.id === voiceId);
-  return voice ? { kind: "cloned", voice } : { kind: "missing-clone" };
+  if (provider === CLONED_VOICE_PROVIDER && model === CLONED_VOICE_MODEL) {
+    const voice = voices.find((candidate) => candidate.id === voiceId);
+    return voice ? { kind: "cloned", voice } : { kind: "missing-clone" };
+  }
+  // A hosted reader speaks its own presets AND the library's voices (SPEC-046 R-10). The library
+  // decides which this id is: a match is the recording read in the cloud, anything else is one of
+  // the vendor's presets, never "missing" — a preset was never in the library to go missing from.
+  if (isHostedVoiceReader(provider, model)) {
+    const voice = voices.find((candidate) => candidate.id === voiceId);
+    return voice ? { kind: "cloned", voice } : { kind: "catalogue" };
+  }
+  return { kind: "catalogue" };
 }
 
-export function isClonedVoice(candidate: Pick<VoiceCandidate, "provider" | "model">): boolean {
-  return candidate.provider === CLONED_VOICE_PROVIDER && candidate.model === CLONED_VOICE_MODEL;
+export function isClonedVoice(candidate: Pick<VoiceCandidate, "provider" | "model" | "readsClone">): boolean {
+  return (candidate.provider === CLONED_VOICE_PROVIDER && candidate.model === CLONED_VOICE_MODEL) || candidate.readsClone !== undefined;
+}
+
+/**
+ * The library's voices as candidates for one hosted reader (SPEC-046 R-10): the same id, the
+ * reader's provider and row. `readsClone` is what tells a picker these three candidates are one
+ * voice with three readers, not three voices.
+ */
+export function cloudReaderCandidates(
+  voices: readonly ClonedVoice[],
+  reader: { provider: string; model: string },
+  availability: { unavailableReason?: string } = {},
+): VoiceCandidate[] {
+  return voices.map((v) => ({
+    provider: reader.provider,
+    model: reader.model,
+    voiceId: v.id,
+    label: v.name,
+    attributes: v.attributes,
+    local: false,
+    canClone: false,
+    readsClone: v.id,
+    ...(availability.unavailableReason !== undefined ? { unavailableReason: availability.unavailableReason } : {}),
+  }));
 }
 
 /**
@@ -329,6 +403,7 @@ export function clonedVoiceCandidates(
     attributes: v.attributes,
     local: availability.local ?? true,
     canClone: false,
+    readsClone: v.id,
     ...(availability.unavailableReason !== undefined
       ? { unavailableReason: availability.unavailableReason }
       : {}),
@@ -459,6 +534,7 @@ export function legacyVoiceModel(provider: string, voiceId: string, clonedVoices
   if (provider === "kokoro") return KOKORO_VOICE_MODEL;
   if (provider === "elevenlabs") return ELEVENLABS_VOICE_MODEL;
   if (provider === CLONED_VOICE_PROVIDER && clonedVoices.some((voice) => voice.id === voiceId)) return CLONED_VOICE_MODEL;
+  if (HOSTED_VOICE_READERS[provider] !== undefined) return HOSTED_VOICE_READERS[provider]!;
   return null;
 }
 

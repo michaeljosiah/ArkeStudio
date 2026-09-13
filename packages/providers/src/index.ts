@@ -86,6 +86,7 @@ export {
   type ProviderTransport,
   type ProviderTransportScope,
   type VoiceCatalogueClient,
+  type VoiceSlotClient,
   type SubmitRequest,
   type SubmitResult,
 } from "./types.js";

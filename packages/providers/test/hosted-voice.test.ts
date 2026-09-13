@@ -4,8 +4,8 @@ import { BREEZE_DELIVERY } from "@arke-studio/contracts";
 import { BreezeBlueClient, BREEZE_MODEL } from "../src/clients/breezeblue.js";
 import { MistralClient, VOXTRAL_MODEL, VOXTRAL_PRESETS } from "../src/clients/mistral.js";
 import { SHIPPED_MANIFEST } from "../src/manifest-data.js";
-import { PROVIDER_DECLARATIONS } from "../src/registry.js";
-import { ProviderAuthError, ProviderBusyError, ProviderRequestRejectedError, type FetchLike } from "../src/types.js";
+import { createProviderClients, PROVIDER_DECLARATIONS } from "../src/registry.js";
+import { ProviderAuthError, ProviderBusyError, ProviderRequestRejectedError, type FetchLike, type ProviderTransportScope, type VoiceSlotClient } from "../src/types.js";
 
 /**
  * The two hosted readers of the world's cloned voices (SPEC-046 issues 1144/1145), against a
@@ -189,6 +189,59 @@ describe("BreezeBlue · Breeze TTS 2 as a hosted reader (SPEC-046 §2.4)", () =>
     assert.equal(called, false);
   });
 
+  it("reads a cloned voice from the slot the host ensured, never from the clip in the call (R-13)", async () => {
+    const r = recording(() => new Response(WAV, { status: 200 }));
+    await new BreezeBlueClient(r.fetchImpl).submit("k", {
+      model: BREEZE_MODEL, capability: "voice-tts", params: { text: "Bell Watch.", voiceId: "harbour-glass" },
+      voiceReference: { name: "a.wav", contentType: "audio/wav", data: WAV, remoteVoiceId: "voc_slot_7" },
+    });
+    // The library id rides in params for every other reader; here the slot id is the address.
+    assert.equal(r.calls[0]?.url, "https://api.breeze.blue/v1/text-to-speech/voc_slot_7?output_format=wav");
+    assert.equal(r.calls.length, 1);
+  });
+
+  it("saves a clip as a voice in two steps — preview from the file, then save — and returns the slot (§2.4)", async () => {
+    const r = recording((url) =>
+      url.endsWith("/v1/voice-previews/clone")
+        ? json(200, { generated_voice_id: "gen_1", transcript: "…" })
+        : json(200, { voice_id: "voc_new", name: "Harbour glass" }),
+    );
+    const saved = await new BreezeBlueClient(r.fetchImpl).saveVoice("k", { name: "Harbour glass", clip: WAV, contentType: "audio/wav", language: "en" });
+    assert.deepEqual(saved, { voiceId: "voc_new" });
+    assert.equal(r.calls[0]?.url, "https://api.breeze.blue/v1/voice-previews/clone");
+    const form = r.calls[0]!.init!.body;
+    assert.ok(form instanceof FormData, "the preview is multipart: the file goes as bytes, not base64 in JSON");
+    assert.equal(form.get("name"), "Harbour glass");
+    assert.equal(form.get("language_code"), "en");
+    const file = form.get("files");
+    assert.ok(file instanceof Blob && file.size === WAV.length && file.type === "audio/wav");
+    assert.equal((r.calls[0]!.init!.headers as Record<string, string>)["xi-api-key"], "k");
+    assert.equal(r.calls[1]?.url, "https://api.breeze.blue/v1/voice-previews/gen_1/save");
+    assert.deepEqual(r.body(), { voice_name: "Harbour glass", language_code: "en" });
+  });
+
+  it("a refused save is classed by Breeze's code, not its status (R-26)", async () => {
+    const save = (client: BreezeBlueClient) => client.saveVoice("k", { name: "x", clip: WAV, contentType: "audio/wav" });
+    // What the live service answered on 2026-09-13, for every clip: its own transcription failing.
+    await assert.rejects(save(new BreezeBlueClient(async () => json(429, { ok: false, code: "UPSTREAM_GENERATION_ERROR", detail: "Request to /internal/llm/voice-clone/transcribe failed." }))), ProviderBusyError);
+    await assert.rejects(save(new BreezeBlueClient(async () => json(502, { ok: false, code: "VOICE_CLONE_FAILED", detail: "Voice clone failed." }))), ProviderBusyError);
+    // A bare FORBIDDEN is a refusal of this request; only an AUTH_ code is the key's fault (R-24).
+    await assert.rejects(save(new BreezeBlueClient(async () => json(403, { ok: false, code: "FORBIDDEN", detail: "Forbidden." }))),
+      (err: unknown) => err instanceof ProviderRequestRejectedError && !(err instanceof ProviderAuthError) && /Forbidden/.test(err.message));
+    await assert.rejects(save(new BreezeBlueClient(async () => json(403, { ok: false, code: "AUTH_ADMIN_ACCESS_DENIED", detail: "Admin console access denied." }))), ProviderAuthError);
+    await assert.rejects(save(new BreezeBlueClient(async () => json(200, {}))), /no generated_voice_id/);
+  });
+
+  it("removes a saved voice, and treats one already gone as removed (R-15)", async () => {
+    const r = recording(() => new Response(null, { status: 204 }));
+    await new BreezeBlueClient(r.fetchImpl).deleteVoice("k", "voc_old");
+    assert.equal(r.calls[0]?.url, "https://api.breeze.blue/v1/voices/voc_old");
+    assert.equal(r.calls[0]?.init?.method, "DELETE");
+    await new BreezeBlueClient(async () => json(404, { ok: false, code: "NOT_FOUND", detail: "Voice not found." })).deleteVoice("k", "voc_gone");
+    await assert.rejects(new BreezeBlueClient(async () => json(500, { ok: false, code: "INTERNAL", detail: "x" })).deleteVoice("k", "voc_1"));
+    await assert.rejects(new BreezeBlueClient(async () => new Response(null, { status: 204 })).deleteVoice("k", "../voices"), ProviderRequestRejectedError);
+  });
+
   it("lists the public catalogue with its metadata as attributes and leaves saved voices out (R-32)", async () => {
     const r = recording(() => json(200, { voices: [
       { voice_id: "voc_a", name: "Ada", origin: "designed", voice_type: "default", visibility: "public", language_code: "en", accent: "british",
@@ -207,6 +260,26 @@ describe("the rows and the registry (SPEC-046 R-6..R-8, R-28)", () => {
     for (const id of ["mistral", "breezeblue"] as const) {
       assert.deepEqual(PROVIDER_DECLARATIONS[id], { supportsIdempotencyKey: false, supportsLookupByKey: false, supportsListRecent: false, reportsCost: false });
     }
+  });
+
+  it("the registry's Breeze client still saves and removes voices through the capture wrapper (R-13, R-15)", async () => {
+    // The wrapper rebuilds the client from the ProviderClient interface, so a method only the
+    // concrete class has is silently absent from what the host holds — a cast hid exactly that.
+    const scopes: ProviderTransportScope[] = [];
+    const answer: FetchLike = async (url) =>
+      url.endsWith("/clone") ? json(200, { generated_voice_id: "gen_1" })
+        : url.endsWith("/save") ? json(200, { voice_id: "voc_wrapped" })
+        : new Response(null, { status: 204 });
+    const clients = createProviderClients({
+      fetch: answer,
+      transport: { run: (scope, operation) => { scopes.push(scope); return operation(answer); } },
+    });
+    const breeze = clients.breezeblue as VoiceSlotClient;
+    assert.equal(typeof breeze.saveVoice, "function");
+    assert.deepEqual(await breeze.saveVoice("k", { name: "Harbour", clip: WAV, contentType: "audio/wav" }), { voiceId: "voc_wrapped" });
+    await breeze.deleteVoice("k", "voc_wrapped");
+    assert.deepEqual(scopes.map((scope) => scope.operation), ["save-voice", "delete-voice"], "and each is a named operation on the host's transport");
+    assert.equal(typeof (clients.mistral as Partial<VoiceSlotClient>).saveVoice, "undefined", "Mistral keeps no slots and gets no method");
   });
 
   it("the Voxtral row is honest: one delivery, WAV, our own cap, sixteen micro-dollars a character", () => {

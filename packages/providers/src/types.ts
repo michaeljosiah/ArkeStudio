@@ -89,6 +89,12 @@ export interface PreparedVoiceReference {
   name: string;
   contentType: "audio/wav" | "audio/mpeg";
   data: Uint8Array;
+  /**
+   * For a reader that keeps the clip on its account (SPEC-046 R-13): the id it keeps it under,
+   * ensured by the host before this read. Breeze reads from the slot and never from the bytes;
+   * Mistral sends the bytes and has no id. Absent where the reader has no such state.
+   */
+  remoteVoiceId?: string;
 }
 
 /**
@@ -214,6 +220,8 @@ export type ProviderOperation =
   | "lookup-by-key"
   | "list-recent"
   | "list-voices"
+  | "save-voice"
+  | "delete-voice"
   | "release";
 
 export interface ProviderTransportScope extends ProviderCallContext {
@@ -254,6 +262,18 @@ export interface VoiceCatalogueClient extends ProviderClient {
   listVoicesCatalog(key: string): Promise<
     Array<{ provider: string; model: string; voiceId: string; label: string; attributes: string[]; local: boolean; canClone: boolean }>
   >;
+}
+
+/**
+ * A hosted reader that keeps a cloned voice on the account (SPEC-046 R-13): the clip is saved
+ * once as a slot the reads then address, and removed when the library lets go of it (R-15).
+ */
+export interface VoiceSlotClient extends ProviderClient {
+  saveVoice(
+    key: string,
+    input: { name: string; clip: Uint8Array; contentType: "audio/wav" | "audio/mpeg"; language?: string },
+  ): Promise<{ voiceId: string }>;
+  deleteVoice(key: string, voiceId: string): Promise<void>;
 }
 
 export interface ProviderClient {

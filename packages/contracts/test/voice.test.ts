@@ -4,16 +4,21 @@ import {
   BREEZE_DELIVERY,
   breezeDirection,
   clonedVoiceCandidates,
+  cloudReaderCandidates,
   DEFAULT_NARRATOR,
   DELIVERIES,
   deliveryParams,
   extractVoiceAttributes,
+  HOSTED_VOICE_READERS,
+  isClonedVoice,
+  isHostedVoiceReader,
   mintVoiceId,
   narratorFor,
   legacyVoiceModel,
   newClonedVoice,
   parseVoiceLibrary,
   rankVoices,
+  voiceSourceFor,
 } from "../src/voice.js";
 import { ClientMessageSchema } from "../src/frames.js";
 import { DomainEventSchema } from "../src/events.js";
@@ -486,5 +491,59 @@ describe("the hosted readers' deliveries (SPEC-046 R-19, R-22)", () => {
     }
     assert.deepEqual(breezeDirection("whispered"), { tag: "whispers" });
     assert.equal(breezeDirection("cold").tag, undefined);
+  });
+});
+
+describe("one voice, several readers (SPEC-046 D1, R-10, R-13)", () => {
+  const harbour = { id: "harbour-glass", name: "Harbour glass", clip: "voices/harbour-glass.wav", attributes: ["low", "coastal"] } as never;
+
+  it("a hosted reader reads the library's voice under its own provider and row, and says which voice it reads", () => {
+    const [mistral] = cloudReaderCandidates([harbour], { provider: "mistral", model: HOSTED_VOICE_READERS["mistral"]! });
+    assert.deepEqual(mistral, {
+      provider: "mistral", model: "voxtral-mini-tts", voiceId: "harbour-glass", label: "Harbour glass",
+      attributes: ["low", "coastal"], local: false, canClone: false, readsClone: "harbour-glass",
+    });
+    // The recipe's candidate says the same thing about itself: a picker groups the three by it.
+    assert.equal(clonedVoiceCandidates([harbour])[0]?.readsClone, "harbour-glass");
+    assert.ok(isClonedVoice(mistral!));
+    assert.ok(isClonedVoice({ provider: "comfyui", model: "comfyui-cloned-voice" }));
+    assert.equal(isClonedVoice({ provider: "mistral", model: "voxtral-mini-tts" }), false, "a preset through the same reader is not a clone");
+    const [unready] = cloudReaderCandidates([harbour], { provider: "breezeblue", model: "breeze-tts-2" }, { unavailableReason: "no key" });
+    assert.equal(unready?.unavailableReason, "no key");
+  });
+
+  it("the library decides what a hosted reader's voice id is: a match is the clone, anything else a preset", () => {
+    assert.deepEqual(voiceSourceFor([harbour], "mistral", "voxtral-mini-tts", "harbour-glass"), { kind: "cloned", voice: harbour });
+    assert.deepEqual(voiceSourceFor([harbour], "breezeblue", "breeze-tts-2", "harbour-glass"), { kind: "cloned", voice: harbour });
+    // A preset was never in the library, so it is not missing from it.
+    assert.deepEqual(voiceSourceFor([harbour], "mistral", "voxtral-mini-tts", "gb_jane_neutral"), { kind: "catalogue" });
+    assert.deepEqual(voiceSourceFor([], "mistral", "voxtral-mini-tts", "harbour-glass"), { kind: "catalogue" });
+    // The recipe keeps its stricter answer: an id it cannot find is a voice that went missing.
+    assert.deepEqual(voiceSourceFor([], "comfyui", "comfyui-cloned-voice", "harbour-glass"), { kind: "missing-clone" });
+    // Only the reader row reads a clip; another model behind the same vendor is a catalogue voice.
+    assert.deepEqual(voiceSourceFor([harbour], "mistral", "some-other-model", "harbour-glass"), { kind: "catalogue" });
+    assert.ok(isHostedVoiceReader("mistral") && isHostedVoiceReader("breezeblue", "breeze-tts-2"));
+    assert.equal(isHostedVoiceReader("elevenlabs"), false);
+    assert.equal(isHostedVoiceReader("mistral", "some-other-model"), false);
+  });
+
+  it("a legacy assignment through a hosted reader migrates to the reader's row", () => {
+    assert.equal(legacyVoiceModel("mistral", "harbour-glass", [harbour]), "voxtral-mini-tts");
+    assert.equal(legacyVoiceModel("breezeblue", "voc_1"), "breeze-tts-2");
+  });
+
+  it("what a reader holds of a voice reads with the entry, and reads as absent rather than losing the voice", () => {
+    const held = {
+      id: "harbour-glass", name: "Harbour glass", clip: "voices/harbour-glass.wav",
+      remote: { mistral: { confirmedAt: "2026-09-13T10:00:00.000Z" }, breezeblue: { confirmedAt: "2026-09-13T10:00:00.000Z", voiceId: "voc_9", clipHash: `sha256:${"a".repeat(64)}`, savedAt: "2026-09-13T10:00:01.000Z", newer: true } },
+    };
+    const [voice] = parseVoiceLibrary({ voices: [held] });
+    assert.equal(voice?.remote?.["breezeblue"]?.voiceId, "voc_9");
+    assert.equal(voice?.remote?.["mistral"]?.voiceId, undefined);
+    // A hand-edited field, or one from a build this one has never met: the person is asked
+    // again and a slot is made again — the voice itself is not the thing to lose (D3 posture).
+    const [edited] = parseVoiceLibrary({ voices: [{ ...held, remote: "yes" }] });
+    assert.equal(edited?.id, "harbour-glass");
+    assert.equal(edited?.remote, undefined);
   });
 });

@@ -1529,6 +1529,7 @@ function VoiceCard({
   const [uploadConfirmation, setUploadConfirmation] = useState<{
     destinationLabel: string;
     confirmationToken: string;
+    destinationNotice?: string;
   } | null>(null);
   const played = useRef<string | null>(null);
   const voiceModel = voice
@@ -1640,6 +1641,7 @@ function VoiceCard({
       {uploadConfirmation && (
         <RemoteVoiceUploadConfirmation
           destinationLabel={uploadConfirmation.destinationLabel}
+          destinationNotice={uploadConfirmation.destinationNotice}
           onCancel={() => {
             setUploadConfirmation(null);
             pendingRequest.current = null;

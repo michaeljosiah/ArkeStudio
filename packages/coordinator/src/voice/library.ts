@@ -446,3 +446,43 @@ export async function clipFor(store: WorldStore, voice: ClonedVoice): Promise<Di
     return null;
   }
 }
+
+/**
+ * What a hosted reader holds of a voice (SPEC-046 R-13, R-16), written onto the library entry:
+ * the once-per-vendor confirmation, and — for a reader that keeps the clip on its account — the
+ * slot it keeps it under with the hash of the clip it was made from. Patched into the entries AS
+ * READ for the same reason the clone path appends to them: an entry this build does not
+ * understand survives, and a malformed neighbour is left exactly as it was.
+ */
+export async function recordVoiceReader(
+  store: WorldStore,
+  voiceId: string,
+  provider: string,
+  patch: { confirmedAt?: string; voiceId?: string; clipHash?: string; savedAt?: string },
+): Promise<void> {
+  const existingRaw = await readLibraryRaw(store);
+  if (existingRaw === null) throw new Error("the voice library is missing");
+  const entries = rawEntries(existingRaw);
+  const entry = entries.find((candidate) => candidate?.["id"] === voiceId);
+  if (!entry) throw new Error("that cloned voice is no longer in this world");
+  const remote = (typeof entry["remote"] === "object" && entry["remote"] !== null ? entry["remote"] : {}) as Record<string, Record<string, unknown>>;
+  const current = typeof remote[provider] === "object" && remote[provider] !== null ? remote[provider] : {};
+  entry["remote"] = { ...remote, [provider]: { ...current, ...patch } };
+  await store.commit({
+    kind: "voice-reader",
+    source: "app",
+    files: [
+      {
+        path: CLONED_VOICES_PATH,
+        action: "replace",
+        content: JSON.stringify({ voices: entries }, null, 2) + "\n",
+        baseHash: sha256(existingRaw),
+      },
+    ],
+  });
+}
+
+/** The hash the library compares a reader's slot against: the clip's bytes, as `clipFor` reads them. */
+export function clipHashOf(clip: DispatchVoiceReference): string {
+  return `sha256:${createHash("sha256").update(clip.data).digest("hex")}`;
+}

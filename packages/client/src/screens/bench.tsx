@@ -648,6 +648,7 @@ function BenchWorkspace({
   const [uploadConfirmation, setUploadConfirmation] = useState<{
     destinationLabel: string;
     confirmationToken: string;
+    destinationNotice?: string;
   } | null>(null);
   useEffect(
     () =>
@@ -2728,6 +2729,7 @@ function BenchWorkspace({
         {uploadConfirmation && (
           <RemoteVoiceUploadConfirmation
             destinationLabel={uploadConfirmation.destinationLabel}
+            destinationNotice={uploadConfirmation.destinationNotice}
             onCancel={() => {
               pendingDispatch.current = null;
               pendingDispatchAction.current = null;

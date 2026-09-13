@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   clonedVoiceCandidates,
+  cloudReaderCandidates,
   normalizeSpeechText,
   KOKORO_VOICE_MODEL,
   estimateMicroUsd,
@@ -66,6 +67,12 @@ export interface VoiceServiceDeps {
   sidecar: SidecarLike | null;
   localPresets: VoiceCandidate[];
   cloudSources: CloudVoiceSource[];
+  /**
+   * The hosted readers of the world's cloned voices (SPEC-046 R-10): a keyed one offers every
+   * library voice as a candidate of its own — the same id, its provider and row — beside the
+   * recipe's. Unkeyed, it offers nothing, like an unkeyed cloud catalogue.
+   */
+  hostedReaders?: Array<{ provider: string; model: string }>;
   getKey: (provider: string) => Promise<string | null>;
   emit: (event: DomainEvent) => void;
   clock?: () => string;
@@ -458,7 +465,7 @@ export class VoiceService {
       const health = await this.deps.sidecar.health().catch(() => null);
       const speechEngine = health === null ? "unknown" : health.engineStatus.kokoro.ready ? "ready" : "down";
       if (speechEngine === "down") {
-        return [...(await this.cloudVoices()), ...clonedVoiceCandidates(clonedVoices, clonedAvailability)];
+        return [...(await this.cloudVoices()), ...clonedVoiceCandidates(clonedVoices, clonedAvailability), ...(await this.hostedReaderCandidates(clonedVoices))];
       }
       const live = await this.deps.sidecar.listVoices().catch(() => []);
       if (live.length > 0) {
@@ -476,7 +483,17 @@ export class VoiceService {
         }));
       }
     }
-    return [...(await this.cloudVoices()), ...local, ...clonedVoiceCandidates(clonedVoices, clonedAvailability)];
+    return [...(await this.cloudVoices()), ...local, ...clonedVoiceCandidates(clonedVoices, clonedAvailability), ...(await this.hostedReaderCandidates(clonedVoices))];
+  }
+
+  /** The library's voices through each keyed hosted reader (SPEC-046 R-10). */
+  private async hostedReaderCandidates(clonedVoices: readonly ClonedVoice[]): Promise<VoiceCandidate[]> {
+    const out: VoiceCandidate[] = [];
+    for (const reader of this.deps.hostedReaders ?? []) {
+      if ((await this.deps.getKey(reader.provider)) === null) continue;
+      out.push(...cloudReaderCandidates(clonedVoices, reader));
+    }
+    return out;
   }
 
   /** The keyed cloud catalogues, which are unaffected by whatever the local engine is doing. */

@@ -53,6 +53,8 @@ export interface DispatchVoiceReference {
   name: string;
   contentType: "audio/wav" | "audio/mpeg";
   data: Uint8Array;
+  /** For a hosted reader that keeps the clip on its account: the id it keeps it under (SPEC-046 R-13). */
+  remoteVoiceId?: string;
 }
 
 /** The footage a continuation extends (SPEC-019 R-50), resolved immediately before submit. */

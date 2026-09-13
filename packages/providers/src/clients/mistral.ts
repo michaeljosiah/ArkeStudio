@@ -1,4 +1,4 @@
-import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts";
+import { HOSTED_VOICE_READERS, type CapabilityProbe, type ClientDeclarations } from "@arke-studio/contracts";
 import { jsonRequest, tryProbe } from "./http.js";
 import {
   ProviderAuthError,
@@ -14,7 +14,7 @@ import {
 } from "../types.js";
 
 /** The manifest row's stable id, and the version Mistral serves behind it (SPEC-046 R-6). */
-export const VOXTRAL_MODEL = "voxtral-mini-tts";
+export const VOXTRAL_MODEL = HOSTED_VOICE_READERS["mistral"]!;
 export const VOXTRAL_PROVIDER_MODEL = "voxtral-mini-tts-2603";
 
 /**
