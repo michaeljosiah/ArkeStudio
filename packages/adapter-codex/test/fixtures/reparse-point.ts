@@ -6,7 +6,8 @@ import { promisify } from "node:util";
 // directory. This intentionally does not share the production broker's pin/traversal code.
 const source = String.raw`
 $ErrorActionPreference = 'Stop'
-$asm = [AppDomain]::CurrentDomain.DefineDynamicAssembly((New-Object Reflection.AssemblyName('ReparseTest')), [Reflection.Emit.AssemblyBuilderAccess]::Run)
+$PSModuleAutoLoadingPreference = 'None'
+$asm = [AppDomain]::CurrentDomain.DefineDynamicAssembly([Reflection.AssemblyName]::new('ReparseTest'), [Reflection.Emit.AssemblyBuilderAccess]::Run)
 $type = $asm.DefineDynamicModule('ReparseTest', $false).DefineType('ReparseTest', 'Public, Class')
 $ctor = [Runtime.InteropServices.DllImportAttribute].GetConstructor([string])
 $fields = [Reflection.FieldInfo[]]@([Runtime.InteropServices.DllImportAttribute].GetField('CharSet'))
@@ -16,7 +17,7 @@ foreach ($sig in @(
   @('CloseHandle', [bool], @([IntPtr]))
 )) {
   $m = $type.DefineMethod($sig[0], 'Public, Static, PinvokeImpl', $sig[1], $sig[2])
-  $m.SetCustomAttribute((New-Object Reflection.Emit.CustomAttributeBuilder($ctor, @('kernel32.dll'), $fields, @([Runtime.InteropServices.CharSet]::Unicode))))
+  $m.SetCustomAttribute([Reflection.Emit.CustomAttributeBuilder]::new($ctor, @('kernel32.dll'), $fields, @([Runtime.InteropServices.CharSet]::Unicode)))
 }
 $k = $type.CreateType()
 $h = $k::CreateFileW($env:ARKE_TEST_DIRECTORY, 0x40000000, 7, [IntPtr]::Zero, 3, 0x02200000, [IntPtr]::Zero)
