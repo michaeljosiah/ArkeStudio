@@ -155,14 +155,14 @@ export class FishAudioClient implements ProviderClient, VoiceCatalogueClient, Vo
    * id and a `state` that is `trained` at once for a fast model; `failed` is a refusal here, not
    * a model to read from.
    */
-  async saveVoice(key: string, input: { name: string; clip: Uint8Array; contentType: "audio/wav" | "audio/mpeg"; language?: string }): Promise<{ voiceId: string }> {
+  async saveVoice(key: string, input: { name: string; clip: Uint8Array; contentType: "audio/wav" | "audio/mpeg"; language?: string }, signal?: AbortSignal): Promise<{ voiceId: string }> {
     const form = new FormData();
     form.append("type", "tts");
     form.append("title", input.name.slice(0, 80));
     form.append("train_mode", "fast");
     form.append("visibility", "private");
     form.append("voices", new Blob([new Uint8Array(input.clip)], { type: input.contentType }), input.contentType === "audio/wav" ? "voice.wav" : "voice.mp3");
-    const res = await this.fetchImpl(`${this.baseUrl}/model`, { method: "POST", headers: this.headers(key), body: form });
+    const res = await this.fetchImpl(`${this.baseUrl}/model`, { method: "POST", headers: this.headers(key), body: form, ...(signal ? { signal } : {}) });
     if (res.status >= 400) throw await this.failure(res);
     const body = (await res.json().catch(() => null)) as { _id?: unknown; state?: unknown } | null;
     const voiceId = body?._id;
@@ -172,9 +172,9 @@ export class FishAudioClient implements ProviderClient, VoiceCatalogueClient, Vo
   }
 
   /** Remove a saved voice model (R-15). One already gone is not an error: the outcome is the same. */
-  async deleteVoice(key: string, voiceId: string): Promise<void> {
+  async deleteVoice(key: string, voiceId: string, signal?: AbortSignal): Promise<void> {
     if (!/^[A-Za-z0-9_-]+$/.test(voiceId)) throw new ProviderRequestRejectedError("fishaudio: not a voice model id");
-    const res = await this.fetchImpl(`${this.baseUrl}/model/${encodeURIComponent(voiceId)}`, { method: "DELETE", headers: this.headers(key) });
+    const res = await this.fetchImpl(`${this.baseUrl}/model/${encodeURIComponent(voiceId)}`, { method: "DELETE", headers: this.headers(key), ...(signal ? { signal } : {}) });
     if (res.status === 404) return;
     if (res.status >= 400) throw await this.failure(res);
   }
@@ -185,8 +185,8 @@ export class FishAudioClient implements ProviderClient, VoiceCatalogueClient, Vo
    * again. `title` filters by text match, so the title is checked exactly. A listing that
    * fails is thrown, never read as "none": that is the one moment a second save would charge twice.
    */
-  async findVoice(key: string, name: string): Promise<string | null> {
-    const res = await this.fetchImpl(`${this.baseUrl}/model?self=true&title=${encodeURIComponent(name)}&page_size=100`, { headers: this.headers(key) });
+  async findVoice(key: string, name: string, signal?: AbortSignal): Promise<string | null> {
+    const res = await this.fetchImpl(`${this.baseUrl}/model?self=true&title=${encodeURIComponent(name)}&page_size=100`, { headers: this.headers(key), ...(signal ? { signal } : {}) });
     if (res.status >= 400) throw await this.failure(res);
     const body = (await res.json().catch(() => null)) as { items?: Array<Record<string, unknown>> } | null;
     const match = (body?.items ?? []).find((v) => v["title"] === name && typeof v["_id"] === "string");
@@ -194,9 +194,9 @@ export class FishAudioClient implements ProviderClient, VoiceCatalogueClient, Vo
   }
 
   /** Whether the account still holds the model: one deleted on fish.audio, or owned by another account, reads false. */
-  async hasVoice(key: string, voiceId: string): Promise<boolean> {
+  async hasVoice(key: string, voiceId: string, signal?: AbortSignal): Promise<boolean> {
     if (!/^[A-Za-z0-9_-]+$/.test(voiceId)) return false;
-    const res = await this.fetchImpl(`${this.baseUrl}/model/${encodeURIComponent(voiceId)}`, { headers: this.headers(key) });
+    const res = await this.fetchImpl(`${this.baseUrl}/model/${encodeURIComponent(voiceId)}`, { headers: this.headers(key), ...(signal ? { signal } : {}) });
     if (res.status === 404 || res.status === 403) return false;
     if (res.status >= 400) throw await this.failure(res);
     return true;
