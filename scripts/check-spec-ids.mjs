@@ -1,13 +1,13 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { privateDocsRoot } from "./private-docs.mjs";
 
-const directory = join(dirname(fileURLToPath(import.meta.url)), "../docs/specifications");
+const directory = join(privateDocsRoot(), "specifications");
 
 // The specification set is not published with the code — it lives in the private document set,
-// and docs/specifications is a junction into it on machines that hold one. So its absence is the
-// normal case in CI and for outside contributors, and only its presence means there is something
-// to check. Failing here would make lint red for everyone who simply does not have the specs.
+// a sibling repository on machines that hold one. So its absence is the normal case in CI and for
+// outside contributors, and only its presence means there is something to check. Failing here
+// would make lint red for everyone who simply does not have the specs.
 if (!existsSync(directory)) process.exit(0);
 
 const seen = new Map();
