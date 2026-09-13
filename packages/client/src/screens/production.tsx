@@ -187,6 +187,7 @@ import {
   PictureTrack,
   TakePicker,
   pictureClipViews,
+  useMeasuredWidth,
   type EditorTool,
   type PictureClipView,
 } from "./editor-timeline.js";
@@ -4221,6 +4222,26 @@ function editorMediaMatches(query: string): boolean {
   return typeof window.matchMedia === "function" && window.matchMedia(query).matches;
 }
 
+/**
+ * How a clip's source is named in the Library's use index: the kind, and the thing it points at.
+ *
+ * A performance carries a shot id too, and keying it by that shot would file it under the shot's
+ * row — where the row's `Locate` would then walk onto a clip the row does not stand for. It keeps
+ * its own key and no row asks for it, which is the row that was there before this was an index.
+ */
+function clipSourceKey(source: TimelineClip["source"]): string {
+  switch (source.kind) {
+    case "shot":
+      return `shot:${source.shotId}`;
+    case "take":
+      return `take:${source.takeId}`;
+    case "artifact":
+      return `artifact:${source.artifactId}`;
+    case "performance":
+      return `performance:${source.performanceId}`;
+  }
+}
+
 /** A file being imported, as the Library lists it until its row is real (issue 1035). */
 export interface PendingImport {
   requestId: string;
@@ -4396,10 +4417,26 @@ function ArtifactPanel({
       return { scene, shot, take, path: take && production ? takeMediaPath(production, take) : null };
     }),
   );
-  const usesOf = (matches: (clip: TimelineClip) => boolean): Array<{ id: TimelineClipId; startFrame: number }> =>
-    (timeline?.tracks ?? [])
-      .flatMap((track) => track.clips.filter(matches).map((clip) => ({ id: clip.id, startFrame: clip.startFrame })))
-      .sort((a, b) => a.startFrame - b.startFrame);
+  /*
+   * Where each source is used, indexed once rather than searched once per row.
+   *
+   * Every row asks the record the same question — where does this appear — and each answer used
+   * to walk every clip on every track and sort what it found. A world with a few hundred files
+   * over a timeline of a few hundred clips made that tens of thousands of clip visits for one
+   * render, on a panel that renders whether or not it is open and re-renders four times a second
+   * while the film plays. One pass builds the answer for every row at once.
+   */
+  const usesIndex = new Map<string, Array<{ id: TimelineClipId; startFrame: number }>>();
+  for (const track of timeline?.tracks ?? []) {
+    for (const clip of track.clips) {
+      const key = clipSourceKey(clip.source);
+      const found = usesIndex.get(key);
+      if (found === undefined) usesIndex.set(key, [{ id: clip.id, startFrame: clip.startFrame }]);
+      else found.push({ id: clip.id, startFrame: clip.startFrame });
+    }
+  }
+  for (const uses of usesIndex.values()) uses.sort((a, b) => a.startFrame - b.startFrame);
+  const usesOf = (key: string): Array<{ id: TimelineClipId; startFrame: number }> => usesIndex.get(key) ?? [];
   const laneOf = (artifact: ArtifactSidecar): string | null =>
     artifact.kind === "audio" ? "Audio" : artifact.kind === "video" || artifact.kind === "image" || artifact.kind === "board" ? "Picture" : null;
 
@@ -4451,7 +4488,7 @@ function ArtifactPanel({
       lane: "Picture",
       why: null,
       used,
-      uses: usesOf((clip) => clip.source.kind === "shot" && clip.source.shotId === shot.id),
+      uses: usesOf(`shot:${shot.id}`),
       add: onAddShot !== null && !used ? () => onAddShot(shot.id) : null,
       drag: take !== null && path !== null ? `shot:${shot.id}` : null,
       durationFrames: shot.durationSec !== undefined ? Math.max(1, secondsToFrames(shot.durationSec, frameRate)) : null,
@@ -4492,7 +4529,7 @@ function ArtifactPanel({
       lane,
       why: why ?? (lane === null ? `a ${artifact.kind} has no picture or sound to place` : null),
       used: usedArtifactIds.has(artifact.id),
-      uses: usesOf((clip) => clip.source.kind === "artifact" && clip.source.artifactId === artifact.id),
+      uses: usesOf(`artifact:${artifact.id}`),
       add: why === null && onAddArtifact !== null && lane !== null ? () => onAddArtifact(artifact) : null,
       placeAt: why === null && onPlaceAtPlayhead !== null && lane === "Picture" ? () => onPlaceAtPlayhead(artifact) : null,
       overlay: why === null && onOverlayArtifact && ["video", "image", "board"].includes(artifact.kind) ? () => onOverlayArtifact(artifact) : null,
@@ -4513,7 +4550,7 @@ function ArtifactPanel({
     if (item.kind !== "artifact" || artifacts.some(artifact => artifact.id === item.artifactId)) continue;
     artifactItems.push({ key: libraryItemKey(item), name: item.artifactId, sub: "Missing media", subTone: "destructive", thumb: <Film size={12} />,
       lane: null, why: "This world does not have the media. Remove it from the Library or import the file.", used: usedArtifactIds.has(item.artifactId),
-      uses: usesOf(clip => clip.source.kind === "artifact" && clip.source.artifactId === item.artifactId), add: null,
+      uses: usesOf(`artifact:${item.artifactId}`), add: null,
       remove: onRemoveFromLibrary === null ? null : () => onRemoveFromLibrary(item),
       drag: null, durationFrames: null, search: item.artifactId, kind: "artifact", scenes: [] });
   }
@@ -4529,7 +4566,7 @@ function ArtifactPanel({
         const read = voice.find((take) => take.completedAt !== undefined && take.media !== undefined) ?? null;
         const reading = voice.some((take) => take.completedAt === undefined);
         const status: "read" | "reading…" | "not generated" = read !== null ? "read" : reading ? "reading…" : "not generated";
-        const uses = read === null ? [] : usesOf((clip) => clip.source.kind === "take" && clip.source.takeId === read.id);
+        const uses = read === null ? [] : usesOf(`take:${read.id}`);
         return {
           key: `line:${shot.id}`,
           name: `“${shot.audio!.line!.trim()}”`,
@@ -5214,29 +5251,58 @@ function ClipLanes({
 }
 
 /**
- * Seek by dragging the ruler (24a's "1:26 / 2:40" made reachable).
- *
- * Proportional rather than pixels-per-second: the ruler spans the whole cut whatever the window
- * is doing, so the fraction of its width is the fraction of the film — the same arithmetic the
- * player dock already scrubs by.
+ * The lane gutter: the width of every track's label column, and the zero of every position
+ * measured across the canvas. The ruler, the playhead and `.fy-track__label` have to agree on it
+ * or the times printed are not the times drawn, so it is stated once and shared.
  */
-function CutScrubber({ totalSec, frameRate, transport }: { totalSec: number; frameRate: FrameRate; transport: Transport }) {
-  const { time, seek, setPlaying } = transport;
-  const seekToEvent = (e: React.PointerEvent | PointerEvent, el: HTMLElement) => {
-    const box = el.getBoundingClientRect();
-    const laneWidth = box.width - 88;
-    if (laneWidth <= 0 || totalSec <= 0) return;
-    const laneX = Math.max(0, Math.min(e.clientX - box.left - 88, laneWidth));
-    seek((laneX / laneWidth) * totalSec);
-  };
-  const onPointerDown = (e: React.PointerEvent) => {
+const LANE_GUTTER_PX = 88;
+
+/** Where the playhead sits for a fraction of the film, in the one expression all of them use. */
+function lanePosition(fraction: number): string {
+  return `calc(${LANE_GUTTER_PX}px + (100% - ${LANE_GUTTER_PX}px) * ${Math.min(1, Math.max(0, fraction))})`;
+}
+
+/** The second of the film a pointer is over, for a box whose lanes start at the gutter. */
+function secondsAtPointer(clientX: number, box: DOMRect, totalSec: number): number | null {
+  const laneWidth = box.width - LANE_GUTTER_PX;
+  if (laneWidth <= 0 || totalSec <= 0) return null;
+  const laneX = Math.max(0, Math.min(clientX - box.left - LANE_GUTTER_PX, laneWidth));
+  return (laneX / laneWidth) * totalSec;
+}
+
+/**
+ * Press and drag to seek, from any surface that spans the lanes.
+ *
+ * The ruler and the playhead are the same gesture on two elements and they have to agree to the
+ * pixel, so the arithmetic lives once. `laneOf` names what the fraction is measured across: the
+ * ruler is its own box, the playhead is one pixel wide and has to ask the track stack.
+ */
+function seekDrag(opts: {
+  totalSec: number;
+  transport: Transport;
+  laneOf: (target: HTMLElement) => HTMLElement | null;
+  /** The ruler jumps to where it was pressed; the playhead is already under the hand. */
+  seekOnPress: boolean;
+}): (e: React.PointerEvent) => void {
+  const { totalSec, transport, laneOf, seekOnPress } = opts;
+  const { seek, setPlaying } = transport;
+  return (e: React.PointerEvent) => {
     if (e.button !== 0) return;
     const el = e.currentTarget as HTMLElement;
+    const lane = laneOf(el);
+    if (lane === null) return;
+    // Or the press selects text across the lanes, and a drag that started on a clip label ends
+    // up dragging the label instead of the transport.
+    e.preventDefault();
     el.setPointerCapture(e.pointerId);
     // Scrubbing while it runs fights the transport for the same value; stop, then seek.
     setPlaying(false);
-    seekToEvent(e, el);
-    const move = (ev: PointerEvent) => seekToEvent(ev, el);
+    const to = (clientX: number) => {
+      const at = secondsAtPointer(clientX, lane.getBoundingClientRect(), totalSec);
+      if (at !== null) seek(at);
+    };
+    if (seekOnPress) to(e.clientX);
+    const move = (ev: PointerEvent) => to(ev.clientX);
     const up = (ev: PointerEvent) => {
       el.releasePointerCapture(ev.pointerId);
       el.removeEventListener("pointermove", move);
@@ -5247,7 +5313,12 @@ function CutScrubber({ totalSec, frameRate, transport }: { totalSec: number; fra
     el.addEventListener("pointerup", up);
     el.addEventListener("pointercancel", up);
   };
-  const onKeyDown = (e: React.KeyboardEvent) => {
+}
+
+/** Arrow, Home and End on whichever of the two has focus: the same seek without a pointer. */
+function seekKeys(transport: Transport, totalSec: number): (e: React.KeyboardEvent) => void {
+  const { time, seek } = transport;
+  return (e: React.KeyboardEvent) => {
     if (e.key === "ArrowRight") seek(time + 1);
     else if (e.key === "ArrowLeft") seek(time - 1);
     else if (e.key === "Home") seek(0);
@@ -5255,11 +5326,48 @@ function CutScrubber({ totalSec, frameRate, transport }: { totalSec: number; fra
     else return;
     e.preventDefault();
   };
+}
+
+/** Label steps a person reads a timeline in; the first that leaves room for the text wins. */
+const RULER_STEPS_SEC = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
+/** Room for `mm:ss` and the air the design leaves around it. */
+const RULER_LABEL_PX = 64;
+
+/** Every second the ruler prints, at the design's regular interval rather than three fixed spots. */
+export function rulerTicks(totalSec: number, laneWidthPx: number): number[] {
+  if (totalSec <= 0 || laneWidthPx <= 0) return [];
+  const step =
+    RULER_STEPS_SEC.find((candidate) => (candidate / totalSec) * laneWidthPx >= RULER_LABEL_PX) ??
+    RULER_STEPS_SEC[RULER_STEPS_SEC.length - 1]!;
+  const ticks: number[] = [];
+  for (let at = 0; at < totalSec; at += step) ticks.push(at);
+  return ticks;
+}
+
+/**
+ * Seek by dragging the ruler (24a's "1:26 / 2:40" made reachable).
+ *
+ * Proportional rather than pixels-per-second: the ruler spans the whole cut whatever the window
+ * is doing, so the fraction of its width is the fraction of the film — the same arithmetic the
+ * player dock already scrubs by.
+ *
+ * The times are printed where they are true. Three labels pushed apart by flex named zero, half
+ * and the end, but drew them at the edges of their own text: the last sat a label's width short
+ * of the end it named, and the middle landed wherever the other two left room. The design draws a
+ * regular interval across the lanes and so does this, every label placed by the same expression
+ * the playhead is, so a clip edge under the ruler's `0:20` is at twenty seconds.
+ */
+function CutScrubber({ totalSec, frameRate, transport }: { totalSec: number; frameRate: FrameRate; transport: Transport }) {
+  const { time } = transport;
+  const ref = useRef<HTMLDivElement>(null);
+  const width = useMeasuredWidth(ref);
+  const onPointerDown = seekDrag({ totalSec, transport, laneOf: (el) => el, seekOnPress: true });
   return (
     <div
+      ref={ref}
       className="fy-timeline__ruler fy-scrub"
       onPointerDown={onPointerDown}
-      onKeyDown={onKeyDown}
+      onKeyDown={seekKeys(transport, totalSec)}
       role="slider"
       tabIndex={0}
       aria-label="Seek"
@@ -5268,11 +5376,49 @@ function CutScrubber({ totalSec, frameRate, transport }: { totalSec: number; fra
       aria-valuenow={Math.round(time)}
       aria-valuetext={formatTimecode(time, frameRate)}
     >
-      <span className="fy-mono">{formatTimecode(0, frameRate)}</span>
-      <span className="fy-h1row__push" />
-      <span className="fy-mono">{formatTimecode(totalSec / 2, frameRate)}</span>
-      <span className="fy-h1row__push" />
-      <span className="fy-mono">{formatTimecode(totalSec, frameRate)}</span>
+      {rulerTicks(totalSec, width - LANE_GUTTER_PX).map((at) => (
+        <span key={at} className="fy-timeline__tick" style={{ left: lanePosition(at / totalSec) }}>
+          <span className="fy-mono">{clock(at)}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The playhead, and the thing a hand actually grabs.
+ *
+ * It was a one-pixel line under `pointer-events: none`, so the only way to move the transport was
+ * the ruler — a 24-pixel strip above the lanes, which is what "only the top of it drags" meant.
+ * The line is the obvious target and is one now: an invisible band rides with it, wide enough to
+ * hit without aiming, and the head at the top is inside that band rather than a 7-pixel dot of
+ * its own. The band is the only part that takes a pointer and it is only ever where the playhead
+ * is, so a clip anywhere else on the lane is untouched by it.
+ */
+function CutPlayhead({ totalSec, frameRate, transport }: { totalSec: number; frameRate: FrameRate; transport: Transport }) {
+  const { time } = transport;
+  const onPointerDown = seekDrag({
+    totalSec,
+    transport,
+    laneOf: (el) => el.closest<HTMLElement>(".fy-tracks"),
+    // Pressing the playhead grabs it where it is; jumping to the centre of the band would move
+    // the transport by a few frames for a press that was meant to hold it still.
+    seekOnPress: false,
+  });
+  return (
+    <div className="fy-playhead" style={{ left: lanePosition(time / totalSec) }}>
+      <span
+        className="fy-playhead__grab"
+        onPointerDown={onPointerDown}
+        onKeyDown={seekKeys(transport, totalSec)}
+        role="slider"
+        tabIndex={0}
+        aria-label="Playhead"
+        aria-valuemin={0}
+        aria-valuemax={Math.round(totalSec)}
+        aria-valuenow={Math.round(time)}
+        aria-valuetext={formatTimecode(time, frameRate)}
+      />
     </div>
   );
 }
@@ -6836,25 +6982,42 @@ export function CutScreen() {
    * production previews its empty first state, not the film the story would derive. A production
    * with no story and legacy placements keeps its legacy preview until the first write folds them.
    */
-  const previewState: typeof timelineState =
-    production && timelineState.status === "absent" && production.spine === null && !mediaOnly
-      ? { status: "ready", timeline: seedFirstPictureTimeline(production) }
-      : timelineState;
-  const renderPlan =
-    production && (!production.spine || timelineState.status === "ready") && timelineError === null
-      ? buildRenderPlan({
-          production,
-          artifacts: world?.artifacts ?? [],
-          timeline: previewState,
-          scope: { kind: "production" },
-          preset: "review-cut",
-          // A hidden (muted) track is not asked for: the plan would refuse it and take the whole
-          // preview with it (round nine). Hiding captions leaves the film.
-          ...(subtitleView !== null && subtitleTracks.some((track) => track.id === subtitleView && !track.muted)
-            ? { subtitles: { trackId: subtitleView, mode: "none" } }
-            : {}),
-        })
-      : null;
+  const previewState: typeof timelineState = useMemo(
+    () =>
+      production && timelineState.status === "absent" && production.spine === null && !mediaOnly
+        ? { status: "ready", timeline: seedFirstPictureTimeline(production) }
+        : timelineState,
+    [production, timelineState.status, mediaOnly],
+  );
+  /*
+   * Memoised, and the identity matters as much as the cost.
+   *
+   * The transport reports four times a second, so this ran four times a second for the whole
+   * length of every film — resolving the picture timeline, building every overlay and merging
+   * the speech regions, none of which had changed. Worse than the work was the churn: the plan
+   * is what the monitor mix, the preview's spans and the cue lookup are keyed on, and a fresh
+   * object each render restarted all three. The sound heard that as four pause/play cycles a
+   * second. The inputs below are the only things the plan is made of, and each of them is either
+   * a snapshot the store replaces or a value the screen chooses.
+   */
+  const planArtifacts = world?.artifacts;
+  const subtitleHidden = subtitleTracks.some((track) => track.id === subtitleView && track.muted);
+  const renderPlan = useMemo(
+    () =>
+      production && (!production.spine || timelineState.status === "ready") && timelineError === null
+        ? buildRenderPlan({
+            production,
+            artifacts: planArtifacts ?? [],
+            timeline: previewState,
+            scope: { kind: "production" },
+            preset: "review-cut",
+            // A hidden (muted) track is not asked for: the plan would refuse it and take the whole
+            // preview with it (round nine). Hiding captions leaves the film.
+            ...(subtitleView !== null && !subtitleHidden ? { subtitles: { trackId: subtitleView, mode: "none" as const } } : {}),
+          })
+        : null,
+    [production, planArtifacts, previewState, timelineState.status, timelineError, subtitleView, subtitleHidden],
+  );
   /*
    * A plan the projection refuses — a placed artifact the world no longer has, say — blocks the
    * preview and the export by name, and nothing else (SPEC-039 R-39, R-40): the editor stays
@@ -6881,7 +7044,11 @@ export function CutScreen() {
    * What the preview shows: the plan's answer at every edge, on either clock. The song clock keeps
    * its own spans until its timeline is materialised (SPEC-037 §2.3).
    */
-  const spans = spineCut ? spineSpans(spineCut) : renderPlan?.ok ? planSpans(renderPlan.plan) : [];
+  /** Keyed on the plan, so the preview's frame loop restarts when the film changes and not before. */
+  const spans = useMemo(
+    () => (spineCut ? spineSpans(spineCut) : renderPlan?.ok ? planSpans(renderPlan.plan) : []),
+    [spineCut, renderPlan],
+  );
   /*
    * What a person placed, which a split does not add to: splitting files a second record over the
    * same file, and counting both would report two clips for one piece of media still drawn as one
@@ -7783,13 +7950,7 @@ export function CutScreen() {
               transport={transport}
             />
             <div className="fy-tracks">
-              {totalSec > 0 && (
-                <div
-                  className="fy-playhead"
-                  style={{ left: `calc(88px + (100% - 88px) * ${Math.min(1, transport.time / totalSec)})` }}
-                  aria-hidden
-                />
-              )}
+              {totalSec > 0 && <CutPlayhead totalSec={totalSec} frameRate={frameRate} transport={transport} />}
               {editableTimeline && production && subtitleTracksOf(editableTimeline).length > 0 ? (
                 subtitleTracksOf(editableTimeline).map((track) => (
                   <SubtitleTrackRow
