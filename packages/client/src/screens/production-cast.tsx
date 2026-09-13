@@ -23,7 +23,7 @@ import {
   attachCharacterLook,
   createSheetFromSentence,
 } from "../lib/store.js";
-import { lookPickerLabels, lookOptionScope } from "./production.js";
+import { lookPickerLabels, lookOptionScope } from "./production-generate.js";
 
 /**
  * What each character wears in this production (design 67).
