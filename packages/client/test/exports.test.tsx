@@ -16,7 +16,7 @@ import { renderToString } from "react-dom/server";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
-import { CutScreen } from "../src/screens/production.js";
+import { CutScreen } from "../src/screens/cut.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**

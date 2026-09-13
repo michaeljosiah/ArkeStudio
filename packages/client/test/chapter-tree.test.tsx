@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { ChapterSummary, ClientState } from "@arke-studio/contracts";
-import { ChapterTreeScreen } from "../src/screens/production.js";
+import { ChapterTreeScreen } from "../src/screens/production-story.js";
 import { rememberChaptersView } from "../src/lib/continuity.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";

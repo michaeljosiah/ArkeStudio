@@ -4,7 +4,8 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { CharacterLook, ClientState, CompiledPass, CompiledReference } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { carriedSubjects, lookOptionScope, lookPickerLabels, passRow } from "../src/screens/production.js";
+import { carriedSubjects } from "../src/screens/production-cast.js";
+import { lookOptionScope, lookPickerLabels, passRow } from "../src/screens/production-generate.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 

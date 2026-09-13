@@ -13,7 +13,7 @@ import {
   type ClientState,
 } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { CutScreen } from "../src/screens/production.js";
+import { CutScreen } from "../src/screens/cut.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";

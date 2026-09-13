@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { ChapterSummary, ClientMessage, ClientState } from "@arke-studio/contracts";
-import { ChapterTreeScreen } from "../src/screens/production.js";
+import { ChapterTreeScreen } from "../src/screens/production-story.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
