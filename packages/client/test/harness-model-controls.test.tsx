@@ -210,6 +210,28 @@ describe("live harness model controls (#1123, #1124)", () => {
     assert.equal(sent.filter((message) => message.kind === "list-harness-models").length, 2);
   });
 
+  it("disables models without reported text support in every writing picker and blocks a saved production choice", async () => {
+    const state = modelState();
+    state.app.harnessModels.push(
+      { id: "image-only", provider: "custom", displayName: "Image only", inputModalities: ["image"] },
+      { id: "no-inputs", provider: "custom", displayName: "No inputs", inputModalities: [] },
+    );
+    state.world!.productions.find(production => production.meta.id === "saltlight")!.meta.models = { llm: "custom/image-only" };
+    await mount(state, <><AgentsPanel />{conversation()}</>);
+    for (const label of ["Model for world-builder", "Model for stage-designer", "Language model"]) {
+      const options = [...select(label).options];
+      for (const value of ["custom/image-only", "custom/no-inputs"]) {
+        const option = options.find(option => option.value === value)!;
+        assert.equal(option.hasAttribute("disabled"), true, `${label}: ${value}`);
+        assert.match(option.textContent!, /cannot read text/);
+      }
+    }
+    const prompt = [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.trim() === "Explain the scene")!;
+    assert.equal(prompt.disabled, true, "a previously saved model without text input cannot dispatch");
+    await press("Clear production default");
+    assert.ok(sent.some(message => message.kind === "set-production-model" && message.modelId === null));
+  });
+
   it("uses the live production catalog even when no media manifest entry exists", async () => {
     await mount(modelState(), conversation());
     const values = [...select("Language model").options].map((option) => option.value);

@@ -49,6 +49,19 @@ test("corrupt PNG data and text-only model image reads never produce a successfu
   await assert.rejects(f.run("read", { path: "frame.png" }), /does not accept image/);
 });
 
+test("text search skips truncated images and retains matches in unrelated files", async t => {
+  const f = await fixture(); t.after(() => rm(f.base, { recursive: true, force: true }));
+  await writeFile(join(f.root, "before.txt"), "The actor waits at the door.");
+  // No NUL bytes: this must reach image classification, not the generic binary shortcut.
+  await writeFile(join(f.root, "broken.png"), Buffer.concat([png.subarray(0, 8), Buffer.from("actor")]));
+  await writeFile(join(f.root, "frame.jpg"), Buffer.from([255, 216, 255, ...Buffer.from("actor")]));
+  await writeFile(join(f.root, "later.txt"), "The actor crosses the room.");
+  const result = await f.run("search", { query: "actor" });
+  assert.equal(result.result.success, true);
+  assert.deepEqual(result.result.contentItems, [{ type: "inputText", text: "before.txt:1: The actor waits at the door.\nlater.txt:1: The actor crosses the room." }]);
+  await assert.rejects(f.run("read", { path: "broken.png" }), /corrupt/);
+});
+
 test("parallel edits retain both changes and a cancelled queued write changes no file", async t => {
   const f = await fixture(); t.after(() => rm(f.base, { recursive: true, force: true }));
   await writeFile(join(f.root, "draft.txt"), "alpha beta");

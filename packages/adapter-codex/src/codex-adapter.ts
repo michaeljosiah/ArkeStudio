@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import {
-  agentPromptFor, confinementFor, findHarnessModel, ROSTER, sessionSkillForAgent, LLM_ENV_NAMES, LLM_ENV_PROVIDERS,
+  agentPromptFor, confinementFor, findHarnessModel, harnessModelMissingInput, ROSTER, sessionSkillForAgent, LLM_ENV_NAMES, LLM_ENV_PROVIDERS,
   type CreateSessionInput, type HarnessAdapter, type HarnessCapability, type HarnessEvent, type ModelInfo,
   type Readiness, type SendMessageInput, type SendReceipt, type SessionConfigInput, type SessionRef,
 } from "@arke-studio/contracts";
@@ -75,6 +75,7 @@ interface Turn {
 }
 interface Session extends ToolSession {
   id: string;
+  threadId: string;
   model: string;
   provider: string;
   turn: Turn | null;
@@ -91,14 +92,23 @@ export class CodexAdapter implements HarnessAdapter {
   private priorConfig: JsonObject = {};
   private readonly preparations = new Map<string, SessionConfigInput>();
   private readonly sessions = new Map<string, Session>();
+  private readonly threads = new Map<string, Session>();
   private readonly queues = new Set<EventQueue>();
-  private inputLimit: number | null = null;
+  private readonly modelLimits = new Map<string, number>();
+  private revision = 0;
+  private recovery: Promise<void> | null = null;
+  private retirement: Promise<void> = Promise.resolve();
+  private recoveryEligible = true;
+  private environmentChanging = false;
   private environmentUpdate: Promise<void> = Promise.resolve();
   constructor(private readonly opts: CodexAdapterOptions) {}
 
   capabilities(): ReadonlySet<HarnessCapability> { return new Set(["events", "models"]); }
   readiness(): Readiness { return this.ready; }
-  knownInputTokenLimit(): number | null { return this.inputLimit; }
+  lifecycleRevision(): number { return this.revision; }
+  // This argument-free legacy method cannot identify the selected model. Measured limits
+  // belong to the matching catalog entry; other models retain the caller's safe fallback.
+  knownInputTokenLimit(): null { return null; }
   sessionFiles(): [] { return []; }
   prepareSession(input: SessionConfigInput): void {
     if (input.preparationId) {
@@ -116,13 +126,19 @@ export class CodexAdapter implements HarnessAdapter {
       const prior = this.opts.env ?? process.env;
       const names = new Set([...Object.keys(prior), ...Object.keys(requested)]);
       if ([...names].every(name => prior[name] === requested[name])) return;
-      const started = this.rpc !== null || this.initialization !== null;
-      if (this.initialization) await this.initialization.catch(() => {});
-      await this.rpc?.dispose(); this.rpc = null;
-      this.sessions.clear(); this.preparations.clear();
-      this.opts.env = requested;
-      this.ready = { ready: false, reason: "Codex credentials changed; reconnecting." };
-      if (started) await this.init();
+      const started = this.rpc !== null || this.initialization !== null || this.recovery !== null;
+      this.environmentChanging = true;
+      try {
+        await this.recovery;
+        if (this.initialization) await this.initialization.catch(() => {});
+        await this.retirement;
+        if (this.disposed) throw new Error("Codex adapter is disposed.");
+        await this.rpc?.dispose(); this.rpc = null;
+        this.sessions.clear(); this.threads.clear(); this.preparations.clear(); this.modelLimits.clear();
+        this.opts.env = requested;
+        this.ready = { ready: false, reason: "Codex credentials changed; reconnecting." };
+        if (started) await this.initTransport();
+      } finally { this.environmentChanging = false; }
     });
     this.environmentUpdate = update;
     return update;
@@ -130,30 +146,52 @@ export class CodexAdapter implements HarnessAdapter {
 
   async init(): Promise<void> {
     if (this.disposed) throw new Error("Codex adapter is disposed.");
+    if (this.recovery) {
+      await this.recovery;
+      if (!this.ready.ready) throw new Error(this.ready.reason ?? "Codex could not reconnect.");
+      return;
+    }
+    return this.initTransport();
+  }
+  private async initTransport(): Promise<void> {
+    if (this.disposed) throw new Error("Codex adapter is disposed.");
     if (this.ready.ready) return;
     if (this.initialization) return this.initialization;
     this.initialization = this.initialize();
     try { await this.initialization; } finally { this.initialization = null; }
   }
   private async initialize(): Promise<void> {
-    await this.rpc?.dispose();
+    const prior = this.rpc; this.rpc = null;
+    await prior?.dispose();
+    await this.retirement;
+    if (this.disposed) throw new Error("Codex adapter is disposed.");
+    let healthy = false;
     const rpc = new CodexRpc({ ...this.opts,
-      onNotification: (method, params) => this.notification(method, params),
-      onRequest: (method, params) => this.serverRequest(method, params),
-      onFailure: error => this.failure(error),
+      onNotification: (method, params) => { if (this.rpc === rpc) this.notification(method, params); },
+      onRequest: async (method, params) => { if (this.rpc !== rpc) throw new ConfinementError(); return this.serverRequest(method, params); },
+      onFailure: error => this.failure(rpc, error, healthy),
     });
     this.rpc = rpc;
     try {
       await rpc.start();
       await rpc.request("initialize", { clientInfo: { name: "arke_studio", version: "0.1.0" }, capabilities: { experimentalApi: true } });
       await rpc.write({ method: "initialized" });
-      this.priorConfig = object(object(await rpc.request("config/read", { includeLayers: false })).config);
-      this.ready = { ready: true };
+      const config = object(object(await rpc.request("config/read", { includeLayers: false })).config);
+      if (this.disposed || this.rpc !== rpc) throw new Error("Codex initialization was retired.");
+      this.priorConfig = config;
+      healthy = true; this.revision++; this.ready = { ready: true };
     } catch (error) {
-      await rpc.dispose(); this.ready = { ready: false, reason: "Codex app-server could not initialize." }; throw error;
+      if (this.rpc === rpc) this.rpc = null;
+      await rpc.dispose();
+      if (!this.disposed) this.ready = { ready: false, reason: "Codex app-server could not initialize." };
+      throw error;
     }
   }
-  private connection(): CodexRpc { if (!this.rpc || !this.ready.ready) throw new Error(this.ready.reason ?? "Codex is not running."); return this.rpc; }
+  private connection(): CodexRpc {
+    if (this.environmentChanging) throw new Error("Codex credentials changed; reconnecting.");
+    if (!this.rpc || !this.ready.ready) throw new Error(this.ready.reason ?? "Codex is not running.");
+    return this.rpc;
+  }
 
   async listModels(): Promise<ModelInfo[]> {
     return this.discoverModels();
@@ -164,14 +202,16 @@ export class CodexAdapter implements HarnessAdapter {
     let cursor: string | null = null;
     do {
       const response = object(await rpc.request("model/list", { limit: 100, includeHidden: false, ...(cursor ? { cursor } : {}) }, signal));
+      if (this.rpc !== rpc || !this.ready.ready) throw new Error("Codex catalog connection was retired.");
       if (!Array.isArray(response.data)) throw new Error("Codex returned an invalid model catalog.");
       for (const raw of response.data) {
         const model = object(raw); if (model.hidden === true) continue;
         if (typeof model.model !== "string" || !model.model || typeof model.id !== "string") throw new Error("Codex returned an invalid model identity.");
-        if (result.some(row => row.id === model.model && row.provider === provider)) continue;
+        if (result.some(row => row.id === model.model && row.provider === provider)) throw new Error("Codex returned duplicate canonical model identities.");
         result.push({ id: model.model, provider, ...(typeof model.displayName === "string" ? { displayName: model.displayName } : {}), isDefault: model.isDefault === true,
           ...(model.id !== model.model ? { aliases: [model.id] } : {}),
           ...(Array.isArray(model.inputModalities) ? { inputModalities: model.inputModalities.filter((value): value is "text" | "image" => value === "text" || value === "image") } : {}),
+          ...(this.modelLimits.has(JSON.stringify([provider, model.model])) ? { inputTokenLimit: this.modelLimits.get(JSON.stringify([provider, model.model]))! } : {}),
         });
       }
       cursor = typeof response.nextCursor === "string" ? response.nextCursor : null;
@@ -198,26 +238,44 @@ export class CodexAdapter implements HarnessAdapter {
     const selected = requested === undefined ? catalog.find(model => model.isDefault) : findHarnessModel(requested, catalog);
     if (requested !== undefined && !selected) throw new Error("The selected model is unavailable through Codex. Refresh the model list and choose an available model.");
     if (!selected) throw new Error("Codex did not report a default model. Choose a model before starting this agent.");
-    if (member.name === "stage-designer" && selected.inputModalities && !selected.inputModalities.includes("image")) throw new Error("This Codex model cannot inspect Stage images.");
+    const missingInput = harnessModelMissingInput(selected, member.name === "stage-designer");
+    if (missingInput === "text") throw new Error("This Codex model cannot accept the text instructions required by Arke.");
+    if (missingInput === "image") throw new Error("This Codex model cannot inspect Stage images.");
     const researchWeb = member.name !== "stage-designer" && prepared.researchWeb === true;
     const toolSession: ToolSession = { root, rootIdentity: await captureRootIdentity(root, input.signal), confinement: confinementFor(member, { web: researchWeb }), worldQueryUrl: prepared.worldQueryUrl, worldTools: new Map(), inputModalities: selected.inputModalities };
     await discoverWorldTools(toolSession, input.signal);
     const skill = sessionSkillForAgent(member.name, prepared);
     const prompt = agentPromptFor({ ...member, researchWeb, ...(override?.brief !== undefined ? { brief: override.brief } : {}), ...(skill ? { skill } : {}) });
     const config = confinedConfig(this.priorConfig, researchWeb);
-    const archiveLate = (value: unknown) => { const id = object(object(value).thread).id; if (typeof id === "string") void rpc.request("thread/archive", { threadId: id }).catch(() => {}); };
+    const archiveLate = (value: unknown) => {
+      const id = object(object(value).thread).id;
+      if (typeof id !== "string") return;
+      if (this.rpc === rpc && this.threads.has(id)) { void rpc.dispose(); return; }
+      void rpc.request("thread/archive", { threadId: id }).catch(() => {});
+    };
     const response = object(await rpc.request("thread/start", {
       model: selected.id, modelProvider: selected.provider, allowProviderModelFallback: false,
       cwd: root, runtimeWorkspaceRoots: [], ephemeral: true, environments: [], selectedCapabilityRoots: [],
       sandbox: "read-only", approvalPolicy: "untrusted", baseInstructions: prompt, developerInstructions: "",
       config, dynamicTools: [{ type: "namespace", name: "arke", description: "Arke Studio's application-owned tools. Use read for actual images.", tools: toolsFor(toolSession) }],
     }, input.signal, archiveLate));
-    const id = object(response.thread).id;
-    if (typeof id !== "string" || response.model !== selected.id || response.modelProvider !== selected.provider || (Array.isArray(response.instructionSources) && response.instructionSources.length > 0)) {
+    const threadId = object(response.thread).id;
+    if (typeof threadId === "string" && this.rpc === rpc && this.threads.has(threadId)) {
+      // Archiving this response would archive the existing session. Retire the faulty
+      // transport instead: two distinct preparations cannot share one live wire thread.
+      await rpc.dispose();
+      throw new Error("Codex reused an active thread identity; its connection was retired.");
+    }
+    if (typeof threadId !== "string" || response.model !== selected.id || response.modelProvider !== selected.provider || (Array.isArray(response.instructionSources) && response.instructionSources.length > 0)) {
       archiveLate(response); throw new Error("Codex changed the selected model or loaded instructions outside this session.");
     }
-    if (input.signal?.aborted) { archiveLate(response); throw new Error("Session creation cancelled."); }
-    this.sessions.set(id, { ...toolSession, id, model: selected.id, provider: selected.provider, turn: null, retiredTurns: new Set(), usage: 0 });
+    if (input.signal?.aborted || this.rpc !== rpc || !this.ready.ready) { archiveLate(response); throw new Error("Session creation cancelled or its connection was retired."); }
+    // Server thread IDs may repeat across processes. Old callers must never address a new
+    // session after recovery merely because the replacement server reused an identifier.
+    const id = randomUUID();
+    const session: Session = { ...toolSession, id, threadId, model: selected.id, provider: selected.provider, turn: null, retiredTurns: new Set(), usage: 0 };
+    this.sessions.set(id, session); this.threads.set(threadId, session);
+    this.recoveryEligible = true;
     this.opts.onTrace?.({ at: "codex.session-created", sessionId: id, model: selected.id, provider: selected.provider, agent: member.name });
     this.emit({ type: "session.created", sessionId: id });
     return { sessionId: id };
@@ -233,7 +291,7 @@ export class CodexAdapter implements HarnessAdapter {
     const turn: Turn = { id: null, correlationId, items: new Map(), phases: new Map(), settled, settle, abort: new AbortController(), cancelled: false };
     session.turn = turn;
     try {
-      const response = object(await rpc.request("turn/start", { threadId: session.id, input: input.parts.map(part => ({ type: "text", text: part.text })), environments: [] }));
+      const response = object(await rpc.request("turn/start", { threadId: session.threadId, input: input.parts.map(part => ({ type: "text", text: part.text })), environments: [] }));
       const id = object(response.turn).id;
       if (typeof id !== "string" || (turn.id !== null && turn.id !== id)) throw new Error("Codex returned an invalid turn identity.");
       turn.id = id;
@@ -252,7 +310,7 @@ export class CodexAdapter implements HarnessAdapter {
   usageTokens(sessionId: string): number { return this.sessions.get(sessionId)?.usage ?? 0; }
 
   private notification(method: string, params: JsonObject): void {
-    const session = typeof params.threadId === "string" ? this.sessions.get(params.threadId) : undefined;
+    const session = typeof params.threadId === "string" ? this.threads.get(params.threadId) : undefined;
     if (!session) return;
     const turn = session.turn;
     const announced = object(params.turn);
@@ -260,7 +318,10 @@ export class CodexAdapter implements HarnessAdapter {
     if (method === "thread/tokenUsage/updated") {
       const usage = object(params.tokenUsage); const total = object(usage.total).totalTokens;
       if (typeof total === "number" && Number.isFinite(total) && total >= session.usage) session.usage = total;
-      if (typeof usage.modelContextWindow === "number" && usage.modelContextWindow > 0) this.inputLimit = usage.modelContextWindow;
+      if (typeof usage.modelContextWindow === "number" && Number.isSafeInteger(usage.modelContextWindow) && usage.modelContextWindow > 0) {
+        const key = JSON.stringify([session.provider, session.model]);
+        if (this.modelLimits.get(key) !== usage.modelContextWindow) { this.modelLimits.set(key, usage.modelContextWindow); this.revision++; }
+      }
       return;
     }
     if (!turn || !id || session.retiredTurns.has(id) || (turn.id !== null && turn.id !== id)) return;
@@ -276,7 +337,8 @@ export class CodexAdapter implements HarnessAdapter {
       // render its question or treat its internal accepted:true as delivery to an Arke user.
       this.emit({ type: "tool.refused", sessionId: session.id, tool: "request_user_input_async", summary: "refused an unsupported Codex question tool" });
       this.finish(session, "error", "This Codex question tool is not available in Arke. Retry with an instruction to reply directly.");
-      void this.rpc?.request("turn/interrupt", { threadId: session.id, turnId: id }, AbortSignal.timeout(5000)).catch(() => this.rpc?.dispose());
+      const rpc = this.rpc;
+      void rpc?.request("turn/interrupt", { threadId: session.threadId, turnId: id }, AbortSignal.timeout(5000)).catch(() => rpc.dispose());
       return;
     }
     if (incoming.type === "agentMessage" && typeof incoming.id === "string" && typeof incoming.phase === "string") turn.phases.set(incoming.id, incoming.phase);
@@ -312,7 +374,7 @@ export class CodexAdapter implements HarnessAdapter {
 
   private async serverRequest(method: string, params: JsonObject): Promise<{ result: unknown; delivered?: () => void }> {
     this.opts.onTrace?.({ at: "codex.server-request", method, namespace: params.namespace, tool: params.tool });
-    const session = typeof params.threadId === "string" ? this.sessions.get(params.threadId) : undefined;
+    const session = typeof params.threadId === "string" ? this.threads.get(params.threadId) : undefined;
     if (method !== "item/tool/call" || !session?.turn || params.namespace !== "arke" || typeof params.tool !== "string" || typeof params.turnId !== "string" || session.retiredTurns.has(params.turnId) || session.turn.id === null || session.turn.id !== params.turnId) {
       if (session) this.emit({ type: "tool.refused", sessionId: session.id, tool: typeof params.tool === "string" ? params.tool : method, summary: "refused a tool outside this session's capabilities" });
       throw new ConfinementError();
@@ -329,16 +391,38 @@ export class CodexAdapter implements HarnessAdapter {
       return { result: { success: false, contentItems: [{ type: "inputText", text: refused ? "Denied by Arke Studio confinement." : "The tool could not complete. Check the supplied path, arguments and active world." }] } };
     }
   }
-  private failure(error: Error): void {
+  private failure(rpc: CodexRpc, error: Error, wasHealthy: boolean): void {
+    if (this.rpc !== rpc) return;
+    const mayRecover = wasHealthy && this.recoveryEligible;
+    this.recoveryEligible = false;
+    this.rpc = null; this.revision++;
     this.ready = { ready: false, reason: error.message };
     for (const session of this.sessions.values()) this.finish(session, "error", error.message);
+    this.sessions.clear(); this.threads.clear(); this.preparations.clear(); this.modelLimits.clear();
+    const retired = Promise.resolve().then(() => rpc.dispose());
+    this.retirement = retired; void retired.catch(() => {});
+    // A replacement that repeatedly initializes and exits must not spin a background
+    // restart loop. Only a newly admitted session replenishes the recovery allowance.
+    if (!mayRecover || this.disposed || this.environmentChanging || this.recovery) return;
+    this.ready = { ready: false, reason: "Codex connection failed; reconnecting without replaying the interrupted turn." };
+    // Start on the next microtask: CodexRpc must first publish its disposal promise. This
+    // makes cleanup single-flight even when failure() was called by dispose() itself.
+    const recovery = Promise.resolve().then(async () => {
+      await retired;
+      if (this.disposed || this.environmentChanging) return;
+      await this.initTransport();
+    }).catch(() => {
+      if (!this.disposed && !this.environmentChanging) this.ready = { ready: false, reason: "Codex could not reconnect. Check its installation and login, then retry." };
+    }).finally(() => { if (this.recovery === recovery) this.recovery = null; });
+    this.recovery = recovery;
   }
   async interrupt(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId); const turn = session?.turn; if (!session || !turn) return;
     turn.cancelled = true; turn.abort.abort();
     if (turn.id === null) return;
-    try { await this.connection().request("turn/interrupt", { threadId: sessionId, turnId: turn.id }); }
-    catch { this.finish(session, "error", "Codex could not confirm cancellation."); await this.rpc?.dispose(); throw new Error("Codex could not confirm cancellation."); }
+    const rpc = this.connection();
+    try { await rpc.request("turn/interrupt", { threadId: session.threadId, turnId: turn.id }); }
+    catch { this.finish(session, "error", "Codex could not confirm cancellation."); await rpc.dispose(); throw new Error("Codex could not confirm cancellation."); }
     if (session.turn === turn) this.finish(session, "cancelled");
   }
   private emit(event: HarnessEvent): void { for (const queue of this.queues) queue.push(event); }
@@ -352,7 +436,11 @@ export class CodexAdapter implements HarnessAdapter {
   async dispose(): Promise<void> {
     this.disposed = true; this.preparations.clear();
     await this.rpc?.dispose(); this.rpc = null;
-    this.sessions.clear(); for (const queue of this.queues) queue.close(); this.queues.clear();
+    await this.retirement;
+    await this.recovery;
+    await this.initialization?.catch(() => {});
+    await this.environmentUpdate.catch(() => {});
+    this.sessions.clear(); this.threads.clear(); this.modelLimits.clear(); for (const queue of this.queues) queue.close(); this.queues.clear();
     this.ready = { ready: false, reason: "Codex adapter disposed." };
   }
 }

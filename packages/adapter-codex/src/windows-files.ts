@@ -6,12 +6,13 @@
  */
 export const WINDOWS_FILES_SOURCE = String.raw`
 $ErrorActionPreference = 'Stop'
-$ProgressPreference = 'SilentlyContinue'
-[Console]::InputEncoding = New-Object Text.UTF8Encoding($false)
-[Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 $pins = @{}
 $k = $null
 try {
+  $ProgressPreference = 'SilentlyContinue'
+  [Console]::InputEncoding = New-Object Text.UTF8Encoding($false)
+  [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
+  [Console]::Out.WriteLine('{"startup":"encoding"}')
   $asm = [AppDomain]::CurrentDomain.DefineDynamicAssembly((New-Object Reflection.AssemblyName('ArkeFiles')), [Reflection.Emit.AssemblyBuilderAccess]::Run)
   $type = $asm.DefineDynamicModule('ArkeFilesModule', $false).DefineType('ArkeFiles', 'Public, Class')
   $ctor = [Runtime.InteropServices.DllImportAttribute].GetConstructor([string])
@@ -30,6 +31,7 @@ try {
     $m.SetCustomAttribute((New-Object Reflection.Emit.CustomAttributeBuilder($ctor, @($dll), $fields, @($true, [Runtime.InteropServices.CharSet]::Unicode))))
   }
   $k = $type.CreateType()
+  [Console]::Out.WriteLine('{"startup":"native"}')
   function Fail { throw 'Denied by Arke Studio confinement.' }
   function Info([IntPtr]$handle) {
     $p = [Runtime.InteropServices.Marshal]::AllocHGlobal(52)
@@ -217,6 +219,9 @@ try {
       [Console]::Out.WriteLine((@{ error = $message } | ConvertTo-Json -Compress))
     }
   }
+} catch {
+  Report-ArkeStartupError $_
+  exit 1
 } finally {
   if ($k) { foreach ($value in $pins.Values) { [void]$k::CloseHandle($value.handle) } }
 }

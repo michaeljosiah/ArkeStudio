@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  findHarnessModel, harnessModelDisabled, harnessModelManifestEntry, harnessModelReference,
+  findHarnessModel, harnessModelDisabled, harnessModelManifestEntry, harnessModelMissingInput, harnessModelReference,
   ManifestModelSchema, ModelInfoSchema, effectiveHarnessEngine, type ModelInfo,
 } from "../src/index.js";
 
@@ -92,6 +92,18 @@ describe("legacy disabled preferences", () => {
 });
 
 describe("catalog metadata on the wire", () => {
+  it("requires reported text input for writing and both text and images for Stage", () => {
+    for (const inputModalities of [[], ["image"]] satisfies ModelInfo["inputModalities"][]) {
+      assert.equal(harnessModelMissingInput({ inputModalities }), "text");
+      assert.equal(harnessModelMissingInput({ inputModalities }, true), "text");
+    }
+    assert.equal(harnessModelMissingInput({ inputModalities: ["text"] }), undefined);
+    assert.equal(harnessModelMissingInput({ inputModalities: ["text"] }, true), "image");
+    assert.equal(harnessModelMissingInput({ inputModalities: ["text", "image"] }, true), undefined);
+    assert.equal(harnessModelMissingInput({}), undefined);
+    assert.equal(harnessModelMissingInput({}, true), undefined);
+  });
+
   it("distinguishes unknown modalities from an explicit text-only result", () => {
     assert.equal(ModelInfoSchema.parse(sonnet).inputModalities, undefined);
     assert.deepEqual(ModelInfoSchema.parse({ ...sonnet, inputModalities: ["text"] }).inputModalities, ["text"]);

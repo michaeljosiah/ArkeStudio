@@ -171,7 +171,9 @@ async function executeFileTool(session: ToolSession, files: ConfinedFiles, name:
           let bytes: Buffer;
           try { bytes = await files.read(target, 1024 * 1024); }
           catch (error) { if (error instanceof Error && /session read limit|confinement/.test(error.message)) continue; throw error; }
-          if (bytes.includes(0) || imageType(bytes)) continue;
+          if (bytes.includes(0)) continue;
+          // A broken image is still binary; it must not hide matches in other files.
+          try { if (imageType(bytes)) continue; } catch { continue; }
           const lines = bytes.toString("utf8").split(/\r?\n/);
           for (let i = 0; i < lines.length && found.length < limit; i++) if (lines[i]!.includes(query)) found.push(`${relative(session.root, target)}:${i + 1}: ${lines[i]!.slice(0, 1000)}`);
         }

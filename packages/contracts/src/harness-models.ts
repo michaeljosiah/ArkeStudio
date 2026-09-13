@@ -13,6 +13,16 @@ export function harnessModelReference(model: Pick<ModelInfo, "provider" | "id">)
   return `${model.provider}/${model.id}`;
 }
 
+/** Writing needs text; Stage also needs images. Omitted metadata makes neither claim. */
+export function harnessModelMissingInput(
+  model: Pick<ModelInfo, "inputModalities">, needsImages = false,
+): "text" | "image" | undefined {
+  if (model.inputModalities === undefined) return undefined;
+  if (!model.inputModalities.includes("text")) return "text";
+  if (needsImages && !model.inputModalities.includes("image")) return "image";
+  return undefined;
+}
+
 function names(model: ModelInfo): string[] {
   return [model.id, ...(model.aliases ?? [])];
 }

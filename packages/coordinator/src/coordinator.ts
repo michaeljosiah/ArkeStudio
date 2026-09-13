@@ -2974,9 +2974,15 @@ export class Coordinator {
       // Own-process failures do not travel through ChildSupervisor. Reflect them even when
       // no authoring session happens to be listening to the adapter's event stream.
       let previousReadiness = { ...this.opts.adapter.readiness() };
+      let previousRevision = this.opts.adapter.lifecycleRevision?.();
       const healthTimer = setInterval(() => {
         if (this.stopping) return;
         const readiness = this.opts.adapter!.readiness();
+        const revision = this.opts.adapter!.lifecycleRevision?.();
+        if (previousRevision !== revision) {
+          previousRevision = revision;
+          this.modelCatalogValue?.invalidate();
+        }
         if (this.readModel.getState().app.health.harness.status === "starting") return;
         const status = readiness.ready ? "healthy" : "unavailable";
         if (previousReadiness.ready !== readiness.ready || previousReadiness.reason !== readiness.reason) {

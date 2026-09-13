@@ -54,6 +54,10 @@ export class WindowsFiles {
   private failure: Error | null = null;
   private buffer = "";
   private closed = false;
+  private startupStage: "launch" | "bootstrap" | "source" | "encoding" | "native" = "launch";
+  private stderrCategory: "none" | "syntax" | "security" | "encoding" | "runtime" | "other" = "none";
+  private stderrTail = "";
+  private readySeen = false;
   private readonly deadline: ReturnType<typeof setTimeout>;
   private readonly abort = () => this.fail(new Error("The confined file operation was cancelled."));
   private readonly exit = () => { this.child.kill(); };
@@ -61,7 +65,7 @@ export class WindowsFiles {
     // Static inline source, JSON data on stdin, no profile/module/credential inheritance.
     // Keep argv below CreateProcess's 32,767-character ceiling. Only this fixed bootstrap
     // executes source; the first pipe frame is our static broker, all later frames are JSON.
-    const bootstrap = "$s=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadLine())); & ([ScriptBlock]::Create($s))";
+    const bootstrap = "$ErrorActionPreference='Stop'; function Report-ArkeStartupError($e) { $d=$e.Exception.GetType().FullName+' '+$e.FullyQualifiedErrorId+' '+$e.Exception.Message; $c=if($d -match 'PSSecurityException|UnauthorizedAccess|ExecutionPolicy|ConstrainedLanguage|blocked by'){ 'security' } elseif($d -match 'InputEncoding|OutputEncoding|InvalidHandle|handle is invalid'){ 'encoding' } elseif($d -match 'ParseException|ParserError|UnexpectedToken'){ 'syntax' } else { 'runtime' }; [Console]::Out.WriteLine('{\"startupError\":true,\"category\":\"'+$c+'\"}') }; try { [Console]::Out.WriteLine('{\"startup\":\"bootstrap\"}'); $s=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadLine())); [Console]::Out.WriteLine('{\"startup\":\"source\"}'); & ([ScriptBlock]::Create($s)) } catch { Report-ArkeStartupError $_; exit 1 }";
     this.child = spawn(command, args ?? ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(bootstrap, "utf16le").toString("base64")], {
       windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
       env: { SystemRoot: process.env["SystemRoot"], WINDIR: process.env["WINDIR"], TEMP: process.env["TEMP"], TMP: process.env["TMP"], PATH: dirname(powershell()) },
@@ -70,7 +74,7 @@ export class WindowsFiles {
     this.ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
     this.rejectReady = readyReject;
     // A helper that cannot initialize is a closed capability, not a pathname fallback.
-    const startup = setTimeout(() => this.fail(new Error("Codex's confined Windows file helper could not start.")), 30_000);
+    const startup = setTimeout(() => this.fail(this.startupError("timed out")), 30_000);
     this.ready.then(() => clearTimeout(startup), () => clearTimeout(startup));
     this.child.stdout.setEncoding("utf8");
     this.child.stdout.on("data", (chunk: string) => {
@@ -81,27 +85,47 @@ export class WindowsFiles {
         const line = this.buffer.slice(0, end); this.buffer = this.buffer.slice(end + 1);
         try {
           const message = JSON.parse(line) as Record<string, unknown>;
-          if (message.ready === true) { readyResolve(); continue; }
+          if (message.startup === "bootstrap" || message.startup === "source" || message.startup === "encoding" || message.startup === "native") {
+            this.startupStage = message.startup; continue;
+          }
+          if (message.startupError === true) {
+            if (message.category === "syntax" || message.category === "security" || message.category === "encoding" || message.category === "runtime") this.stderrCategory = message.category;
+            this.fail(this.startupError("failed")); return;
+          }
+          if (message.ready === true) { this.readySeen = true; readyResolve(); continue; }
           const pending = this.pending; this.pending = null;
           if (!pending) { this.fail(new Error("The confined file helper returned an unexpected response.")); return; }
           if (typeof message.error === "string") pending.reject(new Error(message.error));
           else pending.resolve(message.result as Record<string, unknown>);
-        } catch { this.fail(new Error("The confined file helper returned an invalid response.")); }
+        } catch { this.fail(this.readySeen ? new Error("The confined file helper returned an invalid response.") : this.startupError("failed", "invalid output")); }
       }
     });
-    this.child.stderr.resume();
+    this.child.stderr.on("data", (chunk: Buffer) => {
+      this.stderrTail = (this.stderrTail + chunk.toString("utf8")).slice(-8192);
+      const raw = this.stderrTail;
+      this.stderrCategory = /PSSecurityException|UnauthorizedAccess|ExecutionPolicy|ConstrainedLanguage|blocked by/i.test(raw) ? "security" :
+        /InputEncoding|OutputEncoding|InvalidHandle|handle is invalid/i.test(raw) ? "encoding" :
+          /ParseException|ParserError|UnexpectedToken/i.test(raw) ? "syntax" :
+            /TypeLoadException|TypeInitializationException|Reflection\.Emit|MethodException|RuntimeException/i.test(raw) ? "runtime" : "other";
+    });
     this.child.stdin.on("error", () => this.fail(new Error("The confined file helper stopped.")));
     this.child.on("error", () => this.fail(new Error("Codex's confined Windows file helper is unavailable.")));
     this.ended = new Promise(resolve => this.child.once("close", () => {
       if (!this.closed) this.fail(new Error("The confined file helper stopped."));
       readyReject(this.failure ?? new Error("The confined file helper stopped.")); resolve();
     }));
-    this.child.once("exit", () => { readyReject(this.failure ?? new Error("The confined file helper stopped.")); });
+    this.child.once("exit", () => { readyReject(this.failure ?? this.startupError("failed")); });
     this.deadline = setTimeout(() => this.fail(new Error("The confined file operation exceeded 60 seconds.")), 60_000);
     signal.addEventListener("abort", this.abort, { once: true });
     process.once("exit", this.exit);
     this.child.stdin.write(Buffer.from(WINDOWS_FILES_SOURCE, "utf8").toString("base64") + "\n");
     if (signal.aborted) this.abort();
+  }
+  private startupError(outcome: "failed" | "timed out", output?: "invalid output"): Error {
+    // These labels come only from the fixed bootstrap/broker protocol. Never forward
+    // PowerShell stderr, script text, environment values or native exception details.
+    const detail = output ?? (this.stderrCategory === "none" ? (this.buffer.length ? "incomplete output" : "no error output") : `${this.stderrCategory} error`);
+    return new Error(`Codex's confined Windows file helper ${outcome} during ${this.startupStage} startup (${detail}).`);
   }
   private fail(error: Error): void {
     this.failure ??= error; this.rejectReady(this.failure); this.pending?.reject(this.failure); this.pending = null;

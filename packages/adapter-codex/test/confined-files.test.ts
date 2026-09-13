@@ -98,6 +98,31 @@ test("helper spawn failure settles readiness even when no process exit event is 
   finally { await helper.close(); }
 });
 
+test("helper startup failures report only the fixed startup phase and release the process", { timeout: 5000 }, async () => {
+  const source = 'process.stdin.resume(); process.stderr.write("SENSITIVE_NATIVE_EXCEPTION"); process.stdout.write(JSON.stringify({startup:"source"})+"\\n"+JSON.stringify({startupError:true,category:"encoding"})+"\\n"); setInterval(()=>{}, 30000);';
+  const helper = new WindowsFiles(new AbortController().signal, process.execPath, ["-e", source]);
+  try {
+    await assert.rejects(helper.request("pin", "."), error => {
+      assert.match(String(error), /failed during source startup/);
+      assert.match(String(error), /encoding error/);
+      assert.doesNotMatch(String(error), /SENSITIVE_NATIVE_EXCEPTION/);
+      return true;
+    });
+  } finally { await helper.close(); }
+});
+
+test("unexpected startup output is identified without exposing its contents", { timeout: 5000 }, async () => {
+  const source = 'process.stdin.resume(); process.stdout.write("SENSITIVE_INVALID_FRAME\\n"); setInterval(()=>{}, 30000);';
+  const helper = new WindowsFiles(new AbortController().signal, process.execPath, ["-e", source]);
+  try {
+    await assert.rejects(helper.request("pin", "."), error => {
+      assert.match(String(error), /launch startup \(invalid output\)/);
+      assert.doesNotMatch(String(error), /SENSITIVE_INVALID_FRAME/);
+      return true;
+    });
+  } finally { await helper.close(); }
+});
+
 test("in-place Windows reparse mutation cannot redirect a pinned directory capability", { skip: process.platform !== "win32" }, async t => {
   const f = await fixture(); t.after(() => rm(f.base, { recursive: true, force: true }));
   const empty = join(f.root, "empty"); await mkdir(empty);

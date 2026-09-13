@@ -28,6 +28,7 @@ const CUSTOM = "custom-provider/region/model:fast";
 class CaptureAdapter implements HarnessAdapter {
   readonly id = "model-routing-test";
   ready = true;
+  revision = 0;
   initCalls = 0;
   disposeCalls = 0;
   initError: Error | undefined;
@@ -36,6 +37,7 @@ class CaptureAdapter implements HarnessAdapter {
   readonly sessions: Array<{ agent?: string; config: SessionConfigInput }> = [];
   capabilities() { return new Set(["models", "events"] as const); }
   readiness() { return { ready: this.ready, ...(this.ready ? {} : { reason: "not initialized" }) }; }
+  lifecycleRevision() { return this.revision; }
   async init() {
     this.initCalls++;
     if (this.initError) throw this.initError;
@@ -134,6 +136,21 @@ describe("coordinator harness/model routing (#1122)", () => {
       await test.send({ kind: "list-harness-models" });
       assert.deepEqual(test.coordinator.getState().app.harnessModelStatus, { status: "ready" });
       assert.deepEqual(test.coordinator.getState().app.harnessModels, []);
+    } finally { await test.close(); }
+  });
+
+  it("marks catalog state stale when an owned process recovers between health polls", async () => {
+    const test = await fixture();
+    try {
+      await until(() => test.coordinator.getState().app.health.harness.status === "healthy", "owned harness readiness");
+      await test.send({ kind: "list-harness-models" });
+      assert.equal(test.coordinator.getState().app.harnessModelStatus.status, "ready");
+      test.adapter.list = async () => [MODELS[1]!];
+      test.adapter.revision++;
+      await until(() => test.coordinator.getState().app.harnessModelStatus.status === "idle", "replacement catalog invalidation");
+      assert.equal(test.coordinator.getState().app.health.harness.status, "healthy");
+      await test.send({ kind: "list-harness-models" });
+      assert.deepEqual(test.coordinator.getState().app.harnessModels, [MODELS[1]!]);
     } finally { await test.close(); }
   });
 

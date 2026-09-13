@@ -1,6 +1,6 @@
 import {
   ModelInfoSchema, findHarnessModel, harnessModelDisabled, harnessModelManifestEntry,
-  harnessModelReference, modelEligible, PROVIDERS,
+  harnessModelMissingInput, harnessModelReference, modelEligible, PROVIDERS,
   type ClientState, type HarnessAdapter, type HarnessModelStatus, type ModelInfo,
 } from "@arke-studio/contracts";
 
@@ -15,6 +15,7 @@ export class HarnessModelCatalog {
   private checkedAt = 0;
   private pending: Promise<ModelInfo[]> | undefined;
   private generation = 0;
+  private lifecycleRevision: number | undefined;
 
   constructor(
     private readonly adapter: HarnessAdapter | null,
@@ -29,7 +30,16 @@ export class HarnessModelCatalog {
     this.publish(this.models, { status: "idle" });
   }
 
+  private synchronizeLifecycle(): void {
+    const revision = this.adapter?.lifecycleRevision?.();
+    if (revision === this.lifecycleRevision) return;
+    this.lifecycleRevision = revision;
+    this.invalidate();
+  }
+
   async get(refresh = false): Promise<ModelInfo[]> {
+    // A process can restart between health polls while both observed readiness values are true.
+    this.synchronizeLifecycle();
     if (this.pending) return this.pending;
     const now = this.options.now ?? Date.now;
     if (!refresh && this.adapter?.readiness().ready && this.checkedAt && now() - this.checkedAt < (this.options.ttlMs ?? 60_000)) return this.models;
@@ -51,9 +61,13 @@ export class HarnessModelCatalog {
         ]);
         const parsed = ModelInfoSchema.array().safeParse(received);
         if (!parsed.success) throw new CatalogError("The harness returned an invalid model catalog. Retry models.");
-        const unique = new Map(parsed.data.map((model) => [harnessModelReference(model), model]));
+        const references = new Set(parsed.data.map(harnessModelReference));
+        if (references.size !== parsed.data.length) {
+          throw new CatalogError("The harness returned duplicate model identities. Retry models.");
+        }
+        this.synchronizeLifecycle();
         if (generation !== this.generation) throw new CatalogError("The harness changed during model discovery. Retry models.");
-        this.models = [...unique.values()];
+        this.models = parsed.data;
         this.checkedAt = now();
         this.publish(this.models, { status: "ready" });
         return this.models;
@@ -100,7 +114,11 @@ export function selectHarnessModel(
     }))) {
     return { modelId: reference, reason: `${model.displayName ?? model.id} is unavailable. Check AI models or choose another model.` };
   }
-  if (needsImages && model.inputModalities && !model.inputModalities.includes("image")) {
+  const missingInput = harnessModelMissingInput(model, needsImages);
+  if (missingInput === "text") {
+    return { modelId: reference, reason: `${model.displayName ?? model.id} cannot read text. Choose a text-reading model in Settings → Harness → Advanced or the production's Develop conversation.` };
+  }
+  if (missingInput === "image") {
     return { modelId: reference, reason: `${model.displayName ?? model.id} cannot read images. Choose Stage designer under Settings → Harness → Advanced, or an image-reading model in the production's Develop conversation.` };
   }
   return {

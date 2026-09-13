@@ -254,6 +254,8 @@ export interface HarnessAdapter {
   /** Probe the server, derive capabilities, build initial state. Idempotent. */
   init?(): Promise<void>;
   readiness(): Readiness;
+  /** Changes when a process or its catalog metadata is replaced, including recovery between health polls. */
+  lifecycleRevision?(): number;
   /** Stop anything the adapter started. SHALL NOT stop a server it did not start. */
   dispose?(): Promise<void>;
 
@@ -288,11 +290,9 @@ export interface HarnessAdapter {
   // ---- core ----
   createSession(input: CreateSessionInput): Promise<SessionRef>;
   /**
-   * The input-token window of the model this harness answers with, when it can name one (§8.5).
-   *
-   * Optional because an adapter may not know, and a caller that cannot find out budgets from a
-   * floor instead. Studio does not choose the model — the session config carries no `model` key —
-   * so this is the only place the real limit can come from.
+   * A safe input-token window when the adapter can name one without a selected model (§8.5).
+   * Model-specific limits belong on listModels() entries. This fallback must not return the
+   * last session's window when another model may be selected; unknown limits use a floor.
    */
   knownInputTokenLimit?(): number | null;
   /** Synchronous send: resolves when the turn completes. */

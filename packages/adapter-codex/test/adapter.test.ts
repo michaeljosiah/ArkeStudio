@@ -5,18 +5,23 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
+import { once } from "node:events";
 import type { HarnessEvent } from "@arke-studio/contracts";
-import { CodexAdapter, codexCredentialEnv, confinedConfig } from "../src/codex-adapter.js";
+import { CodexAdapter, codexCredentialEnv, confinedConfig, type CodexAdapterOptions } from "../src/codex-adapter.js";
 
-async function fixture(scenario = "normal") {
+async function fixture(scenario = "normal", overrides: Partial<CodexAdapterOptions> = {}) {
   const root = await mkdtemp(join(tmpdir(), "arke-codex-adapter-")); const log = join(root, "rpc.jsonl");
   const adapter = new CodexAdapter({ command: process.execPath, args: [fileURLToPath(new URL("./fixtures/app-server.mjs", import.meta.url))],
-    env: { ...process.env, ARKE_CODEX_TEST_CASE: scenario, ARKE_CODEX_TEST_LOG: log }, requestTimeoutMs: 2000 });
+    env: { ...process.env, ARKE_CODEX_TEST_CASE: scenario, ARKE_CODEX_TEST_LOG: log, ARKE_CODEX_TEST_STATE: join(root, "restart-state") }, requestTimeoutMs: 2000, ...overrides });
   const events: HarnessEvent[] = []; const abort = new AbortController();
   const drain = (async () => { for await (const event of adapter.streamEvents(abort.signal)) events.push(event); })();
   await adapter.init();
   return { root, log, adapter, events, cleanup: async () => { await adapter.dispose(); abort.abort(); await drain; await rm(root, { recursive: true, force: true }); },
     requests: async () => (await readFile(log, "utf8")).trim().split("\n").map(line => JSON.parse(line) as Record<string, any>) };
+}
+async function eventually(predicate: () => boolean | Promise<boolean>): Promise<void> {
+  const deadline = Date.now() + 30_000;
+  while (!await predicate()) { assert.ok(Date.now() < deadline, "expected adapter lifecycle transition"); await delay(10); }
 }
 
 test("live paginated model catalog preserves identity, aliases and modalities", async t => {
@@ -43,7 +48,8 @@ test("prepared overrides and brief are captured; streaming accumulates across it
   const final = f.events.find(event => event.type === "message.completed");
   assert.ok(final && final.type === "message.completed"); assert.deepEqual(JSON.parse(final.text), { reply: "Second item" }); assert.equal(final.correlationId, "correlation-1");
   assert.ok(f.events.some(event => event.type === "message.delta" && event.text === "Hello world\n\nSecond item"));
-  assert.equal(f.adapter.usageTokens(session.sessionId), 42); assert.equal(f.adapter.knownInputTokenLimit(), 100000);
+  assert.equal(f.adapter.usageTokens(session.sessionId), 42); assert.equal(f.adapter.knownInputTokenLimit(), null);
+  assert.equal((await f.adapter.listModels()).find(model => model.id === "image-model")?.inputTokenLimit, 100000);
 });
 
 test("Stage rejects known text-only models and an explicit unavailable override cannot fall back", async t => {
@@ -143,4 +149,139 @@ test("credential rotation strips old managed values; configuration disables inhe
   assert.deepEqual(codexCredentialEnv({ openai: "new" }, { OPENAI_API_KEY: "old", ANTHROPIC_API_KEY: "stale", CODEX_HOME: "own-login", UNRELATED: "kept" }), { OPENAI_API_KEY: "new", CODEX_HOME: "own-login", UNRELATED: "kept" });
   const config = confinedConfig({ mcp_servers: { "unsafe.name": {} } }, true);
   assert.deepEqual(config.mcp_servers, { "unsafe.name": { enabled: false } }); assert.equal(config.web_search, "live");
+});
+
+test("measured context windows remain scoped to the selected canonical model", async t => {
+  const f = await fixture("different-windows"); t.after(f.cleanup);
+  const large = await f.adapter.createSession({ cwd: f.root, purpose: "ask" });
+  await f.adapter.sendMessage({ sessionId: large.sessionId, parts: [{ type: "text", text: "measure large" }] });
+  let models = await f.adapter.listModels();
+  assert.equal(models.find(model => model.id === "image-model")?.inputTokenLimit, 100000);
+  assert.equal(models.find(model => model.id === "text-only")?.inputTokenLimit, undefined);
+  assert.equal(f.adapter.knownInputTokenLimit(), null);
+  const measuredRevision = f.adapter.lifecycleRevision();
+  await f.adapter.sendMessage({ sessionId: large.sessionId, parts: [{ type: "text", text: "same window" }] });
+  assert.equal(f.adapter.lifecycleRevision(), measuredRevision);
+  f.adapter.prepareSession({ preparationId: "small", model: "openai/text-only" });
+  const small = await f.adapter.createSession({ cwd: f.root, purpose: "ask", preparationId: "small" });
+  await Promise.all([large, small].map(session => f.adapter.sendMessage({ sessionId: session.sessionId, parts: [{ type: "text", text: "measure independently" }] })));
+  models = await f.adapter.listModels();
+  assert.equal(models.find(model => model.id === "image-model")?.inputTokenLimit, 100000);
+  assert.equal(models.find(model => model.id === "text-only")?.inputTokenLimit, 8000);
+  assert.equal(f.adapter.knownInputTokenLimit(), null); assert.ok(f.adapter.lifecycleRevision() > measuredRevision);
+});
+
+for (const scenario of ["timeout-once", "reject-once"]) test(`${scenario}: recovery waits for disposal and admits new work without replaying the old turn`, async t => {
+  let spawns = 0; let kills = 0; let release!: () => void; let cleanupStarted!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const cleaning = new Promise<void>(resolve => { cleanupStarted = resolve; });
+  const f = await fixture(scenario, {
+    onSpawn: async () => { spawns++; },
+    killProcess: async child => {
+      if (++kills === 1) { cleanupStarted(); await gate; }
+      if (child.exitCode === null && child.signalCode === null) { const closed = once(child, "close"); child.kill(); await closed; }
+    },
+  });
+  t.after(async () => { release(); await f.cleanup(); });
+  const old = await f.adapter.createSession({ cwd: f.root, purpose: "ask" });
+  const revision = f.adapter.lifecycleRevision();
+  f.adapter.prepareSession({ preparationId: "old-preparation" });
+  const failed = assert.rejects(f.adapter.sendMessage({ sessionId: old.sessionId, parts: [{ type: "text", text: "uncertain original" }] }), /timed out|rejected/);
+  await cleaning; assert.equal(spawns, 1); assert.equal(f.adapter.readiness().ready, false);
+  const concurrentInit = Promise.all([f.adapter.init(), f.adapter.init()]);
+  await delay(20); assert.equal(spawns, 1); release();
+  await failed; await concurrentInit;
+  assert.equal(spawns, 2); assert.equal(f.adapter.readiness().ready, true); assert.ok(f.adapter.lifecycleRevision() > revision);
+  await assert.rejects(f.adapter.createSession({ cwd: f.root, purpose: "ask", preparationId: "old-preparation" }), /missing|consumed/);
+  const fresh = await f.adapter.createSession({ cwd: f.root, purpose: "ask" });
+  assert.notEqual(fresh.sessionId, old.sessionId);
+  await assert.rejects(f.adapter.sendMessage({ sessionId: old.sessionId, parts: [{ type: "text", text: "stale session" }] }), /Unknown Codex session/);
+  await f.adapter.sendMessage({ sessionId: fresh.sessionId, parts: [{ type: "text", text: "newly requested turn" }] });
+  const requests = await f.requests();
+  assert.equal(requests.filter(request => request.method === "initialize").length, 2);
+  assert.deepEqual(requests.filter(request => request.method === "turn/start").map(request => request.params.input[0].text), ["uncertain original", "newly requested turn"]);
+  assert.equal(f.events.filter(event => event.type === "message.completed" && event.sessionId === old.sessionId).length, 0);
+});
+
+test("failed recovery initializes once and never loops or resurrects after disposal", async t => {
+  let spawns = 0;
+  const f = await fixture("recovery-init-fails", { onSpawn: async () => { spawns++; } }); t.after(f.cleanup);
+  const old = await f.adapter.createSession({ cwd: f.root, purpose: "ask" });
+  await assert.rejects(f.adapter.sendMessage({ sessionId: old.sessionId, parts: [{ type: "text", text: "fail" }] }), /rejected/);
+  await eventually(() => f.adapter.readiness().reason?.includes("could not reconnect") === true);
+  await delay(100); assert.equal(spawns, 2); assert.equal(f.adapter.readiness().ready, false);
+  await f.adapter.dispose(); await assert.rejects(f.adapter.init(), /disposed/); assert.equal(spawns, 2);
+});
+
+test("replacement initialization followed by immediate exit cannot loop background recovery", async t => {
+  let spawns = 0;
+  const f = await fixture("recovery-exits-after-init", { onSpawn: async () => { spawns++; }, killProcess: async child => {
+    if (child.exitCode === null && child.signalCode === null) { const closed = once(child, "close"); child.kill(); await closed; }
+  } }); t.after(f.cleanup);
+  const old = await f.adapter.createSession({ cwd: f.root, purpose: "ask" });
+  await assert.rejects(f.adapter.sendMessage({ sessionId: old.sessionId, parts: [{ type: "text", text: "fail" }] }), /rejected/);
+  await eventually(() => spawns >= 2 && !f.adapter.readiness().ready && f.adapter.readiness().reason === "Codex app-server exited.");
+  await delay(250);
+  assert.equal(spawns, 2);
+  const requests = await f.requests();
+  assert.equal(requests.filter(request => request.method === "initialize").length, 2);
+  assert.equal(requests.filter(request => request.method === "turn/start").length, 1);
+  assert.equal(f.adapter.readiness().ready, false);
+});
+
+test("final disposal during retirement prevents the pending automatic restart", async t => {
+  let spawns = 0; let release!: () => void; let started!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; }); const cleaning = new Promise<void>(resolve => { started = resolve; });
+  const f = await fixture("reject-once", { onSpawn: async () => { spawns++; }, killProcess: async child => {
+    started(); await gate;
+    if (child.exitCode === null && child.signalCode === null) { const closed = once(child, "close"); child.kill(); await closed; }
+  } });
+  t.after(async () => { release(); await f.cleanup(); });
+  const session = await f.adapter.createSession({ cwd: f.root, purpose: "ask" });
+  const rejected = assert.rejects(f.adapter.sendMessage({ sessionId: session.sessionId, parts: [{ type: "text", text: "fail" }] }));
+  await cleaning; const disposed = f.adapter.dispose(); release(); await disposed; await rejected;
+  assert.equal(spawns, 1); assert.equal(f.adapter.readiness().ready, false);
+  await assert.rejects(f.adapter.init(), /disposed/); assert.equal(spawns, 1);
+});
+
+test("environment rotation during retirement performs one restart with the new environment", async t => {
+  let spawns = 0; let release!: () => void; let started!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; }); const cleaning = new Promise<void>(resolve => { started = resolve; });
+  const f = await fixture("reject-once", { onSpawn: async () => { spawns++; }, killProcess: async child => {
+    started(); await gate;
+    if (child.exitCode === null && child.signalCode === null) { const closed = once(child, "close"); child.kill(); await closed; }
+  } });
+  t.after(async () => { release(); await f.cleanup(); });
+  const old = await f.adapter.createSession({ cwd: f.root, purpose: "ask" });
+  const rejected = assert.rejects(f.adapter.sendMessage({ sessionId: old.sessionId, parts: [{ type: "text", text: "fail" }] }));
+  await cleaning;
+  const update = f.adapter.updateEnvironment({ ...process.env, ARKE_CODEX_TEST_CASE: "normal", ARKE_CODEX_TEST_LOG: f.log });
+  await delay(20); assert.equal(spawns, 1); release(); await update; await rejected;
+  assert.equal(spawns, 2); assert.equal(f.adapter.readiness().ready, true);
+  await assert.rejects(f.adapter.sendMessage({ sessionId: old.sessionId, parts: [{ type: "text", text: "stale" }] }), /Unknown Codex session/);
+  const fresh = await f.adapter.createSession({ cwd: f.root, purpose: "ask" });
+  await f.adapter.sendMessage({ sessionId: fresh.sessionId, parts: [{ type: "text", text: "fresh" }] });
+});
+
+for (const scenario of ["empty-input", "image-input-only"]) test(`${scenario}: default models must accept text before session admission`, async t => {
+  const f = await fixture(scenario); t.after(f.cleanup);
+  await assert.rejects(f.adapter.createSession({ cwd: f.root, purpose: "ask" }), /text instructions/);
+  assert.equal((await f.requests()).some(request => request.method === "thread/start"), false);
+});
+
+test("duplicate canonical catalog identities are refused before response order can select metadata", async t => {
+  const f = await fixture("duplicate-model"); t.after(f.cleanup);
+  await assert.rejects(f.adapter.listModels(), /duplicate canonical/);
+});
+
+test("duplicate live wire thread identities retire the connection without archiving the existing session", async t => {
+  let spawns = 0; const f = await fixture("duplicate-thread", { onSpawn: async () => { spawns++; } }); t.after(f.cleanup);
+  const old = await f.adapter.createSession({ cwd: f.root, purpose: "ask" });
+  await assert.rejects(f.adapter.createSession({ cwd: f.root, purpose: "authoring" }), /reused an active thread identity/);
+  await eventually(() => spawns === 2 && f.adapter.readiness().ready);
+  assert.equal((await f.requests()).some(request => request.method === "thread/archive"), false);
+  const fresh = await f.adapter.createSession({ cwd: f.root, purpose: "ask" });
+  assert.notEqual(fresh.sessionId, old.sessionId);
+  await assert.rejects(f.adapter.sendMessage({ sessionId: old.sessionId, parts: [{ type: "text", text: "old context" }] }), /Unknown Codex session/);
+  await f.adapter.sendMessage({ sessionId: fresh.sessionId, parts: [{ type: "text", text: "fresh context" }] });
 });

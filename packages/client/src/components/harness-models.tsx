@@ -2,6 +2,7 @@ import {
   findHarnessModel,
   harnessModelDisabled,
   harnessModelManifestEntry,
+  harnessModelMissingInput,
   harnessModelReference,
   modelEligible,
   PROVIDERS,
@@ -32,7 +33,9 @@ export function harnessModelUnavailableReason(
   if (entry && PROVIDERS[entry.provider].local && !modelEligible(entry, eligibilityInputs(state))) {
     return "local model unavailable";
   }
-  if (needsImages && model.inputModalities && !model.inputModalities.includes("image")) {
+  const missingInput = harnessModelMissingInput(model, needsImages);
+  if (missingInput === "text") return "cannot read text";
+  if (missingInput === "image") {
     return "text only · Stage needs images";
   }
   return undefined;

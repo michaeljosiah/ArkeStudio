@@ -49,6 +49,26 @@ describe("the running harness model catalog", () => {
     assert.deepEqual(await catalog.get(), [model]);
   });
 
+  it("refuses duplicate canonical identities in either order and keeps only the last verified catalog", async () => {
+    let rows = [model];
+    const published: Array<{ rows: ModelInfo[]; status: HarnessModelStatus }> = [];
+    const catalog = new HarnessModelCatalog(adapterWith(async () => rows), (rows, status) => published.push({ rows, status }));
+    await catalog.get();
+    const text: ModelInfo = { ...model, inputModalities: ["text"] };
+    const multimodal: ModelInfo = { ...model, inputModalities: ["text", "image"] };
+    for (const ambiguous of [[text, multimodal], [multimodal, text], [model, { ...model }]]) {
+      rows = ambiguous;
+      await assert.rejects(catalog.get(true), /duplicate model identities/);
+      assert.deepEqual(published.at(-1)?.rows, [model], "a failed refresh retains display names without admitting ambiguous metadata");
+      assert.equal(published.at(-1)?.status.status, "error");
+      await assert.rejects(catalog.get(), /duplicate model identities/, "the old catalog is not treated as verified after a failure");
+    }
+    assert.equal(published.filter(({ status }) => status.status === "ready").length, 1);
+    rows = [model, { ...model, provider: "openai" }];
+    assert.deepEqual(await catalog.get(), rows, "the same bare id from another provider is a distinct canonical model");
+    assert.equal(published.at(-1)?.status.status, "ready");
+  });
+
   it("refuses a cached choice when its process has died and keeps raw errors out of state", async () => {
     let ready = true;
     const states: HarnessModelStatus[] = [];
@@ -59,6 +79,39 @@ describe("the running harness model catalog", () => {
     const failed = new HarnessModelCatalog(adapterWith(async () => { throw new Error("raw token secret-value"); }), (_, status) => states.push(status));
     await assert.rejects(failed.get(), /Model discovery failed/);
     assert.doesNotMatch(JSON.stringify(states), /secret-value/);
+  });
+
+  it("refreshes a cached catalog when the process revision changes without an observed readiness change", async () => {
+    let revision = 1;
+    let calls = 0;
+    let rows = [model];
+    const adapter = { ...adapterWith(async () => { calls++; return rows; }), lifecycleRevision: () => revision };
+    const catalog = new HarnessModelCatalog(adapter, () => {});
+    assert.deepEqual(await catalog.get(), [model]);
+    rows = [{ ...model, id: "new-process-model" }];
+    revision++;
+    assert.deepEqual(await catalog.get(), rows);
+    assert.equal(calls, 2, "a still-healthy replacement process cannot borrow the old process's catalog");
+    assert.deepEqual(await catalog.get(), rows);
+    assert.equal(calls, 2, "the replacement catalog is cached within its own lifecycle");
+  });
+
+  it("refuses discovery that completes after its process revision changed", async () => {
+    let revision = 1;
+    let resolve!: (rows: ModelInfo[]) => void;
+    const adapter = { ...adapterWith(() => new Promise<ModelInfo[]>(done => { resolve = done; })), lifecycleRevision: () => revision };
+    const states: HarnessModelStatus[] = [];
+    const catalog = new HarnessModelCatalog(adapter, (_, status) => states.push(status));
+    const stale = catalog.get();
+    const rejected = assert.rejects(stale, /harness changed/);
+    revision++;
+    resolve([model]);
+    await rejected;
+    assert.equal(states.some(status => status.status === "ready"), false);
+    const fresh = catalog.get();
+    resolve([{ ...model, id: "new-process-model" }]);
+    assert.equal((await fresh)[0]?.id, "new-process-model");
+    assert.equal(states.at(-1)?.status, "ready");
   });
 
   it("refuses stale completion after invalidation without overwriting the new catalog", async () => {
@@ -102,7 +155,20 @@ describe("model selection at dispatch", () => {
     assert.equal(selectHarnessModel("anthropic/sonnet", [textOnly], app).reason, undefined);
     assert.match(selectHarnessModel("anthropic/sonnet", [textOnly], app, true).reason!, /cannot read images/);
     assert.equal(selectHarnessModel("anthropic/sonnet", [model], app, true).reason, undefined);
+    assert.equal(selectHarnessModel("anthropic/sonnet", [{ ...model, inputModalities: ["text", "image"] }], app, true).reason, undefined);
     assert.match(selectHarnessModel("anthropic/missing", [model], app).reason!, /unavailable through the running harness/);
+  });
+
+  it("refuses reported empty or image-only input capabilities for chat and Stage", () => {
+    const app = new ReadModel("test").getState().app;
+    for (const inputModalities of [[], ["image"]] satisfies ModelInfo["inputModalities"][]) {
+      const unsupported = { ...model, inputModalities };
+      for (const needsImages of [false, true]) {
+        const selection = selectHarnessModel("anthropic/sonnet", [unsupported], app, needsImages);
+        assert.match(selection.reason!, /cannot read text/);
+        assert.equal(selection.sessionModel, undefined);
+      }
+    }
   });
 
   it("retains the measured local-runtime refusal while allowing a healthy local model", () => {
