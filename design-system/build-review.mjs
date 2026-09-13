@@ -229,14 +229,17 @@ const screensHtml = sections.map((s) => {
     </section>`;
   }
   const width = s.root.match(/width:\s*(\d+)px/)?.[1] ?? "1360";
-  const rules = s.rules.length ? `<div class="rules"><div class="rules__head">Binding · turn <a href="Arke%20Studio.dc.html#t${s.turn}">${s.turn}</a> <span>${s.turnName}</span></div>${s.rules.map((r) => `<p class="dv-rule">${r}</p>`).join("")}</div>` : "";
+  // A rule copied out of the master keeps its `#126a` links; on this page those ids do not
+  // exist, so the anchors are pointed back at the master (codex on PR 1164).
+  const toMaster = (markup) => markup.replace(/href="#/g, 'href="Arke%20Studio.dc.html#');
+  const rules = s.rules.length ? `<div class="rules"><div class="rules__head">Binding · turn <a href="Arke%20Studio.dc.html#t${s.turn}">${s.turn}</a> <span>${toMaster(s.turnName)}</span></div>${s.rules.map((r) => `<p class="dv-rule">${toMaster(r)}</p>`).join("")}</div>` : "";
   return `
     <section class="screen" id="${esc(slug(s.screen))}">
       <div class="screen__head">
         <div><h2>${esc(s.screen)}</h2><div class="screen__meta"><span class="tag tag--${s.status}">${status}</span><code>${esc(s.route)}</code><span>checked ${s.checked}</span></div></div>
         <a class="screen__frame" href="Arke%20Studio.dc.html#${s.frame}">${s.frame} in the master →</a>
       </div>
-      <p class="screen__caption">${s.caption}</p>
+      <p class="screen__caption">${toMaster(s.caption)}</p>
       <div class="stage" data-width="${width}"><div class="stage__scale" style="width:${width}px">${s.root}</div></div>
       <div class="built built--${s.status}"><div class="built__head"><span class="tag tag--${s.status}">${status}</span><span class="built__label">what shipped</span></div>${notes}</div>
       ${rules}
