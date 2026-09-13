@@ -1387,6 +1387,25 @@ describe("New scene makes the scene and opens it (SPEC-036 R-37)", () => {
     assert.equal(q(mounted, ".fy-prodrail__item--press")!.hasAttribute("disabled"), true);
   });
 
+  it("labels duplicate episode orders by position without changing the scene's destination", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const episodes: Episode[] = [
+      { id: "ep_first", version: 1, order: 1, title: "First", scenes: [] },
+      { id: "ep_second", version: 1, order: 1, title: "Second", scenes: ["sc_04"] },
+    ];
+    const state = episodicState(episodes);
+    const mounted = await mountState(state, `/w/${FIXTURE_WORLD_ID}/p/saltlight/episodes/ep_second`);
+    assert.deepEqual(all(mounted, ".fy-prodrail__episode-name").map((node) => node.textContent), ["Episode 1 · First", "Episode 2 · Second"]);
+    assert.equal(all(mounted, '[title="Duplicate number"]').length, 2);
+    const create = q(mounted, '.fy-prodrail__new-scene[aria-label="New scene in Episode 2: Second"]')!;
+    await click(create);
+    const message = sent.findLast((candidate) => candidate.kind === "create-scene");
+    assert.ok(message?.kind === "create-scene");
+    assert.equal(message.episodeId, "ep_second");
+    assert.deepEqual(episodes.map((episode) => episode.order), [1, 1]);
+  });
+
   it("the episodic production-level press uses the episode in view", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));

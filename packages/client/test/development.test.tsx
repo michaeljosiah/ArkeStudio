@@ -628,12 +628,12 @@ describe("an episodic production's front page is its season (design turn 93)", (
       state,
       `/w/${FIXTURE_WORLD_ID}/p/bell-watch-season-1/scenes/sc_04`,
     );
-    assert.match(html, /aria-label="Collapse Episode 2: The vigil"/);
+    assert.match(html, /aria-label="Collapse Episode 1: The vigil"/);
     assert.match(html, /fy-prodrail__scene fy-prodrail__scene--active/);
     assert.match(html, /4 · The verse rises/);
     assert.ok(html.indexOf("4 · The verse rises") < html.indexOf("2 · Before the watch"), "episode order wins");
     // A press, not a link (SPEC-036 R-37): the episode's New scene makes the scene and opens it.
-    assert.match(html, /class="fy-prodrail__new-scene" aria-label="New scene in Episode 2: The vigil"/);
+    assert.match(html, /class="fy-prodrail__new-scene" aria-label="New scene in Episode 1: The vigil"/);
     assert.doesNotMatch(html, /scenes\/new/, "the brief form is retired");
     assert.match(html, /New episode/);
     assert.match(html, /fy-prodrail--folded/);
@@ -659,7 +659,7 @@ describe("an episodic production's front page is its season (design turn 93)", (
       `/w/${FIXTURE_WORLD_ID}/p/bell-watch-season-1/scenes/sc_05`,
     );
 
-    assert.match(html, /aria-label="Expand Episode 2: The vigil"/);
+    assert.match(html, /aria-label="Expand Episode 1: The vigil"/);
     assert.match(html, /aria-label="Collapse Unassigned scenes"/);
     assert.match(html, /href="\/w\/[^/]+\/p\/bell-watch-season-1\/scenes\/sc_05"/);
     assert.match(html, /fy-prodrail__scene fy-prodrail__scene--active/);

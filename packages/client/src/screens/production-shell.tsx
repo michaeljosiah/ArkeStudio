@@ -461,8 +461,8 @@ export function ProductionLayout() {
   const currentEpisodeId =
     episodeId ?? production?.episodes.find((episode) => sceneId !== undefined && episode.scenes.includes(sceneId))?.id;
   const episodes = [...(production?.episodes ?? [])].sort((a, b) => a.order - b.order);
-  // A duplicate order should never be minted (issue 947), but if one lands on disk the rail
-  // says so rather than drawing two rows both reading "Episode 1".
+  // Position labels keep the rail unambiguous even if two on-disk orders collide. The warning
+  // still exposes the data problem; displaying a position never rewrites an episode's order.
   const episodeOrderCounts = new Map<number, number>();
   for (const episode of episodes) episodeOrderCounts.set(episode.order, (episodeOrderCounts.get(episode.order) ?? 0) + 1);
   const duplicateEpisodeOrders = new Set([...episodeOrderCounts].filter(([, count]) => count > 1).map(([order]) => order));
@@ -481,7 +481,7 @@ export function ProductionLayout() {
   const defaultSceneEpisodeId = defaultEpisodeFor(production, currentEpisodeId);
   const defaultSceneEpisode = episodes.find((episode) => episode.id === defaultSceneEpisodeId);
   const newSceneLabel = defaultSceneEpisode
-    ? `New scene in Episode ${defaultSceneEpisode.order}: ${defaultSceneEpisode.title}`
+    ? `New scene in Episode ${episodes.indexOf(defaultSceneEpisode) + 1}: ${defaultSceneEpisode.title}`
     : "New unassigned scene";
   const sceneItem = (scene: ProductionBundle["scenes"][number]) => (
     <NavLink
@@ -558,7 +558,7 @@ export function ProductionLayout() {
                 inSeason || inScene,
               )}
               <div className="fy-prodrail__episodes">
-                {episodes.map((episode) => {
+                {episodes.map((episode, index) => {
                   const expansionKey = `${prodId ?? ""}:${episode.id}`;
                   const open = episodeExpansion[expansionKey] ?? episode.id === currentEpisodeId;
                   const duplicateOrder = duplicateEpisodeOrders.has(episode.order);
@@ -568,7 +568,7 @@ export function ProductionLayout() {
                         type="button"
                         className="fy-prodrail__episode-toggle"
                         aria-expanded={open}
-                        aria-label={`${open ? "Collapse" : "Expand"} Episode ${episode.order}: ${episode.title}${duplicateOrder ? " · duplicate number" : ""}`}
+                        aria-label={`${open ? "Collapse" : "Expand"} Episode ${index + 1}: ${episode.title}${duplicateOrder ? " · duplicate number" : ""}`}
                         onClick={() =>
                           setEpisodeExpansion((current) => ({ ...current, [expansionKey]: !open }))
                         }
@@ -576,7 +576,7 @@ export function ProductionLayout() {
                         {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
                         <span className="fy-prodrail__episode-name">
                           {duplicateOrder && <span className="fy-dot fy-dot--warn" title="Duplicate number" />}
-                          Episode {episode.order} · {episode.title}
+                          Episode {index + 1} · {episode.title}
                         </span>
                         <span className="fy-prodrail__episode-count">{episode.scenes.length}</span>
                       </button>
@@ -595,7 +595,7 @@ export function ProductionLayout() {
                           <button
                             type="button"
                             className="fy-prodrail__new-scene"
-                            aria-label={`New scene in Episode ${episode.order}: ${episode.title}`}
+                            aria-label={`New scene in Episode ${index + 1}: ${episode.title}`}
                             disabled={newScene.pending}
                             onClick={() => newScene.create(episode.id)}
                           >

@@ -87,7 +87,6 @@ export function CutPreview({
   // plays in its own element on top — the composition the export makes.
   const videoSrcFor = (span: PlaybackSpan | null) =>
     span?.under !== undefined && slug ? mediaUrl(slug, span.under.path) : span?.still ? null : srcFor(span);
-  const stillSrcFor = (span: PlaybackSpan | null) => (span?.still ? srcFor(span) : null);
   const overlayVideoSrcFor = (span: PlaybackSpan | null) => (span !== null && !span.still && span.under !== undefined ? srcFor(span) : null);
   const overlayVideo = useRef<HTMLVideoElement>(null);
   const syncOverlayVideo = useCallback(
@@ -110,15 +109,26 @@ export function CutPreview({
    * begun — a quarter second of the wrong picture at every boundary between the two, which is
    * exactly the mistake the video loop exists to avoid.
    */
-  const stillEl = useRef<HTMLImageElement>(null);
+  const stillLayer = useRef<HTMLSpanElement>(null);
   const paintStill = useCallback((span: PlaybackSpan | null) => {
-    const img = stillEl.current;
+    const layer = stillLayer.current;
     const el = video.current;
     const src = span?.still && slug && span.path ? mediaUrl(slug, span.path) : null;
-    if (img !== null) {
-      // Assigning an identical src would restart the decode every frame.
-      if (src !== null && img.getAttribute("src") !== src) img.setAttribute("src", src);
-      img.style.opacity = src === null ? "0" : "1";
+    if (layer !== null) {
+      let img = layer.querySelector("img");
+      if (src === null) {
+        img?.remove();
+      } else {
+        if (img === null) {
+          img = layer.ownerDocument.createElement("img");
+          img.className = "fy-cutviewer__video";
+          img.alt = "";
+          img.src = src;
+          layer.append(img);
+        }
+        // Assigning an identical src would restart the decode every frame.
+        if (img.getAttribute("src") !== src) img.setAttribute("src", src);
+      }
     }
     if (el !== null) el.style.opacity = videoSrcFor(span) === null ? "0" : "1";
   }, [slug]);
@@ -184,7 +194,7 @@ export function CutPreview({
    */
   const soundOnly = soundSec > 0 && spans.length === 0;
   const showingVideo = videoSrcFor(current);
-  const showingStill = stillSrcFor(current);
+  const showingStill = current?.still ? srcFor(current) : null;
   const showing = showingVideo ?? showingStill;
 
   return (
@@ -205,17 +215,10 @@ export function CutPreview({
         style={{ opacity: overlayVideoSrcFor(current) === null ? 0 : 1 }}
       />
       {/*
-        * Always mounted, never conditional: `paintStill` reaches it through the ref on the frame
-        * clock, and an element that came and went with a throttled render could not be painted at
-        * the moment the picture actually changes.
+        * The frame loop owns the layer's image so it can appear at a picture boundary without
+        * waiting for the throttled transport render, and disappear when there is no still source.
         */}
-      <img
-        ref={stillEl}
-        className="fy-cutviewer__video"
-        alt=""
-        style={{ opacity: showingStill === null ? 0 : 1 }}
-        {...(showingStill !== null ? { src: showingStill } : {})}
-      />
+      <span ref={stillLayer} />
       {showing === null && (
         <span className="fy-cutviewer__empty">
           {current ? current.label : soundOnly ? "sound only" : "nothing here yet"}

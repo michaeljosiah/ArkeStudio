@@ -92,6 +92,13 @@ export function takesForShot(production: ProductionBundle, shotId: string) {
   );
 }
 
+/** The ordered takes the review grid can show, shared with the editor's take numbering. */
+export function reviewableTakesForShot(production: ProductionBundle, shotId: string) {
+  return takesForShot(production, shotId).filter(
+    (take) => mediaTakeFor(production, take) !== null || take.completedAt === undefined,
+  );
+}
+
 /** The take that owns the bytes for a selectable take; pass segments own only a time range. */
 export function mediaTakeFor(
   production: Pick<ProductionBundle, "takes">,

@@ -78,6 +78,9 @@ const SCREENS = [
   { group: "Make", screen: "Cut", frame: "122a", route: "#/w/:worldId/p/:prodId/cut", status: "built", checked: "2026-09-09",
     controls: ["Library"],
     notes: ["The library beside the cut with one drag engine and posters by artifact id (PR 1054); typed trims in the Inspector and audio import (PR 944); the export sheet at <code>/cut?export=1</code> owns delivery."] },
+  { group: "Make", screen: "Generate · takes", frame: "147a", route: "#/w/:worldId/p/:prodId/generate", status: "built", checked: "2026-09-13",
+    controls: ["EPISODE", "SCENE", "SHOT", "Open in generator", "Accept take", "Reject", "Contact sheet", "Advanced"],
+    notes: ["Turn 147 records the shipped episode/scene/shot scope, selectable playable cards and shared verdict bar for the picked take. The bar acts on the selected card; it is not duplicated on each card (issue 1165).", "Measured durations use one decimal. Accepted contact-sheet frames name their shot and mark acceptance as done."] },
 
   { group: "Around it", screen: "Settings", frame: "124a", route: "#/settings", status: "built", checked: "2026-09-06",
     controls: ["Providers", "General", "Diagnostics"],
