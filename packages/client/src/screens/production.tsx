@@ -5292,8 +5292,10 @@ function seekDrag(opts: {
     const lane = laneOf(el);
     if (lane === null) return;
     // Or the press selects text across the lanes, and a drag that started on a clip label ends
-    // up dragging the label instead of the transport.
+    // up dragging the label instead of the transport. It costs the click its own focus, which
+    // the arrow keys need, so the element asks for what the default would have given it.
     e.preventDefault();
+    el.focus();
     el.setPointerCapture(e.pointerId);
     // Scrubbing while it runs fights the transport for the same value; stop, then seek.
     setPlaying(false);
@@ -5395,7 +5397,7 @@ function CutScrubber({ totalSec, frameRate, transport }: { totalSec: number; fra
  * its own. The band is the only part that takes a pointer and it is only ever where the playhead
  * is, so a clip anywhere else on the lane is untouched by it.
  */
-function CutPlayhead({ totalSec, frameRate, transport }: { totalSec: number; frameRate: FrameRate; transport: Transport }) {
+function CutPlayhead({ totalSec, frameRate, transport, tool }: { totalSec: number; frameRate: FrameRate; transport: Transport; tool: EditorTool }) {
   const { time } = transport;
   const onPointerDown = seekDrag({
     totalSec,
@@ -5408,7 +5410,10 @@ function CutPlayhead({ totalSec, frameRate, transport }: { totalSec: number; fra
   return (
     <div className="fy-playhead" style={{ left: lanePosition(time / totalSec) }}>
       <span
-        className="fy-playhead__grab"
+        // Blade cuts where it is pressed and Hand scrolls from under it; both want the lane the
+        // band is sitting on, and neither is asking to move the transport. The band stands aside
+        // for them rather than swallowing the one press the playhead happens to be over.
+        className={cx("fy-playhead__grab", tool !== "select" && "fy-playhead__grab--idle")}
         onPointerDown={onPointerDown}
         onKeyDown={seekKeys(transport, totalSec)}
         role="slider"
@@ -7950,7 +7955,7 @@ export function CutScreen() {
               transport={transport}
             />
             <div className="fy-tracks">
-              {totalSec > 0 && <CutPlayhead totalSec={totalSec} frameRate={frameRate} transport={transport} />}
+              {totalSec > 0 && <CutPlayhead totalSec={totalSec} frameRate={frameRate} transport={transport} tool={tool} />}
               {editableTimeline && production && subtitleTracksOf(editableTimeline).length > 0 ? (
                 subtitleTracksOf(editableTimeline).map((track) => (
                   <SubtitleTrackRow

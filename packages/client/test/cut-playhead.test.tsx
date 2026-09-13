@@ -143,6 +143,33 @@ describe("the playhead is draggable", () => {
     }
   });
 
+  it("stands aside for the tools that want the lane under it", async () => {
+    const screen = await mountCut();
+    try {
+      const grab = () => screen.container.querySelector<HTMLElement>(".fy-playhead__grab")!;
+      assert.equal(grab().className.includes("fy-playhead__grab--idle"), false, "Select gives the band to the playhead");
+
+      // Blade cuts where it is pressed and Hand scrolls from under it; neither is asking to seek.
+      for (const key of ["b", "h"]) {
+        const press = new Event("keydown");
+        Object.defineProperty(press, "key", { value: key });
+        await act(async () => {
+          window.dispatchEvent(press);
+        });
+        assert.equal(grab().className.includes("fy-playhead__grab--idle"), true, `${key} takes the band off the playhead`);
+      }
+
+      const back = new Event("keydown");
+      Object.defineProperty(back, "key", { value: "v" });
+      await act(async () => {
+        window.dispatchEvent(back);
+      });
+      assert.equal(grab().className.includes("fy-playhead__grab--idle"), false, "Select gives it back");
+    } finally {
+      await act(async () => screen.root.unmount());
+    }
+  });
+
   it("does not move the transport on a press that only takes hold of it", async () => {
     const screen = await mountCut();
     try {
