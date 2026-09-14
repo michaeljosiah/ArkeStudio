@@ -706,6 +706,8 @@ export class FsWorldProvider implements WorldProvider {
       }
       this.appIndex = null;
       this.appIndexReady = false;
+      // Closing drains this set of resources; an explicit later load may reuse the provider.
+      this.closing = false;
     } catch (error) {
       this.closing = false;
       throw error;
