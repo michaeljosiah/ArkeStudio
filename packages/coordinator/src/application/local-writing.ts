@@ -127,8 +127,9 @@ export function localWriting(store: WorldStore, assertScratch: (path: string) =>
     try {
       if (!isAbsolute(runtime.cwd)) throw new Error("The writing scratch directory must be absolute.");
       await assertScratch(runtime.cwd);
-      const inside = relative(await realpath(store.dir), await realpath(runtime.cwd));
-      if (!inside || (inside !== ".." && !inside.startsWith(".." + sep) && !isAbsolute(inside))) {
+      const world = await realpath(store.dir), scratch = await realpath(runtime.cwd);
+      const contained = (path: string) => !path || (path !== ".." && !path.startsWith(".." + sep) && !isAbsolute(path));
+      if (contained(relative(world, scratch)) || contained(relative(scratch, world))) {
         throw new Error("The writing harness must run outside the world.");
       }
       if (!Number.isFinite(runtime.inputTokenLimit) || runtime.inputTokenLimit < 1024 || !runtime.sessionModel) throw new Error("The writing model is unavailable.");

@@ -102,7 +102,7 @@ export class ProseApplicationService {
     for (const chapter of result.value.chapters) {
       await this.operations.policy.authorise(context, "read", { ...resource, chapterId: chapter.chapterId });
     }
-    await this.deliver(context, resource, result);
+    await this.deliver(context, resource, result.value);
     return result;
   }
 

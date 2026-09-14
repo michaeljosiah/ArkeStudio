@@ -12,7 +12,7 @@ export const writingInput = z.object({
 }).strict();
 export const writingResult = z.object({
   productionId: proseId, chapterId: proseId, conversationId: ConversationIdSchema, title: ChapterSummarySchema.shape.title,
-  proposal: ProposalSchema, body: z.string().min(1).max(2000000),
+  proposal: ProposalSchema, body: z.string().min(1).max(2000000).refine(body => body.trim().length > 0),
   groundingHash: z.string().regex(/^[a-f0-9]{64}$/),
 }).strict().refine(value => value.proposal.kind === "chapter-draft" && value.proposal.targets.length === 1 &&
   value.proposal.targets[0]!.path.startsWith(`productions/${value.productionId}/chapters/`) &&

@@ -118,6 +118,12 @@ for (const mutation of ["production", "chapter", "save"] as const) {
   });
 }
 
+it("manuscript delivery identifies the semantic manuscript value", async t => {
+  const h = await harness(t);
+  const result = await h.engine.prose.manuscript(context, WORLD_ID, productionId);
+  assert.equal(h.deliveries.at(-1)?.sha256, engineHash(result.value));
+});
+
 it("canonical chapter IDs preserve legacy filenames and prevent alias-based permission bypass", async t => {
   const h = await harness(t);
   const before = await h.engine.prose.readChapter(context, WORLD_ID, productionId, chapterId);

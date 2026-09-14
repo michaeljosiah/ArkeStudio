@@ -1,5 +1,5 @@
 import { mkdir, readdir, rm, stat, realpath } from "node:fs/promises";
-import { basename, join, relative, isAbsolute } from "node:path";
+import { basename, join, relative, isAbsolute, sep } from "node:path";
 import {
   BIBLE_PATH,
   DEFAULT_AUDIO_POLICY,
@@ -85,8 +85,8 @@ export class FsWorldProvider implements WorldProvider {
   async assertWritingScratch(path: string): Promise<void> {
     const scratch = await realpath(path);
     const exclude = (root: string) => {
-      const rel = relative(root, scratch);
-      if (!rel || (!rel.startsWith(".." + (process.platform === "win32" ? "\\" : "/")) && rel !== ".." && !isAbsolute(rel))) {
+      const contained = (rel: string) => !rel || (rel !== ".." && !rel.startsWith(".." + sep) && !isAbsolute(rel));
+      if (contained(relative(root, scratch)) || contained(relative(scratch, root))) {
         throw new Error("The writing scratch directory must be outside all managed worlds.");
       }
     };

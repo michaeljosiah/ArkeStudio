@@ -32,9 +32,9 @@ export class WritingApplicationService {
     context = structuredClone(context); input = writingInput.parse(input);
     productionId = proseId.parse(productionId); chapterId = proseId.parse(chapterId);
     const resource = { worldId, productionId, chapterId };
-    if (!this.runtime) throw new Error("This host has not configured AI writing.");
-    const runtime = this.runtime;
     const result = await this.operations.run(context, "chapter-draft", resource, input.operationId, { mode, ...input }, async key => {
+      if (!this.runtime) throw new Error("This host has not configured AI writing.");
+      const runtime = this.runtime;
       const controller = new AbortController();
       const signal = AbortSignal.any([controller.signal, this.stopping.signal]);
       this.active.set(key, { controller, context, resource });
@@ -57,7 +57,7 @@ export class WritingApplicationService {
               staged.body.trim() !== value.body.trim()) {
               throw new Error("The writing receipt differs from the staged proposal.");
             }
-            value.body = staged.body;
+            value = writingResult.parse({ ...value, body: staged.body });
           } catch (error) {
             // Failed and cancelled runs also own durable conversation events.
             await session.saved(key);

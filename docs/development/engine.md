@@ -268,7 +268,8 @@ The optional `writing` factory receives trusted context, resource, operation key
 ID and an abort signal. It returns a shared `HarnessAdapter`, a private scratch directory,
 the resolved session model and input token limit, `createSession` and `close`. The directory
 must exist outside all managed worlds. The filesystem provider checks resolved paths against
-its world library, archive and directory aliases. Custom local providers must implement
+its world library, archive and directory aliases, rejecting both descendants and ancestors
+of those locations. Custom local providers must implement
 `assertWritingScratch`; writing refuses without that check. The host must enforce
 actual harness confinement, disable unrelated tools/network access, use scoped credentials,
 honour cancellation and drain subprocesses in `close`. A scratch path alone is not a sandbox.
@@ -294,7 +295,8 @@ so the next call can use the acknowledged revision. Output carries proposal meta
 title, body, conversation ID and a grounding hash. Completed replay checks current read and
 exact-content delivery again. It returns the original candidate even if it was later accepted
 or discarded, while its chapter-to-file binding remains valid; use current world/proposal
-state for its present status.
+state for its present status. Completed replay does not require a configured model runtime.
+Whitespace-only generated bodies are refused at the public boundary as well as by the local runner.
 
 `writing.cancel(context, worldId, operationId)` aborts a matching active call without waiting
 behind that world's repository queue. Engine close aborts writing and waits for provider
