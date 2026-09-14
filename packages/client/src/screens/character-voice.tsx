@@ -804,7 +804,7 @@ function ChooseVoiceDialog({
             return (
               <div
                 key={row.key}
-                className={cx("fy-voicerow", isPicked && "fy-voicerow--picked", isCurrent && "fy-voicerow--selected")}
+                className={cx("fy-voicerow", row.clone !== null && "fy-voicerow--readers", isPicked && "fy-voicerow--picked", isCurrent && "fy-voicerow--selected")}
               >
                 <ClipPlayButton
                   small
@@ -833,28 +833,7 @@ function ChooseVoiceDialog({
                     {row.attributes.length > 0 ? row.attributes.join(", ") : row.clone !== null ? "cloned here" : ""}
                   </span>
                 </button>
-                {row.clone !== null ? (
-                  <span className="fy-readerchips" role="group" aria-label="Reader">
-                    {row.readers.map((reader) => {
-                      const readerKey = voiceTargetKey(reader);
-                      return (
-                        <button
-                          key={readerKey}
-                          type="button"
-                          className="fy-readerchip"
-                          aria-pressed={readerKey === key}
-                          disabled={reader.unavailableReason !== undefined}
-                          title={reader.unavailableReason}
-                          data-testid={`voice-reader-${reader.provider}`}
-                          onClick={() => setPick(readerKey)}
-                        >
-                          {reader.local ? <Monitor size={10} /> : <Cloud size={10} />}
-                          {readerLabel(reader, rowFor(models, reader))}
-                        </button>
-                      );
-                    })}
-                  </span>
-                ) : (
+                {row.clone === null && (
                   <span className="fy-voicerow__where">
                     {picked.local ? <Monitor size={12} /> : <Cloud size={12} />}
                     {/* One expression, so the reader and its price stay one text node: split in
@@ -883,6 +862,30 @@ function ChooseVoiceDialog({
                   >
                     {deleting === row.clone ? <Loading inline label="Deleting…" /> : confirmDelete === row.clone ? "Delete for good" : "Delete"}
                   </Button>
+                )}
+                {/* The readers last in the row and on a line of their own beneath the name: beside
+                    the name they left it a word a line, and the tab order stays the visual one. */}
+                {row.clone !== null && (
+                  <span className="fy-readerchips" role="group" aria-label="Reader">
+                    {row.readers.map((reader) => {
+                      const readerKey = voiceTargetKey(reader);
+                      return (
+                        <button
+                          key={readerKey}
+                          type="button"
+                          className="fy-readerchip"
+                          aria-pressed={readerKey === key}
+                          disabled={reader.unavailableReason !== undefined}
+                          title={reader.unavailableReason}
+                          data-testid={`voice-reader-${reader.provider}`}
+                          onClick={() => setPick(readerKey)}
+                        >
+                          {reader.local ? <Monitor size={10} /> : <Cloud size={10} />}
+                          {readerLabel(reader, rowFor(models, reader))}
+                        </button>
+                      );
+                    })}
+                  </span>
                 )}
               </div>
             );
