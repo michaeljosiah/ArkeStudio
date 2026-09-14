@@ -88,3 +88,12 @@ export interface EngineQueue {
 }
 export interface EngineMutation { operationId: string; expectedRevision?: string }
 export interface EngineReceipt<T> { operationKey: string; revision: string; value: T }
+
+/** Every confirmed admission is retained, even when the remaining batch is uncertain. */
+export interface IllustrationOutcome {
+  operationKey: string;
+  reservation: string;
+  jobIds: string[];
+  failures: Array<{ index: number; reason: string }>;
+  needsReconciliation: boolean;
+}

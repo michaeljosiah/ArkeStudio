@@ -187,11 +187,13 @@ it("an enqueue response lost after durable admission cannot blindly submit again
   h.queue.enqueue = async input => { await enqueue(input); throw new Error("Lost enqueue receipt"); };
   const input = { operationId: "uncertain-image", sheetId: "maren-kest", model: FAL_MODELS[0]!, prompt: "Happy",
     count: 1, identityReferences: [], generationKey: "image" };
-  await assert.rejects(h.engine.illustrations.generate(parent, WORLD_ID, input), /Lost enqueue/);
+  const partial = await h.engine.illustrations.generate(parent, WORLD_ID, input);
+  assert.equal(partial.needsReconciliation, true);
+  assert.equal(partial.jobIds.length, 1);
   h.queue.enqueue = enqueue;
   await until(() => h.queue.listJobs().every(job => job.status === "succeeded"), "uncertain admitted job completion");
   const restarted = await h.restart();
-  await assert.rejects(restarted.illustrations.generate(parent, WORLD_ID, input), /uncertain outcome/);
+  assert.deepEqual(await restarted.illustrations.generate(parent, WORLD_ID, input), partial);
   assert.equal((await restarted.illustrations.reconcile(parent, WORLD_ID, input.operationId)).status, "needs-reconciliation");
   assert.equal(h.fake.submitCount, 1);
   assert.equal(h.state.charges + h.state.releases, 0);
@@ -207,4 +209,41 @@ it("a background authoring call uses its named world while Studio has another wo
   const owner = await h.engine.worlds.read(parent, WORLD_ID);
   assert.ok(owner.bundle.proposals.some(p => p.proposal.id === proposed.value.proposal.id));
   assert.equal(h.provider.openStore()!.worldId, other.worldId);
+});
+
+
+it("reconciliation retains the original subject and rechecks the recorded sheet authority", async t => {
+  const h = await harness(t);
+  await h.engine.illustrations.generate(parent, WORLD_ID, { operationId: "scoped-image", sheetId: "maren-kest",
+    model: FAL_MODELS[0]!, prompt: "Happy", count: 1, identityReferences: [], generationKey: "image" });
+  await until(() => h.queue.listJobs().every(job => job.status === "succeeded"), "scoped image completion");
+  await assert.rejects(h.engine.illustrations.reconcile({ ...parent, subjectId: "another-child" }, WORLD_ID, "scoped-image"), /different caller or subject/);
+  await assert.rejects(h.engine.operation({ ...parent, subjectId: "another-child" }, WORLD_ID, "scoped-image"), /different caller or subject/);
+  const authorise = h.policy.authorise;
+  h.policy.authorise = async (context, action, resource) => {
+    await authorise(context, action, resource);
+    if (resource.sheetId === "maren-kest") throw new Error("Sheet access revoked");
+  };
+  await assert.rejects(h.engine.illustrations.reconcile(parent, WORLD_ID, "scoped-image"), /Sheet access revoked/);
+  assert.equal(h.state.charges + h.state.releases, 0);
+});
+
+it("partial batches retain admitted job IDs on the first response and after restart", async t => {
+  const h = await harness(t);
+  const enqueue = h.queue.enqueue.bind(h.queue);
+  let calls = 0;
+  h.queue.enqueue = async input => { if (++calls === 2) throw new Error("Admission unavailable"); return enqueue(input); };
+  const input = { operationId: "partial-image", sheetId: "maren-kest", model: FAL_MODELS[0]!, prompt: "Happy",
+    count: 3, identityReferences: [], generationKey: "image" };
+  const partial = await h.engine.illustrations.generate(parent, WORLD_ID, input);
+  assert.equal(partial.needsReconciliation, true);
+  assert.deepEqual(partial.jobIds, h.queue.listJobs().map(job => job.id));
+  assert.equal(partial.jobIds.length, 1);
+  assert.deepEqual(partial.failures.map(failure => failure.index), [1, 2]);
+  await until(() => h.queue.listJobs().every(job => job.status === "succeeded"), "partially admitted portrait");
+  const restarted = await h.restart();
+  assert.deepEqual(await restarted.illustrations.generate(parent, WORLD_ID, input), partial);
+  assert.equal(h.fake.submitCount, 1);
+  assert.equal((await restarted.illustrations.reconcile(parent, WORLD_ID, input.operationId)).status, "needs-reconciliation");
+  assert.equal(h.state.charges + h.state.releases, 0);
 });

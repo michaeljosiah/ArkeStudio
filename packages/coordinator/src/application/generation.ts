@@ -1,12 +1,12 @@
 import { MAX_IMAGE_PREVIEWS, ulid, type Job } from "@arke-studio/contracts";
-import type { EngineContext, EngineMutation, EngineQueue, EngineWorldRepository, IllustrationInput } from "./contracts.js";
+import type { EngineContext, EngineMutation, EngineQueue, EngineWorldRepository, IllustrationInput, IllustrationOutcome } from "./contracts.js";
 import { engineHash, EngineOperations } from "./operations.js";
 
 export class IllustrationApplicationService {
   constructor(private readonly worlds: EngineWorldRepository, private readonly operations: EngineOperations,
     private readonly queue: EngineQueue) {}
 
-  async generate(context: EngineContext, worldId: string, input: IllustrationInput & EngineMutation) {
+  async generate(context: EngineContext, worldId: string, input: IllustrationInput & EngineMutation): Promise<IllustrationOutcome> {
     context = structuredClone(context);
     input = structuredClone(input);
     const resource = { worldId, sheetId: input.sheetId };
@@ -24,12 +24,29 @@ export class IllustrationApplicationService {
       const jobs: Job[] = [];
       // A partial/uncertain enqueue retains the reservation and operation for reconciliation.
       // Releasing it here could fund another request while the first provider is already working.
-      for (const request of inputs) {
-        await this.operations.policy.authorise(context, "generate", resource);
-        jobs.push(await this.queue.enqueue({ ...request, idempotencyKey: ulid(),
-          params: { ...request.params, engineOperation: { key, reservation, context } } }));
+      for (const [index, request] of inputs.entries()) {
+        try {
+          await this.operations.policy.authorise(context, "generate", resource);
+          jobs.push(await this.queue.enqueue({ ...request, idempotencyKey: ulid(),
+            params: { ...request.params, engineOperation: { key, requestIndex: index, reservation, context } } }));
+        } catch {
+          // The queue may have journalled the failing call before its acknowledgement was lost.
+          // Preserve all known admissions; an incomplete batch is never a wholly rejected one.
+          const admitted = new Map(jobs.map(job => [job.id, job]));
+          for (const job of this.queue.jobs()) {
+            if (job.worldId === worldId && (job.params.engineOperation as { key?: string } | undefined)?.key === key) {
+              admitted.set(job.id, job);
+            }
+          }
+          const confirmed = new Set([...admitted.values()].map(job =>
+            (job.params.engineOperation as { requestIndex?: number }).requestIndex));
+          return { operationKey: key, reservation, jobIds: [...admitted.keys()], needsReconciliation: true,
+            failures: inputs.map((_, requestIndex) => requestIndex).filter(requestIndex => !confirmed.has(requestIndex))
+              .map(requestIndex => ({ index: requestIndex,
+                reason: "Some requests may already be running. Check their status before trying again." })) };
+        }
       }
-      return { operationKey: key, reservation, jobIds: jobs.map(job => job.id) };
+      return { operationKey: key, reservation, jobIds: jobs.map(job => job.id), failures: [], needsReconciliation: false };
     });
   }
 
@@ -40,6 +57,10 @@ export class IllustrationApplicationService {
     await this.operations.policy.authorise(context, "generate", { worldId });
     const operation = await this.operations.store.read(key);
     if (!operation || operation.action !== "generate") throw new Error("Generation operation not found.");
+    if (operation.context.subjectId !== context.subjectId || operation.context.actorId !== context.actorId ||
+      operation.context.scopeId !== context.scopeId) throw new Error("The operation belongs to a different caller or subject.");
+    // A world-level permission is insufficient for a request originally limited to one sheet.
+    await this.operations.policy.authorise(context, "generate", operation.resource);
     const jobs = this.queue.jobs().filter(job => {
       const owner = job.params.engineOperation as { key?: string } | undefined;
       return job.worldId === worldId && owner?.key === key;
@@ -50,7 +71,8 @@ export class IllustrationApplicationService {
     // Do not settle an interrupted batch as a complete batch. A host must first reconcile the
     // started operation against queue/provider evidence; it cannot invent the missing requests.
     if (operation.status !== "completed") return { status: "needs-reconciliation" as const, operationKey: key };
-    const result = operation.result as { reservation: string; jobIds: string[] };
+    const result = operation.result as IllustrationOutcome;
+    if (result.needsReconciliation) return { status: "needs-reconciliation" as const, operationKey: key };
     if (jobs.length !== result.jobIds.length || jobs.some(job => !result.jobIds.includes(job.id))) {
       throw new Error("Generation recovery does not match the durable batch.");
     }

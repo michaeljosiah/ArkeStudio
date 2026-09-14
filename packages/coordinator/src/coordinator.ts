@@ -13220,7 +13220,7 @@ export class Coordinator {
             count: msg.count, identityReferences: msg.identityReferences, generationKey: msg.requestId,
             ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
           });
-          this.emitEnqueueResult(msg.requestId, msg.kind, msg.count, outcome.jobIds, []);
+          this.emitEnqueueResult(msg.requestId, msg.kind, msg.count, outcome.jobIds, outcome.failures);
         } catch (error) {
           this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error));
         }

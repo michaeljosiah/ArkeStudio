@@ -37,6 +37,9 @@ export function createEngine(options: EngineOptions) {
       const key = operations.key(context, { worldId }, operationId);
       await options.policy.authorise(context, "read", { worldId });
       const record = await options.operations.read(key);
+      if (record && (record.context.subjectId !== context.subjectId || record.context.actorId !== context.actorId ||
+        record.context.scopeId !== context.scopeId)) throw new Error("The operation belongs to a different caller or subject.");
+      if (record) await options.policy.authorise(context, "read", record.resource);
       // Progress does not expose raw proposal contents or provider job data.
       return record ? { operationKey: key, status: record.status, action: record.action } : null;
     }),
