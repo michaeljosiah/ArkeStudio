@@ -16,6 +16,10 @@ export const proseSaveResult = proseChapterResult.extend({ version: z.number().i
   hash: z.string().regex(/^sha256:[a-f0-9]{64}$/) }).strict();
 export const proseChapterRead = proseSaveResult.extend({ title: z.string(), order: z.number(), body: z.string(),
   versions: z.array(z.number().int().min(1)) }).strict();
+export const proseManuscript = z.object({ productionId: proseId, title: z.string(),
+  contentType: z.literal("text/markdown; charset=utf-8"), markdown: z.string(),
+  chapters: z.array(proseSaveResult).min(1) }).strict();
+export type ProseManuscript = z.infer<typeof proseManuscript>;
 
 export type ProseProductionInput = z.infer<typeof proseProductionInput>;
 export type ProseChapterInput = z.infer<typeof proseChapterInput>;
@@ -31,4 +35,5 @@ export interface EngineProseSession {
   createChapter(productionId: string, input: ProseChapterInput, operationKey: string): Promise<ProseChapterResult>;
   readChapter(productionId: string, chapterId: string): Promise<ProseChapterRead>;
   saveChapter(productionId: string, chapterId: string, input: ProseSaveInput, operationKey: string): Promise<ProseSaveResult>;
+  manuscript?(productionId: string): Promise<ProseManuscript>;
 }

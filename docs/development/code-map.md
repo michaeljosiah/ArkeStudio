@@ -210,3 +210,12 @@ Regression checks: coordinator `test/application/prose.test.ts` and
 `test/productions/chapters.test.ts`; engine `test/consumer.mjs` and `test/pack.test.mjs` exercise
 the installed package outside the monorepo. See [direct prose authoring](engine.md#direct-prose-authoring-02)
 for the API, version 0.2 adapter migration and remaining authoring/server boundaries.
+
+`engine.writing` uses `application/writing.ts` for scoped admission, cancellation, replay and
+authoritative completion. `application/local-writing.ts` composes the existing WorldChatRunner,
+chapter briefing/read receipts, conversation action lifecycle and proposal gate for one chapter.
+`writing-contracts.ts` defines the optional host model-runtime factory and strict receipts.
+`engine.prose.manuscript` checks complete production access and assembles committed chapters
+through `local-prose.ts`, returning Markdown with version/file-hash provenance.
+Regression checks: `test/application/writing.test.ts` and the packed engine consumer cover the
+draft/accept/revise/manuscript journey and its failure boundaries.

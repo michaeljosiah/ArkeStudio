@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
+import { mkdir } from "node:fs/promises";
 import { createEngine } from "@arke-studio/engine";
 import { FsWorldProvider, createLocalWorldRepository, FileEngineOperationStore, JobQueue, JobJournal } from "@arke-studio/engine/local";
 const worldId = "01J8F3K2QW9VZX4N7M0RTYB6HC";
@@ -9,6 +10,29 @@ const provider = new FsWorldProvider(root);
 await provider.loadWorld(worldId);
 let submissions = 0;
 const ledger = new Set();
+let writingCalls = 0;
+let writingTarget;
+let writingBody = "Fenn crossed the bridge and found his family.";
+const writing = async ({ modelId }) => {
+  await mkdir(join(root, "writing-scratch"), { recursive: true });
+  let prompt = "", notify;
+  const sent = new Promise(resolve => { notify = resolve; });
+  return { cwd: join(root, "writing-scratch"), inputTokenLimit: 100000, sessionModel: modelId,
+    createSession: async () => ({ sessionId: "writing-session" }), close: async () => {},
+    adapter: { id: "test-writer", capabilities: () => new Set(["events"]), readiness: () => ({ ready: true }),
+      dispatchAsync: async input => { writingCalls++; prompt = input.parts.map(p => p.text ?? "").join("\n"); notify(); return { ok: true }; },
+      streamEvents: () => (async function* () {
+        await sent;
+        const ids = [...new Set([...prompt.matchAll(/"proposalCheckReceiptId":"([^"]+)"/g)].map(m => m[1]))];
+        yield { type: "message.completed", sessionId: "writing-session", text: JSON.stringify({
+          reply: "The proposed chapter is ready.", candidateOperations: [], groupOperations: [],
+          actions: [{ kind: "production-chapter", productionId: writingTarget.productionId, checkReceiptIds: ids,
+            change: { operation: "edit", chapterId: writingTarget.chapterId, changes: { body: writingBody } } }],
+        }) };
+      })(),
+    },
+  };
+};
 const bytes = Uint8Array.from([137,80,78,71,13,10,26,10,...Array(64).fill(0),0,0,0,0,73,69,78,68,174,66,96,130]);
 const client = {
   declarations: { supportsIdempotencyKey: true, supportsLookupByKey: false, supportsListRecent: false, reportsCost: false },
@@ -31,7 +55,7 @@ const policy = {
   async deliver(ctx, resource) { await this.authorise(ctx, "read", resource); },
   async reserve(_ctx, key) { return key; }, async settle() {}, async release() {},
 };
-const make = () => createEngine({ worlds: createLocalWorldRepository(provider), policy,
+const make = () => createEngine({ worlds: createLocalWorldRepository(provider), policy, writing,
   operations: new FileEngineOperationStore(join(root, "operations.jsonl")),
   queue: { enqueue: input => queue.enqueue(input), jobs: () => queue.listJobs() } });
 let engine = make();
@@ -75,6 +99,27 @@ try {
   const reopenedChapter = await engine.prose.readChapter(context, worldId, proseId, chapterId);
   assert.equal(reopenedChapter.body.trim(), saveInput.body);
   assert.equal(reopenedChapter.hash, saved.value.hash);
+  writingTarget = { productionId: proseId, chapterId };
+  const writingInput = { operationId: "ai-draft", modelId: "test-writer", instruction: "Finish Fenn's journey.",
+    baseHash: reopenedChapter.hash, expectedRevision: (await engine.worlds.read(context, worldId)).revision };
+  const draft = await engine.writing.draft(context, worldId, proseId, chapterId, writingInput);
+  assert.ok(!(await engine.prose.manuscript(context, worldId, proseId)).value.markdown.includes(writingBody));
+  assert.equal((await engine.proposals.accept(context, worldId, draft.value.proposal.id,
+    { operationId: "accept-ai-draft", expectedDraftRevision: draft.value.proposal.draftRevision })).value.status, "accepted");
+  writingBody = "Fenn crossed the moonlit bridge and found his family waiting.";
+  const revision = await engine.writing.revise(context, worldId, proseId, chapterId,
+    { ...writingInput, operationId: "ai-revision", instruction: "Make the bridge scene take place at night.",
+      baseHash: (await engine.prose.readChapter(context, worldId, proseId, chapterId)).hash,
+      expectedRevision: (await engine.worlds.read(context, worldId)).revision });
+  assert.equal((await engine.proposals.accept(context, worldId, revision.value.proposal.id,
+    { operationId: "accept-ai-revision", expectedDraftRevision: revision.value.proposal.draftRevision })).value.status, "accepted");
+  const manuscript = await engine.prose.manuscript(context, worldId, proseId);
+  assert.ok(manuscript.value.markdown.includes(writingBody));
+  assert.equal(manuscript.value.chapters[0].hash, (await engine.prose.readChapter(context, worldId, proseId, chapterId)).hash);
+  await engine.close(); await provider.close(); await provider.loadWorld(worldId); engine = make();
+  assert.deepEqual(await engine.writing.draft(context, worldId, proseId, chapterId, writingInput), draft);
+  assert.deepEqual((await engine.prose.manuscript(context, worldId, proseId)).value, manuscript.value);
+  assert.equal(writingCalls, 2);
   await assert.rejects(engine.prose.saveChapter({ ...context, actorId: "child" }, worldId, proseId, chapterId,
     { ...saveInput, operationId: "child-save" }), /Forbidden/);
   assert.deepEqual(await engine.proposals.accept(context, worldId, proposal.value.proposal.id, { operationId: "accept" }), accepted);

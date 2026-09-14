@@ -131,7 +131,7 @@ contracts, scoped durable operations and the server host remain future work unde
 
 `engine.prose` supports creating a Story production, creating a chapter, reading it by its
 canonical ID and saving direct author edits. This is the next public boundary under epic #1182.
-It does not yet run the writing harness, generate an outline or return an accepted manuscript.
+AI chapter drafting and manuscript output are described below. Outline generation is not part of this API.
 Studio's local workspace services and this API share `productions/ops.ts`; Studio transport
 and event sequencing retain their existing compatibility services.
 
@@ -206,5 +206,94 @@ Coordinator `test/application/prose.test.ts` covers the local commit path, canon
 scoped permissions, exact delivery, stale edits, retirement, pending proposals, save failure,
 restart and malformed receipts. The packed external consumer creates, edits, closes/reopens and
 replays a prose production alongside its existing character/portrait journey. These tests prove
-direct authoring and recovery boundaries; they do not establish the full epic's AI drafting,
-accepted manuscript, follow-on continuity, server host or hosted writer fencing.
+direct authoring and recovery boundaries.
+
+## AI chapter writing and manuscript output (0.2)
+
+An external host can draft a planned chapter, revise committed prose, review the resulting
+proposal and accept it through the same gate as Studio. The supported revision here is a complete
+chapter rewrite. It starts from committed text, not from another pending proposal. Accept or
+discard that proposal before continuing the review loop; a new call never silently replaces it.
+The public API does not yet expose passage selection or conversation history.
+
+```ts
+// Add writing: host.openWritingRuntime to createEngine's existing options.
+const current = await engine.prose.readChapter(context, worldId, productionId, chapterId);
+const snapshot = await engine.worlds.read(context, worldId);
+const draft = await engine.writing.draft(context, worldId, productionId, chapterId, {
+  operationId: "draft-chapter-1", modelId: "host-approved-model",
+  instruction: "Write the planned chapter, ending with the discovery of the bridge.",
+  baseHash: current.hash, expectedRevision: snapshot.revision,
+});
+// Present draft.value.title and draft.value.body for review.
+const acceptance = await engine.proposals.accept(context, worldId, draft.value.proposal.id, {
+  operationId: "accept-chapter-1",
+  expectedDraftRevision: draft.value.proposal.draftRevision,
+});
+if (acceptance.value.status !== "accepted") {
+  // Present the gate's refusal or reconfirmation requirement; do not assume a commit.
+}
+// To revise, read the current chapter/world again and call writing.revise with new inputs.
+const manuscript = await engine.prose.manuscript(context, worldId, productionId);
+// manuscript.value.markdown is the complete committed manuscript.
+```
+
+The local adapter reuses `WorldChatRunner`, the existing chapter briefing and read receipts,
+conversation action preparation, and `ProposalManager`. It creates one durable conversation per
+operation. Sources include the chapter plan, the preceding chapter's ending, overview, prose
+style, selected world references, projected Bible and the current chapter body. The complete
+outline is read with receipts before staging. Source material is labelled as source material.
+Only one body/title/draft-status change for the requested chapter is allowed; other generated
+actions refuse. No story facts become canon through this call.
+
+Required base hash and world revision reject stale admission. Before dispatch and staging, the
+adapter checks current authority, projection and source state again. Staging also fences the
+chapter's exact file hash and the existing read observations inside the gate. Changes to the
+run's own conversation log do not count as changed story sources. Initial support requires
+visibility of the complete target outline, overview and prose style; a partial view refuses
+rather than exposing hidden material to satisfy a grounding check.
+
+The optional `writing` factory receives trusted context, resource, operation key, explicit model
+ID and an abort signal. It returns a shared `HarnessAdapter`, a private scratch directory,
+the resolved session model and input token limit, `createSession` and `close`. The directory
+must exist outside the world; the local adapter checks its resolved path. The host must enforce
+actual harness confinement, disable unrelated tools/network access, use scoped credentials,
+honour cancellation and drain subprocesses in `close`. A scratch path alone is not a sandbox.
+There is no implicit model substitution or paid-provider default. Concrete Studio harness
+assembly still belongs in `harness/v2-launch.ts`.
+
+Open the runtime only after checking and durably reserving any host allowance, keyed by the
+operation key. Its `close` records operator usage and drains provider work even on failure.
+This is not permission to charge a subscriber: product charging, refunds and held-content
+decisions remain host responsibilities. The portrait queue's reservation API is not used for
+writing. No Aonik commercial billing implementation is added here.
+
+Add `chapter-draft` to host policy actions and durable operation codecs. Both draft and revision
+use that action; mode is part of the request fingerprint. Output carries proposal metadata,
+title, body, conversation ID and a grounding hash. Completed replay checks current read and
+exact-content delivery again. It returns the original candidate even if it was later accepted
+or discarded; use current world/proposal state for its present status.
+
+`writing.cancel(context, worldId, operationId)` aborts a matching active call without waiting
+behind that world's repository queue. Engine close aborts writing and waits for provider
+cleanup and authoritative saves. Cancellation, model failure, uncertain provider outcomes and
+failed saves retain started operation evidence; they do not authorize retrying the provider.
+The conversation creation event records the operation key for host reconciliation. Failed runs
+also finalise their conversation records. This slice has no automatic recovery/resubmission of
+an interrupted writing run.
+
+Manuscript output is Markdown from every active chapter, in chapter order. It excludes pending
+proposal bodies and refuses empty chapters, ambiguous IDs, denied chapters or a filtered
+production. “Committed” includes accepted AI drafts and direct author saves. It does not imply
+a separate editorial approval of each human edit. The response carries the world revision and
+each included chapter's canonical ID, version and exact file hash. Hashes matter because direct
+author saves preserve version numbers. Current authority and final exact-content delivery are
+checked before returning the assembled output. DOCX/EPUB publishing and print fulfilment remain
+separate services.
+
+Regression coverage: `test/application/writing.test.ts` exercises draft → accept → revise →
+accept → manuscript, live duplicate calls, restart, cancellation, shutdown, stale sources,
+revocation, held output and failed authoritative saves. The packed external consumer performs
+the same journey from a newly created Story using a scripted harness and checks public types.
+These are protocol and persistence checks, not evidence of model quality, automatic continuity
+planning, Aonik readiness, a server host or the atomic hosted writer fence in #468.

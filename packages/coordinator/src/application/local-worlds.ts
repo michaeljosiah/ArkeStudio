@@ -10,6 +10,7 @@ import type { WorldStore } from "../world/store.js";
 import type { EngineWorldRepository, EngineWorldSession } from "./contracts.js";
 import { engineHash } from "./operations.js";
 import { localProse } from "./local-prose.js";
+import { localWriting } from "./local-writing.js";
 
 export interface LocalWorldRepositoryOptions {
   /** The composition, not each service, decides who closes the shared provider. */
@@ -28,6 +29,7 @@ function localSession(store: WorldStore, provider: WorldProvider, options: Local
     () => engineHash(store.getBundle()) === expected ? null : "The world changed before this operation.";
   return {
     prose: localProse(store),
+    writing: localWriting(store),
     snapshot,
     propose: (input, expected) => createSheetFromSentence(store, gate, input, precondition(expected)),
     proposal: id => gate.readManifest(id),

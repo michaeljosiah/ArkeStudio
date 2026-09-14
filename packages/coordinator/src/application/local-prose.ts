@@ -40,6 +40,24 @@ export function localProse(store: WorldStore): EngineProseSession {
     return null;
   };
   return {
+    async manuscript(productionId) {
+      return store.gateOp(async () => {
+        const found = production(productionId);
+        const outline = found.chapters.filter(c => !c.retired).sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+        if (!outline.length) throw new Error("The manuscript has no active chapters.");
+        const chapters = [];
+        const sections = [`# ${found.meta.title.replace(/[\r\n]+/g, " ")}`];
+        for (const item of outline) {
+          chapter(productionId, item.id);
+          const value = await openChapter(store, productionId, item.id, { canonicalId: true });
+          if (!value.body.trim()) throw new Error("Every active chapter needs committed prose before manuscript output.");
+          chapters.push({ productionId, chapterId: item.id, version: value.version, hash: value.hash });
+          sections.push(`## ${value.title.replace(/[\r\n]+/g, " ")}\n\n${value.body.trim()}`);
+        }
+        return { productionId, title: found.meta.title, contentType: "text/markdown; charset=utf-8" as const,
+          markdown: sections.join("\n\n") + "\n", chapters };
+      });
+    },
     async createProduction(input, key) {
       const productionId = await createProduction(store, { title: input.title, format: "story", logline: input.logline, requestId: key },
         { source: "engine", precondition: precondition(input.expectedRevision) });

@@ -4,12 +4,15 @@ import { WorldSessionService } from "./world-sessions.js";
 import { ProposalApplicationService } from "./proposals.js";
 import { IllustrationApplicationService } from "./generation.js";
 import { ProseApplicationService } from "./prose.js";
+import { WritingApplicationService } from "./writing.js";
+import type { WritingRuntimeFactory } from "./writing-contracts.js";
 
 export interface EngineOptions {
   worlds: EngineWorldRepository;
   operations: EngineOperationStore;
   policy: EnginePolicy;
   queue: EngineQueue;
+  writing?: WritingRuntimeFactory;
 }
 
 /** No default host policy: only the Studio composition opts into sole-author behaviour. */
@@ -30,9 +33,13 @@ export function createEngine(options: EngineOptions) {
   const proposals = new ProposalApplicationService(options.worlds, operations);
   const illustrations = new IllustrationApplicationService(options.worlds, operations, options.queue);
   const prose = new ProseApplicationService(options.worlds, operations);
+  const writing = new WritingApplicationService(options.worlds, operations, options.writing);
   return {
+    writing: { draft: tracked(writing.draft.bind(writing)), revise: tracked(writing.revise.bind(writing)),
+      cancel: tracked(writing.cancel.bind(writing)) },
     prose: { createProduction: tracked(prose.createProduction.bind(prose)), createChapter: tracked(prose.createChapter.bind(prose)),
-      readChapter: tracked(prose.readChapter.bind(prose)), saveChapter: tracked(prose.saveChapter.bind(prose)) },
+      readChapter: tracked(prose.readChapter.bind(prose)), saveChapter: tracked(prose.saveChapter.bind(prose)),
+      manuscript: tracked(prose.manuscript.bind(prose)) },
     worlds: { read: tracked(worlds.read.bind(worlds)), media: tracked(worlds.media.bind(worlds)) },
     proposals: { propose: tracked(proposals.propose.bind(proposals)), accept: tracked(proposals.accept.bind(proposals)),
       discard: tracked(proposals.discard.bind(proposals)) },
@@ -49,6 +56,7 @@ export function createEngine(options: EngineOptions) {
     }),
     close() {
       closing = true;
+      writing.stop();
       return closed ??= (async () => {
         await Promise.allSettled(active);
         try { await operations.close(); }

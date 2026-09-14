@@ -3,6 +3,7 @@ import { JobSchema, ProposalSchema, RippleItemSchema, RipplePreviewSchema } from
 import type { EngineOperation } from "./contracts.js";
 import { engineHash } from "./operations.js";
 import { proseId, proseProductionResult, proseChapterResult, proseSaveResult } from "./prose-contracts.js";
+import { writingResult } from "./writing-contracts.js";
 
 const text = z.string().min(1).refine(value => value.trim().length > 0);
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
@@ -10,7 +11,7 @@ const context = z.object({ actorId: text, scopeId: text, executorId: text, subje
 const resource = z.object({ worldId: text, proposalId: text.optional(), sheetId: text.optional(), artifactId: text.optional(),
   productionId: proseId.optional(), chapterId: proseId.optional() }).strict();
 const envelope = z.object({ key: hash, fingerprint: hash, context, resource,
-  action: z.enum(["propose", "accept", "discard", "generate", "production-create", "chapter-create", "chapter-save"]), status: z.enum(["started", "completed"]), result: z.unknown().optional() }).strict();
+  action: z.enum(["propose", "accept", "discard", "generate", "production-create", "chapter-create", "chapter-save", "chapter-draft"]), status: z.enum(["started", "completed"]), result: z.unknown().optional() }).strict();
 const commit = z.object({ commitId: text, canonRevision: z.number().int().nonnegative(), allocatedCanonIds: z.array(text),
   versions: z.record(z.number().int().nonnegative()), hashes: z.record(z.string().regex(/^sha256:[a-f0-9]{64}$/)).optional() }).strict();
 const acceptance = z.discriminatedUnion("status", [
@@ -37,8 +38,8 @@ export function parseOperationRecord(value: unknown): EngineOperation {
   const row = envelope.parse(value);
   if ((["accept", "discard"].includes(row.action) && !row.resource.proposalId) ||
     (row.action === "generate" && !row.resource.sheetId)) throw new Error("Invalid engine operation resource.");
-  if ((["chapter-create", "chapter-save"].includes(row.action) && !row.resource.productionId) ||
-    (row.action === "chapter-save" && !row.resource.chapterId)) throw new Error("Invalid engine prose resource.");
+  if ((["chapter-create", "chapter-save", "chapter-draft"].includes(row.action) && !row.resource.productionId) ||
+    (["chapter-save", "chapter-draft"].includes(row.action) && !row.resource.chapterId)) throw new Error("Invalid engine prose resource.");
   if (row.status === "started" && row.result === undefined) return row;
   if (row.action === "generate") {
     if (row.status === "completed" && admission.safeParse(row.result).success) {
@@ -67,6 +68,14 @@ export function parseOperationRecord(value: unknown): EngineOperation {
   if (row.action === "propose") proposal.parse(result.value);
   else if (row.action === "accept") acceptance.parse(result.value);
   else if (row.action === "production-create") proseProductionResult.parse(result.value);
+  else if (row.action === "chapter-draft") {
+    const draft = writingResult.parse(result.value);
+    if (draft.productionId !== row.resource.productionId || draft.chapterId !== row.resource.chapterId ||
+      draft.proposal.kind !== "chapter-draft" || draft.proposal.targets.length !== 1 ||
+      !draft.proposal.targets[0]!.path.startsWith(`productions/${draft.productionId}/chapters/`)) {
+      throw new Error("Invalid engine writing receipt identity.");
+    }
+  }
   else if (row.action === "chapter-create" || row.action === "chapter-save") {
     const chapter = row.action === "chapter-create" ? proseChapterResult.parse(result.value) : proseSaveResult.parse(result.value);
     if (chapter.productionId !== row.resource.productionId ||
