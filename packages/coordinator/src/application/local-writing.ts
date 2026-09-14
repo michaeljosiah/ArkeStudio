@@ -22,9 +22,15 @@ export function localWriting(store: WorldStore): EngineWritingSession {
     const { context, policy, signal, operationKey } = options;
     const resource = { worldId: store.worldId, productionId, chapterId };
     const prose = localProse(store);
+    const pendingChapter = () => {
+      const found = store.getBundle().productions.find(p => p.meta.id === productionId)?.chapters.find(c => c.id === chapterId);
+      const path = `productions/${productionId}/chapters/${found?.file}.md`;
+      return store.getBundle().proposals.some(p => p.proposal.targets.some(target => target.path === path));
+    };
     const initial = await store.gateOp(async () => {
       const chapter = await prose.readChapter(productionId, chapterId);
       if (chapter.hash !== input.baseHash) throw new Error("The chapter changed before writing.");
+      if (pendingChapter()) throw new Error("Accept or discard the pending chapter proposal before writing again.");
       return chapter;
     }, () => engineHash(store.getBundle()) === input.expectedRevision ? null : "The world changed before writing.");
     if (options.mode === "revise" && !initial.body.trim()) throw new Error("There is no committed prose to revise.");
@@ -73,6 +79,7 @@ export function localWriting(store: WorldStore): EngineWritingSession {
     });
     const guard = async () => {
       signal.throwIfAborted();
+      if (pendingChapter()) throw new Error("A chapter proposal is already pending.");
       await policy.authorise(context, "chapter-draft", resource);
       if (projectedSources(await policy.project(context, structuredClone(store.getBundle()))) !== projectedHash) {
         throw new Error("The authorised writing sources changed.");
@@ -91,6 +98,7 @@ export function localWriting(store: WorldStore): EngineWritingSession {
         if (value.targets.length !== 1 || value.targets[0]!.path !== path) throw new Error("The draft targets a different chapter.");
         return super.stage({ ...value, targets: value.targets.map(target => ({ ...target, expectedBaseHash: initial.hash })) },
           () => signal.aborted ? "Writing cancelled." :
+          pendingChapter() ? "A chapter proposal is already pending." :
           sourceRevisionNow() !== sourceRevision ? "The world changed during writing." : precondition?.() ?? null);
       }
     }
@@ -118,7 +126,7 @@ export function localWriting(store: WorldStore): EngineWritingSession {
         // A separate target permits guarded methods even when the host froze its adapter.
         adapter: new Proxy(Object.create(runtime.adapter) as typeof runtime.adapter, { get(_target, property) {
           const target = runtime.adapter;
-          const value = Reflect.get(target, property);
+          const value = Reflect.get(target, property, runtime.adapter);
           if (typeof value !== "function") return value;
           if (property === "dispatchAsync" || property === "sendMessage") return async (...args: unknown[]) => {
             await guard();

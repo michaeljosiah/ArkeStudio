@@ -165,6 +165,10 @@ caller's projected `worlds.read` bundle, then use their canonical IDs. Ambiguous
 duplicate. A legacy filename is not
 an alternative public chapter identity.
 
+Canonical local reads compare the scanned file hash with the bytes read. If an external edit
+has outpaced the scan, the read refuses until the host refreshes or reopens the world; it never
+returns an old title/order alongside a new body.
+
 The required save `baseHash` is the `sha256:` file hash returned by a read or successful save.
 It protects unseen competing edits. An optional `expectedRevision` protects the whole world;
 the local adapter rechecks it after a fresh scan inside the domain write gate. Chapter saves
@@ -220,6 +224,9 @@ chapter rewrite. It starts from committed text, not from another pending proposa
 discard that proposal before continuing the review loop; a new call never silently replaces it.
 The public API does not yet expose passage selection or conversation history.
 
+A pending proposal targeting that chapter blocks another writing call before the model opens.
+The staging gate checks again for a competing proposal that appeared during generation.
+
 ```ts
 // Add writing: host.openWritingRuntime to createEngine's existing options.
 const current = await engine.prose.readChapter(context, worldId, productionId, chapterId);
@@ -273,10 +280,15 @@ decisions remain host responsibilities. The portrait queue's reservation API is 
 writing. No Aonik commercial billing implementation is added here.
 
 Add `chapter-draft` to host policy actions and durable operation codecs. Both draft and revision
-use that action; mode is part of the request fingerprint. Output carries proposal metadata,
+use that action; mode is part of the request fingerprint. Host-returned proposals must target
+the file belonging to the requested canonical chapter, not just its production directory;
+the binding is checked again on replay. Identity failures still finalise written state.
+Local finalisation refreshes the owned projection after conversation binding/resolution,
+so the next call can use the acknowledged revision. Output carries proposal metadata,
 title, body, conversation ID and a grounding hash. Completed replay checks current read and
 exact-content delivery again. It returns the original candidate even if it was later accepted
-or discarded; use current world/proposal state for its present status.
+or discarded, while its chapter-to-file binding remains valid; use current world/proposal
+state for its present status.
 
 `writing.cancel(context, worldId, operationId)` aborts a matching active call without waiting
 behind that world's repository queue. Engine close aborts writing and waits for provider

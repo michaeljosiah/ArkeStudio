@@ -8,7 +8,7 @@ import { FileEngineOperationStore } from "../../src/application/local-operations
 import { parseOperationRecord } from "../../src/application/operation-record.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
-import { MarkdownFile } from "../../src/world/text-files.js";
+import { MarkdownFile, sha256 } from "../../src/world/text-files.js";
 import { saveChapter, setChapterRetired } from "../../src/productions/ops.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
@@ -170,6 +170,29 @@ it("malformed host chapter metadata is refused before content delivery", async t
     await assert.rejects(h.engine.prose.readChapter(context, WORLD_ID, productionId, chapterId));
   }
   assert.equal(h.deliveries.length, 0);
+});
+
+it("a changed file cannot be returned with cached chapter metadata", async t => {
+  const h = await harness(t);
+  const before = await h.engine.prose.readChapter(context, WORLD_ID, productionId, chapterId);
+  const path = join(h.worldDir, "productions", productionId, "chapters/01-neap.md");
+  const doc = MarkdownFile.parse(await readFile(path, "utf8"));
+  doc.setData({ title: "Changed title", order: 99 }); doc.setBody("Changed body.");
+  const raw = doc.serialize();
+  const cached = h.store().getBundle();
+  const getBundle = h.store().getBundle;
+  h.store().getBundle = () => cached;
+  try {
+    await writeFile(path, raw);
+    await assert.rejects(h.engine.prose.readChapter(context, WORLD_ID, productionId, chapterId), /chapter changed/);
+  } finally { h.store().getBundle = getBundle; }
+  assert.equal(h.deliveries.length, 1);
+  const restarted = await h.restart();
+  const read = await restarted.prose.readChapter(context, WORLD_ID, productionId, chapterId);
+  assert.equal(read.title, "Changed title"); assert.equal(read.body.trim(), "Changed body.");
+  assert.equal(read.hash, sha256(raw)); assert.equal(read.version, before.version);
+  const snapshot = await restarted.worlds.read(context, WORLD_ID);
+  assert.equal(read.order, snapshot.bundle.productions.find(p => p.meta.id === productionId)!.chapters.find(c => c.id === chapterId)!.order);
 });
 
 it("durable prose replay rejects malformed results and crossed resource identities", async t => {

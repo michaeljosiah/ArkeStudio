@@ -1,7 +1,18 @@
-import type { EngineContext, EngineResource, EngineWorldRepository } from "./contracts.js";
+import type { EngineContext, EngineResource, EngineWorldRepository, EngineWorldSession } from "./contracts.js";
 import { EngineOperations, engineHash, requireContext } from "./operations.js";
 import { proseId } from "./prose-contracts.js";
 import { writingInput, writingResult, type WritingInput, type WritingRuntimeFactory } from "./writing-contracts.js";
+
+async function chapterTarget(session: EngineWorldSession, productionId: string, chapterId: string) {
+  const { bundle } = await session.snapshot();
+  const productions = bundle.productions.filter(p => p.meta.id === productionId);
+  const chapters = productions.length === 1 ? productions[0]!.chapters.filter(c => c.id === chapterId) : [];
+  const file = chapters.length === 1 ? chapters[0]!.file : undefined;
+  if (!file || /[\\/:]/.test(file) || file.includes("\0") || file === "." || file === "..") {
+    throw new Error("The chapter identity is unavailable or ambiguous.");
+  }
+  return `productions/${productionId}/chapters/${file}.md`;
+}
 
 export class WritingApplicationService {
   private readonly stopping = new AbortController();
@@ -32,19 +43,29 @@ export class WritingApplicationService {
           signal.throwIfAborted();
           await this.operations.policy.authorise(context, "chapter-draft", resource);
           if (!session.writing) throw new Error("This repository does not support AI writing.");
+          const target = await chapterTarget(session, productionId, chapterId);
           let value;
           try {
             value = writingResult.parse(await session.writing.run(productionId, chapterId, input,
               { mode, context, operationKey: key, policy: this.operations.policy, runtime, signal }));
+            if (value.productionId !== productionId || value.chapterId !== chapterId ||
+              value.proposal.targets[0]!.path !== target || await chapterTarget(session, productionId, chapterId) !== target) {
+              throw new Error("The chapter identity changed or the proposal targets a different chapter.");
+            }
           } catch (error) {
             // Failed and cancelled runs also own durable conversation events.
             await session.saved(key);
             throw error;
           }
-          if (value.productionId !== productionId || value.chapterId !== chapterId) throw new Error("The chapter identity changed.");
           return { operationKey: key, ...(await session.saved(key)), value };
         });
       } finally { this.active.delete(key); }
+    });
+    // Replayed data must still name this chapter, not another file in the same production.
+    await this.worlds.use(worldId, async session => {
+      if (result.value.proposal.targets[0]!.path !== await chapterTarget(session, productionId, chapterId)) {
+        throw new Error("The writing proposal no longer targets this chapter.");
+      }
     });
     await this.operations.policy.authorise(context, "read", resource);
     await this.operations.policy.deliver(context, { ...resource, proposalId: result.value.proposal.id },

@@ -837,6 +837,9 @@ export async function openChapter(
   const path = `productions/${productionId}/chapters/${summary.file}.md`;
   const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8").catch(() => null);
   if (live === null) throw new Error("That chapter is no longer in this production.");
+  const hash = sha256(live);
+  // Canonical public reads must not mix a scanned title/order with newly edited file bytes.
+  if (options.canonicalId && summary.hash !== hash) throw new Error("The chapter changed. Refresh the world before reading it again.");
   const doc = MarkdownFile.parse(live);
   if (options.canonicalId && doc.data["id"] !== chapterId) throw new Error("The chapter identity changed.");
   const version = Math.max(1, typeof doc.data["version"] === "number" ? (doc.data["version"] as number) : summary.version);
@@ -856,7 +859,7 @@ export async function openChapter(
     .sort((a, b) => a - b);
   // The hash of the prose alone beside the file's (turn 129): what a continuity record is keyed
   // to, normalised exactly as the scanner normalises it for the summary's `bodyHash`.
-  return { file: summary.file, title: summary.title, order: summary.order, body, version, hash: sha256(live), bodyHash: sha256(body), versions };
+  return { file: summary.file, title: summary.title, order: summary.order, body, version, hash, bodyHash: sha256(body), versions };
 }
 
 /**

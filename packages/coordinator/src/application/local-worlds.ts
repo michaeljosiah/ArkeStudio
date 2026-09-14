@@ -56,6 +56,9 @@ function localSession(store: WorldStore, provider: WorldProvider, options: Local
       return { id, contentType: file.contentType, bytes };
     },
     async saved(key) {
+      // Action binding/resolution can append conversation events after the domain writer's scan.
+      // Refresh under ownership before finalisation; the precondition makes scan failures visible.
+      await store.gateOp(async () => {}, () => null);
       if (options.finalise) await options.finalise(store.worldId, key);
       return { revision: (await snapshot()).revision };
     },

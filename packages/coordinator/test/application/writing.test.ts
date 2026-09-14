@@ -19,7 +19,8 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
   let provider = new FsWorldProvider(root);
   await provider.loadWorld(WORLD_ID);
   await mkdir(join(root, "scratch"));
-  const state = { calls: 0, opened: 0, closed: 0, body: "Maren found the path home.", wrongTarget: false,
+  const state = { calls: 0, opened: 0, closed: 0, saves: 0, corruptResult: "" as "" | "identity" | "target",
+    body: "Maren found the path home.", wrongTarget: false,
     revoked: false, held: false, failSave: false, hideOutline: false, denyChapter: "", hang: false,
     dispatched: undefined as (() => void) | undefined, beforeReply: undefined as (() => Promise<void>) | undefined };
   const prompts: string[] = [];
@@ -35,8 +36,23 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
     async reserve() { throw new Error("Portrait billing must not be used for prose."); }, async settle() {}, async release() {},
   };
   const journal = join(root, "engine-operations.jsonl");
-  const make = () => createEngine({
-    worlds: createLocalWorldRepository(provider, { finalise: async () => { if (state.failSave) throw new Error("Save unavailable"); } }),
+  const make = () => {
+    const local = createLocalWorldRepository(provider, { finalise: async () => {
+      state.saves++; if (state.failSave) throw new Error("Save unavailable");
+    } });
+    return createEngine({
+    worlds: { use: (id, action) => local.use(id, session => action({ ...session, writing: {
+      run: async (...args) => {
+        const value = await session.writing!.run(...args);
+        if (state.corruptResult === "identity") value.chapterId = "different-chapter";
+        if (state.corruptResult === "target") {
+          const other = (await session.snapshot()).bundle.productions.find(p => p.meta.id === productionId)!
+            .chapters.find(c => c.id !== chapterId)!;
+          value.proposal.targets[0]!.path = `productions/${productionId}/chapters/${other.file}.md`;
+        }
+        return value;
+      },
+    } })), close: () => local.close() },
     operations: new FileEngineOperationStore(journal), policy,
     queue: { jobs: () => [], enqueue: async () => { throw new Error("Unexpected image job"); } },
     writing: async ({ modelId, signal }) => {
@@ -63,11 +79,20 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
           }) };
         })(),
       }) as unknown as HarnessAdapter;
+      class AccessorAdapter {
+        #adapter = adapter;
+        get id() { return this.#adapter.id; }
+        get capabilities() { return this.#adapter.capabilities; }
+        get readiness() { return this.#adapter.readiness; }
+        get dispatchAsync() { return this.#adapter.dispatchAsync; }
+        get streamEvents() { return this.#adapter.streamEvents; }
+      }
       signal.throwIfAborted();
-      return { adapter, cwd: join(root, "scratch"), inputTokenLimit: 100000, sessionModel: modelId,
+      return { adapter: Object.freeze(new AccessorAdapter()) as HarnessAdapter,
+        cwd: join(root, "scratch"), inputTokenLimit: 100000, sessionModel: modelId,
         createSession: async () => ({ sessionId: "session" }), close: async () => { state.closed++; } };
     },
-  });
+  }); };
   let engine = make();
   t.after(async () => { await engine.close(); await provider.close(); });
   return { engine, state, prompts, journal, policy, store: () => provider.openStore()!,
@@ -212,5 +237,45 @@ it("draft receipts preserve valid legacy titles longer than the new-title input 
   });
   const draft = await h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, await h.input("legacy-title"));
   assert.equal(draft.value.title, title);
+  assert.equal(h.state.calls, 1);
+});
+
+it("pending chapter proposals refuse new writing before opening another runtime", async t => {
+  const h = await harness(t);
+  const draft = await h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, await h.input("first"));
+  await assert.rejects(h.engine.writing.revise(context, WORLD_ID, productionId, chapterId, await h.input("second")), /pending chapter proposal/);
+  assert.equal(h.state.calls, 1);
+  await h.engine.proposals.discard(context, WORLD_ID, draft.value.proposal.id, { operationId: "discard" });
+  await h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, await h.input("after-discard"));
+  assert.equal(h.state.calls, 2);
+});
+
+for (const corruption of ["identity", "target"] as const) {
+  it(`malformed host writing ${corruption} finalises side effects but never completes or delivers`, async t => {
+    const h = await harness(t);
+    const other = h.store().getBundle().productions.find(p => p.meta.id === productionId)!.chapters.find(c => c.id !== chapterId)!;
+    h.state.denyChapter = other.id;
+    h.state.corruptResult = corruption;
+    const input = await h.input("bad-host");
+    let delivered = false;
+    h.policy.deliver = async (_ctx, _resource, content) => { if (content.kind === "proposal") delivered = true; };
+    await assert.rejects(h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, input), /chapter identity changed|different chapter/);
+    assert.equal(delivered, false); assert.equal(h.state.saves, 1);
+    assert.equal(h.state.calls, 1);
+    assert.equal((await h.engine.operation(context, WORLD_ID, input.operationId))!.status, "started");
+  });
+}
+
+it("replay refuses a durable writing receipt redirected to another chapter file", async t => {
+  const h = await harness(t); const input = await h.input("replay-target");
+  await h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, input);
+  const other = h.store().getBundle().productions.find(p => p.meta.id === productionId)!.chapters.find(c => c.id !== chapterId)!;
+  await h.engine.close();
+  const rows = (await readFile(h.journal, "utf8")).trim().split("\n").map(line => JSON.parse(line));
+  rows.find(row => row.status === "completed").result.value.proposal.targets[0].path =
+    `productions/${productionId}/chapters/${other.file}.md`;
+  await writeFile(h.journal, rows.map(row => JSON.stringify(row)).join("\n") + "\n");
+  const restarted = await h.restart();
+  await assert.rejects(restarted.writing.draft(context, WORLD_ID, productionId, chapterId, input), /no longer targets/);
   assert.equal(h.state.calls, 1);
 });
