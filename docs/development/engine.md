@@ -48,7 +48,7 @@ The host authenticates requests and constructs `EngineContext`: actor, security 
 
 `worlds.read` projects a detached bundle for each caller and checks delivery against its hash. Reconnect calls this method again. It does not replay Studio's global snapshot. `worlds.media` checks artifact identity and hashes the returned bytes; approval for an earlier hash does not approve changed bytes. Hosts must project held/private artifact metadata out of world reads. A successful job is a candidate, not an accepted portrait or child-safe output.
 
-The generation model is host-resolved configuration, not a browser-provided model description or price. Host admission must inspect frozen requests and current allowance. The queue's clients, credential resolution, admission and authoritative artifact landing are host-owned. Operator provider cost remains in the queue ledger; user allowance is a separate reservation and settlement contract.
+The generation model is host-resolved configuration, not a browser-provided model description or price. Host admission must inspect frozen requests and current allowance. The queue's clients, credential resolution, admission and authoritative artifact landing are host-owned. Credential resolution receives the durable job, including its engine context, on submit and recovery. Operator provider cost remains in the queue ledger; user allowance is a separate reservation and settlement contract.
 
 ## Save, retry and shutdown
 
@@ -60,7 +60,7 @@ Mutation IDs are scoped by security scope, actor and world. Reusing an ID with d
 
 The operation store's insert-if-absent and completion must be durable and atomic across workers. The local journal syncs before acknowledging and fails closed on malformed records or uncertain appends. It is not a distributed database. Keep it with authoritative operational state, separate from disposable caches.
 
-Portrait reservation precedes enqueue. Interrupted or partially enqueued batches retain their reservation and need reconciliation; they cannot release funds while provider work may exist. The existing queue retains persist-before-submit and unknown-provider-outcome recovery. Terminal reconciliation records its charge/release decision durably before calling the host. Both host calls must be idempotent by operation key, including when their response is lost. Later policy changes may withhold delivery but cannot reverse that financial decision.
+Portrait reservation precedes enqueue. Interrupted or partially enqueued batches retain their reservation and need reconciliation; they cannot release funds while provider work may exist. The existing queue retains persist-before-submit and unknown-provider-outcome recovery. Terminal reconciliation records its charge/release decision durably before calling the host. Both host calls must be idempotent by operation key, including when their response is lost. Unavailable or refusing output checks hold settlement until policy permits it; they do not release an outstanding reservation. Later policy changes may withhold delivery but cannot reverse an already recorded financial decision.
 
 The host owns queue lifecycle. Stop external admission, stop queue admission, drain or dispose provider work according to the queue contract, call `engine.close()`, then close a shared filesystem provider. Engine close rejects new calls, waits for active service work, drains operation state and closes its repository. It does not dispose a supplied queue.
 

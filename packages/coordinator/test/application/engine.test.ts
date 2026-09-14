@@ -45,7 +45,10 @@ async function harness(t: TestContext) {
   const ledger = new Set<string>();
   const journal = new JobJournal(join(root, "durable-jobs.jsonl"));
   const queue = new JobQueue({ journal, journalPath: join(root, "scratch", "unused.jsonl"),
-    clients: { fal: fake }, getKey: async () => "scoped-test-key", emit() {},
+    clients: { fal: fake }, getKey: async (_provider, job) => {
+      const owner = job.params.engineOperation as { context: EngineContext };
+      assert.deepEqual(owner.context, parent); return "scoped-test-key";
+    }, emit() {},
     ledger: { readJobIds: async () => ledger, has: async id => ledger.has(id), append: async entry => { ledger.add(entry.jobId); } },
     landInWorld: async (worldId, fn) => { assert.equal(worldId, WORLD_ID); await fn(worldDir); return true; },
     pollIntervalMs: 5, baseIntervalMs: 1 });
@@ -102,9 +105,13 @@ it("illustrations reuse the dispatcher, hold exact output and settle once after 
   assert.equal(h.fake.submitCount, 0);
   h.state.refuse = false;
   const generated = await h.engine.illustrations.generate(parent, WORLD_ID, { ...input, operationId: "allowed" });
-  await until(() => h.queue.listJobs().every(job => job.status === "succeeded"));
+  await until(() => h.queue.listJobs().every(job => job.status === "succeeded"), "portrait completion");
   assert.equal(h.fake.submitCount, 1);
   assert.ok((await readFile(join(h.root, "durable-jobs.jsonl"), "utf8")).includes(generated.jobIds[0]!));
+  h.state.held = true;
+  assert.equal((await h.engine.illustrations.reconcile(parent, WORLD_ID, "allowed")).status, "held");
+  assert.equal(h.state.charges + h.state.releases, 0);
+  h.state.held = false;
   h.state.failSettlement = true;
   await assert.rejects(h.engine.illustrations.reconcile(parent, WORLD_ID, "allowed"), /Response lost/);
   const restarted = await h.restart(); h.state.failSettlement = false; h.state.held = true;
@@ -149,8 +156,12 @@ it("concurrent duplicate calls join, stale revisions refuse, and close drains a 
 
 it("loss of the local owner blocks writes without acknowledging a save", async t => {
   const h = await harness(t);
-  const store = h.provider.openStore()!;
-  await store.close();
-  await assert.rejects(h.engine.proposals.propose(parent, WORLD_ID, draft), /unavailable|closed|lock/i);
+  const lock = join(h.worldDir, "world.lock");
+  const original = await readFile(lock, "utf8");
+  const successor = { pid: process.pid, startedAt: "2000-01-01T00:00:00.000Z" };
+  await writeFile(lock, JSON.stringify(successor));
+  await assert.rejects(h.engine.proposals.propose(parent, WORLD_ID, draft), /ownership lost/);
+  assert.deepEqual(JSON.parse(await readFile(lock, "utf8")), successor);
+  await writeFile(lock, original);
   assert.equal(h.state.saves, 0);
 });

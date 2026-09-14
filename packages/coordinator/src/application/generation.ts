@@ -54,6 +54,8 @@ export class IllustrationApplicationService {
     if (jobs.length !== result.jobIds.length || jobs.some(job => !result.jobIds.includes(job.id))) {
       throw new Error("Generation recovery does not match the durable batch.");
     }
+    const settlementKey = engineHash([key, "settlement"]);
+    const previousSettlement = await this.operations.store.read(settlementKey);
     const permitted: Job[] = [];
     for (const job of jobs) {
       if (job.status !== "succeeded") continue;
@@ -68,7 +70,9 @@ export class IllustrationApplicationService {
     }
     // Persist the financial decision before making an idempotent external call. A crash or a
     // later policy change must never turn an already released reservation into a charge.
-    const settlementKey = engineHash([key, "settlement"]);
+    if (!previousSettlement && permitted.length < jobs.filter(job => job.status === "succeeded").length) {
+      return { status: "held" as const, operationKey: key };
+    }
     const fingerprint = engineHash([key, result.reservation]);
     const claim = await this.operations.store.begin({ key: settlementKey, fingerprint,
       context, resource: operation.resource, action: "generate", status: "started",

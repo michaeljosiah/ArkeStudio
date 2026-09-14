@@ -147,7 +147,7 @@ export interface JobQueueOptions {
   journal?: JobStateStore;
   journalPath: string;
   clients: Record<string, DispatchClient>;
-  getKey: (provider: string) => Promise<string | null>;
+  getKey: (provider: string, job: Job) => Promise<string | null>;
   emit: (event: DomainEvent) => void;
   /**
    * The idempotency seam (R-16): startup snapshots once; runtime checks the live ledger.
@@ -814,7 +814,7 @@ export class JobQueue {
       await this.terminalize({ ...job, attempt: job.attempt }, "failed", `no client for provider "${job.provider}"`);
       return;
     }
-    const key = await this.keyFor(job.provider);
+    const key = await this.keyFor(job);
     if (key === null) {
       // Not the job's fault: hold the lane, keep the job queued (R-8 posture).
       await this.transition({ ...job, status: "queued", updatedAt: this.clock() });
@@ -1632,7 +1632,7 @@ export class JobQueue {
     // Attempt the remote cancel where there is remote work to cancel; best-effort.
     if (job.providerJobId) {
       const client = this.opts.clients[job.provider];
-      const key = await this.keyFor(job.provider);
+      const key = await this.keyFor(job);
       // `key !== null`, not a truthiness test: keyFor returns the EMPTY STRING for every
       // provider whose credential is not ours to hold — every local runtime, and Higgsfield,
       // whose credential lives in its own CLI. An empty string is falsy, so the truthiness
@@ -1876,7 +1876,7 @@ export class JobQueue {
   private async resumePolling(job: Job): Promise<void> {
     if (!this.stillPolling(job)) return;
     const client = this.opts.clients[job.provider];
-    const key = await this.keyFor(job.provider);
+    const key = await this.keyFor(job);
     if (!client || key === null) {
       this.pauseLane(job.provider, "credential", "no credential stored for this provider");
       return;
@@ -1909,7 +1909,7 @@ export class JobQueue {
   /** The unwitnessed-submission window (§2.4 rows ②→③ and ④): observe, never guess (D2). */
   private async reconcileSubmitting(job: Job): Promise<ReconcileAction> {
     const client = this.opts.clients[job.provider];
-    const key = client ? await this.keyFor(job.provider) : null;
+    const key = client ? await this.keyFor(job) : null;
     if (!client || key === null) {
       this.pauseLane(job.provider, "credential", "no credential stored for this provider");
       return { jobId: job.id, action: "held-for-user", detail: "no credential to reconcile with" };
@@ -2211,12 +2211,13 @@ export class JobQueue {
 
   // ---- misc -----------------------------------------------------------------
 
-  private async keyFor(provider: string): Promise<string | null> {
+  private async keyFor(job: Job): Promise<string | null> {
+    const provider = job.provider;
     // Only an in-app credential is ours to hand over. A local runtime takes none, and an
     // external one is held by the tool the client drives — both dispatch with an empty key
     // rather than being held for a credential that was never going to be in `credentials.dat`.
     if (credentialKindOf(provider) !== "in-app") return "";
-    return this.opts.getKey(provider);
+    return this.opts.getKey(provider, job);
   }
 
   private concurrencyFor(provider: string): number {
