@@ -14,7 +14,7 @@ export interface LocalWorldRepositoryOptions {
   /** The composition, not each service, decides who closes the shared provider. */
   closeProvider?: boolean;
   /** A hosted materialisation must finalise remotely here before a save receipt is returned. */
-  finalise?: (worldId: string, operationKey: string) => Promise<{ revision: string }>;
+  finalise?: (worldId: string, operationKey: string) => Promise<void>;
 }
 
 function localSession(store: WorldStore, provider: WorldProvider, options: LocalWorldRepositoryOptions): EngineWorldSession {
@@ -52,7 +52,7 @@ function localSession(store: WorldStore, provider: WorldProvider, options: Local
       return { id, contentType: file.contentType, bytes };
     },
     async saved(key) {
-      if (options.finalise) return options.finalise(store.worldId, key);
+      if (options.finalise) await options.finalise(store.worldId, key);
       return { revision: (await snapshot()).revision };
     },
   };

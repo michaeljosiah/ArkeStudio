@@ -56,7 +56,7 @@ export interface FsWorldProviderOptions {
 export class FsWorldProvider implements WorldProvider {
   private store: WorldStore | null = null;
   private closing = false;
-  private readonly scopedOperations = new Set<Promise<unknown>>();
+  private worldAccessTail: Promise<void> = Promise.resolve();
   private onAdoptedCb: ((worldId: string) => void) | null = null;
   private onLockErrorCb: ((worldId: string, message: string, consecutive: number) => void) | null = null;
   private appIndex: AppIndex | null = null;
@@ -351,8 +351,23 @@ export class FsWorldProvider implements WorldProvider {
     throw new Error(`no world with id ${worldId}`);
   }
 
+  /** Local store lifetimes and selection changes share one queue; callbacks retain their owner. */
+  private accessWorld<T>(action: () => Promise<T>): Promise<T> {
+    const operation = this.worldAccessTail.then(action);
+    this.worldAccessTail = operation.then(() => {}, () => {});
+    return operation;
+  }
+
   /** Open for read-write: recovery, lock, scan, index, watcher. Closes any previous world. */
   async loadWorld(worldId: string): Promise<WorldBundle> {
+    if (this.closing) throw new Error("the world provider is closing");
+    return this.accessWorld(() => {
+      if (this.closing) throw new Error("the world provider is closing");
+      return this.loadWorldOnce(worldId);
+    });
+  }
+
+  private async loadWorldOnce(worldId: string): Promise<WorldBundle> {
     const dir = await this.findWorldDir(worldId);
     if (this.store) {
       if (this.store.worldId === worldId) {
@@ -440,7 +455,7 @@ export class FsWorldProvider implements WorldProvider {
 
   async withWorldStore<T>(worldId: string, fn: (store: WorldStore) => Promise<T>): Promise<T> {
     if (this.closing) throw new Error("the world provider is closing");
-    const operation = (async () => {
+    return this.accessWorld(async () => {
       if (this.store?.worldId === worldId) return fn(this.store);
       const dir = await this.findWorldDir(worldId);
       const scoped = await WorldStore.open(dir, {
@@ -454,13 +469,7 @@ export class FsWorldProvider implements WorldProvider {
         this.refreshRegistry(scoped.getBundle());
         await scoped.close();
       }
-    })();
-    this.scopedOperations.add(operation);
-    try {
-      return await operation;
-    } finally {
-      this.scopedOperations.delete(operation);
-    }
+    });
   }
 
   /**
@@ -485,7 +494,9 @@ export class FsWorldProvider implements WorldProvider {
   async archiveWorld(worldId: string): Promise<{ folder: string }> {
     const dir = await this.findWorldDir(worldId);
     const wasOpen = this.store?.worldId === worldId;
-    if (wasOpen) await this.closeStore();
+    if (wasOpen) await this.accessWorld(async () => {
+      if (this.store?.worldId === worldId) await this.closeStore();
+    });
     try {
       const target = await this.moveToArchive(dir);
       this.appIndex?.removeWorld(worldId);
@@ -686,7 +697,7 @@ export class FsWorldProvider implements WorldProvider {
   async close(): Promise<void> {
     this.closing = true;
     try {
-      await Promise.all(this.scopedOperations);
+      await this.worldAccessTail;
       await this.closeStore();
       try {
         this.appIndex?.close();

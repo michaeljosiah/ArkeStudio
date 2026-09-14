@@ -75,7 +75,7 @@ export interface EngineOperation {
   fingerprint: string;
   context: EngineContext;
   resource: EngineResource;
-  action: EngineAction;
+  action: Exclude<EngineAction, "read" | "media">;
   status: "started" | "completed";
   result?: unknown;
 }

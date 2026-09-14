@@ -102,7 +102,7 @@ export class IllustrationApplicationService {
     const fingerprint = engineHash([key, result.reservation]);
     const claim = await this.operations.store.begin({ key: settlementKey, fingerprint,
       context, resource: operation.resource, action: "generate", status: "started",
-      result: { reservation: result.reservation, jobs: permitted } });
+      result: { operationKey: key, reservation: result.reservation, jobs: permitted } });
     if (claim.operation.fingerprint !== fingerprint) throw new Error("Settlement identity changed.");
     const decision = claim.operation.result as { reservation: string; jobs: EngineDeliveredJob[] };
     if (claim.operation.status !== "completed") {

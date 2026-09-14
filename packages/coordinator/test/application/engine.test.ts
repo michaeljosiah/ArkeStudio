@@ -61,7 +61,7 @@ async function harness(t: TestContext) {
   let operationStore!: FileEngineOperationStore;
   const make = () => createEngine({ policy, operations: (operationStore = new FileEngineOperationStore(join(root, "operations.jsonl"))),
     worlds: createLocalWorldRepository(provider, { finalise: async () => {
-      if (state.failSave) throw new Error("Authoritative save unavailable"); state.saves++; return { revision: String(state.saves) };
+      if (state.failSave) throw new Error("Authoritative save unavailable"); state.saves++;
     } }), queue: { enqueue: input => queue.enqueue(input), jobs: () => queue.listJobs() } });
   let engine = make();
   t.after(async () => { queue.stopAccepting(); queue.dispose(); await queue.drain(); await engine.close(); await provider.close(); });
@@ -73,17 +73,17 @@ it("real gate journey saves before receipt, replays after restart and restricts 
   const h = await harness(t);
   const initial = await h.engine.worlds.read(parent, WORLD_ID);
   const proposed = await h.engine.proposals.propose(parent, WORLD_ID, { ...draft, expectedRevision: initial.revision });
-  assert.equal(proposed.revision, "1");
+  assert.equal(proposed.revision, (await h.engine.worlds.read(parent, WORLD_ID)).revision);
   const rows = (await readFile(join(h.root, "operations.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
   assert.deepEqual(rows.find(row => row.action === "propose").context, parent);
   assert.equal((await h.engine.worlds.read(child, WORLD_ID)).bundle.proposals.length, 0);
   await assert.rejects(h.engine.proposals.accept(child, WORLD_ID, proposed.value.proposal.id, { operationId: "accept" }), /Forbidden/);
   const accepted = await h.engine.proposals.accept(parent, WORLD_ID, proposed.value.proposal.id,
-    { operationId: "accept", expectedDraftRevision: proposed.value.proposal.draftRevision });
+    { operationId: "accept", expectedDraftRevision: proposed.value.proposal.draftRevision, expectedRevision: proposed.revision });
   assert.equal(accepted.value.status, "accepted");
   const restarted = await h.restart();
   assert.deepEqual(await restarted.proposals.accept(parent, WORLD_ID, proposed.value.proposal.id,
-    { operationId: "accept", expectedDraftRevision: proposed.value.proposal.draftRevision }), accepted);
+    { operationId: "accept", expectedDraftRevision: proposed.value.proposal.draftRevision, expectedRevision: proposed.revision }), accepted);
   assert.equal(h.state.saves, 2);
   await assert.rejects(restarted.proposals.propose(parent, WORLD_ID, { ...draft, sentence: "Changed" }), /different input/);
   await assert.rejects(restarted.worlds.read({ ...parent, scopeId: "other" }, WORLD_ID), /Forbidden/);
@@ -384,4 +384,62 @@ it("failed engine cleanup can retry without admitting new work", async t => {
   await assert.rejects(engine.worlds.read(parent, WORLD_ID), /stopping/);
   await engine.close(); await engine.close();
   assert.equal(drains, 3); assert.equal(closes, 3);
+});
+
+
+it("valid JSON with malformed engine records fails closed before replay", async t => {
+  const h = await harness(t);
+  await h.engine.proposals.propose(parent, WORLD_ID, draft);
+  await h.engine.illustrations.generate(parent, WORLD_ID, { operationId: "journal-image", sheetId: "maren-kest",
+    model: FAL_MODELS.find(m => m.capability === "image")!, prompt: "Happy", count: 1, identityReferences: [], generationKey: "portrait" });
+  await until(() => h.queue.listJobs().every(job => job.status === "succeeded"), "portrait completion");
+  await h.engine.illustrations.reconcile(parent, WORLD_ID, "journal-image");
+  const rows = (await readFile(join(h.root, "operations.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+  const settled = rows.find(row => row.status === "completed" && row.result?.jobs);
+  const proposed = rows.find(row => row.action === "propose" && row.status === "completed");
+  assert.ok(settled); assert.ok(proposed);
+  const malformed = [
+    { ...settled, context: { ...settled.context, actorId: 42 } },
+    { ...settled, resource: { sheetId: "maren-kest" } },
+    { ...settled, action: "typo" },
+    { ...settled, result: { ...settled.result, reservation: {} } },
+    { ...settled, result: { ...settled.result, jobs: [{ ...settled.result.jobs[0], deliveredArtifacts: [{ id: "bad", sha256: "bad" }] }] } },
+    { ...proposed, result: { ...proposed.result, value: { proposal: {} } } },
+  ];
+  for (const [index, row] of malformed.entries()) {
+    const file = join(h.root, `malformed-${index}.jsonl`);
+    await writeFile(file, JSON.stringify(row) + "\n");
+    await assert.rejects(new FileEngineOperationStore(file).read(row.key));
+  }
+  const changed = { ...proposed, context: { ...proposed.context, actorId: "another-valid-actor" } };
+  const conflicting = join(h.root, "conflicting.jsonl");
+  await writeFile(conflicting, [proposed, changed].map(row => JSON.stringify(row)).join("\n") + "\n");
+  await assert.rejects(new FileEngineOperationStore(conflicting).read(proposed.key), /Conflicting/);
+});
+
+it("navigation waits for an engine callback to finish using the selected store", async t => {
+  const h = await harness(t);
+  const proposed = await h.engine.proposals.propose(parent, WORLD_ID, draft);
+  const other = await h.provider.createWorld({ name: "Another world" });
+  const owner = h.provider.openStore()!;
+  let entered!: () => void; let release!: () => void; let approvals = 0;
+  const waiting = new Promise<void>(resolve => { entered = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const authorise = h.policy.authorise;
+  h.policy.authorise = async (context, action, resource) => {
+    await authorise(context, action, resource);
+    if (action === "accept" && ++approvals === 2) { entered(); await held; }
+  };
+  const accepting = h.engine.proposals.accept(parent, WORLD_ID, proposed.value.proposal.id, { operationId: "accept-with-navigation" });
+  await waiting;
+  const navigating = h.provider.loadWorld(other.worldId);
+  try {
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(h.provider.openStore(), owner);
+    assert.equal(owner.isClosed(), false);
+  } finally { release(); }
+  assert.equal((await accepting).value.status, "accepted");
+  await navigating;
+  assert.equal(h.provider.openStore()!.worldId, other.worldId);
+  assert.equal(owner.isClosed(), true);
 });

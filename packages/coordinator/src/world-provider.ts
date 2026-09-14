@@ -43,6 +43,8 @@ export interface WorldProvider {
   /**
    * Run against a world's locked store without changing which world the renderer has open.
    * Used by durable background jobs whose owner may not be the selected world.
+   * Selection changes wait for the callback. Use its supplied store; do not recursively
+   * call provider selection/scoped-store methods from inside the callback.
    */
   withWorldStore?<T>(worldId: string, fn: (store: WorldStore) => Promise<T>): Promise<T>;
   /**

@@ -2,6 +2,8 @@ import { mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { WriteQueue } from "../change-log.js";
 import { appendFlushed } from "../flushed-append.js";
+import { parseOperationRecord } from "./operation-record.js";
+import { engineHash } from "./operations.js";
 import type { EngineOperation, EngineOperationStore } from "./contracts.js";
 
 /** One local host owns this file. Distributed hosts must supply atomic durable uniqueness. */
@@ -20,11 +22,14 @@ export class FileEngineOperationStore implements EngineOperationStore {
     const records = new Map<string, EngineOperation>();
     // An unreadable/torn row is unknown, not an empty journal granting permission to repeat work.
     for (const line of text.split("\n").filter(Boolean)) {
-      const row = JSON.parse(line) as EngineOperation;
-      if (!/^[a-f0-9]{64}$/.test(row.key) || !/^[a-f0-9]{64}$/.test(row.fingerprint) ||
-        !["started", "completed"].includes(row.status)) throw new Error("Invalid engine operation journal.");
+      const row = parseOperationRecord(JSON.parse(line));
       const before = records.get(row.key);
-      if (before && before.fingerprint !== row.fingerprint) throw new Error("Conflicting engine operation journal.");
+      if (before && (before.fingerprint !== row.fingerprint || before.action !== row.action ||
+        engineHash(before.context) !== engineHash(row.context) || engineHash(before.resource) !== engineHash(row.resource) ||
+        (before.status === "completed" && engineHash(before) !== engineHash(row)) ||
+        (before.result !== undefined && engineHash(before.result) !== engineHash(row.result)))) {
+        throw new Error("Conflicting engine operation journal.");
+      }
       records.set(row.key, row);
     }
     this.records = records;
@@ -44,6 +49,7 @@ export class FileEngineOperationStore implements EngineOperationStore {
 
   begin(operation: EngineOperation) {
     return this.serialise(async () => {
+      operation = parseOperationRecord(operation);
       const records = await this.load();
       const existing = records.get(operation.key);
       if (existing) return { inserted: false, operation: structuredClone(existing) };
@@ -60,7 +66,7 @@ export class FileEngineOperationStore implements EngineOperationStore {
       const existing = records.get(key);
       if (!existing || existing.fingerprint !== fingerprint) throw new Error("Unknown engine operation completion.");
       if (existing.status === "completed") return;
-      const row: EngineOperation = { ...existing, status: "completed", result: structuredClone(result) };
+      const row = parseOperationRecord({ ...existing, status: "completed", result: structuredClone(result) });
       await this.append(row);
       records.set(key, row);
     });

@@ -3161,7 +3161,10 @@ export class Coordinator {
     const existing = this.openingWorlds.get(worldId);
     if (existing) return existing;
     if (this.stopping || this.engineClosed) throw new Error("The coordinator is stopping.");
-    const opening = this.openWorldTail.then(() => this.openWorldOnce(worldId));
+    const opening = this.openWorldTail.then(() => {
+      if (this.stopping) throw new Error("The coordinator is stopping.");
+      return this.openWorldOnce(worldId);
+    });
     this.openWorldTail = opening.catch(() => {});
     this.openingWorlds.set(worldId, opening);
     try {
@@ -3213,7 +3216,7 @@ export class Coordinator {
     // (issue 1037): the Library's `Portrait` remembers a failed decode per URL, so a poster drawn
     // a moment after the rows render would sit on disk unseen until the screen was rebuilt.
     if (store && !wasAlreadyOpen) await this.backfillArtifactPosters(store);
-    if (store && !this.stillOpen(store)) return;
+    if (this.stopping || (store && !this.stillOpen(store))) return;
     this.emit({ at: new Date().toISOString(), type: "world.opened", worldId });
     // The bundle itself travels as a fresh snapshot — a world is small enough to re-send (D4).
     this.transport.broadcastSnapshot();

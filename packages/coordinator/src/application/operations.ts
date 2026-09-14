@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { EngineAction, EngineContext, EngineOperationStore, EnginePolicy, EngineResource } from "./contracts.js";
+import type { EngineOperation, EngineContext, EngineOperationStore, EnginePolicy, EngineResource } from "./contracts.js";
 
 function canonical(value: unknown): string {
   if (value === undefined) return "null";
@@ -36,7 +36,7 @@ export class EngineOperations {
     return engineHash([context.scopeId, context.actorId, resource.worldId, operationId]);
   }
 
-  async run<T>(context: EngineContext, action: EngineAction, resource: EngineResource, operationId: string,
+  async run<T>(context: EngineContext, action: EngineOperation["action"], resource: EngineResource, operationId: string,
     input: unknown, execute: (key: string) => Promise<T>, uncertainCompletion?: (result: T) => T): Promise<T> {
     if (this.stopping) throw new Error("The engine is stopping.");
     const key = this.key(context, resource, operationId);

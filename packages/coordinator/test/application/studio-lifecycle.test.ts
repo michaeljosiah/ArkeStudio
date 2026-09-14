@@ -85,3 +85,32 @@ it("a read-only provider opens once and keeps the first successful bundle", asyn
   assert.equal(loads, 1);
   assert.equal(events.filter(event => event.type === "world.opened").length, 1);
 });
+
+
+it("shutdown refuses a queued world switch before loading or resuming it", async t => {
+  const { root } = await makeTempRoot();
+  const provider = new FsWorldProvider(root);
+  const other = await provider.createWorld({ name: "Second world" });
+  const events: DomainEvent[] = [];
+  const coordinator = new Coordinator({ provider, adapter: null, appRoot: root,
+    changeLogPath: join(root, "changes.jsonl"), appVersion: "test", observeEvent: event => events.push(event) });
+  t.after(() => coordinator.stop());
+  const internal = coordinator as unknown as { engine: ReturnType<typeof createEngine> };
+  const read = internal.engine.worlds.read;
+  let entered!: () => void; let release!: () => void;
+  const reading = new Promise<void>(resolve => { entered = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  internal.engine.worlds.read = async (context, worldId) => {
+    const result = await read(context, worldId); entered(); await held; return result;
+  };
+  const loads: string[] = []; const load = provider.loadWorld.bind(provider);
+  provider.loadWorld = async id => { loads.push(id); return load(id); };
+  const first = coordinator.openWorld(WORLD_ID);
+  await reading;
+  const second = assert.rejects(coordinator.openWorld(other.worldId), /stopping/);
+  const stopping = coordinator.stop();
+  release();
+  await Promise.all([first, second, stopping]);
+  assert.deepEqual(loads, [WORLD_ID]);
+  assert.equal(events.some(event => event.type === "world.opened"), false);
+});
