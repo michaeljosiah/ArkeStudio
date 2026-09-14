@@ -37,7 +37,7 @@ export class EngineOperations {
   }
 
   async run<T>(context: EngineContext, action: EngineAction, resource: EngineResource, operationId: string,
-    input: unknown, execute: (key: string) => Promise<T>): Promise<T> {
+    input: unknown, execute: (key: string) => Promise<T>, uncertainCompletion?: (result: T) => T): Promise<T> {
     if (this.stopping) throw new Error("The engine is stopping.");
     const key = this.key(context, resource, operationId);
     // A completed operation is not a bearer token: revalidate before replaying its result.
@@ -59,7 +59,13 @@ export class EngineOperations {
       // Never infer that a rejected call had no side effect. The started row deliberately stays
       // visible if execution or completion fails, rather than silently running the operation again.
       const result = await execute(key);
-      await this.store.complete(key, fingerprint, result);
+      try { await this.store.complete(key, fingerprint, result); }
+      catch (error) {
+        // Only a service with independently durable evidence may supply an uncertain receipt.
+        // The started operation remains unresolved; this is never permission to execute again.
+        if (uncertainCompletion) return uncertainCompletion(result);
+        throw error;
+      }
       return result;
     })();
     this.active.set(key, { fingerprint, promise });

@@ -48,7 +48,7 @@ export class IllustrationApplicationService {
         }
       }
       return { operationKey: key, reservation, jobIds: jobs.map(job => job.id), failures: [], needsReconciliation: false };
-    });
+    }, result => ({ ...result, needsReconciliation: true }));
   }
 
   /** Reconcile terminal work from durable queue state, never from a browser's success flag. */

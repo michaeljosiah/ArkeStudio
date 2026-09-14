@@ -58,13 +58,14 @@ async function harness(t: TestContext) {
     landInWorld: async (worldId, fn) => { assert.equal(worldId, WORLD_ID); await fn(worldDir); return true; },
     pollIntervalMs: 5, baseIntervalMs: 1 });
   await queue.start();
-  const make = () => createEngine({ policy, operations: new FileEngineOperationStore(join(root, "operations.jsonl")),
+  let operationStore!: FileEngineOperationStore;
+  const make = () => createEngine({ policy, operations: (operationStore = new FileEngineOperationStore(join(root, "operations.jsonl"))),
     worlds: createLocalWorldRepository(provider, { finalise: async () => {
       if (state.failSave) throw new Error("Authoritative save unavailable"); state.saves++; return { revision: String(state.saves) };
     } }), queue: { enqueue: input => queue.enqueue(input), jobs: () => queue.listJobs() } });
   let engine = make();
   t.after(async () => { queue.stopAccepting(); queue.dispose(); await queue.drain(); await engine.close(); await provider.close(); });
-  return { engine, provider, queue, fake, state, policy, root, worldDir,
+  return { engine, provider, queue, fake, state, policy, root, worldDir, operations: () => operationStore,
     restart: async () => { await engine.close(); engine = make(); return engine; } };
 }
 
@@ -247,4 +248,22 @@ it("partial batches retain admitted job IDs on the first response and after rest
   assert.equal(h.fake.submitCount, 1);
   assert.equal((await restarted.illustrations.reconcile(parent, WORLD_ID, input.operationId)).status, "needs-reconciliation");
   assert.equal(h.state.charges + h.state.releases, 0);
+});
+
+
+it("a failed operation completion preserves the queue's durable admission receipt for concurrent callers", async t => {
+  const h = await harness(t);
+  h.operations().complete = async () => { throw new Error("Operation receipt unavailable"); };
+  const input = { operationId: "receipt-failure", sheetId: "maren-kest", model: FAL_MODELS[0]!, prompt: "Happy",
+    count: 1, identityReferences: [], generationKey: "image" };
+  const [one, two] = await Promise.all([h.engine.illustrations.generate(parent, WORLD_ID, input),
+    h.engine.illustrations.generate(parent, WORLD_ID, input)]);
+  assert.deepEqual(one, two);
+  assert.equal(one.needsReconciliation, true);
+  assert.deepEqual(one.jobIds, h.queue.listJobs().map(job => job.id));
+  assert.equal(one.jobIds.length, 1);
+  assert.equal((await h.engine.operation(parent, WORLD_ID, input.operationId))!.status, "started");
+  await until(() => h.queue.listJobs().every(job => job.status === "succeeded"), "admitted job with lost operation receipt");
+  assert.equal((await h.engine.illustrations.reconcile(parent, WORLD_ID, input.operationId)).status, "needs-reconciliation");
+  assert.equal(h.fake.submitCount, 1);
 });
