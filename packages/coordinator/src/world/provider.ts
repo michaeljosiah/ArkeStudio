@@ -93,6 +93,9 @@ export class FsWorldProvider implements WorldProvider {
     const rejectNestedAliases = async (dir: string): Promise<void> => {
       for (const entry of await readdir(dir, { withFileTypes: true })) {
         if (entry.isSymbolicLink()) throw new Error("Writing requires managed world trees without nested filesystem aliases.");
+        if (entry.isFile() && (await stat(join(dir, entry.name))).nlink > 1) {
+          throw new Error("Writing requires managed world files without hard links.");
+        }
         if (entry.isDirectory()) await rejectNestedAliases(join(dir, entry.name));
       }
     };

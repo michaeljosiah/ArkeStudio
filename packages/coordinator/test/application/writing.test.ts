@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it, type TestContext } from "node:test";
 import { join, dirname } from "node:path";
-import { mkdir, readFile, writeFile, symlink } from "node:fs/promises";
+import { mkdir, readFile, writeFile, symlink, link, readdir } from "node:fs/promises";
 import type { HarnessAdapter } from "@arke-studio/contracts";
 import { createEngine, type EngineContext, type EnginePolicy } from "../../src/application/engine.js";
 import { createLocalWorldRepository } from "../../src/application/local-worlds.js";
@@ -347,6 +347,42 @@ it("nested world aliases cannot expose scratch files to the harness", async t =>
   await symlink(h.state.scratch, join(h.store().dir, "productions", productionId, "scratch-alias"), "junction");
   await assert.rejects(h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, input), /nested filesystem aliases/);
   assert.equal(h.state.calls, 0); assert.equal(h.state.closed, 1);
+});
+
+it("hard-linked world files cannot be edited through the writing scratch", async t => {
+  const h = await harness(t); const input = await h.input("hard-link");
+  await link(join(h.store().dir, "productions", productionId, "chapters", "01-neap.md"), join(h.state.scratch, "chapter.md"));
+  await assert.rejects(h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, input), /without hard links/);
+  assert.equal(h.state.calls, 0); assert.equal(h.state.closed, 1);
+});
+
+it("generated CRLF prose matches its canonical staged manuscript", async t => {
+  const h = await harness(t); h.state.body = "Maren found a road.\r\n\r\nShe followed it home.";
+  const result = await h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, await h.input("crlf"));
+  assert.equal(result.value.body.trim(), h.state.body.replace(/\r\n/g, "\n"));
+  assert.equal((await h.engine.operation(context, WORLD_ID, "crlf"))!.status, "completed");
+});
+
+it("writing requires retired outline records too until canonical receipts support partial projections", async t => {
+  const h = await harness(t, async worldDir => {
+    const dir = join(worldDir, "productions", productionId, "chapters");
+    const file = (await readdir(dir)).find(name => name.endsWith(".md") && name !== "01-neap.md")!;
+    assert.ok(file);
+    const doc = MarkdownFile.parse(await readFile(join(dir, file), "utf8"));
+    doc.setData({ retired: true });
+    await writeFile(join(dir, file), doc.serialize());
+  });
+  const project = h.policy.project;
+  h.policy.project = async (...args) => {
+    const bundle = await project(...args);
+    const production = bundle.productions.find(p => p.meta.id === productionId)!;
+    assert.ok(production.chapters.some(c => c.retired));
+    production.chapters = production.chapters.filter(c => !c.retired);
+    return bundle;
+  };
+  await assert.rejects(h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, await h.input("retired-projection")),
+    /complete story outline/);
+  assert.equal(h.state.calls, 0);
 });
 
 it("cancellation during asynchronous admission prevents later model dispatch", async t => {

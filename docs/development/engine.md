@@ -266,7 +266,8 @@ Required base hash and world revision reject stale admission. Before dispatch an
 adapter checks current authority, projection and source state again. Staging also fences the
 chapter's exact file hash and the existing read observations inside the gate. Changes to the
 run's own conversation log do not count as changed story sources. Initial support requires
-visibility of the complete target outline, overview and prose style; a partial view refuses
+visibility of the complete target outline (including retired records needed by canonical
+read receipts), overview and prose style; a partial view refuses
 rather than exposing hidden material to satisfy a grounding check.
 
 The optional `writing` factory receives trusted context, resource, operation key, explicit model
@@ -275,7 +276,8 @@ the resolved session model and input token limit, `createSession` and `close`. T
 must exist outside all managed worlds. The filesystem provider checks resolved paths against
 its world library, archive and directory aliases, rejecting both descendants and ancestors
 of those locations. Nested symlinks/junctions within managed or archived world trees refuse
-writing, so a nested alias cannot turn an external scratch path into authored storage.
+writing, as do hard-linked regular files, so existing filesystem aliases cannot expose authored
+storage through the scratch directory. This preflight does not replace host confinement.
 Custom local providers must implement
 `assertWritingScratch`; writing refuses without that check. The host must enforce
 actual harness confinement, disable unrelated tools/network access, use scoped credentials,

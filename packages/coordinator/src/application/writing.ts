@@ -60,7 +60,7 @@ export class WritingApplicationService {
             }
             const staged = await session.writing.review(value.proposal.id);
             if (engineHash(staged.proposal) !== engineHash(value.proposal) || staged.title !== value.title ||
-              staged.body.trim() !== value.body.trim()) {
+              staged.body.replace(/\r\n/g, "\n").trim() !== value.body.replace(/\r\n/g, "\n").trim()) {
               throw new Error("The writing receipt differs from the staged proposal.");
             }
             value = writingResult.parse({ ...value, body: staged.body });

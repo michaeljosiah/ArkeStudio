@@ -65,6 +65,7 @@ export function localWriting(store: WorldStore, assertScratch: (path: string) =>
     const production = productions[0];
     const rawProduction = store.getBundle().productions.find(p => p.meta.id === productionId)!;
     if (productions.length !== 1 || production?.meta.format !== "story" ||
+      // Canonical outline receipts still cover retired records, even though prose grounding skips them.
       engineHash(production.chapters) !== engineHash(rawProduction.chapters) ||
       engineHash(production.story) !== engineHash(rawProduction.story) ||
       engineHash(production.proseStyle) !== engineHash(rawProduction.proseStyle)) {
