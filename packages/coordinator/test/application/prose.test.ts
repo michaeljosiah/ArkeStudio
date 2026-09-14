@@ -125,6 +125,12 @@ it("manuscript delivery identifies the semantic manuscript value", async t => {
   assert.equal(h.deliveries.at(-1)?.sha256, engineHash(result.value));
 });
 
+it("manuscript output refuses non-prose productions before reading chapters", async t => {
+  const h = await harness(t);
+  await assert.rejects(h.engine.prose.manuscript(context, WORLD_ID, "saltlight"), /requires a prose production/);
+  assert.equal(h.deliveries.length, 0);
+});
+
 for (const mutation of ["production", "chapter"] as const) {
   it(`creation cannot acknowledge an existing ${mutation} instead of the newly created record`, async t => {
     const h = await harness(t);

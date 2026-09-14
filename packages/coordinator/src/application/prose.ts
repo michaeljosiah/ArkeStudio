@@ -1,4 +1,5 @@
 import type { EngineContext, EngineResource, EngineWorldRepository, EngineWorldSession } from "./contracts.js";
+import { productionShape } from "@arke-studio/contracts";
 import { engineHash, EngineOperations, requireContext } from "./operations.js";
 import { proseId, proseProductionInput, proseChapterInput, proseSaveInput, proseProductionResult,
   proseChapterResult, proseSaveResult, proseChapterRead, proseManuscript,
@@ -97,6 +98,7 @@ export class ProseApplicationService {
       if (raw.length !== 1 || visible.length !== 1 || engineHash(raw[0]) !== engineHash(visible[0])) {
         throw new Error("A complete authorised production is required for manuscript output.");
       }
+      if (!productionShape(raw[0]!.meta).hasChapters) throw new Error("Manuscript output requires a prose production.");
       const chapters = raw[0]!.chapters.filter(c => !c.retired).sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
       const ids = chapters.map(c => c.id);
       for (const chapterId of ids) await this.operations.policy.authorise(context, "read", { ...resource, chapterId });

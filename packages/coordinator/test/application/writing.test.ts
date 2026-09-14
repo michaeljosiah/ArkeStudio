@@ -310,6 +310,26 @@ it("nested world aliases cannot expose scratch files to the harness", async t =>
   assert.equal(h.state.calls, 0); assert.equal(h.state.closed, 1);
 });
 
+it("cancellation during asynchronous admission prevents later model dispatch", async t => {
+  const h = await harness(t); const input = await h.input("cancel-admission");
+  const authorise = h.policy.authorise;
+  let release!: () => void, entered!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const waiting = new Promise<void>(resolve => { entered = resolve; });
+  let first = true;
+  h.policy.authorise = async (...args) => {
+    if (args[1] === "chapter-draft" && first) { first = false; entered(); await held; }
+    await authorise(...args);
+  };
+  const running = h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, input);
+  const refused = assert.rejects(running, /cancelled/i);
+  await waiting;
+  try { assert.equal(await h.engine.writing.cancel(context, WORLD_ID, input.operationId), true); }
+  finally { release(); }
+  await refused;
+  assert.equal(h.state.opened, 0); assert.equal(h.state.calls, 0);
+});
+
 it("replay refuses a durable writing receipt redirected to another chapter file", async t => {
   const h = await harness(t); const input = await h.input("replay-target");
   await h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, input);

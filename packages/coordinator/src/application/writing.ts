@@ -16,7 +16,8 @@ async function chapterTarget(session: EngineWorldSession, productionId: string, 
 
 export class WritingApplicationService {
   private readonly stopping = new AbortController();
-  private readonly active = new Map<string, { controller: AbortController; context: EngineContext; resource: EngineResource }>();
+  private readonly active = new Map<string, { controller: AbortController; context: EngineContext;
+    resource: EngineResource; fingerprint: string; callers: number }>();
   constructor(private readonly worlds: EngineWorldRepository, private readonly operations: EngineOperations,
     private readonly runtime?: WritingRuntimeFactory) {}
 
@@ -32,13 +33,18 @@ export class WritingApplicationService {
     context = structuredClone(context); input = writingInput.parse(input);
     productionId = proseId.parse(productionId); chapterId = proseId.parse(chapterId);
     const resource = { worldId, productionId, chapterId };
+    const key = this.operations.key(context, resource, input.operationId);
+    const fingerprint = engineHash({ resource, mode, input, subjectId: context.subjectId });
+    const held = this.active.get(key);
+    if (held && held.fingerprint !== fingerprint) throw new Error("Operation ID reused with different input.");
+    const active = held ?? { controller: new AbortController(), context, resource, fingerprint, callers: 0 };
+    active.callers++;
+    this.active.set(key, active);
+    const signal = AbortSignal.any([active.controller.signal, this.stopping.signal]);
+    try {
     const result = await this.operations.run(context, "chapter-draft", resource, input.operationId, { mode, ...input }, async key => {
       if (!this.runtime) throw new Error("This host has not configured AI writing.");
       const runtime = this.runtime;
-      const controller = new AbortController();
-      const signal = AbortSignal.any([controller.signal, this.stopping.signal]);
-      this.active.set(key, { controller, context, resource });
-      try {
         return await this.worlds.use(worldId, async session => {
           signal.throwIfAborted();
           await this.operations.policy.authorise(context, "chapter-draft", resource);
@@ -65,7 +71,6 @@ export class WritingApplicationService {
           }
           return { operationKey: key, ...(await session.saved(key)), value };
         });
-      } finally { this.active.delete(key); }
     });
     // Replayed data must still name this chapter, not another file in the same production.
     await this.worlds.use(worldId, async session => {
@@ -77,6 +82,9 @@ export class WritingApplicationService {
     await this.operations.policy.deliver(context, { ...resource, proposalId: result.value.proposal.id },
       { kind: "proposal", id: result.value.proposal.id, sha256: engineHash(result.value) });
     return result;
+    } finally {
+      if (--active.callers === 0 && this.active.get(key) === active) this.active.delete(key);
+    }
   }
 
   async cancel(context: EngineContext, worldId: string, operationId: string) {
