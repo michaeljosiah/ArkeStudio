@@ -475,6 +475,11 @@ const CLIENT_COMMAND_METADATA = {
   "set-audiobook-block": action("production", "command", "voice", "external-network-action", ["chapters"]),
   "direct-chapter": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),
   "discard-direction": action("production", "command", "extraction", "external-network-action", ["chapters"]),
+  // The door and the book (SPEC-047 R-29, R-16): a read of every chapter's state, and the
+  // chapter's run over the whole book.
+  "open-audiobook": readOnly(QUERY),
+  "read-audiobook-book": action("production", "generation", "voice", "external-network-action", ["chapters", "sheets"]),
+  "stop-audiobook-book": action("production", "command", "voice", "external-network-action", ["chapters"]),
   "accept-direction": action("production", "command", "voice", "external-network-action", ["chapters"]),
   // A manuscript out and in (turn 131): a file the host writes, a file the host picks.
   "export-manuscript": action("production", "host-action", "export", "export", ["chapters", "exports"]),

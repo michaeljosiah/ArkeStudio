@@ -2897,6 +2897,22 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   z.object({ kind: z.literal("direct-chapter"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
+  /**
+   * The door (SPEC-047 R-29): a row a chapter with its counts, the voices and the price, answered
+   * as `audiobook.door`; and the book read as one run (R-16, R-17) — every chapter with prose in
+   * order, priced once, stopped and resumed like a chapter's.
+   */
+  z.object({ kind: z.literal("open-audiobook"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("read-audiobook-book"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      confirmationToken: z.string().min(1).optional(),
+      voiceUploadConfirmedFor: z.string().min(1).optional(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("stop-audiobook-book"), worldId: UlidSchema, productionId: SlugSchema }).strict(),
   /** The card put away: the coordinator holds a proposal until it is accepted or discarded, so a window that reconnects sees it again. */
   z.object({ kind: z.literal("discard-direction"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
   z

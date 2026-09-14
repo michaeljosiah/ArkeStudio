@@ -6,7 +6,7 @@ import { PerformanceGenerationQuoteSchema } from "./performance.js";
 import { PerformanceRecordSchema } from "./performance.js";
 import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
-import { AudiobookDirectionInputSchema, ChapterAudiobookSchema } from "./audiobook.js";
+import { AudiobookDirectionInputSchema, AudiobookDoorSchema, AudiobookPriceLineSchema, ChapterAudiobookSchema } from "./audiobook.js";
 import { z } from "zod";
 import { ModelResidencySchema } from "./local-ai.js";
 import { WorldImageReferenceSchema } from "./world-image-references.js";
@@ -93,6 +93,7 @@ export const QueueCommandSchema = z.enum([
   "read-prose",
   "read-prose-page",
   "read-audiobook-chapter",
+  "read-audiobook-book",
   "generate-world-image",
   "upload-world-image",
   "generate-master-look",
@@ -1117,6 +1118,72 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
    * offered as one card, accepted whole through `accept-direction` or discarded in the window.
    * Nothing is written by the run itself.
    */
+  /** The door's answer (SPEC-047 R-29): what every chapter stands at, who reads, and what a press would spend. */
+  z.object({ ...base, type: z.literal("audiobook.door"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, door: AudiobookDoorSchema }).strict(),
+  /**
+   * The book read as one run (SPEC-047 R-16..R-18): started under the run's request (a cloned
+   * voice's consent is asked under it), priced once for every chapter's cloud blocks, a chapter
+   * at a time — each chapter's own events say how far it is — and finished with the counts.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.book-started"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      /** The chapters with something to make, of the chapters with prose. */
+      chapters: z.number().int().min(0),
+      blocks: z.number().int().min(0),
+      replayed: z.literal(true).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.book-priced"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapters: z.number().int().min(0),
+      blocks: z.number().int().min(0),
+      cloudBlocks: z.number().int().min(0),
+      characters: z.number().int().min(0),
+      estimatedMicroUsd: z.number().int().min(0),
+      confirmationToken: z.string().min(1),
+      voices: z.array(AudiobookPriceLineSchema),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.book-progress"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      /** Chapters finished so far, of the chapters the run set out to read. */
+      done: z.number().int().min(0),
+      chapters: z.number().int().min(0),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.book-finished"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      outcome: z.enum(["read", "stopped", "unavailable", "failed"]),
+      /** Chapters read to the end, and chapters refused under `cast` and left for their rows to say why. */
+      chaptersRead: z.number().int().min(0),
+      chaptersRefused: z.number().int().min(0),
+      made: z.number().int().min(0),
+      flagged: z.number().int().min(0),
+      reason: z.string().optional(),
+    })
+    .strict(),
+  /** Directions re-checked against changed readers (SPEC-047 R-13): how many controls were dropped, across how many chapters. */
+  z
+    .object({ ...base, type: z.literal("audiobook.conformed"), worldId: UlidSchema, productionId: SlugSchema, dropped: z.number().int().min(0), chapters: z.number().int().min(0) })
+    .strict(),
   z
     .object({ ...base, type: z.literal("direction.started"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema })
     .strict(),

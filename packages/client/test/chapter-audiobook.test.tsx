@@ -18,7 +18,7 @@ import {
 } from "@arke-studio/contracts";
 import { ChapterScreen } from "../src/screens/chapter-workspace.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
-import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __connectionStatusForTest, __handleFrameForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -298,15 +298,28 @@ describe("the Audiobook view (turn 146)", () => {
     const m = await mount(inkbound());
     await answerOpen(m);
     const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+    const replayed = { at: AT, type: "audiobook.started" as const, ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 0, blocks: 0, replayed: true as const };
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 4 }));
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.progress", ...ids, block: "title", outcome: "made", made: 1, toMake: 4 }));
-    // The world snapshot refreshes after every take lands, and each refresh replays the start.
-    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 0, blocks: 0, replayed: true }));
+    // The world snapshot refreshes after every take lands, and each refresh replays the start
+    // behind it: the snapshot must not take the counts with it (the door's live check on slice 3).
+    await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 3, state: inkbound() }));
+    await act(async () => __applyEventForTest(replayed));
     assert.match(text(m), /reading… 1 of 4/, "the progress the window knows stands");
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.finished", ...ids, outcome: "read", made: 4, flagged: 0 }));
-    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 0, blocks: 0, replayed: true }));
+    await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 5, state: inkbound() }));
+    await act(async () => __applyEventForTest(replayed));
     assert.doesNotMatch(text(m), /reading…/, "a finished run is not flipped back to going by a late replay");
     assert.ok(!all(m, "button").some((button) => button.textContent === "Stop"));
+    // A window that rejoins may have missed the run's end: it starts from the replay, which
+    // says only that a run is going and can be stopped.
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H2", toMake: 4, blocks: 4 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.progress", ...ids, block: "title", outcome: "made", made: 2, toMake: 4 }));
+    await act(async () => __connectionStatusForTest("open"));
+    await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 1, state: inkbound() }));
+    assert.doesNotMatch(text(m), /reading…/, "the run the window held is gone with the rejoin");
+    await act(async () => __applyEventForTest({ ...replayed, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H2" }));
+    assert.ok(all(m, "button").some((button) => button.textContent === "Stop"), "the replay says a run is going");
   });
 
   it("a block whose words moved is stale, and a flagged block says why", async () => {

@@ -32,6 +32,7 @@ import {
   ChevronsUpDown,
   Film,
   Folder,
+  Speaker,
   Home,
   ListOrdered,
   Message,
@@ -64,9 +65,13 @@ import {
   attachHostText,
   hostCanAttach,
   createEpisode,
+  openAudiobook,
   uploadArtifacts,
   setProductionAspect,
+  useAudiobookDoors,
+  useStore,
 } from "../lib/store.js";
+import { audiobookDoorLine } from "@arke-studio/contracts";
 import { takeMediaPath, type TakeEpisodeOption, episodeLabel, filterTakeEpisodes } from "./production-generate.js";
 import { useNewScene, useNewChapter, NewSceneContext, useSharedNewScene, NewChapterContext, ChapterPlan, ChapterOutlineRow } from "./production-story.js";
 import { exportViewFor } from "./editor-export.js";
@@ -319,6 +324,24 @@ export function ProductionLayout() {
    * production row, pointing at a world screen that could not have shown the difference.
    */
   const artifactCount = productionShelf(world?.artifacts ?? [], prodId).length;
+  /*
+   * The rail's read count (turn 146, SPEC-047 R-29): chapters read of those with prose, which
+   * only the coordinator can say — a chapter is read when every block's take is current, and
+   * the bundle carries the record's stamp alone. So a story production asks the door once
+   * when it is shown, and the rail reads the answer; the door itself asks again as the book
+   * changes.
+   */
+  const audiobookDoor = useAudiobookDoors()[prodId ?? ""]?.door ?? null;
+  const shellConnection = useStore().connection;
+  const audiobookStamp = production === null ? "" : JSON.stringify(production.chapters.map((c) => [c.id, c.version, c.bodyHash ?? "", c.audiobook ?? null]));
+  useEffect(() => {
+    if (!worldId || !prodId || !isStory || shellConnection !== "open") return;
+    openAudiobook(worldId, prodId);
+  }, [worldId, prodId, isStory, shellConnection, audiobookStamp]);
+  const audiobookCount = audiobookDoor === null ? "—" : (() => {
+    const line = audiobookDoorLine(audiobookDoor.rows);
+    return `${line.read}/${line.withProse}`;
+  })();
   const guestCount = prodId
     ? guestsOf(world?.sheets ?? [], prodId).filter((s) => s.retired !== true).length
     : 0;
@@ -358,6 +381,7 @@ export function ProductionLayout() {
     narrative: Scroll,
     season: Film,
     "story/chapters": Book,
+    "story/audiobook": Speaker,
     "story-structure": Folder,
     scenes: Film,
     "branch-map": ListOrdered,
@@ -659,6 +683,8 @@ export function ProductionLayout() {
                   {item("story", "Develop", "chat", true)}
                   {item("overview", "Overview", production?.story ? `v${production.story.version}` : "—")}
                   {item("story/chapters", "Chapters", String(production?.chapters.length ?? 0))}
+                  {/* The reading (turn 146, SPEC-047 R-29): chapters read of those with prose, from the door's last answer. */}
+                  {item("story/audiobook", "Audiobook", audiobookCount)}
                   <span className="fy-prodrail__section-divider" aria-hidden="true" />
                   {item("artifacts", "Artifacts", String(artifactCount))}
                 </>

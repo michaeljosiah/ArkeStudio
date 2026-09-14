@@ -59,6 +59,7 @@ import {
 } from "./screens/world.js";
 import { EpisodeChatScreen, EpisodeDetailScreen } from "./screens/development.js";
 import { ChapterTreeScreen, SceneDetailScreen, ScenesScreen, StoryScreen } from "./screens/production-story.js";
+import { AudiobookScreen } from "./screens/audiobook.js";
 import { CutScreen } from "./screens/cut.js";
 import { GenerateScreen, VoiceLineDialogScreen } from "./screens/production-generate.js";
 import { ProductionCastScreen } from "./screens/production-cast.js";
@@ -298,6 +299,8 @@ export function App() {
           <Route path="story/chapters" element={<ChapterTreeScreen />} />
           {/* The chapter, opened (turn 126): the scene workspace's sibling, under Chapters. */}
           <Route path="story/chapters/:chapterId" element={<ChapterScreen />} />
+          {/* The audiobook's door (turn 146, SPEC-047 R-29): a row a chapter, its state, one priced batch. */}
+          <Route path="story/audiobook" element={<AudiobookScreen />} />
           {/* Arcs, themes, setups and payoffs — off the season, under one rail item
               (turn 99): a season is its episodes. */}
           <Route path="story-structure" element={<StoryStructureScreen />} />

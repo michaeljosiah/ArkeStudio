@@ -291,3 +291,120 @@ export function audiobookCounts(
 export function audiobookChapterComplete(counts: Pick<AudiobookCounts, "total" | "made">): boolean {
   return counts.total > 0 && counts.made === counts.total;
 }
+
+/**
+ * The door (R-15, R-29): a row a chapter with its counts, the voices the book reads in, and the
+ * price of what a press would make. Computed by the coordinator from every chapter's prose,
+ * cast and record — the bundle carries only each chapter's stamp — and answered to a window
+ * that opens the door or hears the book change.
+ */
+export const AudiobookRowSchema = z
+  .object({
+    chapterId: SlugSchema,
+    file: z.string().min(1),
+    order: z.number().int().min(1),
+    title: z.string(),
+    version: z.number().int().min(1),
+    /** No prose: the row says `planned`, the run skips it, the count leaves it out (R-2, R-15). */
+    planned: z.boolean(),
+    total: z.number().int().min(0),
+    made: z.number().int().min(0),
+    stale: z.number().int().min(0),
+    flagged: z.number().int().min(0),
+    notMade: z.number().int().min(0),
+    /** The made takes' running time, summed from their measurements; null while any made take is unmeasured. */
+    seconds: z.number().min(0).nullable(),
+    /** Under `cast`, the run's refusal (R-12) when the cast is not current — said on the row. */
+    castTrouble: z.string().min(1).optional(),
+  })
+  .strict();
+export type AudiobookRow = z.infer<typeof AudiobookRowSchema>;
+
+/** A voice on the door's row (R-12): who reads, in what, or why the narrator does instead. */
+export const AudiobookVoiceRowSchema = z
+  .object({
+    sheet: SlugSchema.optional(),
+    name: z.string().min(1),
+    voice: z.object({ label: z.string().min(1), provider: z.string().min(1), local: z.boolean() }).strict().optional(),
+    state: z.enum(["narrator", "reads", "no voice", "voice unavailable"]),
+    /** Blocks this reader has across the book: the narrator's narration, a speaker's lines. */
+    blocks: z.number().int().min(0),
+  })
+  .strict();
+export type AudiobookVoiceRow = z.infer<typeof AudiobookVoiceRowSchema>;
+
+/** One line of the book's price (R-17): a reader, its characters and what they cost; free for the narrator on this machine and for a speaker the narrator stands in for. */
+export const AudiobookPriceLineSchema = z
+  .object({
+    label: z.string().min(1),
+    provider: z.string().min(1),
+    /** Said as the speaker when the narrator stands in (`Odile Sarn · no voice · narrator · free`). */
+    speaker: z.string().min(1).optional(),
+    substituted: AudiobookSubstitutionSchema.optional(),
+    local: z.boolean(),
+    characters: z.number().int().min(0),
+    estimatedMicroUsd: z.number().int().min(0),
+  })
+  .strict();
+export type AudiobookPriceLine = z.infer<typeof AudiobookPriceLineSchema>;
+
+export const AudiobookDoorSchema = z
+  .object({
+    reading: AudiobookReadingSchema,
+    voices: z.array(AudiobookVoiceRowSchema),
+    /** Lines a current cast counts ambiguous, read in the narrator's voice (R-12); summed over the chapters. */
+    unattributed: z.number().int().min(0),
+    rows: z.array(AudiobookRowSchema),
+    /** What `Read the book` would make and spend: the chapters with something to make, the cloud characters, and the lines. */
+    price: z
+      .object({
+        chapters: z.number().int().min(0),
+        blocks: z.number().int().min(0),
+        cloudBlocks: z.number().int().min(0),
+        characters: z.number().int().min(0),
+        estimatedMicroUsd: z.number().int().min(0),
+        voices: z.array(AudiobookPriceLineSchema),
+      })
+      .strict(),
+  })
+  .strict();
+export type AudiobookDoor = z.infer<typeof AudiobookDoorSchema>;
+
+/** `2:09:28`, or `31:04` under an hour: the running time as a player would show it. */
+export function formatRunningTime(seconds: number): string {
+  const whole = Math.max(0, Math.round(seconds));
+  const h = Math.floor(whole / 3600);
+  const m = Math.floor((whole % 3600) / 60);
+  const s = whole % 60;
+  const mm = h > 0 ? String(m).padStart(2, "0") : String(m);
+  return `${h > 0 ? `${h}:` : ""}${mm}:${String(s).padStart(2, "0")}`;
+}
+
+/**
+ * A row's word (R-15): `planned` for a chapter with no prose; the cast's trouble under `cast`;
+ * `read · 31:04` when every block is made; `not read` when none is; `moved · 3 of 24 stale`
+ * when what stands in the way is stale takes alone; otherwise the count made with what is
+ * stale and flagged beside it (`22 of 26 made · 1 flagged`).
+ */
+export function audiobookRowLabel(row: AudiobookRow): string {
+  if (row.planned) return "planned";
+  if (row.castTrouble !== undefined) return row.castTrouble;
+  if (row.total > 0 && row.made === row.total) return row.seconds === null ? "read" : `read · ${formatRunningTime(row.seconds)}`;
+  if (row.made === 0 && row.stale === 0 && row.flagged === 0) return "not read";
+  if (row.flagged === 0 && row.notMade === 0 && row.stale > 0) return `moved · ${row.stale} of ${row.total} stale`;
+  return [`${row.made} of ${row.total} made`, ...(row.stale > 0 ? [`${row.stale} stale`] : []), ...(row.flagged > 0 ? [`${row.flagged} flagged`] : [])].join(" · ");
+}
+
+/** The door's line and the rail's count (R-29): chapters read of those with prose, the running time, the planned ones apart. */
+export function audiobookDoorLine(rows: readonly AudiobookRow[]): { read: number; withProse: number; planned: number; seconds: number | null; line: string } {
+  const withProse = rows.filter((row) => !row.planned);
+  const readRows = withProse.filter((row) => row.total > 0 && row.made === row.total);
+  const planned = rows.length - withProse.length;
+  const seconds = readRows.length > 0 && readRows.every((row) => row.seconds !== null) ? readRows.reduce((sum, row) => sum + (row.seconds ?? 0), 0) : null;
+  const line = [
+    `${readRows.length} of ${withProse.length} chapter${withProse.length === 1 ? "" : "s"} read`,
+    ...(seconds !== null && readRows.length > 0 ? [formatRunningTime(seconds)] : []),
+    ...(planned > 0 ? [`${planned} planned`] : []),
+  ].join(" · ");
+  return { read: readRows.length, withProse: withProse.length, planned, seconds, line };
+}

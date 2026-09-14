@@ -6,7 +6,9 @@ import { join } from "node:path";
 import {
   ChapterAudiobookSchema,
   audiobookBlocks,
+  audiobookDoorLine,
   audiobookHeading,
+  audiobookRowLabel,
   audiobookTextHash,
   billableCharacters,
   normalizeSpeechText,
@@ -64,6 +66,26 @@ const FISH: ManifestModel = {
   accepts: { referenceImages: 0, startFrame: false, endFrame: false },
   limits: { maxPromptChars: 2000, audioFormat: "wav" },
   pricing: { kind: "perCharacter", microUsdPerCharacter: 15, unit: "utf8-byte" },
+};
+/** The shipped Eleven v3 row, as the manifest declares it: every delivery, a phrase as a tag, cues as tags. */
+const V3: ManifestModel = {
+  id: "eleven-v3",
+  provider: "elevenlabs",
+  capability: "voice-tts",
+  displayName: "Eleven v3",
+  accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+  limits: { maxPromptChars: 5000, audioFormat: "mp3" },
+  pricing: { kind: "perCharacter", microUsdPerCharacter: 100 },
+  cadence: {
+    deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"],
+    speed: { min: 0.7, max: 1.2 },
+    pause: "best-effort-audio-tag",
+    emphasis: "best-effort-capitalization",
+    breath: "best-effort-audio-tag",
+    outputTimestamps: "none",
+    phrase: "best-effort-tag",
+    deliveryMappings: { measured: { settings: { stability: 0.5 } }, whispered: { settings: { stability: 0.5 }, tag: "whispers" }, cold: { settings: { stability: 1 }, tag: "coldly" } },
+  },
 };
 const LOW_TIDE: VoiceCandidate = { provider: "elevenlabs", model: ELEVEN.id, voiceId: "v_8Kq2", label: "Low tide", attributes: [], local: false, canClone: false };
 const HARBOUR: VoiceCandidate = { provider: "fishaudio", model: FISH.id, voiceId: "fv_harbour", label: "Harbour", attributes: [], local: false, canClone: false };
@@ -130,6 +152,8 @@ async function withHarness(
     reload: () => Promise<void>;
     /** What a window connecting now would be told first: the runs going and the cards held. */
     replay: () => DomainEvent[];
+    /** What every refresh of the world told the windows was still going, in order. */
+    refreshes: DomainEvent[][];
   }) => Promise<void>,
 ): Promise<void> {
   const { root, worldDir } = await makeTempRoot();
@@ -184,6 +208,15 @@ async function withHarness(
   });
   const send = (message: ClientMessage) =>
     (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+  // A refresh sends the snapshot and then replays every run on the register: what the replay
+  // held at each refresh is what a window was told, so it is kept for the tests to read.
+  const transport = (coordinator as unknown as { transport: { broadcastSnapshot: () => void; opts: { getInitialEvents: () => DomainEvent[] } } }).transport;
+  const refreshes: DomainEvent[][] = [];
+  const broadcast = transport.broadcastSnapshot.bind(transport);
+  transport.broadcastSnapshot = () => {
+    refreshes.push(transport.opts.getInitialEvents());
+    broadcast();
+  };
   try {
     await run({
       root,
@@ -196,7 +229,8 @@ async function withHarness(
       reload: async () => {
         await provider.openStore!()!.reload();
       },
-      replay: () => (coordinator as unknown as { transport: { opts: { getInitialEvents: () => DomainEvent[] } } }).transport.opts.getInitialEvents(),
+      replay: () => transport.opts.getInitialEvents(),
+      refreshes,
     });
   } finally {
     await provider.close();
@@ -249,25 +283,6 @@ describe("a part already in the queue (codex on PR 1180)", () => {
 describe("a direction held to its block and its reader (SPEC-047 R-10)", () => {
   const GEORGE = { provider: "kokoro", model: KOKORO.id, voiceId: "bm_george", label: "George" };
   const ANNA = { provider: "elevenlabs", model: "eleven-v3", voiceId: "v_anna", label: "Anna" };
-  const V3: ManifestModel = {
-    id: "eleven-v3",
-    provider: "elevenlabs",
-    capability: "voice-tts",
-    displayName: "Eleven v3",
-    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-    limits: { maxPromptChars: 5000, audioFormat: "mp3" },
-    pricing: { kind: "perCharacter", microUsdPerCharacter: 100 },
-    cadence: {
-      deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"],
-      speed: { min: 0.7, max: 1.2 },
-      pause: "best-effort-audio-tag",
-      emphasis: "best-effort-capitalization",
-      breath: "best-effort-audio-tag",
-      outputTimestamps: "none",
-      phrase: "best-effort-tag",
-      deliveryMappings: { measured: { settings: { stability: 0.5 } }, whispered: { settings: { stability: 0.5 }, tag: "whispers" }, cold: { settings: { stability: 1 }, tag: "coldly" } },
-    },
-  };
   const narration: DirectableBlock = { key: "p0.0", text: "Maren counted the bells, and the bells did not answer.", reader: GEORGE, model: KOKORO };
   const line: DirectableBlock = { key: "p1.0", text: "“That is not how it works,” she said to the water.", reader: ANNA, model: V3 };
 
@@ -380,11 +395,13 @@ describe("a direction held to its block and its reader (SPEC-047 R-10)", () => {
 
 describe("the audiobook run (turn 146)", () => {
   it("reads every block in the narrator's voice, files each take as the production's artifact, and a second press makes nothing", () =>
-    withHarness({}, async ({ worldDir, events, spoken, send, bundle }) => {
+    withHarness({}, async ({ worldDir, events, spoken, send, bundle, refreshes }) => {
       await read(send);
       const finished = events.filter((e): e is Finished => e.type === "audiobook.finished");
       assert.equal(finished.length, 1);
       assert.equal(finished[0]!.outcome, "read", finished[0]!.reason);
+      assert.ok(refreshes.length > 0, "the run refreshes the world it wrote");
+      assert.equal(refreshes.at(-1)!.some((e) => e.type === "audiobook.started"), false, "the refresh after the run replays no run: it is off the register first (the door's live check on slice 3)");
       const progress = events.filter((e): e is Progress => e.type === "audiobook.progress");
       assert.ok(progress.length >= 2, "the title and at least one paragraph");
       assert.ok(progress.every((e) => e.outcome === "made"), "every block made locally");
@@ -975,4 +992,181 @@ describe("the audiobook run (turn 146)", () => {
       assert.equal(finished.reason, "cast moved · cast again");
       assert.equal(spoken.length, 0);
     }));
+});
+
+describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
+  type Door = Extract<DomainEvent, { type: "audiobook.door" }>;
+  type BookStarted = Extract<DomainEvent, { type: "audiobook.book-started" }>;
+  type BookPriced = Extract<DomainEvent, { type: "audiobook.book-priced" }>;
+  type BookFinished = Extract<DomainEvent, { type: "audiobook.book-finished" }>;
+  const openDoor = async (send: (message: ClientMessage) => Promise<void>, events: DomainEvent[], requestId = "01J8F3K2QW9VZX4N7M0RTYB6D1") => {
+    await send({ kind: "open-audiobook", worldId: WORLD_ID, productionId: LEDGER, requestId });
+    const answer = events.filter((e): e is Door => e.type === "audiobook.door" && e.requestId === requestId).at(-1);
+    assert.ok(answer, "the door answers");
+    return answer.door;
+  };
+  const readBook = (send: (message: ClientMessage) => Promise<void>, extra: { confirmationToken?: string } = {}) => send({ kind: "read-audiobook-book", worldId: WORLD_ID, productionId: LEDGER, ...extra });
+  /** Two chapters make a book here: the fixture's last two are retired, or a read of it is a minute of filing takes. */
+  const twoChapters = async (worldDir: string) => {
+    for (const file of ["03-nothing-wrong-with-it", "04-her-own-hand"]) {
+      const path = join(worldDir, "productions", LEDGER, "chapters", `${file}.md`);
+      const raw = await readFile(path, "utf8");
+      await writeFile(path, raw.replace(/^---\r?\n/, "---\nretired: true\n"));
+    }
+  };
+
+  it("the door says what every chapter stands at, who reads, and what a press would spend, and the book reads every chapter in order", () =>
+    withHarness({ durations: () => 3, before: twoChapters }, async ({ worldDir, events, spoken, send, refreshes }) => {
+      const before = await openDoor(send, events);
+      assert.equal(before.reading, "narrator");
+      assert.deepEqual(before.rows.map((row) => [row.order, row.planned, audiobookRowLabel(row)]), [[1, false, "not read"], [2, false, "not read"]], "a retired chapter is no row");
+      assert.deepEqual(before.voices.map((v) => [v.name, v.state, v.voice?.local]), [["George", "narrator", true]], "under the narrator's reading every block is the narrator's");
+      assert.equal(before.price.chapters, 2);
+      assert.equal(before.price.estimatedMicroUsd, 0, "a local narrator costs nothing");
+      assert.deepEqual(before.price.voices.map((v) => [v.label, v.local, v.estimatedMicroUsd]), [["George", true, 0]]);
+      const line = audiobookDoorLine(before.rows);
+      assert.equal(line.line, "0 of 2 chapters read");
+
+      await readBook(send);
+      const started = events.find((e): e is BookStarted => e.type === "audiobook.book-started");
+      assert.equal(started?.chapters, 2);
+      assert.ok(started!.blocks > 2);
+      const finished = events.find((e): e is BookFinished => e.type === "audiobook.book-finished");
+      assert.equal(finished?.outcome, "read", finished?.reason);
+      assert.equal(finished?.chaptersRead, 2);
+      assert.equal(events.filter((e) => e.type === "audiobook.finished").length, 2, "each chapter its own run");
+      assert.equal(events.filter((e) => e.type === "audiobook.priced").length, 0, "no chapter asked its own price");
+      assert.equal(events.filter((e) => e.type === "audiobook.book-progress").length, 2);
+      const chapterOrder = events.filter((e): e is Extract<DomainEvent, { type: "audiobook.started" }> => e.type === "audiobook.started").map((e) => e.chapterId);
+      assert.deepEqual(chapterOrder, ["neap", "the-same-ink"], "in the book's order");
+      for (const file of ["01-neap", "02-the-same-ink"]) assert.ok(existsSync(recordPath(worldDir, file)));
+      assert.ok(refreshes.length > 0, "the book refreshes the world it wrote");
+      assert.equal(refreshes.at(-1)!.some((e) => e.type === "audiobook.book-started" || e.type === "audiobook.started"), false, "the refresh after the book replays no run");
+
+      const after = await openDoor(send, events, "01J8F3K2QW9VZX4N7M0RTYB6D2");
+      assert.ok(after.rows.every((row) => audiobookRowLabel(row).startsWith("read · ")), after.rows.map(audiobookRowLabel).join(" | "));
+      assert.equal(after.price.chapters, 0, "nothing left to make");
+      assert.match(audiobookDoorLine(after.rows).line, /^2 of 2 chapters read · \d+:\d\d$/);
+      const count = spoken.length;
+      await readBook(send);
+      assert.equal(spoken.length, count, "a second press makes nothing");
+      assert.equal(events.filter((e): e is BookStarted => e.type === "audiobook.book-started").at(-1)?.chapters, 0);
+    }));
+
+  it("the book is priced once for every chapter's cloud blocks, and the chapters read on that answer", () =>
+    withHarness({ cloud: [LOW_TIDE] }, async ({ events, send }) => {
+      await send({ kind: "set-credential", provider: "elevenlabs", key: "k-test" });
+      await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "cast" });
+      const door = await openDoor(send, events);
+      assert.equal(door.reading, "cast");
+      assert.deepEqual(door.voices.map((v) => [v.name, v.state, v.voice?.label]), [["George", "narrator", "George"], ["Maren Kest", "reads", "Low tide"]], "the speaker with the voice that reads her");
+      assert.equal(door.price.estimatedMicroUsd, SPAN.length * 300, "the one cloud line");
+      assert.deepEqual(door.price.voices.map((v) => [v.label, v.local, v.estimatedMicroUsd > 0]), [["George", true, false], ["Low tide", false, true]]);
+
+      await readBook(send);
+      const priced = events.find((e): e is BookPriced => e.type === "audiobook.book-priced");
+      assert.ok(priced, "asked once");
+      assert.equal(priced.estimatedMicroUsd, SPAN.length * 300);
+      assert.equal(priced.chapters, 1, "the one chapter with a cast; the others are refused under cast and left to their rows");
+      assert.equal(priced.cloudBlocks, 1);
+      assert.equal(events.filter((e) => e.type === "audiobook.book-finished").length, 0, "a priced book waits for its answer");
+      await readBook(send, { confirmationToken: priced.confirmationToken });
+      const finished = events.find((e): e is BookFinished => e.type === "audiobook.book-finished");
+      assert.equal(finished?.outcome, "read", finished?.reason);
+      assert.equal(finished?.chaptersRefused, 3);
+      assert.equal(events.filter((e) => e.type === "audiobook.priced").length, 0, "no chapter asked again");
+      assert.equal(finished?.flagged, 1, "the cloud line has no provider behind the queue here, and is flagged as the chapter's own press would flag it");
+    }));
+
+  it("under cast, a chapter whose cast is not current is left to its row and counted, and a voice that cannot speak now is said on the voices row", () =>
+    withHarness({ castHash: `sha256:${"0".repeat(64)}` }, async ({ events, send }) => {
+      await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "cast" });
+      const door = await openDoor(send, events);
+      assert.equal(audiobookRowLabel(door.rows[0]!), "cast moved · cast again");
+      assert.ok(door.rows.slice(1).every((row) => audiobookRowLabel(row) === "not cast · cast the lines first"), "the other chapters have no cast at all");
+      // Maren's ElevenLabs voice is assigned but no catalogue lists it: the narrator stands in, and the row says so.
+      assert.deepEqual(door.voices.map((v) => [v.name, v.state]), [["George", "narrator"], ["Maren Kest", "voice unavailable"]]);
+      await readBook(send);
+      const finished = events.find((e): e is BookFinished => e.type === "audiobook.book-finished");
+      assert.equal(finished?.outcome, "read");
+      assert.equal(finished?.chaptersRefused, 4);
+      assert.equal(finished?.chaptersRead, 0);
+    }));
+
+  it("a stop leaves the takes made so far, and the next press reads the rest (R-18)", async () => {
+    let releaseSecond: () => void = () => {};
+    const second = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    let calls = 0;
+    await withHarness(
+      {
+        before: twoChapters,
+        synthesize: async (_request, options) => {
+          calls += 1;
+          if (calls === 2) {
+            await Promise.race([second, new Promise<void>((resolve) => options?.signal?.addEventListener("abort", () => resolve(), { once: true }))]);
+            if (options?.signal?.aborted) throw new Error("aborted");
+          }
+          return wav();
+        },
+      },
+      async ({ worldDir, events, send }) => {
+        const run = readBook(send);
+        while (calls < 2) await new Promise((resolve) => setTimeout(resolve, 5));
+        await send({ kind: "stop-audiobook-book", worldId: WORLD_ID, productionId: LEDGER });
+        await run;
+        const finished = events.find((e): e is BookFinished => e.type === "audiobook.book-finished");
+        assert.equal(finished?.outcome, "stopped");
+        assert.equal(finished?.made, 1, "the title of the first chapter stands");
+        assert.ok(existsSync(recordPath(worldDir, "01-neap")));
+        assert.ok(!existsSync(recordPath(worldDir, "02-the-same-ink")), "the second chapter was never reached");
+        releaseSecond();
+        await readBook(send);
+        const again = events.filter((e): e is BookFinished => e.type === "audiobook.book-finished").at(-1);
+        assert.equal(again?.outcome, "read", again?.reason);
+        assert.equal(again?.chaptersRead, 2);
+        const first = await readRecord(worldDir, "01-neap");
+        assert.ok(first.takes["title"] && Object.keys(first.takes).length > 1, "the first chapter's remaining blocks were made, the title kept");
+      },
+    );
+  });
+
+  it("switching the reading re-checks every standing direction against its new reader, dropping what that row cannot carry and saying how many (R-13)", () =>
+    withHarness(
+      {
+        models: [ELEVEN, KOKORO, FISH, V3],
+        cloud: [{ provider: "elevenlabs", model: V3.id, voiceId: "v_8Kq2", label: "Low tide", attributes: [], local: false, canClone: false }],
+        before: async (worldDir) => {
+          const sheet = join(worldDir, "characters", "maren-kest.md");
+          const raw = await readFile(sheet, "utf8");
+          const swapped = raw.replace(/voice:\r?\n  provider: elevenlabs\r?\n  voiceId: v_8Kq2\r?\n  label: Low tide\r?\n/, `voice:\n  provider: elevenlabs\n  model: ${V3.id}\n  voiceId: v_8Kq2\n  label: Low tide\n`);
+          assert.notEqual(swapped, raw);
+          await writeFile(sheet, swapped);
+        },
+      },
+      async ({ worldDir, events, send }) => {
+        await send({ kind: "set-credential", provider: "elevenlabs", key: "k-test" });
+        await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "cast" });
+        // Maren's line, directed for Eleven v3: whispered, with a phrase — both beyond Kokoro.
+        const door = await openDoor(send, events);
+        const line = door.rows[0]!;
+        assert.equal(line.castTrouble, undefined);
+        await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p0.1", direction: { delivery: "whispered", speed: 1, cues: [], phrase: "under her breath" } });
+        type Recorded = Extract<DomainEvent, { type: "audiobook.record" }>;
+        const written = events.filter((e): e is Recorded => e.type === "audiobook.record").at(-1);
+        assert.ok(written?.record, written?.refused);
+        assert.equal(written.record.direction["p0.1"]?.plan.delivery, "whispered");
+
+        await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "narrator" });
+        type Conformed = Extract<DomainEvent, { type: "audiobook.conformed" }>;
+        const conformed = events.find((e): e is Conformed => e.type === "audiobook.conformed");
+        assert.ok(conformed, "said how many");
+        assert.equal(conformed.dropped, 2, "the whisper and the phrase");
+        assert.equal(conformed.chapters, 1);
+        const record = await readRecord(worldDir);
+        assert.equal(record.direction["p0.1"]?.plan.delivery, "measured", "fallen to what Kokoro reads");
+        assert.equal(record.direction["p0.1"]?.plan.phrase, undefined);
+      },
+    ));
 });
