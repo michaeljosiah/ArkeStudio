@@ -56,6 +56,7 @@ export interface FsWorldProviderOptions {
 export class FsWorldProvider implements WorldProvider {
   private store: WorldStore | null = null;
   private closing = false;
+  private closeAttempt: Promise<void> | null = null;
   private worldAccessTail: Promise<void> = Promise.resolve();
   private onAdoptedCb: ((worldId: string) => void) | null = null;
   private onLockErrorCb: ((worldId: string, message: string, consecutive: number) => void) | null = null;
@@ -694,9 +695,10 @@ export class FsWorldProvider implements WorldProvider {
     return this.store!.getBundle();
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    if (this.closeAttempt) return this.closeAttempt;
     this.closing = true;
-    try {
+    this.closeAttempt = (async () => {
       await this.worldAccessTail;
       await this.closeStore();
       try {
@@ -706,12 +708,12 @@ export class FsWorldProvider implements WorldProvider {
       }
       this.appIndex = null;
       this.appIndexReady = false;
-      // Closing drains this set of resources; an explicit later load may reuse the provider.
+    })().finally(() => {
+      // A later explicit load may reuse the provider, but overlapping closes share this drain.
       this.closing = false;
-    } catch (error) {
-      this.closing = false;
-      throw error;
-    }
+      this.closeAttempt = null;
+    });
+    return this.closeAttempt;
   }
 
   /** Read-only scan of an arbitrary world directory — the corpus/tests entry point. */

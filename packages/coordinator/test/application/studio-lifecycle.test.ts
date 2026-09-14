@@ -114,3 +114,30 @@ it("shutdown refuses a queued world switch before loading or resuming it", async
   assert.deepEqual(loads, [WORLD_ID]);
   assert.equal(events.some(event => event.type === "world.opened"), false);
 });
+
+
+it("overlapping provider closes keep admission shut until the detached store finishes draining", async t => {
+  const { root } = await makeTempRoot();
+  const provider = new FsWorldProvider(root);
+  t.after(() => provider.close());
+  const other = await provider.createWorld({ name: "Second world" });
+  await provider.loadWorld(WORLD_ID);
+  const store = provider.openStore()!;
+  const close = store.close.bind(store);
+  let entered!: () => void; let release!: () => void;
+  const draining = new Promise<void>(resolve => { entered = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  store.close = async () => { entered(); await held; return close(); };
+  const first = provider.close();
+  await draining;
+  const second = provider.close();
+  try {
+    await new Promise<void>(resolve => setImmediate(resolve));
+    await assert.rejects(provider.loadWorld(other.worldId), /closing/);
+  } finally { release(); }
+  await Promise.all([first, second]);
+  assert.equal(provider.openStore(), null);
+  assert.equal(store.isClosed(), true);
+  await provider.loadWorld(other.worldId);
+  assert.equal(provider.openStore()!.worldId, other.worldId);
+});
