@@ -75,3 +75,33 @@ Coordinator `test/application/engine.test.ts` exercises the real filesystem gate
 `npm test --workspace @arke-studio/engine` builds, packs, installs into an OS temporary directory outside the monorepo, executes the journey and typechecks an external consumer. It uses a deterministic provider and requires registry access for declared dependencies. CI runs it on Windows and Linux with the workspace tests. No paid generation is involved.
 
 These tests establish an application boundary and simulated recovery behavior. Production hosts still need authoritative restore/finalisation, atomic fencing (#468), scoped secrets, real content policy, idempotent allowance accounting and operational recovery procedures. Aonik adapters, commercial workflows, monthly scheduling, printing and interactive episodes remain outside this package.
+
+## Coordinator extraction toward a server host (epic #1182)
+
+The first authoring extraction is internal to Studio. It does not expand the public engine API
+or establish cloud authorization and storage guarantees.
+
+| Responsibility | New owner | Still supplied by Studio |
+|---|---|---|
+| Validate conversation context, start/retry a turn, cancel production setup | `application/conversation-authoring.ts` | Authorized open store, cached runner and optional naming pass |
+| Assemble writing sessions, leased retrieval, chapter/setup briefs, receipts and validation | `application/conversation-runs.ts` | Harness adapter, session configuration, query endpoint, model/research policy, action adapters and operator notifications |
+| Open a prose workspace with its derived records; create/save/edit/restore/retire chapters | `application/prose-authoring.ts` | Authorized open store, request/result events, snapshot sequencing and save draining |
+
+Coordinator keeps runner identity across commands, maps progress and results to Studio events,
+and owns shutdown. Existing `world-chat/run.ts` remains the durable turn state machine;
+`productions/ops.ts` and the proposal gate retain write and history rules. Direct chapter saves
+do not become proposals or cut a new accepted version. Generated chapter proposals still use
+the existing explicit acceptance path. The authoring service returns a completion promise so
+Studio can publish a running turn before waiting for the model; optional naming never delays
+the reply.
+
+Regression baseline: `test/application/conversation-authoring.test.ts` covers the extracted
+boundary, scratch/lease cleanup, rejected contexts, chapter grounding and stale-save/reopen
+behaviour. Preserve the existing world-chat run, retry, cache, recovery and chapter/proposal
+suites. Model quality and production cloud persistence are not demonstrated by these tests.
+
+Next, move the remaining production creation/action orchestration behind scoped services and
+add the public authoring contracts, durable operation/save outcomes and external consumer proof.
+Only then consolidate the Studio server host: Electron-managed or standalone Node startup,
+using the existing authenticated transport for desktop and browser clients. Kidz embeds the
+engine in its own Node server and supplies its private product and Aonik integrations.
