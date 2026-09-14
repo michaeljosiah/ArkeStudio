@@ -1118,8 +1118,12 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
    * offered as one card, accepted whole through `accept-direction` or discarded in the window.
    * Nothing is written by the run itself.
    */
-  /** The door's answer (SPEC-047 R-29): what every chapter stands at, who reads, and what a press would spend. */
-  z.object({ ...base, type: z.literal("audiobook.door"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, door: AudiobookDoorSchema }).strict(),
+  /**
+   * The door's answer (SPEC-047 R-29): what every chapter stands at, who reads, and what a
+   * press would spend — or, when the door could not be read, no door and the reason, so the
+   * window is never left opening.
+   */
+  z.object({ ...base, type: z.literal("audiobook.door"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, door: AudiobookDoorSchema.nullable(), refused: z.string().min(1).optional() }).strict(),
   /**
    * The book read as one run (SPEC-047 R-16..R-18): started under the run's request (a cloned
    * voice's consent is asked under it), priced once for every chapter's cloud blocks, a chapter

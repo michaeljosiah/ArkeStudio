@@ -71,7 +71,8 @@ export function AudiobookScreen() {
   const { production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
   const connection = useStore().connection;
-  const door = useAudiobookDoors()[prodId ?? ""]?.door ?? null;
+  const held = useAudiobookDoors()[prodId ?? ""];
+  const door = held?.door ?? null;
   const book = useAudiobookBooks()[prodId ?? ""];
   const note = useAudiobookNotes()[prodId ?? ""];
   const runs = useAudiobookRuns();
@@ -256,7 +257,7 @@ export function AudiobookScreen() {
           })}
         </div>
       ) : (
-        <EmptyState title={door === null ? "Opening…" : "No chapters yet"} />
+        <EmptyState title={door === null ? (held?.refused ?? "Opening…") : "No chapters yet"} />
       )}
       {book?.state === "priced" && book.price !== undefined && (
         <BookPriceSheet

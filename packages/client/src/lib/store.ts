@@ -284,7 +284,7 @@ interface StoreState {
    * reads, and the price of a press, as the coordinator last answered; and `Read the book`,
    * the chapter's run over the whole book, keyed by production like the chapters' by chapter.
    */
-  audiobookDoor: Record<string, { door: import("@arke-studio/contracts").AudiobookDoor; requestId: string }>;
+  audiobookDoor: Record<string, { door: import("@arke-studio/contracts").AudiobookDoor | null; requestId: string; refused?: string }>;
   audiobookBook: Record<
     string,
     {
@@ -1589,7 +1589,7 @@ function handleFrame(json: string): void {
         };
       }
     } else if (event.type === "audiobook.door") {
-      audiobookDoor = { ...audiobookDoor, [event.productionId]: { door: event.door, requestId: event.requestId } };
+      audiobookDoor = { ...audiobookDoor, [event.productionId]: { door: event.door, requestId: event.requestId, ...(event.refused !== undefined ? { refused: event.refused } : {}) } };
     } else if (event.type === "audiobook.book-started") {
       // A replayed start carries no counts: a window that holds the run keeps what it knows.
       if (event.replayed !== true || audiobookBook[event.productionId] === undefined) {

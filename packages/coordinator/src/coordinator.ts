@@ -11784,6 +11784,7 @@ export class Coordinator {
           this.emit({ at: new Date().toISOString(), type: "audiobook.door", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, door });
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.door-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
+          this.emit({ at: new Date().toISOString(), type: "audiobook.door", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, door: null, refused: describeCoordinatorError(err) });
         }
         return;
       }

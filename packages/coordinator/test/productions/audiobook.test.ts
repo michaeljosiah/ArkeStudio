@@ -1003,6 +1003,7 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
     await send({ kind: "open-audiobook", worldId: WORLD_ID, productionId: LEDGER, requestId });
     const answer = events.filter((e): e is Door => e.type === "audiobook.door" && e.requestId === requestId).at(-1);
     assert.ok(answer, "the door answers");
+    assert.ok(answer.door !== null, answer.refused);
     return answer.door;
   };
   const readBook = (send: (message: ClientMessage) => Promise<void>, extra: { confirmationToken?: string } = {}) => send({ kind: "read-audiobook-book", worldId: WORLD_ID, productionId: LEDGER, ...extra });

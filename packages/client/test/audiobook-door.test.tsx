@@ -268,5 +268,11 @@ describe("the Audiobook door (turn 146)", () => {
     const items = all(m, ".fy-prodrail__item").map((item) => item.textContent?.replace(/[0-9—/]+$/, "").trim());
     const chapters = items.findIndex((label) => label?.startsWith("Chapters"));
     assert.equal(items[chapters + 1]?.startsWith("Audiobook"), true, "between Chapters and Artifacts");
+    // A door that could not be read answers with the reason, never with a screen left opening.
+    const ask = m.sent.findLast((message) => message.kind === "open-audiobook") as Extract<ClientMessage, { kind: "open-audiobook" }>;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.door", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", door: null, refused: "the chapter file is gone" }));
+    assert.match(rail.textContent ?? "", /—/);
+    assert.match(text(m), /the chapter file is gone/);
+    assert.doesNotMatch(text(m), /Opening…/);
   });
 });
