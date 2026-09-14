@@ -1,4 +1,4 @@
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AudiobookBookSchema,
@@ -32,10 +32,14 @@ import { readVoices } from "./voices.js";
  * gate's, read plainly by the scanner and never through a manifest, written through the store's
  * ownership-checked path so a run that finishes after the world's claim was lost writes nothing.
  * The takes themselves are artifacts; these records are the index of what is made and chosen.
+ *
+ * The chapters' records sit under `chapters/`, apart from the book's file: a chapter's file
+ * stem is unconstrained, and one named `book` would otherwise write its record over the book's
+ * reading and lose every take it had chosen the moment the reading changed (codex on PR 1180).
  */
 
 export function audiobookPath(productionId: string, chapterFile: string): string {
-  return `productions/${productionId}/.audiobook/${chapterFile}.json`;
+  return `productions/${productionId}/.audiobook/chapters/${chapterFile}.json`;
 }
 
 export function audiobookBookPath(productionId: string): string {
@@ -124,6 +128,7 @@ export function assignReaders(
   sheets: readonly Sheet[],
   clonedVoices: readonly ClonedVoice[],
   record: ChapterAudiobook | null,
+  hasArtifact?: (artifactId: string) => boolean,
 ): PlannedBlock[] {
   return blocks.map((block) => {
     const planned = ((): Omit<PlannedBlock, "state" | "block"> => {
@@ -140,8 +145,28 @@ export function assignReaders(
         sheetVersion: voice.assignedAtVersion,
       };
     })();
-    return { block, ...planned, state: audiobookBlockState(block, record, planned.assigned) };
+    return { block, ...planned, state: audiobookBlockState(block, record, planned.assigned, hasArtifact) };
   });
+}
+
+/**
+ * The takes a record names that are still on the shelf (codex on PR 1180): the sidecar in the
+ * bundle, not retired, and its media on disk. The record is an index, and a world carried by
+ * hand can lose either; a block whose take is gone reads as not made, so it is made again
+ * rather than shown as made and unplayable.
+ */
+export async function presentTakes(store: WorldStore, record: ChapterAudiobook | null): Promise<Set<string>> {
+  const present = new Set<string>();
+  if (record === null) return present;
+  const artifacts = store.getBundle().artifacts;
+  for (const take of Object.values(record.takes)) {
+    if (present.has(take.artifactId)) continue;
+    const sidecar = artifacts.find((artifact) => artifact.id === take.artifactId);
+    if (sidecar === undefined || sidecar.retiredAt !== undefined) continue;
+    const there = await stat(toExtendedLength(join(store.dir, "artifacts", fromPortable(sidecar.file)))).then((s) => s.isFile(), () => false);
+    if (there) present.add(take.artifactId);
+  }
+  return present;
 }
 
 export interface AudiobookPlan {
@@ -177,7 +202,8 @@ export async function planAudiobook(
   const reading = book === null || book === "unreadable" ? DEFAULT_AUDIOBOOK_BOOK.reading : book.reading;
   const derived = audiobookBlocks(opened.body, cast === "unreadable" ? null : cast, audiobookHeading(summary.order, summary.title));
   const sheets = store.getBundle().sheets.filter((sheet) => sheet.type === "character" && !sheet.retired);
-  const blocks = assignReaders(derived.blocks, reading, input.narrator, sheets, store.getBundle().clonedVoices ?? [], record === "unreadable" ? null : record);
+  const present = await presentTakes(store, record === "unreadable" ? null : record);
+  const blocks = assignReaders(derived.blocks, reading, input.narrator, sheets, store.getBundle().clonedVoices ?? [], record === "unreadable" ? null : record, (artifactId) => present.has(artifactId));
   return {
     chapter: { id: summary.id, file: summary.file, title: summary.title, order: summary.order, version: opened.version, hash: sha256(opened.body) },
     body: opened.body,

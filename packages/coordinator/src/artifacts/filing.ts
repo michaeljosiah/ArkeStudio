@@ -570,8 +570,23 @@ export async function fileGeneratedArtifact(
   const identity = generatedIdentity(input.generation, basename(original, extname(original)));
   const kind = kindForFile(original);
   const filed = await store.gateOp(async () => {
-    const existing = store.getBundle().artifacts.find(identity.isSame);
-    if (existing) return { artifact: existing, created: false };
+    // A retired artifact is off the shelf by the person's word: the same identity made again
+    // is a new artifact beside it, never the retired one handed back.
+    const existing = store.getBundle().artifacts.find((artifact) => identity.isSame(artifact) && artifact.retiredAt === undefined);
+    if (existing) {
+      // The same take filed again is the take already on the shelf — unless its media is gone,
+      // as a world carried by hand can lose it: then the file is restored under the sidecar it
+      // always had, so the id every record names stays true and the block is made rather than
+      // handed its dead take back (codex on PR 1180). The hash and the making are the new
+      // file's; the id, the links and the owner are the old one's.
+      const media = join(store.dir, "artifacts", existing.file);
+      if ((await lstat(toExtendedLength(media)).catch(() => null)) !== null) return { artifact: existing, created: false };
+      await atomicWriteFile(media, bytes);
+      const current = await currentSidecar(store, existing);
+      const restored: ArtifactSidecar = { ...(current?.sidecar ?? existing), hash: hash as ArtifactSidecar["hash"], generation: input.generation };
+      await writeSidecar(store, restored, current?.raw ?? null);
+      return { artifact: restored, created: true };
+    }
 
     const taken = new Set(store.getBundle().artifacts.map((artifact) => artifact.file));
     let file = `${identity.stem}${ext}`;

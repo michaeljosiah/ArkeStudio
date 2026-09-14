@@ -569,8 +569,9 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
           return parsed.success ? summariseVoices(parsed.data) : { unreadable: true as const };
         })
         .catch((err: NodeJS.ErrnoException) => (err.code === "ENOENT" ? null : { unreadable: true as const }));
-      // The audiobook record beside the chapter (turn 146, SPEC-047 R-1), the same way: its stamp.
-      const audiobook: ChapterAudiobookState | null = await read(join(pdir, ".audiobook", `${stem}.json`))
+      // The audiobook record beside the chapter (turn 146, SPEC-047 R-1), the same way: its
+      // stamp. Under `chapters/`, apart from the book's file, so a chapter named `book` is its own.
+      const audiobook: ChapterAudiobookState | null = await read(join(pdir, ".audiobook", "chapters", `${stem}.json`))
         .then((raw) => {
           const parsed = ChapterAudiobookSchema.safeParse(JSON.parse(raw));
           return parsed.success ? summariseAudiobook(parsed.data) : { unreadable: true as const };
