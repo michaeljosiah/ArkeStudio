@@ -47,7 +47,7 @@ export class EngineOperations {
     const running = this.active.get(key);
     if (running) {
       if (running.fingerprint !== fingerprint) throw new Error("Operation ID reused with different input.");
-      return running.promise as Promise<T>;
+      return structuredClone(await running.promise) as T;
     }
     const promise = (async () => {
       const claimed = await this.store.begin({ key, fingerprint, context: structuredClone(context), resource, action, status: "started" });
@@ -63,7 +63,7 @@ export class EngineOperations {
       return result;
     })();
     this.active.set(key, { fingerprint, promise });
-    try { return await promise; }
+    try { return structuredClone(await promise); }
     finally { if (this.active.get(key)?.promise === promise) this.active.delete(key); }
   }
 

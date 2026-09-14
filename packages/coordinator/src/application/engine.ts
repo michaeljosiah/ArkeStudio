@@ -54,6 +54,3 @@ export function createEngine(options: EngineOptions) {
 export type { EngineContext };
 export * from "./contracts.js";
 export { EngineOperationUncertainError, engineHash } from "./operations.js";
-export { WorldSessionService } from "./world-sessions.js";
-export { ProposalApplicationService } from "./proposals.js";
-export { IllustrationApplicationService } from "./generation.js";

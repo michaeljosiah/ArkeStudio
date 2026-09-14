@@ -22,6 +22,11 @@ async function harness(t: TestContext) {
   const provider = new FsWorldProvider(root);
   await provider.loadWorld(WORLD_ID);
   const fake = new FakeProvider({ supportsIdempotencyKey: true });
+  const submit = fake.submit.bind(fake);
+  fake.submit = async (key, request) => {
+    assert.equal("engineOperation" in request.params, false, "host identity and reservation stay out of provider parameters");
+    return submit(key, request);
+  };
   fake.artifacts = [{ name: "portrait.png", contentType: "image/png", data: pngBytes() }];
   const state = { revoked: false, held: false, refuse: false, failSave: false, failSettlement: false, saves: 0, charges: 0, releases: 0 };
   const settled = new Set<string>();
@@ -68,6 +73,8 @@ it("real gate journey saves before receipt, replays after restart and restricts 
   const initial = await h.engine.worlds.read(parent, WORLD_ID);
   const proposed = await h.engine.proposals.propose(parent, WORLD_ID, { ...draft, expectedRevision: initial.revision });
   assert.equal(proposed.revision, "1");
+  const rows = (await readFile(join(h.root, "operations.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+  assert.deepEqual(rows.find(row => row.action === "propose").context, parent);
   assert.equal((await h.engine.worlds.read(child, WORLD_ID)).bundle.proposals.length, 0);
   await assert.rejects(h.engine.proposals.accept(child, WORLD_ID, proposed.value.proposal.id, { operationId: "accept" }), /Forbidden/);
   const accepted = await h.engine.proposals.accept(parent, WORLD_ID, proposed.value.proposal.id,
@@ -188,4 +195,16 @@ it("an enqueue response lost after durable admission cannot blindly submit again
   assert.equal((await restarted.illustrations.reconcile(parent, WORLD_ID, input.operationId)).status, "needs-reconciliation");
   assert.equal(h.fake.submitCount, 1);
   assert.equal(h.state.charges + h.state.releases, 0);
+});
+
+it("a background authoring call uses its named world while Studio has another world selected", async t => {
+  const h = await harness(t);
+  const other = await h.provider.createWorld({ name: "Another world" });
+  await h.provider.loadWorld(other.worldId);
+  const proposed = await h.engine.proposals.propose(parent, WORLD_ID, draft);
+  assert.equal(h.provider.openStore()!.worldId, other.worldId);
+  assert.equal(h.provider.openStore()!.getBundle().proposals.some(p => p.proposal.id === proposed.value.proposal.id), false);
+  const owner = await h.engine.worlds.read(parent, WORLD_ID);
+  assert.ok(owner.bundle.proposals.some(p => p.proposal.id === proposed.value.proposal.id));
+  assert.equal(h.provider.openStore()!.worldId, other.worldId);
 });
