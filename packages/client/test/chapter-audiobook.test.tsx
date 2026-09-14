@@ -6,6 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import {
   audiobookTextHash,
+  type ArtifactSidecar,
   type ChapterAudiobook,
   type ChapterSummary,
   type ChapterVoices,
@@ -57,6 +58,39 @@ const CHAPTERS: ChapterSummary[] = [
   { id: "neap", file: "01-neap", order: 2, title: "The counting of bells", status: "drafting", version: 4, words: 1900, bodyHash: HASH },
 ];
 
+/** A kept take on the shelf: what a record's `artifactId` must name for a block to be made. */
+function takeArtifact(id: string, chapterId: string, block = "title"): ArtifactSidecar {
+  return {
+    id,
+    kind: "audio",
+    file: `${chapterId}-${block}.wav`,
+    hash: `sha256:${"b".repeat(16)}`,
+    origin: { by: "system", producedBy: "audiobook" },
+    links: [chapterId],
+    production: "inkbound",
+    generation: {
+      source: "audiobook",
+      productionId: "inkbound",
+      chapterId,
+      chapterVersion: 4,
+      block,
+      paragraph: block === "title" ? -1 : 0,
+      textHash: "text-v1:x",
+      provider: "kokoro",
+      model: "kokoro-82m",
+      voiceId: "bm_george",
+      voiceLabel: "George",
+      parts: 1,
+      characters: 10,
+      estimatedMicroUsd: 0,
+      costMicroUsd: 0,
+    },
+    created: AT,
+  };
+}
+/** The one artifact every take in `record()` names, so a made block has its file on the shelf. */
+const KEPT = "ar_01J8F3K2QW9VZX4N7M0RTYB6H1";
+
 function inkbound(reading: "narrator" | "cast" = "narrator"): ClientState {
   const world = FIXTURE_STATE.world!;
   const salt = world.productions.find((p) => p.meta.id === "saltlight")!;
@@ -64,6 +98,7 @@ function inkbound(reading: "narrator" | "cast" = "narrator"): ClientState {
     ...FIXTURE_STATE,
     world: {
       ...world,
+      artifacts: [...world.artifacts, takeArtifact(KEPT, "neap", "p0.0")],
       productions: [
         ...world.productions,
         {
@@ -123,7 +158,7 @@ const text = (m: Mounted): string => m.container.textContent ?? "";
 const q = (m: Mounted, selector: string): HTMLElement | null => m.container.querySelector(selector) as HTMLElement | null;
 const all = (m: Mounted, selector: string): HTMLElement[] => [...m.container.querySelectorAll(selector)] as HTMLElement[];
 
-async function answerOpen(m: Mounted, extra: { audiobook?: ChapterAudiobook; voices?: ChapterVoices } = {}): Promise<void> {
+async function answerOpen(m: Mounted, extra: { audiobook?: ChapterAudiobook; audiobookMissing?: string[]; voices?: ChapterVoices } = {}): Promise<void> {
   const ask = m.sent.findLast((message) => message.kind === "open-chapter") as Extract<ClientMessage, { kind: "open-chapter" }>;
   assert.ok(ask, "opening asks for the body");
   await act(async () => {
@@ -158,7 +193,7 @@ function record(keys: readonly string[], texts: Record<string, string>): Chapter
       keys.map((key) => [
         key,
         {
-          artifactId: "ar_01J8F3K2QW9VZX4N7M0RTYB6H1",
+          artifactId: KEPT,
           textHash: audiobookTextHash(texts[key]!),
           reader: { provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george", label: "George" },
           format: "wav" as const,
@@ -308,6 +343,13 @@ describe("the Audiobook view (turn 146)", () => {
     assert.equal(both.confirmationToken, "tok");
     assert.equal(both.voiceUploadConfirmedFor, "engine-1", "the price's answer carries the consent, or the two prompts chase each other");
 
+    // The run over, the consent is spent (codex on PR 1180): the next press is asked again, as
+    // the engine's per-request rule says, rather than sending the recording on this window's word.
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.finished", ...ids, outcome: "read", made: 3, flagged: 1 }));
+    await act(async () => q(m, '[data-testid="read-audiobook"]')!.click());
+    const fresh = m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>;
+    assert.equal(fresh.voiceUploadConfirmedFor, undefined, "a finished run's consent does not ride on the next press");
+
     // Declining the consent: the coordinator's run returned without a finished event, so the window clears its own.
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId, toMake: 4, blocks: 4 }));
     await act(async () =>
@@ -323,35 +365,7 @@ describe("the Audiobook view (turn 146)", () => {
   it("a block's takes are this chapter's, and the press waits out a pending save", async () => {
     const state = inkbound();
     const world = state.world!;
-    const take = (id: string, chapterId: string) =>
-      ({
-        id,
-        kind: "audio" as const,
-        file: `${chapterId}-title.wav`,
-        hash: `sha256:${"b".repeat(16)}`,
-        origin: { by: "system" as const, producedBy: "audiobook" },
-        links: [chapterId],
-        production: "inkbound",
-        generation: {
-          source: "audiobook" as const,
-          productionId: "inkbound",
-          chapterId,
-          chapterVersion: 4,
-          block: "title",
-          paragraph: -1,
-          textHash: "text-v1:x",
-          provider: "kokoro",
-          model: "kokoro-82m",
-          voiceId: "bm_george",
-          voiceLabel: "George",
-          parts: 1,
-          characters: 10,
-          estimatedMicroUsd: 0,
-          costMicroUsd: 0,
-        },
-        created: AT,
-      }) satisfies (typeof world.artifacts)[number];
-    const m = await mount({ ...state, world: { ...world, artifacts: [...world.artifacts, take("ar_01J8F3K2QW9VZX4N7M0RTYB6A1", "neap"), take("ar_01J8F3K2QW9VZX4N7M0RTYB6A2", "slack-water")] } });
+    const m = await mount({ ...state, world: { ...world, artifacts: [...world.artifacts, takeArtifact("ar_01J8F3K2QW9VZX4N7M0RTYB6A1", "neap"), takeArtifact("ar_01J8F3K2QW9VZX4N7M0RTYB6A2", "slack-water")] } });
     await answerOpen(m);
     await act(async () => all(m, ".fy-ab__block")[0]!.click());
     const takes = q(m, '[data-testid="audiobook-takes"]')!;
@@ -380,6 +394,45 @@ describe("the Audiobook view (turn 146)", () => {
       before + 1,
       `sent once the save landed: ${m.sent.map((message) => message.kind).join(" | ")} · ${text(m).slice(0, 200)}`,
     );
+  });
+
+  it("a take the shelf no longer holds is not made, and the press counts it (codex on PR 1180)", async () => {
+    const m = await mount(inkbound());
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." };
+    const held = record(NARRATION_KEYS, texts);
+    held.takes["p1.0"] = { ...held.takes["p1.0"]!, artifactId: "ar_01J8F3K2QW9VZX4N7M0RTYB6H9" };
+    await answerOpen(m, { audiobook: held });
+    assert.deepEqual(all(m, ".fy-ab__block").map((row) => row.getAttribute("data-state")), ["made", "made", "not made", "made"], "the record is an index, not the shelf");
+    assert.equal(q(m, '[data-testid="read-audiobook"]')!.textContent, "Read the chapter · 1 block");
+  });
+
+  it("a take whose media the coordinator found gone is not made until a run's record says otherwise (codex on PR 1183)", async () => {
+    const m = await mount(inkbound());
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." };
+    const held = record(NARRATION_KEYS, texts);
+    await answerOpen(m, { audiobook: held, audiobookMissing: [KEPT] });
+    assert.deepEqual(all(m, ".fy-ab__block").map((row) => row.getAttribute("data-state")), ["not made", "not made", "not made", "not made"], "the sidecar is there; the coordinator says the media is not");
+    assert.equal(q(m, '[data-testid="read-audiobook"]')!.textContent, "Read the chapter · 4 blocks", "the press is offered, so the run can make them again");
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 4 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.finished", ...ids, outcome: "read", made: 4, flagged: 0, record: { ...held, updatedAt: "2026-09-14T10:00:00.000Z" } }));
+    assert.deepEqual(all(m, ".fy-ab__block").map((row) => row.getAttribute("data-state")), ["made", "made", "made", "made"], "the run's record is newer, and what it found gone it has made again");
+  });
+
+  it("a retired character keeps its name in the margin and loses its voice, so the narrator's take for it is made, not stale (codex on PR 1180)", async () => {
+    const state = inkbound("cast");
+    const world = state.world!;
+    const m = await mount({ ...state, world: { ...world, sheets: world.sheets.map((sheet) => (sheet.id === "maren-kest" ? { ...sheet, retired: true } : sheet)) } });
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": "“You hear it too,”", "p1.1": "she said.", "p3.0": "Six, and the tide <br> not yet called." };
+    const held = record(Object.keys(texts), texts);
+    held.takes["p1.0"] = { ...held.takes["p1.0"]!, assigned: held.takes["p1.0"]!.reader, substituted: "no voice", sheet: "maren-kest" };
+    await answerOpen(m, { audiobook: held, voices: CAST });
+    const rows = all(m, ".fy-ab__block");
+    assert.equal(rows.length, 5);
+    const mark = rows[2]!.querySelector(".fy-ab__mark")!;
+    assert.equal(mark.textContent, FIXTURE_STATE.world!.sheets.find((s) => s.id === "maren-kest")!.name, "the speaker's name stays");
+    assert.ok(mark.className.includes("fy-ab__mark--warn"), "and it is said to have no voice");
+    assert.deepEqual(rows.map((row) => row.getAttribute("data-state")), ["made", "made", "made", "made", "made"], "the coordinator made the line in the narrator's stead, and this side agrees");
   });
 
   it("under the cast's reading a line carries its speaker in the margin", async () => {

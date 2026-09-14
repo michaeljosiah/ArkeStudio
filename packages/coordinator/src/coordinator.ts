@@ -265,7 +265,7 @@ import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachm
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { deriveContinuity, makeAdapterContinuityDeriver, readContinuity, type ContinuityDeriver } from "./productions/continuity.js";
 import { castLines, makeAdapterVoicesDeriver, readVoices, type VoicesDeriver } from "./productions/voices.js";
-import { readAudiobook, writeAudiobookBook } from "./productions/audiobook.js";
+import { presentTakes, readAudiobook, writeAudiobookBook } from "./productions/audiobook.js";
 import { runAudiobookChapter } from "./productions/audiobook-run.js";
 import { exportManuscript, importManuscript, readManuscript } from "./productions/manuscript.js";
 import { manuscriptChapters, productionShape, type StructuredDocument } from "@arke-studio/contracts";
@@ -7294,11 +7294,14 @@ export class Coordinator {
         this.emit({ ...base, status: "testing", detail: "Testing Voxa voice synthesis", audioBase64: null });
         try {
           const sidecar = this.opts.voice?.sidecar;
-          if (!sidecar) throw new Error("Voxa is unavailable");
+          if (!sidecar || !this.voiceService) throw new Error("Voxa is unavailable");
           const voices = await sidecar.listVoices();
           const voice = voices[0];
           if (!voice) throw new Error("Voxa returned no compatible voices");
-          const audio = await sidecar.synthesize({
+          // Through the voice service's lane, not straight to the engine (codex on PR 1183): a
+          // test pressed while a read or a run is synthesising would otherwise be the second
+          // request at once that leaves the engine unavailable for the rest of the process.
+          const audio = await this.voiceService.synthesizeOnce({
             voiceId: voice.id,
             text: "The harbour remembers.",
           });
@@ -7600,6 +7603,7 @@ export class Coordinator {
                 voicesUnreadable?: true;
                 audiobook?: ChapterAudiobook;
                 audiobookUnreadable?: true;
+                audiobookMissing?: string[];
               }
             | { disposition: "failed"; reason: string },
         ) =>
@@ -7623,8 +7627,12 @@ export class Coordinator {
           const continuity = await readContinuity(store, msg.productionId, chapter.file);
           // The cast of lines too (turn 130), for the same reason: the bundle has only its stamp.
           const voices = await readVoices(store, msg.productionId, chapter.file);
-          // The audiobook record too (turn 146): the takes come with the chapter, the bundle its stamp.
+          // The audiobook record too (turn 146): the takes come with the chapter, the bundle its
+          // stamp — and which of its takes are gone from the shelf, since the window cannot
+          // look at the media (codex on PR 1183).
           const audiobook = await readAudiobook(store, msg.productionId, chapter.file);
+          const present = audiobook === null || audiobook === "unreadable" ? null : await presentTakes(store, audiobook);
+          const audiobookMissing = present === null || audiobook === null || audiobook === "unreadable" ? [] : [...new Set(Object.values(audiobook.takes).map((take) => take.artifactId))].filter((id) => !present.has(id));
           answer({
             disposition: "opened",
             body: chapter.body,
@@ -7634,6 +7642,7 @@ export class Coordinator {
             ...(continuity === "unreadable" ? { continuityUnreadable: true as const } : continuity !== null ? { continuity } : {}),
             ...(voices === "unreadable" ? { voicesUnreadable: true as const } : voices !== null ? { voices } : {}),
             ...(audiobook === "unreadable" ? { audiobookUnreadable: true as const } : audiobook !== null ? { audiobook } : {}),
+            ...(audiobookMissing.length > 0 ? { audiobookMissing } : {}),
           });
         } catch (err) {
           answer({ disposition: "failed", reason: describeCoordinatorError(err) });
@@ -11514,45 +11523,59 @@ export class Coordinator {
         // made so far standing. The run itself lives in productions/audiobook-run.ts; this is
         // the harness around it: the narrator, the catalogue, the queue and the events.
         const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId || !this.voiceService) return;
+        if (!store || store.worldId !== msg.worldId) return;
         const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
         if (!chapter) return;
         const key = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
         if (this.readingAudiobooks.has(key)) return;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id };
+        const at = () => new Date().toISOString();
+        // A composition without voice answers rather than falling silent (codex on PR 1180):
+        // the press is offered wherever the view is, and `unavailable` is a run's outcome.
+        const voice = this.voiceService;
+        if (!voice) {
+          this.emit({ at: at(), type: "audiobook.finished", ...ids, outcome: "unavailable", made: 0, flagged: 0, reason: "voice is not available in this build" });
+          return;
+        }
         const control = new AbortController();
         const requestId = ulid();
         this.readingAudiobooks.set(key, { control, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id });
         this.audiobookRequests.set(key, requestId);
         const onClose = () => control.abort();
         store.closingSignal.addEventListener("abort", onClose, { once: true });
-        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id };
-        const at = () => new Date().toISOString();
         try {
           const narratorSettings = this.appSettings ? await this.appSettings.load() : null;
           const clonedVoices = store.getBundle().clonedVoices ?? [];
           // The catalogue says whether a concrete voice can speak now (turn 130's rule): the
           // manifest still lists a model whose key was removed or whose engine is down.
-          const catalogue = (await this.voiceService.catalogue(clonedVoices, await this.comfyUiVoiceAvailability()).catch(() => null)) ?? [];
-          const narrationCatalogue = catalogue.filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined);
+          const catalogue = (await voice.catalogue(clonedVoices, await this.comfyUiVoiceAvailability()).catch(() => null)) ?? [];
+          const narrationCatalogue = catalogue.filter((candidate) => supportsVoiceUse(candidate, "narration") && candidate.unavailableReason === undefined);
           const narrator = narratorFor(narratorSettings?.narrator ?? null, narrationCatalogue);
           await runAudiobookChapter({
             store,
             worldId: msg.worldId,
             productionId: msg.productionId,
             chapterId: chapter.id,
-            voice: this.voiceService,
             models: this.opts.manifest?.models ?? [],
             narrator: { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId, ...(narrator.label !== undefined ? { label: narrator.label } : {}) },
             catalogue,
             signal: control.signal,
             ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
-            requireUploadConfirmation: () =>
+            // The voice and the vendor on the question (SPEC-046 R-16): a hosted reader's
+            // consent is per voice, written onto the library entry; without `reader` only the
+            // engine's destination is asked about, and a hosted line is refused at dispatch
+            // without ever being asked (codex on PR 1180).
+            requireUploadConfirmation: (reader) =>
               this.requireVoiceUploadConfirmation({
                 worldId: msg.worldId,
                 requestId,
                 command: msg.kind,
                 ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
+                reader: { store, provider: reader.provider, voice: reader.voice },
               }),
+            // One synthesis at a time on the engine is the voice service's rule, whoever asks
+            // (codex on PR 1180): two chapters read at once take turns there, as a page read does.
+            localSpeech: (voiceId, text, signal) => voice.localSpeech(store, voiceId, text, undefined, { signal }),
             enqueue: async (inputs) => {
               // The engine a cloned voice's recording was allowed to go to rides on the job, as
               // the voiced read's does (SPEC-022): without it every uncached cloned line fails.

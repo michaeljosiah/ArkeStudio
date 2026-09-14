@@ -108,7 +108,7 @@ export const AudiobookFlagSchema = z.object({ reason: z.string().min(1), at: Iso
 export type AudiobookFlag = z.infer<typeof AudiobookFlagSchema>;
 
 /**
- * The record beside a chapter's cast at `productions/<production>/.audiobook/<chapter>.json`
+ * The record beside a chapter's cast at `productions/<production>/.audiobook/chapters/<chapter>.json`
  * (R-1): unversioned, no track of the gate's, carried by export, written through the store's
  * ownership-checked path. `chapterVersion` and `hash` say which prose the last run read; a
  * block's own staleness is judged by its take's text hash, since one changed paragraph must not
@@ -155,7 +155,11 @@ export function summariseAudiobook(record: ChapterAudiobook): ChapterAudiobookSu
 export const AudiobookReadingSchema = z.enum(["narrator", "cast"]);
 export type AudiobookReading = z.infer<typeof AudiobookReadingSchema>;
 
-/** `productions/<production>/.audiobook/book.json`: the one choice the whole book shares. */
+/**
+ * `productions/<production>/.audiobook/book.json`: the one choice the whole book shares. The
+ * chapters' records sit under `chapters/`, since a chapter's file stem is unconstrained and one
+ * named `book` would otherwise share this path (codex on PR 1180).
+ */
 export const AudiobookBookSchema = z.object({ schemaVersion: z.literal(1), reading: AudiobookReadingSchema }).strict();
 export type AudiobookBook = z.infer<typeof AudiobookBookSchema>;
 export const DEFAULT_AUDIOBOOK_BOOK: AudiobookBook = { schemaVersion: 1, reading: "narrator" };
@@ -171,17 +175,23 @@ const sameReader = (a: AudiobookReader, b: AudiobookReader): boolean =>
  * the reader the block is meant for now — the sheet's voice under `cast` when it has one, the
  * narrator otherwise — so a reading switched or a voice reassigned moves the block to `stale`
  * (R-13) while a take that stood in for a voiceless sheet stays current until the sheet has one.
+ * `hasArtifact` says whether the take the record names is still on the shelf: the record is an
+ * index, never authoritative over the files it names (§2.2), and a world carried by hand can
+ * lose a sidecar or its media while the record stands — a block whose take is gone is not made,
+ * or it could neither play nor be read again (codex on PR 1180).
  */
 export function audiobookBlockState(
   block: Pick<AudiobookBlock, "key" | "text">,
   record: ChapterAudiobook | null,
   assigned: AudiobookReader,
+  hasArtifact?: (artifactId: string) => boolean,
 ): AudiobookBlockState {
   if (record === null) return "not made";
   const take = record.takes[block.key];
   const flag = record.flags[block.key];
   if (flag !== undefined && (take === undefined || flag.at > take.madeAt)) return "flagged";
   if (take === undefined) return "not made";
+  if (hasArtifact !== undefined && !hasArtifact(take.artifactId)) return "not made";
   if (take.textHash !== audiobookTextHash(block.text)) return "stale";
   if (!sameReader(take.assigned ?? take.reader, assigned)) return "stale";
   return "made";
@@ -201,10 +211,11 @@ export function audiobookCounts(
   blocks: readonly AudiobookBlock[],
   record: ChapterAudiobook | null,
   assignedOf: (block: AudiobookBlock) => AudiobookReader,
+  hasArtifact?: (artifactId: string) => boolean,
 ): AudiobookCounts {
   const counts: AudiobookCounts = { total: blocks.length, made: 0, stale: 0, flagged: 0, notMade: 0, toMake: [] };
   for (const block of blocks) {
-    const state = audiobookBlockState(block, record, assignedOf(block));
+    const state = audiobookBlockState(block, record, assignedOf(block), hasArtifact);
     if (state === "made") counts.made += 1;
     else {
       if (state === "stale") counts.stale += 1;

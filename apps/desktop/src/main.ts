@@ -974,8 +974,11 @@ async function initialize(): Promise<{ port: number }> {
     health: () =>
       voxaSelection.command === null || !voxaRequestsEnabled ? Promise.resolve(null) : voxaClient.health(),
     listVoices: () => voxaClient.listVoices(),
-    synthesize: (input: { voiceId: string; text: string; params?: Record<string, number> }) =>
-      voxaClient.synthesize(input),
+    // The caller's signal travels with the request (codex on PR 1183): a stopped audiobook run
+    // or a cancelled performance ends the Voxa request, and the client's own waiter, rather
+    // than leaving the engine to finish a paragraph nobody is waiting for.
+    synthesize: (input: { voiceId: string; text: string; params?: Record<string, number> }, options?: { signal?: AbortSignal }) =>
+      voxaClient.synthesize(input, options ?? {}),
     transcribe: (audio: Uint8Array, contentType: string) => voxaClient.transcribe(audio, contentType),
   };
 

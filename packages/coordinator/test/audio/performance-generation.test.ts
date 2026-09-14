@@ -66,6 +66,29 @@ it("explicit local retakes synthesize again and forward cancellation and mapped 
   assert.equal(calls, 2);
 });
 
+it("a synthesis queued behind another leaves the lane when its signal fires, and the next one still waits for the one ahead (codex on PR 1183)", async () => {
+  let releaseFirst: () => void = () => {};
+  const first = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  let calls = 0, inFlight = 0, most = 0;
+  const service = new VoiceService({ sidecar: { async health() { return { engineStatus: { kokoro: { ready: true } } }; }, async listVoices() { return []; },
+    async transcribe() { return ""; }, async synthesize() { calls++; inFlight++; most = Math.max(most, inFlight); if (calls === 1) await first; inFlight--; return wav([1, 2, 3, 4]); } },
+    localPresets: [], cloudSources: [], getKey: async () => null, emit: () => {} });
+  const ahead = service.synthesizePerformance("af_bella", "Hello", {}, new AbortController().signal);
+  const behindControl = new AbortController();
+  const behind = service.synthesizePerformance("af_bella", "Hello", {}, behindControl.signal);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  behindControl.abort();
+  await assert.rejects(behind, /cancelled/, "settles while the one ahead is still being made");
+  const after = service.synthesizePerformance("af_bella", "Hello", {}, new AbortController().signal);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(calls, 1, "the one after still waits for the one ahead, though the one between left");
+  releaseFirst();
+  await ahead;
+  await after;
+  assert.equal(calls, 2);
+  assert.equal(most, 1, "never two at once");
+});
+
 it("a generated read's cloud basis is the voice's own: licensed stock, the sample's standing basis for a clone of its recording, nothing otherwise (SPEC-044 R-14; codex round 1)", async t => {
   const dir = await makeTempWorld();
   const AT = "2026-09-10T09:00:00.000Z";

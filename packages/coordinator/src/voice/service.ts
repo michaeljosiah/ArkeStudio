@@ -579,20 +579,25 @@ export class VoiceService {
      * that does not want to think about parts should not have to.
      */
     onPart?: (part: { file: string; index: number; total: number }) => void,
-  ): Promise<{ file: string; cached: boolean }> {
+    options: { signal?: AbortSignal } = {},
+  ): Promise<{ file: string; cached: boolean; parts: number }> {
     const normalized = normalizeSpeechText(text);
     if (normalized.length === 0) throw new Error("Nothing to read yet.");
     const rel = speechCacheFile({ provider: "kokoro", model: KOKORO_VOICE_MODEL, voiceId, text: normalized, format: "wav" });
     const abs = join(store.dir, rel);
+    // The chunks the text splits into name the parts a file was made from, cached or not: the
+    // split is a function of the text, so a hit was made from the same ones (codex on PR 1180).
+    const chunks = splitForSpeech(normalized);
     try {
       const bytes = await readFile(toExtendedLength(abs));
       if (cachedVoiceAudioLooksRight(bytes, "wav")) {
-        return { file: rel, cached: true };
+        return { file: rel, cached: true, parts: chunks.length };
       }
     } catch {
       /* miss → synthesise */
     }
-    if (!this.deps.sidecar) throw new Error("Voxa is not running — local voice is off; cloud voice still works");
+    const sidecar = this.deps.sidecar;
+    if (!sidecar) throw new Error("Voxa is not running — local voice is off; cloud voice still works");
     /*
      * One request per chunk, in order, rather than one request for everything.
      *
@@ -600,48 +605,105 @@ export class VoiceService {
      * unavailable for the rest of the process — so the whole app lost voice because one section
      * of a bible was long. Sequential rather than parallel on purpose: this is one small model on
      * the user's own machine, and several concurrent syntheses is the other way to fell it.
+     *
+     * A caller with a signal — an audiobook run stopped, or the world closing under it — ends
+     * the read at the next chunk and cancels the one in flight, rather than finishing a
+     * paragraph nobody is waiting for past the desktop's shutdown deadline (codex on PR 1180).
      */
-    const chunks = splitForSpeech(normalized);
-    const rendered: Uint8Array[] = [];
-    for (const [index, chunk] of chunks.entries()) {
-      const part = await this.deps.sidecar.synthesize({ voiceId, text: chunk });
-      if (!cachedVoiceAudioLooksRight(part, "wav")) {
-        throw new Error("Voxa returned invalid audio.");
+    return this.oneAtATime(options.signal, () => new Error("stopped"), async () => {
+      const rendered: Uint8Array[] = [];
+      for (const [index, chunk] of chunks.entries()) {
+        if (options.signal?.aborted) throw new Error("stopped");
+        const part = await sidecar.synthesize({ voiceId, text: chunk }, options.signal !== undefined ? { signal: options.signal } : {});
+        if (!cachedVoiceAudioLooksRight(part, "wav")) {
+          throw new Error("Voxa returned invalid audio.");
+        }
+        rendered.push(part);
+        /*
+         * Hand each piece over the moment it exists, so listening can begin on the first one while
+         * the rest are still being made. A ten-minute section takes about ten minutes to render on
+         * this machine; waiting for all of it before the first word is a wait nobody should sit
+         * through, and the pieces are already separate files.
+         */
+        if (onPart) {
+          const partRel = speechCacheFile({ provider: "kokoro", model: KOKORO_VOICE_MODEL, voiceId, text: chunk, format: "wav" });
+          await store.gateOp(async () => {
+            await atomicWriteFile(join(store.dir, partRel), part);
+          });
+          onPart({ file: partRel, index, total: chunks.length });
+        }
       }
-      rendered.push(part);
-      /*
-       * Hand each piece over the moment it exists, so listening can begin on the first one while
-       * the rest are still being made. A ten-minute section takes about ten minutes to render on
-       * this machine; waiting for all of it before the first word is a wait nobody should sit
-       * through, and the pieces are already separate files.
-       */
-      if (onPart) {
-        const partRel = speechCacheFile({ provider: "kokoro", model: KOKORO_VOICE_MODEL, voiceId, text: chunk, format: "wav" });
-        await store.gateOp(async () => {
-          await atomicWriteFile(join(store.dir, partRel), part);
-        });
-        onPart({ file: partRel, index, total: chunks.length });
-      }
-    }
-    const audio = concatWav(rendered);
-    await store.gateOp(async () => {
-      await atomicWriteFile(abs, audio);
+      const audio = concatWav(rendered);
+      await store.gateOp(async () => {
+        await atomicWriteFile(abs, audio);
+      });
+      return { file: rel, cached: false, parts: chunks.length };
     });
-    return { file: rel, cached: false };
+  }
+
+  /**
+   * The engine takes one request at a time, whoever asks (codex on PR 1180). The chunks of a
+   * read were always sequential; what was not bounded was two readers at once — an audiobook
+   * run on one chapter and another on the next, a page read pressed while a run is going, a
+   * performance beside either — and several syntheses at once is the documented way to leave
+   * Kokoro unavailable for the rest of the process. So every synthesis queues here, and a cache
+   * hit never does (it is answered above without touching the engine). A caller whose signal
+   * fires while it waits its turn leaves the queue then and there, in its own words (codex on PR
+   * 1183): a run stopped behind a long page read would otherwise say `reading…` until that read
+   * was done, and the coordinator's stop would wait on it. Its slot still opens only after the
+   * turn ahead of it, so leaving early never lets two syntheses run.
+   */
+  private sidecarLane: Promise<void> = Promise.resolve();
+  private oneAtATime<T>(signal: AbortSignal | undefined, cancelled: () => Error, work: () => Promise<T>): Promise<T> {
+    const ahead = this.sidecarLane;
+    let release!: () => void;
+    const slot = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.sidecarLane = ahead.then(() => slot);
+    return (async () => {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          if (signal?.aborted) {
+            reject(cancelled());
+            return;
+          }
+          const onAbort = () => reject(cancelled());
+          signal?.addEventListener("abort", onAbort, { once: true });
+          void ahead.then(() => {
+            signal?.removeEventListener("abort", onAbort);
+            resolve();
+          });
+        });
+        return await work();
+      } finally {
+        release();
+      }
+    })();
+  }
+
+  /** One request straight to the engine, through the lane: the runtime's Test control (codex on PR 1183). */
+  async synthesizeOnce(input: { voiceId: string; text: string }): Promise<Uint8Array> {
+    const sidecar = this.deps.sidecar;
+    if (!sidecar) throw new Error("Voxa is unavailable");
+    return this.oneAtATime(undefined, () => new Error("stopped"), () => sidecar.synthesize(input, {}));
   }
 
   /** A deliberate performance is always a fresh synthesis; preview caches are not take authority. */
   async synthesizePerformance(voiceId: string, text: string, params: Record<string, number>, signal: AbortSignal): Promise<Uint8Array> {
-    if (!this.deps.sidecar) throw new Error("Local synthesis is unavailable.");
-    const rendered: Uint8Array[] = [];
-    for (const chunk of splitForSpeech(normalizeSpeechText(text))) {
-      if (signal.aborted) throw new Error("Performance generation cancelled.");
-      const bytes = await this.deps.sidecar.synthesize({ voiceId, text: chunk, params }, { signal });
-      if (!cachedVoiceAudioLooksRight(bytes, "wav")) throw new Error("Local synthesis returned invalid audio.");
-      rendered.push(bytes);
-    }
-    if (!rendered.length) throw new Error("This line has no spoken text.");
-    return concatWav(rendered);
+    const sidecar = this.deps.sidecar;
+    if (!sidecar) throw new Error("Local synthesis is unavailable.");
+    return this.oneAtATime(signal, () => new Error("Performance generation cancelled."), async () => {
+      const rendered: Uint8Array[] = [];
+      for (const chunk of splitForSpeech(normalizeSpeechText(text))) {
+        if (signal.aborted) throw new Error("Performance generation cancelled.");
+        const bytes = await sidecar.synthesize({ voiceId, text: chunk, params }, { signal });
+        if (!cachedVoiceAudioLooksRight(bytes, "wav")) throw new Error("Local synthesis returned invalid audio.");
+        rendered.push(bytes);
+      }
+      if (!rendered.length) throw new Error("This line has no spoken text.");
+      return concatWav(rendered);
+    });
   }
 
   async localPreview(store: WorldStore, _sheet: Sheet, voiceId: string, line: PreviewLine): Promise<string> {

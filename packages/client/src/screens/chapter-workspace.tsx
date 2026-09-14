@@ -91,6 +91,8 @@ type OpenedRecord = {
   voices: ChapterVoices | "unreadable" | null;
   /** The audiobook record beside the chapter (turn 146, SPEC-047 R-1), the same way. */
   audiobook: ChapterAudiobook | "unreadable" | null;
+  /** The takes that record names that are gone from the shelf, as the coordinator found them at open (codex on PR 1183). */
+  audiobookMissing: readonly string[];
 };
 
 /**
@@ -377,6 +379,7 @@ export function ChapterWorkspace({
           continuity: result.continuityUnreadable === true ? "unreadable" : (result.continuity ?? null),
           voices: result.voicesUnreadable === true ? "unreadable" : (result.voices ?? null),
           audiobook: result.audiobookUnreadable === true ? "unreadable" : (result.audiobook ?? null),
+          audiobookMissing: result.audiobookMissing ?? [],
         };
         const previous = recordRef.current;
         recordRef.current = opened;
@@ -494,6 +497,7 @@ export function ChapterWorkspace({
           continuity: recordRef.current?.continuity ?? null,
           voices: recordRef.current?.voices ?? null,
           audiobook: recordRef.current?.audiobook ?? null,
+          audiobookMissing: recordRef.current?.audiobookMissing ?? [],
         };
         recordRef.current = saved;
         setRecord(saved);
@@ -814,19 +818,23 @@ export function ChapterWorkspace({
   useEffect(() => {
     if (audiobookRun?.record !== undefined) setFinishedAudiobook(audiobookRun.record);
   }, [audiobookRun?.record]);
-  const audiobookRecord = useMemo((): ChapterAudiobook | "unreadable" | null => {
+  // The takes the coordinator found gone belong to the record it was answering with: a run's
+  // record, taken when newer, has made them again, so the list goes with the opened record alone.
+  const audiobookRecord = useMemo((): { record: ChapterAudiobook | "unreadable" | null; missing: readonly string[] } => {
     const opened = record?.audiobook ?? null;
-    if (finishedAudiobook === null) return opened;
-    if (opened === null || opened === "unreadable" || finishedAudiobook.updatedAt >= opened.updatedAt) return finishedAudiobook;
-    return opened;
-  }, [record?.audiobook, finishedAudiobook]);
+    const missing = record?.audiobookMissing ?? [];
+    if (finishedAudiobook === null) return { record: opened, missing };
+    if (opened === null || opened === "unreadable" || finishedAudiobook.updatedAt >= opened.updatedAt) return { record: finishedAudiobook, missing: [] };
+    return { record: opened, missing };
+  }, [record?.audiobook, record?.audiobookMissing, finishedAudiobook]);
   const audiobook = useChapterAudiobook({
     worldId,
     prodId,
     chapter,
     body: record?.body ?? "",
     cast: voicesRecord,
-    record: audiobookRecord,
+    record: audiobookRecord.record,
+    missing: audiobookRecord.missing,
     reading: production.audiobook?.reading ?? "narrator",
     connection,
     locked: locked || record === null,
@@ -1252,7 +1260,7 @@ export function ChapterWorkspace({
               <AudiobookSide
                 rows={audiobook.rows}
                 selected={audiobook.selected}
-                record={audiobookRecord === "unreadable" ? null : audiobookRecord}
+                record={audiobookRecord.record === "unreadable" ? null : audiobookRecord.record}
                 artifacts={world.artifacts}
                 slug={worldSlug}
                 productionId={prodId}

@@ -96,6 +96,16 @@ describe("a block's state (R-13, R-14)", () => {
     assert.equal(audiobookBlockState(line, stoodIn, GEORGE), "stale", "the book now reads in the narrator's voice by choice, which is a different take");
   });
 
+  it("is not made when the take it names is gone from the shelf, whatever the record says (codex on PR 1180)", () => {
+    const made = record({ [narration.key]: take(narration.text, GEORGE) });
+    assert.equal(audiobookBlockState(narration, made, GEORGE, () => true), "made");
+    assert.equal(audiobookBlockState(narration, made, GEORGE, () => false), "not made", "the record is an index, never authoritative over the files it names");
+    assert.equal(audiobookBlockState({ key: narration.key, text: "other words" }, made, GEORGE, () => false), "not made", "gone beats stale: there is nothing to keep");
+    const counts = audiobookCounts(blocks, made, () => GEORGE, () => false);
+    assert.equal(counts.made, 0);
+    assert.ok(counts.toMake.includes(narration.key));
+  });
+
   it("is flagged while the flag is newer than any take, and made once a later take replaces it", () => {
     const flagged = record({}, { [line.key]: { reason: "the reader refused", at: AT } });
     assert.equal(audiobookBlockState(line, flagged, ANNA), "flagged");

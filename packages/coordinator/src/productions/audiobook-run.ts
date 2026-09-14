@@ -2,7 +2,9 @@ import { createHash } from "node:crypto";
 import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  CLONED_VOICE_PROVIDER,
   audiobookTextHash,
+  billableCharacters,
   estimateMicroUsd,
   normalizeSpeechText,
   voiceFormatForModel,
@@ -13,6 +15,7 @@ import {
   type AudiobookSubstitution,
   type AudiobookTake,
   type ChapterAudiobook,
+  type ClonedVoice,
   type Job,
   type ManifestModel,
   type VoiceCandidate,
@@ -21,7 +24,7 @@ import { fileGeneratedArtifact } from "../artifacts/filing.js";
 import type { MediaProbe } from "../media/probe.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 import { clipFor } from "../voice/library.js";
-import { cachedVoiceAudioLooksRight, concatWav, speechCacheFile, splitForSpeech, type VoiceService } from "../voice/service.js";
+import { cachedVoiceAudioLooksRight, concatWav, speechCacheFile, splitForSpeech } from "../voice/service.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
@@ -48,15 +51,25 @@ export interface AudiobookRunDeps {
   worldId: string;
   productionId: string;
   chapterId: string;
-  voice: VoiceService;
   models: readonly ManifestModel[];
   narrator: AudiobookReader;
   /** What can speak now (turn 130's rule): a voice the catalogue lacks or marks reads in the narrator's. */
   catalogue: readonly VoiceCandidate[];
   signal: AbortSignal;
   confirmationToken?: string;
-  /** Ask once for a cloned voice's recording to leave the machine; true when the run must stop here and wait for the answer. */
-  requireUploadConfirmation: () => boolean | Promise<boolean>;
+  /**
+   * Ask for a cloned voice's recording to leave the machine (SPEC-046 R-16): per voice and
+   * vendor for a hosted reader, whose answer is written onto the voice, per request for the
+   * engine. True when the run must stop here and wait for the answer.
+   */
+  requireUploadConfirmation: (reader: { provider: string; voice: ClonedVoice }) => boolean | Promise<boolean>;
+  /**
+   * Speech on this machine, into the speech cache: the voice service's, which takes one
+   * synthesis at a time whoever asks, since the engine is one small model that several
+   * syntheses at once can fell for the whole process; ended by the signal. `parts` is how many
+   * requests made the file, a cache hit's too.
+   */
+  localSpeech: (voiceId: string, text: string, signal: AbortSignal) => Promise<{ file: string; cached: boolean; parts: number }>;
   enqueue: (inputs: EnqueueInput[]) => Promise<{ jobIds: string[]; reason?: string }>;
   waitForJob: (jobId: string) => Promise<Job>;
   cancelJob: (jobId: string) => Promise<void>;
@@ -75,7 +88,8 @@ interface Speaking extends PlannedBlock {
   reader: AudiobookReader;
   model: ManifestModel;
   local: boolean;
-  cloned: boolean;
+  /** The library voice the reader is, when it is one: its recording is what leaves the machine. */
+  clone: ClonedVoice | null;
   text: string;
   /** The rendered text in parts, each within the reader's cap (R-5). One part for a block within it. */
   parts: string[];
@@ -142,7 +156,7 @@ export function priorPartJob(jobs: readonly Job[], identity: PartIdentity, part:
 }
 
 export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void> {
-  const { store, productionId, chapterId, voice, narrator, signal, emit } = deps;
+  const { store, productionId, chapterId, narrator, signal, emit } = deps;
   let made = 0;
   let flaggedCount = 0;
   const finish = (outcome: Extract<AudiobookRunEvent, { type: "finished" }>["outcome"], extra: { record?: ChapterAudiobook; reason?: string } = {}) =>
@@ -219,7 +233,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
       reader,
       model,
       local,
-      cloned: source.kind === "cloned",
+      clone: source.kind === "cloned" ? source.voice : null,
       text,
       parts,
       format,
@@ -243,8 +257,27 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     }
     misses.push(block);
   }
-  if (misses.some((block) => block.cloned) && (await deps.requireUploadConfirmation())) return;
-  const priceOf = (block: Speaking) => block.parts.reduce((sum, part) => sum + estimateMicroUsd(block.model, { characters: part.length }), 0);
+  // A cloned voice's recording leaving the machine is asked about before the price (R-17):
+  // once per voice and vendor for a hosted reader, whose answer is written onto the voice, and
+  // per request for the engine. One question at a time — the run returns at the first
+  // unanswered and the window's next press brings the answer — the hosted readers' first,
+  // since theirs persist, the engine's last, so the token the window holds at the end is the
+  // one the price's answer must carry (codex on PR 1180: without the voice on the question,
+  // a hosted reader's line was refused at dispatch and flagged without ever being asked).
+  const clones = new Map<string, { provider: string; voice: ClonedVoice }>();
+  for (const block of misses) {
+    if (block.clone !== null) clones.set(`${block.reader.provider}\n${block.clone.id}`, { provider: block.reader.provider, voice: block.clone });
+  }
+  const askOrder = [...clones.values()].sort((a, b) => Number(a.provider === CLONED_VOICE_PROVIDER) - Number(b.provider === CLONED_VOICE_PROVIDER));
+  for (const reader of askOrder) {
+    if (await deps.requireUploadConfirmation(reader)) return;
+  }
+  // Priced by the character as the row bills it (SPEC-046 R-8): bytes, or doubled CJK, for the
+  // readers that count so — `text.length` alone understates a Fish or Breeze block by up to 3×
+  // (codex on PR 1180). The counts the card and the job show stay the prose's, as the page
+  // read's do; only the money is the vendor's count.
+  const billed = (block: Speaking, part: string) => billableCharacters(block.model, part);
+  const priceOf = (block: Speaking) => block.parts.reduce((sum, part) => sum + estimateMicroUsd(block.model, { characters: billed(block, part) }), 0);
   const estimate = misses.reduce((sum, block) => sum + priceOf(block), 0);
   if (estimate > 0) {
     const token = createHash("sha256")
@@ -313,20 +346,22 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
       madeAt: deps.now(),
     };
     const { [block.block.key]: _dropped, ...flags } = record.flags;
-    record = { ...record, chapterVersion: plan.chapter.version, hash: plan.chapter.hash, updatedAt: deps.now(), takes: { ...record.takes, [block.block.key]: take }, flags };
-    await write(record);
+    await write({ ...record, chapterVersion: plan.chapter.version, hash: plan.chapter.hash, updatedAt: deps.now(), takes: { ...record.takes, [block.block.key]: take }, flags });
     made += 1;
   };
+  // The record the run holds is the record on disk (codex on PR 1180): a write that failed —
+  // the claim lost, an I/O fault — leaves it as it was, so the finished event never carries a
+  // take the file does not, which the window would prefer over the scanned record by its date.
   const write = async (next: ChapterAudiobook) => {
     try {
       await writeAudiobook(store, productionId, chapterFile, next);
     } catch (err) {
       throw new RecordWriteError(err instanceof Error ? err.message : String(err));
     }
+    record = next;
   };
   const flag = async (block: Speaking, reason: string) => {
-    record = { ...record, updatedAt: deps.now(), flags: { ...record.flags, [block.block.key]: { reason, at: deps.now() } } };
-    await write(record);
+    await write({ ...record, updatedAt: deps.now(), flags: { ...record.flags, [block.block.key]: { reason, at: deps.now() } } });
     flaggedCount += 1;
     progress(block, "flagged", reason);
   };
@@ -343,10 +378,13 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
         if (block.local) {
           // Local speech lands in the speech cache as it always has; the take is a copy of it
           // filed as the production's own, so the cache can be emptied without losing the book.
-          const result = await voice.localSpeech(store, block.reader.voiceId, block.text);
-          const artifact = await file(block, join(store.dir, fromPortable(result.file)), { parts: 1, estimatedMicroUsd: 0, costMicroUsd: 0 });
-          await keep(block, artifact, { parts: 1, estimatedMicroUsd: 0, costMicroUsd: 0 });
-          progress(block, "made");
+          // A file the cache already held — a page read, an earlier run — is adopted (R-19) and
+          // says so; a made one records the requests it took (codex on PR 1180).
+          const result = await deps.localSpeech(block.reader.voiceId, block.text, signal);
+          const provenance = { parts: result.parts, estimatedMicroUsd: 0, costMicroUsd: 0, ...(result.cached ? { adopted: true as const } : {}) };
+          const artifact = await file(block, join(store.dir, fromPortable(result.file)), provenance);
+          await keep(block, artifact, provenance);
+          progress(block, result.cached ? "adopted" : "made");
           continue;
         }
         if (block.cacheFile !== null && !misses.includes(block)) {
@@ -419,9 +457,9 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
                 characterCount: part.length,
                 sheetVersion: plan.chapter.version,
               },
-              estimatedMicroUsd: estimateMicroUsd(block.model, { characters: part.length }),
+              estimatedMicroUsd: estimateMicroUsd(block.model, { characters: billed(block, part) }),
               landing: { dir: landingDir, name: `${block.block.key.replace(/[^a-z0-9]+/gi, "-")}-${index}.${block.format}` },
-              ...(block.cloned ? { voiceReference: true } : {}),
+              ...(block.clone !== null ? { voiceReference: true } : {}),
             };
             const queued = await deps.enqueue([input]);
             const jobId = queued.jobIds[0];

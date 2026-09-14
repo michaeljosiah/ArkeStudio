@@ -6,6 +6,7 @@ import {
   audiobookBlocks,
   audiobookCounts,
   audiobookHeading,
+  billableCharacters,
   estimateMicroUsd,
   formatMicroUsd,
   legacyVoiceModel,
@@ -50,6 +51,8 @@ export interface ChapterAudiobookInput {
   body: string;
   cast: ChapterVoices | null;
   record: ChapterAudiobook | "unreadable" | null;
+  /** The takes the record names that the coordinator found gone from the shelf when the chapter was opened. */
+  missing?: readonly string[];
   reading: AudiobookReading;
   connection: string;
   locked: boolean;
@@ -80,7 +83,7 @@ function readerOf(voice: { provider: string; model?: string; voiceId: string; la
 
 /** The blocks, their states and the counts, from the one rule both ends use. */
 export function useChapterAudiobook(input: ChapterAudiobookInput) {
-  const { worldId, prodId, chapter, body, cast, record, reading, connection, locked } = input;
+  const { worldId, prodId, chapter, body, cast, record, missing, reading, connection, locked } = input;
   const { state } = useStore();
   const world = state?.world ?? null;
   const catalogue = useStore().voiceCatalogue;
@@ -104,35 +107,50 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   );
   const recordOrNull = record === "unreadable" ? null : record;
   const derived = useMemo(() => audiobookBlocks(body, cast, audiobookHeading(chapter.order, chapter.title)), [body, cast, chapter.order, chapter.title]);
+  // A take the record names but the shelf no longer holds is not made (codex on PR 1180): the
+  // coordinator plans the same way, so the block is made again rather than shown unplayable.
+  // The sidecar this window can see for itself; the media it cannot, so the coordinator says
+  // at open which takes it found gone (codex on PR 1183).
+  const hasArtifact = useCallback(
+    (artifactId: string) => !(missing ?? []).includes(artifactId) && (world?.artifacts.some((candidate) => candidate.id === artifactId && candidate.retiredAt === undefined) ?? false),
+    [world, missing],
+  );
   const rows = useMemo<BlockRow[]>(() => {
     return derived.blocks.map((block) => {
       let assigned = narrator;
       let mark = block.key === AUDIOBOOK_TITLE_KEY ? "title" : "narrator";
       let markWarn = false;
+      // The speaker keeps its name in the margin; a retired character loses its voice (codex on
+      // PR 1180): the coordinator plans with the active characters only, and a take it made in
+      // the narrator's stead must read as made here too, not as stale against a retired voice.
+      const sheet = block.sheet === undefined ? undefined : world?.sheets.find((candidate) => candidate.id === block.sheet);
+      const active = sheet !== undefined && sheet.type === "character" && !sheet.retired;
       if (reading === "cast" && block.speaker !== undefined) {
-        const sheet = block.sheet === undefined ? undefined : world?.sheets.find((candidate) => candidate.id === block.sheet);
         mark = sheet?.name ?? block.speaker;
-        const reader = sheet?.voice === undefined ? null : readerOf(sheet.voice, world?.clonedVoices);
+        const reader = !active || sheet.voice === undefined ? null : readerOf(sheet.voice, world?.clonedVoices);
         if (reader === null) markWarn = true;
         else assigned = reader;
       } else if (block.speaker !== undefined) {
-        const sheet = block.sheet === undefined ? undefined : world?.sheets.find((candidate) => candidate.id === block.sheet);
         mark = sheet?.name ?? block.speaker;
       }
       const take = recordOrNull?.takes[block.key];
       const artifact = take === undefined ? null : (world?.artifacts.find((candidate) => candidate.id === take.artifactId) ?? null);
-      return { block, state: audiobookBlockState(block, recordOrNull, assigned), mark, markWarn, assigned, artifact };
+      return { block, state: audiobookBlockState(block, recordOrNull, assigned, hasArtifact), mark, markWarn, assigned, artifact };
     });
-  }, [derived.blocks, narrator, reading, world, recordOrNull]);
-  const counts = useMemo(() => audiobookCounts(derived.blocks, recordOrNull, (block) => rows.find((row) => row.block.key === block.key)?.assigned ?? narrator), [derived.blocks, recordOrNull, rows, narrator]);
-  // What a press would spend, before the run asks: the cloud blocks not made, by the character.
+  }, [derived.blocks, narrator, reading, world, recordOrNull, hasArtifact]);
+  const counts = useMemo(
+    () => audiobookCounts(derived.blocks, recordOrNull, (block) => rows.find((row) => row.block.key === block.key)?.assigned ?? narrator, hasArtifact),
+    [derived.blocks, recordOrNull, rows, narrator, hasArtifact],
+  );
+  // What a press would spend, before the run asks: the cloud blocks not made, by the character
+  // as the row bills it (SPEC-046 R-8) — bytes or doubled CJK for the readers that count so.
   // The cache is not consulted here, so the run's own price can only be lower.
   const estimate = useMemo(
     () =>
       rows.reduce((sum, row) => {
         if (row.state === "made" || row.assigned.provider === "kokoro") return sum;
         const model = modelOf(row.assigned);
-        return model === null ? sum : sum + estimateMicroUsd(model, { characters: row.block.text.length });
+        return model === null ? sum : sum + estimateMicroUsd(model, { characters: billableCharacters(model, row.block.text) });
       }, 0),
     [rows, modelOf],
   );
@@ -177,11 +195,22 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   );
 
   const reading_ = run?.state === "reading";
-  // The engine a cloned voice's recording was allowed to go to, kept for the rest of this
-  // window's presses (codex on PR 1180): a cast with a cloned voice and a paid one is asked for
-  // consent first and the price second, and the price's answer must carry the consent too, or
-  // the restarted run asks for consent again and the two prompts chase each other for ever.
+  // The engine a cloned voice's recording was allowed to go to, kept across the one chain of
+  // presses that answers a run's questions (codex on PR 1180, twice): a cast with a cloned voice
+  // and a paid one is asked for consent first and the price second, and the price's answer must
+  // carry the consent too, or the restarted run asks for consent again and the two prompts chase
+  // each other for ever. It is the answer to one run's question, not this window's standing
+  // permission: the run ending — read, stopped, failed, refused — the consent declined, a fresh
+  // press or another chapter clears it, so a later read is asked again as the engine's
+  // per-request rule says.
   const uploadAllowed = useRef<string | null>(null);
+  const ended = run !== undefined && run.state !== "reading" && run.state !== "priced";
+  useEffect(() => {
+    if (ended) uploadAllowed.current = null;
+  }, [ended]);
+  useEffect(() => {
+    uploadAllowed.current = null;
+  }, [chapter.id]);
   const send = useCallback(
     (options: { confirmationToken?: string; voiceUploadConfirmedFor?: string } = {}) => {
       const consent = options.voiceUploadConfirmedFor ?? uploadAllowed.current ?? undefined;
@@ -198,6 +227,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     // chapter's other reads do, and the workspace sends it once the save lands.
     if (input.beforeRead !== undefined && !input.beforeRead()) return;
     setUpload(null);
+    uploadAllowed.current = null;
     send();
   }, [locked, connection, reading_, input, send]);
 
@@ -208,6 +238,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
           destinationLabel={upload.destination}
           onCancel={() => {
             setUpload(null);
+            uploadAllowed.current = null;
             dismissAudiobookRun(worldId, prodId, chapter.id);
           }}
           onConfirm={() => {

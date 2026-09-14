@@ -25,6 +25,7 @@ import { HarnessStatusSchema } from "./harness.js";
 import {
   IsoDateTimeSchema,
   CandidateIdSchema,
+  ArtifactIdSchema,
   ConversationIdSchema,
   FrameRunIdSchema,
   JobIdSchema,
@@ -316,6 +317,13 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       /** The audiobook record beside the chapter (turn 146, SPEC-047 R-1): the takes come with the chapter; the bundle carries the stamp. */
       audiobook: ChapterAudiobookSchema.optional(),
       audiobookUnreadable: z.literal(true).optional(),
+      /**
+       * The takes the record names that are not on the shelf — sidecar gone or retired, or the
+       * media gone from a world carried by hand (SPEC-047 R-14). The window cannot look at the
+       * media itself, and without this it would show a block made that cannot play and hide the
+       * press that would make it again (codex on PR 1183).
+       */
+      audiobookMissing: z.array(ArtifactIdSchema).optional(),
       reason: z.string().min(1).optional(),
     })
     .strict(),
