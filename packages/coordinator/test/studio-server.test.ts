@@ -93,6 +93,7 @@ it("the Node host serves authenticated prose editing, reconnect and restart with
   const reconnected = await connect(session.port); sockets.push(reconnected.socket);
   const snapshot = await reconnected.wait(frame => frame.kind === "snapshot");
   assert.equal(snapshot.seq, 1);
+  assert.equal((await reconnected.event("export.progress")).output, exported.event.output);
   for (const socket of sockets) socket.terminate();
   await host.server.stop();
   host = await createNodeStudioHost({ appRoot: root, appVersion: "test", adapter: null, transportAuth: auth });
@@ -100,6 +101,13 @@ it("the Node host serves authenticated prose editing, reconnect and restart with
   const reopened = await connect(session.port); sockets.push(reopened.socket);
   await reopened.wait(frame => frame.kind === "snapshot");
   reopened.send({ kind: "open-world", worldId: WORLD_ID }); await reopened.event("world.opened");
+  const restoredExport = await reopened.event("export.progress");
+  assert.equal(restoredExport.status, "done");
+  assert.equal(restoredExport.output, exported.event.output);
+  const restoredDownload = await fetch(`http://127.0.0.1:${session.port}/media/the-undersong/${restoredExport.output}`,
+    { headers: { Authorization: `Bearer ${auth.token}` } });
+  assert.equal(restoredDownload.status, 200);
+  assert.equal(Buffer.from(await restoredDownload.arrayBuffer()).subarray(0, 2).toString(), "PK");
   const rereadRequest = ulid();
   reopened.send({ kind: "open-chapter", worldId: WORLD_ID, productionId: production.slug, chapterId: created.chapterId, requestId: rereadRequest });
   const reread = await reopened.event("chapter.open-result", rereadRequest);

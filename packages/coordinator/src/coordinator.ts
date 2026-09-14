@@ -2529,6 +2529,15 @@ export class Coordinator {
         for (const [key, run] of this.readingAudiobooks) {
           replayed.push({ at: new Date().toISOString(), type: "audiobook.started", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId, requestId: this.audiobookRequests.get(key) ?? ulid(), toMake: run.toMake ?? 0, blocks: run.blocks ?? 0, made: run.made ?? 0, replayed: true });
         }
+        // The browser's download controls must survive reload and process restart.
+        const worldId = this.readModel.getState().world?.meta.worldId;
+        for (const record of this.exportReads.values()) {
+          if (record.worldId !== worldId || !record.id.startsWith("ms_") || record.status !== "done" ||
+            !record.productionId || !record.output) continue;
+          replayed.push({ at: new Date().toISOString(), type: "export.progress", worldId: record.worldId,
+            productionId: record.productionId, exportId: record.id, status: "done", percent: 100,
+            output: record.output, error: null });
+        }
         return replayed;
       },
       beforeInitialSnapshot: async () => {
