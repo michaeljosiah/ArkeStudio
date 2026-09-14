@@ -16,10 +16,10 @@ export class WorldSessionService {
     return { revision: snapshot.revision, bundle };
   }
 
-  async media(context: EngineContext, worldId: string, artifactId: string) {
+  async media(context: EngineContext, worldId: string, artifactId: string, sheetId?: string) {
     context = structuredClone(context);
     requireContext(context);
-    const resource = { worldId, artifactId };
+    const resource = { worldId, artifactId, ...(sheetId ? { sheetId } : {}) };
     await this.policy.authorise(context, "media", resource);
     const artifact = await this.repository.use(worldId, session => session.artifact(artifactId));
     if (artifact.id !== artifactId) throw new Error("Artifact identity does not match the request.");

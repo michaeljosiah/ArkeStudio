@@ -3177,7 +3177,7 @@ export class Coordinator {
     // rather than an abandoned one. Held here rather than trusted from the caller — the client
     // does check, but a repair that can destroy live state should not depend on it.
     const wasAlreadyOpen = this.opts.provider.openStore?.()?.worldId === worldId;
-    await this.opts.provider.loadWorld(worldId);
+    const loaded = await this.opts.provider.loadWorld(worldId);
     /*
      * Everything past the load is repair, and repair does not decide whether the world opened
      * (issue 571, Codex round 3).
@@ -3197,7 +3197,7 @@ export class Coordinator {
     if (store && (store.worldId !== worldId || !this.stillOpen(store))) return;
     const bundle = store
       ? (await this.engine.worlds.read(LOCAL_ENGINE_CONTEXT, worldId)).bundle
-      : await this.opts.provider.loadWorld(worldId);
+      : loaded;
     if (bundle.meta.worldId !== worldId || (store && !this.stillOpen(store))) return;
     this.readModel.setWorld(bundle);
     // Recovery always receives the store that owns this bundle, even across awaited reads.

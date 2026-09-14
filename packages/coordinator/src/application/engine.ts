@@ -49,7 +49,11 @@ export function createEngine(options: EngineOptions) {
         await Promise.allSettled(active);
         try { await operations.close(); }
         finally { await options.worlds.close(); }
-      })();
+      })().catch(error => {
+        // Admission stays closed, but a transient drain/cleanup failure may be retried.
+        closed = undefined;
+        throw error;
+      });
     },
   };
 }

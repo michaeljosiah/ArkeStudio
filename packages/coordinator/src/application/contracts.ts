@@ -59,7 +59,8 @@ export interface EngineWorldSession {
   accept(id: string, options: { confirmRipples?: string; expectedDraftRevision?: number; expectedRevision?: string }): Promise<AcceptOutcome>;
   discard(id: string, expectedRevision?: string): Promise<void>;
   resolution(proposal: Proposal, outcome: "accepted" | "discarded"): Promise<void>;
-  illustrations(input: IllustrationInput): Promise<EnqueueInput[]>;
+  /** Check the revision and freeze all inputs under the same world transaction. */
+  illustrations(input: IllustrationInput, expectedRevision?: string): Promise<EnqueueInput[]>;
   artifact(id: string): Promise<EngineArtifact>;
   /** Resolve only after authoritative storage accepted all changed state, or reject as uncertain. */
   saved(operationKey: string): Promise<{ revision: string }>;

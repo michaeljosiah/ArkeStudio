@@ -15,12 +15,8 @@ export class IllustrationApplicationService {
       if (!Number.isInteger(input.count) || input.count < 1 || input.count > MAX_IMAGE_PREVIEWS) {
         throw new Error(`Request between one and ${MAX_IMAGE_PREVIEWS} illustrations.`);
       }
-      const inputs = await this.worlds.use(worldId, async session => {
-        if (input.expectedRevision !== undefined && (await session.snapshot()).revision !== input.expectedRevision) {
-          throw new Error("The world changed before generation was prepared.");
-        }
-        return session.illustrations({ ...input, generationKey: key });
-      });
+      const inputs = await this.worlds.use(worldId, session =>
+        session.illustrations({ ...input, generationKey: key }, input.expectedRevision));
       const reservation = await this.operations.policy.reserve(context, key, inputs);
       const jobs: Job[] = [];
       // A partial/uncertain enqueue retains the reservation and operation for reconciliation.
@@ -67,28 +63,29 @@ export class IllustrationApplicationService {
       const owner = job.params.engineOperation as { key?: string } | undefined;
       return job.worldId === worldId && owner?.key === key;
     });
-    if (jobs.length === 0 || jobs.some(job => !["succeeded", "failed", "cancelled"].includes(job.status))) {
-      return { status: "pending" as const, operationKey: key };
-    }
-    // Do not settle an interrupted batch as a complete batch. A host must first reconcile the
-    // started operation against queue/provider evidence; it cannot invent the missing requests.
+    // Missing evidence is not running work. Interrupted admissions and removed queue rows
+    // need a host recovery decision before any reservation can be settled or released.
     if (operation.status !== "completed") return { status: "needs-reconciliation" as const, operationKey: key };
     const result = operation.result as IllustrationOutcome;
     if (result.needsReconciliation) return { status: "needs-reconciliation" as const, operationKey: key };
-    if (jobs.length !== result.jobIds.length || jobs.some(job => !result.jobIds.includes(job.id))) {
-      throw new Error("Generation recovery does not match the durable batch.");
-    }
     const settlementKey = engineHash([key, "settlement"]);
     const previousSettlement = await this.operations.store.read(settlementKey);
+    if (!previousSettlement && (jobs.length === 0 || jobs.length !== result.jobIds.length ||
+      jobs.some(job => !result.jobIds.includes(job.id)))) {
+      return { status: "needs-reconciliation" as const, operationKey: key };
+    }
+    if (!previousSettlement && jobs.some(job => !["succeeded", "failed", "cancelled"].includes(job.status))) {
+      return { status: "pending" as const, operationKey: key };
+    }
     const permitted: EngineDeliveredJob[] = [];
     const media = new WorldSessionService(this.worlds, this.operations.policy);
     for (const job of jobs) {
-      if (job.status !== "succeeded") continue;
+      if (job.status !== "succeeded" || !result.jobIds.includes(job.id)) continue;
       try {
         if (!job.landedFiles?.length) throw new Error("Successful job has no landed artifacts.");
         const deliveredArtifacts = [];
         for (const id of job.landedFiles) {
-          const artifact = await media.media(context, worldId, id);
+          const artifact = await media.media(context, worldId, id, operation.resource.sheetId);
           deliveredArtifacts.push({ id, sha256: artifact.sha256 });
         }
         permitted.push({ ...structuredClone(job), deliveredArtifacts });
@@ -113,6 +110,7 @@ export class IllustrationApplicationService {
       else await this.operations.policy.settle(context, key, decision.reservation, decision.jobs);
       await this.operations.store.complete(settlementKey, fingerprint, decision);
     }
-    return { status: "settled" as const, operationKey: key, jobIds: permitted.map(job => job.id) };
+    return { status: "settled" as const, operationKey: key, jobIds: decision.jobs.map(job => job.id),
+      deliverableJobIds: permitted.map(job => job.id) };
   }
 }

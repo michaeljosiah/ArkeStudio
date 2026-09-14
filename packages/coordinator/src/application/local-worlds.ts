@@ -32,7 +32,7 @@ function localSession(store: WorldStore, provider: WorldProvider, options: Local
     accept: (id, opts) => gate.accept(id, { ...opts, precondition: precondition(opts.expectedRevision) }),
     discard: (id, expected) => gate.discard(id, precondition(expected)),
     resolution: (proposal, outcome) => recordResolution(store, proposal, outcome, () => store.now()),
-    async illustrations(input) {
+    illustrations: (input, expected) => store.gateOp(async () => {
       const bundle = store.getBundle();
       const sheet = bundle.sheets.find(candidate => candidate.id === input.sheetId);
       if (!sheet) throw new Error("The character or image model is no longer available.");
@@ -40,7 +40,7 @@ function localSession(store: WorldStore, provider: WorldProvider, options: Local
       const staged = stagedWorldImage(bundle, stagedReferenceKey("main-photo", input.sheetId));
       return mainPhotoRequests(bundle.meta, bundle.artDirection, sheet, kit, input.model,
         { ...input, ...(staged ? { staged } : {}) }).map(request => request.input);
-    },
+    }, precondition(expected)),
     async artifact(id) {
       // The provider owns traversal, symlink and extension checks. The public API returns bytes,
       // never its absolute path, and caps the initial portrait-only surface before allocating.

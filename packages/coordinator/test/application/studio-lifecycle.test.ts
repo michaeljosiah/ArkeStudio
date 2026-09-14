@@ -64,3 +64,24 @@ it("a provider close failure keeps a closed engine out of service while cleanup 
   provider.close = close;
   await coordinator.stop();
 });
+
+
+it("a read-only provider opens once and keeps the first successful bundle", async t => {
+  const { root } = await makeTempRoot();
+  const source = new FsWorldProvider(root);
+  const bundle = await source.loadWorld(WORLD_ID);
+  await source.close();
+  let loads = 0;
+  const events: DomainEvent[] = [];
+  const coordinator = new Coordinator({ appRoot: root, adapter: null, appVersion: "test",
+    changeLogPath: join(root, "changes.jsonl"), observeEvent: event => events.push(event),
+    provider: { async listWorlds() { return []; }, async loadWorld() {
+      if (++loads > 1) throw new Error("World loaded twice");
+      return bundle;
+    } },
+  });
+  t.after(() => coordinator.stop());
+  await coordinator.openWorld(WORLD_ID);
+  assert.equal(loads, 1);
+  assert.equal(events.filter(event => event.type === "world.opened").length, 1);
+});

@@ -123,7 +123,14 @@ it("illustrations reuse the dispatcher, hold exact output and settle once after 
   h.state.failSettlement = true;
   await assert.rejects(h.engine.illustrations.reconcile(parent, WORLD_ID, "allowed"), /Response lost/);
   const restarted = await h.restart(); h.state.failSettlement = false; h.state.held = true;
-  await restarted.illustrations.reconcile(parent, WORLD_ID, "allowed");
+  const receipt = await restarted.illustrations.reconcile(parent, WORLD_ID, "allowed");
+  assert.equal(receipt.status, "settled");
+  if (receipt.status === "settled") {
+    assert.deepEqual(receipt.jobIds, generated.jobIds);
+    assert.deepEqual(receipt.deliverableJobIds, []);
+  }
+  await h.queue.delete(generated.jobIds[0]!);
+  assert.deepEqual(await restarted.illustrations.reconcile(parent, WORLD_ID, "allowed"), receipt);
   assert.equal(h.state.charges, 1); assert.equal(h.state.releases, 0);
   const file = "references/maren-kest/candidates/check.png";
   await mkdir(join(h.worldDir, "references/maren-kest/candidates"), { recursive: true });
@@ -312,4 +319,69 @@ it("overlapping portrait batches keep distinct landed bytes and settle only appr
   };
   assert.equal((await h.engine.illustrations.reconcile(parent, WORLD_ID, "batch-a")).status, "settled");
   assert.equal(h.state.charges, 1);
+});
+
+
+it("artifact reconciliation retains sheet policy and flags missing unsettled queue evidence", async t => {
+  const h = await harness(t);
+  const input = { operationId: "sheet-output", sheetId: "maren-kest", model: FAL_MODELS.find(m => m.capability === "image")!,
+    prompt: "Happy", count: 1, identityReferences: [], generationKey: "portrait" };
+  const result = await h.engine.illustrations.generate(parent, WORLD_ID, input);
+  await until(() => h.queue.listJobs().every(job => job.status === "succeeded"), "portrait completion");
+  const authorise = h.policy.authorise; const deliver = h.policy.deliver;
+  let checked = 0;
+  h.policy.authorise = async (context, action, resource) => {
+    await authorise(context, action, resource);
+    if (action === "media") assert.equal(resource.sheetId, input.sheetId);
+  };
+  h.policy.deliver = async (context, resource, content) => {
+    await deliver(context, resource, content);
+    if (content.kind === "artifact") { checked++; assert.equal(resource.sheetId, input.sheetId); throw new Error("Sheet held"); }
+  };
+  assert.equal((await h.engine.illustrations.reconcile(parent, WORLD_ID, input.operationId)).status, "held");
+  assert.equal(checked, 1);
+  await h.queue.delete(result.jobIds[0]!);
+  assert.equal(h.queue.listJobs().length, 0);
+  assert.equal((await h.engine.illustrations.reconcile(parent, WORLD_ID, input.operationId)).status, "needs-reconciliation");
+  assert.equal(h.state.charges + h.state.releases, 0);
+});
+
+it("illustration revision is checked inside the same gate as frozen input preparation", async t => {
+  const h = await harness(t);
+  const before = await h.engine.worlds.read(parent, WORLD_ID);
+  const store = h.provider.openStore()!;
+  const gateOp = store.gateOp.bind(store);
+  let changed = false;
+  // Simulate a legacy write arriving immediately before preparation acquires the write gate.
+  store.gateOp = async (fn, precondition) => {
+    if (!changed) { changed = true; await store.renameWorld("A newer world"); }
+    return gateOp(fn, precondition);
+  };
+  await assert.rejects(h.engine.illustrations.generate(parent, WORLD_ID, {
+    operationId: "stale-portrait", expectedRevision: before.revision,
+    sheetId: "maren-kest", model: FAL_MODELS.find(m => m.capability === "image")!, prompt: "Happy",
+    count: 1, identityReferences: [], generationKey: "portrait",
+  }), /world changed/);
+  assert.equal(changed, true);
+  assert.equal(h.fake.submitCount, 0);
+  assert.equal(h.queue.listJobs().length, 0);
+});
+
+it("failed engine cleanup can retry without admitting new work", async t => {
+  const h = await harness(t);
+  let drains = 0; let closes = 0;
+  const engine = createEngine({ policy: h.policy,
+    worlds: { async use() { throw new Error("Unused"); }, async close() {
+      if (++closes === 2) throw new Error("Repository close unavailable");
+    } },
+    operations: { async begin() { throw new Error("Unused"); }, async read() { return null; }, async complete() {},
+      async drain() { if (++drains === 1) throw new Error("Drain unavailable"); } },
+    queue: { async enqueue() { throw new Error("Unused"); }, jobs: () => [] },
+  });
+  await assert.rejects(engine.close(), /Drain unavailable/);
+  await assert.rejects(engine.worlds.read(parent, WORLD_ID), /stopping/);
+  await assert.rejects(engine.close(), /Repository close unavailable/);
+  await assert.rejects(engine.worlds.read(parent, WORLD_ID), /stopping/);
+  await engine.close(); await engine.close();
+  assert.equal(drains, 3); assert.equal(closes, 3);
 });
