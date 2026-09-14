@@ -1,3 +1,4 @@
+import { valueSchema } from "./value-schema.js";
 import { BorrowedImageOriginSchema } from "./take.js";
 import { TakeDialogueFeedbackSchema } from "./take-feedback.js";
 import { RehearsalSessionSchema } from "./rehearsal.js";
@@ -272,7 +273,7 @@ export const ExternalEditSchema = z
 export type ExternalEdit = z.infer<typeof ExternalEditSchema>;
 
 /** The open world, in full — a world is small enough to send whole (SPEC-001 D4). */
-export const WorldBundleSchema = z
+export const WorldBundleSchema = valueSchema(z
   .object({
     meta: WorldMetaSchema,
     artDirection: ResolvedArtDirectionSchema,
@@ -373,10 +374,10 @@ export const WorldBundleSchema = z
     /** Closed-world edits awaiting reconciliation (SPEC-002 R-28). */
     externalEdits: z.array(ExternalEditSchema).default([]),
   })
-  .strict();
+  .strict());
 export type WorldBundle = z.infer<typeof WorldBundleSchema>;
 
-export const ClientStateSchema = z
+export const ClientStateSchema = valueSchema(z
   .object({
     app: z
       .object({
@@ -615,7 +616,7 @@ export const ClientStateSchema = z
     /** Active and completed-but-undismissed frame runs survive navigation and reconnects. */
     frameRuns: z.array(FrameRunStateSchema).default([]),
   })
-  .strict();
+  .strict());
 export type ClientState = z.infer<typeof ClientStateSchema>;
 
 // ---------------------------------------------------------------------------

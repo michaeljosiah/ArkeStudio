@@ -25,7 +25,7 @@ import {
 import { toExtendedLength } from "../world/paths.js";
 import { describeCoordinatorError } from "../errors/user-message.js";
 import { backoffMs, classifyError, isRateLimit, type FailureClass } from "./classify.js";
-import { JobJournal } from "./journal.js";
+import { JobJournal, type JobStateStore } from "./journal.js";
 import { imageFormatOf, verifyArtifact } from "./verify.js";
 import { atomicWriteFile } from "../world/atomic.js";
 
@@ -143,6 +143,8 @@ export interface EnqueueInput {
 }
 
 export interface JobQueueOptions {
+  /** The host owns durability; journalPath still locates disposable inline-artifact staging. */
+  journal?: JobStateStore;
   journalPath: string;
   clients: Record<string, DispatchClient>;
   getKey: (provider: string) => Promise<string | null>;
@@ -278,7 +280,7 @@ const FOLLOW_ON_TARGETS = new Set([
   "voice-line",
   "voice-preview",
 ]);
-const COORDINATOR_ONLY_PARAMS = new Set(["frameRun", "frameRunStep", "landing", "request"]);
+const COORDINATOR_ONLY_PARAMS = new Set(["frameRun", "frameRunStep", "landing", "request", "engineOperation"]);
 
 function providerParams(params: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(params).filter(([key]) => !COORDINATOR_ONLY_PARAMS.has(key) && (key !== "audioReferences" || (Array.isArray((params.audioReferences as { references?: unknown })?.references) && ((params.audioReferences as { references: unknown[] }).references.length > 0)))));
@@ -323,7 +325,7 @@ function landedName(job: Job, artifact: DispatchArtifact, index: number): string
 }
 
 export class JobQueue {
-  private readonly journal: JobJournal;
+  private readonly journal: JobStateStore;
   private readonly jobs = new Map<string, Job>();
   private readonly lanes = new Map<string, Lane>();
   private readonly clock: () => string;
@@ -365,7 +367,7 @@ export class JobQueue {
   private readonly retiredEngineRuns = new Set<string>();
 
   constructor(private readonly opts: JobQueueOptions) {
-    this.journal = new JobJournal(opts.journalPath);
+    this.journal = opts.journal ?? new JobJournal(opts.journalPath);
     this.clock = opts.clock ?? (() => new Date().toISOString());
     this.rng = opts.rng ?? Math.random;
     this.maxAttempts = opts.maxAttempts ?? 4;

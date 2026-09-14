@@ -12,7 +12,13 @@ import { WriteQueue } from "../change-log.js";
  * it authorises (D1, §2.2.1): write, file sync, close, then resolve. The WriteQueue
  * serialises these complete operations; an OS flush failure rejects the append.
  */
-export class JobJournal {
+export interface JobStateStore {
+  append(job: Job): Promise<void>;
+  readHistory(): Promise<Job[]>;
+  drain(): Promise<void>;
+}
+
+export class JobJournal implements JobStateStore {
   private readonly queue = new WriteQueue();
   private repaired = false;
 

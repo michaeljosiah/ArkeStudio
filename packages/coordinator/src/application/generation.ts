@@ -1,0 +1,85 @@
+import { MAX_IMAGE_PREVIEWS, ulid, type Job } from "@arke-studio/contracts";
+import type { EngineContext, EngineMutation, EngineQueue, EngineWorldRepository, IllustrationInput } from "./contracts.js";
+import { engineHash, EngineOperations } from "./operations.js";
+
+export class IllustrationApplicationService {
+  constructor(private readonly worlds: EngineWorldRepository, private readonly operations: EngineOperations,
+    private readonly queue: EngineQueue) {}
+
+  async generate(context: EngineContext, worldId: string, input: IllustrationInput & EngineMutation) {
+    context = structuredClone(context);
+    input = structuredClone(input);
+    const resource = { worldId, sheetId: input.sheetId };
+    return this.operations.run(context, "generate", resource, input.operationId, input, async key => {
+      if (!Number.isInteger(input.count) || input.count < 1 || input.count > MAX_IMAGE_PREVIEWS) {
+        throw new Error(`Request between one and ${MAX_IMAGE_PREVIEWS} illustrations.`);
+      }
+      const inputs = await this.worlds.use(worldId, async session => {
+        if (input.expectedRevision !== undefined && (await session.snapshot()).revision !== input.expectedRevision) {
+          throw new Error("The world changed before generation was prepared.");
+        }
+        return session.illustrations({ ...input, generationKey: key });
+      });
+      const reservation = await this.operations.policy.reserve(context, key, inputs);
+      const jobs: Job[] = [];
+      // A partial/uncertain enqueue retains the reservation and operation for reconciliation.
+      // Releasing it here could fund another request while the first provider is already working.
+      for (const request of inputs) {
+        await this.operations.policy.authorise(context, "generate", resource);
+        jobs.push(await this.queue.enqueue({ ...request, idempotencyKey: ulid(),
+          params: { ...request.params, engineOperation: { key, reservation, context } } }));
+      }
+      return { operationKey: key, reservation, jobIds: jobs.map(job => job.id) };
+    });
+  }
+
+  /** Reconcile terminal work from durable queue state, never from a browser's success flag. */
+  async reconcile(context: EngineContext, worldId: string, operationId: string) {
+    context = structuredClone(context);
+    const key = this.operations.key(context, { worldId }, operationId);
+    await this.operations.policy.authorise(context, "generate", { worldId });
+    const operation = await this.operations.store.read(key);
+    if (!operation || operation.action !== "generate") throw new Error("Generation operation not found.");
+    const jobs = this.queue.jobs().filter(job => {
+      const owner = job.params.engineOperation as { key?: string } | undefined;
+      return job.worldId === worldId && owner?.key === key;
+    });
+    if (jobs.length === 0 || jobs.some(job => !["succeeded", "failed", "cancelled"].includes(job.status))) {
+      return { status: "pending" as const, operationKey: key };
+    }
+    // Do not settle an interrupted batch as a complete batch. A host must first reconcile the
+    // started operation against queue/provider evidence; it cannot invent the missing requests.
+    if (operation.status !== "completed") return { status: "needs-reconciliation" as const, operationKey: key };
+    const result = operation.result as { reservation: string; jobIds: string[] };
+    if (jobs.length !== result.jobIds.length || jobs.some(job => !result.jobIds.includes(job.id))) {
+      throw new Error("Generation recovery does not match the durable batch.");
+    }
+    const permitted: Job[] = [];
+    for (const job of jobs) {
+      if (job.status !== "succeeded") continue;
+      try {
+        await this.operations.policy.deliver(context, { worldId, sheetId: operation.resource.sheetId },
+          { kind: "job", id: job.id, sha256: engineHash(job) });
+        permitted.push(job);
+      } catch {
+        // A refusal and an unavailable check both withhold delivery. The host's idempotent
+        // settlement policy decides how to treat held output; the engine never treats it as allowed.
+      }
+    }
+    // Persist the financial decision before making an idempotent external call. A crash or a
+    // later policy change must never turn an already released reservation into a charge.
+    const settlementKey = engineHash([key, "settlement"]);
+    const fingerprint = engineHash([key, result.reservation]);
+    const claim = await this.operations.store.begin({ key: settlementKey, fingerprint,
+      context, resource: operation.resource, action: "generate", status: "started",
+      result: { reservation: result.reservation, jobs: permitted } });
+    if (claim.operation.fingerprint !== fingerprint) throw new Error("Settlement identity changed.");
+    const decision = claim.operation.result as { reservation: string; jobs: Job[] };
+    if (claim.operation.status !== "completed") {
+      if (decision.jobs.length === 0) await this.operations.policy.release(context, key, decision.reservation);
+      else await this.operations.policy.settle(context, key, decision.reservation, decision.jobs);
+      await this.operations.store.complete(settlementKey, fingerprint, decision);
+    }
+    return { status: "settled" as const, operationKey: key, jobIds: permitted.map(job => job.id) };
+  }
+}

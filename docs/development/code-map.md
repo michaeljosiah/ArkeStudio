@@ -167,3 +167,7 @@ proposal; acceptance cuts a version. Its `outline` operation stages several plan
 one card. Implies stays on the chapter until Propose sends its separate canon/sheet ask or Dismiss
 removes an open item. See SPEC-012 R-53–R-61 and the chapter workspace, chapter brief, chapter
 operations and story dashboard tests named above.
+
+## Embeddable engine foundation
+
+The [engine guide](engine.md) maps the initial extracted services and remaining Coordinator responsibilities. Public entry points are `packages/engine/src/index.ts` and `src/local.ts`; implementation lives in coordinator `src/application/`. Desktop/dev construct through `createStudioCoordinator`. World ownership and acceptance still belong to the existing store and gate; the dispatcher accepts a supplied durable job journal.

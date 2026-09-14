@@ -190,6 +190,7 @@ export async function createSheetFromSentence(
     /** The existing destination surface that will hold the ordinary request's decision. */
     attendedSurface?: "sheet-list" | "production-cast";
   },
+  precondition?: WorldStatePrecondition,
 ): Promise<SentenceDraft> {
   const bundle = store.getBundle();
   const slug = uniqueSlug(input.name, input.sheetType, await takenSlugs(store, input.sheetType));
@@ -233,7 +234,7 @@ export async function createSheetFromSentence(
     // Ownership on the proposal, not only in the staged file: the world's surfaces read pending
     // sheets from the proposal and would otherwise show this guest all through its review.
     ...(input.production !== undefined ? { production: input.production } : {}),
-  });
+  }, precondition);
 
   // The count the agent is told about is the world's own cast. A guest drafting against "nine
   // existing characters" when six of them belong to another production would be told the world

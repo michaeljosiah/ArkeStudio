@@ -943,7 +943,7 @@ export class ProposalManager {
   }
 
   /** Discard: the directory goes, reservations stay burned, one log line remains (R-4, D9). */
-  async discard(proposalId: string): Promise<void> {
+  async discard(proposalId: string, precondition?: WorldStatePrecondition): Promise<void> {
     await this.store.gateOp(async () => {
       const proposal = await this.readManifest(proposalId).catch(() => null);
       await rm(toExtendedLength(this.proposalDir(proposalId)), { recursive: true, force: true });
@@ -956,14 +956,14 @@ export class ProposalManager {
           source: proposal?.source ?? "unknown",
         },
       ]);
-    });
+    }, precondition);
   }
 
   // ---- accept --------------------------------------------------------------
 
   async accept(
     proposalId: string,
-    opts: { confirmRipples?: string; precondition?: WorldStatePrecondition } = {},
+    opts: { confirmRipples?: string; precondition?: WorldStatePrecondition; expectedDraftRevision?: number } = {},
   ): Promise<AcceptOutcome> {
     return this.store.gateOp(async () => {
       // §11.4.1: recover first, then refuse while anything remains unresolved. Accepting past an
@@ -972,6 +972,10 @@ export class ProposalManager {
       if (recovery.status === "blocked") return { status: "draft-unresolved", records: recovery.unreadable };
 
       const proposal = await this.readManifest(proposalId);
+
+      if (opts.expectedDraftRevision !== undefined && proposal.draftRevision !== opts.expectedDraftRevision) {
+        return { status: "stale", stalePaths: proposal.targets.map(target => target.path), detail: "The proposal changed since review." };
+      }
 
       const openChoices = proposal.openChoices ?? [];
       if (openChoices.length > 0) return { status: "open-choices", count: openChoices.length };

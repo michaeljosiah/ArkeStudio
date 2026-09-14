@@ -1,3 +1,4 @@
+import { valueSchema } from "./value-schema.js";
 import { StageReferenceFrameSchema } from "./scene.js";
 import { isManuscriptLanguage } from "./manuscript.js";
 import { StageInspectionFrameSchema } from "./stage-construction.js";
@@ -51,10 +52,10 @@ import { DecideConversationActionSchema } from "./arke-actions.js";
  * receives a fresh snapshot — partial replay is deliberately not offered (D4).
  */
 
-export const FrameSchema = z.discriminatedUnion("kind", [
+export const FrameSchema = valueSchema(z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("snapshot"), seq: z.number().int().min(1), state: ClientStateSchema }).strict(),
   z.object({ kind: z.literal("event"), seq: z.number().int().min(1), event: DomainEventSchema }).strict(),
-]);
+]));
 export type Frame = z.infer<typeof FrameSchema>;
 
 /** What a client may send up. Commands arrive with their owning specs. */
