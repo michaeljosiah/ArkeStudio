@@ -9,6 +9,8 @@ import type { WorldStore } from "./world/store.js";
  * or reconcile, and the coordinator degrades accordingly.
  */
 export interface WorldProvider {
+  /** Reject harness scratch paths inside any managed or archived world, including directory aliases. */
+  assertWritingScratch?(path: string): Promise<void>;
   listWorlds(): Promise<WorldSummary[]>;
   /** Read-only image catalogue; opens no second store and acquires no world lock. */
   listReferenceImages?(slug: string): Promise<WorldImageReference[]>;

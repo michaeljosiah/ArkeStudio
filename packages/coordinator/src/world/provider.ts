@@ -82,6 +82,24 @@ export class FsWorldProvider implements WorldProvider {
     return join(this.appRoot, "worlds");
   }
 
+  async assertWritingScratch(path: string): Promise<void> {
+    const scratch = await realpath(path);
+    const exclude = (root: string) => {
+      const rel = relative(root, scratch);
+      if (!rel || (!rel.startsWith(".." + (process.platform === "win32" ? "\\" : "/")) && rel !== ".." && !isAbsolute(rel))) {
+        throw new Error("The writing scratch directory must be outside all managed worlds.");
+      }
+    };
+    for (const root of [this.worldsDir(), join(this.appRoot, "archive")]) {
+      let canonical: string;
+      try { canonical = await realpath(root); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; throw error; }
+      exclude(canonical);
+      // A world may be reached through a directory junction outside the library's physical root.
+      for (const entry of await readdir(root)) exclude(await realpath(join(root, entry)));
+    }
+  }
+
   /** Create the app root and its skeleton on first run, without prompting (R-1). */
   async ensureAppRoot(): Promise<void> {
     await mkdir(toExtendedLength(this.worldsDir()), { recursive: true });

@@ -267,7 +267,9 @@ rather than exposing hidden material to satisfy a grounding check.
 The optional `writing` factory receives trusted context, resource, operation key, explicit model
 ID and an abort signal. It returns a shared `HarnessAdapter`, a private scratch directory,
 the resolved session model and input token limit, `createSession` and `close`. The directory
-must exist outside the world; the local adapter checks its resolved path. The host must enforce
+must exist outside all managed worlds. The filesystem provider checks resolved paths against
+its world library, archive and directory aliases. Custom local providers must implement
+`assertWritingScratch`; writing refuses without that check. The host must enforce
 actual harness confinement, disable unrelated tools/network access, use scoped credentials,
 honour cancellation and drain subprocesses in `close`. A scratch path alone is not a sandbox.
 There is no implicit model substitution or paid-provider default. Concrete Studio harness
@@ -282,7 +284,11 @@ writing. No Aonik commercial billing implementation is added here.
 Add `chapter-draft` to host policy actions and durable operation codecs. Both draft and revision
 use that action; mode is part of the request fingerprint. Host-returned proposals must target
 the file belonging to the requested canonical chapter, not just its production directory;
-the binding is checked again on replay. Identity failures still finalise written state.
+the binding is checked again on replay. Writing sessions also supply `review(proposalId)`,
+which independently reads the authoritative staged manifest, title and full body. The service
+compares these with the run receipt before completion and returns the staged body. Malformed
+writing and direct-prose receipts still finalise written state, retain started evidence and
+withhold output.
 Local finalisation refreshes the owned projection after conversation binding/resolution,
 so the next call can use the acknowledged revision. Output carries proposal metadata,
 title, body, conversation ID and a grounding hash. Completed replay checks current read and

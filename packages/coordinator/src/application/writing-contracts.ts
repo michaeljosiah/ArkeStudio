@@ -38,6 +38,8 @@ export type WritingRuntimeFactory = (input: {
 }) => Promise<WritingRuntime>;
 
 export interface EngineWritingSession {
+  /** Read the authoritative staged chapter, independently of the model/run receipt. */
+  review(proposalId: string): Promise<{ proposal: WritingResult["proposal"]; title: string; body: string }>;
   run(productionId: string, chapterId: string, input: WritingInput, options: {
     mode: "draft" | "revise"; context: EngineContext; operationKey: string;
     policy: EnginePolicy; runtime: WritingRuntimeFactory; signal: AbortSignal;

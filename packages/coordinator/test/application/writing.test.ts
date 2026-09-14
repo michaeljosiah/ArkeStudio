@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it, type TestContext } from "node:test";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import type { HarnessAdapter } from "@arke-studio/contracts";
 import { createEngine, type EngineContext, type EnginePolicy } from "../../src/application/engine.js";
@@ -19,7 +19,8 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
   let provider = new FsWorldProvider(root);
   await provider.loadWorld(WORLD_ID);
   await mkdir(join(root, "scratch"));
-  const state = { calls: 0, opened: 0, closed: 0, saves: 0, corruptResult: "" as "" | "identity" | "target",
+  const state = { calls: 0, opened: 0, closed: 0, saves: 0, scratch: join(root, "scratch"),
+    corruptResult: "" as "" | "identity" | "target" | "body" | "title",
     body: "Maren found the path home.", wrongTarget: false,
     revoked: false, held: false, failSave: false, hideOutline: false, denyChapter: "", hang: false,
     dispatched: undefined as (() => void) | undefined, beforeReply: undefined as (() => Promise<void>) | undefined };
@@ -42,9 +43,12 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
     } });
     return createEngine({
     worlds: { use: (id, action) => local.use(id, session => action({ ...session, writing: {
+      review: id => session.writing!.review(id),
       run: async (...args) => {
         const value = await session.writing!.run(...args);
         if (state.corruptResult === "identity") value.chapterId = "different-chapter";
+        if (state.corruptResult === "body") value.body = "A different story from the staged draft.";
+        if (state.corruptResult === "title") value.title = "A different title";
         if (state.corruptResult === "target") {
           const other = (await session.snapshot()).bundle.productions.find(p => p.meta.id === productionId)!
             .chapters.find(c => c.id !== chapterId)!;
@@ -89,7 +93,7 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
       }
       signal.throwIfAborted();
       return { adapter: Object.freeze(new AccessorAdapter()) as HarnessAdapter,
-        cwd: join(root, "scratch"), inputTokenLimit: 100000, sessionModel: modelId,
+        cwd: state.scratch, inputTokenLimit: 100000, sessionModel: modelId,
         createSession: async () => ({ sessionId: "session" }), close: async () => { state.closed++; } };
     },
   }); };
@@ -250,7 +254,7 @@ it("pending chapter proposals refuse new writing before opening another runtime"
   assert.equal(h.state.calls, 2);
 });
 
-for (const corruption of ["identity", "target"] as const) {
+for (const corruption of ["identity", "target", "body", "title"] as const) {
   it(`malformed host writing ${corruption} finalises side effects but never completes or delivers`, async t => {
     const h = await harness(t);
     const other = h.store().getBundle().productions.find(p => p.meta.id === productionId)!.chapters.find(c => c.id !== chapterId)!;
@@ -259,12 +263,20 @@ for (const corruption of ["identity", "target"] as const) {
     const input = await h.input("bad-host");
     let delivered = false;
     h.policy.deliver = async (_ctx, _resource, content) => { if (content.kind === "proposal") delivered = true; };
-    await assert.rejects(h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, input), /chapter identity changed|different chapter/);
+    await assert.rejects(h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, input), /chapter identity changed|different chapter|differs from the staged/);
     assert.equal(delivered, false); assert.equal(h.state.saves, 1);
     assert.equal(h.state.calls, 1);
     assert.equal((await h.engine.operation(context, WORLD_ID, input.operationId))!.status, "started");
   });
 }
+
+it("a sibling world cannot be used as the writing harness scratch directory", async t => {
+  const h = await harness(t);
+  h.state.scratch = join(dirname(h.store().dir), "another-world");
+  await mkdir(h.state.scratch);
+  await assert.rejects(h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, await h.input("sibling-scratch")), /outside all managed worlds/);
+  assert.equal(h.state.calls, 0); assert.equal(h.state.closed, 1);
+});
 
 it("replay refuses a durable writing receipt redirected to another chapter file", async t => {
   const h = await harness(t); const input = await h.input("replay-target");

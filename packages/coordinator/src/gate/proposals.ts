@@ -1705,6 +1705,15 @@ export class ProposalManager {
     return ProposalSchema.parse(JSON.parse(raw));
   }
 
+  /** Read only a target named by the authoritative manifest, for complete prose review. */
+  async readTarget(proposalId: string, path: string): Promise<string> {
+    const proposal = await this.readManifest(proposalId);
+    if (!proposal.targets.some(target => target.path === path)) throw new Error("The proposal does not target this file.");
+    const content = await this.readProposalFile(proposalId, path);
+    if (content === null) throw new Error("The staged proposal file is unavailable.");
+    return content;
+  }
+
   /** The authority-owned preview used by conversation cards; no staged payload crosses with it. */
   async project(proposalId: string): Promise<{ proposal: Proposal; review: ReviewProjection; ripple: RipplePreview | null }> {
     const proposal = await this.readManifest(proposalId);

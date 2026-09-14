@@ -52,6 +52,12 @@ export class WritingApplicationService {
               value.proposal.targets[0]!.path !== target || await chapterTarget(session, productionId, chapterId) !== target) {
               throw new Error("The chapter identity changed or the proposal targets a different chapter.");
             }
+            const staged = await session.writing.review(value.proposal.id);
+            if (engineHash(staged.proposal) !== engineHash(value.proposal) || staged.title !== value.title ||
+              staged.body.trim() !== value.body.trim()) {
+              throw new Error("The writing receipt differs from the staged proposal.");
+            }
+            value.body = staged.body;
           } catch (error) {
             // Failed and cancelled runs also own durable conversation events.
             await session.saved(key);

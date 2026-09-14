@@ -22,6 +22,7 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
   let provider = new FsWorldProvider(root);
   await provider.loadWorld(WORLD_ID);
   const state = { revoked: false, held: false, failSave: false, saves: 0, deniedChapter: "", unsupported: false,
+    mutationOverride: {} as { productionId?: string; chapterId?: string },
     readOverride: {} as { title?: string; order?: number }, afterSave: undefined as (() => Promise<void>) | undefined };
   const deliveries: Array<{ resource: unknown; sha256: string }> = [];
   const policy: EnginePolicy = {
@@ -45,6 +46,9 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
     return createEngine({ policy, operations: new FileEngineOperationStore(path),
       worlds: { use: (id, action) => local.use(id, session => action({ ...session,
         prose: state.unsupported ? undefined : { ...session.prose!,
+          createProduction: async (...args) => ({ ...await session.prose!.createProduction(...args), ...state.mutationOverride }),
+          createChapter: async (...args) => ({ ...await session.prose!.createChapter(...args), ...state.mutationOverride }),
+          saveChapter: async (...args) => ({ ...await session.prose!.saveChapter(...args), ...state.mutationOverride }),
           readChapter: async (p, c) => ({ ...await session.prose!.readChapter(p, c), ...state.readOverride }) } })),
         close: () => local.close() },
       queue: { enqueue: async () => { throw new Error("No provider expected"); }, jobs: () => [] } });
@@ -87,6 +91,32 @@ it("public prose creates, saves and reopens through the durable local domain wit
   const rows = (await readFile(h.path, "utf8")).trim().split("\n").map(line => JSON.parse(line));
   assert.deepEqual(rows.find(row => row.action === "chapter-save").context, context);
 });
+
+for (const mutation of ["production", "chapter", "save"] as const) {
+  it(`a malformed host ${mutation} receipt finalises the mutation once without delivering or retrying`, async t => {
+    const h = await harness(t);
+    const before = await h.engine.prose.readChapter(context, WORLD_ID, productionId, chapterId);
+    h.state.mutationOverride = mutation === "production" ? { productionId: "" } :
+      mutation === "chapter" ? { productionId: "other-production" } : { chapterId: "other-chapter" };
+    const invoke = (engine: typeof h.engine) => mutation === "production"
+      ? engine.prose.createProduction(context, WORLD_ID, { operationId: "bad-receipt", title: "Created once" })
+      : mutation === "chapter"
+      ? engine.prose.createChapter(context, WORLD_ID, productionId, { operationId: "bad-receipt", title: "Created once", order: 99 })
+      : engine.prose.saveChapter(context, WORLD_ID, productionId, chapterId,
+        { operationId: "bad-receipt", baseHash: before.hash, body: "Saved once." });
+    const delivered = h.deliveries.length;
+    await assert.rejects(invoke(h.engine));
+    assert.equal(h.state.saves, 1); assert.equal(h.deliveries.length, delivered);
+    const restarted = await h.restart();
+    assert.equal((await restarted.operation(context, WORLD_ID, "bad-receipt"))?.status, "started");
+    await assert.rejects(invoke(restarted), /uncertain outcome/);
+    assert.equal(h.state.saves, 1);
+    const bundle = h.store().getBundle();
+    if (mutation === "production") assert.equal(bundle.productions.filter(p => p.meta.title === "Created once").length, 1);
+    else if (mutation === "chapter") assert.equal(bundle.productions.find(p => p.meta.id === productionId)!.chapters.filter(c => c.title === "Created once").length, 1);
+    else assert.equal((await restarted.prose.readChapter(context, WORLD_ID, productionId, chapterId)).body.trim(), "Saved once.");
+  });
+}
 
 it("canonical chapter IDs preserve legacy filenames and prevent alias-based permission bypass", async t => {
   const h = await harness(t);
@@ -295,5 +325,5 @@ it("duplicate canonical IDs refuse both read and save even when projection hides
   await assert.rejects(h.engine.prose.saveChapter(context, WORLD_ID, productionId, chapterId,
     { operationId: "duplicate-id", body: "Replacement", baseHash: "sha256:" + "a".repeat(64) }), /ambiguous/);
   assert.match(await readFile(join(h.worldDir, "productions", productionId, "chapters/00-private.md"), "utf8"), /Private duplicate/);
-  assert.equal(h.state.saves, 0);
+  assert.equal(h.state.saves, 1, "a failed host mutation still finalises possible side effects");
 });

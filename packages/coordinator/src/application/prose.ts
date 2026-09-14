@@ -13,6 +13,17 @@ function prose(session: EngineWorldSession) {
 export class ProseApplicationService {
   constructor(private readonly worlds: EngineWorldRepository, private readonly operations: EngineOperations) {}
 
+  private async saved<T>(session: EngineWorldSession, key: string, mutate: () => Promise<T>) {
+    let value: T;
+    try { value = await mutate(); }
+    catch (error) {
+      // A host may have changed storage before returning an invalid receipt or throwing.
+      await session.saved(key);
+      throw error;
+    }
+    return { operationKey: key, ...(await session.saved(key)), value };
+  }
+
   private async deliver(context: EngineContext, resource: EngineResource, value: unknown) {
     await this.operations.policy.authorise(context, "read", resource);
     await this.operations.policy.deliver(context, resource, { kind: resource.chapterId ? "chapter" : "production",
@@ -24,8 +35,8 @@ export class ProseApplicationService {
     const result = await this.operations.run(context, "production-create", { worldId }, input.operationId, input, key =>
       this.worlds.use(worldId, async session => {
         await this.operations.policy.authorise(context, "production-create", { worldId });
-        const value = proseProductionResult.parse(await prose(session).createProduction(input, key));
-        return { operationKey: key, ...(await session.saved(key)), value };
+        const port = prose(session);
+        return this.saved(session, key, async () => proseProductionResult.parse(await port.createProduction(input, key)));
       }));
     await this.deliver(context, { worldId, productionId: result.value.productionId }, result.value);
     return result;
@@ -37,9 +48,12 @@ export class ProseApplicationService {
     const result = await this.operations.run(context, "chapter-create", resource, input.operationId, input, key =>
       this.worlds.use(worldId, async session => {
         await this.operations.policy.authorise(context, "chapter-create", resource);
-        const value = proseChapterResult.parse(await prose(session).createChapter(productionId, input, key));
-        if (value.productionId !== productionId) throw new Error("The chapter belongs to a different production.");
-        return { operationKey: key, ...(await session.saved(key)), value };
+        const port = prose(session);
+        return this.saved(session, key, async () => {
+          const value = proseChapterResult.parse(await port.createChapter(productionId, input, key));
+          if (value.productionId !== productionId) throw new Error("The chapter belongs to a different production.");
+          return value;
+        });
       }));
     await this.deliver(context, { ...resource, chapterId: result.value.chapterId }, result.value);
     return result;
@@ -99,9 +113,12 @@ export class ProseApplicationService {
     const result = await this.operations.run(context, "chapter-save", resource, input.operationId, input, key =>
       this.worlds.use(worldId, async session => {
         await this.operations.policy.authorise(context, "chapter-save", resource);
-        const value = proseSaveResult.parse(await prose(session).saveChapter(productionId, chapterId, input, key));
-        if (value.productionId !== productionId || value.chapterId !== chapterId) throw new Error("The chapter identity changed.");
-        return { operationKey: key, ...(await session.saved(key)), value };
+        const port = prose(session);
+        return this.saved(session, key, async () => {
+          const value = proseSaveResult.parse(await port.saveChapter(productionId, chapterId, input, key));
+          if (value.productionId !== productionId || value.chapterId !== chapterId) throw new Error("The chapter identity changed.");
+          return value;
+        });
       }));
     await this.deliver(context, resource, result.value);
     return result;

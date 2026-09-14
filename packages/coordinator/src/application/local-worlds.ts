@@ -29,7 +29,10 @@ function localSession(store: WorldStore, provider: WorldProvider, options: Local
     () => engineHash(store.getBundle()) === expected ? null : "The world changed before this operation.";
   return {
     prose: localProse(store),
-    writing: localWriting(store),
+    writing: localWriting(store, async path => {
+      if (!provider.assertWritingScratch) throw new Error("This provider cannot validate writing scratch isolation.");
+      await provider.assertWritingScratch(path);
+    }),
     snapshot,
     propose: (input, expected) => createSheetFromSentence(store, gate, input, precondition(expected)),
     proposal: id => gate.readManifest(id),

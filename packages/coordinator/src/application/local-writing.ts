@@ -1,5 +1,6 @@
 import { relative, isAbsolute, sep } from "node:path";
 import { realpath } from "node:fs/promises";
+import { MarkdownFile } from "../world/text-files.js";
 import { ArkeTargetReadPageSchema, type WorldChatCheckReceipt } from "@arke-studio/contracts";
 import { ProposalManager, type StageInput } from "../gate/proposals.js";
 import { ConversationActionLifecycle } from "../arke-actions/lifecycle.js";
@@ -17,8 +18,16 @@ import { engineHash } from "./operations.js";
 import type { EngineWritingSession } from "./writing-contracts.js";
 
 /** A bounded consumer of Studio's runner, read receipts and proposal preparation. */
-export function localWriting(store: WorldStore): EngineWritingSession {
-  return { async run(productionId, chapterId, input, options) {
+export function localWriting(store: WorldStore, assertScratch: (path: string) => Promise<void>): EngineWritingSession {
+  return {
+    async review(proposalId) {
+      const gate = new ProposalManager(store);
+      const proposal = await gate.readManifest(proposalId);
+      if (proposal.kind !== "chapter-draft" || proposal.targets.length !== 1) throw new Error("A single chapter proposal is required.");
+      const doc = MarkdownFile.parse(await gate.readTarget(proposalId, proposal.targets[0]!.path));
+      return { proposal, title: String(doc.data.title ?? ""), body: doc.body };
+    },
+    async run(productionId, chapterId, input, options) {
     const { context, policy, signal, operationKey } = options;
     const resource = { worldId: store.worldId, productionId, chapterId };
     const prose = localProse(store);
@@ -117,6 +126,7 @@ export function localWriting(store: WorldStore): EngineWritingSession {
     let title = initial.title;
     try {
       if (!isAbsolute(runtime.cwd)) throw new Error("The writing scratch directory must be absolute.");
+      await assertScratch(runtime.cwd);
       const inside = relative(await realpath(store.dir), await realpath(runtime.cwd));
       if (!inside || (inside !== ".." && !inside.startsWith(".." + sep) && !isAbsolute(inside))) {
         throw new Error("The writing harness must run outside the world.");

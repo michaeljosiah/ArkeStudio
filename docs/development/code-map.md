@@ -212,7 +212,9 @@ the installed package outside the monorepo. See [direct prose authoring](engine.
 for the API, version 0.2 adapter migration and remaining authoring/server boundaries.
 
 `engine.writing` uses `application/writing.ts` for scoped admission, cancellation, replay and
-authoritative completion. `application/local-writing.ts` composes the existing WorldChatRunner,
+authoritative completion, including comparison with the staged proposal's review content.
+`WorldProvider.assertWritingScratch` owns library-wide scratch exclusion.
+`application/local-writing.ts` composes the existing WorldChatRunner,
 chapter briefing/read receipts, conversation action lifecycle and proposal gate for one chapter.
 `writing-contracts.ts` defines the optional host model-runtime factory and strict receipts.
 `engine.prose.manuscript` checks complete production access and assembles committed chapters
