@@ -463,6 +463,11 @@ const CLIENT_COMMAND_METADATA = {
   // The cast of lines (turn 130): the same discipline, turned on speech.
   "cast-voices": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),
   "stop-voices": action("production", "command", "extraction", "external-network-action", ["chapters"]),
+  // The audiobook (design turn 146, SPEC-047): a chapter read into kept takes is a generation
+  // that may leave the machine; stopping it and choosing the reading are commands on the record.
+  "read-audiobook-chapter": action("production", "generation", "voice", "external-network-action", ["chapters", "sheets"]),
+  "stop-audiobook": action("production", "command", "voice", "external-network-action", ["chapters"]),
+  "set-audiobook-reading": action("production", "command", "voice", "external-network-action", ["chapters"]),
   // A manuscript out and in (turn 131): a file the host writes, a file the host picks.
   "export-manuscript": action("production", "host-action", "export", "export", ["chapters", "exports"]),
   "open-exports-folder": globalOnly(GLOBAL_OPERATION),

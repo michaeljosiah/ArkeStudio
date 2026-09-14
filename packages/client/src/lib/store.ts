@@ -235,6 +235,28 @@ interface StoreState {
       reason?: string;
     }
   >;
+  /**
+   * A chapter being read into kept takes (turn 146, SPEC-047), keyed by
+   * `worldId/productionId/chapterId`: the run's progress while it goes, its price while that
+   * is on the table, and how it ended. The record itself lands on the chapter's open result and
+   * on the finished event; this is only what the Audiobook view says about the run.
+   */
+  audiobook: Record<
+    string,
+    {
+      state: "reading" | "priced" | "read" | "stopped" | "unavailable" | "failed" | "refused";
+      requestId?: string;
+      toMake: number;
+      blocks: number;
+      made: number;
+      flagged: number;
+      /** The last block that landed or was flagged, and why, for the foot. */
+      last?: { block: string; outcome: "made" | "adopted" | "flagged"; reason?: string };
+      price?: { characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[] };
+      record?: import("@arke-studio/contracts").ChapterAudiobook;
+      reason?: string;
+    }
+  >;
   /** The last word on archiving a world — said once, then dismissed. */
   archiveNote: { worldId: string; text: string; refused: boolean } | null;
   permissions: Record<string, PendingPermission>;
@@ -365,6 +387,7 @@ let current: StoreState = {
   reading: {},
   deriving: {},
   casting: {},
+  audiobook: {},
   manuscripts: {},
   archiveNote: null,
   permissions: {},
@@ -1043,6 +1066,7 @@ function handleFrame(json: string): void {
       // PR 914, round two). The snapshot's records say what stands.
       deriving: {},
       casting: {},
+      audiobook: {},
       // Both are keyed by sheet slug alone, and slugs recur across worlds: a failure left over
       // from one world would otherwise surface under the same-named character in the next one
       // (PR 241 review). They describe an action just taken here, so they do not outlive it.
@@ -1067,6 +1091,7 @@ function handleFrame(json: string): void {
     let reading = current.reading;
     let deriving = current.deriving;
     let casting = current.casting;
+    let audiobook = current.audiobook;
     let manuscripts = current.manuscripts;
     let archiveNote = current.archiveNote;
     let setupStatus = current.setupStatus;
@@ -1404,6 +1429,53 @@ function handleFrame(json: string): void {
           ...(event.reason !== undefined ? { reason: event.reason } : {}),
         },
       };
+    } else if (event.type === "audiobook.started") {
+      // A replayed start carries no counts and reaches every refresh, not only a reconnect: a
+      // window that already holds the run keeps what it knows — its progress, or that it has
+      // finished — and one that does not learns a run is going and can be stopped.
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      if (event.replayed !== true || audiobook[key] === undefined) {
+        audiobook = {
+          ...audiobook,
+          [key]: { state: "reading", requestId: event.requestId, toMake: event.toMake, blocks: event.blocks, made: 0, flagged: 0 },
+        };
+      }
+    } else if (event.type === "audiobook.priced") {
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      const held = audiobook[key] ?? { toMake: 0, blocks: 0, made: 0, flagged: 0 };
+      audiobook = {
+        ...audiobook,
+        [key]: { ...held, state: "priced", price: { characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices } },
+      };
+    } else if (event.type === "audiobook.progress") {
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      const held = audiobook[key] ?? { state: "reading" as const, toMake: event.toMake, blocks: 0, made: 0, flagged: 0 };
+      audiobook = {
+        ...audiobook,
+        [key]: {
+          ...held,
+          state: "reading",
+          toMake: event.toMake,
+          made: event.made,
+          flagged: held.flagged + (event.outcome === "flagged" ? 1 : 0),
+          last: { block: event.block, outcome: event.outcome, ...(event.reason !== undefined ? { reason: event.reason } : {}) },
+        },
+      };
+    } else if (event.type === "audiobook.finished") {
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      const held = audiobook[key] ?? { toMake: 0, blocks: 0, made: 0, flagged: 0 };
+      audiobook = {
+        ...audiobook,
+        [key]: {
+          ...held,
+          state: event.outcome,
+          made: event.made,
+          flagged: event.flagged,
+          price: undefined,
+          ...(event.record !== undefined ? { record: event.record } : {}),
+          ...(event.reason !== undefined ? { reason: event.reason } : {}),
+        },
+      };
     } else if (event.type === "authoring.status") {
       const existing = authoring[event.proposalId] ?? { status: event.status, lines: [] };
       authoring = {
@@ -1695,6 +1767,7 @@ function handleFrame(json: string): void {
       reading,
       deriving,
       casting,
+      audiobook,
       manuscripts,
       archiveNote,
       permissions,
@@ -4060,6 +4133,47 @@ export function stopVoices(worldId: string, productionId: string, chapterFile: s
   send({ kind: "stop-voices", worldId, productionId, chapterFile });
 }
 
+// ---- turn 146: the audiobook ------------------------------------------------
+
+/** Read a chapter into kept takes (SPEC-047 R-16); the token answers a price the run asked. */
+export function readAudiobookChapter(
+  worldId: string,
+  productionId: string,
+  chapterFile: string,
+  options: { confirmationToken?: string; voiceUploadConfirmedFor?: string } = {},
+): boolean {
+  return send({
+    kind: "read-audiobook-chapter",
+    worldId,
+    productionId,
+    chapterFile,
+    ...(options.confirmationToken !== undefined ? { confirmationToken: options.confirmationToken } : {}),
+    ...(options.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: options.voiceUploadConfirmedFor } : {}),
+  });
+}
+
+export function stopAudiobook(worldId: string, productionId: string, chapterFile: string): void {
+  send({ kind: "stop-audiobook", worldId, productionId, chapterFile });
+}
+
+/** The book's reading (SPEC-047 R-11): every block the narrator's, or each line its speaker's. */
+export function setAudiobookReading(worldId: string, productionId: string, reading: "narrator" | "cast"): boolean {
+  return send({ kind: "set-audiobook-reading", worldId, productionId, reading });
+}
+
+/** A price the person declined: the run is over on the coordinator's side, so only this window's word goes. */
+export function dismissAudiobookPrice(worldId: string, productionId: string, chapterId: string): void {
+  const key = `${worldId}/${productionId}/${chapterId}`;
+  if (current.audiobook[key]?.state !== "priced") return;
+  const { [key]: _dropped, ...rest } = current.audiobook;
+  emitChange({ ...current, audiobook: rest });
+}
+
+/** How each chapter's audiobook run is going, keyed by `worldId/productionId/chapterId`. */
+export function useAudiobookRuns(): StoreState["audiobook"] {
+  return useStore().audiobook;
+}
+
 // ---- turn 131: a manuscript out and in ------------------------------------
 
 export function exportManuscript(worldId: string, productionId: string, format: "docx" | "epub", language?: string): boolean {
@@ -4283,6 +4397,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     reading: {},
   deriving: {},
     casting: {},
+    audiobook: {},
   manuscripts: {},
     archiveNote: null,
     permissions: {},

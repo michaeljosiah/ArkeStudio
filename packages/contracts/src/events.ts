@@ -6,6 +6,7 @@ import { PerformanceGenerationQuoteSchema } from "./performance.js";
 import { PerformanceRecordSchema } from "./performance.js";
 import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
+import { ChapterAudiobookSchema } from "./audiobook.js";
 import { z } from "zod";
 import { ModelResidencySchema } from "./local-ai.js";
 import { WorldImageReferenceSchema } from "./world-image-references.js";
@@ -90,6 +91,7 @@ export const QueueCommandSchema = z.enum([
   "read-bible-section",
   "read-prose",
   "read-prose-page",
+  "read-audiobook-chapter",
   "generate-world-image",
   "upload-world-image",
   "generate-master-look",
@@ -311,6 +313,9 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       /** The cast of lines beside the chapter (turn 130), for the same reason. */
       voices: ChapterVoicesSchema.optional(),
       voicesUnreadable: z.literal(true).optional(),
+      /** The audiobook record beside the chapter (turn 146, SPEC-047 R-1): the takes come with the chapter; the bundle carries the stamp. */
+      audiobook: ChapterAudiobookSchema.optional(),
+      audiobookUnreadable: z.literal(true).optional(),
       reason: z.string().min(1).optional(),
     })
     .strict(),
@@ -684,7 +689,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
        */
       sheetId: SlugSchema.optional(),
       sheetVersion: z.number().int().min(1),
-      purpose: z.enum(["candidate-preview", "sheet-section", "sheet-page", "bible-section", "prose"]),
+      purpose: z.enum(["candidate-preview", "sheet-section", "sheet-page", "bible-section", "prose", "audiobook"]),
       sectionHeading: z.string().min(1).optional(),
       /**
        * Which piece of a long read this is, and how many there are (2026-08-24).
@@ -975,6 +980,78 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       dropped: z.number().int().min(0),
       omitted: z.number().int().min(0),
       record: ChapterVoicesSchema.optional(),
+      reason: z.string().optional(),
+    })
+    .strict(),
+
+  /**
+   * A chapter read into kept takes (design turn 146, SPEC-047 R-16..R-18): started with what
+   * the run will make; priced once when any of it is a cloud voice, naming each voice, its
+   * provider and its share; a progress event per block as its take lands or is flagged; then
+   * finished with a named ending. Keyed like continuity's and the cast's runs.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.started"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      /** The run's request, which a cloned voice's upload confirmation is asked under (SPEC-022, SPEC-046). */
+      requestId: UlidSchema,
+      /** How many blocks the run will make, of how many the chapter has. */
+      toMake: z.number().int().min(0),
+      blocks: z.number().int().min(0),
+      /**
+       * Replayed to a renderer that connects while the run is going, with no counts: a window
+       * that already holds the run keeps what it knows, and one that does not learns a run is
+       * going and can be stopped. A replay reaches every refresh, not only a reconnect, so
+       * without this mark it would reset a run's progress and flip a finished run back to going.
+       */
+      replayed: z.literal(true).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.priced"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      characters: z.number().int().min(0),
+      estimatedMicroUsd: z.number().int().min(0),
+      confirmationToken: z.string().min(1),
+      /** Every cloud voice the words would go to, once each, with its share (R-17). */
+      voices: z.array(
+        z.object({ label: z.string().min(1), provider: z.string().min(1), characters: z.number().int().min(0), estimatedMicroUsd: z.number().int().min(0) }).strict(),
+      ),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.progress"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      block: z.string().min(1),
+      outcome: z.enum(["made", "adopted", "flagged"]),
+      reason: z.string().optional(),
+      made: z.number().int().min(0),
+      toMake: z.number().int().min(0),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.finished"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      outcome: z.enum(["read", "stopped", "unavailable", "failed", "refused"]),
+      made: z.number().int().min(0),
+      flagged: z.number().int().min(0),
+      record: ChapterAudiobookSchema.optional(),
       reason: z.string().optional(),
     })
     .strict(),

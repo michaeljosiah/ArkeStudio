@@ -6736,6 +6736,8 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
    The manuscript sits at a reading measure of 640, the side is 250 — the numbers the turn pins. */
 .fy-ch__body { flex: 1; min-height: 0; display: flex; gap: 28px; }
 .fy-ch__manuscript { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+/* The editor stays mounted under the Audiobook view (turn 146); the class's flex would otherwise beat the attribute. */
+.fy-ch__manuscript[hidden] { display: none; }
 .fy-ch__prose { flex: 1; min-height: 0; overflow: auto; padding: 6px 2px 0; max-width: 640px; font: 400 15px/1.75 var(--font-sans); }
 .fy-ch__prose .rich-markdown-editor { min-height: 100%; }
 .fy-ch__source { flex: 1; min-height: 0; max-width: 640px; resize: none; padding: 6px 2px 0; border: 0; background: transparent; color: var(--foreground); font: 400 15px/1.75 var(--font-sans); }
@@ -6747,6 +6749,25 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ch__band-push { flex: 1; }
 .fy-ch__draft { border-left: 2px solid var(--border); padding-left: 14px; }
 .fy-ch__side { width: 250px; flex: none; display: flex; flex-direction: column; gap: 20px; padding-top: 6px; overflow: auto; }
+/* The Audiobook view (design turn 146): a row a block, the reader in a 70px mark column, an 8px dot for its state. */
+.fy-ab__blocks { flex: 1; min-height: 0; overflow: auto; padding: 6px 2px 0; max-width: 640px; }
+.fy-ab__block { display: grid; grid-template-columns: 70px minmax(0, 1fr) 14px; gap: 10px; align-items: start; padding: 4px 6px; margin: 0 -6px 6px; border-radius: 6px; cursor: pointer; }
+.fy-ab__block--selected { background: var(--muted); }
+.fy-ab__block--sounding { background: var(--secondary); box-shadow: inset 2px 0 0 var(--foreground); }
+.fy-ab__mark { padding-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--foreground); }
+.fy-ab__mark--faint { color: var(--neutral-400); }
+.fy-ab__mark--warn { color: var(--warning); }
+.fy-ab__text { font: 400 15px/1.75 var(--font-sans); }
+.fy-ab__dot { width: 8px; height: 8px; margin-top: 9px; padding: 0; border-radius: 50%; border: 1px solid var(--neutral-400); background: transparent; cursor: pointer; flex: none; box-sizing: border-box; }
+.fy-ab__dot:disabled { cursor: default; }
+.fy-ab__dot--made { background: var(--success); border-color: var(--success); }
+.fy-ab__dot--stale { background: var(--warning); border-color: var(--warning); }
+.fy-ab__dot--flagged { background: var(--destructive); border-color: var(--destructive); }
+.fy-ab__control { display: inline-flex; align-items: center; gap: 8px; }
+.fy-ab__play { width: 18px; height: 18px; padding: 0; border: 0; background: transparent; color: var(--muted-foreground); cursor: pointer; font-size: 10px; }
+.fy-ab__foot { display: flex; align-items: center; gap: 14px; padding: 10px 0 16px; border-top: 1px solid var(--border); font: 400 10.5px var(--font-mono); color: var(--neutral-400); }
+.fy-ab__foot-push { flex: 1; }
+.fy-ch__viewrow { margin-top: 10px; align-self: flex-start; }
 .fy-ch__target { height: 4px; border-radius: 99px; background: var(--secondary); margin-top: 7px; overflow: hidden; }
 .fy-ch__target > span { display: block; height: 100%; background: var(--foreground); }
 .fy-ch__target--page { margin: 18px 0 14px; flex: none; }

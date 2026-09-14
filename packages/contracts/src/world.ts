@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CanonIdSchema, EpisodeIdSchema, IsoDateSchema, IsoDateTimeSchema, SceneIdSchema, SlugSchema, UlidSchema } from "./ids.js";
+import { ChapterAudiobookStateSchema } from "./audiobook.js";
 // The same bound the world's list uses, shared rather than restated: two copies of one
 // constraint is how a list and its copy come to disagree (issue 243's finalization bug).
 import { FailureModesSchema } from "./art-direction.js";
@@ -778,6 +779,8 @@ export const ChapterSummarySchema = z
     continuity: ChapterContinuityStateSchema.optional(),
     /** The stamp of the cast of lines beside the chapter (turn 130), when one has been cast — or that the one there cannot be read. */
     voices: ChapterVoicesStateSchema.optional(),
+    /** The stamp of the audiobook record beside the chapter (turn 146, SPEC-047 R-1), the same way. */
+    audiobook: ChapterAudiobookStateSchema.optional(),
     words: z.number().int().min(0).optional(),
     draws: z
       .object({

@@ -273,6 +273,13 @@ export const CHAPTER_SOURCE_SCHEMA_VERSION = 13;
 export const MEDIA_HAS_VIDEO_SCHEMA_VERSION = 14;
 /** Older strict sidecar readers omit retired artifacts, breaking retained citations. */
 export const ARTIFACT_RETIREMENT_SCHEMA_VERSION = 18;
+/**
+ * An audiobook take's sidecar carries `generation.source: "audiobook"` (design turn 146,
+ * SPEC-047 R-3), a member of a union a build older than the audiobook cannot parse: the strict
+ * sidecar read fails and the artifact drops on scan, and with it every take of the book. Fenced
+ * with the sidecar that introduces it, as `hasVideo` and retirement are.
+ */
+export const AUDIOBOOK_TAKE_SCHEMA_VERSION = 23;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {
@@ -280,8 +287,9 @@ function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: strin
   for (const file of files) {
     if (!file.newContent || !file.path.endsWith(".json")) continue;
     try {
-      const record = JSON.parse(file.newContent) as { mediaInfo?: Record<string, unknown>; retiredAt?: unknown } | null;
+      const record = JSON.parse(file.newContent) as { mediaInfo?: Record<string, unknown>; retiredAt?: unknown; generation?: { source?: unknown } } | null;
       if (file.path.startsWith("artifacts/") && record?.retiredAt !== undefined) boundary = Math.max(boundary, ARTIFACT_RETIREMENT_SCHEMA_VERSION);
+      if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook") boundary = Math.max(boundary, AUDIOBOOK_TAKE_SCHEMA_VERSION);
       const info = record?.mediaInfo;
       if (info == null) continue;
       if ("hasVideo" in info) boundary = Math.max(boundary, MEDIA_HAS_VIDEO_SCHEMA_VERSION);

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { Link, useParams, useNavigate } from "react-router";
+import { Link, useParams, useNavigate, useSearchParams } from "react-router";
 import {
   chapterParagraphs,
   countWords,
@@ -10,6 +10,7 @@ import {
   type ChapterContinuity,
   type ChapterSummary,
   type ChapterVoices,
+  type ChapterAudiobook,
   DEFAULT_NARRATOR,
   legacyVoiceModel,
   voicedBlocks,
@@ -25,10 +26,13 @@ import { updateRichModeGate, type RichModeGate } from "../components/editor/rich
 import { Pin, RotateCcw } from "../components/icons.js";
 import { PageReadControl, useProsePageRead, type PageReadBlock } from "../components/page-read.js";
 import { EmptyState, Screen } from "../components/layout.js";
-import { Button } from "../components/ui.js";
+import { Button, cx } from "../components/ui.js";
 import { continuityStamp } from "../lib/continuity.js";
 import { useProduction } from "../lib/selectors.js";
 import { EditableText, SceneTitle } from "./storyboard.js";
+import { AudiobookBlocks, AudiobookSide, useChapterAudiobook } from "./chapter-audiobook.js";
+import { playClip } from "../lib/audio.js";
+import { mediaUrl } from "../lib/media.js";
 import {
   openChapter,
   restoreChapter,
@@ -46,6 +50,7 @@ import {
   requestVoiceCatalogue,
   stopVoices,
   useCasting,
+  useAudiobookRuns,
 } from "../lib/store.js";
 
 /**
@@ -83,6 +88,8 @@ type OpenedRecord = {
   continuity: ChapterContinuity | "unreadable" | null;
   /** The cast of lines beside the chapter (turn 130), the same way. */
   voices: ChapterVoices | "unreadable" | null;
+  /** The audiobook record beside the chapter (turn 146, SPEC-047 R-1), the same way. */
+  audiobook: ChapterAudiobook | "unreadable" | null;
 };
 
 /**
@@ -293,6 +300,8 @@ export function ChapterWorkspace({
   const [finishedRecord, setFinishedRecord] = useState<ChapterContinuity | null>(null);
   /** The cast a run finished with (turn 130), held for the same reason; a fresh open replaces it. */
   const [finishedCast, setFinishedCast] = useState<ChapterVoices | null>(null);
+  /** The audiobook record a run finished with (turn 146), the same way. */
+  const [finishedAudiobook, setFinishedAudiobook] = useState<ChapterAudiobook | null>(null);
   const [openFailure, setOpenFailure] = useState<string | null>(null);
   const [reopen, setReopen] = useState(0);
   const [draft, setDraft] = useState<string | null>(null);
@@ -364,12 +373,14 @@ export function ChapterWorkspace({
           versions: result.versions ?? [],
           continuity: result.continuityUnreadable === true ? "unreadable" : (result.continuity ?? null),
           voices: result.voicesUnreadable === true ? "unreadable" : (result.voices ?? null),
+          audiobook: result.audiobookUnreadable === true ? "unreadable" : (result.audiobook ?? null),
         };
         const previous = recordRef.current;
         recordRef.current = opened;
         setRecord(opened);
         setFinishedRecord(null);
         setFinishedCast(null);
+        setFinishedAudiobook(null);
         setOpenFailure(null);
         // A plan edit can change the file hash without changing its prose. Keep the local
         // words and adopt that base only when the saved prose is still the body we read.
@@ -479,6 +490,7 @@ export function ChapterWorkspace({
           // it is what makes it stale (turn 129).
           continuity: recordRef.current?.continuity ?? null,
           voices: recordRef.current?.voices ?? null,
+          audiobook: recordRef.current?.audiobook ?? null,
         };
         recordRef.current = saved;
         setRecord(saved);
@@ -769,6 +781,49 @@ export function ChapterWorkspace({
   };
   // The block being read, for the band over the manuscript (turn 130).
   const voicedAt = voicedRead.reading && voicedRead.at !== null ? voiced.blocks[voicedRead.at] ?? null : null;
+  /*
+   * The Audiobook view (turn 146, SPEC-047 R-30): the same room, the prose as blocks with a
+   * state each. Carried in the address so a row on the door opens straight into it and a test
+   * can mount it; the manuscript's editor stays mounted underneath, hidden, so its autosave
+   * and its draft are exactly where they were when the view goes back.
+   */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const view: "manuscript" | "audiobook" = searchParams.get("view") === "audiobook" ? "audiobook" : "manuscript";
+  const chooseView = (next: "manuscript" | "audiobook") =>
+    setSearchParams(
+      (params) => {
+        const copy = new URLSearchParams(params);
+        if (next === "audiobook") copy.set("view", "audiobook");
+        else copy.delete("view");
+        return copy;
+      },
+      { replace: true },
+    );
+  // The record a run finished with stands until a fresh open replaces it, as the cast's does:
+  // the run's last word arrives on its finished event, and what the disk holds now is read
+  // again only when the chapter is.
+  const audiobookRun = useAudiobookRuns()[`${worldId}/${prodId}/${chapter.id}`];
+  useEffect(() => {
+    if (audiobookRun?.record !== undefined) setFinishedAudiobook(audiobookRun.record);
+  }, [audiobookRun?.record]);
+  const audiobookRecord = useMemo((): ChapterAudiobook | "unreadable" | null => {
+    const opened = record?.audiobook ?? null;
+    if (finishedAudiobook === null) return opened;
+    if (opened === null || opened === "unreadable" || finishedAudiobook.updatedAt >= opened.updatedAt) return finishedAudiobook;
+    return opened;
+  }, [record?.audiobook, finishedAudiobook]);
+  const audiobook = useChapterAudiobook({
+    worldId,
+    prodId,
+    chapter,
+    body: record?.body ?? "",
+    cast: voicesRecord,
+    record: audiobookRecord,
+    reading: production.audiobook?.reading ?? "narrator",
+    connection,
+    locked: locked || record === null,
+  });
+  const worldSlug = world.meta.slug;
   const read = {
     ...pageRead,
     begin: () => {
@@ -925,9 +980,15 @@ export function ChapterWorkspace({
             <div className="fy-sw__actions">
               {/* Not while a draft stands in the prose's place: the read speaks the saved chapter,
                   and the words on screen are the draft's (codex, PR 879). */}
-              {paragraphs.length > 0 && stagedDraft === undefined && !voicedRead.reading && <PageReadControl read={read} label="Read the chapter" />}
-              {paragraphs.length > 0 && stagedDraft === undefined && voicesRecord !== null && !pageRead.reading && (
-                <PageReadControl read={readVoiced} label="Voiced" />
+              {view === "audiobook" ? (
+                stagedDraft === undefined && audiobook.head
+              ) : (
+                <>
+                  {paragraphs.length > 0 && stagedDraft === undefined && !voicedRead.reading && <PageReadControl read={read} label="Read the chapter" />}
+                  {paragraphs.length > 0 && stagedDraft === undefined && voicesRecord !== null && !pageRead.reading && (
+                    <PageReadControl read={readVoiced} label="Voiced" />
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -984,10 +1045,61 @@ export function ChapterWorkspace({
               </span>
             )}
           </div>
+          {/* The view row (turn 146): the Chapters door's seg, Manuscript or Audiobook. */}
+          <nav className="fy-seg fy-ch__viewrow" aria-label="Chapter view">
+            <button type="button" className={cx("fy-seg__item", view === "manuscript" && "fy-seg__item--active")} onClick={() => chooseView("manuscript")}>
+              Manuscript
+            </button>
+            <button type="button" className={cx("fy-seg__item", view === "audiobook" && "fy-seg__item--active")} onClick={() => chooseView("audiobook")}>
+              Audiobook
+            </button>
+          </nav>
         </header>
 
         <div className="fy-ch__body">
-          <div className="fy-ch__manuscript" ref={manuscriptRef}>
+          {view === "audiobook" && (
+            <div className="fy-ch__manuscript" data-testid="audiobook-column">
+              {audiobook.sounding !== null && (
+                <div className="fy-ch__band" data-testid="audiobook-band">
+                  <span className="fy-ch__band-who">{audiobook.sounding.mark}</span>
+                  <span className="fy-ch__band-push" />
+                  <span className="fy-ch__band-line">{audiobook.sounding.block.text}</span>
+                </div>
+              )}
+              {openFailure !== null ? (
+                <EmptyState title={openFailure} />
+              ) : record === null ? (
+                <p className="fy-bible__empty">Opening…</p>
+              ) : (
+                <AudiobookBlocks
+                  rows={audiobook.rows}
+                  sounding={audiobook.sounding}
+                  selected={audiobook.selected}
+                  onSelect={audiobook.setSelected}
+                  slug={worldSlug}
+                  onPlayOne={(row) => {
+                    if (row.artifact === null) return;
+                    void playClip({ id: row.artifact.id, url: mediaUrl(worldSlug, `artifacts/${row.artifact.file}`), title: `${chapter.title} · ${row.mark}`, sub: "audiobook · one block" });
+                  }}
+                />
+              )}
+              <div className="fy-ab__foot" data-testid="audiobook-foot">
+                <span>{`Saved · v${record?.version ?? chapter.version} · ${words.toLocaleString()} words`}</span>
+                <span className="fy-ab__foot-push" />
+                {audiobook.note !== null && <span className="fy-ch__who-where--warn">{audiobook.note}</span>}
+                <span>
+                  {[
+                    `${audiobook.counts.total} block${audiobook.counts.total === 1 ? "" : "s"}`,
+                    `${audiobook.counts.made} made`,
+                    ...(audiobook.counts.stale > 0 ? [`${audiobook.counts.stale} stale`] : []),
+                    ...(audiobook.counts.flagged > 0 ? [`${audiobook.counts.flagged} flagged`] : []),
+                    ...(audiobook.counts.notMade > 0 ? [`${audiobook.counts.notMade} not made`] : []),
+                  ].join(" · ")}
+                </span>
+              </div>
+            </div>
+          )}
+          <div className="fy-ch__manuscript" ref={manuscriptRef} hidden={view === "audiobook"}>
             {voicedAt !== null && (
               <div className="fy-ch__band" data-testid="voiced-band">
                 <span className="fy-ch__band-who">{voicedAt.speaker === undefined ? narratorName : voicedAt.sheet !== undefined ? sheetNameOf(voicedAt.sheet) : voicedAt.speaker}</span>
@@ -1118,6 +1230,16 @@ export function ChapterWorkspace({
           </div>
 
           <aside className="fy-ch__side">
+            {view === "audiobook" && (
+              <AudiobookSide
+                rows={audiobook.rows}
+                selected={audiobook.selected}
+                record={audiobookRecord === "unreadable" ? null : audiobookRecord}
+                artifacts={world.artifacts}
+                slug={worldSlug}
+                chapterTitle={chapter.title}
+              />
+            )}
             <section className="fy-bible__panel">
               <h2 className="fy-bible__paneltitle">The book</h2>
               <p className="fy-bible__empty fy-mono">

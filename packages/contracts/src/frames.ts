@@ -1,5 +1,6 @@
 import { StageReferenceFrameSchema } from "./scene.js";
 import { isManuscriptLanguage } from "./manuscript.js";
+import { AudiobookReadingSchema } from "./audiobook.js";
 import { StageInspectionFrameSchema } from "./stage-construction.js";
 import { DialogueFailureTagSchema } from "./take-feedback.js";
 import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
@@ -2837,6 +2838,29 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   z
     .object({ kind: z.literal("stop-voices"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
+    .strict(),
+  /**
+   * The audiobook (design turn 146, SPEC-047): read a chapter into kept takes — every block
+   * that is not made, in reading order, priced once and confirmed by token when any of it is a
+   * cloud voice — stop the run, leaving the takes made so far standing, and choose the book's
+   * reading. One run per chapter at a time, keyed like the cast's.
+   */
+  z
+    .object({
+      kind: z.literal("read-audiobook-chapter"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      confirmationToken: z.string().min(1).optional(),
+      /** A cloned voice among the readers: the remote engine its recording may go to (SPEC-022, SPEC-046). */
+      voiceUploadConfirmedFor: z.string().min(1).optional(),
+    })
+    .strict(),
+  z
+    .object({ kind: z.literal("stop-audiobook"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
+    .strict(),
+  z
+    .object({ kind: z.literal("set-audiobook-reading"), worldId: UlidSchema, productionId: SlugSchema, reading: AudiobookReadingSchema })
     .strict(),
   /**
    * A manuscript out and a manuscript in (turn 131, SPEC-012 §2.4.3). The export lands under

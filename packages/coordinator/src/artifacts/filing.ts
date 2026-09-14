@@ -496,6 +496,25 @@ function generatedIdentity(
       links: [],
     };
   }
+  if (generation.source === "audiobook") {
+    // One take per block per run: the same block read again is a new take with a new job, so
+    // the identity is the job when there is one and the block's words and voice when a local
+    // take was made without the queue — a retry of the same words in the same voice is the
+    // take it already made, never a second copy (SPEC-047 R-4).
+    const made = generation.jobId ?? `${generation.textHash}/${generation.provider}/${generation.model}/${generation.voiceId}`;
+    return {
+      producedBy: "audiobook",
+      isSame: (artifact) =>
+        artifact.generation?.source === "audiobook" &&
+        artifact.generation.chapterId === generation.chapterId &&
+        artifact.generation.block === generation.block &&
+        (artifact.generation.jobId ?? `${artifact.generation.textHash}/${artifact.generation.provider}/${artifact.generation.model}/${artifact.generation.voiceId}`) === made,
+      // The chapter and the block, then a short tail so two takes of one block are two files.
+      stem: `${slugify(generation.chapterId).slice(0, 40) || "chapter"}-${generation.block.replace(/[^a-z0-9]+/gi, "-")}-${generation.textHash.slice(-6)}`,
+      // The chapter it belongs to, and the speaker when a sheet's voice read it.
+      links: [generation.chapterId, ...(generation.sheetId !== undefined ? [generation.sheetId] : [])],
+    };
+  }
   return {
     producedBy: "character-reference",
     // The job, not the take: the legacy tile path records no take at all, and one succeeded job
@@ -532,6 +551,12 @@ export async function fileGeneratedArtifact(
     generation: ArtifactGeneration;
     mediaProbe?: MediaProbe | null;
     abandoned?: () => boolean;
+    /**
+     * The production that owns the file (SPEC-020 R-11). An audiobook take is production media
+     * (SPEC-047 R-3): it is that book's, listed under it, and goes with it; a bench take and a
+     * character's reference stay the world's, as they were.
+     */
+    production?: string;
   },
 ): Promise<ArtifactSidecar> {
   const bytes = await readFile(toExtendedLength(input.sourcePath));
@@ -564,8 +589,9 @@ export async function fileGeneratedArtifact(
       hash: hash as ArtifactSidecar["hash"],
       origin: { by: "system", producedBy: identity.producedBy },
       links: identity.links,
-      // No `production` key: the world owns it (SPEC-020 R-13). Neither the bench nor a
-      // character's reference shelf belongs to one.
+      // No `production` key unless the producer names one (SPEC-020 R-13): the world owns a
+      // bench take and a character's reference; an audiobook take is its production's.
+      ...(input.production !== undefined ? { production: input.production } : {}),
       generation: input.generation,
       created: store.now(),
     };

@@ -51,6 +51,10 @@ import {
   ChapterVoicesSchema,
   summariseVoices,
   type ChapterVoicesState,
+  AudiobookBookSchema,
+  ChapterAudiobookSchema,
+  summariseAudiobook,
+  type ChapterAudiobookState,
   ProseStyleSchema,
   StoryOverviewSchema,
   StoryProgressSchema,
@@ -115,7 +119,9 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Eighteen adds artifact retirement to strict sidecars (issue 957).
 // Twenty adds the last/key/overview images to the strict Stage playblast pin (issue 1043).
 // Twenty-one adds gait/object speed ceilings; twenty-two adds performance ease/hold (#1044, #1046).
-export const SUPPORTED_SCHEMA_VERSION = 22;
+// Twenty-three is an audiobook take's sidecar (turn 146, SPEC-047 R-3): `generation.source`
+// gains a member the strict union of an older build cannot parse, so it would drop every take.
+export const SUPPORTED_SCHEMA_VERSION = 23;
 
 export class WorldOpenError extends Error {
   constructor(
@@ -515,6 +521,15 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
     const routing = (await exists(join(pdir, "routing.json")))
       ? await tryParse(`productions/${id}/routing.json`, (raw) => RoutingSchema.parse(JSON.parse(raw)))
       : null;
+    // .audiobook/book.json — the book's reading (turn 146, SPEC-047 R-11): derived-and-authored
+    // like the records beside it, so read plainly rather than through `tryParse`, and absent or
+    // unreadable it is the narrator's, which the default says.
+    const audiobook = await read(join(pdir, ".audiobook", "book.json"))
+      .then((raw) => {
+        const parsed = AudiobookBookSchema.safeParse(JSON.parse(raw));
+        return parsed.success ? parsed.data : null;
+      })
+      .catch(() => null);
     const treatment = (await exists(join(pdir, "story.md")))
       ? (await read(join(pdir, "story.md"))).replace(/\r\n/g, "\n")
       : null;
@@ -523,7 +538,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
     // absent, and anything unresolvable — a tie, a missing value, a value that is not a positive
     // integer — falls back to filename order. The summary carries the resolved dense sequence, so
     // no display surface has to reapply this rule.
-    const chapterEntries: Array<{ file: string; fm: ChapterFrontmatter; bodyHash: string; continuity: ChapterContinuityState | null; voices: ChapterVoicesState | null }> = [];
+    const chapterEntries: Array<{ file: string; fm: ChapterFrontmatter; bodyHash: string; continuity: ChapterContinuityState | null; voices: ChapterVoicesState | null; audiobook: ChapterAudiobookState | null }> = [];
     for (const file of (await listDir(join(pdir, "chapters"))).filter((f) => f.endsWith(".md")).sort()) {
       const parsed = await tryParse(`productions/${id}/chapters/${file}`, (raw) => {
         const doc = MarkdownFile.parse(raw);
@@ -554,14 +569,21 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
           return parsed.success ? summariseVoices(parsed.data) : { unreadable: true as const };
         })
         .catch((err: NodeJS.ErrnoException) => (err.code === "ENOENT" ? null : { unreadable: true as const }));
-      chapterEntries.push({ file: stem, fm, bodyHash, continuity, voices });
+      // The audiobook record beside the chapter (turn 146, SPEC-047 R-1), the same way: its stamp.
+      const audiobook: ChapterAudiobookState | null = await read(join(pdir, ".audiobook", `${stem}.json`))
+        .then((raw) => {
+          const parsed = ChapterAudiobookSchema.safeParse(JSON.parse(raw));
+          return parsed.success ? summariseAudiobook(parsed.data) : { unreadable: true as const };
+        })
+        .catch((err: NodeJS.ErrnoException) => (err.code === "ENOENT" ? null : { unreadable: true as const }));
+      chapterEntries.push({ file: stem, fm, bodyHash, continuity, voices, audiobook });
     }
     const chapterRank = (fm: ChapterFrontmatter): number => {
       const v = fm.order ?? fm.number;
       return typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : Infinity;
     };
     chapterEntries.sort((a, b) => chapterRank(a.fm) - chapterRank(b.fm) || (a.file < b.file ? -1 : 1));
-    const chapters = chapterEntries.map(({ file, fm, bodyHash, continuity, voices }, i) => ({
+    const chapters = chapterEntries.map(({ file, fm, bodyHash, continuity, voices, audiobook }, i) => ({
       id: fm.id,
       file,
       order: i + 1,
@@ -574,6 +596,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
       bodyHash,
       ...(continuity !== null ? { continuity } : {}),
       ...(voices !== null ? { voices } : {}),
+      ...(audiobook !== null ? { audiobook } : {}),
       ...(fm.words !== undefined ? { words: fm.words } : {}),
       ...(fm.draws !== undefined ? { draws: fm.draws } : {}),
       // The plan rides on the summary (turn 127): the door and Arke's list_chapters read it.
@@ -826,6 +849,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
         : null,
       story,
       proseStyle,
+      ...(audiobook !== null ? { audiobook } : {}),
       ...((await exists(join(pdir, "progress.json"))) ? {
         progress: await tryParse(`productions/${id}/progress.json`, (raw) => StoryProgressSchema.parse(JSON.parse(raw))) ?? { unreadable: true as const },
       } : {}),
