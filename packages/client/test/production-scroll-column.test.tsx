@@ -123,9 +123,10 @@ describe("the production column's scroll", () => {
   it("covers every screen the production route tree can mount", () => {
     // A tripwire, not a derivation: a new route under /p/ that nobody listed here would otherwise
     // be audited by a test that never renders it. 20 with the production's own artifacts page,
-    // which arrived carrying the scroll column and is what named it.
-    assert.equal(UNDER_PRODUCTION.length, 20);
-    assert.equal(new Set(UNDER_PRODUCTION.map((s) => s.id)).size, 20, "one entry per screen");
+    // which arrived carrying the scroll column and is what named it; 21 with the audiobook's
+    // door (design turn 146), a page of rows on .fy-prodmain.
+    assert.equal(UNDER_PRODUCTION.length, 21);
+    assert.equal(new Set(UNDER_PRODUCTION.map((s) => s.id)).size, 21, "one entry per screen");
   });
 
   it("never leaves a screen with no scroll and no scrolling panes", () => {
