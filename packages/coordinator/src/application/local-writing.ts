@@ -115,7 +115,9 @@ export function localWriting(store: WorldStore): EngineWritingSession {
       }
       if (!Number.isFinite(runtime.inputTokenLimit) || runtime.inputTokenLimit < 1024 || !runtime.sessionModel) throw new Error("The writing model is unavailable.");
       const runner = new WorldChatRunner({
-        adapter: new Proxy(runtime.adapter, { get(target, property) {
+        // A separate target permits guarded methods even when the host froze its adapter.
+        adapter: new Proxy(Object.create(runtime.adapter) as typeof runtime.adapter, { get(_target, property) {
+          const target = runtime.adapter;
           const value = Reflect.get(target, property);
           if (typeof value !== "function") return value;
           if (property === "dispatchAsync" || property === "sendMessage") return async (...args: unknown[]) => {

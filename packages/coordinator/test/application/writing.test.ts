@@ -43,7 +43,7 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
       assert.equal(modelId, "test-writer"); state.opened++;
       let ready!: () => void;
       const sent = new Promise<void>(resolve => { ready = resolve; });
-      const adapter = {
+      const adapter = Object.freeze({
         id: "fake", capabilities: () => new Set(["events"]), readiness: () => ({ ready: true }),
         dispatchAsync: async (input: { parts: Array<{ text?: string }> }) => {
           state.calls++; prompts.push(input.parts.map(p => p.text ?? "").join("\n")); ready(); state.dispatched?.(); return { ok: true };
@@ -62,7 +62,7 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
               checkReceiptIds: ids }],
           }) };
         })(),
-      } as unknown as HarnessAdapter;
+      }) as unknown as HarnessAdapter;
       signal.throwIfAborted();
       return { adapter, cwd: join(root, "scratch"), inputTokenLimit: 100000, sessionModel: modelId,
         createSession: async () => ({ sessionId: "session" }), close: async () => { state.closed++; } };
