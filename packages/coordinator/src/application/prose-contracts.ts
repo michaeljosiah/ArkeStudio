@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { SlugSchema } from "@arke-studio/contracts";
+import { ChapterSummarySchema, SlugSchema } from "@arke-studio/contracts";
 
 // IDs name records, never host paths. The local adapter maps canonical IDs to scanned filenames.
 export const proseId = SlugSchema;
@@ -14,7 +14,8 @@ export const proseProductionResult = z.object({ productionId: proseId }).strict(
 export const proseChapterResult = z.object({ productionId: proseId, chapterId: proseId }).strict();
 export const proseSaveResult = proseChapterResult.extend({ version: z.number().int().min(1),
   hash: z.string().regex(/^sha256:[a-f0-9]{64}$/) }).strict();
-export const proseChapterRead = proseSaveResult.extend({ title: z.string(), order: z.number(), body: z.string(),
+export const proseChapterRead = proseSaveResult.extend({ title: ChapterSummarySchema.shape.title,
+  order: ChapterSummarySchema.shape.order, body: z.string(),
   versions: z.array(z.number().int().min(1)) }).strict();
 export const proseManuscript = z.object({ productionId: proseId, title: z.string(),
   contentType: z.literal("text/markdown; charset=utf-8"), markdown: z.string(),

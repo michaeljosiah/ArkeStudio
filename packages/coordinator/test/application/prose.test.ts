@@ -21,7 +21,8 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
   await setup?.(worldDir);
   let provider = new FsWorldProvider(root);
   await provider.loadWorld(WORLD_ID);
-  const state = { revoked: false, held: false, failSave: false, saves: 0, deniedChapter: "", unsupported: false, afterSave: undefined as (() => Promise<void>) | undefined };
+  const state = { revoked: false, held: false, failSave: false, saves: 0, deniedChapter: "", unsupported: false,
+    readOverride: {} as { title?: string; order?: number }, afterSave: undefined as (() => Promise<void>) | undefined };
   const deliveries: Array<{ resource: unknown; sha256: string }> = [];
   const policy: EnginePolicy = {
     async authorise(ctx, action, resource) {
@@ -42,7 +43,10 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
       await state.afterSave?.();
     } });
     return createEngine({ policy, operations: new FileEngineOperationStore(path),
-      worlds: { use: (id, action) => local.use(id, session => action({ ...session, ...(state.unsupported ? { prose: undefined } : {}) })), close: () => local.close() },
+      worlds: { use: (id, action) => local.use(id, session => action({ ...session,
+        prose: state.unsupported ? undefined : { ...session.prose!,
+          readChapter: async (p, c) => ({ ...await session.prose!.readChapter(p, c), ...state.readOverride }) } })),
+        close: () => local.close() },
       queue: { enqueue: async () => { throw new Error("No provider expected"); }, jobs: () => [] } });
   };
   let engine = make();
@@ -157,6 +161,15 @@ it("unsupported sessions, invalid production kinds and malformed inputs refuse w
   h.state.unsupported = true;
   await assert.rejects(h.engine.prose.createProduction(context, WORLD_ID, { operationId: "unsupported", title: "No story" }), /does not support prose/);
   assert.equal(h.store().getBundle().productions.length, count);
+});
+
+it("malformed host chapter metadata is refused before content delivery", async t => {
+  const h = await harness(t);
+  for (const override of [{ title: "" }, { order: 0 }, { order: -1 }, { order: 1.5 }]) {
+    h.state.readOverride = override;
+    await assert.rejects(h.engine.prose.readChapter(context, WORLD_ID, productionId, chapterId));
+  }
+  assert.equal(h.deliveries.length, 0);
 });
 
 it("durable prose replay rejects malformed results and crossed resource identities", async t => {
