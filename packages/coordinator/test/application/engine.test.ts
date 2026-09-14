@@ -129,6 +129,7 @@ it("illustrations reuse the dispatcher, hold exact output and settle once after 
     assert.deepEqual(receipt.jobIds, generated.jobIds);
     assert.deepEqual(receipt.deliverableJobIds, []);
   }
+  await h.queue.waitForIdle();
   await h.queue.delete(generated.jobIds[0]!);
   assert.deepEqual(await restarted.illustrations.reconcile(parent, WORLD_ID, "allowed"), receipt);
   assert.equal(h.state.charges, 1); assert.equal(h.state.releases, 0);
@@ -340,6 +341,7 @@ it("artifact reconciliation retains sheet policy and flags missing unsettled que
   };
   assert.equal((await h.engine.illustrations.reconcile(parent, WORLD_ID, input.operationId)).status, "held");
   assert.equal(checked, 1);
+  await h.queue.waitForIdle();
   await h.queue.delete(result.jobIds[0]!);
   assert.equal(h.queue.listJobs().length, 0);
   assert.equal((await h.engine.illustrations.reconcile(parent, WORLD_ID, input.operationId)).status, "needs-reconciliation");
