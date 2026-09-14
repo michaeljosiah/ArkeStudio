@@ -1596,39 +1596,51 @@ function handleFrame(json: string): void {
         audiobookDoor = { ...audiobookDoor, [event.productionId]: { door: event.door, requestId: event.requestId, ...(event.refused !== undefined ? { refused: event.refused } : {}) } };
       }
     } else if (event.type === "audiobook.book-started") {
-      // A replayed start carries no counts: a window that holds the run keeps what it knows.
-      if (event.replayed !== true || audiobookBook[event.productionId] === undefined) {
+      // The book's state is keyed by production, and productions recur by name across worlds:
+      // a run's late word from a world since closed is not this world's (codex on PR 1187).
+      if (current.state?.world?.meta.worldId === event.worldId) {
+        // A replayed start carries no counts: a window that holds the run keeps what it knows.
+        if (event.replayed !== true || audiobookBook[event.productionId] === undefined) {
+          audiobookBook = {
+            ...audiobookBook,
+            [event.productionId]: { state: "reading", requestId: event.requestId, chapters: event.chapters, blocks: event.blocks, done: 0, chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0 },
+          };
+        }
+        // The book's request is the coordinator's (SPEC-047 R-17): a cloned voice's consent is
+        // routed by it, so it is registered here as the chapter's is.
+        pendingQueueRequests.set(event.requestId, { command: "read-audiobook-book" });
+      }
+    } else if (event.type === "audiobook.book-priced") {
+      if (current.state?.world?.meta.worldId === event.worldId) {
+        const held = audiobookBook[event.productionId] ?? { chapters: event.chapters, blocks: event.blocks, done: 0, chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0 };
+        audiobookBook = { ...audiobookBook, [event.productionId]: { ...held, state: "priced", price: event } };
+      }
+    } else if (event.type === "audiobook.book-progress") {
+      if (current.state?.world?.meta.worldId === event.worldId) {
+        const held = audiobookBook[event.productionId] ?? { chapters: event.chapters, blocks: 0, done: 0, chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0 };
+        audiobookBook = { ...audiobookBook, [event.productionId]: { ...held, state: "reading", done: event.done, chapters: event.chapters } };
+      }
+    } else if (event.type === "audiobook.book-finished") {
+      if (current.state?.world?.meta.worldId === event.worldId) {
+        const held = audiobookBook[event.productionId] ?? { chapters: 0, blocks: 0, done: 0, chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0 };
         audiobookBook = {
           ...audiobookBook,
-          [event.productionId]: { state: "reading", requestId: event.requestId, chapters: event.chapters, blocks: event.blocks, done: 0, chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0 },
+          [event.productionId]: {
+            ...held,
+            state: event.outcome,
+            price: undefined,
+            chaptersRead: event.chaptersRead,
+            chaptersRefused: event.chaptersRefused,
+            made: event.made,
+            flagged: event.flagged,
+            ...(event.reason !== undefined ? { reason: event.reason } : {}),
+          },
         };
       }
-      // The book's request is the coordinator's (SPEC-047 R-17): a cloned voice's consent is
-      // routed by it, so it is registered here as the chapter's is.
-      pendingQueueRequests.set(event.requestId, { command: "read-audiobook-book" });
-    } else if (event.type === "audiobook.book-priced") {
-      const held = audiobookBook[event.productionId] ?? { chapters: event.chapters, blocks: event.blocks, done: 0, chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0 };
-      audiobookBook = { ...audiobookBook, [event.productionId]: { ...held, state: "priced", price: event } };
-    } else if (event.type === "audiobook.book-progress") {
-      const held = audiobookBook[event.productionId] ?? { chapters: event.chapters, blocks: 0, done: 0, chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0 };
-      audiobookBook = { ...audiobookBook, [event.productionId]: { ...held, state: "reading", done: event.done, chapters: event.chapters } };
-    } else if (event.type === "audiobook.book-finished") {
-      const held = audiobookBook[event.productionId] ?? { chapters: 0, blocks: 0, done: 0, chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0 };
-      audiobookBook = {
-        ...audiobookBook,
-        [event.productionId]: {
-          ...held,
-          state: event.outcome,
-          price: undefined,
-          chaptersRead: event.chaptersRead,
-          chaptersRefused: event.chaptersRefused,
-          made: event.made,
-          flagged: event.flagged,
-          ...(event.reason !== undefined ? { reason: event.reason } : {}),
-        },
-      };
     } else if (event.type === "audiobook.conformed") {
-      audiobookNotes = { ...audiobookNotes, [event.productionId]: { dropped: event.dropped, chapters: event.chapters, seq: (audiobookNotes[event.productionId]?.seq ?? 0) + 1 } };
+      if (current.state?.world?.meta.worldId === event.worldId) {
+        audiobookNotes = { ...audiobookNotes, [event.productionId]: { dropped: event.dropped, chapters: event.chapters, seq: (audiobookNotes[event.productionId]?.seq ?? 0) + 1 } };
+      }
     } else if (event.type === "direction.started") {
       const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
       // A replay reaches every refresh: a window that already holds the run keeps what it knows.

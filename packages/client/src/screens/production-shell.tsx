@@ -72,6 +72,7 @@ import {
   useStore,
 } from "../lib/store.js";
 import { audiobookDoorLine } from "@arke-studio/contracts";
+import { audiobookDoorStamp } from "./audiobook.js";
 import { takeMediaPath, type TakeEpisodeOption, episodeLabel, filterTakeEpisodes } from "./production-generate.js";
 import { useNewScene, useNewChapter, NewSceneContext, useSharedNewScene, NewChapterContext, ChapterPlan, ChapterOutlineRow } from "./production-story.js";
 import { exportViewFor } from "./editor-export.js";
@@ -333,7 +334,7 @@ export function ProductionLayout() {
    */
   const audiobookDoor = useAudiobookDoors()[prodId ?? ""]?.door ?? null;
   const shellConnection = useStore().connection;
-  const audiobookStamp = production === null ? "" : JSON.stringify(production.chapters.map((c) => [c.id, c.version, c.bodyHash ?? "", c.audiobook ?? null]));
+  const audiobookStamp = audiobookDoorStamp(production);
   useEffect(() => {
     if (!worldId || !prodId || !isStory || shellConnection !== "open") return;
     openAudiobook(worldId, prodId);

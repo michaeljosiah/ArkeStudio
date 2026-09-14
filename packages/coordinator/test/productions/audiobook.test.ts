@@ -1199,6 +1199,12 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
         const second = events.filter((e): e is Finished => e.type === "audiobook.finished" && e.chapterId === "the-same-ink");
         assert.deepEqual(second.map((e) => [e.outcome, e.reason]), [["refused", "moved since the book was priced"]]);
         assert.equal(events.filter((e) => e.type === "audiobook.priced").length, 0, "no chapter asks its own price under the book");
+        type BookProgress = Extract<DomainEvent, { type: "audiobook.book-progress" }>;
+        assert.deepEqual(
+          events.filter((e): e is BookProgress => e.type === "audiobook.book-progress").map((e) => [e.chapterId, e.done]),
+          [["neap", 1], ["the-same-ink", 2]],
+          "the count on the door moves past the refused chapter too",
+        );
 
         // The next press prices what stands now — the directed line — and reads it on that answer.
         await readBook(send);
@@ -1214,6 +1220,78 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
       },
     );
   });
+
+  it("a chapter whose title was renamed after the book was priced is refused too: the spoken heading is in the price's name (R-17; codex on PR 1187)", async () => {
+    let sendRef: ((message: ClientMessage) => Promise<void>) | null = null;
+    let renamed = false;
+    await withHarness(
+      {
+        cloud: [LOW_TIDE],
+        before: async (worldDir) => {
+          await twoChapters(worldDir);
+          // Maren reads on the machine's engine, so the book has a local block to hold while the
+          // narrator — a cloud voice here — is what the title costs.
+          const sheet = join(worldDir, "characters", "maren-kest.md");
+          const raw = await readFile(sheet, "utf8");
+          const swapped = raw.replace(/voice:\r?\n  provider: elevenlabs\r?\n  voiceId: v_8Kq2\r?\n  label: Low tide\r?\n/, "voice:\n  provider: kokoro\n  model: kokoro-82m\n  voiceId: bm_george\n  label: George\n");
+          assert.notEqual(swapped, raw);
+          await writeFile(sheet, swapped);
+        },
+        seed: secondChapterCast,
+        synthesize: async () => {
+          if (!renamed && sendRef !== null) {
+            renamed = true;
+            await sendRef({ kind: "edit-chapter-plan", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "02-the-same-ink", changes: { title: "The same ink, and a longer title than the price was given" } });
+          }
+          return wav();
+        },
+      },
+      async ({ events, send, bundle }) => {
+        sendRef = send;
+        await send({ kind: "set-credential", provider: "elevenlabs", key: "k-test" });
+        await send({ kind: "set-narrator", voice: { provider: "elevenlabs", model: ELEVEN.id, voiceId: LOW_TIDE.voiceId, label: "Low tide" } });
+        await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "cast" });
+        const door = await openDoor(send, events);
+        assert.equal(door.price.chapters, 2);
+        assert.deepEqual(
+          door.price.voices.map((v) => [v.label, v.narrator ?? false, v.local]),
+          [["Low tide", true, false], ["George", false, true]],
+          "the cloud narrator's own line, and Maren's local voice as its own",
+        );
+        await readBook(send);
+        const priced = events.find((e): e is BookPriced => e.type === "audiobook.book-priced");
+        assert.ok(priced);
+        await readBook(send, { confirmationToken: priced.confirmationToken });
+        assert.ok(renamed, "the second chapter was renamed while the first was read");
+        const chapter = bundle().productions.find((p) => p.meta.id === LEDGER)?.chapters.find((c) => c.id === "the-same-ink");
+        assert.equal(chapter?.version, 4, "a rename cuts no version");
+        const finished = events.find((e): e is BookFinished => e.type === "audiobook.book-finished");
+        assert.equal(finished?.outcome, "read", finished?.reason);
+        assert.equal(finished?.chaptersRead, 1);
+        assert.equal(finished?.chaptersRefused, 1);
+        const second = events.filter((e): e is Finished => e.type === "audiobook.finished" && e.chapterId === "the-same-ink");
+        assert.deepEqual(second.map((e) => [e.outcome, e.reason]), [["refused", "moved since the book was priced"]]);
+        await readBook(send);
+        const again = events.filter((e): e is BookPriced => e.type === "audiobook.book-priced").at(-1);
+        assert.ok(again && again !== priced);
+        assert.ok(again.characters > priced.characters, "the longer heading is in the new price");
+      },
+    );
+  });
+
+  it("a chapter refused before the book begins is no chapter of its count, and the count moves past the ones read (codex on PR 1187)", () =>
+    withHarness({ before: twoChapters, castHash: `sha256:${"0".repeat(64)}`, seed: secondChapterCast }, async ({ events, send }) => {
+      // Under cast the first chapter's cast has moved and the second's is current: the first is
+      // refused and the count on the door still moves past it.
+      await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "cast" });
+      await readBook(send);
+      const finished = events.find((e): e is BookFinished => e.type === "audiobook.book-finished");
+      assert.equal(finished?.outcome, "read", finished?.reason);
+      assert.deepEqual([finished?.chaptersRead, finished?.chaptersRefused], [1, 1]);
+      type BookProgress = Extract<DomainEvent, { type: "audiobook.book-progress" }>;
+      const progress = events.filter((e): e is BookProgress => e.type === "audiobook.book-progress");
+      assert.deepEqual(progress.map((e) => [e.chapterId, e.done, e.chapters]), [["the-same-ink", 1, 1]], "a chapter refused before the run is no chapter of the book's count; the one read is");
+    }));
 
   it("a chapter read pressed while the book is being read is refused in a word, and a chapter its own run holds is left to that run (codex on PR 1187)", async () => {
     let releaseFirst: () => void = () => {};
@@ -1270,25 +1348,31 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
     const george = { provider: "kokoro", model: KOKORO.id, voiceId: "bm_george", label: "George" };
     const tide = { provider: "kokoro", model: KOKORO.id, voiceId: "af_tide", label: "Tide" };
     const anna = { provider: "elevenlabs", model: ELEVEN.id, voiceId: "v_anna", label: "Anna" };
-    const block = (text: string, reader: typeof george, extra: Partial<Line> = {}): Line => ({ reader, local: reader.provider === "kokoro", text, ...extra }) as Line;
+    let n = 0;
+    const block = (text: string, reader: typeof george, extra: Partial<Line> & { speaker?: string } = {}): Line => {
+      const { speaker, ...rest } = extra;
+      return { block: { key: `p${n++}.0`, paragraph: n, text, ...(speaker !== undefined ? { speaker } : {}) }, reader, local: reader.provider === "kokoro", text, ...rest } as Line;
+    };
     const speaking = [
       block("Chapter 1 · Neap", george),
       block("Maren counted the bells.", george),
-      block("“Six,” said Maren.", tide, { sheet: "maren-kest" }),
-      block("“Seven,” said Anna.", anna, { sheet: "anna-vale" }),
-      block("“Eight,” said Odile.", george, { sheet: "odile-sarn", substituted: "no voice" }),
+      block("“Six,” said Maren.", tide, { sheet: "maren-kest", speaker: "Maren Kest" }),
+      block("“Seven,” said Anna.", anna, { sheet: "anna-vale", speaker: "Anna Vale" }),
+      block("“Eight,” said Odile.", george, { sheet: "odile-sarn", speaker: "Odile Sarn", substituted: "no voice" }),
+      block("“Nine,” said Tam.", george, { speaker: "Tam Rusk", substituted: "no sheet" }),
     ];
     const misses = [speaking[3]!];
     const lines = bookPriceLines(george, speaking, misses, (b) => b.text.length * 300, (sheet) => (sheet === "odile-sarn" ? "Odile Sarn" : sheet));
     assert.deepEqual(
-      lines.map((line) => [line.label, line.narrator ?? false, line.local, line.speaker ?? null, line.characters, line.estimatedMicroUsd]),
+      lines.map((line) => [line.label, line.narrator ?? false, line.local, line.speaker ?? null, line.substituted ?? null, line.characters, line.estimatedMicroUsd]),
       [
-        ["George", true, true, null, "Chapter 1 · Neap".length + "Maren counted the bells.".length, 0],
-        ["Tide", false, true, null, "“Six,” said Maren.".length, 0],
-        ["Anna", false, false, null, "“Seven,” said Anna.".length, "“Seven,” said Anna.".length * 300],
-        ["George", false, true, "Odile Sarn", "“Eight,” said Odile.".length, 0],
+        ["George", true, true, null, null, "Chapter 1 · Neap".length + "Maren counted the bells.".length, 0],
+        ["Tide", false, true, null, null, "“Six,” said Maren.".length, 0],
+        ["Anna", false, false, null, null, "“Seven,” said Anna.".length, "“Seven,” said Anna.".length * 300],
+        ["George", false, true, "Odile Sarn", "no voice", "“Eight,” said Odile.".length, 0],
+        ["George", false, true, "Tam Rusk", "no sheet", "“Nine,” said Tam.".length, 0],
       ],
-      "Maren's Kokoro voice is her own line, not the narrator's",
+      "Maren's Kokoro voice is her own line, not the narrator's; a speaker with no sheet is stood in for by name, never folded into the narrator's words",
     );
   });
 

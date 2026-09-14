@@ -33,10 +33,14 @@ import {
  * `open-audiobook`, asked again whenever the book changes under it.
  */
 
-/** What the rows depend on, as one string: asked again when it moves. */
-function doorStamp(production: { chapters: readonly { id: string; version: number; bodyHash?: string; retired?: boolean; audiobook?: unknown }[]; audiobook?: unknown } | null): string {
+/**
+ * What the rows depend on, as one string: asked again when it moves. The title and the order
+ * are in it as the version and the hash are (codex on PR 1187): a rename or a reorder is
+ * frontmatter alone, and the spoken heading — and so a row and its price — follows it.
+ */
+export function audiobookDoorStamp(production: { chapters: readonly { id: string; order: number; title: string; version: number; bodyHash?: string; retired?: boolean; audiobook?: unknown }[]; audiobook?: unknown } | null): string {
   if (production === null) return "";
-  return JSON.stringify([production.audiobook ?? null, production.chapters.map((c) => [c.id, c.version, c.bodyHash ?? "", c.retired === true, c.audiobook ?? null])]);
+  return JSON.stringify([production.audiobook ?? null, production.chapters.map((c) => [c.id, c.order, c.title, c.version, c.bodyHash ?? "", c.retired === true, c.audiobook ?? null])]);
 }
 
 /** The voices row (R-12): who reads, in what, or why the narrator does instead. */
@@ -79,7 +83,7 @@ export function AudiobookScreen() {
   const note = useAudiobookNotes()[prodId ?? ""];
   const runs = useAudiobookRuns();
   const records = useAudiobookRecords();
-  const stamp = doorStamp(production);
+  const stamp = audiobookDoorStamp(production);
   // The chapters' runs and the record's writes move the rows: asked again once they land.
   const runStamp = JSON.stringify(Object.entries(runs).filter(([key]) => key.startsWith(`${worldId}/${prodId}/`)).map(([key, run]) => [key, run.state, run.made]));
   const recordStamp = Object.entries(records)

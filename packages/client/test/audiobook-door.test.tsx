@@ -8,7 +8,7 @@ import type { AudiobookDoor, ChapterSummary, ClientMessage, ClientState } from "
 import { AudiobookScreen } from "../src/screens/audiobook.js";
 import { ProductionLayout } from "../src/screens/production-shell.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
-import { __applyEventForTest, __handleFrameForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __handleFrameForTest, __setBridgeForTest, __setStateForTest, __stateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -155,6 +155,26 @@ describe("the Audiobook door (turn 146)", () => {
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.door", requestId: later.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", door: door("narrator", { rows: [] }) }));
     assert.equal(all(m, '[data-testid="audiobook-row"]').length, 0, "the latest ask's answer is taken");
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-finished", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", outcome: "read", chaptersRead: 2, chaptersRefused: 0, made: 50, flagged: 0 }));
+    await answerDoor(m, door("narrator"));
+    // A run's word from another world — a same-named production there — is not this door's.
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-started", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HD", productionId: "inkbound", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H3", chapters: 9, blocks: 120 }));
+    assert.doesNotMatch(text(m), /reading…/);
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.conformed", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HD", productionId: "inkbound", dropped: 3, chapters: 1 }));
+    assert.equal(q(m, '[data-testid="audiobook-note"]'), null);
+    // A rename or a reorder is frontmatter alone — no version, no new hash — and the spoken
+    // heading follows it, so the door is asked again.
+    const asks = () => m.sent.filter((message) => message.kind === "open-audiobook").length;
+    const kept = () => {
+      const held = __stateForTest();
+      return { connection: "open" as const, audiobook: held.audiobook, audiobookRecords: held.audiobookRecords, audiobookDoor: held.audiobookDoor, audiobookBook: held.audiobookBook, audiobookNotes: held.audiobookNotes };
+    };
+    const asked = asks();
+    await act(async () => __setStateForTest(inkbound(), kept()));
+    assert.equal(asks(), asked, "the same chapters ask nothing");
+    const renamed = inkbound();
+    renamed.world!.productions.find((p) => p.meta.id === "inkbound")!.chapters = CHAPTERS.map((c) => (c.id === "neap" ? { ...c, title: "The counting of bells, and after" } : c));
+    await act(async () => __setStateForTest(renamed, kept()));
+    assert.equal(asks(), asked + 1, "a renamed chapter asks the door again");
     await answerDoor(m, door("narrator"));
     await act(async () => all(m, '[data-testid="audiobook-row"]')[1]!.click());
     assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/p/inkbound/story/chapters/neap?view=audiobook`, "a row opens the chapter in its Audiobook view");

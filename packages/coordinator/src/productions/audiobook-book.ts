@@ -14,9 +14,9 @@ import {
   type ClonedVoice,
 } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
-import { checkDirection, directionPlan, effectiveReader, readAudiobook, readAudiobookBook, updateAudiobook } from "./audiobook.js";
-import { conformInput, directableBlocks } from "./audiobook-direction.js";
-import { chapterPriceToken, prepareChapter, type ChapterPreparation, type ReadingRoom, type Speaking } from "./audiobook-run.js";
+import { checkDirection, directionPlan, effectiveReader, readAudiobookBook, updateAudiobook } from "./audiobook.js";
+import { conformInput, directableBlocks, type DirectableBlock } from "./audiobook-direction.js";
+import { chapterPriceToken, missIdentity, prepareChapter, type ChapterPreparation, type ReadingRoom, type Speaking } from "./audiobook-run.js";
 
 /**
  * The book (design turn 146, SPEC-047 R-15..R-17, R-29): every chapter prepared as its own
@@ -70,14 +70,18 @@ export function bookPriceLines(narrator: ReadingRoom["narrator"], speaking: read
   for (const block of speaking) {
     if (block.refusal !== undefined) continue;
     const substituted = block.substitutedNow ?? block.substituted;
-    if (substituted === undefined || block.sheet === undefined) {
+    // A speaker with no sheet at all is stood in for like one with no voice (codex on PR
+    // 1187): named by the name the cast gave, never folded into the narrator's own words.
+    const speaker = block.sheet !== undefined ? sheetName(block.sheet) : block.block.speaker;
+    if (substituted === undefined || speaker === undefined) {
       own.push(block);
       continue;
     }
-    const held = stoodIn.get(block.sheet) ?? {
+    const key = block.sheet ?? `:${speaker}`;
+    const held = stoodIn.get(key) ?? {
       label: block.reader.label ?? block.reader.voiceId,
       provider: block.reader.provider,
-      speaker: sheetName(block.sheet),
+      speaker,
       substituted,
       local: block.local,
       characters: 0,
@@ -85,7 +89,7 @@ export function bookPriceLines(narrator: ReadingRoom["narrator"], speaking: read
     };
     held.characters += block.text.length;
     held.estimatedMicroUsd += misses.includes(block) ? priceOf(block) : 0;
-    stoodIn.set(block.sheet, held);
+    stoodIn.set(key, held);
   }
   // A line a voice: every block of a voice on this machine, free; the cloud misses of a cloud
   // voice, priced — as `priceLines` counts them for the chapter's own card.
@@ -260,10 +264,7 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
           "audiobook-book",
           deps.worldId,
           productionId,
-          ...toRead.flatMap((entry) => [
-            `${entry.summary.id}:${entry.prepared.plan.chapter.version}:${entry.prepared.plan.chapter.hash}`,
-            ...entry.prepared.misses.map((block) => `${block.block.key}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.direction?.hash ?? ""}`),
-          ]),
+          ...toRead.flatMap((entry) => [`${entry.summary.id}:${entry.prepared.plan.chapter.version}:${entry.prepared.plan.chapter.hash}`, ...entry.prepared.misses.map(missIdentity)]),
         ].join("\n"),
       )
       .digest("hex");
@@ -287,6 +288,7 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
   }
   let made = 0;
   let flagged = 0;
+  let read = 0;
   let done = 0;
   for (const entry of toRead) {
     if (signal.aborted) break;
@@ -297,13 +299,16 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
     flagged += result.flagged;
     if (result.outcome === "refused") refused += 1;
     else if (result.outcome === "failed" || result.outcome === "unavailable") {
-      emit({ type: "finished", outcome: result.outcome, chaptersRead: done, chaptersRefused: refused, made, flagged, ...(result.reason !== undefined ? { reason: result.reason } : {}) });
+      emit({ type: "finished", outcome: result.outcome, chaptersRead: read, chaptersRefused: refused, made, flagged, ...(result.reason !== undefined ? { reason: result.reason } : {}) });
       return;
-    } else if (result.outcome === "read") done += 1;
-    emit({ type: "progress", chapterId: entry.summary.id, done, chapters: toRead.length });
+    } else if (result.outcome === "read") read += 1;
     if (result.outcome === "stopped") break;
+    // The progress counts the chapters the book is past, a refused one included (codex on PR
+    // 1187): the count on the door is how far the book is, and the refused are named at the end.
+    done += 1;
+    emit({ type: "progress", chapterId: entry.summary.id, done, chapters: toRead.length });
   }
-  emit({ type: "finished", outcome: signal.aborted ? "stopped" : "read", chaptersRead: done, chaptersRefused: refused, made, flagged });
+  emit({ type: "finished", outcome: signal.aborted ? "stopped" : "read", chaptersRead: read, chaptersRefused: refused, made, flagged });
 }
 
 /**
@@ -321,18 +326,14 @@ export async function conformDirections(store: WorldStore, productionId: string,
   let chapters = 0;
   for (const summary of production.chapters.filter((c) => !c.retired)) {
     const stamp = summary.audiobook;
-    if (stamp === undefined || "unreadable" in stamp) continue;
-    let readable: Awaited<ReturnType<typeof directableBlocks>>;
-    try {
-      readable = await directableBlocks(store, productionId, summary.id, room);
-    } catch {
-      continue;
-    }
-    const { chapter, blocks } = readable;
-    // Every standing direction held to its reader's row, from whichever record is given: the
-    // blocks and their readers are the chapter's, so the same judgement holds for the record
-    // read here and for the one the lane hands over.
-    const conform = (record: Pick<ChapterAudiobook, "direction">): { direction: ChapterAudiobook["direction"]; dropped: number; changed: boolean } => {
+    if (stamp === undefined || "unreadable" in stamp || summary.bodyHash === undefined) continue;
+    // Every standing direction held to its reader's row: the blocks with the readers that
+    // speak them now, and the record, both read under the chapter's lane (codex on PR 1187,
+    // twice): a direction another window set meanwhile is conformed with the rest rather than
+    // erased by a stale map, and two changes of reading or voice close together are judged
+    // in the order they land, each against the readers that stand when its turn comes, rather
+    // than the slower one applying a superseded reader's limits last.
+    const conform = (blocks: DirectableBlock[], record: Pick<ChapterAudiobook, "direction">): { direction: ChapterAudiobook["direction"]; dropped: number; changed: boolean } => {
       const next: ChapterAudiobook["direction"] = { ...record.direction };
       let count = 0;
       let changed = false;
@@ -358,16 +359,20 @@ export async function conformDirections(store: WorldStore, productionId: string,
       }
       return { direction: next, dropped: count, changed };
     };
-    const held = await readAudiobook(store, productionId, chapter.file);
-    if (held === null || held === "unreadable" || !conform(held).changed) continue;
-    // Judged again from the record the lane hands over, never written from the one read above:
-    // a direction another window set or accepted meanwhile is conformed with the rest rather
-    // than erased by a stale map (codex on PR 1187).
     let applied = { dropped: 0, changed: false };
-    await updateAudiobook(store, productionId, chapter, (current) => {
-      const conformed = conform(current);
+    await updateAudiobook(store, productionId, { file: summary.file, version: summary.version, hash: summary.bodyHash }, async (current) => {
+      if (Object.keys(current.direction).length === 0) return null;
+      let readable: Awaited<ReturnType<typeof directableBlocks>>;
+      try {
+        readable = await directableBlocks(store, productionId, summary.id, room);
+      } catch {
+        // A chapter whose cast is not current, or whose narrator's model is gone, is left as
+        // it stands: its run refuses before any direction matters.
+        return null;
+      }
+      const conformed = conform(readable.blocks, current);
       applied = { dropped: conformed.dropped, changed: conformed.changed };
-      return conformed.changed ? { ...current, updatedAt: store.now(), direction: conformed.direction } : current;
+      return conformed.changed ? { ...current, updatedAt: store.now(), direction: conformed.direction } : null;
     });
     dropped += applied.dropped;
     if (applied.changed) chapters += 1;

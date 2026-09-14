@@ -322,8 +322,18 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
  */
 export function chapterPriceToken(worldId: string, productionId: string, chapterId: string, chapter: { version: number; hash: string }, misses: readonly Speaking[]): string {
   return createHash("sha256")
-    .update(["audiobook", worldId, productionId, chapterId, String(chapter.version), chapter.hash, ...misses.map((block) => `${block.block.key}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.direction?.hash ?? ""}`)].join("\n"))
+    .update(["audiobook", worldId, productionId, chapterId, String(chapter.version), chapter.hash, ...misses.map(missIdentity)].join("\n"))
     .digest("hex");
+}
+
+/**
+ * What a miss is priced as: the block, the words it would send — their own hash, since the
+ * chapter's names the prose and not the spoken heading, and a title renamed keeps the version
+ * and the body hash while it lengthens the request (codex on PR 1187) — the reader, and the
+ * direction.
+ */
+export function missIdentity(block: Speaking): string {
+  return `${block.block.key}:${audiobookTextHash(block.text)}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.direction?.hash ?? ""}`;
 }
 
 /** The price's lines (R-17): every cloud voice the words would go to, once each, with its share. */
