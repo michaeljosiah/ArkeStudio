@@ -7,6 +7,7 @@ import { PerformanceRecordSchema, PerformanceReviewStateSchema, emptyPerformance
 import { z } from "zod";
 import { ModelResidencySchema } from "./local-ai.js";
 import { ProductionNarrativeSchema } from "./production-narrative.js";
+import { AudiobookBookSchema } from "./audiobook.js";
 import { HarnessStatusSchema } from "./harness.js";
 import { ModelInfoSchema } from "./adapter.js";
 import { HarnessModelStatusSchema } from "./harness-models.js";
@@ -158,6 +159,8 @@ export const ProductionBundleSchema = z
      */
     proseStyle: ProseStyleSchema.nullable().optional(),
     progress: z.union([StoryProgressSchema, z.object({ unreadable: z.literal(true) }).strict()]).optional(),
+    /** `.audiobook/book.json` — the book's reading, narrator or cast (turn 146, SPEC-047 R-11); absent means the narrator's. */
+    audiobook: AudiobookBookSchema.optional(),
     /** season.json — the season beside its production, or null when none (SPEC-023 R-10). */
     season: SeasonSchema.nullable().default(null),
     /** routing.json — Interactive video's one graph authority, or null (epic #401, brief §2). */

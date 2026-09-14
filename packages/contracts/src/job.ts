@@ -195,7 +195,7 @@ export function voiceJobFormat(job: Pick<Job, "provider" | "params">): "wav" | "
 
 /** Rebuild the document identity frozen into a durable voice-preview job. */
 export function voiceJobReadIdentity(job: Pick<Job, "params">): {
-  purpose: "candidate-preview" | "sheet-section" | "sheet-page" | "bible-section" | "prose";
+  purpose: "candidate-preview" | "sheet-section" | "sheet-page" | "bible-section" | "prose" | "audiobook";
   sheetId?: string;
 } {
   const rawPurpose = job.params["purpose"];
@@ -203,12 +203,14 @@ export function voiceJobReadIdentity(job: Pick<Job, "params">): {
     rawPurpose === "sheet-section" ||
     rawPurpose === "sheet-page" ||
     rawPurpose === "bible-section" ||
-    rawPurpose === "prose"
+    rawPurpose === "prose" ||
+    rawPurpose === "audiobook"
       ? rawPurpose
       : "candidate-preview";
   // Neither belongs to a sheet: the bible is the world's, and a prose read addresses a canon
   // entry, a production record or a conversation reply (issue 857).
-  if (purpose === "bible-section" || purpose === "prose") return { purpose };
+  // An audiobook take belongs to a chapter block, not a sheet, even when a sheet's voice reads it (turn 146).
+  if (purpose === "bible-section" || purpose === "prose" || purpose === "audiobook") return { purpose };
   const sheetId = job.params["sheetId"];
   return typeof sheetId === "string" && sheetId.length > 0 ? { purpose, sheetId } : { purpose };
 }

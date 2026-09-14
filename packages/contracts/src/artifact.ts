@@ -157,9 +157,43 @@ export const ArtifactReferenceGenerationSchema = z
   .strict();
 export type ArtifactReferenceGeneration = z.infer<typeof ArtifactReferenceGenerationSchema>;
 
+/**
+ * An audiobook take (design turn 146, SPEC-047 R-3): one block of a chapter, read in one voice.
+ * The block is named by chapter, paragraph and occurrence and by the hash of its words; the
+ * voice by provider, model and id, with the sheet and the version its voice was assigned at
+ * (SPEC-013 R-18), so a take can say months later whose voice it was and why. Owned by the
+ * production, listed on Artifacts, borrowable by the Cut — and never in the speech cache.
+ */
+export const ArtifactAudiobookGenerationSchema = z
+  .object({
+    source: z.literal("audiobook"),
+    jobId: JobIdSchema.optional(),
+    productionId: SlugSchema,
+    chapterId: SlugSchema,
+    chapterVersion: z.number().int().min(1),
+    /** `title`, or `p<paragraph>.<n>` — the block's key in the chapter's audiobook record. */
+    block: z.string().min(1),
+    paragraph: z.number().int().min(-1),
+    textHash: z.string().min(1),
+    provider: z.string().min(1),
+    model: z.string().min(1),
+    voiceId: z.string().min(1),
+    voiceLabel: z.string().min(1).optional(),
+    sheetId: SlugSchema.optional(),
+    sheetVersion: z.number().int().min(1).optional(),
+    /** How many provider requests were joined into this one file (SPEC-047 R-5). */
+    parts: z.number().int().min(1),
+    characters: z.number().int().min(0),
+    estimatedMicroUsd: z.number().int().min(0),
+    costMicroUsd: z.number().int().min(0).nullable(),
+  })
+  .strict();
+export type ArtifactAudiobookGeneration = z.infer<typeof ArtifactAudiobookGenerationSchema>;
+
 export const ArtifactGenerationSchema = z.union([
   ArtifactBenchGenerationSchema,
   ArtifactReferenceGenerationSchema,
+  ArtifactAudiobookGenerationSchema,
 ]);
 export type ArtifactGeneration = z.infer<typeof ArtifactGenerationSchema>;
 

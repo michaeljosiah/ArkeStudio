@@ -469,6 +469,14 @@ export function jobOrigin(job: Job): JobOrigin | null {
    * voice screen for `CANON-004`, which is the dead end that rule exists to avoid.
    */
   if (job.target.kind === "voice-preview" && job.params["purpose"] === "prose") return null;
+  // An audiobook take (turn 146) is asked for from its chapter's Audiobook view, and that is
+  // where a flagged block is read again; the job froze the chapter it belongs to.
+  if (job.target.kind === "voice-preview" && job.params["purpose"] === "audiobook") {
+    const productionId = job.productionId ?? String(job.params["productionId"] ?? "");
+    const chapterId = String(job.params["chapterId"] ?? "");
+    if (productionId.length === 0 || chapterId.length === 0) return null;
+    return { path: `/w/${job.worldId}/p/${productionId}/story/chapters/${chapterId}?view=audiobook`, label: "Audiobook", where: "the chapter's Audiobook view" };
+  }
   const reference = REFERENCE_ORIGINS[job.target.kind];
   if (reference) {
     // Every reference target id is the sheet's slug followed by whatever distinguishes this

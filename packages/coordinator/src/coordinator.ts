@@ -132,6 +132,7 @@ import {
   type SessionId,
   deliveryParams as mapDelivery,
   type Delivery,
+  type ChapterAudiobook,
   narratorFor,
   voiceFormatForModel,
   hostedReaderKeepsSlot,
@@ -264,6 +265,8 @@ import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachm
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { deriveContinuity, makeAdapterContinuityDeriver, readContinuity, type ContinuityDeriver } from "./productions/continuity.js";
 import { castLines, makeAdapterVoicesDeriver, readVoices, type VoicesDeriver } from "./productions/voices.js";
+import { readAudiobook, writeAudiobookBook } from "./productions/audiobook.js";
+import { runAudiobookChapter } from "./productions/audiobook-run.js";
 import { exportManuscript, importManuscript, readManuscript } from "./productions/manuscript.js";
 import { manuscriptChapters, productionShape, type StructuredDocument } from "@arke-studio/contracts";
 import { voicedBlocks, type ChapterContinuity, type ChapterVoices } from "@arke-studio/contracts";
@@ -1063,6 +1066,26 @@ export class Coordinator {
   private readonly derivingContinuity = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
   /** Chapters whose lines are being cast right now, keyed the same way (turn 130). */
   private readonly castingVoices = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
+  /** A chapter being read into kept takes (turn 146, SPEC-047 R-16), keyed and ended as the cast's runs are. */
+  private readonly readingAudiobooks = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
+  /** The request each audiobook run is asked under, by run key, so a replayed start names the same one. */
+  private readonly audiobookRequests = new Map<string, string>();
+  /**
+   * An audiobook run awaits each of its jobs in turn (SPEC-047 R-16): the waiter is registered
+   * the moment the job is queued, and a job that reaches its end before anyone waits is held
+   * until someone does, so the race between enqueue returning and the provider finishing can
+   * never lose a block.
+   */
+  private readonly audiobookWaiters = new Map<string, (job: Job) => void>();
+  private readonly audiobookTerminal = new Map<string, Job>();
+  private waitForAudiobookJob(jobId: string): Promise<Job> {
+    const done = this.audiobookTerminal.get(jobId);
+    if (done !== undefined) {
+      this.audiobookTerminal.delete(jobId);
+      return Promise.resolve(done);
+    }
+    return new Promise((resolve) => this.audiobookWaiters.set(jobId, resolve));
+  }
   /**
    * Clips chosen or recorded for a clone, held between 74c and 74d (SPEC-022 T-10).
    *
@@ -2346,6 +2369,11 @@ export class Coordinator {
         }
         for (const run of this.castingVoices.values()) {
           replayed.push({ at: new Date().toISOString(), type: "voices.started", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId });
+        }
+        // The counts are not known here; the renderer learns them from the next progress event,
+        // and what a reload must not hide is that a paid run is going and can be stopped.
+        for (const [key, run] of this.readingAudiobooks) {
+          replayed.push({ at: new Date().toISOString(), type: "audiobook.started", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId, requestId: this.audiobookRequests.get(key) ?? ulid(), toMake: 0, blocks: 0, replayed: true });
         }
         return replayed;
       },
@@ -3641,6 +3669,17 @@ export class Coordinator {
     // was the sandbox, and looking its scope up as a world would scan every world's meta
     // just to throw. The genesis rail reads the job row itself.
     if (!UlidSchema.safeParse(job.worldId).success) return;
+    // An audiobook block's job (turn 146): the run that queued it is waiting, and files the take
+    // itself once it hears; a job that ends before the run waits is held for it.
+    if (job.target.kind === "voice-preview" && job.params["purpose"] === "audiobook") {
+      const waiter = this.audiobookWaiters.get(job.id);
+      if (waiter !== undefined) {
+        this.audiobookWaiters.delete(job.id);
+        waiter(job);
+      } else {
+        this.audiobookTerminal.set(job.id, job);
+      }
+    }
     if (job.status !== "succeeded") {
       if (job.target.kind === "voice-preview" && typeof job.params["requestId"] === "string") {
         const readIdentity = voiceJobReadIdentity(job);
@@ -7559,6 +7598,8 @@ export class Coordinator {
                 continuityUnreadable?: true;
                 voices?: ChapterVoices;
                 voicesUnreadable?: true;
+                audiobook?: ChapterAudiobook;
+                audiobookUnreadable?: true;
               }
             | { disposition: "failed"; reason: string },
         ) =>
@@ -7582,6 +7623,8 @@ export class Coordinator {
           const continuity = await readContinuity(store, msg.productionId, chapter.file);
           // The cast of lines too (turn 130), for the same reason: the bundle has only its stamp.
           const voices = await readVoices(store, msg.productionId, chapter.file);
+          // The audiobook record too (turn 146): the takes come with the chapter, the bundle its stamp.
+          const audiobook = await readAudiobook(store, msg.productionId, chapter.file);
           answer({
             disposition: "opened",
             body: chapter.body,
@@ -7590,6 +7633,7 @@ export class Coordinator {
             versions: chapter.versions,
             ...(continuity === "unreadable" ? { continuityUnreadable: true as const } : continuity !== null ? { continuity } : {}),
             ...(voices === "unreadable" ? { voicesUnreadable: true as const } : voices !== null ? { voices } : {}),
+            ...(audiobook === "unreadable" ? { audiobookUnreadable: true as const } : audiobook !== null ? { audiobook } : {}),
           });
         } catch (err) {
           answer({ disposition: "failed", reason: describeCoordinatorError(err) });
@@ -11439,6 +11483,132 @@ export class Coordinator {
         } finally {
           store.closingSignal.removeEventListener("abort", onClose);
           this.castingVoices.delete(key);
+        }
+        return;
+      }
+      case "stop-audiobook": {
+        const store = this.opts.provider.openStore?.();
+        const chapter = store?.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        this.readingAudiobooks.get(`${msg.worldId}/${msg.productionId}/${chapter?.file ?? msg.chapterFile}`)?.control.abort();
+        return;
+      }
+      case "set-audiobook-reading": {
+        // The book's reading (turn 146, SPEC-047 R-11): one choice for the whole book, kept
+        // beside the chapters' records and read by every run; every take stands, and the blocks
+        // whose reader it changes read as stale from the record alone.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
+        try {
+          await writeAudiobookBook(store, msg.productionId, { schemaVersion: 1, reading: msg.reading });
+          this.refreshIfStillOpen(store);
+        } catch (err) {
+          void this.appLog?.append({ kind: "audiobook.reading-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+      case "read-audiobook-chapter": {
+        // The audiobook (turn 146, SPEC-047 R-16..R-18): a chapter read into kept takes — one
+        // run per chapter at a time, keyed by world as continuity's and the cast's runs are,
+        // ended with the world that began it, and every ending short of read leaving the takes
+        // made so far standing. The run itself lives in productions/audiobook-run.ts; this is
+        // the harness around it: the narrator, the catalogue, the queue and the events.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId || !this.voiceService) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const key = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
+        if (this.readingAudiobooks.has(key)) return;
+        const control = new AbortController();
+        const requestId = ulid();
+        this.readingAudiobooks.set(key, { control, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id });
+        this.audiobookRequests.set(key, requestId);
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id };
+        const at = () => new Date().toISOString();
+        try {
+          const narratorSettings = this.appSettings ? await this.appSettings.load() : null;
+          const clonedVoices = store.getBundle().clonedVoices ?? [];
+          // The catalogue says whether a concrete voice can speak now (turn 130's rule): the
+          // manifest still lists a model whose key was removed or whose engine is down.
+          const catalogue = (await this.voiceService.catalogue(clonedVoices, await this.comfyUiVoiceAvailability()).catch(() => null)) ?? [];
+          const narrationCatalogue = catalogue.filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined);
+          const narrator = narratorFor(narratorSettings?.narrator ?? null, narrationCatalogue);
+          await runAudiobookChapter({
+            store,
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            chapterId: chapter.id,
+            voice: this.voiceService,
+            models: this.opts.manifest?.models ?? [],
+            narrator: { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId, ...(narrator.label !== undefined ? { label: narrator.label } : {}) },
+            catalogue,
+            signal: control.signal,
+            ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
+            requireUploadConfirmation: () =>
+              this.requireVoiceUploadConfirmation({
+                worldId: msg.worldId,
+                requestId,
+                command: msg.kind,
+                ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
+              }),
+            enqueue: async (inputs) => {
+              // The engine a cloned voice's recording was allowed to go to rides on the job, as
+              // the voiced read's does (SPEC-022): without it every uncached cloned line fails.
+              const queued = await this.enqueueBatch(
+                requestId,
+                msg.kind,
+                inputs.map((input) => ({
+                  ...input,
+                  ...(input.voiceReference && msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
+                })),
+              );
+              return { jobIds: queued.jobIds, ...(queued.reason !== undefined ? { reason: queued.reason } : {}) };
+            },
+            waitForJob: (jobId) => this.waitForAudiobookJob(jobId),
+            cancelJob: async (jobId) => {
+              await this.jobQueue?.cancel(jobId).catch(() => {});
+            },
+            findJobs: () => this.jobQueue?.listJobs() ?? [],
+            actualCost: async (jobId) => (this.ledger ? ((await this.ledger.readAll()).find((entry) => entry.jobId === jobId)?.actualMicroUsd ?? null) : null),
+            ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
+            now: () => store.now(),
+            emit: (event) => {
+              switch (event.type) {
+                case "started":
+                  this.emit({ at: at(), type: "audiobook.started", ...ids, requestId, toMake: event.toMake, blocks: event.blocks });
+                  return;
+                case "priced":
+                  this.emit({ at: at(), type: "audiobook.priced", ...ids, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices });
+                  return;
+                case "progress":
+                  this.emit({ at: at(), type: "audiobook.progress", ...ids, block: event.block, outcome: event.outcome, ...(event.reason !== undefined ? { reason: event.reason } : {}), made: event.made, toMake: event.toMake });
+                  return;
+                case "finished":
+                  this.emit({
+                    at: at(),
+                    type: "audiobook.finished",
+                    ...ids,
+                    outcome: event.outcome,
+                    made: event.made,
+                    flagged: event.flagged,
+                    ...(event.record !== undefined ? { record: event.record } : {}),
+                    ...(event.reason !== undefined ? { reason: event.reason } : {}),
+                  });
+                  return;
+              }
+            },
+          });
+          this.refreshIfStillOpen(store);
+        } catch (err) {
+          const stopped = control.signal.aborted;
+          void this.appLog?.append({ kind: "audiobook.failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+          this.emit({ at: at(), type: "audiobook.finished", ...ids, outcome: stopped ? "stopped" : "failed", made: 0, flagged: 0, ...(stopped ? {} : { reason: describeCoordinatorError(err) }) });
+        } finally {
+          store.closingSignal.removeEventListener("abort", onClose);
+          this.readingAudiobooks.delete(key);
+          this.audiobookRequests.delete(key);
         }
         return;
       }
@@ -16254,6 +16424,7 @@ export class Coordinator {
       // than waiting on every pass (codex on PR 907), and the last record stands.
       for (const run of this.derivingContinuity.values()) run.control.abort();
       for (const run of this.castingVoices.values()) run.control.abort();
+      for (const run of this.readingAudiobooks.values()) run.control.abort();
       for (const handle of this.exports.values()) handle.cancel();
       // Nothing awaits the backfill, but it should stop trying: its next write would be refused
       // by the store anyway once the world begins closing.
