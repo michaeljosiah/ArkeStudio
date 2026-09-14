@@ -37,6 +37,10 @@ describe("Fish Audio · S2.1-Pro as a hosted reader (SPEC-046 §2.9)", () => {
     const empty = await new FishAudioClient(async () => json(200, { credit: 0 })).validateKey("k");
     assert.equal(empty[0]?.available, false);
     assert.match(empty[0]!.reason!, /balance is \$0\.00/);
+    // The API credit is its own balance, separate from the platform's (probed 2026-09-13): a key
+    // with none authenticates all the same, and says so (issue 1167).
+    assert.ok(empty.every((p) => p.authenticated === true));
+    assert.ok((await new FishAudioClient(async () => json(200, { credit: "3.50" })).validateKey("k")).every((p) => p.authenticated === undefined));
     const bad = await new FishAudioClient(async () => json(401, { status: 401, message: "Invalid Token" })).validateKey("k");
     assert.match(bad[1]!.reason!, /rejected this key/);
     const down = await new FishAudioClient(async () => { throw new Error("ECONNRESET"); }).validateKey("k");

@@ -85,6 +85,21 @@ describe("the clone dialog", () => {
     assert.equal(save("Harbour glass", "Low, dry, unhurried. Coastal."), false);
   });
 
+  it("asks the recording's language beside the words, English until said otherwise (issue 1163)", () => {
+    // Breeze saves a voice under a language and took every one for English before this was
+    // asked; a French recording read with English tags is paid output wasted (SPEC-046 R-23).
+    const markup = renderToString(
+      <NameStep name="Odile" description="Bas, sec." saving={false} ready trouble={null} onName={noop} onDescription={noop} onBack={noop} onSave={noop} />,
+    );
+    assert.match(markup, /data-testid="clone-language"/);
+    assert.match(markup, /<option value="en" selected="">English<\/option>/);
+    assert.match(markup, /<option value="fr">French<\/option>/);
+    const french = renderToString(
+      <NameStep name="Odile" description="Bas, sec." language="fr" saving={false} ready trouble={null} onName={noop} onDescription={noop} onBack={noop} onSave={noop} />,
+    );
+    assert.match(french, /<option value="fr" selected="">French<\/option>/);
+  });
+
   it("shows the words the picker will match on, as they are typed", () => {
     const markup = renderToString(
       <NameStep

@@ -130,6 +130,7 @@ import {
   type Delivery,
   narratorFor,
   voiceFormatForModel,
+  hostedReaderKeepsSlot,
   legacyVoiceModel,
   voiceSourceFor,
   supportsVoiceUse,
@@ -355,6 +356,7 @@ import {
   wavSeconds,
 } from "./voice/library.js";
 import { hostedReaderDestination, hostedUploadConfirmed, hostedUploadToken, prepareHostedClip, type HostedVoiceSlots } from "./voice/hosted.js";
+import { deleteVoice } from "./voice/library.js";
 import { atomicWriteFile, serializeFileMutation } from "./world/atomic.js";
 import { BibleStaleError, readBible, restoreBible, saveBible } from "./world/bible.js";
 import { changesForEntity } from "./world/change-writer.js";
@@ -1638,6 +1640,7 @@ export class Coordinator {
             voiceId: voice.voiceId,
             text: blocks[index]!.text,
             audioFormat: entry.format,
+            ...(voice.clonedVoice !== undefined ? { language: voice.clonedVoice.language } : {}),
             requestId,
             purpose: "prose",
             sheetVersion: subject.version,
@@ -10810,6 +10813,7 @@ export class Coordinator {
           name: msg.name,
           description: msg.description,
           consent: msg.consent,
+          ...(msg.language !== undefined ? { language: msg.language } : {}),
           ...(msg.sheetId !== undefined ? { sheetId: msg.sheetId } : {}),
         });
         this.emit({
@@ -10825,6 +10829,90 @@ export class Coordinator {
         await this.dropStagedClip(msg.clipId);
         // The library is in the bundle, so the picker sees the new voice on the next snapshot.
         if (made.ok) this.refreshIfStillOpen(store);
+        return;
+      }
+      case "delete-voice": {
+        // A cloned voice leaves the world (SPEC-046 R-15, issue 1162): the library's part first,
+        // then every copy a hosted reader kept, best-effort and one line each. Refused while a
+        // sheet still names it — the assignment is the person's to change, on the sheet, not a
+        // side effect of a delete pressed on the catalogue.
+        const store = this.opts.provider.openStore?.();
+        const answer = (
+          status: "deleted" | "refused",
+          rest: { reason?: string; copies?: Array<{ provider: string; removed: boolean; reason?: string }> } = {},
+        ) =>
+          this.emit({
+            at: this.nowIso(),
+            type: "voice.deleted",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            voiceId: msg.voiceId,
+            status,
+            ...(rest.reason !== undefined ? { reason: rest.reason } : {}),
+            copies: rest.copies ?? [],
+          });
+        if (!store || store.worldId !== msg.worldId || store.isClosed()) {
+          answer("refused", { reason: "That world is no longer open." });
+          return;
+        }
+        const bundle = store.getBundle();
+        const voice = bundle.clonedVoices.find((entry) => entry.id === msg.voiceId);
+        if (!voice) {
+          answer("refused", { reason: "That cloned voice is no longer in this world." });
+          return;
+        }
+        // Through any reader: a sheet assigned the voice on Breeze names the same recording.
+        const readers = bundle.sheets.filter((sheet) => {
+          if (sheet.retired || !sheet.voice) return false;
+          const model = sheet.voice.model ?? legacyVoiceModel(sheet.voice.provider, sheet.voice.voiceId, bundle.clonedVoices);
+          const source = model === null ? null : voiceSourceFor(bundle.clonedVoices, sheet.voice.provider, model, sheet.voice.voiceId);
+          return source?.kind === "cloned" && source.voice.id === voice.id;
+        });
+        if (readers.length > 0) {
+          const names = readers.map((sheet) => sheet.name);
+          const list = names.length === 1 ? names[0]! : `${names.slice(0, -1).join(", ")} and ${names.at(-1)!}`;
+          answer("refused", {
+            reason: `${list} still ${names.length === 1 ? "reads" : "read"} with this voice — clear it on the sheet${names.length === 1 ? "" : "s"} first.`,
+          });
+          return;
+        }
+        const removed = await deleteVoice(store, msg.voiceId, { requestId: msg.requestId });
+        if (!removed.ok) {
+          answer("refused", { reason: removed.reason });
+          return;
+        }
+        // The copies, after the record is gone and from the entry it was: the ids on it are the
+        // only handle on them. A vendor that will not give one up, or a key no longer in
+        // Settings, is said on the event and logged — never a block on a delete that has
+        // already happened here.
+        const copies: Array<{ provider: string; removed: boolean; reason?: string }> = [];
+        for (const [provider, held] of Object.entries(removed.voice.remote ?? {})) {
+          if (!hostedReaderKeepsSlot(provider)) continue;
+          const ids = new Set([held.voiceId, ...(held.stale ?? [])].filter((id): id is string => typeof id === "string"));
+          const pending = held.pending ?? [];
+          if (ids.size === 0 && pending.length === 0) continue;
+          const label = hostedReaderDestination(provider)?.label ?? provider;
+          const key = this.credentials ? await this.credentials.get(provider as ProviderId) : null;
+          const slots = this.opts.hostedVoiceSlots;
+          if (key === null || slots === undefined) {
+            copies.push({ provider, removed: false, reason: `${label} has no key in Settings — the copy stays on the account until removed there.` });
+            continue;
+          }
+          try {
+            // A save whose answer never came back may have made a slot under its title.
+            for (const title of pending) {
+              const found = await slots.find(provider, key, title);
+              if (found !== null) ids.add(found);
+            }
+            for (const id of ids) await slots.remove(provider, key, id);
+            copies.push({ provider, removed: true });
+          } catch (error) {
+            copies.push({ provider, removed: false, reason: describeCoordinatorError(error) });
+          }
+        }
+        void this.appLog?.append({ kind: "voice.deleted", worldId: msg.worldId, voiceId: msg.voiceId, copies });
+        answer("deleted", { copies });
+        this.refreshIfStillOpen(store);
         return;
       }
       case "file-artifact": {
@@ -11561,7 +11649,8 @@ export class Coordinator {
             deliveryParams,
             deliveryNotice,
             model,
-            ...(source.kind === "cloned" ? { voiceReference: true } : {}),
+            // The recording's language is the line's (issue 1163): the reader routes and tags by it.
+            ...(source.kind === "cloned" ? { voiceReference: true, language: source.voice.language } : {}),
             ...(msg.voiceUploadConfirmedFor !== undefined
               ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
               : {}),
@@ -11764,6 +11853,7 @@ export class Coordinator {
           sheetId: sheet.id,
           sheetVersion: sheet.version,
           characterCount: normalizeSpeechText(line.text).length,
+          ...(source.kind === "cloned" ? { language: source.voice.language } : {}),
         };
         const queued = await this.enqueueBatch(msg.requestId, msg.kind, [request.input]);
         if (!queued.accepted) {
@@ -13600,7 +13690,24 @@ export class Coordinator {
               productionId: quote.target.productionId, status: "kept", performance, reason: "New local TTS performance ready for review." });
           } else {
             if (controller.signal.aborted) throw new Error("Performance generation cancelled.");
-            await this.enqueueBatch(msg.requestId, msg.kind, [performanceGenerationJob(store, quote, msg.requestId)]);
+            // A cloned voice through a hosted reader (SPEC-046 R-16, issue 1149): the vendor's
+            // question is asked here, where the enqueue is, as the voice-line asks it; the answer
+            // lands on the entry and the dispatcher's clip read checks it before the recording
+            // leaves. The job carries the clip marker so that read happens at all.
+            const source = voiceSourceFor(store.getBundle().clonedVoices, quote.mapping.provider, quote.mapping.model, quote.voiceAssignment.voiceId);
+            if (source.kind === "missing-clone") throw new Error("That cloned voice is no longer in this world.");
+            if (
+              source.kind === "cloned" &&
+              (await this.requireVoiceUploadConfirmation({
+                worldId: msg.worldId,
+                requestId: msg.requestId,
+                command: msg.kind,
+                ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
+                reader: { store, provider: quote.mapping.provider, voice: source.voice },
+              }))
+            )
+              return;
+            await this.enqueueBatch(msg.requestId, msg.kind, [performanceGenerationJob(store, quote, msg.requestId, { voiceReference: source.kind === "cloned" })]);
           }
         } catch { this.rejectEnqueue(msg.requestId, msg.kind, "Performance generation did not complete. Check the quote, current line and voice, engine readiness and cancellation. Existing and paid outputs are retained."); }
         finally { this.performanceGenerations.delete(operationKey); }

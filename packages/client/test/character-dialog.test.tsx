@@ -187,9 +187,10 @@ describe("the character dialog (SPEC-044 R-11..R-16)", () => {
   });
 
   it("opens the priced Generate door only on a reader the performance path can generate with (codex on PR 1156)", async () => {
-    // A hosted reader's row declares a cadence like ElevenLabs' does, but the performance path
-    // has no upload confirmation of its own yet (SPEC-046 G): the door points at the Voice page
-    // rather than onto a refusal.
+    // A hosted reader's row declares a cadence like ElevenLabs' does, and since issue 1149 the
+    // performance path carries the vendor's confirmation and the clip marker, so the door opens
+    // priced for Voxtral too; a reader outside the list still points at the Voice page rather
+    // than onto a refusal. One list, read by the door and by the gate.
     const row = (id: string, provider: string) => ({
       id, provider, capability: "voice-tts", displayName: id, accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: { audioFormat: "wav" },
       pricing: { kind: "perCharacter", microUsdPerCharacter: 100 },
@@ -204,6 +205,10 @@ describe("the character dialog (SPEC-044 R-11..R-16)", () => {
     const eleven = await mount(withVoice("elevenlabs", "eleven_multilingual_v2"));
     assert.match(card(eleven.container, cards(eleven.container, "Voice").at(-1)![0]!).getAttribute("aria-label") ?? "", /^Generate a line · \$/, "priced: the path can generate with it");
     const voxtral = await mount(withVoice("mistral", "voxtral-mini-tts"));
-    assert.equal(cards(voxtral.container, "Voice").at(-1)?.[0], "Generate a line · Voice page");
+    assert.match(card(voxtral.container, cards(voxtral.container, "Voice").at(-1)![0]!).getAttribute("aria-label") ?? "", /^Generate a line · \$/, "a hosted reader generates through the same door");
+    const withOther = withVoice("comfyui", "comfyui-cloned-voice");
+    withOther.app.manifest!.models.push(row("comfyui-cloned-voice", "comfyui") as never);
+    const recipe = await mount(withOther);
+    assert.equal(cards(recipe.container, "Voice").at(-1)?.[0], "Generate a line · Voice page", "the recipe is not on the list: the door points at the Voice page");
   });
 });

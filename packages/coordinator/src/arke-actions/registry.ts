@@ -453,6 +453,7 @@ const CLIENT_COMMAND_METADATA = {
   "clone-voice": action("world", "generation", "voice", "privacy-sensitive", ["voices", "sheets", "artifacts"]),
   "stage-voice-clip": action("world", "host-action", "voice", "privacy-sensitive", ["voices"]),
   "discard-voice-clip": humanOnly("Discarding a temporary clip is part of the person's host recording workflow."),
+  "delete-voice": humanOnly("Deleting a cloned voice removes its recording here and its copies on vendor accounts; that is the person's decision (SPEC-046 R-15)."),
   "import-folder": action("world", "host-action", "artifact-store", "host-file-access", ["artifacts"], { preparation: ARTIFACT_SOURCE }),
   "extract-artifact": action("world", "generation", "extraction", "external-network-action", ["artifacts", "canon", "sheets"]),
   "stop-extraction": action("world", "command", "extraction", "external-network-action", ["artifacts", "jobs"]),

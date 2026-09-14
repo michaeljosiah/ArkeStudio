@@ -1321,7 +1321,7 @@ describe("reading a line on the bench (design 70)", () => {
           ...store.getBundle(),
           clonedVoices: [{
             id: "harbour-glass", name: "Harbour glass", clip: "voices/harbour-glass.wav",
-            description: "Low and dry", attributes: ["low", "dry"], consent: true, created: CLOCK(),
+            description: "Low and dry", attributes: ["low", "dry"], consent: true, created: CLOCK(), language: "en",
           }],
         }
       : store.getBundle();

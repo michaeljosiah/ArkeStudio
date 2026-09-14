@@ -3,13 +3,19 @@ import { useParams, useSearchParams } from "react-router";
 import {
   CLONED_VOICE_MODEL,
   CLONED_VOICE_PROVIDER,
+  HOSTED_READER_LABELS,
   designatedVoiceSample,
   formatMicroUsd,
   isClonedVoice,
+  isHostedVoiceReader,
   legacyVoiceModel,
   mainPhotoFor,
   orderedShots,
+  readerName,
+  readerPriceLabel,
   voiceTargetKey,
+  type ManifestModel,
+  type RankedVoice,
   type ReferenceKit,
   type Sheet,
   type VoiceCandidate,
@@ -29,10 +35,12 @@ import { mediaUrl } from "../lib/media.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
 import {
   assignVoice,
+  deleteVoice,
   providerIdOf,
   requestVoiceCandidates,
   requestVoicePreview,
   subscribeVoiceAssignmentResults,
+  subscribeVoiceDeleteResults,
   subscribeVoiceUploadConfirmations,
   useStore,
   useVoiceAudio,
@@ -57,6 +65,10 @@ import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload
  * screens. Here they are one voice with two uses: the hero names it, and a row each says what is
  * set and where it came from. The authorities underneath are untouched — their rights, quality
  * checks and attestations all still belong to the flow that sets them.
+ *
+ * Since SPEC-046 (issue 1149) a cloned voice has several readers — the recipe on this machine,
+ * Voxtral, Breeze, Fish — and the row names the one in use with its price; the catalogue draws
+ * the voice once with a chip per reader rather than once per reader.
  */
 
 /** Which use an entrance sets. The same two words the rows use, so a tile can be read against them. */
@@ -70,6 +82,10 @@ type Use = "reads" | "on screen";
 const OVERLAYS = ["choose", "record", "sample"] as const;
 type Overlay = (typeof OVERLAYS)[number];
 
+/** The catalogue's shelves. `?choose=1&tab=mine` opens on the world's own voices. */
+const TABS = ["all", "cloud", "local", "mine"] as const;
+type Tab = (typeof TABS)[number];
+
 /** The written voice the picker ranks against — prose the author wrote, not provider metadata. */
 function writtenVoice(sheet: Sheet): string | null {
   const section = sheet.sections.find((candidate) => candidate.heading.startsWith("Voice"));
@@ -78,15 +94,37 @@ function writtenVoice(sheet: Sheet): string | null {
   return body;
 }
 
+/** The row that prices a target, when the manifest has one for it. */
+function rowFor(models: readonly ManifestModel[] | undefined, target: { provider: string; model?: string | null }): ManifestModel | null {
+  if (target.model === undefined || target.model === null) return null;
+  return models?.find((m) => m.provider === target.provider && m.id === target.model && m.capability === "voice-tts") ?? null;
+}
+
 /**
- * What the reads row says about the assigned voice. The catalogue is what knows whether a
- * concrete target is local and what it costs, so the line is precise once candidates arrive and
- * falls back to the provider's name before then rather than guessing.
+ * A reader as the rows and chips name it (SPEC-046 R-30): `IndexTTS · free`, `Voxtral · $0.016
+ * per 1k`. The row is what knows the price; the catalogue is what knows whether the reader runs
+ * on this machine, which is free whatever the row says.
  */
-function readsSource(sheet: Sheet, world: WorldBundle, candidates: VoiceCandidatesState | undefined): {
+function readerLabel(target: { provider: string; model?: string | null; local?: boolean }, row: ManifestModel | null): string {
+  return [readerName(target, row), readerPriceLabel(row) ?? (target.local === true ? "free" : null)].filter(Boolean).join(" · ");
+}
+
+/**
+ * What the reads row says about the assigned voice: the voice's name, then the reader and its
+ * price. The line is precise once candidates arrive and falls back to what the assignment and
+ * the manifest already say before then rather than guessing.
+ */
+function readsSource(
+  sheet: Sheet,
+  world: WorldBundle,
+  candidates: VoiceCandidatesState | undefined,
+  models: readonly ManifestModel[] | undefined,
+): {
   label: string;
   detail: string;
   local: boolean | null;
+  /** True when the assignment is a library voice, through whichever reader. */
+  clone: boolean;
 } | null {
   const voice = sheet.voice;
   if (!voice) return null;
@@ -96,12 +134,15 @@ function readsSource(sheet: Sheet, world: WorldBundle, candidates: VoiceCandidat
         ?.candidate
     : undefined;
   const label = voice.label ?? match?.label ?? voice.voiceId;
-  const engine = match?.provider ?? voice.provider;
-  const cost = match ? (match.local ? "free" : "priced a line at a time") : null;
+  const row = rowFor(models, { provider: voice.provider, model });
   return {
     label,
-    detail: [engine, cost].filter(Boolean).join(" · "),
+    detail: readerLabel({ provider: voice.provider, model, ...(match ? { local: match.local } : {}) }, row),
     local: match ? match.local : null,
+    clone: match
+      ? isClonedVoice(match)
+      : (world.clonedVoices ?? []).some((entry) => entry.id === voice.voiceId) &&
+        (voice.provider === CLONED_VOICE_PROVIDER || isHostedVoiceReader(voice.provider, model ?? undefined)),
   };
 }
 
@@ -125,21 +166,73 @@ function screenSource(kit: ReferenceKit | undefined): string | null {
 
 /**
  * The single line a catalogue row carries on its right. Ordered by what stops you: a target that
- * cannot run, then a preview that failed, then one still being made, and only then what the voice
- * already is to this world.
+ * cannot run, then a preview that failed, then one still being made, then what a first read
+ * through this reader would add (R-14), and only then what the voice already is to this world.
  */
 function rowNote(input: {
   candidate: VoiceCandidate;
   error: string | null | undefined;
   step: { stage: string; done: number; total: number } | null | undefined;
+  notice: string | undefined;
   current: boolean;
   shared: string[] | undefined;
 }): string {
   if (input.candidate.unavailableReason !== undefined) return `unavailable · ${input.candidate.unavailableReason}`;
   if (input.error) return input.error;
   if (input.step) return `${input.step.stage} · step ${input.step.done} of ${input.step.total}`;
+  if (input.notice) return input.notice;
   if (input.current) return "current";
   return input.shared ? `used by ${input.shared.join(", ")}` : "";
+}
+
+/**
+ * One line of the catalogue: a preset, or a cloned voice with every reader that speaks it. The
+ * readers of one voice share its id and differ in provider and row (SPEC-046 R-10); drawn as
+ * three rows they read as three voices, which is the thing R-30 says not to do.
+ */
+interface CatalogueRow {
+  key: string;
+  label: string;
+  attributes: string[];
+  /** The library voice this row is, when it is one. */
+  clone: string | null;
+  readers: VoiceCandidate[];
+}
+
+/** The library voice a candidate reads, whether it says so or is the recipe's row for it. */
+function cloneOf(candidate: VoiceCandidate): string | null {
+  if (candidate.readsClone !== undefined) return candidate.readsClone;
+  return candidate.provider === CLONED_VOICE_PROVIDER && candidate.model === CLONED_VOICE_MODEL ? candidate.voiceId : null;
+}
+
+function catalogueRows(ranked: readonly RankedVoice[], where: Tab): CatalogueRow[] {
+  const rows: CatalogueRow[] = [];
+  const byClone = new Map<string, CatalogueRow>();
+  for (const { candidate } of ranked) {
+    const shown =
+      where === "all"
+        ? true
+        : where === "mine"
+          ? isClonedVoice(candidate)
+          : where === "local"
+            ? candidate.local
+            : !candidate.local;
+    if (!shown) continue;
+    const clone = cloneOf(candidate);
+    if (clone === null) {
+      rows.push({ key: voiceTargetKey(candidate), label: candidate.label, attributes: candidate.attributes, clone: null, readers: [candidate] });
+      continue;
+    }
+    const existing = byClone.get(clone);
+    if (existing) {
+      existing.readers.push(candidate);
+      continue;
+    }
+    const row: CatalogueRow = { key: `clone:${clone}`, label: candidate.label, attributes: candidate.attributes, clone, readers: [candidate] };
+    byClone.set(clone, row);
+    rows.push(row);
+  }
+  return rows;
 }
 
 function UseRow({
@@ -216,9 +309,12 @@ export function CharacterVoiceScreen() {
   const sheet = useSheet(worldId, sheetId);
   const candidates = useVoiceCandidates()[sheetId ?? ""];
   const sidecar = useVoiceSidecar();
+  const models = useStore().state?.app.manifest?.models;
   const [params, setParams] = useSearchParams();
   const overlay = OVERLAYS.find((name) => params.get(name) === "1") ?? null;
-  const open = (name: Overlay) => setParams({ [name]: "1" }, { replace: true });
+  const asked = params.get("tab");
+  const initialTab = TABS.find((tab) => tab === asked) ?? "all";
+  const open = (name: Overlay, tab?: Tab) => setParams({ [name]: "1", ...(tab !== undefined ? { tab } : {}) }, { replace: true });
   const close = () => setParams({}, { replace: true });
   const [refusal, setRefusal] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
@@ -243,7 +339,7 @@ export function CharacterVoiceScreen() {
   const photo = kit ? mainPhotoFor(kit) : null;
   const portrait = photo ? `references/${sheetId}/${photo.file}` : sheetPortraitPath(sheetId);
   const written = writtenVoice(sheet);
-  const reads = readsSource(sheet, world, candidates);
+  const reads = readsSource(sheet, world, candidates, models);
   const screen = screenSource(kit);
   // Both sample shapes store a basename beneath `references/<sheetId>/`, and only the resolver
   // knows it. Reading `sample.file` straight asks the world root for a file that is not there.
@@ -335,7 +431,9 @@ export function CharacterVoiceScreen() {
                 source={reads ? `${reads.label} · ${reads.detail}` : null}
                 empty="not set · the narrator reads their lines"
                 meta={reads ? usage : null}
-                onSet={() => open("choose")}
+                // A library voice's Change opens on its own shelf, where its readers are the
+                // choice (R-30); anything else opens on the whole catalogue.
+                onSet={() => open("choose", reads?.clone ? "mine" : undefined)}
               />
               <UseRow
                 name="On screen"
@@ -415,6 +513,8 @@ export function CharacterVoiceScreen() {
           world={world}
           sheet={sheet}
           candidates={candidates}
+          models={models}
+          initialTab={initialTab}
           onClose={() => close()}
         />
       )}
@@ -456,28 +556,43 @@ export function CharacterVoiceScreen() {
  * a Preview and an Assign on all fifty rows, and the two presses at the same weight made the
  * cheap one and the one that versions the sheet look alike. Here the circle previews — with its
  * price stated on the row beside it — and one press at the foot assigns what is chosen.
+ *
+ * A cloned voice is one row with a chip per reader (SPEC-046 R-30): the chip picks the reader,
+ * the circle previews through it, and the note beside says what a first read there would add.
+ * A hosted vendor's own voices read `presets` — nothing here says "clone" as an action, because
+ * neither vendor is where a voice is made (R-31).
  */
 function ChooseVoiceDialog({
   world,
   sheet,
   candidates,
+  models,
+  initialTab,
   onClose,
 }: {
   world: WorldBundle;
   sheet: Sheet;
   candidates: VoiceCandidatesState | undefined;
+  models: readonly ManifestModel[] | undefined;
+  initialTab: Tab;
   onClose: () => void;
 }) {
   const previews = useVoicePreviews();
   const voiceAudio = useVoiceAudio();
   const jobs = useStore().state?.app.jobs ?? [];
-  const [where, setWhere] = useState<"all" | "cloud" | "local" | "mine">("all");
+  const [where, setWhere] = useState<Tab>(initialTab);
   const [pick, setPick] = useState<string | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [requests, setRequests] = useState<Record<string, string>>({});
   const requestKeys = useRef(new Map<string, string>());
   const assigningRequest = useRef<string | null>(null);
+  // Deleting a library voice (SPEC-046 R-15): a second press on the same row is the confirmation,
+  // and the answer — the copies each vendor gave up or kept — is one line under the list.
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [deleted, setDeleted] = useState<string | null>(null);
+  const deletingRequest = useRef<string | null>(null);
   const [uploadConfirmation, setUploadConfirmation] = useState<{
     destinationLabel: string;
     confirmationToken: string;
@@ -516,6 +631,29 @@ function ChooseVoiceDialog({
       }),
     [],
   );
+  useEffect(
+    () =>
+      subscribeVoiceDeleteResults((result) => {
+        if (result.requestId !== deletingRequest.current) return;
+        deletingRequest.current = null;
+        setDeleting(null);
+        setConfirmDelete(null);
+        if (result.status === "refused") {
+          setRefusal(result.reason ?? "The voice could not be deleted.");
+          return;
+        }
+        // The list is the library's: asked again, the row is gone. A copy a vendor kept is said
+        // once, here, with the vendor's reason — the delete itself has already happened.
+        requestVoiceCandidates(world.meta.worldId, sheet.id);
+        const kept = result.copies.filter((copy) => !copy.removed);
+        setDeleted(
+          kept.length === 0
+            ? "deleted"
+            : `deleted here · ${kept.map((copy) => `${HOSTED_READER_LABELS[copy.provider] ?? copy.provider} kept its copy${copy.reason ? ` — ${copy.reason}` : ""}`).join(" · ")}`,
+        );
+      }),
+    [world.meta.worldId, sheet.id],
+  );
   // Whom this world already gives a voice to. Data on the row, not a warning: assigning it here
   // changes nothing about them, and two characters may legitimately share one voice.
   const usedBy = useMemo(() => {
@@ -530,22 +668,11 @@ function ChooseVoiceDialog({
     }
     return byKey;
   }, [world.sheets, world.clonedVoices, sheet.id]);
-  const rows = (candidates?.ranked ?? []).filter(({ candidate }) =>
-    where === "all"
-      ? true
-      : where === "mine"
-        ? isClonedVoice(candidate)
-        : where === "local"
-          ? candidate.local
-          : !candidate.local,
-  );
-  const counts = {
-    all: candidates?.ranked.length ?? 0,
-    cloud: (candidates?.ranked ?? []).filter(({ candidate }) => !candidate.local).length,
-    local: (candidates?.ranked ?? []).filter(({ candidate }) => candidate.local).length,
-    mine: (candidates?.ranked ?? []).filter(({ candidate }) => isClonedVoice(candidate)).length,
-  };
-  const chosen = rows.find(({ candidate }) => voiceTargetKey(candidate) === pick)?.candidate;
+  const ranked = candidates?.ranked ?? [];
+  const rows = catalogueRows(ranked, where);
+  // The counts are rows, not candidates: a cloned voice with three readers is one voice.
+  const counts = Object.fromEntries(TABS.map((tab) => [tab, catalogueRows(ranked, tab).length])) as Record<Tab, number>;
+  const chosen = rows.flatMap((row) => row.readers).find((candidate) => voiceTargetKey(candidate) === pick);
   const startPreview = (candidate: VoiceCandidate, confirmedFor?: string) => {
     const provider = providerIdOf(candidate.provider);
     if (!provider) return;
@@ -562,6 +689,20 @@ function ChooseVoiceDialog({
     requestKeys.current.set(requestId, key);
     setRequests((current) => ({ ...current, [key]: requestId }));
   };
+  const startDelete = (voiceId: string) => {
+    if (confirmDelete !== voiceId) {
+      setConfirmDelete(voiceId);
+      return;
+    }
+    setRefusal(null);
+    setDeleted(null);
+    setDeleting(voiceId);
+    deletingRequest.current = deleteVoice(world.meta.worldId, voiceId);
+    if (deletingRequest.current === null) {
+      setDeleting(null);
+      setRefusal("The studio is disconnected — the voice was not deleted.");
+    }
+  };
   return (
     <>
       <div className="fy-voicescrim" onClick={onClose} />
@@ -577,7 +718,7 @@ function ChooseVoiceDialog({
         </header>
         <div className="fy-voicesheet__filters">
           <div className="fy-seg">
-            {(["all", "cloud", "local", "mine"] as const).map((tab) => (
+            {TABS.map((tab) => (
               <button
                 key={tab}
                 type="button"
@@ -604,6 +745,11 @@ function ChooseVoiceDialog({
           </span>
         </div>
         {refusal !== null && <p className="fy-refusal">{refusal}</p>}
+        {deleted !== null && (
+          <p className="fy-voicesheet__none" data-testid="voice-deleted">
+            {deleted}
+          </p>
+        )}
         {uploadConfirmation && (
           <RemoteVoiceUploadConfirmation
             destinationLabel={uploadConfirmation.destinationLabel}
@@ -620,8 +766,9 @@ function ChooseVoiceDialog({
               setUploadConfirmation(null);
             }}
             onConfirm={() => {
-              const candidate = rows.find(({ candidate }) => voiceTargetKey(candidate) === uploadConfirmation.key)
-                ?.candidate;
+              const candidate = rows
+                .flatMap((row) => row.readers)
+                .find((reader) => voiceTargetKey(reader) === uploadConfirmation.key);
               if (candidate) startPreview(candidate, uploadConfirmation.confirmationToken);
               setUploadConfirmation(null);
             }}
@@ -634,75 +781,112 @@ function ChooseVoiceDialog({
         {/* The catalogue scrolls in its own pane rather than growing the sheet: fifty cloud
             voices would otherwise push the press that spends money below the fold. */}
         <div className="fy-voicelist">
-          {rows.map(({ candidate }) => {
-            const key = voiceTargetKey(candidate);
+          {rows.map((row) => {
+            // The reader the row is acting through: the picked one, else the assigned one, else
+            // the first. A preset has exactly one.
+            const picked =
+              row.readers.find((reader) => voiceTargetKey(reader) === pick) ??
+              row.readers.find((reader) => voiceTargetKey(reader) === assignedKey) ??
+              row.readers[0]!;
+            const key = voiceTargetKey(picked);
             const requestId = requests[key];
             const result = requestId ? voiceAudio[requestId] : undefined;
             const error = result?.error ?? previews[key]?.error;
             const price = candidates?.previewMicroUsdByVoice[key] ?? candidates?.cloudPreviewMicroUsd;
+            const notice = candidates?.notices[key];
             const shared = usedBy.get(key);
             const step = requestId
               ? jobs.find((job) => job.params["requestId"] === requestId)?.step
               : undefined;
+            const pickedRow = rowFor(models, picked);
+            const isPicked = row.readers.some((reader) => voiceTargetKey(reader) === pick);
+            const isCurrent = row.readers.some((reader) => voiceTargetKey(reader) === assignedKey);
             return (
               <div
-                key={key}
-                className={cx(
-                  "fy-voicerow",
-                  pick === key && "fy-voicerow--picked",
-                  assignedKey === key && "fy-voicerow--selected",
-                )}
+                key={row.key}
+                className={cx("fy-voicerow", row.clone !== null && "fy-voicerow--readers", isPicked && "fy-voicerow--picked", isCurrent && "fy-voicerow--selected")}
               >
                 <ClipPlayButton
                   small
-                  busy={candidate.unavailableReason === undefined && Boolean(requestId && !result)}
-                  label={candidate.local ? "Preview · free" : "Preview"}
+                  busy={picked.unavailableReason === undefined && Boolean(requestId && !result)}
+                  label={picked.local ? "Preview · free" : "Preview"}
                   clip={
                     result?.status === "ready" && result.file
                       ? {
                           id: result.requestId,
                           url: mediaUrl(world.meta.slug, result.file),
-                          title: candidate.label,
-                          sub: `preview · ${candidate.provider}`,
+                          title: row.label,
+                          sub: `preview · ${readerName(picked, pickedRow)}`,
                         }
                       : null
                   }
-                  onStart={
-                    candidate.unavailableReason === undefined ? () => startPreview(candidate) : undefined
-                  }
+                  onStart={picked.unavailableReason === undefined ? () => startPreview(picked) : undefined}
                 />
                 <button
                   type="button"
                   className="fy-voicerow__pick"
-                  disabled={candidate.unavailableReason !== undefined}
+                  disabled={row.readers.every((reader) => reader.unavailableReason !== undefined)}
                   onClick={() => setPick(key)}
                 >
-                  <span className="fy-voicerow__name">{candidate.label}</span>
+                  <span className="fy-voicerow__name">{row.label}</span>
                   <span className="fy-voicerow__sub">
-                    {candidate.attributes.length > 0
-                      ? candidate.attributes.join(", ")
-                      : isClonedVoice(candidate)
-                        ? "cloned here"
-                        : ""}
+                    {row.attributes.length > 0 ? row.attributes.join(", ") : row.clone !== null ? "cloned here" : ""}
                   </span>
                 </button>
-                <span className="fy-voicerow__where">
-                  {candidate.local ? <Monitor size={12} /> : <Cloud size={12} />}
-                  {/* One expression, so the engine and its price stay one text node: split in
-                      two, React puts a comment between them and the pair cannot be read. */}
-                  <span className="fy-mono">
-                    {`${candidate.provider}${
-                      candidate.local
-                        ? " · free"
-                        : price !== null && price !== undefined
-                          ? ` · ${formatMicroUsd(price)} preview`
-                          : ""
-                    }`}
+                {row.clone === null && (
+                  <span className="fy-voicerow__where">
+                    {picked.local ? <Monitor size={12} /> : <Cloud size={12} />}
+                    {/* One expression, so the reader and its price stay one text node: split in
+                        two, React puts a comment between them and the pair cannot be read. */}
+                    <span className="fy-mono">
+                      {`${readerName(picked, pickedRow)}${isHostedVoiceReader(picked.provider, picked.model) ? " · presets" : ""}${
+                        picked.local
+                          ? " · free"
+                          : price !== null && price !== undefined
+                            ? ` · ${formatMicroUsd(price)} preview`
+                            : ""
+                      }`}
+                    </span>
                   </span>
-                </span>
+                )}
                 <span className="fy-mono fy-voicerow__note">
-                  {rowNote({ candidate, error, step, current: assignedKey === key, shared })}
+                  {rowNote({ candidate: picked, error, step, notice, current: isCurrent, shared })}
                 </span>
+                {row.clone !== null && where === "mine" && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    data-testid="voice-delete"
+                    disabled={deleting !== null}
+                    onClick={() => startDelete(row.clone!)}
+                  >
+                    {deleting === row.clone ? <Loading inline label="Deleting…" /> : confirmDelete === row.clone ? "Delete for good" : "Delete"}
+                  </Button>
+                )}
+                {/* The readers last in the row and on a line of their own beneath the name: beside
+                    the name they left it a word a line, and the tab order stays the visual one. */}
+                {row.clone !== null && (
+                  <span className="fy-readerchips" role="group" aria-label="Reader">
+                    {row.readers.map((reader) => {
+                      const readerKey = voiceTargetKey(reader);
+                      return (
+                        <button
+                          key={readerKey}
+                          type="button"
+                          className="fy-readerchip"
+                          aria-pressed={readerKey === key}
+                          disabled={reader.unavailableReason !== undefined}
+                          title={reader.unavailableReason}
+                          data-testid={`voice-reader-${reader.provider}`}
+                          onClick={() => setPick(readerKey)}
+                        >
+                          {reader.local ? <Monitor size={10} /> : <Cloud size={10} />}
+                          {readerLabel(reader, rowFor(models, reader))}
+                        </button>
+                      );
+                    })}
+                  </span>
+                )}
               </div>
             );
           })}
@@ -715,7 +899,7 @@ function ChooseVoiceDialog({
           <Button
             variant="primary"
             data-testid="voice-assign"
-            disabled={chosen === undefined || assigning || pick === assignedKey}
+            disabled={chosen === undefined || chosen.unavailableReason !== undefined || assigning || pick === assignedKey}
             onClick={() => {
               if (!chosen) return;
               const provider = providerIdOf(chosen.provider);

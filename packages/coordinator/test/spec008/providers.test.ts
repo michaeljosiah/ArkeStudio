@@ -171,6 +171,27 @@ describe("provider statuses and availability (R-1..R-4, §3.2)", () => {
     assert.match(clone!.reason!, /no provider is configured/);
   });
 
+  it("a key that authenticates but cannot pay stays valid, with the capability locked and the reason kept (issue 1167)", async () => {
+    // Fish Audio with no API credit: the vendor accepted the key and the account cannot pay.
+    // "invalid" is what Settings renders as "key rejected" and remedies with a replacement — the
+    // wrong remedy — so the probe's `authenticated` keeps the status valid while the capability
+    // stays locked on the probe, and the reason travels with it.
+    const reason = "the key authenticates but the balance is $0.00 — top up on fish.audio";
+    const service = await makeService([
+      { capability: "image", available: false, authenticated: true, reason },
+      { capability: "video", available: false, authenticated: true, reason },
+    ]);
+    const status = await service.validate("fal");
+    assert.equal(status.validation, "valid");
+    assert.equal(status.fault, null);
+    const image = deriveCapabilityAvailability(service.list().filter((s) => s.id === "fal")).find((a) => a.capability === "image");
+    assert.equal(image?.available, false, "still locked: the account cannot pay");
+    assert.equal(status.probes[0]?.reason, reason);
+    // A probe that says neither is what it always was: no capability, no authentication, invalid.
+    const rejected = await (await makeService([{ capability: "image", available: false, reason: "rejected this key" }])).validate("fal");
+    assert.equal(rejected.validation, "invalid");
+  });
+
   it("a probe failure marks the provider invalid with the message, not a crash", async () => {
     const service = await makeService(new Error("connect ETIMEDOUT"));
     const status = await service.validate("fal");

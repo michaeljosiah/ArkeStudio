@@ -51,14 +51,26 @@ it("a paren row writes Breeze's tags and lifts the delivery's sentence out of th
       breaking: { settings: { guidance_scale: 4 }, tag: "sobs", instruction: "The voice is breaking." } } } };
   const text = "Wait here.";
   const cues: CadencePlan["cues"] = [{ kind: "pause", at: 4, length: "long" }, { kind: "breath", at: text.length, action: "inhale" }];
-  const whispered = mapCadence(text, hash(text), { ...plan(text, cues), delivery: "whispered" }, breeze);
+  const whispered = mapCadence(text, hash(text), { ...plan(text, cues), delivery: "whispered" }, breeze, "en");
   assert.equal(whispered.providerText, "(whispers) Wait (pause)  here. (inhales) ");
   assert.equal(whispered.instructions, undefined);
   assert.equal(whispered.controls[0]?.status, "best-effort");
-  const breaking = mapCadence(text, hash(text), { ...plan(text), delivery: "breaking" }, breeze);
+  const breaking = mapCadence(text, hash(text), { ...plan(text), delivery: "breaking" }, breeze, "en");
   assert.equal(breaking.providerText, "(sobs) Wait here.");
   assert.equal(breaking.instructions, "The voice is breaking.");
   assert.equal(breaking.controls[0]?.method, "instruction and declared settings");
+  // The parentheses are English words (R-23): a line not stated to be English — a French clone,
+  // or no language at all — gets the sentence and the untagged text, and each cue that would
+  // have been a tag says why it is not.
+  const french = mapCadence(text, hash(text), { ...plan(text, cues), delivery: "breaking" }, breeze, "fr");
+  assert.equal(french.providerText, "Wait here.");
+  assert.equal(french.instructions, "The voice is breaking.");
+  assert.equal(french.controls[0]?.status, "best-effort");
+  assert.deepEqual(french.controls.filter((c) => c.control === "pause" || c.control === "breath").map((c) => c.status), ["unsupported", "unsupported"]);
+  assert.match(french.controls.find((c) => c.control === "pause")!.reason!, /not stated to be English/);
+  const unstated = mapCadence(text, hash(text), { ...plan(text), delivery: "whispered" }, breeze);
+  assert.equal(unstated.providerText, "Wait here.", "no language stated is not English");
+  assert.equal(unstated.controls[0]?.status, "unsupported", "a tag-only delivery that cannot go in carries nothing");
   const measured = mapCadence(text, hash(text), plan(text), breeze);
   assert.equal(measured.providerText, "Wait here.");
   assert.equal(measured.instructions, "Read it evenly.");

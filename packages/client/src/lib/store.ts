@@ -349,6 +349,8 @@ export interface VoiceCandidatesState {
   previewLine: { text: string; source: "own-line" | "drafted" | "stock" };
   cloudPreviewMicroUsd: number | null;
   previewMicroUsdByVoice: Record<string, number>;
+  /** What a first read through a reader adds, by target key (SPEC-046 R-14): said on the row before the preview. */
+  notices: Record<string, string>;
 }
 
 let current: StoreState = {
@@ -563,6 +565,14 @@ export function subscribeVoiceUploadConfirmations(
 ): () => void {
   voiceUploadConfirmationListeners.add(listener);
   return () => voiceUploadConfirmationListeners.delete(listener);
+}
+
+/** The outcome of deleting a cloned voice (SPEC-046 R-15), by requestId: the library's part and each vendor copy's. */
+export type VoiceDeleteResult = Extract<DomainEvent, { type: "voice.deleted" }>;
+const voiceDeleteListeners = new Set<(result: VoiceDeleteResult) => void>();
+export function subscribeVoiceDeleteResults(listener: (result: VoiceDeleteResult) => void): () => void {
+  voiceDeleteListeners.add(listener);
+  return () => voiceDeleteListeners.delete(listener);
 }
 
 /** The correlated answer to one create-production request (issue 384), by requestId. */
@@ -1103,6 +1113,7 @@ function handleFrame(json: string): void {
     if (event.type === "voice.assignment-result") {
       for (const listener of voiceAssignmentListeners) listener(event);
     }
+    if (event.type === "voice.deleted") for (const listener of voiceDeleteListeners) listener(event);
     if (event.type === "job.ready") {
       for (const listener of jobReadyListeners) listener(event.job);
     }
@@ -1483,6 +1494,7 @@ function handleFrame(json: string): void {
           previewLine: event.previewLine,
           cloudPreviewMicroUsd: event.cloudPreviewMicroUsd,
           previewMicroUsdByVoice: event.previewMicroUsdByVoice,
+          notices: event.notices,
         },
       };
     } else if (event.type === "voice.preview") {
@@ -3218,6 +3230,8 @@ export function cloneVoice(input: {
   clipId: string;
   name: string;
   description: string;
+  /** The recording's language (ISO 639-1); the coordinator takes English when it is not said. */
+  language?: string;
   sheetId?: string;
 }): void {
   send({
@@ -3227,8 +3241,18 @@ export function cloneVoice(input: {
     name: input.name,
     description: input.description,
     consent: true,
+    ...(input.language !== undefined ? { language: input.language } : {}),
     ...(input.sheetId !== undefined ? { sheetId: input.sheetId } : {}),
   });
+}
+
+/**
+ * Delete a cloned voice (SPEC-046 R-15): the clip, the entry, and every vendor copy after. The
+ * answer comes back on `voice.deleted` under this id; null when the studio is disconnected.
+ */
+export function deleteVoice(worldId: string, voiceId: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "delete-voice", requestId, worldId, voiceId }) ? requestId : null;
 }
 
 export function useVoiceClips(): Record<string, StagedClip> {

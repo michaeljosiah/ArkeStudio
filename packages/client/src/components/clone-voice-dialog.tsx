@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { extractVoiceAttributes } from "@arke-studio/contracts";
+import { CLONE_LANGUAGES, extractVoiceAttributes } from "@arke-studio/contracts";
 import {
   cloneVoice,
   discardVoiceClip,
@@ -9,7 +9,7 @@ import {
   type StagedClip,
 } from "../lib/store.js";
 import { MAX_RECORDING_BASE64, recordingToWav, toBase64 } from "../lib/wav.js";
-import { Input, Textarea, cx } from "./ui.js";
+import { Input, Select, Textarea, cx } from "./ui.js";
 import { Folder, Mic, Waveform, X } from "./icons.js";
 
 /**
@@ -48,6 +48,7 @@ export function CloneVoiceDialog({
   const [consent, setConsent] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [language, setLanguage] = useState("en");
   const [saving, setSaving] = useState(false);
   const [trouble, setTrouble] = useState<string | null>(null);
   const [recorder, setRecorder] = useState<MediaRecorder | null>(null);
@@ -66,6 +67,7 @@ export function CloneVoiceDialog({
     setConsent(false);
     setName("");
     setDescription("");
+    setLanguage("en");
     setSaving(false);
     setTrouble(null);
     setElapsed(0);
@@ -191,11 +193,13 @@ export function CloneVoiceDialog({
           <NameStep
             name={name}
             description={description}
+            language={language}
             saving={saving}
             ready={clipId !== null}
             trouble={trouble}
             onName={setName}
             onDescription={setDescription}
+            onLanguage={setLanguage}
             onBack={() => setStep("clip")}
             onSave={() => {
               if (!clipId) return;
@@ -206,6 +210,7 @@ export function CloneVoiceDialog({
                 clipId,
                 name: name.trim(),
                 description: description.trim(),
+                language,
                 ...(sheetId !== undefined ? { sheetId } : {}),
               });
             }}
@@ -324,22 +329,27 @@ export function ClipStep({
 export function NameStep({
   name,
   description,
+  language = "en",
   saving,
   ready,
   trouble,
   onName,
   onDescription,
+  onLanguage,
   onBack,
   onSave,
 }: {
   name: string;
   description: string;
+  /** The recording's language (ISO 639-1), which a hosted reader saves the voice under (issue 1163). */
+  language?: string;
   saving: boolean;
   /** Whether a clip is still staged behind this screen. */
   ready: boolean;
   trouble: string | null;
   onName: (value: string) => void;
   onDescription: (value: string) => void;
+  onLanguage?: (value: string) => void;
   onBack: () => void;
   onSave: () => void;
 }) {
@@ -368,6 +378,19 @@ export function NameStep({
           placeholder="Low, dry, unhurried. Coastal."
           onChange={(e) => onDescription(e.target.value)}
         />
+      </label>
+      {/* Asked here, once, beside the words: Breeze saves a voice under a language and took every
+          one for English before this was asked; a French recording read with English tags is
+          paid output wasted (SPEC-046 R-23). A label and a list, not an explanation. */}
+      <label className="fy-clone__field">
+        <span className="fy-clone__label">Language</span>
+        <Select label="Language" value={language} data-testid="clone-language" onChange={(e) => onLanguage?.(e.target.value)}>
+          {CLONE_LANGUAGES.map(([code, label]) => (
+            <option key={code} value={code}>
+              {label}
+            </option>
+          ))}
+        </Select>
       </label>
       {attributes.length > 0 && (
         <p className="fy-clone__attrs" data-testid="clone-attrs">

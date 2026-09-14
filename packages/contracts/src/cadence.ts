@@ -42,8 +42,15 @@ export const CadenceMappingSchema = z.object({
 }).strict();
 export function normalizeSpeechText(text: string): string { return text.replace(/\s+/g, " ").trim(); }
 
-/** UTF-16 coordinates refer to normalized authored text, never a decorated provider string. */
-export function mapCadence(text: string, expectedHash: string, input: CadencePlan, model: Pick<ManifestModel, "id" | "provider" | "providerModelId" | "cadence">) {
+/**
+ * UTF-16 coordinates refer to normalized authored text, never a decorated provider string.
+ *
+ * `language` is the line's, when anything states it — a cloned voice's recording language
+ * (issue 1163). A paren row's tags are English words (SPEC-046 R-23), so they go in only when
+ * the line is stated to be English: unknown is not English, and the delivery's sentence carries
+ * the direction instead. Bracket rows are untouched by it.
+ */
+export function mapCadence(text: string, expectedHash: string, input: CadencePlan, model: Pick<ManifestModel, "id" | "provider" | "providerModelId" | "cadence">, language?: string) {
   const plan = CadencePlanSchema.parse(input);
   text = normalizeSpeechText(text);
   if (plan.sourceTextHash !== expectedHash) throw new Error("Cadence was authored for different wording.");
@@ -66,27 +73,38 @@ export function mapCadence(text: string, expectedHash: string, input: CadencePla
   }
   const cap = model.cadence;
   const delivery = cap?.deliveries.includes(plan.delivery) ? cap.deliveryMappings[plan.delivery] : undefined;
+  // The two tag spellings the catalogue's vendors read (R-21): brackets with a phrase inside for
+  // ElevenLabs and Fish, parentheses around one English word for Breeze — which is why the
+  // parentheses wait for the line to be stated English (R-23) and the brackets do not.
+  const paren = cap?.tagSyntax === "paren";
+  const tagged = !paren || language === "en";
+  const UNTAGGED = "the tag is an English word and the line is not stated to be English";
   // A delivery carried by a tag or an instruction is best effort, like a cue: neither is a
-  // parameter the vendor promises to honour. Settings alone are mapped.
-  const directed = delivery !== undefined && (delivery.tag !== undefined || delivery.instruction !== undefined);
-  const controls: z.infer<typeof CadenceMappingSchema>["controls"] = [{ control: "delivery", status: delivery ? directed ? "best-effort" : "mapped" : "unsupported",
-    ...(delivery ? { method: delivery.instruction ? "instruction and declared settings" : delivery.tag ? "audio tag and declared settings" : "declared voice settings" }
+  // parameter the vendor promises to honour. Settings alone are mapped. A delivery whose only
+  // direction is a tag that cannot go in carries nothing, and says so.
+  const carriedByTag = delivery?.tag !== undefined && tagged;
+  const directed = delivery !== undefined && (carriedByTag || delivery.instruction !== undefined);
+  const untagged = delivery !== undefined && delivery.tag !== undefined && !tagged && delivery.instruction === undefined;
+  const controls: z.infer<typeof CadenceMappingSchema>["controls"] = [{ control: "delivery", status: delivery ? untagged ? "unsupported" : directed ? "best-effort" : "mapped" : "unsupported",
+    ...(delivery ? untagged ? { method: "declared voice settings", reason: UNTAGGED }
+      : { method: delivery.instruction ? "instruction and declared settings" : carriedByTag ? "audio tag and declared settings" : "declared voice settings" }
       : { reason: "This model has no declared delivery mapping." }) }];
   const voiceSettings = { ...delivery?.settings };
   const speedSupported = cap?.speed && plan.speed >= cap.speed.min && plan.speed <= cap.speed.max;
   controls.push({ control: "speed", status: speedSupported || plan.speed === 1 ? "mapped" : "unsupported",
     method: speedSupported ? "native speed" : "delivery preset only" });
   if (speedSupported) voiceSettings.speed = plan.speed;
-  // The two tag spellings the catalogue's vendors read (R-21): brackets with a phrase inside for
-  // ElevenLabs, parentheses around one word for Breeze. Same cue, same position, different ink.
-  const paren = cap?.tagSyntax === "paren";
+  // Same cue, same position, different ink.
   const tag = (word: string) => (paren ? `(${word})` : `[${word}]`);
   const cueTag = (cue: CadencePlan["cues"][number]) => cue.kind === "pause" ? (paren ? "pause" : `${cue.length} pause`)
     : cue.kind === "breath" ? (cue.action === "inhale" ? (paren ? "inhales" : "inhales deeply") : "exhales") : "";
   const edits: Array<{ at: number; end: number; text: string }> = [];
   plan.cues.forEach((cue, cueIndex) => {
-    const supported = cap && cap[cue.kind] !== "unsupported";
-    controls.push({ control: cue.kind, cueIndex, status: supported ? "best-effort" : "unsupported", method: cap?.[cue.kind] ?? "unsupported" });
+    const declared = cap && cap[cue.kind] !== "unsupported";
+    // Emphasis is capitals in the text, in any language; a pause or a breath is a tag.
+    const supported = declared && (cue.kind === "emphasis" || tagged);
+    controls.push({ control: cue.kind, cueIndex, status: supported ? "best-effort" : "unsupported", method: cap?.[cue.kind] ?? "unsupported",
+      ...(declared && !supported ? { reason: UNTAGGED } : {}) });
     if (!supported) return;
     if (cue.kind === "emphasis") edits.push({ at: cue.span.from, end: cue.span.to, text: cue.span.text.toUpperCase() });
     else edits.push({ at: cue.at, end: cue.at, text: ` ${tag(cueTag(cue))} ` });
@@ -97,7 +115,7 @@ export function mapCadence(text: string, expectedHash: string, input: CadencePla
     providerText += edits.filter(e => e.at === at && e.end === at).map(e => e.text).join("");
     if (at < text.length) providerText += edits.some(e => e.at <= at && e.end > at) ? text[at]!.toUpperCase() : text[at];
   }
-  if (delivery?.tag) providerText = `${tag(delivery.tag)} ${providerText}`;
+  if (delivery?.tag && tagged) providerText = `${tag(delivery.tag)} ${providerText}`;
   return { provider: model.provider, model: model.id, providerModel: model.providerModelId ?? model.id,
     providerText, voiceSettings, ...(delivery?.instruction !== undefined ? { instructions: delivery.instruction } : {}), controls };
 }

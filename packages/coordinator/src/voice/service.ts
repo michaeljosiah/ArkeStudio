@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   clonedVoiceCandidates,
   cloudReaderCandidates,
+  firstReadNotice,
   normalizeSpeechText,
   KOKORO_VOICE_MODEL,
   billableCharacters,
@@ -535,6 +536,15 @@ export class VoiceService {
           : [];
       }),
     );
+    // What a first read through a slot-keeping reader adds, on the row before the circle that
+    // would incur it (SPEC-046 R-14, R-34): once the library records the slot, nothing.
+    const notices = Object.fromEntries(
+      ranked.flatMap(({ candidate }): Array<[string, string]> => {
+        const clone = candidate.readsClone === undefined ? undefined : bundle.clonedVoices.find((voice) => voice.id === candidate.readsClone);
+        const notice = clone === undefined ? null : firstReadNotice(clone, candidate.provider);
+        return notice === null ? [] : [[voiceTargetKey(candidate), notice]];
+      }),
+    );
     this.deps.emit({
       at: this.now(),
       type: "voice.candidates",
@@ -543,6 +553,7 @@ export class VoiceService {
       extracted,
       ranked,
       previewLine: line,
+      notices,
       // Stated before any preview that will incur a charge (R-10): per-line cloud cost.
       // Legacy clients read one aggregate figure. Use it only when every priced candidate agrees;
       // otherwise null is safer than quoting one sibling model for another.

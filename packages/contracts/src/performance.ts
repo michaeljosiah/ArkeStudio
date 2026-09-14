@@ -4,6 +4,7 @@ import { prefixedIdSchema, SlugSchema, SceneIdSchema, ShotIdSchema, IsoDateTimeS
 import { AudioAssetProvenanceSchema, AudioTranscriptComparisonSchema, AudioAttestationSchema, FullSha256Schema } from "./audio.js";
 import { TakeCostSchema } from "./take.js";
 import { VoiceAssignmentSchema } from "./world.js";
+import { VoiceAudioFormatSchema } from "./voice.js";
 import { orderedShots, type SceneRecord } from "./scene-flow.js";
 
 export const PerformanceIdSchema = prefixedIdSchema("pf");
@@ -100,5 +101,11 @@ export const PerformanceGenerationQuoteSchema = z.object({
   voiceAssignment: VoiceAssignmentSchema, cadencePlan: CadencePlanSchema, cadencePlanHash: FullSha256Schema,
   mapping: CadenceMappingSchema, modelHash: FullSha256Schema, estimatedMicroUsd: z.number().int().nonnegative(),
   local: z.boolean(), createdAt: IsoDateTimeSchema,
+  // The container the row delivers (issue 1149): the hosted readers answer WAV where ElevenLabs
+  // answered MP3, and the landing name and the kept file follow the row. MP3 for a quote written
+  // before this was recorded — every such quote was ElevenLabs' or a local one.
+  audioFormat: VoiceAudioFormatSchema.default("mp3"),
+  /** The cloned voice's language (ISO 639-1), when the voice is one: it decides the R-23 tag and rides the job. */
+  language: z.string().optional(),
 }).strict();
 export type PerformanceGenerationQuote = z.infer<typeof PerformanceGenerationQuoteSchema>;
