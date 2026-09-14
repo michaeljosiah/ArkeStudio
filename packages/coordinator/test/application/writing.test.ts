@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it, type TestContext } from "node:test";
 import { join } from "node:path";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import type { HarnessAdapter } from "@arke-studio/contracts";
 import { createEngine, type EngineContext, type EnginePolicy } from "../../src/application/engine.js";
 import { createLocalWorldRepository } from "../../src/application/local-worlds.js";
@@ -9,11 +9,13 @@ import { FileEngineOperationStore } from "../../src/application/local-operations
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 import { saveChapter } from "../../src/productions/ops.js";
+import { MarkdownFile } from "../../src/world/text-files.js";
 
 const context: EngineContext = { actorId: "parent", scopeId: "family", executorId: "worker", subjectId: "child" };
 const productionId = "the-ledger-of-nights", chapterId = "neap";
-async function harness(t: TestContext) {
-  const { root } = await makeTempRoot();
+async function harness(t: TestContext, setup?: (worldDir: string) => Promise<void>) {
+  const { root, worldDir } = await makeTempRoot();
+  await setup?.(worldDir);
   let provider = new FsWorldProvider(root);
   await provider.loadWorld(WORLD_ID);
   await mkdir(join(root, "scratch"));
@@ -199,4 +201,16 @@ it("revocation during the model call blocks proposal preparation", async t => {
   await assert.rejects(h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, input), /did not produce/);
   assert.equal(h.store().getBundle().proposals.length, proposals);
   assert.equal(h.state.closed, 1);
+});
+
+it("draft receipts preserve valid legacy titles longer than the new-title input limit", async t => {
+  const title = "A chapter title ".repeat(20);
+  const h = await harness(t, async dir => {
+    const path = join(dir, "productions", productionId, "chapters", "01-neap.md");
+    const doc = MarkdownFile.parse(await readFile(path, "utf8"));
+    doc.setData({ title }); await writeFile(path, doc.serialize());
+  });
+  const draft = await h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, await h.input("legacy-title"));
+  assert.equal(draft.value.title, title);
+  assert.equal(h.state.calls, 1);
 });

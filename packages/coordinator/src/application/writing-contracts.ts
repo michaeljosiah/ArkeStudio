@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ConversationIdSchema, ProposalSchema, type HarnessAdapter } from "@arke-studio/contracts";
+import { ChapterSummarySchema, ConversationIdSchema, ProposalSchema, type HarnessAdapter } from "@arke-studio/contracts";
 import type { EngineContext, EngineResource, EnginePolicy } from "./contracts.js";
 import { proseId } from "./prose-contracts.js";
 
@@ -11,7 +11,7 @@ export const writingInput = z.object({
   modelId: z.string().min(1).max(200),
 }).strict();
 export const writingResult = z.object({
-  productionId: proseId, chapterId: proseId, conversationId: ConversationIdSchema, title: z.string().min(1).max(200),
+  productionId: proseId, chapterId: proseId, conversationId: ConversationIdSchema, title: ChapterSummarySchema.shape.title,
   proposal: ProposalSchema, body: z.string().min(1).max(2000000),
   groundingHash: z.string().regex(/^[a-f0-9]{64}$/),
 }).strict().refine(value => value.proposal.kind === "chapter-draft" && value.proposal.targets.length === 1 &&
