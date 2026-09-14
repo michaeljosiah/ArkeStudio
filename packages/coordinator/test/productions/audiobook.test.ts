@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   ChapterAudiobookSchema,
@@ -17,7 +17,7 @@ import {
 } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
-import { audiobookBookPath, audiobookPath } from "../../src/productions/audiobook.js";
+import { audiobookBookPath, audiobookPath, legacyAudiobookPath } from "../../src/productions/audiobook.js";
 import { priorPartJob, type PartIdentity } from "../../src/productions/audiobook-run.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
@@ -106,8 +106,18 @@ async function withHarness(
     voiceless?: boolean;
     /** The sidecar's synthesis, when a test needs to watch it or hold it. */
     synthesize?: (request: { voiceId: string; text: string }, options?: { signal?: AbortSignal }) => Promise<Uint8Array>;
+    /** A measurement for every filed take, so a test can see a restored file measured afresh. */
+    durations?: () => number;
   },
-  run: (h: { root: string; worldDir: string; events: DomainEvent[]; spoken: string[]; send: (message: ClientMessage) => Promise<void>; bundle: () => import("@arke-studio/contracts").WorldBundle }) => Promise<void>,
+  run: (h: {
+    root: string;
+    worldDir: string;
+    events: DomainEvent[];
+    spoken: string[];
+    send: (message: ClientMessage) => Promise<void>;
+    bundle: () => import("@arke-studio/contracts").WorldBundle;
+    reload: () => Promise<void>;
+  }) => Promise<void>,
 ): Promise<void> {
   const { root, worldDir } = await makeTempRoot();
   await input.before?.(worldDir);
@@ -133,6 +143,7 @@ async function withHarness(
     credentialsFileName: "credentials.dev.dat",
     manifest: { manifestVersion: 1, generated: "2026-09-14", models: [ELEVEN, KOKORO, FISH] },
     observeEvent: (event) => events.push(event),
+    ...(input.durations ? { mediaProbe: { durationSec: async () => input.durations!(), info: async () => ({ durationSec: input.durations!(), hasAudio: true }) } } : {}),
     ...(input.voiceless
       ? {}
       : {
@@ -158,7 +169,17 @@ async function withHarness(
   const send = (message: ClientMessage) =>
     (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
   try {
-    await run({ root, worldDir, events, spoken, send, bundle: () => provider.openStore!()!.getBundle() });
+    await run({
+      root,
+      worldDir,
+      events,
+      spoken,
+      send,
+      bundle: () => provider.openStore!()!.getBundle(),
+      reload: async () => {
+        await provider.openStore!()!.reload();
+      },
+    });
   } finally {
     await provider.close();
   }
@@ -417,13 +438,20 @@ describe("the audiobook run (turn 146)", () => {
       assert.ok(progress.every((e) => e.outcome === "adopted"), progress.map((e) => e.outcome).join(","));
     }));
 
-  it("a take whose file is gone from the shelf is made again, not shown as made (codex on PR 1180)", () =>
+  it("a take whose file is gone from the shelf is made again, not shown as made, and the open answer names it (codex on PR 1180, 1183)", () =>
     withHarness({}, async ({ worldDir, events, send, bundle }) => {
       await read(send);
       const record = await readRecord(worldDir);
       const title = bundle().artifacts.find((a) => a.id === record.takes["title"]!.artifactId);
       assert.ok(title, "the title's take is on the shelf");
       await rm(join(worldDir, "artifacts", title.file));
+      // The window cannot look at the media, so opening the chapter says which takes are gone.
+      type Opened = Extract<DomainEvent, { type: "chapter.open-result" }>;
+      const requestId = "01J8F3K2QW9VZX4N7M0RTYB6H7";
+      await send({ kind: "open-chapter", requestId, worldId: WORLD_ID, productionId: LEDGER, chapterId: "neap" });
+      const opened = events.find((e): e is Opened => e.type === "chapter.open-result" && e.requestId === requestId);
+      assert.ok(opened && opened.disposition === "opened");
+      assert.deepEqual(opened.audiobookMissing, [title.id], "the title's take is named as gone");
       await read(send);
       const finished = events.filter((e): e is Finished => e.type === "audiobook.finished").at(-1)!;
       assert.equal(finished.outcome, "read", finished.reason);
@@ -433,7 +461,118 @@ describe("the audiobook run (turn 146)", () => {
       const again = await readRecord(worldDir);
       const kept = bundle().artifacts.find((a) => a.id === again.takes["title"]!.artifactId);
       assert.ok(kept && existsSync(join(worldDir, "artifacts", kept.file)), "the record names a take that is there");
+      assert.equal(kept.id, title.id, "restored under the sidecar it always had, so the id every record names stays true");
+      const requestId2 = "01J8F3K2QW9VZX4N7M0RTYB6H8";
+      await send({ kind: "open-chapter", requestId: requestId2, worldId: WORLD_ID, productionId: LEDGER, chapterId: "neap" });
+      const reopened = events.find((e): e is Opened => e.type === "chapter.open-result" && e.requestId === requestId2);
+      assert.ok(reopened && reopened.disposition === "opened");
+      assert.equal(reopened.audiobookMissing, undefined, "nothing is gone any more");
     }));
+
+  it("a restored take is measured afresh: the last file's duration does not outlive its bytes (codex on PR 1183)", async () => {
+    let duration = 3;
+    await withHarness({ durations: () => duration }, async ({ worldDir, send, bundle }) => {
+      await read(send);
+      const record = await readRecord(worldDir);
+      const title = bundle().artifacts.find((a) => a.id === record.takes["title"]!.artifactId);
+      assert.equal(title?.mediaInfo?.durationSec, 3, "measured when filed");
+      await rm(join(worldDir, "artifacts", title!.file));
+      duration = 5;
+      await read(send);
+      const restored = bundle().artifacts.find((a) => a.id === title!.id);
+      assert.equal(restored?.mediaInfo?.durationSec, 5, "the restored file is measured, not handed the old file's duration");
+    });
+  });
+
+  it("a record the first build wrote beside the book's file is read from there and moved by the next write (codex on PR 1183)", () =>
+    withHarness({}, async ({ worldDir, events, spoken, send, bundle, reload }) => {
+      await read(send);
+      const made = await readRecord(worldDir);
+      const legacy = join(worldDir, legacyAudiobookPath(LEDGER, "01-neap"));
+      await rename(recordPath(worldDir), legacy);
+      await reload();
+      const stamp = bundle().productions.find((p) => p.meta.id === LEDGER)!.chapters.find((c) => c.id === "neap")!.audiobook;
+      assert.ok(stamp && "takes" in stamp && stamp.takes === Object.keys(made.takes).length, "the scanner's stamp reads the old path");
+      type Opened = Extract<DomainEvent, { type: "chapter.open-result" }>;
+      const requestId = "01J8F3K2QW9VZX4N7M0RTYB6H6";
+      await send({ kind: "open-chapter", requestId, worldId: WORLD_ID, productionId: LEDGER, chapterId: "neap" });
+      const opened = events.find((e): e is Opened => e.type === "chapter.open-result" && e.requestId === requestId);
+      assert.ok(opened && opened.disposition === "opened");
+      assert.deepEqual(opened.audiobook, made, "the chapter opens with its record");
+
+      // Nothing to make: nothing is written, and the old file stays where it was.
+      const before = spoken.length;
+      await read(send);
+      assert.equal(spoken.length, before, "every take is still made — nothing is paid for or spoken again");
+      assert.ok(existsSync(legacy) && !existsSync(recordPath(worldDir)));
+
+      // One take gone: the run makes it and writes the record to the chapter's own path, and the old file goes.
+      const title = bundle().artifacts.find((a) => a.id === made.takes["title"]!.artifactId)!;
+      await rm(join(worldDir, "artifacts", title.file));
+      await read(send);
+      const finished = events.filter((e): e is Finished => e.type === "audiobook.finished").at(-1)!;
+      assert.equal(finished.outcome, "read", finished.reason);
+      assert.equal(finished.made, 1);
+      assert.ok(existsSync(recordPath(worldDir)) && !existsSync(legacy), "moved, not shadowed");
+      assert.equal(Object.keys((await readRecord(worldDir)).takes).length, Object.keys(made.takes).length);
+    }));
+
+  it("the runtime's Test control takes its turn on the engine like every other synthesis (codex on PR 1183)", async () => {
+    let inFlight = 0;
+    let most = 0;
+    await withHarness(
+      {
+        synthesize: async () => {
+          inFlight += 1;
+          most = Math.max(most, inFlight);
+          await new Promise((resolve) => setTimeout(resolve, 8));
+          inFlight -= 1;
+          return wav();
+        },
+      },
+      async ({ events, send }) => {
+        const requestId = "01J8F3K2QW9VZX4N7M0RTYB6H5";
+        await Promise.all([read(send), send({ kind: "test-local-voice", requestId })]);
+        type Tested = Extract<DomainEvent, { type: "voice.runtime-test" }>;
+        const tested = events.filter((e): e is Tested => e.type === "voice.runtime-test" && e.requestId === requestId).at(-1);
+        assert.equal(tested?.status, "ready", tested?.detail);
+        assert.equal(most, 1, "the test never ran beside the run's synthesis");
+      },
+    );
+  });
+
+  it("a run stopped while it waits its turn behind another synthesis ends then, not when that synthesis does (codex on PR 1183)", async () => {
+    let releaseFirst: () => void = () => {};
+    const first = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let calls = 0;
+    await withHarness(
+      {
+        synthesize: async () => {
+          calls += 1;
+          if (calls === 1) await first;
+          return wav();
+        },
+      },
+      async ({ events, send }) => {
+        const ahead = read(send);
+        while (calls === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+        const behind = read(send, { chapterFile: "02-the-same-ink" });
+        while (!events.some((e) => e.type === "audiobook.started" && e.chapterId === "the-same-ink")) await new Promise((resolve) => setTimeout(resolve, 5));
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        await send({ kind: "stop-audiobook", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "02-the-same-ink" });
+        await behind;
+        const stopped = events.find((e): e is Finished => e.type === "audiobook.finished" && e.chapterId === "the-same-ink");
+        assert.equal(stopped?.outcome, "stopped");
+        assert.equal(calls, 1, "the run behind asked the engine for nothing, and the one ahead is still on its first chunk");
+        releaseFirst();
+        await ahead;
+        const done = events.find((e): e is Finished => e.type === "audiobook.finished" && e.chapterId === "neap");
+        assert.equal(done?.outcome, "read", done?.reason);
+      },
+    );
+  });
 
   it("under cast, a cast the prose moved under refuses the run by name (R-12)", () =>
     withHarness({ castHash: `sha256:${"0".repeat(64)}` }, async ({ events, spoken, send }) => {

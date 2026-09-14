@@ -578,12 +578,16 @@ export async function fileGeneratedArtifact(
       // as a world carried by hand can lose it: then the file is restored under the sidecar it
       // always had, so the id every record names stays true and the block is made rather than
       // handed its dead take back (codex on PR 1180). The hash and the making are the new
-      // file's; the id, the links and the owner are the old one's.
+      // file's; the id, the links and the owner are the old one's. "Gone" is judged as the
+      // audiobook's own presence check judges it — a regular file, not any entry at the path
+      // (codex on PR 1183) — and the old measurement goes with the old bytes, or the probe
+      // would skip the restored file and its duration would be the last file's.
       const media = join(store.dir, "artifacts", existing.file);
-      if ((await lstat(toExtendedLength(media)).catch(() => null)) !== null) return { artifact: existing, created: false };
+      if (await stat(toExtendedLength(media)).then((s) => s.isFile(), () => false)) return { artifact: existing, created: false };
       await atomicWriteFile(media, bytes);
       const current = await currentSidecar(store, existing);
-      const restored: ArtifactSidecar = { ...(current?.sidecar ?? existing), hash: hash as ArtifactSidecar["hash"], generation: input.generation };
+      const { mediaInfo: _measured, ...kept } = current?.sidecar ?? existing;
+      const restored: ArtifactSidecar = { ...kept, hash: hash as ArtifactSidecar["hash"], generation: input.generation };
       await writeSidecar(store, restored, current?.raw ?? null);
       return { artifact: restored, created: true };
     }

@@ -599,7 +599,7 @@ export class VoiceService {
      * the read at the next chunk and cancels the one in flight, rather than finishing a
      * paragraph nobody is waiting for past the desktop's shutdown deadline (codex on PR 1180).
      */
-    return this.oneAtATime(async () => {
+    return this.oneAtATime(options.signal, () => new Error("stopped"), async () => {
       const rendered: Uint8Array[] = [];
       for (const [index, chunk] of chunks.entries()) {
         if (options.signal?.aborted) throw new Error("stopped");
@@ -637,21 +637,52 @@ export class VoiceService {
    * performance beside either — and several syntheses at once is the documented way to leave
    * Kokoro unavailable for the rest of the process. So every synthesis queues here, and a cache
    * hit never does (it is answered above without touching the engine). A caller whose signal
-   * fires while it waits its turn asks the engine for nothing: each loop checks its signal
-   * before its first request, in its own words.
+   * fires while it waits its turn leaves the queue then and there, in its own words (codex on PR
+   * 1183): a run stopped behind a long page read would otherwise say `reading…` until that read
+   * was done, and the coordinator's stop would wait on it. Its slot still opens only after the
+   * turn ahead of it, so leaving early never lets two syntheses run.
    */
-  private sidecarLane: Promise<unknown> = Promise.resolve();
-  private oneAtATime<T>(work: () => Promise<T>): Promise<T> {
-    const turn = this.sidecarLane.then(work);
-    this.sidecarLane = turn.catch(() => undefined);
-    return turn;
+  private sidecarLane: Promise<void> = Promise.resolve();
+  private oneAtATime<T>(signal: AbortSignal | undefined, cancelled: () => Error, work: () => Promise<T>): Promise<T> {
+    const ahead = this.sidecarLane;
+    let release!: () => void;
+    const slot = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.sidecarLane = ahead.then(() => slot);
+    return (async () => {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          if (signal?.aborted) {
+            reject(cancelled());
+            return;
+          }
+          const onAbort = () => reject(cancelled());
+          signal?.addEventListener("abort", onAbort, { once: true });
+          void ahead.then(() => {
+            signal?.removeEventListener("abort", onAbort);
+            resolve();
+          });
+        });
+        return await work();
+      } finally {
+        release();
+      }
+    })();
+  }
+
+  /** One request straight to the engine, through the lane: the runtime's Test control (codex on PR 1183). */
+  async synthesizeOnce(input: { voiceId: string; text: string }): Promise<Uint8Array> {
+    const sidecar = this.deps.sidecar;
+    if (!sidecar) throw new Error("Voxa is unavailable");
+    return this.oneAtATime(undefined, () => new Error("stopped"), () => sidecar.synthesize(input, {}));
   }
 
   /** A deliberate performance is always a fresh synthesis; preview caches are not take authority. */
   async synthesizePerformance(voiceId: string, text: string, params: Record<string, number>, signal: AbortSignal): Promise<Uint8Array> {
     const sidecar = this.deps.sidecar;
     if (!sidecar) throw new Error("Local synthesis is unavailable.");
-    return this.oneAtATime(async () => {
+    return this.oneAtATime(signal, () => new Error("Performance generation cancelled."), async () => {
       const rendered: Uint8Array[] = [];
       for (const chunk of splitForSpeech(normalizeSpeechText(text))) {
         if (signal.aborted) throw new Error("Performance generation cancelled.");

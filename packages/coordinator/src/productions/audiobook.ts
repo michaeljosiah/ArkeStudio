@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AudiobookBookSchema,
@@ -42,6 +42,17 @@ export function audiobookPath(productionId: string, chapterFile: string): string
   return `productions/${productionId}/.audiobook/chapters/${chapterFile}.json`;
 }
 
+/**
+ * Where slice 1 (PR 1180, merged) wrote a chapter's record before the chapters had a folder
+ * of their own: read while no record sits at the chapter's own path, moved by the next write,
+ * never written to. Without this a world read by that build would show every block not made
+ * and pay for its takes again (codex on PR 1183). For a chapter whose stem is `book` the old
+ * path is the book's own file, so nothing is read there.
+ */
+export function legacyAudiobookPath(productionId: string, chapterFile: string): string {
+  return `productions/${productionId}/.audiobook/${chapterFile}.json`;
+}
+
 export function audiobookBookPath(productionId: string): string {
   return `productions/${productionId}/.audiobook/book.json`;
 }
@@ -65,12 +76,16 @@ async function readJson<T>(store: WorldStore, rel: string, parse: (raw: unknown)
   }
 }
 
+const parseChapterAudiobook = (raw: unknown): ChapterAudiobook | null => {
+  const parsed = ChapterAudiobookSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+};
+
 /** The record beside a chapter; a file that is there but cannot be read is said so, never absent (R-1). */
 export async function readAudiobook(store: WorldStore, productionId: string, chapterFile: string): Promise<ChapterAudiobook | "unreadable" | null> {
-  return readJson(store, audiobookPath(productionId, chapterFile), (raw) => {
-    const parsed = ChapterAudiobookSchema.safeParse(raw);
-    return parsed.success ? parsed.data : null;
-  });
+  const current = await readJson(store, audiobookPath(productionId, chapterFile), parseChapterAudiobook);
+  if (current !== null || chapterFile === "book") return current;
+  return readJson(store, legacyAudiobookPath(productionId, chapterFile), parseChapterAudiobook);
 }
 
 /** The book's reading (R-11); absent means the narrator's, and an unreadable file reads the same way but is said. */
@@ -81,17 +96,21 @@ export async function readAudiobookBook(store: WorldStore, productionId: string)
   });
 }
 
-async function writeOwned(store: WorldStore, rel: string, value: unknown): Promise<void> {
+async function writeOwned(store: WorldStore, rel: string, value: unknown, supersedes?: string): Promise<void> {
   const absolute = join(store.dir, fromPortable(rel));
   await store.ownedWrite(async () => {
     await mkdir(toExtendedLength(join(absolute, "..")), { recursive: true });
     await atomicWriteFile(absolute, `${JSON.stringify(value, null, 2)}\n`);
+    // The old file goes with the same claim the new one was written under: left behind, it
+    // would be read again only if the new one were lost, and then as an older record over a
+    // newer set of takes.
+    if (supersedes !== undefined) await unlink(toExtendedLength(join(store.dir, fromPortable(supersedes)))).catch(() => {});
   });
 }
 
 /** Written after every block a run lands, so a stop or a lost claim leaves the takes made so far standing (R-18). */
 export async function writeAudiobook(store: WorldStore, productionId: string, chapterFile: string, record: ChapterAudiobook): Promise<void> {
-  await writeOwned(store, audiobookPath(productionId, chapterFile), record);
+  await writeOwned(store, audiobookPath(productionId, chapterFile), record, chapterFile === "book" ? undefined : legacyAudiobookPath(productionId, chapterFile));
 }
 
 export async function writeAudiobookBook(store: WorldStore, productionId: string, book: AudiobookBook): Promise<void> {

@@ -570,8 +570,11 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
         })
         .catch((err: NodeJS.ErrnoException) => (err.code === "ENOENT" ? null : { unreadable: true as const }));
       // The audiobook record beside the chapter (turn 146, SPEC-047 R-1), the same way: its
-      // stamp. Under `chapters/`, apart from the book's file, so a chapter named `book` is its own.
+      // stamp. Under `chapters/`, apart from the book's file, so a chapter named `book` is its
+      // own; a record the first build wrote beside the book's file is read from there until a
+      // write moves it (codex on PR 1183), except for that one stem, whose old path is the book's.
       const audiobook: ChapterAudiobookState | null = await read(join(pdir, ".audiobook", "chapters", `${stem}.json`))
+        .catch((err: NodeJS.ErrnoException) => (err.code === "ENOENT" && stem !== "book" ? read(join(pdir, ".audiobook", `${stem}.json`)) : Promise.reject(err)))
         .then((raw) => {
           const parsed = ChapterAudiobookSchema.safeParse(JSON.parse(raw));
           return parsed.success ? summariseAudiobook(parsed.data) : { unreadable: true as const };

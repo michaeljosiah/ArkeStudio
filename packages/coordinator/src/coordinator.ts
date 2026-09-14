@@ -260,7 +260,7 @@ import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachm
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { deriveContinuity, makeAdapterContinuityDeriver, readContinuity, type ContinuityDeriver } from "./productions/continuity.js";
 import { castLines, makeAdapterVoicesDeriver, readVoices, type VoicesDeriver } from "./productions/voices.js";
-import { readAudiobook, writeAudiobookBook } from "./productions/audiobook.js";
+import { presentTakes, readAudiobook, writeAudiobookBook } from "./productions/audiobook.js";
 import { runAudiobookChapter } from "./productions/audiobook-run.js";
 import { exportManuscript, importManuscript, readManuscript } from "./productions/manuscript.js";
 import { manuscriptChapters, productionShape, type StructuredDocument } from "@arke-studio/contracts";
@@ -7284,11 +7284,14 @@ export class Coordinator {
         this.emit({ ...base, status: "testing", detail: "Testing Voxa voice synthesis", audioBase64: null });
         try {
           const sidecar = this.opts.voice?.sidecar;
-          if (!sidecar) throw new Error("Voxa is unavailable");
+          if (!sidecar || !this.voiceService) throw new Error("Voxa is unavailable");
           const voices = await sidecar.listVoices();
           const voice = voices[0];
           if (!voice) throw new Error("Voxa returned no compatible voices");
-          const audio = await sidecar.synthesize({
+          // Through the voice service's lane, not straight to the engine (codex on PR 1183): a
+          // test pressed while a read or a run is synthesising would otherwise be the second
+          // request at once that leaves the engine unavailable for the rest of the process.
+          const audio = await this.voiceService.synthesizeOnce({
             voiceId: voice.id,
             text: "The harbour remembers.",
           });
@@ -7590,6 +7593,7 @@ export class Coordinator {
                 voicesUnreadable?: true;
                 audiobook?: ChapterAudiobook;
                 audiobookUnreadable?: true;
+                audiobookMissing?: string[];
               }
             | { disposition: "failed"; reason: string },
         ) =>
@@ -7613,8 +7617,12 @@ export class Coordinator {
           const continuity = await readContinuity(store, msg.productionId, chapter.file);
           // The cast of lines too (turn 130), for the same reason: the bundle has only its stamp.
           const voices = await readVoices(store, msg.productionId, chapter.file);
-          // The audiobook record too (turn 146): the takes come with the chapter, the bundle its stamp.
+          // The audiobook record too (turn 146): the takes come with the chapter, the bundle its
+          // stamp — and which of its takes are gone from the shelf, since the window cannot
+          // look at the media (codex on PR 1183).
           const audiobook = await readAudiobook(store, msg.productionId, chapter.file);
+          const present = audiobook === null || audiobook === "unreadable" ? null : await presentTakes(store, audiobook);
+          const audiobookMissing = present === null || audiobook === null || audiobook === "unreadable" ? [] : [...new Set(Object.values(audiobook.takes).map((take) => take.artifactId))].filter((id) => !present.has(id));
           answer({
             disposition: "opened",
             body: chapter.body,
@@ -7624,6 +7632,7 @@ export class Coordinator {
             ...(continuity === "unreadable" ? { continuityUnreadable: true as const } : continuity !== null ? { continuity } : {}),
             ...(voices === "unreadable" ? { voicesUnreadable: true as const } : voices !== null ? { voices } : {}),
             ...(audiobook === "unreadable" ? { audiobookUnreadable: true as const } : audiobook !== null ? { audiobook } : {}),
+            ...(audiobookMissing.length > 0 ? { audiobookMissing } : {}),
           });
         } catch (err) {
           answer({ disposition: "failed", reason: describeCoordinatorError(err) });

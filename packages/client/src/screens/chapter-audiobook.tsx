@@ -51,6 +51,8 @@ export interface ChapterAudiobookInput {
   body: string;
   cast: ChapterVoices | null;
   record: ChapterAudiobook | "unreadable" | null;
+  /** The takes the record names that the coordinator found gone from the shelf when the chapter was opened. */
+  missing?: readonly string[];
   reading: AudiobookReading;
   connection: string;
   locked: boolean;
@@ -81,7 +83,7 @@ function readerOf(voice: { provider: string; model?: string; voiceId: string; la
 
 /** The blocks, their states and the counts, from the one rule both ends use. */
 export function useChapterAudiobook(input: ChapterAudiobookInput) {
-  const { worldId, prodId, chapter, body, cast, record, reading, connection, locked } = input;
+  const { worldId, prodId, chapter, body, cast, record, missing, reading, connection, locked } = input;
   const { state } = useStore();
   const world = state?.world ?? null;
   const catalogue = useStore().voiceCatalogue;
@@ -107,7 +109,12 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const derived = useMemo(() => audiobookBlocks(body, cast, audiobookHeading(chapter.order, chapter.title)), [body, cast, chapter.order, chapter.title]);
   // A take the record names but the shelf no longer holds is not made (codex on PR 1180): the
   // coordinator plans the same way, so the block is made again rather than shown unplayable.
-  const hasArtifact = useCallback((artifactId: string) => world?.artifacts.some((candidate) => candidate.id === artifactId && candidate.retiredAt === undefined) ?? false, [world]);
+  // The sidecar this window can see for itself; the media it cannot, so the coordinator says
+  // at open which takes it found gone (codex on PR 1183).
+  const hasArtifact = useCallback(
+    (artifactId: string) => !(missing ?? []).includes(artifactId) && (world?.artifacts.some((candidate) => candidate.id === artifactId && candidate.retiredAt === undefined) ?? false),
+    [world, missing],
+  );
   const rows = useMemo<BlockRow[]>(() => {
     return derived.blocks.map((block) => {
       let assigned = narrator;
