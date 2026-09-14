@@ -23,6 +23,10 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
   const state = { calls: 0, opened: 0, closed: 0, saves: 0, scratch: join(root, "scratch"),
     noRuntime: false, corruptResult: "" as "" | "identity" | "target" | "body" | "title" | "blank",
     body: "Maren found the path home.", wrongTarget: false,
+    retiredTarget: false, retireAfterRun: false,
+    beforeClose: undefined as (() => Promise<void>) | undefined,
+    beforeReview: undefined as (() => Promise<void>) | undefined,
+    beforeSave: undefined as (() => Promise<void>) | undefined,
     revoked: false, held: false, failSave: false, hideOutline: false, denyChapter: "", hang: false,
     dispatched: undefined as (() => void) | undefined, beforeReply: undefined as (() => Promise<void>) | undefined };
   const prompts: string[] = [];
@@ -41,12 +45,20 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
   const make = () => {
     const local = createLocalWorldRepository(provider, { finalise: async () => {
       state.saves++; if (state.failSave) throw new Error("Save unavailable");
+      await state.beforeSave?.();
     } });
     return createEngine({
-    worlds: { use: (id, action) => local.use(id, session => action({ ...session, writing: {
-      review: id => session.writing!.review(id),
+    worlds: { use: (id, action) => local.use(id, session => action({ ...session,
+      snapshot: async () => {
+        const snapshot = structuredClone(await session.snapshot());
+        if (state.retiredTarget) snapshot.bundle.productions.find(p => p.meta.id === productionId)!
+          .chapters.find(c => c.id === chapterId)!.retired = true;
+        return snapshot;
+      }, writing: {
+      review: async id => { await state.beforeReview?.(); return session.writing!.review(id); },
       run: async (...args) => {
         const value = await session.writing!.run(...args);
+        if (state.retireAfterRun) state.retiredTarget = true;
         if (state.corruptResult === "identity") value.chapterId = "different-chapter";
         if (state.corruptResult === "body") value.body = "A different story from the staged draft.";
         if (state.corruptResult === "blank") value.body = " \n\t ";
@@ -96,7 +108,7 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
       signal.throwIfAborted();
       return { adapter: Object.freeze(new AccessorAdapter()) as HarnessAdapter,
         cwd: state.scratch, inputTokenLimit: 100000, sessionModel: modelId,
-        createSession: async () => ({ sessionId: "session" }), close: async () => { state.closed++; } };
+        createSession: async () => ({ sessionId: "session" }), close: async () => { state.closed++; await state.beforeClose?.(); } };
     },
   }); };
   let engine = make();
@@ -193,6 +205,36 @@ it("cancellation does not wait behind the world's active writing operation", asy
   await refused;
   assert.equal(h.state.closed, 1);
   assert.equal((await h.engine.operation(context, WORLD_ID, "cancel"))!.status, "started");
+});
+
+for (const phase of ["close", "review", "save", "delivery"] as const) it(`cancellation during ${phase} withholds the completed writing response`, async t => {
+  const h = await harness(t);
+  const input = await h.input("late-" + phase);
+  let release!: () => void, entered!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const waiting = new Promise<void>(resolve => { entered = resolve; });
+  const pause = async () => { entered(); await held; };
+  if (phase === "close") h.state.beforeClose = pause;
+  if (phase === "review") h.state.beforeReview = pause;
+  if (phase === "save") h.state.beforeSave = pause;
+  if (phase === "delivery") {
+    const deliver = h.policy.deliver;
+    h.policy.deliver = async (...args) => { await deliver(...args); if (args[2].kind === "proposal") await pause(); };
+  }
+  const run = h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, input);
+  const refused = assert.rejects(run, /cancelled/);
+  await Promise.race([waiting, run]);
+  try { assert.equal(await h.engine.writing.cancel(context, WORLD_ID, input.operationId), true); }
+  finally { release(); }
+  await refused;
+  assert.equal((await h.engine.operation(context, WORLD_ID, input.operationId))!.status, phase === "delivery" ? "completed" : "started");
+});
+
+for (const after of [false, true]) it(`the writing boundary rejects a retired target ${after ? "after" : "before"} host execution`, async t => {
+  const h = await harness(t); const input = await h.input("retired-target");
+  if (after) h.state.retireAfterRun = true; else h.state.retiredTarget = true;
+  await assert.rejects(h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, input), /identity is unavailable/);
+  assert.equal(h.state.calls, after ? 1 : 0);
 });
 
 it("cancellation returns false when the run finishes during its permission check", async t => {

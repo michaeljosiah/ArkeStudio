@@ -42,6 +42,7 @@ export class ProseApplicationService {
           const value = proseProductionResult.parse(await port.createProduction(input, key));
           const created = (await session.snapshot()).bundle.productions.filter(p => !before.has(p.meta.id));
           if (created.length !== 1 || created[0]!.meta.id !== value.productionId) throw new Error("The production creation receipt names a different production.");
+          if (!productionShape(created[0]!.meta).hasChapters) throw new Error("The created production does not support prose chapters.");
           return value;
         });
       }));
@@ -145,6 +146,12 @@ export class ProseApplicationService {
             .flatMap(p => p.chapters).filter(c => c.id === chapterId);
           if (records.length !== 1 || records[0]!.version !== value.version || records[0]!.hash !== value.hash) {
             throw new Error("The save receipt differs from the authoritative chapter.");
+          }
+          const saved = proseChapterRead.parse(await port.readChapter(productionId, chapterId));
+          const canonicalBody = (body: string) => body.replace(/\r\n/g, "\n").trimEnd();
+          if (saved.productionId !== productionId || saved.chapterId !== chapterId ||
+            saved.version !== value.version || saved.hash !== value.hash || canonicalBody(saved.body) !== canonicalBody(input.body)) {
+            throw new Error("The saved chapter differs from the requested prose.");
           }
           return value;
         });

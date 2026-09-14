@@ -309,8 +309,9 @@ Whitespace-only generated bodies are refused at the public boundary as well as b
 
 `writing.cancel(context, worldId, operationId)` aborts a matching active call without waiting
 behind that world's repository queue. Engine close aborts writing and waits for provider
-cleanup and authoritative saves. Cancellation, model failure, uncertain provider outcomes and
-failed saves retain started operation evidence; they do not authorize retrying the provider.
+cleanup and authoritative saves. Cancellation withholds the response through final delivery,
+but does not undo an already staged proposal or completed operation. Failures before completion
+retain started evidence; cancellation and uncertain outcomes never authorize retrying the provider.
 The conversation creation event records the operation key for host reconciliation. Failed runs
 also finalise their conversation records. This slice has no automatic recovery/resubmission of
 an interrupted writing run.

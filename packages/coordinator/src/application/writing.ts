@@ -8,7 +8,7 @@ async function chapterTarget(session: EngineWorldSession, productionId: string, 
   const productions = bundle.productions.filter(p => p.meta.id === productionId);
   const chapters = productions.length === 1 ? productions[0]!.chapters.filter(c => c.id === chapterId) : [];
   const file = chapters.length === 1 ? chapters[0]!.file : undefined;
-  if (!file || /[\\/:]/.test(file) || file.includes("\0") || file === "." || file === "..") {
+  if (!file || chapters[0]!.retired || /[\\/:]/.test(file) || file.includes("\0") || file === "." || file === "..") {
     throw new Error("The chapter identity is unavailable or ambiguous.");
   }
   return `productions/${productionId}/chapters/${file}.md`;
@@ -54,6 +54,7 @@ export class WritingApplicationService {
           try {
             value = writingResult.parse(await session.writing.run(productionId, chapterId, input,
               { mode, context, operationKey: key, policy: this.operations.policy, runtime, signal }));
+            signal.throwIfAborted();
             if (value.productionId !== productionId || value.chapterId !== chapterId ||
               value.proposal.targets[0]!.path !== target || await chapterTarget(session, productionId, chapterId) !== target) {
               throw new Error("The chapter identity changed or the proposal targets a different chapter.");
@@ -64,14 +65,18 @@ export class WritingApplicationService {
               throw new Error("The writing receipt differs from the staged proposal.");
             }
             value = writingResult.parse({ ...value, body: staged.body });
+            signal.throwIfAborted();
           } catch (error) {
             // Failed and cancelled runs also own durable conversation events.
             await session.saved(key);
             throw error;
           }
-          return { operationKey: key, ...(await session.saved(key)), value };
+          const saved = await session.saved(key);
+          signal.throwIfAborted();
+          return { operationKey: key, ...saved, value };
         });
     });
+    signal.throwIfAborted();
     // Replayed data must still name this chapter, not another file in the same production.
     await this.worlds.use(worldId, async session => {
       if (result.value.proposal.targets[0]!.path !== await chapterTarget(session, productionId, chapterId)) {
@@ -79,8 +84,10 @@ export class WritingApplicationService {
       }
     });
     await this.operations.policy.authorise(context, "read", resource);
+    signal.throwIfAborted();
     await this.operations.policy.deliver(context, { ...resource, proposalId: result.value.proposal.id },
       { kind: "proposal", id: result.value.proposal.id, sha256: engineHash(result.value) });
+    signal.throwIfAborted();
     return result;
     } finally {
       if (--active.callers === 0 && this.active.get(key) === active) this.active.delete(key);

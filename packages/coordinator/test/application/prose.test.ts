@@ -10,7 +10,7 @@ import type { ProseChapterRead } from "../../src/application/prose-contracts.js"
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { MarkdownFile, sha256 } from "../../src/world/text-files.js";
-import { saveChapter, setChapterRetired } from "../../src/productions/ops.js";
+import { createProduction, saveChapter, setChapterRetired } from "../../src/productions/ops.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
 const context: EngineContext = { actorId: "parent", scopeId: "family", executorId: "worker", subjectId: "child" };
@@ -23,6 +23,7 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
   let provider = new FsWorldProvider(root);
   await provider.loadWorld(WORLD_ID);
   const state = { revoked: false, held: false, failSave: false, saves: 0, deniedChapter: "", unsupported: false,
+    nonProse: false, wrongSavedBody: undefined as string | undefined,
     mutationOverride: {} as { productionId?: string; chapterId?: string; hash?: string; version?: number },
     readOverride: {} as Partial<ProseChapterRead>, afterSave: undefined as (() => Promise<void>) | undefined };
   const deliveries: Array<{ resource: unknown; sha256: string }> = [];
@@ -47,9 +48,12 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
     return createEngine({ policy, operations: new FileEngineOperationStore(path),
       worlds: { use: (id, action) => local.use(id, session => action({ ...session,
         prose: state.unsupported ? undefined : { ...session.prose!,
-          createProduction: async (...args) => ({ ...await session.prose!.createProduction(...args), ...state.mutationOverride }),
+          createProduction: async (...args) => ({ ...(state.nonProse
+            ? { productionId: await createProduction(provider.openStore()!, { title: args[0].title, format: "video", requestId: args[1] }) }
+            : await session.prose!.createProduction(...args)), ...state.mutationOverride }),
           createChapter: async (...args) => ({ ...await session.prose!.createChapter(...args), ...state.mutationOverride }),
-          saveChapter: async (...args) => ({ ...await session.prose!.saveChapter(...args), ...state.mutationOverride }),
+          saveChapter: async (p, c, input, key) => ({ ...await session.prose!.saveChapter(p, c,
+            { ...input, body: state.wrongSavedBody ?? input.body }, key), ...state.mutationOverride }),
           readChapter: async (p, c) => ({ ...await session.prose!.readChapter(p, c), ...state.readOverride }) } })),
         close: () => local.close() },
       queue: { enqueue: async () => { throw new Error("No provider expected"); }, jobs: () => [] } });
@@ -62,6 +66,34 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
       provider = new FsWorldProvider(root); await provider.loadWorld(WORLD_ID); engine = make(); return engine;
     } };
 }
+
+it("a host cannot complete prose creation with a video production", async t => {
+  const h = await harness(t); h.state.nonProse = true;
+  await assert.rejects(h.engine.prose.createProduction(context, WORLD_ID, { operationId: "wrong-format", title: "New work" }),
+    /does not support prose chapters/);
+  assert.equal(h.state.saves, 1);
+  assert.equal((await h.engine.operation(context, WORLD_ID, "wrong-format"))!.status, "started");
+});
+
+it("a host save with matching metadata still must contain the requested prose", async t => {
+  const h = await harness(t);
+  const before = await h.engine.prose.readChapter(context, WORLD_ID, productionId, chapterId);
+  h.state.wrongSavedBody = "Different prose.";
+  await assert.rejects(h.engine.prose.saveChapter(context, WORLD_ID, productionId, chapterId,
+    { operationId: "wrong-body", body: "Requested prose.", baseHash: before.hash }), /differs from the requested prose/);
+  assert.equal(h.state.saves, 1);
+  assert.equal((await h.engine.operation(context, WORLD_ID, "wrong-body"))!.status, "started");
+});
+
+it("direct saves compare canonical line endings without losing leading indentation", async t => {
+  const h = await harness(t);
+  const before = await h.engine.prose.readChapter(context, WORLD_ID, productionId, chapterId);
+  const body = "    Indented prose.\r\n\r\nAnother paragraph.\r\n";
+  await h.engine.prose.saveChapter(context, WORLD_ID, productionId, chapterId,
+    { operationId: "canonical-save", body, baseHash: before.hash });
+  assert.equal((await h.engine.prose.readChapter(context, WORLD_ID, productionId, chapterId)).body.trimEnd(),
+    body.replace(/\r\n/g, "\n").trimEnd());
+});
 
 it("public prose creates, saves and reopens through the durable local domain without cutting a version", async t => {
   const h = await harness(t);
