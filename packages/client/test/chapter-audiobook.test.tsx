@@ -545,6 +545,71 @@ describe("the Audiobook view (turn 146)", () => {
     assert.equal(all(m, ".fy-arke__prompt").some((b) => b.textContent === "Direct this chapter"), false);
   });
 
+  it("Make again kept past a save still names its block, and so does the answer to its price (codex on PR 1186)", async () => {
+    const state = voiced(inkbound());
+    const world = state.world!;
+    const m = await mount({ ...state, world: { ...world, artifacts: [...world.artifacts, takeArtifact("ar_01J8F3K2QW9VZX4N7M0RTYB6A1", "neap", "p0.0")] } });
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." };
+    await answerOpen(m, { audiobook: record(NARRATION_KEYS, texts) });
+    // Typing in the manuscript, then back to the blocks: the press must wait for the save.
+    await act(async () => q(m, ".fy-seg__item:not(.fy-seg__item--active)")!.click());
+    const area = q(m, "textarea.fy-ch__source")!;
+    const key = Object.keys(area).find((k) => k.startsWith("__reactProps$"))!;
+    const props = (area as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[key]!;
+    await act(async () => props.onChange({ target: { value: `${BODY}\n\nA new line.` } }));
+    await act(async () => q(m, ".fy-seg__item:not(.fy-seg__item--active)")!.click());
+    await act(async () => all(m, ".fy-ab__block")[1]!.click());
+    const before = m.sent.filter((message) => message.kind === "read-audiobook-chapter").length;
+    await act(async () => q(m, '[data-testid="audiobook-make-again"]')!.click());
+    assert.equal(m.sent.filter((message) => message.kind === "read-audiobook-chapter").length, before, "not sent while the draft is unsaved");
+    const save = m.sent.findLast((message) => message.kind === "save-chapter") as Extract<ClientMessage, { kind: "save-chapter" }>;
+    assert.ok(save?.requestId);
+    await act(async () =>
+      __applyEventForTest({ at: AT, type: "chapter.save-result", requestId: save.requestId!, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterFile: "01-neap", disposition: "saved", version: 5, hash: `sha256:${"c".repeat(64)}` }),
+    );
+    const sent = m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>;
+    assert.deepEqual(sent?.blocks, ["p0.0"], "the block rides on the read sent once the save landed");
+    // The block's reader is paid: the price's answer names the block still.
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 1, blocks: 4 }));
+    await act(async () =>
+      __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 24, estimatedMicroUsd: 2400, confirmationToken: "tok", voices: [{ label: "Low tide", provider: "elevenlabs", characters: 24, estimatedMicroUsd: 2400 }] }),
+    );
+    await act(async () => all(m, "button").find((button) => button.textContent?.startsWith("Confirm 24 characters"))!.click());
+    const answered = m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>;
+    assert.equal(answered.confirmationToken, "tok");
+    assert.deepEqual(answered.blocks, ["p0.0"], "the answer carries the block, or the run would make the chapter's missing blocks and not this one");
+  });
+
+  it("accepting a card waits out the autosave, and a direction keyed to older wording does not make it Direct again (codex on PR 1186)", async () => {
+    const m = await mount(voiced(inkbound()));
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." };
+    const held = record(NARRATION_KEYS, texts);
+    held.direction["p0.0"] = directed("Maren counted the bells, twice.", "urgent");
+    await answerOpen(m, { audiobook: held });
+    assert.ok(all(m, ".fy-arke__prompt").some((b) => b.textContent === "Direct this chapter"), "a direction authored for other words is none to the prompt");
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+    const proposed = { title: { delivery: "measured" as const, speed: 1, cues: [] } };
+    await act(async () => __applyEventForTest({ at: AT, type: "direction.started", ...ids }));
+    await act(async () => __applyEventForTest({ at: AT, type: "direction.finished", ...ids, outcome: "directed", directed: 1, dropped: 0, hash: HASH, chapterVersion: 4, proposed }));
+    await act(async () => q(m, ".fy-seg__item:not(.fy-seg__item--active)")!.click());
+    const area = q(m, "textarea.fy-ch__source")!;
+    const key = Object.keys(area).find((k) => k.startsWith("__reactProps$"))!;
+    const props = (area as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[key]!;
+    await act(async () => props.onChange({ target: { value: `${BODY}\n\nA new line.` } }));
+    await act(async () => q(m, ".fy-seg__item:not(.fy-seg__item--active)")!.click());
+    await act(async () => q(m, '[data-testid="direction-accept"]')!.click());
+    assert.equal(m.sent.some((message) => message.kind === "accept-direction"), false, "not accepted against words the save is about to replace");
+    const save = m.sent.findLast((message) => message.kind === "save-chapter") as Extract<ClientMessage, { kind: "save-chapter" }>;
+    assert.ok(save?.requestId);
+    await act(async () =>
+      __applyEventForTest({ at: AT, type: "chapter.save-result", requestId: save.requestId!, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterFile: "01-neap", disposition: "saved", version: 5, hash: `sha256:${"c".repeat(64)}` }),
+    );
+    const accepted = m.sent.findLast((message) => message.kind === "accept-direction") as Extract<ClientMessage, { kind: "accept-direction" }>;
+    assert.ok(accepted, "sent once the save landed, with the hash the card was made for — which the coordinator now refuses");
+    assert.equal(accepted.hash, HASH);
+  });
+
   it("under the cast's reading a line carries its speaker in the margin", async () => {
     const m = await mount(inkbound("cast"));
     await answerOpen(m, { voices: CAST });

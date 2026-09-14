@@ -110,7 +110,7 @@ it("a phrase rides the row's seam — a tag, an instruction, or refused — and 
     breath: "best-effort-audio-tag", outputTimestamps: "none", phrase: "best-effort-tag",
     deliveryMappings: { measured: { settings: {}, tag: "calm and even" }, whispered: { settings: {}, tag: "whispering" } } } };
   const tagged = mapCadence(text, hash(text), { ...plan(text), delivery: "whispered", phrase: "to the water, flat" }, tagRow);
-  assert.equal(tagged.providerText, "[to the water, flat] [whispering] Wait here.", "after the delivery's tag, in the row's ink");
+  assert.equal(tagged.providerText, "[whispering] [to the water, flat] Wait here.", "after the delivery's tag, in the row's ink");
   assert.deepEqual(tagged.controls.find((c) => c.control === "phrase"), { control: "phrase", status: "best-effort", method: "audio tag" });
   const instructionRow: Pick<ManifestModel, "id" | "provider" | "cadence"> = { id: "breeze-tts-2", provider: "breezeblue", cadence: {
     deliveries: ["measured"], speed: { min: 0.7, max: 1.2 }, pause: "best-effort-audio-tag", emphasis: "unsupported",

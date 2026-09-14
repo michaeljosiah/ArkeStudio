@@ -130,16 +130,18 @@ export function mapCadence(text: string, expectedHash: string, input: CadencePla
     providerText += edits.filter(e => e.at === at && e.end === at).map(e => e.text).join("");
     if (at < text.length) providerText += edits.some(e => e.at <= at && e.end > at) ? text[at]!.toUpperCase() : text[at];
   }
-  if (delivery?.tag && tagged) providerText = `${tag(delivery.tag)} ${providerText}`;
   // The phrase rides the same seam as a delivery's tag or sentence (SPEC-047 R-7): a tag after
   // the delivery's on a row that renders one — the same English-only wait on a paren row — an
   // instruction after the delivery's on a row that takes one, and refused where the row
-  // declares neither, so it is never rendered into words a reader would speak.
+  // declares neither, so it is never rendered into words a reader would speak. The lead is
+  // the delivery's tag then the phrase's, so the modifier follows what it qualifies.
+  const lead: string[] = [];
+  if (delivery?.tag && tagged) lead.push(tag(delivery.tag));
   let instructions = delivery?.instruction;
   if (plan.phrase !== undefined) {
     const how = cap?.phrase ?? "unsupported";
     if (how === "best-effort-tag" && tagged) {
-      providerText = `${tag(plan.phrase)} ${providerText}`;
+      lead.push(tag(plan.phrase));
       controls.push({ control: "phrase", status: "best-effort", method: "audio tag" });
     } else if (how === "best-effort-instruction") {
       instructions = instructions === undefined ? plan.phrase : `${instructions} ${plan.phrase}`;
@@ -148,6 +150,7 @@ export function mapCadence(text: string, expectedHash: string, input: CadencePla
       controls.push({ control: "phrase", status: "unsupported", ...(how === "best-effort-tag" ? { reason: UNTAGGED } : { reason: "This model takes no phrase." }) });
     }
   }
+  if (lead.length > 0) providerText = `${lead.join(" ")} ${providerText}`;
   return { provider: model.provider, model: model.id, providerModel: model.providerModelId ?? model.id,
     providerText, voiceSettings, ...(instructions !== undefined ? { instructions } : {}), controls };
 }

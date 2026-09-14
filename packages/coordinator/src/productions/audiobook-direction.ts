@@ -13,10 +13,11 @@ import {
   type ChapterAudiobook,
   type HarnessAdapter,
   type ManifestModel,
+  type VoiceCandidate,
 } from "@arke-studio/contracts";
 import type { SessionInput } from "../harness/session-files.js";
 import type { WorldStore } from "../world/store.js";
-import { checkDirection, directionPlan, planAudiobook, readAudiobook, readerLanguage, readerModel, writeAudiobook, emptyAudiobook, type PlannedBlock } from "./audiobook.js";
+import { castRefusal, checkDirection, directionPlan, effectiveReader, planAudiobook, readerLanguage, updateAudiobook, type PlannedBlock } from "./audiobook.js";
 import { CONTINUITY_BOUNDS, makeAdapterJsonDeriver } from "./continuity.js";
 
 /**
@@ -221,25 +222,40 @@ export interface DirectedChapter {
   chapterVersion: number;
 }
 
-/** The blocks a chapter's direction is about, each with the row of its effective reader (R-10, R-12). */
+/** What a chapter's direction needs of the room: the narrator, the manifest, and what can speak now. */
+export interface DirectionRoom {
+  narrator: AudiobookReader;
+  models: readonly ManifestModel[];
+  catalogue: readonly VoiceCandidate[];
+}
+
+/**
+ * The blocks a chapter's direction is about, each with the row of the reader that will
+ * actually speak it (R-10, R-12) — the assigned voice when it can speak now, the narrator it
+ * falls to otherwise, by the run's own rule (codex on PR 1186), so a direction is never
+ * accepted for a reader the read will not use. Under `cast` the cast must be current, as the
+ * run requires; the refusal is thrown in the run's words.
+ */
 export async function directableBlocks(
   store: WorldStore,
   productionId: string,
   chapterId: string,
-  input: { narrator: AudiobookReader; models: readonly ManifestModel[] },
+  input: DirectionRoom,
 ): Promise<{ chapter: { id: string; file: string; title: string; version: number; hash: string }; blocks: DirectableBlock[]; planned: PlannedBlock[]; skipped: number }> {
   const plan = await planAudiobook(store, productionId, chapterId, { narrator: input.narrator });
+  const refusal = castRefusal(plan);
+  if (refusal !== null) throw new Error(refusal);
   const clonedVoices = store.getBundle().clonedVoices ?? [];
   const blocks: DirectableBlock[] = [];
   let skipped = 0;
   for (const planned of plan.blocks) {
-    const model = readerModel(input.models, planned.assigned, input.narrator);
-    if (model === null) {
+    const speaking = await effectiveReader(store, planned.assigned, input);
+    if (speaking === null) {
       skipped += 1;
       continue;
     }
-    const language = readerLanguage(clonedVoices, planned.assigned);
-    blocks.push({ key: planned.block.key, text: planned.block.text, reader: planned.assigned, model, ...(language !== undefined ? { language } : {}) });
+    const language = readerLanguage(clonedVoices, speaking.reader);
+    blocks.push({ key: planned.block.key, text: planned.block.text, reader: speaking.reader, model: speaking.model, ...(language !== undefined ? { language } : {}) });
   }
   return { chapter: plan.chapter, blocks, planned: plan.blocks, skipped };
 }
@@ -254,7 +270,7 @@ export async function directChapter(
   productionId: string,
   chapterId: string,
   deriver: DirectionDeriver,
-  input: { narrator: AudiobookReader; models: readonly ManifestModel[] },
+  input: DirectionRoom,
   signal?: AbortSignal,
 ): Promise<DirectedChapter> {
   const { chapter, blocks, skipped } = await directableBlocks(store, productionId, chapterId, input);
@@ -321,9 +337,15 @@ export async function acceptDirections(
   productionId: string,
   chapterId: string,
   accepted: { hash: string; directions: Record<string, AudiobookDirectionInput> },
-  input: { narrator: AudiobookReader; models: readonly ManifestModel[] },
+  input: DirectionRoom,
 ): Promise<AcceptedDirections> {
-  const { chapter, blocks } = await directableBlocks(store, productionId, chapterId, input);
+  let room: Awaited<ReturnType<typeof directableBlocks>>;
+  try {
+    room = await directableBlocks(store, productionId, chapterId, input);
+  } catch (err) {
+    return { outcome: "refused", reason: err instanceof Error ? err.message : String(err) };
+  }
+  const { chapter, blocks } = room;
   if (chapter.hash !== accepted.hash) return { outcome: "refused", reason: "the prose moved · direct again" };
   const direction: ChapterAudiobook["direction"] = {};
   let dropped = 0;
@@ -342,9 +364,6 @@ export async function acceptDirections(
     const held: AudiobookDirection = { textHash: audiobookTextHash(block.text), plan, at };
     direction[key] = held;
   }
-  const current = await readAudiobook(store, productionId, chapter.file);
-  const record = current === null || current === "unreadable" ? emptyAudiobook(chapter.version, chapter.hash, at) : current;
-  const next: ChapterAudiobook = { ...record, updatedAt: at, direction };
-  await writeAudiobook(store, productionId, chapter.file, next);
-  return { outcome: "accepted", record: next, dropped };
+  const record = await updateAudiobook(store, productionId, chapter, (current) => ({ ...current, updatedAt: at, direction }));
+  return { outcome: "accepted", record, dropped };
 }

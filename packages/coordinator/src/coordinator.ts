@@ -11452,8 +11452,8 @@ export class Coordinator {
         const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id };
         const at = () => new Date().toISOString();
         try {
-          const { narrator } = await this.audiobookNarrator(store, this.voiceService);
-          const { chapter: opened, blocks, planned } = await directableBlocks(store, msg.productionId, chapter.id, { narrator, models: this.opts.manifest?.models ?? [] });
+          const { narrator, catalogue } = await this.audiobookNarrator(store, this.voiceService);
+          const { chapter: opened, blocks, planned } = await directableBlocks(store, msg.productionId, chapter.id, { narrator, models: this.opts.manifest?.models ?? [], catalogue });
           const block = blocks.find((candidate) => candidate.key === msg.block);
           if (block === undefined) {
             this.emit({ at: at(), type: "audiobook.record", ...ids, refused: planned.some((p) => p.block.key === msg.block) ? "no reader for this block" : "that block is no longer in the chapter" });
@@ -11521,8 +11521,8 @@ export class Coordinator {
             finished("unavailable", none, { reason: "the writing service is not running" });
             return;
           }
-          const { narrator } = await this.audiobookNarrator(store, this.voiceService);
-          const result = await directChapter(store, msg.productionId, chapter.id, deriver, { narrator, models: this.opts.manifest?.models ?? [] }, control.signal);
+          const { narrator, catalogue } = await this.audiobookNarrator(store, this.voiceService);
+          const result = await directChapter(store, msg.productionId, chapter.id, deriver, { narrator, models: this.opts.manifest?.models ?? [], catalogue }, control.signal);
           finished("directed", { directed: result.directed, dropped: result.dropped }, {
             proposed: result.proposed,
             hash: result.hash,
@@ -11558,8 +11558,8 @@ export class Coordinator {
         const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id };
         const at = () => new Date().toISOString();
         try {
-          const { narrator } = await this.audiobookNarrator(store, this.voiceService);
-          const accepted = await acceptDirections(store, msg.productionId, chapter.id, { hash: msg.hash, directions: msg.directions }, { narrator, models: this.opts.manifest?.models ?? [] });
+          const { narrator, catalogue } = await this.audiobookNarrator(store, this.voiceService);
+          const accepted = await acceptDirections(store, msg.productionId, chapter.id, { hash: msg.hash, directions: msg.directions }, { narrator, models: this.opts.manifest?.models ?? [], catalogue });
           if (accepted.outcome === "refused") {
             this.emit({ at: at(), type: "audiobook.record", ...ids, refused: accepted.reason });
             return;
@@ -11643,7 +11643,7 @@ export class Coordinator {
             // One synthesis at a time on the engine is the voice service's rule, whoever asks
             // (codex on PR 1180): two chapters read at once take turns there, as a page read does.
             localSpeech: (voiceId, text, signal) => voice.localSpeech(store, voiceId, text, undefined, { signal }),
-            synthesizeLocal: (voiceId, text, settings, signal) => voice.synthesizePerformance(voiceId, text, settings, signal),
+            synthesizeLocal: (voiceId, text, settings, signal) => voice.synthesizeDirected(voiceId, text, settings, signal),
             enqueue: async (inputs) => {
               // The engine a cloned voice's recording was allowed to go to rides on the job, as
               // the voiced read's does (SPEC-022): without it every uncached cloned line fails.

@@ -691,6 +691,15 @@ export class VoiceService {
 
   /** A deliberate performance is always a fresh synthesis; preview caches are not take authority. */
   async synthesizePerformance(voiceId: string, text: string, params: Record<string, number>, signal: AbortSignal): Promise<Uint8Array> {
+    return (await this.synthesizeDirected(voiceId, text, params, signal)).audio;
+  }
+
+  /**
+   * The same fresh synthesis, with how many requests made it (SPEC-047 R-5; codex on PR 1186):
+   * a directed audiobook block over the engine's chunk is joined from several, and its take
+   * records that number rather than claiming one.
+   */
+  async synthesizeDirected(voiceId: string, text: string, params: Record<string, number>, signal: AbortSignal): Promise<{ audio: Uint8Array; parts: number }> {
     const sidecar = this.deps.sidecar;
     if (!sidecar) throw new Error("Local synthesis is unavailable.");
     return this.oneAtATime(signal, () => new Error("Performance generation cancelled."), async () => {
@@ -702,7 +711,7 @@ export class VoiceService {
         rendered.push(bytes);
       }
       if (!rendered.length) throw new Error("This line has no spoken text.");
-      return concatWav(rendered);
+      return { audio: concatWav(rendered), parts: rendered.length };
     });
   }
 

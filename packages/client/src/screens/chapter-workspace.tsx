@@ -52,9 +52,6 @@ import {
   useCasting,
   useAudiobookRuns,
   useAudiobookRecords,
-  directChapter,
-  readAudiobookBlocks,
-  readAudiobookChapter,
 } from "../lib/store.js";
 
 /**
@@ -343,6 +340,8 @@ export function ChapterWorkspace({
   const voicedAfterSave = useRef(false);
   /** An audiobook read, or a direction, asked for while a save was pending (turn 146): sent once the save lands, so the takes are of the words on disk. */
   const audiobookAfterSave = useRef<AudiobookIntent | null>(null);
+  /** The hook's own sender for that intent, held for the save handler, which outlives the render that made it. */
+  const audiobookResume = useRef<(intent: AudiobookIntent) => void>(() => {});
   /*
    * The latest record and draft, for callbacks that outlive the render that made them: the
    * autosave timer, the save answer and the unmount flush all need the base hash as it is now,
@@ -535,11 +534,11 @@ export function ChapterWorkspace({
           setVoicedNow(true);
         }
         if (audiobookAfterSave.current !== null) {
+          // Back through the hook, not straight to the store (codex on PR 1186): the hook keeps
+          // the intent's blocks for every answer to a price or a consent that follows.
           const intent = audiobookAfterSave.current;
           audiobookAfterSave.current = null;
-          if (intent.kind === "direct") directChapter(worldId, prodId, chapter.file);
-          else if (intent.blocks !== undefined) readAudiobookBlocks(worldId, prodId, chapter.file, intent.blocks);
-          else readAudiobookChapter(worldId, prodId, chapter.file);
+          audiobookResume.current(intent);
         }
       } else {
         // Keep the latest words, including typing after the refused request. Read the new
@@ -862,7 +861,8 @@ export function ChapterWorkspace({
     },
   });
   const audiobookColumn = useRef<HTMLDivElement | null>(null);
-  const directionStands = audiobookRecord.record !== null && audiobookRecord.record !== "unreadable" && Object.keys(audiobookRecord.record.direction).length > 0;
+  audiobookResume.current = audiobook.resume;
+  const directionStands = audiobook.directedBlocks > 0;
   const worldSlug = world.meta.slug;
   const read = {
     ...pageRead,

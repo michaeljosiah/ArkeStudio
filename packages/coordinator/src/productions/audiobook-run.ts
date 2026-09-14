@@ -8,6 +8,7 @@ import {
   audiobookTextHash,
   billableCharacters,
   estimateMicroUsd,
+  mapCadence,
   normalizeSpeechText,
   voiceFormatForModel,
   voiceSourceFor,
@@ -16,6 +17,7 @@ import {
   type AudiobookReader,
   type AudiobookSubstitution,
   type AudiobookTake,
+  type CadencePlan,
   type ChapterAudiobook,
   type ClonedVoice,
   type Job,
@@ -25,13 +27,12 @@ import {
 import { fileGeneratedArtifact } from "../artifacts/filing.js";
 import type { MediaProbe } from "../media/probe.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
-import { clipFor } from "../voice/library.js";
 import { cachedVoiceAudioLooksRight, concatWav, speechCacheFile, splitForSpeech } from "../voice/service.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { audioHash } from "../audio/qc.js";
-import { audiobookLanding, checkDirection, emptyAudiobook, planAudiobook, readerLanguage, writeAudiobook, type PlannedBlock } from "./audiobook.js";
+import { audiobookLanding, castRefusal, checkDirection, directionSourceHash, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type PlannedBlock } from "./audiobook.js";
 
 /**
  * A chapter read into kept takes (design turn 146, SPEC-047 R-16..R-19): every block that is
@@ -80,7 +81,7 @@ export interface AudiobookRunDeps {
    * the speed a delivery maps to — through the same one-at-a-time rule, never the speech cache,
    * whose files carry no direction (R-19).
    */
-  synthesizeLocal: (voiceId: string, text: string, settings: Record<string, number>, signal: AbortSignal) => Promise<Uint8Array>;
+  synthesizeLocal: (voiceId: string, text: string, settings: Record<string, number>, signal: AbortSignal) => Promise<{ audio: Uint8Array; parts: number }>;
   enqueue: (inputs: EnqueueInput[]) => Promise<{ jobIds: string[]; reason?: string }>;
   waitForJob: (jobId: string) => Promise<Job>;
   cancelJob: (jobId: string) => Promise<void>;
@@ -127,10 +128,50 @@ export function concatMp3(parts: readonly Uint8Array[]): Uint8Array {
   return new Uint8Array(Buffer.concat(stripped.map((part) => Buffer.from(part))));
 }
 
-const sameReader = (a: AudiobookReader, b: AudiobookReader): boolean => a.provider === b.provider && a.model === b.model && a.voiceId === b.voiceId;
-
 /** The record could not be written: the world's claim is gone, or it closed under the run. Nothing more can be kept. */
 class RecordWriteError extends Error {}
+
+/**
+ * A directed block in parts, each rendered on its own (R-5; codex on PR 1186): the words are
+ * split at sentence ends within the reader's cap, each piece carries the cues that fall in it
+ * at their positions in the piece, and each is mapped whole, so the delivery's tag and the
+ * phrase's lead every part rather than the first alone. A piece whose rendering still runs
+ * over the cap — the tags are extra ink — is split again at half its size until it fits, so the
+ * bound holds after rendering for any authored text. A cue whose span straddles a seam goes
+ * with neither piece. One part for a block within the cap.
+ */
+export function renderParts(text: string, plan: CadencePlan, model: ManifestModel, language: string | undefined, cap: number | undefined): string[] {
+  const whole = normalizeSpeechText(text);
+  const render = (piece: string, cues: CadencePlan["cues"]): string =>
+    mapCadence(piece, directionSourceHash(piece), { ...plan, sourceTextHash: directionSourceHash(piece), cues }, model, language).providerText;
+  if (cap === undefined) return [render(whole, plan.cues)];
+  const out: string[] = [];
+  const place = (piece: string, from: number, max: number): void => {
+    const to = from + piece.length;
+    const cues = plan.cues
+      .filter((cue) => (cue.kind === "emphasis" ? cue.span.from >= from && cue.span.to <= to : cue.at >= from && cue.at <= to))
+      .map((cue) => (cue.kind === "emphasis" ? { ...cue, span: { ...cue.span, from: cue.span.from - from, to: cue.span.to - from } } : { ...cue, at: cue.at - from }));
+    const rendered = render(piece, cues);
+    if (rendered.length <= cap || max <= 1 || piece.length <= 1) {
+      out.push(rendered);
+      return;
+    }
+    let offset = 0;
+    for (const smaller of splitForSpeech(piece, Math.max(1, Math.floor(max / 2)))) {
+      const at = piece.indexOf(smaller, offset);
+      place(smaller, from + Math.max(at, 0), Math.floor(max / 2));
+      offset = Math.max(at, 0) + smaller.length;
+    }
+  };
+  const pieces = whole.length > cap ? splitForSpeech(whole, cap) : [whole];
+  let offset = 0;
+  for (const piece of pieces) {
+    const at = whole.indexOf(piece, offset);
+    place(piece, Math.max(at, 0), cap);
+    offset = Math.max(at, 0) + piece.length;
+  }
+  return out;
+}
 
 /** What names one part's job, frozen into its params so a later run can find it (R-16). */
 export interface PartIdentity {
@@ -188,19 +229,10 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   const chapterFile = plan.chapter.file;
   // Under `cast` a run needs a cast that is current (R-12): a line whose speaker the cast cannot
   // name would otherwise be made in the narrator's voice without the door having said so.
-  if (plan.reading === "cast") {
-    if (plan.cast === null) {
-      finish("refused", { reason: "not cast · cast the lines first" });
-      return;
-    }
-    if (plan.cast === "unreadable") {
-      finish("refused", { reason: "cast unreadable · cast again" });
-      return;
-    }
-    if (plan.cast.hash !== plan.chapter.hash) {
-      finish("refused", { reason: "cast moved · cast again" });
-      return;
-    }
+  const castTrouble = castRefusal(plan);
+  if (castTrouble !== null) {
+    finish("refused", { reason: castTrouble });
+    return;
   }
   // An unreadable record is no record: the takes it named are still on the shelf, and a run
   // that cannot read which block each was for makes the chapter afresh rather than guessing.
@@ -215,57 +247,45 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     return;
   }
 
-  const modelOf = (reader: AudiobookReader): ManifestModel | null =>
-    deps.models.find((m) => m.provider === reader.provider && m.id === reader.model && m.capability === "voice-tts") ?? null;
-  const narratorModel = modelOf(narrator);
-  if (narratorModel === null) {
-    finish("unavailable", { reason: "the narrator's voice model is not in the manifest" });
-    return;
-  }
+  const room = { narrator, models: deps.models, catalogue: deps.catalogue };
   const clonedVoices = store.getBundle().clonedVoices ?? [];
 
-  // Who actually speaks each block: the assigned reader when the manifest knows its model, the
-  // catalogue says it can speak now and, for a cloned voice, its recording is still there;
-  // otherwise the narrator, with the reason kept on the take (R-12).
+  // Who actually speaks each block (R-12): the one rule the direction was verified against.
   const speaking: Speaking[] = [];
   for (const planned of toMake) {
-    let reader = planned.assigned;
-    let substitutedNow: AudiobookSubstitution | undefined;
-    let model = sameReader(reader, narrator) ? narratorModel : modelOf(reader);
-    if (!sameReader(reader, narrator)) {
-      const listed = deps.catalogue.find((candidate) => candidate.provider === reader.provider && candidate.model === reader.model && candidate.voiceId === reader.voiceId);
-      const source = voiceSourceFor(clonedVoices, reader.provider, reader.model, reader.voiceId);
-      const clipMissing = source.kind === "missing-clone" || (source.kind === "cloned" && (await clipFor(store, source.voice)) === null);
-      if (model === null || listed === undefined || listed.unavailableReason !== undefined || clipMissing) {
-        reader = narrator;
-        model = narratorModel;
-        substitutedNow = "voice unavailable";
-      }
+    const speaks = await effectiveReader(store, planned.assigned, room);
+    if (speaks === null) {
+      finish("unavailable", { reason: "the narrator's voice model is not in the manifest" });
+      return;
     }
-    if (model === null) throw new Error("unreachable: the narrator's model was checked");
+    const { reader, model, substitutedNow } = speaks;
     const text = normalizeSpeechText(planned.block.text);
     // The direction that stands for these words, mapped for the reader that will speak — the
     // narrator's row when the narrator stands in (R-12) — so a control that reader cannot
     // express is refused here, in one clause, and never sent (R-9).
     const held = audiobookDirectionFor(record, planned.block);
+    const language = readerLanguage(clonedVoices, reader);
+    const cap = model.limits.maxPromptChars;
     let direction: Speaking["direction"] = null;
     let refusal: string | undefined;
+    let parts: string[];
     if (held !== null) {
-      const check = checkDirection(planned.block.text, held.plan, model, readerLanguage(clonedVoices, reader));
+      const check = checkDirection(planned.block.text, held.plan, model, language);
       if (check.ok) {
+        const rendered = renderParts(text, held.plan, model, language, cap);
         direction = {
           hash: audiobookDirectionHash(held.plan),
           delivery: held.plan.delivery,
-          rendered: check.mapped.providerText,
+          rendered: rendered.join(" "),
           voiceSettings: check.mapped.voiceSettings,
           ...(check.mapped.instructions !== undefined ? { instructions: check.mapped.instructions } : {}),
         };
-      } else refusal = check.reason;
-    }
-    const sent = direction?.rendered ?? text;
-    const cap = model.limits.maxPromptChars;
-    // Bounded after rendering (R-5): the words with the tags in are what the cap holds.
-    const parts = cap !== undefined && sent.length > cap ? splitForSpeech(sent, cap) : [sent];
+        parts = rendered;
+      } else {
+        refusal = check.reason;
+        parts = [text];
+      }
+    } else parts = cap !== undefined && text.length > cap ? splitForSpeech(text, cap) : [text];
     const local = reader.provider === "kokoro";
     const format = voiceFormatForModel(model);
     const source = voiceSourceFor(clonedVoices, reader.provider, reader.model, reader.voiceId);
@@ -396,23 +416,26 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
       ...(block.direction !== null ? { directionHash: block.direction.hash } : {}),
       madeAt: deps.now(),
     };
-    const { [block.block.key]: _dropped, ...flags } = record.flags;
-    await write({ ...record, chapterVersion: plan.chapter.version, hash: plan.chapter.hash, updatedAt: deps.now(), takes: { ...record.takes, [block.block.key]: take }, flags });
+    await write((current) => {
+      const { [block.block.key]: _dropped, ...flags } = current.flags;
+      return { ...current, chapterVersion: plan.chapter.version, hash: plan.chapter.hash, updatedAt: deps.now(), takes: { ...current.takes, [block.block.key]: take }, flags };
+    });
     made += 1;
   };
-  // The record the run holds is the record on disk (codex on PR 1180): a write that failed —
-  // the claim lost, an I/O fault — leaves it as it was, so the finished event never carries a
-  // take the file does not, which the window would prefer over the scanned record by its date.
-  const write = async (next: ChapterAudiobook) => {
+  // The record the run holds is the record on disk (codex on PR 1180): every write reads the
+  // file afresh under the chapter's lane and merges this block's take or flag into it, so a
+  // direction set or a card accepted while the run goes is kept, not overwritten from the
+  // run's snapshot (codex on PR 1186); a write that failed — the claim lost, an I/O fault —
+  // leaves the record as it was, so the finished event never carries a take the file does not.
+  const write = async (mutate: (current: ChapterAudiobook) => ChapterAudiobook) => {
     try {
-      await writeAudiobook(store, productionId, chapterFile, next);
+      record = await updateAudiobook(store, productionId, plan.chapter, mutate);
     } catch (err) {
       throw new RecordWriteError(err instanceof Error ? err.message : String(err));
     }
-    record = next;
   };
   const flag = async (block: Speaking, reason: string) => {
-    await write({ ...record, updatedAt: deps.now(), flags: { ...record.flags, [block.block.key]: { reason, at: deps.now() } } });
+    await write((current) => ({ ...current, updatedAt: deps.now(), flags: { ...current.flags, [block.block.key]: { reason, at: deps.now() } } }));
     flaggedCount += 1;
     progress(block, "flagged", reason);
   };
@@ -435,12 +458,12 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
         if (block.local && block.direction !== null) {
           // A directed local block is a fresh synthesis with the direction's settings (R-6):
           // the speech cache keys on the words alone, so it can neither serve nor keep one.
-          const bytes = await deps.synthesizeLocal(block.reader.voiceId, block.direction.rendered, block.direction.voiceSettings, signal);
+          const made = await deps.synthesizeLocal(block.reader.voiceId, block.direction.rendered, block.direction.voiceSettings, signal);
           if (signal.aborted) break;
           const sourcePath = join(store.dir, fromPortable(`${landingDir}/${block.block.key.replace(/[^a-z0-9]+/gi, "-")}-directed.${block.format}`));
-          await atomicWriteFile(sourcePath, bytes);
-          const artifact = await file(block, sourcePath, { parts: 1, estimatedMicroUsd: 0, costMicroUsd: 0 });
-          await keep(block, artifact, { parts: 1, estimatedMicroUsd: 0, costMicroUsd: 0 });
+          await atomicWriteFile(sourcePath, made.audio);
+          const artifact = await file(block, sourcePath, { parts: made.parts, estimatedMicroUsd: 0, costMicroUsd: 0 });
+          await keep(block, artifact, { parts: made.parts, estimatedMicroUsd: 0, costMicroUsd: 0 });
           await unlink(toExtendedLength(sourcePath)).catch(() => {});
           progress(block, "made");
           continue;

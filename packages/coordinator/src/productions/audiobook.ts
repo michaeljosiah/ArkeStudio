@@ -26,9 +26,12 @@ import {
   type ClonedVoice,
   type ManifestModel,
   type Sheet,
+  type VoiceCandidate,
 } from "@arke-studio/contracts";
 import { audioHash } from "../audio/qc.js";
+import { clipFor } from "../voice/library.js";
 import { atomicWriteFile } from "../world/atomic.js";
+import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { sha256 } from "../world/text-files.js";
@@ -117,9 +120,88 @@ async function writeOwned(store: WorldStore, rel: string, value: unknown, supers
   });
 }
 
-/** Written after every block a run lands, so a stop or a lost claim leaves the takes made so far standing (R-18). */
+/**
+ * Written after every block a run lands, so a stop or a lost claim leaves the takes made so far
+ * standing (R-18). A record with no direction is written without the field, in the shape the
+ * first build reads, and one with a direction raises the world past that build first (codex on
+ * PR 1186): its strict reader would otherwise take the record for unreadable and make the
+ * chapter's paid takes again.
+ */
 export async function writeAudiobook(store: WorldStore, productionId: string, chapterFile: string, record: ChapterAudiobook): Promise<void> {
-  await writeOwned(store, audiobookPath(productionId, chapterFile), record, chapterFile === "book" ? undefined : legacyAudiobookPath(productionId, chapterFile));
+  const { direction, ...undirected } = record;
+  const directed = Object.keys(direction).length > 0;
+  if (directed) await store.ensureSchemaVersion(AUDIOBOOK_DIRECTION_SCHEMA_VERSION, "audiobook-direction");
+  await writeOwned(store, audiobookPath(productionId, chapterFile), directed ? record : undirected, chapterFile === "book" ? undefined : legacyAudiobookPath(productionId, chapterFile));
+}
+
+/**
+ * Every write to a chapter's record goes through one lane a chapter (codex on PR 1186): the
+ * run writes after each block from what it holds, and a direction set or a card accepted
+ * meanwhile would otherwise be a read before the run's write and a write after it — whichever
+ * landed last erasing the other's takes or directions, and a take erased is a take paid for
+ * again. So each writer reads the record afresh under the lane, merges its own change into it,
+ * and writes; nothing is written from a snapshot.
+ */
+const recordLanes = new Map<string, Promise<unknown>>();
+export async function updateAudiobook(
+  store: WorldStore,
+  productionId: string,
+  chapter: { file: string; version: number; hash: string },
+  mutate: (current: ChapterAudiobook) => ChapterAudiobook,
+): Promise<ChapterAudiobook> {
+  const key = `${store.dir}\n${productionId}\n${chapter.file}`;
+  const ahead = recordLanes.get(key) ?? Promise.resolve();
+  const turn = ahead.then(async () => {
+    const held = await readAudiobook(store, productionId, chapter.file);
+    // An unreadable record is no record for a writer too: the takes it named stay on the shelf
+    // as artifacts, and a run reads them afresh rather than guessing at a file it cannot read.
+    const current = held === null || held === "unreadable" ? emptyAudiobook(chapter.version, chapter.hash, store.now()) : held;
+    const next = mutate(current);
+    await writeAudiobook(store, productionId, chapter.file, next);
+    return next;
+  });
+  recordLanes.set(key, turn.catch(() => undefined));
+  return turn;
+}
+
+/**
+ * Under `cast` a run needs a cast that is current (R-12), and so does a direction (codex on
+ * PR 1186): a line whose speaker the cast cannot name would otherwise be directed for the
+ * narrator, and a model turn spent on a chapter the next read refuses at once.
+ */
+export function castRefusal(plan: Pick<AudiobookPlan, "reading" | "cast" | "chapter">): string | null {
+  if (plan.reading !== "cast") return null;
+  if (plan.cast === null) return "not cast · cast the lines first";
+  if (plan.cast === "unreadable") return "cast unreadable · cast again";
+  if (plan.cast.hash !== plan.chapter.hash) return "cast moved · cast again";
+  return null;
+}
+
+/**
+ * Who actually speaks a block (R-12), one rule for the run and the direction (codex on PR
+ * 1186): the assigned reader when the manifest knows its model, the catalogue says it can
+ * speak now and, for a cloned voice, its recording is still there; the narrator otherwise,
+ * with the reason. Null only when the narrator's own model is not in the manifest.
+ */
+export async function effectiveReader(
+  store: WorldStore,
+  assigned: AudiobookReader,
+  input: { narrator: AudiobookReader; models: readonly ManifestModel[]; catalogue: readonly VoiceCandidate[] },
+): Promise<{ reader: AudiobookReader; model: ManifestModel; substitutedNow?: AudiobookSubstitution } | null> {
+  const modelOf = (reader: AudiobookReader): ManifestModel | null =>
+    input.models.find((m) => m.provider === reader.provider && m.id === reader.model && m.capability === "voice-tts") ?? null;
+  const narratorModel = modelOf(input.narrator);
+  if (narratorModel === null) return null;
+  const same = assigned.provider === input.narrator.provider && assigned.model === input.narrator.model && assigned.voiceId === input.narrator.voiceId;
+  if (same) return { reader: input.narrator, model: narratorModel };
+  const model = modelOf(assigned);
+  const listed = input.catalogue.find((candidate) => candidate.provider === assigned.provider && candidate.model === assigned.model && candidate.voiceId === assigned.voiceId);
+  const source = voiceSourceFor(store.getBundle().clonedVoices ?? [], assigned.provider, assigned.model, assigned.voiceId);
+  const clipMissing = source.kind === "missing-clone" || (source.kind === "cloned" && (await clipFor(store, source.voice)) === null);
+  if (model === null || listed === undefined || listed.unavailableReason !== undefined || clipMissing) {
+    return { reader: input.narrator, model: narratorModel, substitutedNow: "voice unavailable" };
+  }
+  return { reader: assigned, model };
 }
 
 export async function writeAudiobookBook(store: WorldStore, productionId: string, book: AudiobookBook): Promise<void> {
@@ -190,18 +272,16 @@ export async function writeBlockDirection(
   key: string,
   direction: AudiobookDirection | null,
 ): Promise<ChapterAudiobook> {
-  const held = await readAudiobook(store, productionId, chapter.file);
-  const record = held === null || held === "unreadable" ? emptyAudiobook(chapter.version, chapter.hash, store.now()) : held;
-  const { [key]: _was, ...rest } = record.direction;
-  const kept = Object.fromEntries(
-    Object.entries(rest).filter(([other, entry]) => {
-      const block = blocks.find((candidate) => candidate.key === other);
-      return block !== undefined && entry.textHash === audiobookTextHash(block.text);
-    }),
-  );
-  const next: ChapterAudiobook = { ...record, updatedAt: store.now(), direction: direction === null ? kept : { ...kept, [key]: direction } };
-  await writeAudiobook(store, productionId, chapter.file, next);
-  return next;
+  return updateAudiobook(store, productionId, chapter, (record) => {
+    const { [key]: _was, ...rest } = record.direction;
+    const kept = Object.fromEntries(
+      Object.entries(rest).filter(([other, entry]) => {
+        const block = blocks.find((candidate) => candidate.key === other);
+        return block !== undefined && entry.textHash === audiobookTextHash(block.text);
+      }),
+    );
+    return { ...record, updatedAt: store.now(), direction: direction === null ? kept : { ...kept, [key]: direction } };
+  });
 }
 
 /** A block with the reader it is meant for now (R-11, R-12): before availability is asked, which the run does. */

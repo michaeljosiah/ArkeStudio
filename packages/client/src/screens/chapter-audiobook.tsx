@@ -78,8 +78,8 @@ export interface ChapterAudiobookInput {
   beforeRead?: (intent: AudiobookIntent) => boolean;
 }
 
-/** What a press asks for once the save lands: the chapter, these blocks alone, or a direction. */
-export type AudiobookIntent = { kind: "read"; blocks?: readonly string[] } | { kind: "direct" };
+/** What a press asks for once the save lands: the chapter, these blocks alone, a direction, or a card's acceptance. */
+export type AudiobookIntent = { kind: "read"; blocks?: readonly string[] } | { kind: "direct" } | { kind: "accept" };
 
 export interface BlockRow {
   block: AudiobookBlock;
@@ -248,18 +248,36 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     },
     [worldId, prodId, chapter.file],
   );
+  // What a press asks for goes out here, now or once the save lands (codex on PR 1186): the
+  // workspace hands a deferred intent back through `resume`, so `Make again` kept past a save
+  // still names its block, and every answer to a price or a consent carries it on.
+  const resume = useCallback(
+    (intent: AudiobookIntent) => {
+      if (intent.kind === "direct") {
+        directChapter(worldId, prodId, chapter.file);
+        return;
+      }
+      if (intent.kind === "accept") {
+        acceptDirection(worldId, prodId, chapter.id, chapter.file);
+        return;
+      }
+      setUpload(null);
+      uploadAllowed.current = null;
+      only.current = intent.blocks ?? null;
+      send();
+    },
+    [worldId, prodId, chapter.id, chapter.file, send],
+  );
   const press = useCallback(
     (blocks: readonly string[] | null) => {
       if (locked || connection !== "open" || reading_) return;
       // Unsaved typing is not what is read (R-2): the press waits out the autosave, as the
       // chapter's other reads do, and the workspace sends it once the save lands.
-      if (input.beforeRead !== undefined && !input.beforeRead({ kind: "read", ...(blocks !== null ? { blocks } : {}) })) return;
-      setUpload(null);
-      uploadAllowed.current = null;
-      only.current = blocks;
-      send();
+      const intent: AudiobookIntent = { kind: "read", ...(blocks !== null ? { blocks } : {}) };
+      if (input.beforeRead !== undefined && !input.beforeRead(intent)) return;
+      resume(intent);
     },
-    [locked, connection, reading_, input, send],
+    [locked, connection, reading_, input, resume],
   );
   const begin = useCallback(() => press(null), [press]);
   const makeAgain = useCallback((key: string) => press([key]), [press]);
@@ -270,9 +288,17 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const directPress = useCallback(() => {
     if (locked || connection !== "open" || directionRun?.state === "directing" || directionRun?.state === "accepting") return;
     if (input.beforeRead !== undefined && !input.beforeRead({ kind: "direct" })) return;
-    directChapter(worldId, prodId, chapter.file);
-  }, [locked, connection, directionRun?.state, input, worldId, prodId, chapter.file]);
-  const accept = useCallback(() => acceptDirection(worldId, prodId, chapter.id, chapter.file), [worldId, prodId, chapter.id, chapter.file]);
+    resume({ kind: "direct" });
+  }, [locked, connection, directionRun?.state, input, resume]);
+  // Accepting waits out the autosave too (codex on PR 1186): a card accepted against words the
+  // save is about to replace would be refused by the coordinator only if it saw them first.
+  const accept = useCallback(() => {
+    if (input.beforeRead !== undefined && !input.beforeRead({ kind: "accept" })) return;
+    resume({ kind: "accept" });
+  }, [input, resume]);
+  // A direction stands only where its words still do (codex on PR 1186): the record keeps
+  // entries keyed to earlier wording, and those are none to the dock's prompt.
+  const directedBlocks = useMemo(() => rows.filter((row) => audiobookDirectionFor(recordOrNull, row.block) !== null).length, [rows, recordOrNull]);
   const discard = useCallback(() => dismissDirection(worldId, prodId, chapter.id, chapter.file), [worldId, prodId, chapter.id, chapter.file]);
   const setDirection = useCallback(
     (key: string, direction: AudiobookDirectionInput | null) => {
@@ -382,7 +408,9 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     narrator,
     modelOf,
     makeAgain,
+    resume,
     directionRun,
+    directedBlocks,
     directPress,
     accept,
     discard,
