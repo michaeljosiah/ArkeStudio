@@ -56,7 +56,7 @@ export interface AudiobookRunDeps {
   signal: AbortSignal;
   confirmationToken?: string;
   /** Ask once for a cloned voice's recording to leave the machine; true when the run must stop here and wait for the answer. */
-  requireUploadConfirmation: () => boolean;
+  requireUploadConfirmation: () => boolean | Promise<boolean>;
   enqueue: (inputs: EnqueueInput[]) => Promise<{ jobIds: string[]; reason?: string }>;
   waitForJob: (jobId: string) => Promise<Job>;
   cancelJob: (jobId: string) => Promise<void>;
@@ -199,7 +199,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     }
     misses.push(block);
   }
-  if (misses.some((block) => block.cloned) && deps.requireUploadConfirmation()) return;
+  if (misses.some((block) => block.cloned) && (await deps.requireUploadConfirmation())) return;
   const priceOf = (block: Speaking) => block.parts.reduce((sum, part) => sum + estimateMicroUsd(block.model, { characters: part.length }), 0);
   const estimate = misses.reduce((sum, block) => sum + priceOf(block), 0);
   if (estimate > 0) {
