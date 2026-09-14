@@ -187,3 +187,11 @@ Start with coordinator `test/application/conversation-authoring.test.ts`, then t
 `test/world-chat/`, `test/productions/chapters.test.ts` and `test/gate/chapter-review.test.ts`.
 These local services are not yet exports of the public engine package; see the [engine guide](engine.md#coordinator-extraction-toward-a-server-host-epic-1182)
 for the remaining host and persistence boundaries.
+
+Production creation admission and commit acknowledgement now live in
+`application/production-creation.ts`; its host callback preserves snapshot-before-result ordering.
+`application/conversation-actions.ts` composes default/supplied authority adapters and the same
+lifecycle options for live decisions and recovery, including archive path relocation. Coordinator
+supplies the platform callbacks through `conversationActionDependencies` and translates results
+into events. See `test/application/production-actions.test.ts`,
+`test/productions/create-ack.test.ts`, and `test/arke-actions/` for the regression boundary.

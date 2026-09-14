@@ -1,3 +1,5 @@
+import { ProductionCreationService } from "./application/production-creation.js";
+import { ConversationActionService } from "./application/conversation-actions.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
 import { ConversationAuthoringService } from "./application/conversation-authoring.js";
 import { conversationRunDependencies } from "./application/conversation-runs.js";
@@ -180,12 +182,10 @@ import {
   compileBoard,
   composeDispatches,
   createEpisode,
-  createProduction,
   createScene,
   draftSceneSkeleton,
   exportBoard,
   landBoard,
-  productionCreatedBy,
   proposeEpisode,
   proposeSeason,
   proposeStoryOverview,
@@ -500,12 +500,9 @@ import { projectWorkspace } from "./world-chat/project.js";
 import {
   ConversationActionLifecycle,
   conversationActionDigest,
-  recoverConversationActions,
   type ConversationActionAuthorityAdapter,
-  type ConversationActionLifecycleOptions,
 } from "./arke-actions/lifecycle.js";
 import {
-  worldChatActionAdapters,
   type WorldChatActionAdapterDeps,
 } from "./world-chat/actions.js";
 import { blockingDependencies, explainBlocked, routeFor as mediaRouteFor } from "./world-chat/media.js";
@@ -1948,7 +1945,7 @@ export class Coordinator {
   private readonly readJobs = new Map<string, string[]>();
   private stopPromise: Promise<void> | null = null;
   /** Request ids whose create-production is still running — redelivery waits, never doubles (#384). */
-  private readonly creatingProductions = new Set<string>();
+  private readonly productionCreation = new ProductionCreationService();
   /** In-flight dispatch-scene-planned requestIds (SPEC-024 R-12): the same redelivery guard. */
   private readonly creatingPlans = new Set<string>();
   private readonly activeMessages = new Set<Promise<void>>();
@@ -2398,7 +2395,7 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store || this.stopping) return;
         await this.durableExportReads(store.worldId);
-        await recoverConversationActions(this.conversationActionLifecycleOptions(store));
+        await this.conversationActions(store).recover();
         if (!this.stillOpen(store)) return;
         // Recovery may find nothing to append while the durable card log is still newer than the
         // process projection (for example, after a crash between binding and broadcast).
@@ -3435,7 +3432,7 @@ export class Coordinator {
       const gate = this.opts.provider.gate?.();
       const wrapUps = gate ? await recoverWrapUps(store, gate, now) : { repaired: [] };
       await this.durableExportReads(store.worldId);
-      const actions = await recoverConversationActions(this.conversationActionLifecycleOptions(store));
+      const actions = await this.conversationActions(store).recover();
       if (
         outcome.repaired.length > 0 ||
         outcome.sweptTombstones.length > 0 ||
@@ -5297,7 +5294,7 @@ export class Coordinator {
           });
           return;
         }
-        const result = await this.conversationActionLifecycle(store).decide(msg);
+        const result = await this.conversationActions(store).decide(msg);
         if (!this.stillOpen(store)) return;
         this.emit({ at: this.nowIso(), type: "conversation-action.decision-result", ...result });
         await this.refreshConversationOutcome(store, msg.conversationId);
@@ -7303,53 +7300,23 @@ export class Coordinator {
             ...result,
           });
         };
-        // The frame names a medium or the legacy format (SPEC-023 R-1); one that names neither
-        // is malformed — refused with its correlated answer, never dropped into a dialog that
-        // waits forever.
-        if (msg.medium === undefined && msg.format === undefined) {
-          answer({ disposition: "failed", reason: "the request names neither a medium nor a format" });
-          return;
-        }
-        if (requestId) {
-          // Redelivery of a request that is still running: its result will broadcast once.
-          // Marked BEFORE any await — frames are handled concurrently, and a check-then-add
-          // across the change-log read let two deliveries of one requestId both create.
-          if (this.creatingProductions.has(requestId)) return;
-          this.creatingProductions.add(requestId);
-          // Redelivery of a request whose commit already landed: same slug, no second
-          // production, no title-2 (#384). The whole change log is consulted, not the
-          // bundle's windowed tail, so the answer survives restart and later work.
-          const prior = await productionCreatedBy(store.dir, requestId).catch(() => null);
-          if (prior) {
-            this.creatingProductions.delete(requestId);
-            answer({ disposition: "created", slug: prior });
-            return;
-          }
-        }
-        try {
-          const slug = await createProduction(store, {
-            title: msg.title,
-            ...(msg.format !== undefined ? { format: msg.format } : {}),
-            ...(msg.medium !== undefined ? { medium: msg.medium } : {}),
-            ...(msg.productionKind !== undefined ? { productionKind: msg.productionKind } : {}),
-            ...(msg.seriesTitle !== undefined ? { seriesTitle: msg.seriesTitle } : {}),
-            ...(msg.aspect !== undefined ? { aspect: msg.aspect } : {}),
-            ...(msg.frameRate !== undefined ? { frameRate: msg.frameRate } : {}),
-            ...(msg.defaults !== undefined ? { defaults: msg.defaults } : {}),
-            ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
-            ...(requestId !== undefined ? { requestId } : {}),
-          });
-          await this.refreshWorldSnapshot(msg.worldId);
-          // Acknowledged only after the commit is durable and the snapshot carries it.
-          answer({ disposition: "created", slug });
-        } catch (err) {
+        const result = await this.productionCreation.create(store, {
+          title: msg.title,
+          ...(msg.format !== undefined ? { format: msg.format } : {}),
+          ...(msg.medium !== undefined ? { medium: msg.medium } : {}),
+          ...(msg.productionKind !== undefined ? { productionKind: msg.productionKind } : {}),
+          ...(msg.seriesTitle !== undefined ? { seriesTitle: msg.seriesTitle } : {}),
+          ...(msg.aspect !== undefined ? { aspect: msg.aspect } : {}),
+          ...(msg.frameRate !== undefined ? { frameRate: msg.frameRate } : {}),
+          ...(msg.defaults !== undefined ? { defaults: msg.defaults } : {}),
+          ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
+          ...(requestId !== undefined ? { requestId } : {}),
+        }, () => this.refreshWorldSnapshot(msg.worldId));
+        if (result.status === "created") answer({ disposition: "created", slug: result.slug });
+        else if (result.status === "invalid") answer({ disposition: "failed", reason: result.reason });
+        else if (result.status === "failed") {
           this.transport.broadcastSnapshot();
-          answer({
-            disposition: "failed",
-            reason: describeCoordinatorError(err),
-          });
-        } finally {
-          if (requestId) this.creatingProductions.delete(requestId);
+          answer({ disposition: "failed", reason: describeCoordinatorError(result.error) });
         }
         return;
       }
@@ -15683,20 +15650,9 @@ export class Coordinator {
     };
   }
 
-  /**
-   * The runner for the open world, built once and kept (#70 §8).
-   *
-   * Kept rather than rebuilt per command because it holds the in-flight runs: a runner made
-   * fresh for a cancel would have no record of the turn it was asked to stop.
-   */
-  private conversationActionAdapters(
-    store: WorldStore,
-    archivedAt?: (path: string) => void,
-  ): readonly ConversationActionAuthorityAdapter[] {
-    const supplied = this.opts.conversationActionAdapters ?? [];
-    const suppliedKinds = new Set(supplied.map((adapter) => adapter.actionKind));
-    const archive = this.opts.provider.archiveWorld?.bind(this.opts.provider);
-    const deps: WorldChatActionAdapterDeps = {
+  /** Platform callbacks stay in the host; the application service composes their authority. */
+  private conversationActionDependencies(store: WorldStore): WorldChatActionAdapterDeps {
+    return {
       activePlans: (productionId) => this.activeScenePlans(store, productionId),
       ...(this.opts.pickFiles ? { pickFiles: this.opts.pickFiles } : {}),
       ...(this.opts.pickFolder ? { pickFolder: this.opts.pickFolder } : {}),
@@ -15716,26 +15672,6 @@ export class Coordinator {
         this.useReferenceCandidateForConversationAction(store, change, mutation),
       discardReferenceImage: (target, mutation) =>
         this.discardReferenceImageForConversationAction(store, target, mutation),
-      ...(archive
-        ? {
-            archiveWorld: async () => {
-              const name = store.getBundle().meta.name;
-              const { folder } = await archive(store.worldId);
-              archivedAt?.(folder);
-              this.readModel.setWorld(null);
-              this.readModel.setWorlds(await this.opts.provider.listWorlds());
-              this.emit({
-                at: this.nowIso(),
-                type: "world.archived",
-                worldId: store.worldId,
-                name,
-                folder: basename(folder),
-              });
-              this.transport.broadcastSnapshot();
-              return { id: store.worldId };
-            },
-          }
-        : {}),
       ...(this.opts.appRoot
         ? {
             exportWorld: async (actionId) => {
@@ -15789,11 +15725,6 @@ export class Coordinator {
         return true;
       },
     };
-    return [
-      ...worldChatActionAdapters(store, this.opts.provider.gate?.() ?? null, () => this.nowIso(), deps)
-        .filter((adapter) => !suppliedKinds.has(adapter.actionKind)),
-      ...supplied,
-    ];
   }
 
   private async startProductionExportForConversationAction(
@@ -15867,21 +15798,32 @@ export class Coordinator {
     return active;
   }
 
-  private conversationActionLifecycleOptions(store: WorldStore): ConversationActionLifecycleOptions {
-    let worldPath = store.dir;
-    return {
-      worldPath: () => worldPath,
-      worldId: store.worldId,
-      adapters: this.conversationActionAdapters(store, (path) => {
-        worldPath = path;
-      }),
+  private conversationActions(store: WorldStore): ConversationActionService {
+    const archive = this.opts.provider.archiveWorld?.bind(this.opts.provider);
+    return new ConversationActionService(store, {
+      gate: this.opts.provider.gate?.() ?? null,
+      actions: this.conversationActionDependencies(store),
+      supplied: this.opts.conversationActionAdapters,
       now: () => this.nowIso(),
       isWorldOpen: () => !this.stopping && this.stillOpen(store),
-    };
+      ...(archive ? {
+        archiveWorld: async () => {
+          const { folder } = await archive(store.worldId);
+          return { id: store.worldId, folder };
+        },
+        archived: async ({ folder }: { folder: string }) => {
+          this.readModel.setWorld(null);
+          this.readModel.setWorlds(await this.opts.provider.listWorlds());
+          this.emit({ at: this.nowIso(), type: "world.archived", worldId: store.worldId,
+            name: store.getBundle().meta.name, folder: basename(folder) });
+          this.transport.broadcastSnapshot();
+        },
+      } : {}),
+    });
   }
 
   private conversationActionLifecycle(store: WorldStore): ConversationActionLifecycle {
-    return new ConversationActionLifecycle(this.conversationActionLifecycleOptions(store));
+    return this.conversationActions(store).lifecycle;
   }
 
   private conversationAuthoring(store: WorldStore): ConversationAuthoringService {
