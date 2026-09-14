@@ -1526,14 +1526,15 @@ function handleFrame(json: string): void {
       if (event.replayed !== true || audiobook[key] === undefined) {
         audiobook = {
           ...audiobook,
-          [key]: { state: "reading", requestId: event.requestId, toMake: event.toMake, blocks: event.blocks, made: 0, flagged: 0 },
+          [key]: { state: "reading", requestId: event.requestId, toMake: event.toMake, blocks: event.blocks, made: event.made ?? 0, flagged: 0 },
         };
       }
       // The run's request is minted by the coordinator, so it is registered here rather than
       // at send time: a cloned voice's upload consent is routed by request (codex on PR 1180),
       // and without this entry the consent would be dropped on the floor and the run would
-      // wait for an answer no window could give.
-      pendingQueueRequests.set(event.requestId, { command: "read-audiobook-chapter" });
+      // wait for an answer no window could give. A chapter read under the book carries the
+      // book's request, whose command is registered already and stands (codex on PR 1187).
+      if (!pendingQueueRequests.has(event.requestId)) pendingQueueRequests.set(event.requestId, { command: "read-audiobook-chapter" });
     } else if (event.type === "audiobook.priced") {
       const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
       const held = audiobook[key] ?? { toMake: 0, blocks: 0, made: 0, flagged: 0 };
@@ -1599,11 +1600,12 @@ function handleFrame(json: string): void {
       // The book's state is keyed by production, and productions recur by name across worlds:
       // a run's late word from a world since closed is not this world's (codex on PR 1187).
       if (current.state?.world?.meta.worldId === event.worldId) {
-        // A replayed start carries no counts: a window that holds the run keeps what it knows.
+        // A replayed start carries the counts the book has reached: a window that holds the
+        // run keeps what it knows, and one that rejoined takes them.
         if (event.replayed !== true || audiobookBook[event.productionId] === undefined) {
           audiobookBook = {
             ...audiobookBook,
-            [event.productionId]: { state: "reading", requestId: event.requestId, chapters: event.chapters, blocks: event.blocks, done: 0, chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0 },
+            [event.productionId]: { state: "reading", requestId: event.requestId, chapters: event.chapters, blocks: event.blocks, done: event.done ?? 0, chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0 },
           };
         }
         // The book's request is the coordinator's (SPEC-047 R-17): a cloned voice's consent is

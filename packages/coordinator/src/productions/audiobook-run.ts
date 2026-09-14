@@ -370,26 +370,24 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     finish("read", { record });
     return;
   }
+  const token = chapterPriceToken(deps.worldId, productionId, chapterId, plan.chapter, misses);
+  // The book's run priced every chapter at once (R-17), and its chapters are read on that
+  // answer rather than asked again one by one — but only the chapter that was priced. Each
+  // chapter is prepared afresh when the book reaches it, and prose, a reading or a voice
+  // changed while earlier chapters were read can put cloud work in that preparation the card
+  // never showed: that chapter is refused and left to its row rather than read on an answer
+  // given for other words (codex on PR 1187). Judged before any consent is asked, so a chapter
+  // that moved never puts a question under the book that the book's answer cannot follow.
+  if (deps.priced !== undefined && estimate > 0 && deps.priced !== token) {
+    finish("refused", { reason: "moved since the book was priced" });
+    return;
+  }
   for (const reader of clones) {
     if (await deps.requireUploadConfirmation(reader)) return;
   }
-  if (estimate > 0) {
-    const token = chapterPriceToken(deps.worldId, productionId, chapterId, plan.chapter, misses);
-    if (deps.priced !== undefined) {
-      // The book's run priced every chapter at once (R-17), and its chapters are read on that
-      // answer rather than asked again one by one — but only the chapter that was priced. Each
-      // chapter is prepared afresh when the book reaches it, and prose, a reading or a voice
-      // changed while earlier chapters were read can put cloud work in that preparation the
-      // card never showed: that chapter is refused and left to its row rather than read on an
-      // answer given for other words (codex on PR 1187).
-      if (deps.priced !== token) {
-        finish("refused", { reason: "moved since the book was priced" });
-        return;
-      }
-    } else if (deps.confirmationToken !== token) {
-      emit({ type: "priced", characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: token, voices: priceLines(misses, priceOf) });
-      return;
-    }
+  if (estimate > 0 && deps.priced === undefined && deps.confirmationToken !== token) {
+    emit({ type: "priced", characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: token, voices: priceLines(misses, priceOf) });
+    return;
   }
 
   const landingDir = audiobookLanding(productionId, chapterFile);

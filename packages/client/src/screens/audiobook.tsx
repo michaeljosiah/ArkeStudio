@@ -12,6 +12,7 @@ import {
   dismissAudiobookNote,
   openAudiobook,
   readAudiobookBook,
+  requestVoiceCatalogue,
   setAudiobookReading,
   stopAudiobookBook,
   subscribeVoiceUploadConfirmations,
@@ -34,13 +35,41 @@ import {
  */
 
 /**
- * What the rows depend on, as one string: asked again when it moves. The title and the order
- * are in it as the version and the hash are (codex on PR 1187): a rename or a reorder is
- * frontmatter alone, and the spoken heading — and so a row and its price — follows it.
+ * What the door's answer depends on, as one string: asked again when it moves. The chapters'
+ * title and order are in it as their version and hash are (codex on PR 1187): a rename or a
+ * reorder is frontmatter alone, and the spoken heading — and so a row and its price — follows
+ * it. So are the readers (codex on PR 1187, round three): the app's narrator, every sheet's
+ * voice, and the catalogue that says which can speak now, since another window changing any
+ * of them changes who reads, what stands in for whom, and what a press would spend.
  */
-export function audiobookDoorStamp(production: { chapters: readonly { id: string; order: number; title: string; version: number; bodyHash?: string; retired?: boolean; audiobook?: unknown }[]; audiobook?: unknown } | null): string {
+export function useAudiobookDoorStamp(
+  production: { chapters: readonly { id: string; order: number; title: string; version: number; bodyHash?: string; retired?: boolean; audiobook?: unknown }[]; audiobook?: unknown } | null,
+  world: { sheets: readonly { id: string; voice?: unknown }[] } | null,
+): string {
+  const store = useStore();
+  const narrator = store.state?.app.narrator ?? null;
+  const catalogue = store.voiceCatalogue;
   if (production === null) return "";
-  return JSON.stringify([production.audiobook ?? null, production.chapters.map((c) => [c.id, c.order, c.title, c.version, c.bodyHash ?? "", c.retired === true, c.audiobook ?? null])]);
+  return JSON.stringify([
+    production.audiobook ?? null,
+    production.chapters.map((c) => [c.id, c.order, c.title, c.version, c.bodyHash ?? "", c.retired === true, c.audiobook ?? null]),
+    narrator,
+    (world?.sheets ?? []).map((sheet) => [sheet.id, sheet.voice ?? null]),
+    catalogue === null ? null : catalogue.map((voice) => [voice.provider, voice.model, voice.voiceId, voice.unavailableReason ?? null]),
+  ]);
+}
+
+/**
+ * Whether the book, or any chapter of it, is being read in this window's sight. While it is,
+ * the rows read the runs' own counts and the door is not asked again for every take that
+ * lands — each ask prepares the whole book, and a long book read block by block would ask
+ * once a block (codex on PR 1187); it is asked once more when the run ends.
+ */
+export function useAudiobookReading(worldId: string | undefined, prodId: string | undefined): boolean {
+  const runs = useAudiobookRuns();
+  const book = useAudiobookBooks()[prodId ?? ""];
+  if (book?.state === "reading") return true;
+  return Object.entries(runs).some(([key, run]) => key.startsWith(`${worldId}/${prodId}/`) && run.state === "reading");
 }
 
 /** The voices row (R-12): who reads, in what, or why the narrator does instead. */
@@ -74,7 +103,7 @@ function priceLineWords(line: AudiobookPriceLine): { who: string; how: string; c
 
 export function AudiobookScreen() {
   const { prodId, worldId } = useParams();
-  const { production } = useProduction(worldId, prodId);
+  const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
   const connection = useStore().connection;
   const held = useAudiobookDoors()[prodId ?? ""];
@@ -83,17 +112,24 @@ export function AudiobookScreen() {
   const note = useAudiobookNotes()[prodId ?? ""];
   const runs = useAudiobookRuns();
   const records = useAudiobookRecords();
-  const stamp = audiobookDoorStamp(production);
-  // The chapters' runs and the record's writes move the rows: asked again once they land.
-  const runStamp = JSON.stringify(Object.entries(runs).filter(([key]) => key.startsWith(`${worldId}/${prodId}/`)).map(([key, run]) => [key, run.state, run.made]));
+  const stamp = useAudiobookDoorStamp(production, world);
+  const running = useAudiobookReading(worldId, prodId);
+  // The chapters' runs ending and the record's writes move the rows: asked again once they
+  // land — not once a block while a run is going, when the rows read the run's own counts.
+  const runStamp = JSON.stringify(Object.entries(runs).filter(([key]) => key.startsWith(`${worldId}/${prodId}/`)).map(([key, run]) => [key, run.state]));
   const recordStamp = Object.entries(records)
     .filter(([key]) => key.startsWith(`${worldId}/${prodId}/`))
     .map(([, held]) => held.seq)
     .join(",");
   useEffect(() => {
-    if (!worldId || !prodId || connection !== "open") return;
+    if (!worldId || !prodId || connection !== "open" || running) return;
     openAudiobook(worldId, prodId);
-  }, [worldId, prodId, connection, stamp, runStamp, recordStamp, book?.state, note?.seq]);
+  }, [worldId, prodId, connection, running, stamp, runStamp, recordStamp, book?.state, note?.seq]);
+  // The catalogue says who can speak now (turn 130's rule): asked for once the door is open,
+  // so a voice gone unavailable moves the voices row and the price.
+  useEffect(() => {
+    if (connection === "open") requestVoiceCatalogue(worldId);
+  }, [connection, worldId]);
 
   // A cloned voice's recording leaving the machine (SPEC-022, SPEC-046): asked under the book's request, the answer kept for the price's answer and spent with the run (codex on PR 1180).
   const [upload, setUpload] = useState<{ destination: string; token: string; notice?: string } | null>(null);

@@ -1039,12 +1039,14 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       toMake: z.number().int().min(0),
       blocks: z.number().int().min(0),
       /**
-       * Replayed to a renderer that connects while the run is going, with no counts: a window
-       * that already holds the run keeps what it knows, and one that does not learns a run is
-       * going and can be stopped. A replay reaches every refresh, not only a reconnect, so
-       * without this mark it would reset a run's progress and flip a finished run back to going.
+       * Replayed to a renderer that connects while the run is going, with the counts the run
+       * has reached (`made`): a window that already holds the run keeps what it knows, and one
+       * that does not learns how far a run is and that it can be stopped. A replay reaches every
+       * refresh, not only a reconnect, so without this mark it would reset a run's progress and
+       * flip a finished run back to going.
        */
       replayed: z.literal(true).optional(),
+      made: z.number().int().min(0).optional(),
     })
     .strict(),
   z
@@ -1139,6 +1141,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       /** The chapters with something to make, of the chapters with prose. */
       chapters: z.number().int().min(0),
       blocks: z.number().int().min(0),
+      /** On a replay, how many chapters the book is past, so a window that rejoins is not told `0 of 0` until the next chapter ends. */
+      done: z.number().int().min(0).optional(),
       replayed: z.literal(true).optional(),
     })
     .strict(),

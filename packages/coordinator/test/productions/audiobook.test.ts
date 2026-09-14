@@ -1293,6 +1293,55 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
       assert.deepEqual(progress.map((e) => [e.chapterId, e.done, e.chapters]), [["the-same-ink", 1, 1]], "a chapter refused before the run is no chapter of the book's count; the one read is");
     }));
 
+  it("a chapter retired after the book was priced is left out when the book reaches it (codex on PR 1187)", async () => {
+    let sendRef: ((message: ClientMessage) => Promise<void>) | null = null;
+    let retired = false;
+    await withHarness(
+      {
+        before: twoChapters,
+        synthesize: async () => {
+          if (!retired && sendRef !== null) {
+            retired = true;
+            await sendRef({ kind: "retire-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "02-the-same-ink" });
+          }
+          return wav();
+        },
+      },
+      async ({ worldDir, events, send, bundle }) => {
+        sendRef = send;
+        await readBook(send);
+        assert.ok(retired);
+        assert.equal(bundle().productions.find((p) => p.meta.id === LEDGER)?.chapters.find((c) => c.id === "the-same-ink")?.retired, true);
+        const finished = events.find((e): e is BookFinished => e.type === "audiobook.book-finished");
+        assert.equal(finished?.outcome, "read", finished?.reason);
+        assert.deepEqual([finished?.chaptersRead, finished?.chaptersRefused], [1, 1]);
+        assert.equal(events.some((e) => e.type === "audiobook.started" && e.chapterId === "the-same-ink"), false, "never begun");
+        assert.ok(!existsSync(recordPath(worldDir, "02-the-same-ink")), "nothing written for it");
+      },
+    );
+  });
+
+  it("a new narrator re-checks every standing direction, as a reading switch does (R-13; codex on PR 1187)", () =>
+    withHarness({ models: [ELEVEN, KOKORO, FISH, V3], cloud: [V3_LOW_TIDE] }, async ({ worldDir, events, send }) => {
+      await send({ kind: "set-credential", provider: "elevenlabs", key: "k-test" });
+      await send({ kind: "set-narrator", voice: { provider: "elevenlabs", model: V3.id, voiceId: V3_LOW_TIDE.voiceId, label: "Low tide" } });
+      // The title, narration, directed for Eleven v3: a whisper and a phrase.
+      await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "title", direction: { delivery: "whispered", speed: 1, cues: [], phrase: "under her breath" } });
+      type Recorded = Extract<DomainEvent, { type: "audiobook.record" }>;
+      const written = events.filter((e): e is Recorded => e.type === "audiobook.record").at(-1);
+      assert.ok(written?.record, written?.refused);
+      assert.equal(written.record.direction["title"]?.plan.delivery, "whispered");
+      // Back to the shipped local voice: Kokoro reads measured or urgent, and takes no phrase.
+      await send({ kind: "set-narrator", voice: null });
+      type Conformed = Extract<DomainEvent, { type: "audiobook.conformed" }>;
+      const conformed = events.find((e): e is Conformed => e.type === "audiobook.conformed");
+      assert.ok(conformed, "said how many");
+      assert.deepEqual([conformed.dropped, conformed.chapters], [2, 1]);
+      const record = await readRecord(worldDir);
+      assert.equal(record.direction["title"]?.plan.delivery, "measured");
+      assert.equal(record.direction["title"]?.plan.phrase, undefined);
+    }));
+
   it("a chapter read pressed while the book is being read is refused in a word, and a chapter its own run holds is left to that run (codex on PR 1187)", async () => {
     let releaseFirst: () => void = () => {};
     const first = new Promise<void>((resolve) => {
@@ -1308,12 +1357,17 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
           return wav();
         },
       },
-      async ({ events, send }) => {
+      async ({ events, send, replay }) => {
         const run = readBook(send);
         while (calls < 1) await new Promise((resolve) => setTimeout(resolve, 5));
         await read(send, { chapterFile: "02-the-same-ink" });
         const refused = events.filter((e): e is Finished => e.type === "audiobook.finished");
         assert.deepEqual(refused.map((e) => [e.chapterId, e.outcome, e.reason]), [["the-same-ink", "refused", "the book is being read"]], "the press is answered, and the book is not disturbed");
+        // A window that rejoins now is told how far the book and the chapter are, not `0 of 0`.
+        const replayedBook = replay().find((e): e is BookStarted => e.type === "audiobook.book-started");
+        assert.deepEqual([replayedBook?.chapters, replayedBook?.done, replayedBook?.replayed], [2, 0, true]);
+        const replayedChapter = replay().find((e): e is Extract<DomainEvent, { type: "audiobook.started" }> => e.type === "audiobook.started");
+        assert.ok(replayedChapter && replayedChapter.toMake > 0 && replayedChapter.made === 0, "the chapter's counts, at its first block");
         releaseFirst();
         await run;
         const finished = events.find((e): e is BookFinished => e.type === "audiobook.book-finished");

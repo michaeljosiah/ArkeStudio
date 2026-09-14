@@ -8,7 +8,7 @@ import type { AudiobookDoor, ChapterSummary, ClientMessage, ClientState } from "
 import { AudiobookScreen } from "../src/screens/audiobook.js";
 import { ProductionLayout } from "../src/screens/production-shell.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
-import { __applyEventForTest, __handleFrameForTest, __setBridgeForTest, __setStateForTest, __stateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __connectionStatusForTest, __handleFrameForTest, __setBridgeForTest, __setStateForTest, __stateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -146,15 +146,15 @@ describe("the Audiobook door (turn 146)", () => {
     // The door is asked again as the book moves, and only the latest ask's answer stands: an
     // older answer arriving late, or one for another world, changes nothing (codex on PR 1187).
     const earlier = m.sent.findLast((message) => message.kind === "open-audiobook") as Extract<ClientMessage, { kind: "open-audiobook" }>;
-    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-started", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", chapters: 2, blocks: 50 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.conformed", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", dropped: 1, chapters: 1 }));
     const later = m.sent.findLast((message) => message.kind === "open-audiobook") as Extract<ClientMessage, { kind: "open-audiobook" }>;
-    assert.notEqual(later.requestId, earlier.requestId, "a run's start asks the door again");
+    assert.notEqual(later.requestId, earlier.requestId, "a conform asks the door again");
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.door", requestId: earlier.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", door: door("narrator", { rows: [] }) }));
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.door", requestId: later.requestId, worldId: "01J8F3K2QW9VZX4N7M0RTYB6HD", productionId: "inkbound", door: door("narrator", { rows: [] }) }));
     assert.equal(all(m, '[data-testid="audiobook-row"]').length, 3, "the rows the latest answer gave stand");
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.door", requestId: later.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", door: door("narrator", { rows: [] }) }));
     assert.equal(all(m, '[data-testid="audiobook-row"]').length, 0, "the latest ask's answer is taken");
-    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-finished", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", outcome: "read", chaptersRead: 2, chaptersRefused: 0, made: 50, flagged: 0 }));
+    await act(async () => all(m, '[aria-label="Put away"]')[0]!.click());
     await answerDoor(m, door("narrator"));
     // A run's word from another world — a same-named production there — is not this door's.
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-started", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HD", productionId: "inkbound", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H3", chapters: 9, blocks: 120 }));
@@ -175,6 +175,15 @@ describe("the Audiobook door (turn 146)", () => {
     renamed.world!.productions.find((p) => p.meta.id === "inkbound")!.chapters = CHAPTERS.map((c) => (c.id === "neap" ? { ...c, title: "The counting of bells, and after" } : c));
     await act(async () => __setStateForTest(renamed, kept()));
     assert.equal(asks(), asked + 1, "a renamed chapter asks the door again");
+    // So do the readers: another window's narrator, or a sheet's voice, moves who reads and the price.
+    const narrated = inkbound();
+    narrated.app = { ...narrated.app, narrator: { provider: "elevenlabs", model: "eleven_multilingual_v2", voiceId: "v_8Kq2", label: "Low tide" } };
+    await act(async () => __setStateForTest(narrated, kept()));
+    assert.equal(asks(), asked + 2, "a new narrator asks the door again");
+    const voiced = inkbound();
+    voiced.world = { ...voiced.world!, sheets: voiced.world!.sheets.map((sheet, index) => (index === 0 ? { ...sheet, voice: { provider: "elevenlabs", voiceId: "v_8Kq2", label: "Low tide", assignedAtVersion: 1 } } : sheet)) };
+    await act(async () => __setStateForTest(voiced, kept()));
+    assert.equal(asks(), asked + 3, "a sheet's voice asks the door again");
     await answerDoor(m, door("narrator"));
     await act(async () => all(m, '[data-testid="audiobook-row"]')[1]!.click());
     assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/p/inkbound/story/chapters/neap?view=audiobook`, "a row opens the chapter in its Audiobook view");
@@ -260,6 +269,21 @@ describe("the Audiobook door (turn 146)", () => {
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", chapters: 9, blocks: 120 }));
     assert.match(text(m), /reading… 0 of 9 chapters/);
     assert.ok(all(m, "button").some((b) => b.textContent === "Stop"));
+    // A chapter read under the book carries the book's request: its start does not take the
+    // book's registration, so a consent asked under the book reaches this door.
+    const asksBefore = m.sent.filter((message) => message.kind === "open-audiobook").length;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, chapterId: "slack-water", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 24, blocks: 24 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.progress", ...ids, chapterId: "slack-water", block: "title", outcome: "made", made: 1, toMake: 24 }));
+    assert.match(all(m, '[data-testid="audiobook-row"]')[0]?.textContent ?? "", /reading… 1 of 24/);
+    assert.equal(m.sent.filter((message) => message.kind === "open-audiobook").length, asksBefore, "a block landing under a run asks the door nothing; the row reads the run");
+    await act(async () =>
+      __applyEventForTest({ at: AT, type: "voice.upload-confirmation-required", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", worldId: FIXTURE_WORLD_ID, command: "read-audiobook-book", destinationLabel: "the studio's ComfyUI", confirmationToken: "engine-1" }),
+    );
+    const allow = all(m, "button").find((button) => /allow|send|confirm|yes/i.test(button.textContent ?? "") && !/cancel|not now/i.test(button.textContent ?? ""));
+    assert.ok(allow, `the consent is one press: ${all(m, "button").map((b) => b.textContent).join(" | ")}`);
+    await act(async () => allow.click());
+    const consented = m.sent.findLast((message) => message.kind === "read-audiobook-book") as Extract<ClientMessage, { kind: "read-audiobook-book" }>;
+    assert.equal(consented.voiceUploadConfirmedFor, "engine-1");
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-progress", ...ids, chapterId: "slack-water", done: 3, chapters: 9 }));
     assert.match(text(m), /reading… 3 of 9 chapters/);
     // Every chapter's record refreshes the world, and the refresh replays the start with no
@@ -268,12 +292,27 @@ describe("the Audiobook door (turn 146)", () => {
     await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 3, state: inkbound("cast") }));
     await act(async () => __applyEventForTest(replayed));
     assert.match(text(m), /reading… 3 of 9 chapters/);
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.finished", ...ids, chapterId: "slack-water", outcome: "stopped", made: 1, flagged: 0 }));
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-finished", ...ids, outcome: "stopped", chaptersRead: 3, chaptersRefused: 0, made: 40, flagged: 0 }));
     await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 5, state: inkbound("cast") }));
     await act(async () => __applyEventForTest(replayed));
     assert.match(q(m, '[data-testid="audiobook-note"]')?.textContent ?? "", /stopped · the takes made stand/);
     assert.ok(!all(m, "button").some((b) => b.textContent === "Stop"), "a late replay does not flip a stopped book back to reading");
     assert.ok(q(m, '[data-testid="read-book"]'), "the press is back, for the rest");
+    assert.equal(m.sent.filter((message) => message.kind === "open-audiobook").length, asksBefore + 1, "the run's end asks the door once");
+  });
+
+  it("a window that rejoins is told how far the book and its chapter are (codex on PR 1187)", async () => {
+    const m = await mount(inkbound());
+    await answerDoor(m, door("narrator"));
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound" };
+    await act(async () => __connectionStatusForTest("open"));
+    await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 1, state: inkbound() }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", chapters: 9, blocks: 120, done: 3, replayed: true }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, chapterId: "neap", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 26, blocks: 26, made: 5, replayed: true }));
+    await answerDoor(m, door("narrator"));
+    assert.match(text(m), /reading… 3 of 9 chapters/);
+    assert.match(all(m, '[data-testid="audiobook-row"]')[1]?.textContent ?? "", /reading… 5 of 26/);
   });
 
   it("the rail says how many chapters are read, from the door's answer (R-29)", async () => {
