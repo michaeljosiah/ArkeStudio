@@ -6,7 +6,7 @@ import { PerformanceGenerationQuoteSchema } from "./performance.js";
 import { PerformanceRecordSchema } from "./performance.js";
 import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
-import { ChapterAudiobookSchema } from "./audiobook.js";
+import { AudiobookDirectionInputSchema, ChapterAudiobookSchema } from "./audiobook.js";
 import { z } from "zod";
 import { ModelResidencySchema } from "./local-ai.js";
 import { WorldImageReferenceSchema } from "./world-image-references.js";
@@ -1087,6 +1087,54 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       made: z.number().int().min(0),
       flagged: z.number().int().min(0),
       record: ChapterAudiobookSchema.optional(),
+      reason: z.string().optional(),
+    })
+    .strict(),
+  /**
+   * The record written outside a run (SPEC-047 R-6, R-10): a block's direction set or cleared,
+   * a chapter's directions accepted. The window that asked, and every other, takes the record
+   * as a run's finished one — the newer wins — or hears why nothing was written.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.record"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      record: ChapterAudiobookSchema.optional(),
+      /** Why the write was refused — a control the reader cannot express, prose that moved — when it was. */
+      refused: z.string().min(1).optional(),
+      /** How many controls a direction lost to its reader's row, when a whole chapter was accepted (R-10). */
+      dropped: z.number().int().min(0).optional(),
+    })
+    .strict(),
+  /**
+   * `Direct this chapter` (SPEC-047 R-10): the model asked for a direction per block in the
+   * cast's discipline, every control checked against the block's reader; what verifies is
+   * offered as one card, accepted whole through `accept-direction` or discarded in the window.
+   * Nothing is written by the run itself.
+   */
+  z
+    .object({ ...base, type: z.literal("direction.started"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("direction.finished"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      outcome: z.enum(["directed", "stopped", "unavailable", "failed"]),
+      /** The prose the directions were made for, carried back on acceptance. */
+      hash: z.string().min(1).optional(),
+      chapterVersion: z.number().int().min(1).optional(),
+      directed: z.number().int().min(0),
+      /** Blocks the model did not address, and controls its reader could not express, dropped and counted. */
+      dropped: z.number().int().min(0),
+      /** The model's one or two sentences on what it did, said on the card. */
+      summary: z.string().optional(),
+      proposed: z.record(z.string().min(1), AudiobookDirectionInputSchema).optional(),
       reason: z.string().optional(),
     })
     .strict(),

@@ -7,18 +7,27 @@ import {
   audiobookBlocks,
   audiobookBlockState,
   audiobookHeading,
+  audiobookTextHash,
   legacyVoiceModel,
+  mapCadence,
+  normalizeSpeechText,
+  voiceSourceFor,
   type AudiobookBlock,
   type AudiobookBlockState,
   type AudiobookBook,
+  type AudiobookDirection,
+  type AudiobookDirectionInput,
   type AudiobookReader,
   type AudiobookReading,
   type AudiobookSubstitution,
+  type CadencePlan,
   type ChapterAudiobook,
   type ChapterVoices,
   type ClonedVoice,
+  type ManifestModel,
   type Sheet,
 } from "@arke-studio/contracts";
+import { audioHash } from "../audio/qc.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
@@ -119,7 +128,80 @@ export async function writeAudiobookBook(store: WorldStore, productionId: string
 }
 
 export function emptyAudiobook(chapterVersion: number, hash: string, now: string): ChapterAudiobook {
-  return { schemaVersion: 1, chapterVersion, hash, updatedAt: now, takes: {}, flags: {} };
+  return { schemaVersion: 1, chapterVersion, hash, updatedAt: now, takes: {}, flags: {}, direction: {} };
+}
+
+/** The digest `mapCadence` verifies a plan against: the block's words, whitespace folded. */
+export function directionSourceHash(text: string): string {
+  return audioHash(Buffer.from(normalizeSpeechText(text)));
+}
+
+/** A plan from what a window or a derivation sends (R-6): the hashes are the block's, never the sender's. */
+export function directionPlan(text: string, input: AudiobookDirectionInput): CadencePlan {
+  return { schemaVersion: 1, sourceTextHash: directionSourceHash(text), delivery: input.delivery, speed: input.speed, cues: input.cues, ...(input.phrase !== undefined ? { phrase: input.phrase } : {}) };
+}
+
+/** The model that speaks a block's assigned reader, or the narrator's when the manifest lacks it. */
+export function readerModel(models: readonly ManifestModel[], reader: AudiobookReader, narrator: AudiobookReader): ManifestModel | null {
+  const of = (candidate: AudiobookReader) => models.find((m) => m.provider === candidate.provider && m.id === candidate.model && m.capability === "voice-tts") ?? null;
+  return of(reader) ?? of(narrator);
+}
+
+/** A cloned voice's recording language is the line's (issue 1163); a catalogue voice states none. */
+export function readerLanguage(clonedVoices: readonly ClonedVoice[], reader: AudiobookReader): string | undefined {
+  const source = voiceSourceFor(clonedVoices, reader.provider, reader.model, reader.voiceId);
+  return source.kind === "cloned" ? source.voice.language : undefined;
+}
+
+export type DirectionCheck = { ok: true; mapped: ReturnType<typeof mapCadence> } | { ok: false; reason: string };
+
+/**
+ * A direction held to its block and its reader (R-9): the plan must map with every control
+ * `mapped` or `best-effort` — a delivery the row lacks, a phrase it takes nowhere, a cue it
+ * cannot place is refused in one clause, before a run could only flag it. Every cue is checked
+ * by `mapCadence` against the words it names.
+ */
+export function checkDirection(text: string, plan: CadencePlan, model: ManifestModel, language?: string): DirectionCheck {
+  let mapped: ReturnType<typeof mapCadence>;
+  try {
+    mapped = mapCadence(text, directionSourceHash(text), plan, model, language);
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+  const refused = mapped.controls.find((control) => control.status === "unsupported");
+  if (refused !== undefined) {
+    const name = refused.control === "delivery" ? plan.delivery : refused.control;
+    return { ok: false, reason: `${name} · ${model.displayName} ${refused.reason ?? `takes no ${refused.control}`}`.replace(/\.$/, "") };
+  }
+  return { ok: true, mapped };
+}
+
+/**
+ * One block's direction set or cleared (R-6): written into the record beside the chapter,
+ * keyed to the block's words, through the same ownership-checked path a run writes by. The
+ * record is made if the chapter has none yet; a direction authored for other words than the
+ * block's now is dropped on the way (R-9), since nothing can read it again.
+ */
+export async function writeBlockDirection(
+  store: WorldStore,
+  productionId: string,
+  chapter: { file: string; version: number; hash: string },
+  blocks: readonly AudiobookBlock[],
+  key: string,
+  direction: AudiobookDirection | null,
+): Promise<ChapterAudiobook> {
+  const held = await readAudiobook(store, productionId, chapter.file);
+  const record = held === null || held === "unreadable" ? emptyAudiobook(chapter.version, chapter.hash, store.now()) : held;
+  const { [key]: _was, ...rest } = record.direction;
+  const kept = Object.fromEntries(
+    Object.entries(rest).filter(([other, entry]) => {
+      const block = blocks.find((candidate) => candidate.key === other);
+      return block !== undefined && entry.textHash === audiobookTextHash(block.text);
+    }),
+  );
+  const next: ChapterAudiobook = { ...record, updatedAt: store.now(), direction: direction === null ? kept : { ...kept, [key]: direction } };
+  await writeAudiobook(store, productionId, chapter.file, next);
+  return next;
 }
 
 /** A block with the reader it is meant for now (R-11, R-12): before availability is asked, which the run does. */

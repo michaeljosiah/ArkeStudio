@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { createHash } from "node:crypto";
-import { seedCadencePlan, mapCadence, normalizeSpeechText, type CadencePlan, type ManifestModel } from "../src/index.js";
+import { cadenceSupport, seedCadencePlan, mapCadence, normalizeSpeechText, CadencePlanSchema, type CadencePlan, type ManifestModel } from "../src/index.js";
 const hash = (text: string) => `sha256:${createHash("sha256").update(text).digest("hex")}`;
 const model: Pick<ManifestModel, "id" | "provider" | "cadence"> = { id: "test-v3", provider: "elevenlabs", cadence: {
   deliveries: ["measured"], speed: { min: 0.7, max: 1.2 }, pause: "best-effort-audio-tag", emphasis: "best-effort-capitalization",
@@ -101,4 +101,44 @@ it("a Fish row carries the delivery as a bracket phrase in the text and nothing 
   const breaking = mapCadence(text, hash(text), { ...plan(text), delivery: "breaking", speed: 0.8 }, fish);
   assert.equal(breaking.providerText, "[voice breaking, through tears] Wait here.");
   assert.deepEqual(breaking.voiceSettings, { speed: 0.8 });
+});
+
+it("a phrase rides the row's seam — a tag, an instruction, or refused — and is never spoken words (SPEC-047 R-7)", () => {
+  const text = "Wait here.";
+  const tagRow: Pick<ManifestModel, "id" | "provider" | "cadence"> = { id: "fish-s2.1-pro", provider: "fishaudio", cadence: {
+    deliveries: ["measured", "whispered"], speed: { min: 0.7, max: 1.3 }, pause: "best-effort-audio-tag", emphasis: "unsupported",
+    breath: "best-effort-audio-tag", outputTimestamps: "none", phrase: "best-effort-tag",
+    deliveryMappings: { measured: { settings: {}, tag: "calm and even" }, whispered: { settings: {}, tag: "whispering" } } } };
+  const tagged = mapCadence(text, hash(text), { ...plan(text), delivery: "whispered", phrase: "to the water, flat" }, tagRow);
+  assert.equal(tagged.providerText, "[to the water, flat] [whispering] Wait here.", "after the delivery's tag, in the row's ink");
+  assert.deepEqual(tagged.controls.find((c) => c.control === "phrase"), { control: "phrase", status: "best-effort", method: "audio tag" });
+  const instructionRow: Pick<ManifestModel, "id" | "provider" | "cadence"> = { id: "breeze-tts-2", provider: "breezeblue", cadence: {
+    deliveries: ["measured"], speed: { min: 0.7, max: 1.2 }, pause: "best-effort-audio-tag", emphasis: "unsupported",
+    breath: "best-effort-audio-tag", outputTimestamps: "none", tagSyntax: "paren", phrase: "best-effort-instruction",
+    deliveryMappings: { measured: { settings: { guidance_scale: 4 }, instruction: "Read it evenly." } } } };
+  const instructed = mapCadence(text, hash(text), { ...plan(text), phrase: "To the water, flat." }, instructionRow, "fr");
+  assert.equal(instructed.providerText, "Wait here.", "nothing of the phrase in the words, whatever the language");
+  assert.equal(instructed.instructions, "Read it evenly. To the water, flat.");
+  assert.deepEqual(instructed.controls.find((c) => c.control === "phrase"), { control: "phrase", status: "best-effort", method: "instruction" });
+  const refused = mapCadence(text, hash(text), { ...plan(text), phrase: "flat" }, model);
+  assert.equal(refused.providerText, "Wait here.");
+  assert.equal(refused.controls.find((c) => c.control === "phrase")?.status, "unsupported", "a row that declares nothing takes no phrase");
+  assert.equal(mapCadence(text, hash(text), plan(text), tagRow).controls.some((c) => c.control === "phrase"), false, "no phrase, no control to report");
+  assert.ok(!CadencePlanSchema.safeParse({ ...plan(text), phrase: "x".repeat(61) }).success, "the phrase is at most 60 characters");
+  assert.ok(!CadencePlanSchema.safeParse({ ...plan(text), phrase: "" }).success);
+});
+
+it("the support report reads off the row what each control would do, one clause where it cannot (SPEC-047 R-9)", () => {
+  const kokoro = cadenceSupport({ cadence: { deliveries: ["measured", "urgent"], speed: null, pause: "unsupported", emphasis: "unsupported", breath: "unsupported",
+    outputTimestamps: "none", deliveryMappings: { measured: { settings: { speed: 0.92 } }, urgent: { settings: { speed: 1.15 } } } } });
+  assert.deepEqual(kokoro.deliveries["measured"], { status: "mapped", method: "settings" });
+  assert.deepEqual(kokoro.deliveries["whispered"], { status: "unsupported", reason: "reads measured · urgent" });
+  assert.deepEqual(kokoro.speed, { status: "unsupported", reason: "no speed" });
+  assert.deepEqual(kokoro.pause, { status: "unsupported", reason: "no pause" });
+  assert.deepEqual(kokoro.phrase, { status: "unsupported", reason: "no phrase" });
+  const eleven = cadenceSupport(model);
+  assert.deepEqual(eleven.pause, { status: "best-effort", method: "tag" });
+  assert.deepEqual(eleven.emphasis, { status: "best-effort", method: "capitals" });
+  assert.deepEqual(eleven.speed, { status: "mapped", method: "0.7–1.2" });
+  assert.deepEqual(cadenceSupport({}).deliveries["measured"], { status: "unsupported", reason: "no delivery" }, "a row with no cadence at all");
 });

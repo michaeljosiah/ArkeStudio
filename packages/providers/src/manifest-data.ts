@@ -208,8 +208,10 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       id: "eleven-v3", providerModelId: "eleven_v3", provider: "elevenlabs", capability: "voice-tts", displayName: "Eleven v3",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: { audioFormat: "mp3", maxPromptChars: 5000 },
       pricing: { kind: "perCharacter", microUsdPerCharacter: 100 },
+      // A phrase goes in as one more bracket tag (SPEC-047 R-7): v3 reads `[to the water, flat]`
+      // as it reads `[whispers]`, best effort, and the audiobook's block panel offers it.
       cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: { min: 0.7, max: 1.2 },
-        pause: "best-effort-audio-tag", emphasis: "best-effort-capitalization", breath: "best-effort-audio-tag", outputTimestamps: "none",
+        pause: "best-effort-audio-tag", emphasis: "best-effort-capitalization", breath: "best-effort-audio-tag", outputTimestamps: "none", phrase: "best-effort-tag",
         deliveryMappings: { measured: { settings: { stability: 0.5 } }, whispered: { settings: { stability: 0.5 }, tag: "whispers" },
           breaking: { settings: { stability: 0 }, tag: "crying" }, cold: { settings: { stability: 1 }, tag: "coldly" },
           warm: { settings: { stability: 0.5 }, tag: "warmly" }, urgent: { settings: { stability: 0 }, tag: "urgent" } } },
@@ -252,6 +254,9 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       pricing: { kind: "perCharacter", microUsdPerCharacter: 40, unit: "cjk-double" },
       cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: { min: 0.7, max: 1.2 },
         pause: "best-effort-audio-tag", emphasis: "unsupported", breath: "best-effort-audio-tag", outputTimestamps: "none", tagSyntax: "paren",
+        // A phrase is a sentence beside the text, after the delivery's (SPEC-047 R-7): Breeze's
+        // `instructions` field takes prose, so the author's words go there and never into the line.
+        phrase: "best-effort-instruction",
         // The one table (contracts `BREEZE_DELIVERY`): the bench path reads its numbers and words
         // through `deliveryParams` and `breezeDirection`, the performance path through this row.
         deliveryMappings: BREEZE_DELIVERY },
@@ -276,6 +281,9 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       pricing: { kind: "perCharacter", microUsdPerCharacter: 15, unit: "utf8-byte" },
       cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: { min: 0.7, max: 1.3 },
         pause: "best-effort-audio-tag", emphasis: "unsupported", breath: "best-effort-audio-tag", outputTimestamps: "none",
+        // A phrase is one more bracket phrase in the text (SPEC-047 R-7), read as language like
+        // the delivery's; unprobed like every phrase here, and the listen tunes it (SPEC-046 R-22).
+        phrase: "best-effort-tag",
         deliveryMappings: FISH_DELIVERY },
     },
     {

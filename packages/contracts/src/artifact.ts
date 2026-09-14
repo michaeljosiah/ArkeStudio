@@ -186,6 +186,14 @@ export const ArtifactAudiobookGenerationSchema = z
     characters: z.number().int().min(0),
     estimatedMicroUsd: z.number().int().min(0),
     costMicroUsd: z.number().int().min(0).nullable(),
+    /**
+     * The direction the take was made under (SPEC-047 R-6, R-8): the plan's name, its delivery,
+     * and the digest of the text the reader was actually sent — the words with the tags in —
+     * which lives here and never on the chapter. Absent for a take made with no direction.
+     */
+    directionHash: z.string().min(1).optional(),
+    delivery: z.string().min(1).optional(),
+    providerTextHash: z.string().min(1).optional(),
   })
   .strict();
 export type ArtifactAudiobookGeneration = z.infer<typeof ArtifactAudiobookGenerationSchema>;

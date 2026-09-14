@@ -133,6 +133,10 @@ import {
   deliveryParams as mapDelivery,
   type Delivery,
   type ChapterAudiobook,
+  type AudiobookDirection,
+  type AudiobookDirectionInput,
+  type AudiobookReader,
+  audiobookTextHash,
   narratorFor,
   voiceFormatForModel,
   hostedReaderKeepsSlot,
@@ -265,7 +269,8 @@ import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachm
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { deriveContinuity, makeAdapterContinuityDeriver, readContinuity, type ContinuityDeriver } from "./productions/continuity.js";
 import { castLines, makeAdapterVoicesDeriver, readVoices, type VoicesDeriver } from "./productions/voices.js";
-import { presentTakes, readAudiobook, writeAudiobookBook } from "./productions/audiobook.js";
+import { acceptDirections, directChapter, directableBlocks, makeAdapterDirectionDeriver, type DirectionDeriver } from "./productions/audiobook-direction.js";
+import { checkDirection, directionPlan, presentTakes, readAudiobook, writeAudiobookBook, writeBlockDirection } from "./productions/audiobook.js";
 import { runAudiobookChapter } from "./productions/audiobook-run.js";
 import { exportManuscript, importManuscript, readManuscript } from "./productions/manuscript.js";
 import { manuscriptChapters, productionShape, type StructuredDocument } from "@arke-studio/contracts";
@@ -866,6 +871,8 @@ export interface CoordinatorOptions {
   continuityDeriver?: ContinuityDeriver;
   /** Turn 130: the cast-of-lines model seam; every quote is re-verified regardless (SPEC-012 R-45). */
   voicesDeriver?: VoicesDeriver;
+  /** Turn 146: the direction model seam; every control is re-verified against the block's reader regardless (SPEC-047 R-10). */
+  directionDeriver?: DirectionDeriver;
   /** Desktop-owned update commands. Electron APIs remain outside the coordinator. */
   updates?: {
     check: () => Promise<void>;
@@ -1066,6 +1073,14 @@ export class Coordinator {
   private readonly derivingContinuity = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
   /** Chapters whose lines are being cast right now, keyed the same way (turn 130). */
   private readonly castingVoices = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
+  /** `Direct this chapter` runs (turn 146), keyed like the cast's: one per chapter, ended with the world. */
+  private readonly directingChapters = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
+  /**
+   * A proposal not yet answered (SPEC-047 R-10): held by chapter until it is accepted or
+   * discarded and replayed to a window that connects, so a refresh does not lose a card the
+   * model was paid to make. Nothing on disk: a proposal is not a record until it is accepted.
+   */
+  private readonly heldDirections = new Map<string, Extract<DomainEvent, { type: "direction.finished" }>>();
   /** A chapter being read into kept takes (turn 146, SPEC-047 R-16), keyed and ended as the cast's runs are. */
   private readonly readingAudiobooks = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
   /** The request each audiobook run is asked under, by run key, so a replayed start names the same one. */
@@ -1100,6 +1115,22 @@ export class Coordinator {
   private static readonly MAX_STAGED_CLIPS = 8;
 
   /** The same recipe verdict used by Settings and enqueue admission, projected onto voice rows. */
+  /**
+   * The narrator as the audiobook chooses it (turn 146, SPEC-047 R-11, R-12): the app's, when
+   * the catalogue says it can speak now — the manifest still lists a model whose key was
+   * removed or whose engine is down — the local default otherwise; and the catalogue itself,
+   * which the run asks about every other reader. One rule for the run, the block panel's
+   * writes and the derivation, so a fallback is the same voice wherever it is judged.
+   */
+  private async audiobookNarrator(store: WorldStore, voice: VoiceService | null): Promise<{ narrator: AudiobookReader; catalogue: VoiceCandidate[] }> {
+    const narratorSettings = this.appSettings ? await this.appSettings.load() : null;
+    const clonedVoices = store.getBundle().clonedVoices ?? [];
+    const catalogue = voice === null ? [] : ((await voice.catalogue(clonedVoices, await this.comfyUiVoiceAvailability()).catch(() => null)) ?? []);
+    const narrationCatalogue = catalogue.filter((candidate) => supportsVoiceUse(candidate, "narration") && candidate.unavailableReason === undefined);
+    const narrator = narratorFor(narratorSettings?.narrator ?? null, narrationCatalogue);
+    return { narrator: { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId, ...(narrator.label !== undefined ? { label: narrator.label } : {}) }, catalogue };
+  }
+
   private async comfyUiVoiceAvailability(): Promise<{ local: boolean; unavailableReason?: string }> {
     const service = this.opts.comfyui?.service;
     if (!service) {
@@ -2370,6 +2401,10 @@ export class Coordinator {
         for (const run of this.castingVoices.values()) {
           replayed.push({ at: new Date().toISOString(), type: "voices.started", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId });
         }
+        for (const run of this.directingChapters.values()) {
+          replayed.push({ at: new Date().toISOString(), type: "direction.started", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId });
+        }
+        for (const held of this.heldDirections.values()) replayed.push({ ...held, at: new Date().toISOString() });
         // The counts are not known here; the renderer learns them from the next progress event,
         // and what a reload must not hide is that a paid run is going and can be stopped.
         for (const [key, run] of this.readingAudiobooks) {
@@ -11501,6 +11536,138 @@ export class Coordinator {
         this.readingAudiobooks.get(`${msg.worldId}/${msg.productionId}/${chapter?.file ?? msg.chapterFile}`)?.control.abort();
         return;
       }
+      case "set-audiobook-block": {
+        // One block's direction, set or cleared by hand (turn 146, SPEC-047 R-6, R-9): held to
+        // the block's words and its reader's row before it is written, refused in one clause
+        // otherwise, and the record answered to every window as a run's finished one is.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id };
+        const at = () => new Date().toISOString();
+        try {
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService);
+          const { chapter: opened, blocks, planned } = await directableBlocks(store, msg.productionId, chapter.id, { narrator, models: this.opts.manifest?.models ?? [] });
+          const block = blocks.find((candidate) => candidate.key === msg.block);
+          if (block === undefined) {
+            this.emit({ at: at(), type: "audiobook.record", ...ids, refused: planned.some((p) => p.block.key === msg.block) ? "no reader for this block" : "that block is no longer in the chapter" });
+            return;
+          }
+          let direction: AudiobookDirection | null = null;
+          if (msg.direction !== null) {
+            const plan = directionPlan(block.text, msg.direction);
+            const check = checkDirection(block.text, plan, block.model, block.language);
+            if (!check.ok) {
+              this.emit({ at: at(), type: "audiobook.record", ...ids, refused: check.reason });
+              return;
+            }
+            direction = { textHash: audiobookTextHash(block.text), plan, at: store.now() };
+          }
+          const record = await writeBlockDirection(store, msg.productionId, opened, planned.map((p) => p.block), msg.block, direction);
+          this.refreshIfStillOpen(store);
+          this.emit({ at: at(), type: "audiobook.record", ...ids, record });
+        } catch (err) {
+          void this.appLog?.append({ kind: "audiobook.direction-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+          this.emit({ at: at(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(err) });
+        }
+        return;
+      }
+      case "direct-chapter": {
+        // `Direct this chapter` (turn 146, SPEC-047 R-10): the cast's derivation turned on
+        // performance — one run per chapter at a time, ended with the world, every control
+        // verified against the block's reader — and its result a card the window holds until
+        // it is accepted whole or discarded. Nothing is written here.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const key = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
+        if (this.directingChapters.has(key)) return;
+        const control = new AbortController();
+        this.directingChapters.set(key, { control, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id });
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id };
+        const at = () => new Date().toISOString();
+        const finished = (
+          outcome: "directed" | "stopped" | "unavailable" | "failed",
+          counts: { directed: number; dropped: number },
+          extra: { reason?: string; summary?: string; proposed?: Record<string, AudiobookDirectionInput>; hash?: string; chapterVersion?: number } = {},
+        ) => {
+          const event: Extract<DomainEvent, { type: "direction.finished" }> = { at: at(), type: "direction.finished", ...ids, outcome, ...counts, ...extra };
+          if (outcome === "directed") this.heldDirections.set(key, event);
+          this.emit(event);
+        };
+        this.heldDirections.delete(key);
+        this.emit({ at: at(), type: "direction.started", ...ids });
+        const none = { directed: 0, dropped: 0 };
+        try {
+          let deriver = this.opts.directionDeriver ?? null;
+          if (!deriver && this.opts.adapter?.readiness().ready && this.opts.authoring) {
+            deriver = makeAdapterDirectionDeriver(
+              this.opts.adapter,
+              this.sessionInput,
+              this.opts.appRoot ? join(this.opts.appRoot, ".extract") : `${this.opts.changeLogPath}.extract`,
+            );
+          }
+          if (!deriver) {
+            void this.appLog?.append({ kind: "direction.unavailable", chapter: chapter.file, reason: "directing needs the authoring harness running" });
+            finished("unavailable", none, { reason: "the writing service is not running" });
+            return;
+          }
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService);
+          const result = await directChapter(store, msg.productionId, chapter.id, deriver, { narrator, models: this.opts.manifest?.models ?? [] }, control.signal);
+          finished("directed", { directed: result.directed, dropped: result.dropped }, {
+            proposed: result.proposed,
+            hash: result.hash,
+            chapterVersion: result.chapterVersion,
+            ...(result.summary !== undefined ? { summary: result.summary } : {}),
+          });
+        } catch (err) {
+          if (control.signal.aborted) {
+            finished("stopped", none);
+            return;
+          }
+          void this.appLog?.append({ kind: "direction.failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+          finished("failed", none, { reason: describeCoordinatorError(err) });
+        } finally {
+          store.closingSignal.removeEventListener("abort", onClose);
+          this.directingChapters.delete(key);
+        }
+        return;
+      }
+      case "discard-direction": {
+        const store = this.opts.provider.openStore?.();
+        const chapter = store?.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        this.heldDirections.delete(`${msg.worldId}/${msg.productionId}/${chapter?.file ?? msg.chapterFile}`);
+        return;
+      }
+      case "accept-direction": {
+        // The card accepted whole (turn 146, SPEC-047 R-10): every direction checked once more
+        // against the chapter as it stands, the record written and nothing else.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id };
+        const at = () => new Date().toISOString();
+        try {
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService);
+          const accepted = await acceptDirections(store, msg.productionId, chapter.id, { hash: msg.hash, directions: msg.directions }, { narrator, models: this.opts.manifest?.models ?? [] });
+          if (accepted.outcome === "refused") {
+            this.emit({ at: at(), type: "audiobook.record", ...ids, refused: accepted.reason });
+            return;
+          }
+          this.heldDirections.delete(`${msg.worldId}/${msg.productionId}/${chapter.file}`);
+          this.refreshIfStillOpen(store);
+          this.emit({ at: at(), type: "audiobook.record", ...ids, record: accepted.record, dropped: accepted.dropped });
+        } catch (err) {
+          void this.appLog?.append({ kind: "audiobook.direction-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+          this.emit({ at: at(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(err) });
+        }
+        return;
+      }
       case "set-audiobook-reading": {
         // The book's reading (turn 146, SPEC-047 R-11): one choice for the whole book, kept
         // beside the chapters' records and read by every run; every take stands, and the blocks
@@ -11544,23 +11711,18 @@ export class Coordinator {
         const onClose = () => control.abort();
         store.closingSignal.addEventListener("abort", onClose, { once: true });
         try {
-          const narratorSettings = this.appSettings ? await this.appSettings.load() : null;
-          const clonedVoices = store.getBundle().clonedVoices ?? [];
-          // The catalogue says whether a concrete voice can speak now (turn 130's rule): the
-          // manifest still lists a model whose key was removed or whose engine is down.
-          const catalogue = (await voice.catalogue(clonedVoices, await this.comfyUiVoiceAvailability()).catch(() => null)) ?? [];
-          const narrationCatalogue = catalogue.filter((candidate) => supportsVoiceUse(candidate, "narration") && candidate.unavailableReason === undefined);
-          const narrator = narratorFor(narratorSettings?.narrator ?? null, narrationCatalogue);
+          const { narrator, catalogue } = await this.audiobookNarrator(store, voice);
           await runAudiobookChapter({
             store,
             worldId: msg.worldId,
             productionId: msg.productionId,
             chapterId: chapter.id,
             models: this.opts.manifest?.models ?? [],
-            narrator: { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId, ...(narrator.label !== undefined ? { label: narrator.label } : {}) },
+            narrator,
             catalogue,
             signal: control.signal,
             ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
+            ...(msg.blocks !== undefined ? { only: msg.blocks } : {}),
             // The voice and the vendor on the question (SPEC-046 R-16): a hosted reader's
             // consent is per voice, written onto the library entry; without `reader` only the
             // engine's destination is asked about, and a hosted line is refused at dispatch
@@ -11576,6 +11738,7 @@ export class Coordinator {
             // One synthesis at a time on the engine is the voice service's rule, whoever asks
             // (codex on PR 1180): two chapters read at once take turns there, as a page read does.
             localSpeech: (voiceId, text, signal) => voice.localSpeech(store, voiceId, text, undefined, { signal }),
+            synthesizeLocal: (voiceId, text, settings, signal) => voice.synthesizePerformance(voiceId, text, settings, signal),
             enqueue: async (inputs) => {
               // The engine a cloned voice's recording was allowed to go to rides on the job, as
               // the voiced read's does (SPEC-022): without it every uncached cloned line fails.
@@ -16447,6 +16610,7 @@ export class Coordinator {
       // than waiting on every pass (codex on PR 907), and the last record stands.
       for (const run of this.derivingContinuity.values()) run.control.abort();
       for (const run of this.castingVoices.values()) run.control.abort();
+      for (const run of this.directingChapters.values()) run.control.abort();
       for (const run of this.readingAudiobooks.values()) run.control.abort();
       for (const handle of this.exports.values()) handle.cancel();
       // Nothing awaits the backfill, but it should stop trying: its next write would be refused

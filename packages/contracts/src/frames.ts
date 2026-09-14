@@ -1,7 +1,7 @@
 import { valueSchema } from "./value-schema.js";
 import { StageReferenceFrameSchema } from "./scene.js";
 import { isManuscriptLanguage } from "./manuscript.js";
-import { AudiobookReadingSchema } from "./audiobook.js";
+import { AudiobookDirectionInputSchema, AudiobookReadingSchema } from "./audiobook.js";
 import { StageInspectionFrameSchema } from "./stage-construction.js";
 import { DialogueFailureTagSchema } from "./take-feedback.js";
 import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
@@ -2867,6 +2867,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       confirmationToken: z.string().min(1).optional(),
       /** A cloned voice among the readers: the remote engine its recording may go to (SPEC-022, SPEC-046). */
       voiceUploadConfirmedFor: z.string().min(1).optional(),
+      /** These blocks alone, made again whatever their state — the panel's `Make again` (SPEC-047 R-30). */
+      blocks: z.array(z.string().min(1)).min(1).max(400).optional(),
     })
     .strict(),
   z
@@ -2874,6 +2876,37 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   z
     .object({ kind: z.literal("set-audiobook-reading"), worldId: UlidSchema, productionId: SlugSchema, reading: AudiobookReadingSchema })
+    .strict(),
+  /**
+   * Direction beside the prose (SPEC-047 R-6..R-10): one block's plan set by hand, or cleared;
+   * a chapter directed by the model — a derivation in the cast's discipline whose result is a
+   * card accepted whole or discarded; and the acceptance, which writes the record and nothing
+   * else. The coordinator supplies every hash from the block's words and refuses a control the
+   * block's reader declares unsupported, so nothing reaches a run that could only flag it.
+   */
+  z
+    .object({
+      kind: z.literal("set-audiobook-block"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      block: z.string().min(1),
+      direction: AudiobookDirectionInputSchema.nullable(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("direct-chapter"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
+  /** The card put away: the coordinator holds a proposal until it is accepted or discarded, so a window that reconnects sees it again. */
+  z.object({ kind: z.literal("discard-direction"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
+  z
+    .object({
+      kind: z.literal("accept-direction"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      /** The prose the directions were made for: a chapter that moved since refuses them. */
+      hash: z.string().min(1),
+      directions: z.record(z.string().min(1), AudiobookDirectionInputSchema),
+    })
     .strict(),
   /**
    * A manuscript out and a manuscript in (turn 131, SPEC-012 §2.4.3). The export lands under

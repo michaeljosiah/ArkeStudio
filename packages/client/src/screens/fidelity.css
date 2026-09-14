@@ -6767,6 +6767,27 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ab__play { width: 18px; height: 18px; padding: 0; border: 0; background: transparent; color: var(--muted-foreground); cursor: pointer; font-size: 10px; }
 .fy-ab__foot { display: flex; align-items: center; gap: 14px; padding: 10px 0 16px; border-top: 1px solid var(--border); font: 400 10.5px var(--font-mono); color: var(--neutral-400); }
 .fy-ab__foot-push { flex: 1; }
+/* The block's direction (turn 146, SPEC-047 R-6, R-9): a label, then the control; a delivery
+   the reader lacks is struck with its reason on the control, never explained under it. */
+.fy-ab__direction { display: flex; flex-direction: column; gap: 8px; }
+.fy-ab__row { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.fy-ab__label { font: 500 10.5px var(--font-sans); color: var(--muted-foreground); }
+.fy-ab__seg { flex-wrap: wrap; row-gap: 2px; }
+.fy-ab__seg .fy-seg__item { padding: 2px 6px; font-size: 10.5px; }
+.fy-ab__seg-item--off { text-decoration: line-through; color: var(--neutral-400); cursor: default; }
+.fy-ab__seg-item--off:hover { color: var(--neutral-400); }
+.fy-ab__phrase { flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; font-size: 11px; background: var(--background); color: var(--foreground); }
+.fy-ab__off { font-size: 10.5px; color: var(--neutral-400); }
+.fy-ab__cues { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.fy-ab__cue { display: inline-flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--foreground); }
+.fy-ab__cue-x { border: 0; background: transparent; padding: 0 2px; color: var(--muted-foreground); cursor: pointer; font-size: 12px; line-height: 1; }
+.fy-ab__cue-add { display: flex; gap: 10px; padding-top: 2px; }
+.fy-ab__again { padding-top: 8px; }
+/* The card `Direct this chapter` leaves in the dock (R-10): the model's sentence, the counts as data. */
+.fy-ab__card { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+.fy-ab__card-title { margin: 0; font: 500 12.5px var(--font-sans); color: var(--foreground); }
+.fy-ab__card-text { margin: 0; font: 400 12.5px/1.6 var(--font-sans); color: var(--foreground); }
+.fy-ab__card-line { margin: 0; font-size: 10.5px; color: var(--muted-foreground); }
 .fy-ch__viewrow { margin-top: 10px; align-self: flex-start; }
 .fy-ch__target { height: 4px; border-radius: 99px; background: var(--secondary); margin-top: 7px; overflow: hidden; }
 .fy-ch__target > span { display: block; height: 100%; background: var(--foreground); }

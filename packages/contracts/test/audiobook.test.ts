@@ -2,17 +2,22 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   AUDIOBOOK_TITLE_KEY,
+  AudiobookDirectionSchema,
   audiobookBlocks,
   audiobookBlockState,
   audiobookChapterComplete,
   audiobookCounts,
+  audiobookDirectionFor,
+  audiobookDirectionHash,
   audiobookHeading,
   audiobookTextHash,
   ChapterAudiobookSchema,
   summariseAudiobook,
+  type AudiobookDirection,
   type AudiobookReader,
   type ChapterAudiobook,
 } from "../src/audiobook.js";
+import type { CadencePlan } from "../src/cadence.js";
 
 /**
  * The audiobook's blocks and states (design turn 146, SPEC-047 R-2, R-13, R-14): the title
@@ -25,9 +30,12 @@ const BODY = "Maren counted the bells.\n\n***\n\n“That is not how it works,”
 const CAST = { lines: [{ speaker: "Maren Kest", sheet: "maren-kest", paragraph: 2, occurrence: 0, quote: "“That is not how it works,”" }] };
 const AT = "2026-09-14T09:00:00.000Z";
 
-function record(takes: ChapterAudiobook["takes"], flags: ChapterAudiobook["flags"] = {}): ChapterAudiobook {
-  return { schemaVersion: 1, chapterVersion: 4, hash: "sha256:body", updatedAt: AT, takes, flags };
+function record(takes: ChapterAudiobook["takes"], flags: ChapterAudiobook["flags"] = {}, direction: ChapterAudiobook["direction"] = {}): ChapterAudiobook {
+  return { schemaVersion: 1, chapterVersion: 4, hash: "sha256:body", updatedAt: AT, takes, flags, direction };
 }
+const SOURCE = `sha256:${"a".repeat(64)}`;
+const plan = (extra: Partial<CadencePlan> = {}): CadencePlan => ({ schemaVersion: 1, sourceTextHash: SOURCE, delivery: "measured", speed: 1, cues: [], ...extra });
+const directed = (text: string, p: CadencePlan): AudiobookDirection => ({ textHash: audiobookTextHash(text), plan: p, at: AT });
 
 const take = (text: string, reader: AudiobookReader, extra: Partial<ChapterAudiobook["takes"][string]> = {}) => ({
   artifactId: "ar_01J8F3K2QW9VZX4N7M0RTYB6H1",
@@ -106,6 +114,31 @@ describe("a block's state (R-13, R-14)", () => {
     assert.ok(counts.toMake.includes(narration.key));
   });
 
+  it("is stale when the direction changed since the take, and a direction authored for other words is none (R-9, R-14)", () => {
+    const made = record({ [narration.key]: take(narration.text, GEORGE) });
+    assert.equal(audiobookBlockState(narration, made, GEORGE), "made", "no direction, a take made with none");
+    const withDirection = record({ [narration.key]: take(narration.text, GEORGE) }, {}, { [narration.key]: directed(narration.text, plan({ delivery: "urgent" })) });
+    assert.equal(audiobookBlockState(narration, withDirection, GEORGE), "stale", "a direction added since the take");
+    const hash = audiobookDirectionHash(plan({ delivery: "urgent" }));
+    const under = record({ [narration.key]: take(narration.text, GEORGE, { directionHash: hash }) }, {}, { [narration.key]: directed(narration.text, plan({ delivery: "urgent" })) });
+    assert.equal(audiobookBlockState(narration, under, GEORGE), "made", "the take was made under the direction that stands");
+    const changed = record({ [narration.key]: take(narration.text, GEORGE, { directionHash: hash }) }, {}, { [narration.key]: directed(narration.text, plan({ delivery: "urgent", phrase: "flat" })) });
+    assert.equal(audiobookBlockState(narration, changed, GEORGE), "stale", "a phrase added is a different direction");
+    const dropped = record({ [narration.key]: take(narration.text, GEORGE, { directionHash: hash }) });
+    assert.equal(audiobookBlockState(narration, dropped, GEORGE), "stale", "the direction cleared since the take");
+    const otherWords = record({ [narration.key]: take(narration.text, GEORGE) }, {}, { [narration.key]: directed("other words entirely", plan({ delivery: "urgent" })) });
+    assert.equal(audiobookDirectionFor(otherWords, narration), null, "a direction keyed to another hash is no direction");
+    assert.equal(audiobookBlockState(narration, otherWords, GEORGE), "made", "and the undirected take stands");
+  });
+
+  it("names a direction the same whatever order its fields came in, and differently for any change", () => {
+    const a = audiobookDirectionHash({ schemaVersion: 1, sourceTextHash: SOURCE, delivery: "cold", speed: 0.9, cues: [{ kind: "pause", at: 4, length: "long" }], phrase: "flat" });
+    const b = audiobookDirectionHash({ phrase: "flat", cues: [{ length: "long", at: 4, kind: "pause" }], speed: 0.9, delivery: "cold", sourceTextHash: SOURCE, schemaVersion: 1 } as CadencePlan);
+    assert.equal(a, b);
+    assert.notEqual(a, audiobookDirectionHash(plan({ delivery: "cold", speed: 0.9, cues: [{ kind: "pause", at: 4, length: "short" }], phrase: "flat" })));
+    assert.notEqual(a, audiobookDirectionHash(plan({ delivery: "cold", speed: 0.9, cues: [{ kind: "pause", at: 4, length: "long" }] })));
+  });
+
   it("is flagged while the flag is newer than any take, and made once a later take replaces it", () => {
     const flagged = record({}, { [line.key]: { reason: "the reader refused", at: AT } });
     assert.equal(audiobookBlockState(line, flagged, ANNA), "flagged");
@@ -131,6 +164,11 @@ describe("the record", () => {
   it("parses, and its summary carries the counts alone", () => {
     const rec = record({ p0: take("words", GEORGE) }, { p1: { reason: "x", at: AT } });
     assert.ok(ChapterAudiobookSchema.safeParse(rec).success);
+    const { direction: _none, ...firstBuild } = rec;
+    const parsed = ChapterAudiobookSchema.safeParse(firstBuild);
+    assert.ok(parsed.success && Object.keys(parsed.data.direction).length === 0, "a record the first build wrote, with no direction field, reads with none");
+    assert.ok(!AudiobookDirectionSchema.safeParse({ textHash: "text-v1:x", plan: plan({ phrase: "x".repeat(61) }), at: AT }).success, "a phrase over 60 characters is refused");
+    assert.ok(!AudiobookDirectionSchema.safeParse({ textHash: "text-v1:x", plan: plan({ speed: 1.3 }), at: AT }).success, "speed is the plan's own 0.7–1.2");
     assert.deepEqual(summariseAudiobook(rec), { chapterVersion: 4, hash: "sha256:body", updatedAt: AT, takes: 1, flagged: 1 });
     assert.ok(!ChapterAudiobookSchema.safeParse({ ...rec, extra: true }).success, "strict: a field this build does not know is not a record");
   });
