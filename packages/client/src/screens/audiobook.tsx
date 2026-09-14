@@ -139,7 +139,9 @@ export function AudiobookScreen() {
       : book?.state === "failed" || book?.state === "unavailable"
         ? `could not read · ${book.reason ?? "the run failed"}`
         : book?.state === "read" && book.chaptersRefused > 0
-          ? `${book.chaptersRefused} chapter${book.chaptersRefused === 1 ? "" : "s"} left to its row`
+          ? book.chaptersRefused === 1
+            ? "1 chapter left to its row"
+            : `${book.chaptersRefused} chapters left to their rows`
           : null;
   const primary = (() => {
     if (upload !== null && book?.state !== "read") {
