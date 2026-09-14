@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AUDIOBOOK_TITLE_KEY,
   DEFAULT_NARRATOR,
@@ -10,6 +10,7 @@ import {
   formatMicroUsd,
   legacyVoiceModel,
   narratorFor,
+  supportsVoiceUse,
   type ArtifactSidecar,
   type AudiobookBlock,
   type AudiobookBlockState,
@@ -23,10 +24,10 @@ import {
 } from "@arke-studio/contracts";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
 import { Button } from "../components/ui.js";
-import { clearQueue, dismissPlayback, enqueueClip, jumpQueue, playClip, playbackSnapshot, useQueueAt } from "../lib/audio.js";
+import { clearQueue, dismissPlayback, enqueueClip, jumpQueue, playClip, playbackSnapshot, usePlayback, useQueueAt } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
 import {
-  dismissAudiobookPrice,
+  dismissAudiobookRun,
   readAudiobookChapter,
   stopAudiobook,
   subscribeVoiceUploadConfirmations,
@@ -52,6 +53,11 @@ export interface ChapterAudiobookInput {
   reading: AudiobookReading;
   connection: string;
   locked: boolean;
+  /**
+   * The press waits out the autosave (R-2): true when the read may go now; false when the
+   * workspace has taken it, flushed the draft, and will send it once the save lands.
+   */
+  beforeRead?: () => boolean;
 }
 
 export interface BlockRow {
@@ -83,8 +89,12 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const at = useQueueAt();
   const [selected, setSelected] = useState<string | null>(null);
 
+  // The narrator as the coordinator chooses it (codex on PR 1180): a stored narrator whose
+  // voice cannot speak now falls back the same way on both sides, or the client would judge
+  // every take of the local fallback stale against a voice the run never used.
   const narrator = useMemo<AudiobookReader>(() => {
-    const chosen = narratorFor(state?.app.narrator ?? null, catalogue ?? []);
+    const speakable = (catalogue ?? []).filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined);
+    const chosen = narratorFor(state?.app.narrator ?? null, speakable);
     return { provider: chosen.provider, model: chosen.model, voiceId: chosen.voiceId, label: chosen.label ?? DEFAULT_NARRATOR.label };
   }, [state?.app.narrator, catalogue]);
   const models = state?.app.manifest?.models ?? [];
@@ -130,7 +140,10 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   // The player: the made takes in order, through the one queue the page read uses (R-20).
   const playable = useMemo(() => rows.filter((row) => row.state === "made" && row.artifact !== null), [rows]);
   const queueId = `audiobook:${worldId}/${prodId}/${chapter.id}`;
-  const playing = at !== null && playbackSnapshot().clip?.id === queueId;
+  // A queue that has run dry rests on `ended` with `at` one past its last piece (codex on PR
+  // 1180): that is not playing, and the head goes back to Play rather than `N+1 of N · Stop`.
+  const playback = usePlayback();
+  const playing = at !== null && at < playable.length && playback.status !== "ended" && playback.clip?.id === queueId;
   const play = useCallback(() => {
     if (world === null || playable.length === 0) return;
     clearQueue();
@@ -164,11 +177,29 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   );
 
   const reading_ = run?.state === "reading";
+  // The engine a cloned voice's recording was allowed to go to, kept for the rest of this
+  // window's presses (codex on PR 1180): a cast with a cloned voice and a paid one is asked for
+  // consent first and the price second, and the price's answer must carry the consent too, or
+  // the restarted run asks for consent again and the two prompts chase each other for ever.
+  const uploadAllowed = useRef<string | null>(null);
+  const send = useCallback(
+    (options: { confirmationToken?: string; voiceUploadConfirmedFor?: string } = {}) => {
+      const consent = options.voiceUploadConfirmedFor ?? uploadAllowed.current ?? undefined;
+      readAudiobookChapter(worldId, prodId, chapter.file, {
+        ...(options.confirmationToken !== undefined ? { confirmationToken: options.confirmationToken } : {}),
+        ...(consent !== undefined ? { voiceUploadConfirmedFor: consent } : {}),
+      });
+    },
+    [worldId, prodId, chapter.file],
+  );
   const begin = useCallback(() => {
     if (locked || connection !== "open" || reading_) return;
+    // Unsaved typing is not what is read (R-2): the press waits out the autosave, as the
+    // chapter's other reads do, and the workspace sends it once the save lands.
+    if (input.beforeRead !== undefined && !input.beforeRead()) return;
     setUpload(null);
-    readAudiobookChapter(worldId, prodId, chapter.file);
-  }, [locked, connection, reading_, worldId, prodId, chapter.file]);
+    send();
+  }, [locked, connection, reading_, input, send]);
 
   const head = (() => {
     if (upload !== null && run?.state !== "read") {
@@ -177,12 +208,12 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
           destinationLabel={upload.destination}
           onCancel={() => {
             setUpload(null);
-            dismissAudiobookPrice(worldId, prodId, chapter.id);
+            dismissAudiobookRun(worldId, prodId, chapter.id);
           }}
           onConfirm={() => {
-            const token = upload.token;
+            uploadAllowed.current = upload.token;
             setUpload(null);
-            readAudiobookChapter(worldId, prodId, chapter.file, { voiceUploadConfirmedFor: token });
+            send({ voiceUploadConfirmedFor: upload.token });
           }}
         />
       );
@@ -192,13 +223,13 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       return (
         <span className="fy-ab__control">
           <Button
-            onClick={() => readAudiobookChapter(worldId, prodId, chapter.file, { confirmationToken: price.confirmationToken })}
+            onClick={() => send({ confirmationToken: price.confirmationToken })}
             title="the words and the voice go to the provider · the text stays in Activity"
           >
             Confirm {price.characters.toLocaleString()} characters · {formatMicroUsd(price.estimatedMicroUsd)}
             {price.voices.map((voice) => ` · ${voice.label} · ${voice.provider}`).join("")}
           </Button>
-          <Button variant="ghost" onClick={() => dismissAudiobookPrice(worldId, prodId, chapter.id)}>
+          <Button variant="ghost" onClick={() => dismissAudiobookRun(worldId, prodId, chapter.id)}>
             Cancel
           </Button>
         </span>
@@ -296,20 +327,31 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelect, onPlayOne,
 }
 
 /** The side in the Audiobook view: the block pressed, then its takes. */
-export function AudiobookSide({ rows, selected, record, artifacts, slug, chapterTitle }: {
+export function AudiobookSide({ rows, selected, record, artifacts, slug, productionId, chapterId, chapterTitle }: {
   rows: BlockRow[];
   selected: string | null;
   record: ChapterAudiobook | null;
   artifacts: readonly ArtifactSidecar[];
   slug: string | undefined;
+  productionId: string;
+  chapterId: string;
   chapterTitle: string;
 }) {
   const row = rows.find((candidate) => candidate.block.key === selected) ?? null;
   if (row === null) return null;
   const take = record?.takes[row.block.key];
   const flag = record?.flags[row.block.key];
+  // This chapter's takes of this block (codex on PR 1180): every chapter has a `title` and a
+  // `p0.0`, so the key alone would list another chapter's reading under this one's name.
   const takes = artifacts
-    .filter((artifact) => artifact.generation?.source === "audiobook" && artifact.generation.block === row.block.key && artifact.retiredAt === undefined)
+    .filter(
+      (artifact) =>
+        artifact.generation?.source === "audiobook" &&
+        artifact.generation.productionId === productionId &&
+        artifact.generation.chapterId === chapterId &&
+        artifact.generation.block === row.block.key &&
+        artifact.retiredAt === undefined,
+    )
     .sort((a, b) => (a.created < b.created ? 1 : -1));
   const readerLabel = `${row.assigned.label ?? row.assigned.voiceId} · ${row.assigned.provider}`;
   return (

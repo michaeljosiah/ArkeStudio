@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { ChapterAudiobookSchema, type ClientMessage, type DomainEvent, type ManifestModel, type VoiceCandidate } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
+import { priorPartJob, type PartIdentity } from "../../src/productions/audiobook-run.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
@@ -125,6 +126,41 @@ async function withHarness(
 
 const read = (send: (message: ClientMessage) => Promise<void>, extra: { confirmationToken?: string } = {}) =>
   send({ kind: "read-audiobook-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", ...extra });
+
+describe("a part already in the queue (codex on PR 1180)", () => {
+  const identity: PartIdentity = { productionId: LEDGER, chapterId: "neap", block: "p0.0", textHash: "text-v1:abc", provider: "elevenlabs", model: ELEVEN.id, voiceId: "v_8Kq2", parts: 1 };
+  const job = (id: string, status: string, extra: Record<string, unknown> = {}, params: Record<string, unknown> = {}) =>
+    ({
+      id,
+      status,
+      provider: "elevenlabs",
+      model: ELEVEN.id,
+      target: { kind: "voice-preview", id: "x" },
+      params: { purpose: "audiobook", productionId: LEDGER, chapterId: "neap", block: "p0.0", textHash: "text-v1:abc", voiceId: "v_8Kq2", part: 0, parts: 1, ...params },
+      ...extra,
+    }) as unknown as import("@arke-studio/contracts").Job;
+
+  it("finds a landed job to file rather than asking for the part again", () => {
+    const found = priorPartJob([job("j1", "succeeded", { landedFiles: [".staging/audiobook/x/p0-0.mp3"] })], identity, 0);
+    assert.equal(found?.kind, "landed");
+    assert.equal(found?.job.id, "j1");
+  });
+
+  it("waits for a job still being made, and the newest row wins over an older failure", () => {
+    const found = priorPartJob([job("j1", "failed"), job("j2", "running")], identity, 0);
+    assert.equal(found?.kind, "running");
+    assert.equal(found?.job.id, "j2");
+  });
+
+  it("nothing usable: a failed job, another part, other words, another voice or another chapter", () => {
+    assert.equal(priorPartJob([job("j1", "failed")], identity, 0), null);
+    assert.equal(priorPartJob([job("j1", "succeeded", { landedFiles: ["a"] }, { part: 1 })], identity, 0), null);
+    assert.equal(priorPartJob([job("j1", "succeeded", { landedFiles: ["a"] }, { textHash: "text-v1:other" })], identity, 0), null);
+    assert.equal(priorPartJob([job("j1", "succeeded", { landedFiles: ["a"] }, { voiceId: "other" })], identity, 0), null);
+    assert.equal(priorPartJob([job("j1", "succeeded", { landedFiles: ["a"] }, { chapterId: "slack-water" })], identity, 0), null);
+    assert.equal(priorPartJob([job("j1", "succeeded", { landedFiles: ["a"] }, { productionId: "other" })], identity, 0), null, "another production's job is not this one's part");
+  });
+});
 
 describe("the audiobook run (turn 146)", () => {
   it("reads every block in the narrator's voice, files each take as the production's artifact, and a second press makes nothing", () =>

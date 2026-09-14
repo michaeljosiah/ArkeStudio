@@ -11475,6 +11475,7 @@ export class Coordinator {
             cancelJob: async (jobId) => {
               await this.jobQueue?.cancel(jobId).catch(() => {});
             },
+            findJobs: () => this.jobQueue?.listJobs() ?? [],
             actualCost: async (jobId) => (this.ledger ? ((await this.ledger.readAll()).find((entry) => entry.jobId === jobId)?.actualMicroUsd ?? null) : null),
             ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
             now: () => store.now(),

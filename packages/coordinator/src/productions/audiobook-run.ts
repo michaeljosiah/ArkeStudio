@@ -60,6 +60,8 @@ export interface AudiobookRunDeps {
   enqueue: (inputs: EnqueueInput[]) => Promise<{ jobIds: string[]; reason?: string }>;
   waitForJob: (jobId: string) => Promise<Job>;
   cancelJob: (jobId: string) => Promise<void>;
+  /** Every job the queue holds, so a part already paid for is found before another is asked for (R-16). */
+  findJobs: () => readonly Job[];
   actualCost: (jobId: string) => Promise<number | null>;
   mediaProbe?: MediaProbe;
   emit: (event: AudiobookRunEvent) => void;
@@ -96,6 +98,48 @@ const sameReader = (a: AudiobookReader, b: AudiobookReader): boolean => a.provid
 
 /** The record could not be written: the world's claim is gone, or it closed under the run. Nothing more can be kept. */
 class RecordWriteError extends Error {}
+
+/** What names one part's job, frozen into its params so a later run can find it (R-16). */
+export interface PartIdentity {
+  productionId: string;
+  chapterId: string;
+  block: string;
+  textHash: string;
+  provider: string;
+  model: string;
+  voiceId: string;
+  parts: number;
+}
+
+/**
+ * A part already paid for, or still being made, found in the queue's durable rows before
+ * another request is asked for (codex on PR 1180). A process that exits after a job reaches
+ * its end but before the take is filed loses the waiter and the record write; the job itself,
+ * its landed file and its params survive, and the next press picks up where it left off — a
+ * landed job is filed, a running one is waited for, and only a block with neither is asked for.
+ * The newest match wins: a retry after a failure is a later row.
+ */
+export function priorPartJob(jobs: readonly Job[], identity: PartIdentity, part: number): { kind: "landed" | "running"; job: Job } | null {
+  const matching = jobs.filter(
+    (job) =>
+      job.target.kind === "voice-preview" &&
+      job.params["purpose"] === "audiobook" &&
+      job.params["productionId"] === identity.productionId &&
+      job.params["chapterId"] === identity.chapterId &&
+      job.params["block"] === identity.block &&
+      job.params["textHash"] === identity.textHash &&
+      job.provider === identity.provider &&
+      job.model === identity.model &&
+      job.params["voiceId"] === identity.voiceId &&
+      job.params["part"] === part &&
+      job.params["parts"] === identity.parts,
+  );
+  for (const job of [...matching].reverse()) {
+    if (job.status === "succeeded" && job.landedFiles?.[0] !== undefined) return { kind: "landed", job };
+    if (job.status !== "succeeded" && job.status !== "failed" && job.status !== "cancelled") return { kind: "running", job };
+  }
+  return null;
+}
 
 export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void> {
   const { store, productionId, chapterId, voice, narrator, signal, emit } = deps;
@@ -322,39 +366,72 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
         let estimated = 0;
         let cost: number | null = 0;
         let firstJob: string | undefined;
+        const textHash = audiobookTextHash(block.text);
+        const identity: PartIdentity = {
+          productionId,
+          chapterId: plan.chapter.id,
+          block: block.block.key,
+          textHash,
+          provider: block.model.provider,
+          model: block.model.id,
+          voiceId: block.reader.voiceId,
+          parts: block.parts.length,
+        };
         for (const [index, part] of block.parts.entries()) {
           if (signal.aborted) break;
-          const input: EnqueueInput = {
-            worldId: deps.worldId,
-            productionId,
-            target: { kind: "voice-preview", id: `${block.sheet ?? "narrator"}/${block.model.provider}/${block.model.id}/${block.reader.voiceId}` },
-            capability: "voice-tts",
-            provider: block.model.provider,
-            model: block.model.id,
-            params: {
-              voiceId: block.reader.voiceId,
-              text: part,
-              audioFormat: block.format,
-              purpose: "audiobook",
+          // Paid for already, or on its way: the queue's rows outlive this process, so a part
+          // whose job landed before the take was filed is filed now, and one still being made
+          // is waited for, before another request is asked for (R-16).
+          let prior = priorPartJob(deps.findJobs(), identity, index);
+          if (prior?.kind === "landed") {
+            const stillThere = await readFile(toExtendedLength(join(store.dir, fromPortable(prior.job.landedFiles![0]!)))).then(() => true).catch(() => false);
+            if (!stillThere) prior = null;
+          }
+          let job: Job;
+          if (prior !== null) {
+            firstJob ??= prior.job.id;
+            if (prior.kind === "running") {
+              jobInFlight = prior.job.id;
+              job = await deps.waitForJob(prior.job.id);
+              jobInFlight = null;
+            } else {
+              job = prior.job;
+            }
+          } else {
+            const input: EnqueueInput = {
+              worldId: deps.worldId,
               productionId,
-              chapterId: plan.chapter.id,
-              block: block.block.key,
-              part: index,
-              parts: block.parts.length,
-              characterCount: part.length,
-              sheetVersion: plan.chapter.version,
-            },
-            estimatedMicroUsd: estimateMicroUsd(block.model, { characters: part.length }),
-            landing: { dir: landingDir, name: `${block.block.key.replace(/[^a-z0-9]+/gi, "-")}-${index}.${block.format}` },
-            ...(block.cloned ? { voiceReference: true } : {}),
-          };
-          const queued = await deps.enqueue([input]);
-          const jobId = queued.jobIds[0];
-          if (jobId === undefined) throw new Error(queued.reason ?? "the voice job could not be queued");
-          firstJob ??= jobId;
-          jobInFlight = jobId;
-          const job = await deps.waitForJob(jobId);
-          jobInFlight = null;
+              target: { kind: "voice-preview", id: `${block.sheet ?? "narrator"}/${block.model.provider}/${block.model.id}/${block.reader.voiceId}` },
+              capability: "voice-tts",
+              provider: block.model.provider,
+              model: block.model.id,
+              params: {
+                voiceId: block.reader.voiceId,
+                text: part,
+                audioFormat: block.format,
+                purpose: "audiobook",
+                productionId,
+                chapterId: plan.chapter.id,
+                block: block.block.key,
+                textHash,
+                part: index,
+                parts: block.parts.length,
+                characterCount: part.length,
+                sheetVersion: plan.chapter.version,
+              },
+              estimatedMicroUsd: estimateMicroUsd(block.model, { characters: part.length }),
+              landing: { dir: landingDir, name: `${block.block.key.replace(/[^a-z0-9]+/gi, "-")}-${index}.${block.format}` },
+              ...(block.cloned ? { voiceReference: true } : {}),
+            };
+            const queued = await deps.enqueue([input]);
+            const jobId = queued.jobIds[0];
+            if (jobId === undefined) throw new Error(queued.reason ?? "the voice job could not be queued");
+            firstJob ??= jobId;
+            jobInFlight = jobId;
+            job = await deps.waitForJob(jobId);
+            jobInFlight = null;
+          }
+          const jobId = job.id;
           if (job.status !== "succeeded" || job.landedFiles?.[0] === undefined) {
             throw new Error(job.status === "cancelled" ? "stopped" : "the voice job failed · open Activity for details");
           }

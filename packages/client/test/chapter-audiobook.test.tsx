@@ -282,6 +282,106 @@ describe("the Audiobook view (turn 146)", () => {
     assert.ok(q(m, '[data-testid="read-audiobook"]'), "declined, the press is back");
   });
 
+  it("a cloned voice's consent is kept for the price's answer, and declining the consent clears the run (codex on PR 1180)", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+    const requestId = "01J8F3K2QW9VZX4N7M0RTYB6H1";
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId, toMake: 4, blocks: 4 }));
+    await act(async () =>
+      __applyEventForTest({ at: AT, type: "voice.upload-confirmation-required", requestId, worldId: FIXTURE_WORLD_ID, command: "read-audiobook-chapter", destinationLabel: "the studio's ComfyUI", confirmationToken: "engine-1" }),
+    );
+    const allow = all(m, "button").find((button) => /allow|send|confirm|yes/i.test(button.textContent ?? "") && !/cancel|not now/i.test(button.textContent ?? ""));
+    assert.ok(allow, `the consent is one press: ${all(m, "button").map((b) => b.textContent).join(" | ")}`);
+    await act(async () => allow.click());
+    const consented = m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>;
+    assert.equal(consented.voiceUploadConfirmedFor, "engine-1");
+    // The restarted run passes the gate and asks the price; its answer must carry the consent too.
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId, toMake: 4, blocks: 4 }));
+    await act(async () =>
+      __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 120, estimatedMicroUsd: 36_000, confirmationToken: "tok", voices: [{ label: "Low tide", provider: "elevenlabs", characters: 120, estimatedMicroUsd: 36_000 }] }),
+    );
+    const confirm = all(m, "button").find((button) => button.textContent?.startsWith("Confirm 120 characters"));
+    assert.ok(confirm);
+    await act(async () => confirm.click());
+    const both = m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>;
+    assert.equal(both.confirmationToken, "tok");
+    assert.equal(both.voiceUploadConfirmedFor, "engine-1", "the price's answer carries the consent, or the two prompts chase each other");
+
+    // Declining the consent: the coordinator's run returned without a finished event, so the window clears its own.
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId, toMake: 4, blocks: 4 }));
+    await act(async () =>
+      __applyEventForTest({ at: AT, type: "voice.upload-confirmation-required", requestId, worldId: FIXTURE_WORLD_ID, command: "read-audiobook-chapter", destinationLabel: "the studio's ComfyUI", confirmationToken: "engine-1" }),
+    );
+    const decline = all(m, "button").find((button) => /cancel|not now/i.test(button.textContent ?? ""));
+    assert.ok(decline);
+    await act(async () => decline.click());
+    assert.doesNotMatch(text(m), /reading…/, "no ghost run");
+    assert.ok(q(m, '[data-testid="read-audiobook"]'), "the press is back");
+  });
+
+  it("a block's takes are this chapter's, and the press waits out a pending save", async () => {
+    const state = inkbound();
+    const world = state.world!;
+    const take = (id: string, chapterId: string) =>
+      ({
+        id,
+        kind: "audio" as const,
+        file: `${chapterId}-title.wav`,
+        hash: `sha256:${"b".repeat(16)}`,
+        origin: { by: "system" as const, producedBy: "audiobook" },
+        links: [chapterId],
+        production: "inkbound",
+        generation: {
+          source: "audiobook" as const,
+          productionId: "inkbound",
+          chapterId,
+          chapterVersion: 4,
+          block: "title",
+          paragraph: -1,
+          textHash: "text-v1:x",
+          provider: "kokoro",
+          model: "kokoro-82m",
+          voiceId: "bm_george",
+          voiceLabel: "George",
+          parts: 1,
+          characters: 10,
+          estimatedMicroUsd: 0,
+          costMicroUsd: 0,
+        },
+        created: AT,
+      }) satisfies (typeof world.artifacts)[number];
+    const m = await mount({ ...state, world: { ...world, artifacts: [...world.artifacts, take("ar_01J8F3K2QW9VZX4N7M0RTYB6A1", "neap"), take("ar_01J8F3K2QW9VZX4N7M0RTYB6A2", "slack-water")] } });
+    await answerOpen(m);
+    await act(async () => all(m, ".fy-ab__block")[0]!.click());
+    const takes = q(m, '[data-testid="audiobook-takes"]')!;
+    assert.match(takes.textContent ?? "", /Takes1/, "one take of this chapter's title, not the other chapter's");
+
+    // Typing, then the press: the read waits for the save, and goes out once it lands.
+    await act(async () => q(m, ".fy-seg__item:not(.fy-seg__item--active)")!.click());
+    const area = q(m, "textarea.fy-ch__source");
+    assert.ok(area, "the manuscript view's source editor");
+    const key = Object.keys(area).find((k) => k.startsWith("__reactProps$"))!;
+    const props = (area as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[key]!;
+    await act(async () => props.onChange({ target: { value: `${BODY}\n\nA new line.` } }));
+    await act(async () => q(m, ".fy-seg__item:not(.fy-seg__item--active)")!.click());
+    const before = m.sent.filter((message) => message.kind === "read-audiobook-chapter").length;
+    await act(async () => q(m, '[data-testid="read-audiobook"]')!.click());
+    assert.equal(m.sent.filter((message) => message.kind === "read-audiobook-chapter").length, before, "not sent while the draft is unsaved");
+    const save = m.sent.findLast((message) => message.kind === "save-chapter") as Extract<ClientMessage, { kind: "save-chapter" }>;
+    assert.ok(save, "the press flushed the draft");
+    const saveRequest = save.requestId;
+    assert.ok(saveRequest);
+    await act(async () =>
+      __applyEventForTest({ at: AT, type: "chapter.save-result", requestId: saveRequest, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterFile: "01-neap", disposition: "saved", version: 4, hash: `sha256:${"c".repeat(64)}` }),
+    );
+    assert.equal(
+      m.sent.filter((message) => message.kind === "read-audiobook-chapter").length,
+      before + 1,
+      `sent once the save landed: ${m.sent.map((message) => message.kind).join(" | ")} · ${text(m).slice(0, 200)}`,
+    );
+  });
+
   it("under the cast's reading a line carries its speaker in the margin", async () => {
     const m = await mount(inkbound("cast"));
     await answerOpen(m, { voices: CAST });

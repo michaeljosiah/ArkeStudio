@@ -1440,6 +1440,11 @@ function handleFrame(json: string): void {
           [key]: { state: "reading", requestId: event.requestId, toMake: event.toMake, blocks: event.blocks, made: 0, flagged: 0 },
         };
       }
+      // The run's request is minted by the coordinator, so it is registered here rather than
+      // at send time: a cloned voice's upload consent is routed by request (codex on PR 1180),
+      // and without this entry the consent would be dropped on the floor and the run would
+      // wait for an answer no window could give.
+      pendingQueueRequests.set(event.requestId, { command: "read-audiobook-chapter" });
     } else if (event.type === "audiobook.priced") {
       const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
       const held = audiobook[key] ?? { toMake: 0, blocks: 0, made: 0, flagged: 0 };
@@ -4161,10 +4166,15 @@ export function setAudiobookReading(worldId: string, productionId: string, readi
   return send({ kind: "set-audiobook-reading", worldId, productionId, reading });
 }
 
-/** A price the person declined: the run is over on the coordinator's side, so only this window's word goes. */
-export function dismissAudiobookPrice(worldId: string, productionId: string, chapterId: string): void {
+/**
+ * A price declined, or an upload consent declined: the run is over on the coordinator's side
+ * either way — it returned without a finished event when it asked — so only this window's word
+ * goes, and a finished run is never cleared (codex on PR 1180).
+ */
+export function dismissAudiobookRun(worldId: string, productionId: string, chapterId: string): void {
   const key = `${worldId}/${productionId}/${chapterId}`;
-  if (current.audiobook[key]?.state !== "priced") return;
+  const held = current.audiobook[key];
+  if (held === undefined || (held.state !== "priced" && held.state !== "reading")) return;
   const { [key]: _dropped, ...rest } = current.audiobook;
   emitChange({ ...current, audiobook: rest });
 }

@@ -506,6 +506,9 @@ function generatedIdentity(
       producedBy: "audiobook",
       isSame: (artifact) =>
         artifact.generation?.source === "audiobook" &&
+        // The production too (codex on PR 1180): two books in one world can each hold a
+        // `neap` with the same words in the same voice, and neither may own the other's take.
+        artifact.generation.productionId === generation.productionId &&
         artifact.generation.chapterId === generation.chapterId &&
         artifact.generation.block === generation.block &&
         (artifact.generation.jobId ?? `${artifact.generation.textHash}/${artifact.generation.provider}/${artifact.generation.model}/${artifact.generation.voiceId}`) === made,

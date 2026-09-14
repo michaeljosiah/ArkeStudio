@@ -51,6 +51,7 @@ import {
   stopVoices,
   useCasting,
   useAudiobookRuns,
+  readAudiobookChapter,
 } from "../lib/store.js";
 
 /**
@@ -335,6 +336,8 @@ export function ChapterWorkspace({
   const castAfterSave = useRef(false);
   /** A voiced read asked for while a save was pending (turn 130): begun once the save lands. */
   const voicedAfterSave = useRef(false);
+  /** An audiobook read asked for while a save was pending (turn 146): sent once the save lands, so the takes are of the words on disk. */
+  const audiobookAfterSave = useRef(false);
   /*
    * The latest record and draft, for callbacks that outlive the render that made them: the
    * autosave timer, the save answer and the unmount flush all need the base hash as it is now,
@@ -524,6 +527,10 @@ export function ChapterWorkspace({
           voicedAfterSave.current = false;
           setVoicedNow(true);
         }
+        if (audiobookAfterSave.current) {
+          audiobookAfterSave.current = false;
+          readAudiobookChapter(worldId, prodId, chapter.file);
+        }
       } else {
         // Keep the latest words, including typing after the refused request. Read the new
         // base to distinguish a plan-only change from competing prose, never merge blindly.
@@ -537,6 +544,7 @@ export function ChapterWorkspace({
         deriveAfterSave.current = false;
         castAfterSave.current = false;
         voicedAfterSave.current = false;
+        audiobookAfterSave.current = false;
         setSaveRefusal("save refused · your draft is kept");
         setReopen((n) => n + 1);
       }
@@ -822,6 +830,16 @@ export function ChapterWorkspace({
     reading: production.audiobook?.reading ?? "narrator",
     connection,
     locked: locked || record === null,
+    // The press waits out the autosave (turn 126's fourth rule, codex on PR 1180): a read of
+    // the words on disk while newer ones are on their way would make takes stale on arrival.
+    beforeRead: () => {
+      if ((draft !== null && draft !== live) || pendingSave.current !== null) {
+        audiobookAfterSave.current = true;
+        if (draft !== null && draft !== live) flushSave(draft);
+        return false;
+      }
+      return true;
+    },
   });
   const worldSlug = world.meta.slug;
   const read = {
@@ -1237,6 +1255,8 @@ export function ChapterWorkspace({
                 record={audiobookRecord === "unreadable" ? null : audiobookRecord}
                 artifacts={world.artifacts}
                 slug={worldSlug}
+                productionId={prodId}
+                chapterId={chapter.id}
                 chapterTitle={chapter.title}
               />
             )}
