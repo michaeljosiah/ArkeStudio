@@ -30,7 +30,7 @@ import { Button, cx } from "../components/ui.js";
 import { continuityStamp } from "../lib/continuity.js";
 import { useProduction } from "../lib/selectors.js";
 import { EditableText, SceneTitle } from "./storyboard.js";
-import { AudiobookBlocks, AudiobookSide, useChapterAudiobook } from "./chapter-audiobook.js";
+import { AudiobookBlocks, AudiobookSide, DirectionCard, useChapterAudiobook, type AudiobookIntent } from "./chapter-audiobook.js";
 import { playClip } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
 import {
@@ -51,7 +51,7 @@ import {
   stopVoices,
   useCasting,
   useAudiobookRuns,
-  readAudiobookChapter,
+  useAudiobookRecords,
 } from "../lib/store.js";
 
 /**
@@ -338,8 +338,10 @@ export function ChapterWorkspace({
   const castAfterSave = useRef(false);
   /** A voiced read asked for while a save was pending (turn 130): begun once the save lands. */
   const voicedAfterSave = useRef(false);
-  /** An audiobook read asked for while a save was pending (turn 146): sent once the save lands, so the takes are of the words on disk. */
-  const audiobookAfterSave = useRef(false);
+  /** An audiobook read, or a direction, asked for while a save was pending (turn 146): sent once the save lands, so the takes are of the words on disk. */
+  const audiobookAfterSave = useRef<AudiobookIntent | null>(null);
+  /** The hook's own sender for that intent, held for the save handler, which outlives the render that made it. */
+  const audiobookResume = useRef<(intent: AudiobookIntent) => void>(() => {});
   /*
    * The latest record and draft, for callbacks that outlive the render that made them: the
    * autosave timer, the save answer and the unmount flush all need the base hash as it is now,
@@ -531,9 +533,12 @@ export function ChapterWorkspace({
           voicedAfterSave.current = false;
           setVoicedNow(true);
         }
-        if (audiobookAfterSave.current) {
-          audiobookAfterSave.current = false;
-          readAudiobookChapter(worldId, prodId, chapter.file);
+        if (audiobookAfterSave.current !== null) {
+          // Back through the hook, not straight to the store (codex on PR 1186): the hook keeps
+          // the intent's blocks for every answer to a price or a consent that follows.
+          const intent = audiobookAfterSave.current;
+          audiobookAfterSave.current = null;
+          audiobookResume.current(intent);
         }
       } else {
         // Keep the latest words, including typing after the refused request. Read the new
@@ -548,7 +553,7 @@ export function ChapterWorkspace({
         deriveAfterSave.current = false;
         castAfterSave.current = false;
         voicedAfterSave.current = false;
-        audiobookAfterSave.current = false;
+        audiobookAfterSave.current = null;
         setSaveRefusal("save refused · your draft is kept");
         setReopen((n) => n + 1);
       }
@@ -818,6 +823,12 @@ export function ChapterWorkspace({
   useEffect(() => {
     if (audiobookRun?.record !== undefined) setFinishedAudiobook(audiobookRun.record);
   }, [audiobookRun?.record]);
+  // A write outside a run — a block's direction set, a card accepted (turn 146) — answers with
+  // the record too, and is taken the same way: the newest record stands, whoever wrote it.
+  const writtenAudiobook = useAudiobookRecords()[`${worldId}/${prodId}/${chapter.id}`];
+  useEffect(() => {
+    if (writtenAudiobook?.record !== undefined) setFinishedAudiobook((held) => (held === null || writtenAudiobook.record!.updatedAt >= held.updatedAt ? writtenAudiobook.record! : held));
+  }, [writtenAudiobook]);
   // The takes the coordinator found gone belong to the record it was answering with: a run's
   // record, taken when newer, has made them again, so the list goes with the opened record alone.
   const audiobookRecord = useMemo((): { record: ChapterAudiobook | "unreadable" | null; missing: readonly string[] } => {
@@ -840,15 +851,18 @@ export function ChapterWorkspace({
     locked: locked || record === null,
     // The press waits out the autosave (turn 126's fourth rule, codex on PR 1180): a read of
     // the words on disk while newer ones are on their way would make takes stale on arrival.
-    beforeRead: () => {
+    beforeRead: (intent) => {
       if ((draft !== null && draft !== live) || pendingSave.current !== null) {
-        audiobookAfterSave.current = true;
+        audiobookAfterSave.current = intent;
         if (draft !== null && draft !== live) flushSave(draft);
         return false;
       }
       return true;
     },
   });
+  const audiobookColumn = useRef<HTMLDivElement | null>(null);
+  audiobookResume.current = audiobook.resume;
+  const directionStands = audiobook.directedBlocks > 0;
   const worldSlug = world.meta.slug;
   const read = {
     ...pageRead,
@@ -1084,7 +1098,7 @@ export function ChapterWorkspace({
 
         <div className="fy-ch__body">
           {view === "audiobook" && (
-            <div className="fy-ch__manuscript" data-testid="audiobook-column">
+            <div className="fy-ch__manuscript" data-testid="audiobook-column" ref={audiobookColumn}>
               {audiobook.sounding !== null && (
                 <div className="fy-ch__band" data-testid="audiobook-band">
                   <span className="fy-ch__band-who">{audiobook.sounding.mark}</span>
@@ -1266,6 +1280,11 @@ export function ChapterWorkspace({
                 productionId={prodId}
                 chapterId={chapter.id}
                 chapterTitle={chapter.title}
+                modelOf={audiobook.modelOf}
+                onSetDirection={audiobook.setDirection}
+                onMakeAgain={audiobook.makeAgain}
+                refused={audiobook.lastRecord?.refused ?? null}
+                blockHost={(key) => audiobookColumn.current?.querySelector<HTMLElement>(`[data-block="${key}"] .fy-ab__text`) ?? null}
               />
             )}
             <section className="fy-bible__panel">
@@ -1571,7 +1590,11 @@ export function ChapterWorkspace({
             // coordinator refuses any action the turn comes back with.
             // Under a derived chapter the prompts are questions the record can answer (turn 129);
             // under a stale one, the press that reads again and a question the prose answers.
-            prompts: passage !== null
+            // In the Audiobook view the prompts are the reading's (turn 146, SPEC-047 R-31):
+            // the direction, again once one stands, and two questions the blocks answer.
+            prompts: view === "audiobook"
+              ? [{ label: directionStands ? "Direct again" : "Direct this chapter", press: audiobook.directPress }, "Who reads this chapter?", "Which blocks are stale?"]
+              : passage !== null
               ? ["Tighten this", { label: "Hold this against the style", replyOnly: true }]
               : voicesRecord !== null && voicesStale
                 ? [{ label: "Cast again", press: castLinesPress }, "Who speaks in this chapter?"]
@@ -1592,7 +1615,9 @@ export function ChapterWorkspace({
           openingNote="opening…"
           emptyLine={`Nothing written with Arke for ${chapterLabel} yet.`}
           placeholder={`Ask about ${chapterLabel}`}
-          {...(stagedDraft === undefined
+          {...(stagedDraft === undefined && view === "audiobook" && audiobook.directionRun !== undefined
+            ? { side: <DirectionCard run={audiobook.directionRun} chapterOrder={chapter.order} onAccept={audiobook.accept} onDiscard={audiobook.discard} /> }
+            : stagedDraft === undefined
             ? { pointsEmpty: "Nothing understood yet. As you talk, what Arke takes from the chapter appears here." }
             : {
                 side: (

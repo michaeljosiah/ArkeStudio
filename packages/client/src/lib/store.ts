@@ -257,6 +257,28 @@ interface StoreState {
       reason?: string;
     }
   >;
+  /**
+   * `Direct this chapter` (turn 146, SPEC-047 R-10), keyed like a run: the card the window
+   * holds until it is accepted whole or discarded, then the acceptance's word. The record a
+   * write outside a run answers with — a block's direction set, a card accepted — lands here
+   * too, so the workspace takes the newest record whoever wrote it.
+   */
+  direction: Record<
+    string,
+    {
+      state: "directing" | "directed" | "accepting" | "accepted" | "stopped" | "unavailable" | "failed";
+      /** The acceptance's own name while it is on its way, so only its answer moves the card. */
+      requestId?: string;
+      directed: number;
+      dropped: number;
+      summary?: string;
+      proposed?: Record<string, import("@arke-studio/contracts").AudiobookDirectionInput>;
+      hash?: string;
+      chapterVersion?: number;
+      reason?: string;
+    }
+  >;
+  audiobookRecords: Record<string, { record?: import("@arke-studio/contracts").ChapterAudiobook; refused?: string; seq: number }>;
   /** The last word on archiving a world — said once, then dismissed. */
   archiveNote: { worldId: string; text: string; refused: boolean } | null;
   permissions: Record<string, PendingPermission>;
@@ -390,6 +412,8 @@ let current: StoreState = {
   deriving: {},
   casting: {},
   audiobook: {},
+  direction: {},
+  audiobookRecords: {},
   manuscripts: {},
   archiveNote: null,
   permissions: {},
@@ -1077,6 +1101,11 @@ function handleFrame(json: string): void {
       deriving: {},
       casting: {},
       audiobook: {},
+      // A card answered — proposed, accepted, failed — is this window's to put away (turn 146):
+      // a snapshot follows every accept, and would otherwise take the ✓ line with it. Only a
+      // derivation still going is dropped, since the replay restores it when it is.
+      direction: changedWorld ? {} : Object.fromEntries(Object.entries(current.direction).filter(([, held]) => held.state !== "directing")),
+      audiobookRecords: changedWorld ? {} : current.audiobookRecords,
       // Both are keyed by sheet slug alone, and slugs recur across worlds: a failure left over
       // from one world would otherwise surface under the same-named character in the next one
       // (PR 241 review). They describe an action just taken here, so they do not outlive it.
@@ -1102,6 +1131,8 @@ function handleFrame(json: string): void {
     let deriving = current.deriving;
     let casting = current.casting;
     let audiobook = current.audiobook;
+    let direction = current.direction;
+    let audiobookRecords = current.audiobookRecords;
     let manuscripts = current.manuscripts;
     let archiveNote = current.archiveNote;
     let setupStatus = current.setupStatus;
@@ -1492,6 +1523,43 @@ function handleFrame(json: string): void {
           ...(event.reason !== undefined ? { reason: event.reason } : {}),
         },
       };
+    } else if (event.type === "audiobook.record") {
+      // A write outside a run (turn 146): the record, or why nothing was written. A card being
+      // accepted takes the answer as its own — accepted, or refused and held for another try.
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      const seq = (audiobookRecords[key]?.seq ?? 0) + 1;
+      audiobookRecords = { ...audiobookRecords, [key]: { seq, ...(event.record !== undefined ? { record: event.record } : {}), ...(event.refused !== undefined ? { refused: event.refused } : {}) } };
+      // Only its own answer (codex on PR 1186): another window's block write lands as the same
+      // event, and would otherwise mark the card accepted while the acceptance itself is still
+      // on its way to a refusal it could no longer show.
+      const card = direction[key];
+      if (card?.state === "accepting" && event.requestId !== undefined && event.requestId === card.requestId) {
+        direction = {
+          ...direction,
+          [key]: event.record !== undefined
+            ? { ...card, state: "accepted", dropped: card.dropped + (event.dropped ?? 0), proposed: undefined, requestId: undefined }
+            : { ...card, state: "directed", requestId: undefined, ...(event.refused !== undefined ? { reason: event.refused } : {}) },
+        };
+      }
+    } else if (event.type === "direction.started") {
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      // A replay reaches every refresh: a window that already holds the run keeps what it knows.
+      if (direction[key]?.state !== "directing") direction = { ...direction, [key]: { state: "directing", directed: 0, dropped: 0 } };
+    } else if (event.type === "direction.finished") {
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      direction = {
+        ...direction,
+        [key]: {
+          state: event.outcome,
+          directed: event.directed,
+          dropped: event.dropped,
+          ...(event.summary !== undefined ? { summary: event.summary } : {}),
+          ...(event.proposed !== undefined ? { proposed: event.proposed } : {}),
+          ...(event.hash !== undefined ? { hash: event.hash } : {}),
+          ...(event.chapterVersion !== undefined ? { chapterVersion: event.chapterVersion } : {}),
+          ...(event.reason !== undefined ? { reason: event.reason } : {}),
+        },
+      };
     } else if (event.type === "authoring.status") {
       const existing = authoring[event.proposalId] ?? { status: event.status, lines: [] };
       authoring = {
@@ -1785,6 +1853,8 @@ function handleFrame(json: string): void {
       deriving,
       casting,
       audiobook,
+      direction,
+      audiobookRecords,
       manuscripts,
       archiveNote,
       permissions,
@@ -4208,6 +4278,68 @@ export function useAudiobookRuns(): StoreState["audiobook"] {
   return useStore().audiobook;
 }
 
+/** Read a chapter into kept takes, these blocks alone (SPEC-047 R-30): the panel's `Make again`. */
+export function readAudiobookBlocks(
+  worldId: string,
+  productionId: string,
+  chapterFile: string,
+  blocks: readonly string[],
+  options: { confirmationToken?: string; voiceUploadConfirmedFor?: string } = {},
+): boolean {
+  return send({
+    kind: "read-audiobook-chapter",
+    worldId,
+    productionId,
+    chapterFile,
+    blocks: [...blocks],
+    ...(options.confirmationToken !== undefined ? { confirmationToken: options.confirmationToken } : {}),
+    ...(options.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: options.voiceUploadConfirmedFor } : {}),
+  });
+}
+
+/** One block's direction, set or cleared (SPEC-047 R-6): the coordinator answers with the record, or why not. */
+export function setAudiobookBlock(worldId: string, productionId: string, chapterFile: string, block: string, direction: import("@arke-studio/contracts").AudiobookDirectionInput | null): boolean {
+  return send({ kind: "set-audiobook-block", worldId, productionId, chapterFile, block, direction });
+}
+
+/** `Direct this chapter` (SPEC-047 R-10): the model asked for a direction per block; the card comes back as a run's result. */
+export function directChapter(worldId: string, productionId: string, chapterFile: string): boolean {
+  return send({ kind: "direct-chapter", worldId, productionId, chapterFile });
+}
+
+/** The card accepted whole: the coordinator checks every direction once more and writes the record. */
+export function acceptDirection(worldId: string, productionId: string, chapterId: string, chapterFile: string): boolean {
+  const key = `${worldId}/${productionId}/${chapterId}`;
+  const card = current.direction[key];
+  if (card === undefined || card.state !== "directed" || card.proposed === undefined || card.hash === undefined) return false;
+  const requestId = ulid();
+  const sent = send({ kind: "accept-direction", worldId, productionId, chapterFile, requestId, hash: card.hash, directions: card.proposed });
+  if (sent) emitChange({ ...current, direction: { ...current.direction, [key]: { ...card, state: "accepting", requestId } } });
+  return sent;
+}
+
+/**
+ * The card discarded, or an ended derivation put away: nothing was written, and the coordinator
+ * is told to stop holding a proposal for a window that reconnects. `chapterFile` names the
+ * chapter to the coordinator as every audiobook frame does.
+ */
+export function dismissDirection(worldId: string, productionId: string, chapterId: string, chapterFile: string): void {
+  const key = `${worldId}/${productionId}/${chapterId}`;
+  const held = current.direction[key];
+  if (held === undefined || held.state === "directing") return;
+  if (held.state === "directed") send({ kind: "discard-direction", worldId, productionId, chapterFile });
+  const { [key]: _dropped, ...rest } = current.direction;
+  emitChange({ ...current, direction: rest });
+}
+
+export function useDirectionRuns(): StoreState["direction"] {
+  return useStore().direction;
+}
+
+export function useAudiobookRecords(): StoreState["audiobookRecords"] {
+  return useStore().audiobookRecords;
+}
+
 // ---- turn 131: a manuscript out and in ------------------------------------
 
 export function exportManuscript(worldId: string, productionId: string, format: "docx" | "epub", language?: string): boolean {
@@ -4432,6 +4564,8 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
   deriving: {},
     casting: {},
     audiobook: {},
+    direction: {},
+    audiobookRecords: {},
   manuscripts: {},
     archiveNote: null,
     permissions: {},

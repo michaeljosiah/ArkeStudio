@@ -7,7 +7,10 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import {
   audiobookTextHash,
   type ArtifactSidecar,
+  type AudiobookDirection,
+  type CadencePlan,
   type ChapterAudiobook,
+  type ManifestModel,
   type ChapterSummary,
   type ChapterVoices,
   type ClientMessage,
@@ -183,12 +186,48 @@ const CAST = { version: 4, hash: HASH, derivedAt: AT, passes: 1, dropped: 0, omi
 
 const NARRATION_KEYS = ["title", "p0.0", "p1.0", "p3.0"];
 
+/** The rows a block's reader is judged by (SPEC-047 R-9): the shipped Kokoro and Eleven v3 cadence, as the manifest declares them. */
+const VOICE_ROWS: ManifestModel[] = [
+  {
+    id: "kokoro-82m",
+    provider: "kokoro",
+    capability: "voice-tts",
+    displayName: "Kokoro 82M",
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    limits: { audioFormat: "wav" },
+    pricing: { kind: "unmetered" },
+    cadence: { deliveries: ["measured", "urgent"], speed: null, pause: "unsupported", emphasis: "unsupported", breath: "unsupported", outputTimestamps: "none",
+      deliveryMappings: { measured: { settings: { speed: 0.92 } }, urgent: { settings: { speed: 1.15 } } } },
+  },
+  {
+    id: "eleven-v3",
+    provider: "elevenlabs",
+    capability: "voice-tts",
+    displayName: "Eleven v3",
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    limits: { audioFormat: "mp3", maxPromptChars: 5000 },
+    pricing: { kind: "perCharacter", microUsdPerCharacter: 100 },
+    cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: { min: 0.7, max: 1.2 }, pause: "best-effort-audio-tag",
+      emphasis: "best-effort-capitalization", breath: "best-effort-audio-tag", outputTimestamps: "none", phrase: "best-effort-tag",
+      deliveryMappings: { measured: { settings: { stability: 0.5 } }, whispered: { settings: { stability: 0.5 }, tag: "whispers" }, cold: { settings: { stability: 1 }, tag: "coldly" } } },
+  },
+];
+/** The fixture with the voice rows in its manifest, so the panel has a row to read. */
+function voiced(state: ClientState): ClientState {
+  return { ...state, app: { ...state.app, manifest: { ...state.app.manifest!, models: [...state.app.manifest!.models, ...VOICE_ROWS] } } };
+}
+const SOURCE = `sha256:${"a".repeat(64)}`;
+function directed(text: string, delivery: "measured" | "whispered" | "breaking" | "cold" | "warm" | "urgent", extra: Partial<CadencePlan> = {}): AudiobookDirection {
+  return { textHash: audiobookTextHash(text), plan: { schemaVersion: 1, sourceTextHash: SOURCE, delivery, speed: 1, cues: [], ...extra }, at: AT };
+}
+
 function record(keys: readonly string[], texts: Record<string, string>): ChapterAudiobook {
   return {
     schemaVersion: 1,
     chapterVersion: 4,
     hash: HASH,
     updatedAt: AT,
+    direction: {},
     takes: Object.fromEntries(
       keys.map((key) => [
         key,
@@ -433,6 +472,169 @@ describe("the Audiobook view (turn 146)", () => {
     assert.equal(mark.textContent, FIXTURE_STATE.world!.sheets.find((s) => s.id === "maren-kest")!.name, "the speaker's name stays");
     assert.ok(mark.className.includes("fy-ab__mark--warn"), "and it is said to have no voice");
     assert.deepEqual(rows.map((row) => row.getAttribute("data-state")), ["made", "made", "made", "made", "made"], "the coordinator made the line in the narrator's stead, and this side agrees");
+  });
+
+  it("the block panel says what the reader does with each control, a press writes the direction, and a refusal is one clause (SPEC-047 R-6, R-9)", async () => {
+    const m = await mount(voiced(inkbound()));
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." };
+    await answerOpen(m, { audiobook: record(NARRATION_KEYS, texts) });
+    await act(async () => all(m, ".fy-ab__block")[1]!.click());
+    const panel = q(m, '[data-testid="audiobook-direction"]');
+    assert.ok(panel, "the block's direction sits between the block and its takes");
+    const deliveries = [...panel.querySelectorAll('[aria-label="Delivery"] button')] as HTMLButtonElement[];
+    assert.deepEqual(deliveries.map((b) => b.textContent), ["measured", "whispered", "breaking", "cold", "warm", "urgent"]);
+    const whispered = deliveries.find((b) => b.textContent === "whispered")!;
+    assert.ok(whispered.disabled && whispered.className.includes("fy-ab__seg-item--off"), "Kokoro cannot whisper: struck");
+    assert.equal(whispered.getAttribute("title"), "reads measured · urgent", "the reason, one clause, on the control");
+    assert.ok(!deliveries.find((b) => b.textContent === "urgent")!.disabled);
+    assert.equal(panel.querySelector(".fy-ab__off")?.textContent, "no phrase", "no phrase on this reader");
+    const speeds = [...panel.querySelectorAll('[aria-label="Speed"] button')] as HTMLButtonElement[];
+    assert.ok(speeds.find((b) => b.textContent === "0.9")!.disabled && !speeds.find((b) => b.textContent === "1.0")!.disabled, "no speed on Kokoro, but one is always one");
+    assert.ok(!/\bis\b.*\bbecause\b/.test(panel.textContent ?? ""), "no sentence explains the controls");
+
+    await act(async () => deliveries.find((b) => b.textContent === "urgent")!.click());
+    const set = m.sent.findLast((message) => message.kind === "set-audiobook-block") as Extract<ClientMessage, { kind: "set-audiobook-block" }>;
+    assert.ok(set, "a press writes the direction");
+    assert.equal(set.block, "p0.0");
+    assert.deepEqual(set.direction, { delivery: "urgent", speed: 1, cues: [] });
+
+    // The coordinator answers with the record: the block is stale against its undirected take, and the report says how the reader carries it.
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+    const held = record(NARRATION_KEYS, texts);
+    held.direction["p0.0"] = directed(texts["p0.0"], "urgent");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, record: { ...held, updatedAt: "2026-09-14T10:00:00.000Z" } }));
+    assert.equal(all(m, ".fy-ab__block")[1]!.getAttribute("data-state"), "stale", "a direction changed since the take");
+    assert.equal(q(m, '[data-testid="audiobook-report"]')?.textContent, "urgent · mapped");
+    assert.ok(all(m, '[aria-label="Delivery"] button').find((b) => b.textContent === "urgent")!.className.includes("fy-seg__item--active"));
+
+    // A refusal is said on the panel, in the coordinator's clause.
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, refused: "whispered · Kokoro 82M reads measured · urgent" }));
+    assert.equal(q(m, '[data-testid="audiobook-report"]')?.textContent, "whispered · Kokoro 82M reads measured · urgent");
+  });
+
+  it("Direct this chapter is the dock's prompt, its card is accepted whole, and the prompt becomes Direct again (SPEC-047 R-10, R-31)", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    const prompt = all(m, ".fy-arke__prompt").find((b) => b.textContent === "Direct this chapter");
+    assert.ok(prompt, `the dock offers the direction: ${all(m, ".fy-arke__prompt").map((b) => b.textContent).join(" | ")}`);
+    assert.ok(all(m, ".fy-arke__prompt").some((b) => b.textContent === "Which blocks are stale?"));
+    await act(async () => prompt.click());
+    assert.ok(m.sent.some((message) => message.kind === "direct-chapter"), "the press directs, and says nothing");
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+    await act(async () => __applyEventForTest({ at: AT, type: "direction.started", ...ids }));
+    assert.match(q(m, '[data-testid="direction-card"]')?.textContent ?? "", /directing…/);
+    const proposed = { title: { delivery: "measured" as const, speed: 1, cues: [] }, "p0.0": { delivery: "urgent" as const, speed: 1, cues: [] } };
+    await act(async () =>
+      __applyEventForTest({ at: AT, type: "direction.finished", ...ids, outcome: "directed", directed: 2, dropped: 1, hash: HASH, chapterVersion: 4, summary: "Two blocks measured but the title, said with urgency.", proposed }),
+    );
+    const card = q(m, '[data-testid="direction-card"]')!;
+    assert.match(card.textContent ?? "", /Two blocks measured but the title, said with urgency\./);
+    assert.match(card.textContent ?? "", /proposed · chapter 02 · direction v4 · 2 blocks · 1 dropped · nothing spent/);
+    await act(async () => q(m, '[data-testid="direction-accept"]')!.click());
+    const accepted = m.sent.findLast((message) => message.kind === "accept-direction") as Extract<ClientMessage, { kind: "accept-direction" }>;
+    assert.ok(accepted, "accepted whole");
+    assert.equal(accepted.hash, HASH);
+    assert.deepEqual(accepted.directions, proposed);
+    assert.ok(accepted.requestId, "the acceptance is named");
+    assert.match(q(m, '[data-testid="direction-card"]')?.textContent ?? "", /accepting…/);
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells." };
+    const written = record([], texts);
+    written.direction = { title: directed(texts.title, "measured"), "p0.0": directed(texts["p0.0"], "urgent") };
+    // Another window's block write answers first (codex on PR 1186): it is not this card's answer.
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H9", record: { ...written, updatedAt: "2026-09-14T09:30:00.000Z" } }));
+    assert.match(q(m, '[data-testid="direction-card"]')?.textContent ?? "", /accepting…/, "still on its way");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, requestId: accepted.requestId, record: { ...written, updatedAt: "2026-09-14T10:00:00.000Z" } }));
+    assert.match(q(m, '[data-testid="direction-card"]')?.textContent ?? "", /✓ directed · chapter 02 · direction v4 · 2 blocks · 1 dropped/);
+    assert.ok(all(m, ".fy-arke__prompt").some((b) => b.textContent === "Direct again"), "a direction stands, so the prompt is Direct again");
+    assert.equal(all(m, ".fy-arke__prompt").some((b) => b.textContent === "Direct this chapter"), false);
+  });
+
+  it("edits compose before the record answers, and the panel reads the reader that will speak (codex on PR 1186)", async () => {
+    const m = await mount(voiced(inkbound("cast")));
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": "“You hear it too,”", "p1.1": "she said.", "p3.0": "Six, and the tide <br> not yet called." };
+    await answerOpen(m, { audiobook: record(Object.keys(texts), texts), voices: CAST });
+    // Two presses before the first answer: the second carries the first.
+    await act(async () => all(m, ".fy-ab__block")[1]!.click());
+    await act(async () => all(m, '[aria-label="Delivery"] button').find((b) => b.textContent === "urgent")!.click());
+    await act(async () => all(m, '[aria-label="Speed"] button').find((b) => b.textContent === "1.0")!.click());
+    const writes = m.sent.filter((message) => message.kind === "set-audiobook-block") as Extract<ClientMessage, { kind: "set-audiobook-block" }>[];
+    assert.equal(writes.length, 2);
+    assert.equal(writes[1]!.direction?.delivery, "urgent", "the speed press did not undo the delivery");
+    // Maren's line: her ElevenLabs voice is assigned, but the catalogue says it cannot speak now,
+    // so the panel reads Kokoro's row — whispered struck — and says who stands in.
+    await act(async () => __applyEventForTest({ at: AT, type: "voice.catalogue", worldId: FIXTURE_WORLD_ID, voices: [{ provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george", label: "George", attributes: [], local: true, canClone: false, usedBy: [] }] }));
+    await act(async () => all(m, ".fy-ab__block")[2]!.click());
+    const panel = q(m, '[data-testid="audiobook-direction"]')!;
+    const whispered = panel.querySelector('[aria-label="Delivery"] button:nth-child(2)') as HTMLButtonElement;
+    assert.equal(whispered.textContent, "whispered");
+    assert.ok(whispered.disabled, "Kokoro will speak this line, and Kokoro cannot whisper");
+    assert.match(q(m, '[data-testid="audiobook-block"]')?.textContent ?? "", /George · kokoro · stands in/);
+    assert.equal(all(m, ".fy-ab__block")[2]!.getAttribute("data-state"), "stale", "the state is judged against the voice the line is meant for, not the one that stands in");
+  });
+
+  it("Make again kept past a save still names its block, and so does the answer to its price (codex on PR 1186)", async () => {
+    const state = voiced(inkbound());
+    const world = state.world!;
+    const m = await mount({ ...state, world: { ...world, artifacts: [...world.artifacts, takeArtifact("ar_01J8F3K2QW9VZX4N7M0RTYB6A1", "neap", "p0.0")] } });
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." };
+    await answerOpen(m, { audiobook: record(NARRATION_KEYS, texts) });
+    // Typing in the manuscript, then back to the blocks: the press must wait for the save.
+    await act(async () => q(m, ".fy-seg__item:not(.fy-seg__item--active)")!.click());
+    const area = q(m, "textarea.fy-ch__source")!;
+    const key = Object.keys(area).find((k) => k.startsWith("__reactProps$"))!;
+    const props = (area as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[key]!;
+    await act(async () => props.onChange({ target: { value: `${BODY}\n\nA new line.` } }));
+    await act(async () => q(m, ".fy-seg__item:not(.fy-seg__item--active)")!.click());
+    await act(async () => all(m, ".fy-ab__block")[1]!.click());
+    const before = m.sent.filter((message) => message.kind === "read-audiobook-chapter").length;
+    await act(async () => q(m, '[data-testid="audiobook-make-again"]')!.click());
+    assert.equal(m.sent.filter((message) => message.kind === "read-audiobook-chapter").length, before, "not sent while the draft is unsaved");
+    const save = m.sent.findLast((message) => message.kind === "save-chapter") as Extract<ClientMessage, { kind: "save-chapter" }>;
+    assert.ok(save?.requestId);
+    await act(async () =>
+      __applyEventForTest({ at: AT, type: "chapter.save-result", requestId: save.requestId!, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterFile: "01-neap", disposition: "saved", version: 5, hash: `sha256:${"c".repeat(64)}` }),
+    );
+    const sent = m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>;
+    assert.deepEqual(sent?.blocks, ["p0.0"], "the block rides on the read sent once the save landed");
+    // The block's reader is paid: the price's answer names the block still.
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 1, blocks: 4 }));
+    await act(async () =>
+      __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 24, estimatedMicroUsd: 2400, confirmationToken: "tok", voices: [{ label: "Low tide", provider: "elevenlabs", characters: 24, estimatedMicroUsd: 2400 }] }),
+    );
+    await act(async () => all(m, "button").find((button) => button.textContent?.startsWith("Confirm 24 characters"))!.click());
+    const answered = m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>;
+    assert.equal(answered.confirmationToken, "tok");
+    assert.deepEqual(answered.blocks, ["p0.0"], "the answer carries the block, or the run would make the chapter's missing blocks and not this one");
+  });
+
+  it("accepting a card waits out the autosave, and a direction keyed to older wording does not make it Direct again (codex on PR 1186)", async () => {
+    const m = await mount(voiced(inkbound()));
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." };
+    const held = record(NARRATION_KEYS, texts);
+    held.direction["p0.0"] = directed("Maren counted the bells, twice.", "urgent");
+    await answerOpen(m, { audiobook: held });
+    assert.ok(all(m, ".fy-arke__prompt").some((b) => b.textContent === "Direct this chapter"), "a direction authored for other words is none to the prompt");
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+    const proposed = { title: { delivery: "measured" as const, speed: 1, cues: [] } };
+    await act(async () => __applyEventForTest({ at: AT, type: "direction.started", ...ids }));
+    await act(async () => __applyEventForTest({ at: AT, type: "direction.finished", ...ids, outcome: "directed", directed: 1, dropped: 0, hash: HASH, chapterVersion: 4, proposed }));
+    await act(async () => q(m, ".fy-seg__item:not(.fy-seg__item--active)")!.click());
+    const area = q(m, "textarea.fy-ch__source")!;
+    const key = Object.keys(area).find((k) => k.startsWith("__reactProps$"))!;
+    const props = (area as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[key]!;
+    await act(async () => props.onChange({ target: { value: `${BODY}\n\nA new line.` } }));
+    await act(async () => q(m, ".fy-seg__item:not(.fy-seg__item--active)")!.click());
+    await act(async () => q(m, '[data-testid="direction-accept"]')!.click());
+    assert.equal(m.sent.some((message) => message.kind === "accept-direction"), false, "not accepted against words the save is about to replace");
+    const save = m.sent.findLast((message) => message.kind === "save-chapter") as Extract<ClientMessage, { kind: "save-chapter" }>;
+    assert.ok(save?.requestId);
+    await act(async () =>
+      __applyEventForTest({ at: AT, type: "chapter.save-result", requestId: save.requestId!, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterFile: "01-neap", disposition: "saved", version: 5, hash: `sha256:${"c".repeat(64)}` }),
+    );
+    const accepted = m.sent.findLast((message) => message.kind === "accept-direction") as Extract<ClientMessage, { kind: "accept-direction" }>;
+    assert.ok(accepted, "sent once the save landed, with the hash the card was made for — which the coordinator now refuses");
+    assert.equal(accepted.hash, HASH);
   });
 
   it("under the cast's reading a line carries its speaker in the margin", async () => {

@@ -121,7 +121,9 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Twenty-one adds gait/object speed ceilings; twenty-two adds performance ease/hold (#1044, #1046).
 // Twenty-three is an audiobook take's sidecar (turn 146, SPEC-047 R-3): `generation.source`
 // gains a member the strict union of an older build cannot parse, so it would drop every take.
-export const SUPPORTED_SCHEMA_VERSION = 23;
+// Twenty-four is a directed take's sidecar (SPEC-047 R-6, R-8): the direction's name, delivery
+// and provider-text digest on the generation, which the first audiobook build reads as unknown.
+export const SUPPORTED_SCHEMA_VERSION = 24;
 
 export class WorldOpenError extends Error {
   constructor(

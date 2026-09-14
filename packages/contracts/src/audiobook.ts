@@ -1,6 +1,8 @@
 import { z } from "zod";
+import { CadencePlanSchema, type CadencePlan } from "./cadence.js";
 import { ArtifactIdSchema, IsoDateTimeSchema, SlugSchema } from "./ids.js";
 import { isSceneBreak } from "./manuscript.js";
+import { DeliverySchema } from "./voice.js";
 import { chapterParagraphs, voicedBlocks, type VoicedBlock } from "./prose.js";
 import { textDigest } from "./subtitles.js";
 
@@ -98,10 +100,62 @@ export const AudiobookTakeSchema = z
     costMicroUsd: z.number().int().min(0).nullable(),
     /** True when the take was adopted from the speech cache rather than made (R-19). */
     adopted: z.literal(true).optional(),
+    /** The direction the take was made under (R-6, R-14), as `audiobookDirectionHash` names it; absent for a take made with none. */
+    directionHash: z.string().min(1).optional(),
     madeAt: IsoDateTimeSchema,
   })
   .strict();
 export type AudiobookTake = z.infer<typeof AudiobookTakeSchema>;
+
+/**
+ * A block's direction (R-6, R-8): SPEC-011's cadence plan, kept on the record and never in the
+ * prose, keyed to the block's text by `textHash` — the same fingerprint the take carries — so a
+ * changed wording drops it (R-9) rather than letting cues authored at positions in other words
+ * land in these. The plan's own `sourceTextHash` is the full digest `mapCadence` verifies.
+ */
+export const AudiobookDirectionSchema = z
+  .object({
+    textHash: z.string().min(1),
+    plan: CadencePlanSchema,
+    at: IsoDateTimeSchema,
+  })
+  .strict();
+export type AudiobookDirection = z.infer<typeof AudiobookDirectionSchema>;
+
+/** What a window or a derivation writes: the plan without its hashes, which the coordinator supplies from the block's words. */
+export const AudiobookDirectionInputSchema = CadencePlanSchema.omit({ schemaVersion: true, sourceTextHash: true });
+export type AudiobookDirectionInput = z.infer<typeof AudiobookDirectionInputSchema>;
+
+/**
+ * The name of a direction as a take remembers it (R-14): the plan's fields in a fixed order,
+ * so the same direction hashes the same whatever order it was written in, and a phrase or a
+ * cue changed moves the block to `stale`.
+ */
+export function audiobookDirectionHash(plan: CadencePlan): string {
+  const canonical = {
+    delivery: plan.delivery,
+    speed: plan.speed,
+    ...(plan.phrase !== undefined ? { phrase: plan.phrase } : {}),
+    cues: plan.cues.map((cue) =>
+      cue.kind === "emphasis"
+        ? { kind: cue.kind, from: cue.span.from, to: cue.span.to, text: cue.span.text, level: cue.level }
+        : cue.kind === "pause"
+          ? { kind: cue.kind, at: cue.at, length: cue.length }
+          : { kind: cue.kind, at: cue.at, action: cue.action },
+    ),
+  };
+  return textDigest(`direction-v1:${JSON.stringify(canonical)}`);
+}
+
+/** The block's direction as it stands: the record's, when it was authored for these words (R-9); nothing otherwise. */
+export function audiobookDirectionFor(record: Pick<ChapterAudiobook, "direction"> | null, block: Pick<AudiobookBlock, "key" | "text">): AudiobookDirection | null {
+  const held = record?.direction[block.key];
+  if (held === undefined || held.textHash !== audiobookTextHash(block.text)) return null;
+  return held;
+}
+
+/** The deliveries, for a panel's seg and a prompt's list. */
+export const AUDIOBOOK_DELIVERIES = DeliverySchema.options;
 
 /** A block whose make failed or was refused (R-14): the reason, kept until a later make replaces it. */
 export const AudiobookFlagSchema = z.object({ reason: z.string().min(1), at: IsoDateTimeSchema }).strict();
@@ -123,6 +177,8 @@ export const ChapterAudiobookSchema = z
     updatedAt: IsoDateTimeSchema,
     takes: z.record(z.string(), AudiobookTakeSchema),
     flags: z.record(z.string(), AudiobookFlagSchema),
+    /** The direction per block (R-6); absent on a record the first build wrote, which read the same. */
+    direction: z.record(z.string(), AudiobookDirectionSchema).default({}),
   })
   .strict();
 export type ChapterAudiobook = z.infer<typeof ChapterAudiobookSchema>;
@@ -194,6 +250,10 @@ export function audiobookBlockState(
   if (hasArtifact !== undefined && !hasArtifact(take.artifactId)) return "not made";
   if (take.textHash !== audiobookTextHash(block.text)) return "stale";
   if (!sameReader(take.assigned ?? take.reader, assigned)) return "stale";
+  // The direction the take was made under against the one that stands (R-14): a direction
+  // added, changed or dropped since is a different take; one authored for other words is none.
+  const direction = audiobookDirectionFor(record, block);
+  if ((direction === null ? undefined : audiobookDirectionHash(direction.plan)) !== take.directionHash) return "stale";
   return "made";
 }
 
