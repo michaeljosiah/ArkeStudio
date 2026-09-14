@@ -214,13 +214,12 @@ async function withHarness(
     (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
   // A refresh sends the snapshot and then replays every run on the register: what the replay
   // held at each refresh is what a window was told, so it is kept for the tests to read.
-  const transport = (coordinator as unknown as { transport: { broadcastSnapshot: () => void; opts: { getInitialEvents: () => DomainEvent[] } } }).transport;
   const refreshes: DomainEvent[][] = [];
-  const broadcast = transport.broadcastSnapshot.bind(transport);
-  transport.broadcastSnapshot = () => {
-    refreshes.push(transport.opts.getInitialEvents());
-    broadcast();
-  };
+  const replay = () => coordinator.serverApplication.getInitialEvents!();
+  coordinator.serverApplication.attachTransport({
+    broadcast() {},
+    broadcastSnapshot() { refreshes.push(replay()); },
+  });
   try {
     await run({
       root,
@@ -233,7 +232,7 @@ async function withHarness(
       reload: async () => {
         await provider.openStore!()!.reload();
       },
-      replay: () => transport.opts.getInitialEvents(),
+      replay,
       refreshes,
     });
   } finally {
