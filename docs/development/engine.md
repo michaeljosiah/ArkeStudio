@@ -105,3 +105,23 @@ add the public authoring contracts, durable operation/save outcomes and external
 Only then consolidate the Studio server host: Electron-managed or standalone Node startup,
 using the existing authenticated transport for desktop and browser clients. Kidz embeds the
 engine in its own Node server and supplies its private product and Aonik integrations.
+
+### Production creation and permission-card composition
+
+`application/production-creation.ts` now owns the legacy local creation request reservation,
+committed-slug lookup and domain creation call. Its commit notification lets Studio publish the
+new world before acknowledging success; duplicate admission stays reserved until that callback
+finishes. Coordinator maps outcomes to correlated events. The existing creation journal and
+request-ID semantics are unchanged: this is not the durable, scoped public authoring API.
+
+`application/conversation-actions.ts` composes the existing permission-card authority adapters
+for both live decisions and recovery. Supplied adapters replace a default of the same kind.
+The service moves its authority path after archival before notifying the host, preserving
+terminal writes in the moved world even when publication fails. Coordinator supplies platform
+callbacks and publishes UI state; `arke-actions/lifecycle.ts` remains the sole decision and
+recovery state machine. There is no new permission journal or decision protocol.
+
+Regression coverage includes `test/application/production-actions.test.ts`, production creation
+acknowledgements, and the existing action lifecycle/coordinator/recovery suites. Production setup
+continues to use `productions/setup-command.ts` and its reviewed creation path. Public authoring
+contracts, scoped durable operations and the server host remain future work under #1182.
