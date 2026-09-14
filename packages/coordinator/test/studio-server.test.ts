@@ -136,6 +136,19 @@ it("failed host cleanup can retry while new admission stays closed", async () =>
   await server.stop(); assert.equal(attempts, 2);
 });
 
+it("an occupied port rejects startup and drains the failed host", async t => {
+  const first = new StudioServer(application(), auth);
+  let cleaned = false;
+  const second = new StudioServer(application({ async stop(closed) { await closed; cleaned = true; } }), auth);
+  t.after(async () => { await second.stop(); await first.stop(); });
+  const session = await first.start();
+  await assert.rejects(second.start(session.port), /EADDRINUSE/);
+  assert.equal(cleaned, true);
+  const client = await connect(session.port);
+  try { await client.wait(frame => frame.kind === "snapshot"); }
+  finally { client.socket.terminate(); }
+});
+
 it("private browser handoff replaces an expired session without publishing it in application state", async () => {
   const { root } = await makeTempRoot();
   const path = join(root, ".dev", "transport-8791.json");

@@ -173,7 +173,8 @@ export class Transport {
     this.wss = wss;
     wss.on("connection", (socket, request) => this.accept(socket, request.headers.origin));
     server.listen(port, host);
-    await once(server, "listening");
+    // ws forwards HTTP bind failures as its own error event; consume that forwarded event too.
+    await once(wss, "listening");
     const address = server.address();
     if (address === null || typeof address === "string") throw new Error("no bound address");
     return address.port;
