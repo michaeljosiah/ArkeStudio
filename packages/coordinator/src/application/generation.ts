@@ -1,4 +1,4 @@
-import { MAX_IMAGE_PREVIEWS, ulid, type Job } from "@arke-studio/contracts";
+import { MAX_IMAGE_PREVIEWS, describeError, ulid, type Job } from "@arke-studio/contracts";
 import type { EngineContext, EngineMutation, EngineQueue, EngineWorldRepository, IllustrationInput, IllustrationOutcome } from "./contracts.js";
 import { engineHash, EngineOperations } from "./operations.js";
 
@@ -29,7 +29,7 @@ export class IllustrationApplicationService {
           await this.operations.policy.authorise(context, "generate", resource);
           jobs.push(await this.queue.enqueue({ ...request, idempotencyKey: ulid(),
             params: { ...request.params, engineOperation: { key, requestIndex: index, reservation, context } } }));
-        } catch {
+        } catch (error) {
           // The queue may have journalled the failing call before its acknowledgement was lost.
           // Preserve all known admissions; an incomplete batch is never a wholly rejected one.
           const admitted = new Map(jobs.map(job => [job.id, job]));
@@ -43,7 +43,8 @@ export class IllustrationApplicationService {
           return { operationKey: key, reservation, jobIds: [...admitted.keys()], needsReconciliation: true,
             failures: inputs.map((_, requestIndex) => requestIndex).filter(requestIndex => !confirmed.has(requestIndex))
               .map(requestIndex => ({ index: requestIndex,
-                reason: "Some requests may already be running. Check their status before trying again." })) };
+                reason: requestIndex === index ? describeError(error)
+                  : "This request was not queued. Check the admitted jobs before trying again." })) };
         }
       }
       return { operationKey: key, reservation, jobIds: jobs.map(job => job.id), failures: [], needsReconciliation: false };

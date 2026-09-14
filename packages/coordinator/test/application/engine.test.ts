@@ -190,6 +190,7 @@ it("an enqueue response lost after durable admission cannot blindly submit again
   const partial = await h.engine.illustrations.generate(parent, WORLD_ID, input);
   assert.equal(partial.needsReconciliation, true);
   assert.equal(partial.jobIds.length, 1);
+  assert.deepEqual(partial.failures, [], "a confirmed row is not also reported as a failed admission");
   h.queue.enqueue = enqueue;
   await until(() => h.queue.listJobs().every(job => job.status === "succeeded"), "uncertain admitted job completion");
   const restarted = await h.restart();
