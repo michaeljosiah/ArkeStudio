@@ -72,9 +72,9 @@ export class FishAudioClient implements ProviderClient, VoiceCatalogueClient, Vo
     const probe = await tryProbe(() =>
       jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/wallet/self/api-credit?check_free_credit=true`, { headers: this.headers(key) }),
     );
-    const both = (available: boolean, reason?: string): CapabilityProbe[] => [
-      { capability: "voice-tts", available, ...(reason !== undefined ? { reason } : {}) },
-      { capability: "voice-clone", available, ...(reason !== undefined ? { reason } : {}) },
+    const both = (available: boolean, reason?: string, authenticated?: true): CapabilityProbe[] => [
+      { capability: "voice-tts", available, ...(reason !== undefined ? { reason } : {}), ...(authenticated ? { authenticated } : {}) },
+      { capability: "voice-clone", available, ...(reason !== undefined ? { reason } : {}), ...(authenticated ? { authenticated } : {}) },
     ];
     if (!probe.ok) return both(false, probe.auth ? "Fish Audio rejected this key" : `Fish Audio could not be reached: ${probe.message}`);
     if (probe.value.status >= 400) return both(false, `Fish Audio answered HTTP ${probe.value.status} to the credit read`);
@@ -83,7 +83,10 @@ export class FishAudioClient implements ProviderClient, VoiceCatalogueClient, Vo
     if (Number.isNaN(dollars)) return both(false, "Fish Audio's credit read carried no balance");
     // Reported in dollars as the wallet states it, never converted: the number the person sees
     // on fish.audio is the number here.
-    if (dollars <= 0) return both(false, `the key authenticates but the balance is $${dollars.toFixed(2)} — top up on fish.audio`);
+    // Both halves of R-3, kept apart (issue 1167): the key was accepted, the account cannot pay
+    // — the API credit is its own balance, separate from the platform's. Said as `authenticated`
+    // so Settings says so, rather than "key rejected" and a remedy that would not help.
+    if (dollars <= 0) return both(false, `the key authenticates but the balance is $${dollars.toFixed(2)} — top up on fish.audio`, true);
     return both(true);
   }
 

@@ -398,7 +398,13 @@ function connectionWords(id: ProviderId, status: ProviderStatus | undefined): { 
   const troubled = Boolean(status?.fault) || status?.validation === "invalid";
   if (troubled) return { word: external ? "sign-in needed" : "key rejected", tone: "warn" };
   if (status?.configured === true) {
-    if (status.validation === "valid") return { word: "connected", tone: "ok" };
+    if (status.validation === "valid") {
+      // The key was accepted and nothing is unlocked (issue 1167): the account is what needs
+      // attention — a balance, a plan — and "key rejected" would send the person to replace a
+      // key that is fine. The probe's own reason is on the pane's "Last tested" line.
+      const unpaid = !status.probes.some((p) => p.available) && status.probes.some((p) => p.authenticated === true);
+      return unpaid ? { word: "can't pay", tone: "warn" } : { word: "connected", tone: "ok" };
+    }
     return { word: status.validation === "testing" ? "testing" : "untested", tone: "idle" };
   }
   return { word: external ? "not signed in" : "no key", tone: "idle" };

@@ -191,6 +191,12 @@ export const CapabilityProbeSchema = z
     zeroRetention: z.boolean().optional(),
     /** Why not, in provider terms: "no video access on this plan", "out of credit" … */
     reason: z.string().optional(),
+    /**
+     * The vendor accepted the key even though this capability is not unlocked — no credit, no
+     * plan access (issue 1167). The two halves of R-3 kept apart, so the remedy offered is the
+     * right one: a key that authenticates is not a key to replace.
+     */
+    authenticated: z.boolean().optional(),
   })
   .strict();
 export type CapabilityProbe = z.infer<typeof CapabilityProbeSchema>;

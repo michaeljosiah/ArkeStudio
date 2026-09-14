@@ -1,4 +1,4 @@
-import { isHostedVoiceReader, type ClonedVoice } from "@arke-studio/contracts";
+import { HOSTED_READER_LABELS, hostedReaderKeepsSlot, isHostedVoiceReader, type ClonedVoice } from "@arke-studio/contracts";
 import type { DispatchVoiceReference } from "../queue/dispatcher.js";
 import type { WorldStore } from "../world/store.js";
 import { clipHashOf, recordVoiceReader } from "./library.js";
@@ -19,44 +19,35 @@ export interface HostedReaderDestination {
   label: string;
   /** What the vendor does with the clip, in the vendor's own terms (R-17). */
   notice: string;
-  /** Whether the vendor keeps the clip on the account, addressed by an id the library records. */
-  keepsSlot: boolean;
 }
 
-const DESTINATIONS: Record<string, HostedReaderDestination> = {
-  mistral: {
-    label: "Mistral",
-    notice:
-      "The recording is sent with each read and not kept by Arke on the service. On a paid workspace it is not used for training and is kept 30 days for abuse monitoring; on the free Experiment tier it is used for training unless opted out in Mistral's admin console.",
-    keepsSlot: false,
-  },
-  breezeblue: {
-    label: "BreezeBlue",
-    // No claim of removal: nothing in the app deletes a cloned voice yet, so nothing removes the
-    // slot on the person's behalf (R-15 waits on that command). What is true is said instead.
-    notice:
-      "The recording is saved as a voice on the account, transcribed and trimmed to 30 seconds by the service. It stays on the account until removed there; re-recording the clip here replaces it.",
-    keepsSlot: true,
-  },
-  fishaudio: {
-    label: "Fish Audio",
-    // Fish's terms (read 2026-09-13): content may be used to develop, train or enhance its
-    // models; content is kept as long as its systems need it; deleted content may not be fully
-    // removable from its records. Said as read, because the person is choosing with it.
-    notice:
-      "The recording is saved as a private voice model on the account, transcribed by the service, and stays there until removed on the account. Fish Audio's terms allow uploaded content to be used to train its models and say deleted content may not be fully removed from its records.",
-    keepsSlot: true,
-  },
+/**
+ * The notices, by provider. The removal clause is a claim the app keeps true since issue 1162:
+ * deleting the voice here removes the vendor's copy best-effort, and a copy the vendor would not
+ * give up is reported on the delete rather than left unsaid. Which readers keep a copy at all
+ * — the slot, the model — is `hostedReaderKeepsSlot` in contracts, shared with the screen that
+ * states a first read's consequence before it (R-14).
+ */
+const NOTICES: Record<string, string> = {
+  mistral:
+    "The recording is sent with each read and not kept by Arke on the service. On a paid workspace it is not used for training and is kept 30 days for abuse monitoring; on the free Experiment tier it is used for training unless opted out in Mistral's admin console.",
+  breezeblue:
+    "The recording is saved as a voice on the account, transcribed and trimmed to 30 seconds by the service. It is removed from the account when the voice is deleted here, and replaced when the clip is re-recorded.",
+  // Fish's terms (read 2026-09-13): content may be used to develop, train or enhance its
+  // models; content is kept as long as its systems need it; deleted content may not be fully
+  // removable from its records. Said as read, because the person is choosing with it.
+  fishaudio:
+    "The recording is saved as a private voice model on the account, transcribed by the service, and removed from the account when the voice is deleted here. Fish Audio's terms allow uploaded content to be used to train its models and say deleted content may not be fully removed from its records.",
 };
 
 export function hostedReaderDestination(provider: string): HostedReaderDestination | null {
-  return DESTINATIONS[provider] ?? null;
+  const notice = NOTICES[provider];
+  const label = HOSTED_READER_LABELS[provider];
+  return notice !== undefined && label !== undefined ? { label, notice } : null;
 }
 
 /** Whether the reader keeps the clip on the account (R-13): a slot to make, check and remove. */
-export function hostedReaderKeepsSlot(provider: string): boolean {
-  return DESTINATIONS[provider]?.keepsSlot === true;
-}
+export { hostedReaderKeepsSlot };
 
 /**
  * The token a command carries back to say "yes, send this one". Per vendor AND per voice: a
@@ -198,7 +189,9 @@ export async function prepareHostedClip(
       // The intent goes on the entry before the call leaves: whatever happens to the answer,
       // the title the slot would carry is remembered and reconciled on the next read.
       await recordVoiceReader(store, voice.id, provider, { pending: [name], stale: remaining });
-      voiceId = (await slots.save(provider, key, { name, clip: clip.data, contentType: clip.contentType }, signal)).voiceId;
+      // Saved under the recording's language (issue 1163): Breeze requires one and would
+      // otherwise take every voice for English; Fish reads it as a hint its detection outranks.
+      voiceId = (await slots.save(provider, key, { name, clip: clip.data, contentType: clip.contentType, language: current.language }, signal)).voiceId;
     }
     const replaced = held?.voiceId !== undefined && held.voiceId !== voiceId ? [held.voiceId] : [];
     // Recorded before the old slot is removed, with the old id kept as stale until it is: a

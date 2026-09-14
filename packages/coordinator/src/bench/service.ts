@@ -1106,10 +1106,13 @@ export function planBenchDispatch(
           // cannot express one says so rather than having a neighbour's settings guessed at. Its
           // name rides too, for a reader whose vocabulary is words (SPEC-046 R-22).
           ...(voiceSettings !== null ? { voiceSettings, delivery: params.delivery } : {}),
+          // A cloned voice's recording language is the line's (issue 1163): the reader routes and
+          // tags by it, and the estimate counts the tag it would put in.
+          ...(voiceSource.kind === "cloned" ? { language: voiceSource.voice.language } : {}),
           // No container control: the concrete model declares its format and every downstream
           // layer consumes that same value.
         },
-        estimatedMicroUsd: estimateMicroUsd(model, { characters: billableCharacters(model, composer.brief, voiceSettings !== null ? params.delivery : undefined) }),
+        estimatedMicroUsd: estimateMicroUsd(model, { characters: billableCharacters(model, composer.brief, voiceSettings !== null ? params.delivery : undefined, voiceSource.kind === "cloned" ? voiceSource.voice.language : undefined) }),
         landing: { dir: sessionMediaDir(session.id, takeId) },
         ...(voiceSource.kind === "cloned" ? { voiceReference: true } : {}),
       });

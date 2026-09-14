@@ -92,10 +92,12 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
       ];
     }
     if (balance <= 0) {
+      // Both halves of R-3, kept apart (issue 1167): the key was accepted, the account cannot
+      // pay. Said as `authenticated` so Settings offers a top-up rather than a replacement key.
       const reason = `the key authenticates but the balance is ${balance.toLocaleString("en-US")} credits — top up on breezeblue.ai`;
       return [
-        { capability: "voice-tts", available: false, reason },
-        { capability: "voice-clone", available: false, reason },
+        { capability: "voice-tts", available: false, authenticated: true, reason },
+        { capability: "voice-clone", available: false, authenticated: true, reason },
       ];
     }
     return [
@@ -122,6 +124,10 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
     }
     const delivery = DeliverySchema.safeParse(request.params["delivery"]);
     const direction = delivery.success ? breezeDirection(delivery.data) : {};
+    // A performance job arrives already decorated — `mapCadence` put the tag in the text and
+    // lifted the sentence out as `instructions` (issue 1149) — so it names no delivery here, and
+    // the sentence rides as it was mapped rather than being re-derived.
+    const instruction = typeof request.params["instructions"] === "string" && request.params["instructions"].trim() !== "" ? request.params["instructions"] : direction.instruction;
     const settings = isNumberRecord(request.params["voiceSettings"]) ? request.params["voiceSettings"] : {};
     const language = typeof request.params["language"] === "string" && /^[A-Za-z]{2}$/.test(request.params["language"]) ? request.params["language"].toLowerCase() : undefined;
     // Tags are per language on Breeze — parentheses in English, the language's own word in
@@ -143,7 +149,7 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
       body: JSON.stringify({
         text: tagged,
         ...(language !== undefined ? { language_code: language } : {}),
-        ...(direction.instruction !== undefined ? { instructions: direction.instruction } : {}),
+        ...(instruction !== undefined ? { instructions: instruction } : {}),
         ...(Object.keys(settings).length > 0 ? { voice_settings: settings } : {}),
       }),
       ...(request.signal !== undefined ? { signal: request.signal } : {}),
@@ -265,16 +271,22 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
     Array<{ provider: string; model: string; voiceId: string; label: string; attributes: string[]; local: boolean; canClone: boolean }>
   > {
     const voices: Array<Record<string, unknown>> = [];
+    // The trend sort pages by token, not by number (issue 1168): `page=2` is a 400 — "sort=trend
+    // uses next_page_token pagination; page must be 1" — and a rejected call in the ledger on
+    // every listing. Each page's body names the next; the filters stay the same; no token is
+    // the end whatever `has_more` says.
+    let token: string | null = null;
     for (let page = 1; page <= BREEZE_CATALOGUE_PAGES; page += 1) {
       const { status, body } = await jsonRequest(
         this.fetchImpl, this.id,
-        `${this.baseUrl}/v1/voices?voice_type=default&sort=trend&sort_direction=desc&page_size=100&page=${page}`,
+        `${this.baseUrl}/v1/voices?voice_type=default&sort=trend&sort_direction=desc&page_size=100${token !== null ? `&next_page_token=${encodeURIComponent(token)}` : ""}`,
         { headers: this.headers(key) },
       ).catch(() => ({ status: 599, body: null }));
       if (status >= 400) break;
-      const listed = (body as { voices?: Array<Record<string, unknown>>; has_more?: unknown } | null);
+      const listed = (body as { voices?: Array<Record<string, unknown>>; has_more?: unknown; next_page_token?: unknown } | null);
       voices.push(...(listed?.voices ?? []));
-      if (listed?.has_more !== true) break;
+      token = typeof listed?.next_page_token === "string" && listed.next_page_token !== "" ? listed.next_page_token : null;
+      if (listed?.has_more !== true || token === null) break;
     }
     return voices
       .filter((v) => typeof v["voice_id"] === "string" && typeof v["name"] === "string" && (v["visibility"] === undefined || v["visibility"] === "public"))

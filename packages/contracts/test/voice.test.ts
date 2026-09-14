@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   BREEZE_DELIVERY,
   breezeDirection,
+  CLONE_LANGUAGES,
   clonedVoiceCandidates,
   cloudReaderCandidates,
   DEFAULT_NARRATOR,
@@ -10,8 +11,10 @@ import {
   deliveryParams,
   extractVoiceAttributes,
   FISH_DELIVERY,
+  firstReadNotice,
   fishDirection,
   HOSTED_VOICE_READERS,
+  hostedReaderKeepsSlot,
   isClonedVoice,
   isHostedVoiceReader,
   mintVoiceId,
@@ -19,7 +22,11 @@ import {
   legacyVoiceModel,
   newClonedVoice,
   parseVoiceLibrary,
+  PERFORMANCE_GENERATION_PROVIDERS,
   rankVoices,
+  readerName,
+  readerPriceLabel,
+  supportsPerformanceGeneration,
   supportsVoiceUse,
   voiceSourceFor,
 } from "../src/voice.js";
@@ -607,5 +614,111 @@ describe("what a vendor bills as a character (SPEC-046 R-8)", () => {
     const bad = JSON.parse(JSON.stringify(base)) as typeof base;
     bad.models[0]!.pricing.unit = "cjk-triple" as never;
     assert.equal(ModelManifestSchema.safeParse(bad).success, false);
+  });
+});
+
+describe("a cloned voice's language (issue 1163)", () => {
+  const entry = { id: "harbour-glass", name: "Harbour glass", clip: "voices/harbour-glass.wav" };
+  it("reads as English for an entry written before it was asked, and for a code the schema cannot read", () => {
+    assert.equal(parseVoiceLibrary({ voices: [entry] })[0]?.language, "en");
+    assert.equal(parseVoiceLibrary({ voices: [{ ...entry, language: "fr" }] })[0]?.language, "fr");
+    // A hand-edited value is not a reason to lose the voice: it reads as English, the way every
+    // reader assumed before the field existed.
+    assert.equal(parseVoiceLibrary({ voices: [{ ...entry, language: "French" }] })[0]?.language, "en");
+    assert.equal(parseVoiceLibrary({ voices: [{ ...entry, language: 7 }] })[0]?.id, "harbour-glass");
+  });
+  it("is asked at creation as a two-letter code, English when not said", () => {
+    const base = { name: "Harbour glass", description: "Low, dry.", clip: "voices/x.wav", consent: true, created: "2026-09-14T00:00:00.000Z", taken: [] };
+    const plain = newClonedVoice(base);
+    assert.ok(plain.ok && plain.voice.language === "en");
+    const french = newClonedVoice({ ...base, language: " FR " });
+    assert.ok(french.ok && french.voice.language === "fr", "trimmed and lowered: the dialog's select is not the only way in");
+    const refused = newClonedVoice({ ...base, language: "français" });
+    assert.ok(!refused.ok && /two-letter code/.test(refused.reason));
+    // The dialog offers codes the schema takes, every one of them.
+    for (const [code] of CLONE_LANGUAGES) assert.ok(newClonedVoice({ ...base, language: code }).ok, code);
+    assert.equal(CLONE_LANGUAGES[0]?.[0], "en", "English first, because it is the default");
+  });
+  it("the clone-voice frame carries it, or not, and refuses a name for one", () => {
+    const frame = { kind: "clone-voice" as const, worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", clipId: "clip_1", name: "Harbour glass", description: "Low.", consent: true as const };
+    assert.equal(ClientMessageSchema.safeParse(frame).success, true);
+    assert.equal(ClientMessageSchema.safeParse({ ...frame, language: "fr" }).success, true);
+    assert.equal(ClientMessageSchema.safeParse({ ...frame, language: "French" }).success, false);
+  });
+});
+
+describe("what a first read through a reader adds (SPEC-046 R-14, R-34)", () => {
+  it("names the readers that keep a copy, and no other", () => {
+    assert.deepEqual(["mistral", "breezeblue", "fishaudio", "elevenlabs", "comfyui"].map(hostedReaderKeepsSlot), [false, true, true, false, false]);
+  });
+  it("says so on the row until the library records the slot, in the vendor's own terms", () => {
+    const fresh = { remote: undefined };
+    assert.match(firstReadNotice(fresh, "breezeblue") ?? "", /clone charge, priced by BreezeBlue/, "Breeze charges a flat fee its docs do not quantify");
+    assert.match(firstReadNotice(fresh, "fishaudio") ?? "", /voice made on Fish Audio/, "Fish makes the model for nothing, so only the making is said");
+    assert.equal(firstReadNotice(fresh, "mistral"), null, "Mistral keeps nothing: nothing to say");
+    assert.equal(firstReadNotice({ remote: { breezeblue: { confirmedAt: "2026-09-14T00:00:00.000Z" } } }, "breezeblue")?.includes("clone charge"), true, "confirmed is not yet saved");
+    assert.equal(firstReadNotice({ remote: { breezeblue: { voiceId: "voc_1" } } }, "breezeblue"), null, "the second read is a read");
+    assert.equal(firstReadNotice({ remote: { breezeblue: { voiceId: "voc_1" } } }, "fishaudio")?.includes("Fish Audio"), true, "one vendor's slot says nothing about another's");
+  });
+});
+
+describe("how the Voice page names a reader and its price (SPEC-046 R-30)", () => {
+  const priced = (microUsdPerCharacter: number, unit?: "cjk-double" | "utf8-byte") =>
+    ({ pricing: { kind: "perCharacter" as const, microUsdPerCharacter, ...(unit ? { unit } : {}) } });
+  it("prices per thousand of the unit the row bills, three decimals where the rate has them", () => {
+    assert.equal(readerPriceLabel(priced(16)), "$0.016 per 1k", "$0.016 rounded to a cent is a different price");
+    assert.equal(readerPriceLabel(priced(100)), "$0.10 per 1k");
+    assert.equal(readerPriceLabel(priced(40, "cjk-double")), "$0.04 per 1k · CJK ×2");
+    assert.equal(readerPriceLabel(priced(15, "utf8-byte")), "$0.015 per 1k bytes");
+    assert.equal(readerPriceLabel({ pricing: { kind: "unmetered" } }), "free");
+    assert.equal(readerPriceLabel({ pricing: { kind: "perSecond", microUsdPerSecond: 1 } as never }), null);
+    assert.equal(readerPriceLabel(null), null);
+  });
+  it("names the engine behind the row, then the row, then the provider", () => {
+    assert.equal(readerName({ provider: "comfyui", model: "comfyui-cloned-voice" }), "IndexTTS");
+    assert.equal(readerName({ provider: "mistral", model: "voxtral-mini-tts" }), "Voxtral");
+    assert.equal(readerName({ provider: "breezeblue", model: "breeze-tts-2" }), "Breeze");
+    assert.equal(readerName({ provider: "fishaudio", model: "fish-s2.1-pro" }), "Fish Audio");
+    assert.equal(readerName({ provider: "kokoro", model: "kokoro-82m" }), "Kokoro");
+    assert.equal(readerName({ provider: "acme", model: "acme-tts" }, { displayName: "Acme Reader" }), "Acme Reader");
+    assert.equal(readerName({ provider: "acme", model: null }), "acme");
+  });
+});
+
+describe("the performance path's readers (SPEC-044 R-14, SPEC-046 issue 1149)", () => {
+  const row = (provider: ManifestModel["provider"], id: string, cadence = true) =>
+    ({ id, provider, capability: "voice-tts" as const, ...(cadence ? { cadence: { deliveries: ["measured" as const], speed: null, pause: "unsupported" as const, emphasis: "unsupported" as const, breath: "unsupported" as const, outputTimestamps: "none" as const, deliveryMappings: { measured: { settings: {} } } } } : {}) });
+  it("include the hosted readers, and still exclude the recipe and a row with no cadence", () => {
+    assert.deepEqual([...PERFORMANCE_GENERATION_PROVIDERS], ["kokoro", "elevenlabs", "mistral", "breezeblue", "fishaudio"]);
+    assert.equal(supportsPerformanceGeneration(row("breezeblue", "breeze-tts-2")), true);
+    assert.equal(supportsPerformanceGeneration(row("mistral", "voxtral-mini-tts")), true);
+    assert.equal(supportsPerformanceGeneration(row("fishaudio", "fish-s2.1-pro")), true);
+    assert.equal(supportsPerformanceGeneration(row("comfyui", "comfyui-cloned-voice")), false, "the recipe has no upload seam on this path");
+    assert.equal(supportsPerformanceGeneration(row("mistral", "voxtral-mini-tts", false)), false, "no cadence, no door");
+  });
+  it("generate-performance carries the vendor's answer, as the voice-line does (R-16)", () => {
+    const frame = { kind: "generate-performance" as const, requestId: "01J8F3K2QW9VZX4N7M0RTYB6HD", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", operationId: "00000000-0000-4000-8000-000000000000", confirmedMicroUsd: 1200 };
+    assert.equal(ClientMessageSchema.safeParse(frame).success, true);
+    assert.equal(ClientMessageSchema.safeParse({ ...frame, voiceUploadConfirmedFor: "vendor:breezeblue:harbour" }).success, true);
+    assert.equal(ClientMessageSchema.safeParse({ ...frame, voiceUploadConfirmedFor: "" }).success, false);
+  });
+});
+
+describe("deleting a cloned voice (SPEC-046 R-15, issue 1162)", () => {
+  it("is a frame with a request to answer, and an answer that lists each vendor copy", () => {
+    assert.equal(ClientMessageSchema.safeParse({ kind: "delete-voice", requestId: "01J8F3K2QW9VZX4N7M0RTYB6HD", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", voiceId: "harbour" }).success, true);
+    assert.equal(ClientMessageSchema.safeParse({ kind: "delete-voice", requestId: "01J8F3K2QW9VZX4N7M0RTYB6HD", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", voiceId: "" }).success, false);
+    const base = { at: "2026-09-14T00:00:00.000Z", type: "voice.deleted" as const, requestId: "01J8F3K2QW9VZX4N7M0RTYB6HD", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", voiceId: "harbour" };
+    const deleted = DomainEventSchema.safeParse({ ...base, status: "deleted", copies: [{ provider: "breezeblue", removed: true }, { provider: "fishaudio", removed: false, reason: "Fish Audio answered HTTP 500" }] });
+    assert.ok(deleted.success);
+    const refused = DomainEventSchema.safeParse({ ...base, status: "refused", reason: "Maren Kest still reads with this voice — clear it on the sheet first." });
+    assert.ok(refused.success && refused.data.type === "voice.deleted" && refused.data.copies.length === 0, "no copies is an empty list, never absent");
+  });
+  it("voice.candidates says what a first read adds, keyed like the prices, and an older coordinator says nothing", () => {
+    const base = { at: "2026-09-14T00:00:00.000Z", type: "voice.candidates" as const, worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", sheetId: "maren-kest", extracted: [], ranked: [], previewLine: { text: "x", source: "stock" as const }, cloudPreviewMicroUsd: null, previewMicroUsdByVoice: {} };
+    const older = DomainEventSchema.safeParse(base);
+    assert.ok(older.success && older.data.type === "voice.candidates" && Object.keys(older.data.notices).length === 0);
+    const noted = DomainEventSchema.safeParse({ ...base, notices: { '["breezeblue","breeze-tts-2","harbour"]': "first read · clone charge, priced by BreezeBlue" } });
+    assert.ok(noted.success);
   });
 });

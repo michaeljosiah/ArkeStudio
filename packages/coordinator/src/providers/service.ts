@@ -122,9 +122,14 @@ export class ProviderService {
       const probes = await validator.validateKey(key);
       if (!current()) return this.statuses.get(id)!;
       const anyAvailable = probes.some((p) => p.available);
+      // A key the vendor accepted is a valid key, whatever the account can pay for (issue 1167):
+      // "invalid" here is what Settings renders as "key rejected" and remedies with a
+      // replacement, which an unfunded account does not need. The capability stays locked —
+      // `deriveCapabilityAvailability` reads the probe — and the probe's reason says why.
+      const authenticated = anyAvailable || probes.some((p) => p.authenticated === true);
       void this.log?.append({ kind: "provider.validated", provider: id, probes });
       return this.patch(id, {
-        validation: anyAvailable ? "valid" : "invalid",
+        validation: authenticated ? "valid" : "invalid",
         probes,
         lastValidated: this.clock(),
         fault: null,

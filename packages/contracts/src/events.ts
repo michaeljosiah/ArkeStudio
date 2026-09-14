@@ -668,6 +668,11 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       cloudPreviewMicroUsd: z.number().int().min(0).nullable(),
       /** Exact preflight price by concrete provider/model/voice target. */
       previewMicroUsdByVoice: z.record(z.string(), z.number().int().min(0)).default({}),
+      /**
+       * What a first read through a reader adds, by the same key (SPEC-046 R-14, R-34): a
+       * slot-keeping reader's clone charge, said on the row before the preview that would incur it.
+       */
+      notices: z.record(z.string(), z.string().min(1)).default({}),
     })
     .strict(),
   /** Correlated synthesis result for candidate previews and authoritative sheet reads. */
@@ -783,6 +788,26 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       label: z.string().nullable(),
       /** Why not — the same words `newClonedVoice` refuses with, never a generic failure. */
       reason: z.string().nullable(),
+    })
+    .strict(),
+  /**
+   * The outcome of deleting a cloned voice (SPEC-046 R-15): the library's part first, then each
+   * copy a hosted reader kept — removed, or kept with the vendor's reason. A copy the vendor
+   * would not give up never blocks the delete here; it is reported once, on this event.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("voice.deleted"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      voiceId: z.string().min(1),
+      status: z.enum(["deleted", "refused"]),
+      /** Why not — the characters still reading with it, or what the library said. */
+      reason: z.string().min(1).optional(),
+      copies: z
+        .array(z.object({ provider: z.string().min(1), removed: z.boolean(), reason: z.string().min(1).optional() }).strict())
+        .default([]),
     })
     .strict(),
   z

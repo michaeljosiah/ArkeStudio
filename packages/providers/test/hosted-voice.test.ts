@@ -153,6 +153,11 @@ describe("BreezeBlue · Breeze TTS 2 as a hosted reader (SPEC-046 §2.4)", () =>
     const probes = await empty.validateKey("k");
     assert.equal(probes[0]?.available, false);
     assert.match(probes[0]!.reason!, /authenticates but the balance is 0 credits/);
+    // Both halves of R-3 kept apart (issue 1167): the key was accepted, so Settings must not
+    // say "key rejected" and offer a replacement for an account that needs a top-up.
+    assert.ok(probes.every((p) => p.authenticated === true), "the key authenticated");
+    const full = await new BreezeBlueClient(async () => json(200, { balance: 1400 })).validateKey("k");
+    assert.ok(full.every((p) => p.authenticated === undefined), "said only when it is the whole answer");
     const bad = new BreezeBlueClient(async () => json(401, { ok: false, code: "AUTH_REQUIRED", detail: "Authentication required." }));
     assert.match((await bad.validateKey("k"))[0]!.reason!, /rejected this key/);
   });
@@ -325,25 +330,32 @@ describe("BreezeBlue · Breeze TTS 2 as a hosted reader (SPEC-046 §2.4)", () =>
   });
 
   it("lists the public catalogue by trend, page after page to a bound, with its metadata as attributes and saved voices left out (R-32)", async () => {
+    // The trend sort pages by token (issue 1168): `page=2` was a 400 — "sort=trend uses
+    // next_page_token pagination; page must be 1" — and a rejected call in the ledger on every
+    // listing. Each body names the next page; the first call carries no token at all.
+    const FILTERS = "https://api.breeze.blue/v1/voices?voice_type=default&sort=trend&sort_direction=desc&page_size=100";
+    const pageOf = (url: string) => Number(/next_page_token=t(\d+)/.exec(url)?.[1] ?? 1);
     const page = (n: number, hasMore: boolean) => json(200, { voices: [
       { voice_id: `voc_a${n}`, name: `Ada ${n}`, origin: "designed", voice_type: "default", visibility: "public", language_code: "en", accent: "british",
         gender: "female", age: "middle_aged", tone: ["calm", "warm"], primary_category_code: "narration", tags: ["Narration"] },
       { voice_id: `voc_b${n}`, name: "Mine", origin: "cloned", voice_type: "custom", visibility: "private", language_code: "en" },
-    ], has_more: hasMore, total: 6898, page: n, page_size: 100 });
-    const r = recording((url) => page(Number(/page=(\d+)/.exec(url)?.[1]), url.includes("page=1")));
+    ], has_more: hasMore, ...(hasMore ? { next_page_token: `t${n + 1}` } : {}), total: 6898, page_size: 100 });
+    const r = recording((url) => page(pageOf(url), pageOf(url) === 1));
     const voices = await new BreezeBlueClient(r.fetchImpl).listVoicesCatalog("k");
-    assert.deepEqual(r.calls.map((call) => call.url), [
-      "https://api.breeze.blue/v1/voices?voice_type=default&sort=trend&sort_direction=desc&page_size=100&page=1",
-      "https://api.breeze.blue/v1/voices?voice_type=default&sort=trend&sort_direction=desc&page_size=100&page=2",
-    ], "the second page said there was no more");
+    assert.deepEqual(r.calls.map((call) => call.url), [FILTERS, `${FILTERS}&next_page_token=t2`], "the second page said there was no more; no page number is ever sent");
     assert.deepEqual(voices, [1, 2].map((n) => ({ provider: "breezeblue", model: BREEZE_MODEL, voiceId: `voc_a${n}`, label: `Ada ${n}`,
       attributes: ["en", "british", "female", "middle_aged", "narration", "calm", "warm", "narration"], local: false, canClone: false })));
     // A catalogue that never ends is read to the bound and no further.
-    const endless = recording((url) => page(Number(/page=(\d+)/.exec(url)?.[1]), true));
+    const endless = recording((url) => page(pageOf(url), true));
     assert.equal((await new BreezeBlueClient(endless.fetchImpl).listVoicesCatalog("k")).length, BREEZE_CATALOGUE_PAGES);
     assert.equal(endless.calls.length, BREEZE_CATALOGUE_PAGES);
+    assert.equal(endless.calls[2]?.url, `${FILTERS}&next_page_token=t3`, "the same filters ride with the token");
+    // `has_more` without a token is the end too: nothing the API documents as invalid is sent.
+    const tokenless = recording(() => json(200, { voices: [{ voice_id: "voc_1", name: "One", visibility: "public" }], has_more: true }));
+    assert.equal((await new BreezeBlueClient(tokenless.fetchImpl).listVoicesCatalog("k")).length, 1);
+    assert.equal(tokenless.calls.length, 1);
     // A page that fails ends the run with what was read, not with nothing.
-    const flaky = recording((url) => (url.includes("page=2") ? json(500, { ok: false, code: "INTERNAL_ERROR" }) : page(1, true)));
+    const flaky = recording((url) => (url.includes("next_page_token") ? json(500, { ok: false, code: "INTERNAL_ERROR" }) : page(1, true)));
     assert.equal((await new BreezeBlueClient(flaky.fetchImpl).listVoicesCatalog("k")).length, 1);
   });
 });
@@ -431,5 +443,28 @@ describe("the rows and the registry (SPEC-046 R-6..R-8, R-28)", () => {
     assert.equal(row.cadence?.tagSyntax, "paren");
     assert.deepEqual(row.cadence?.deliveryMappings, BREEZE_DELIVERY);
     assert.equal(row.cadence?.emphasis, "unsupported");
+  });
+});
+
+describe("Breeze on the performance path (SPEC-046 issue 1149)", () => {
+  it("takes the delivery's sentence as it was mapped, and does not re-derive a tag from a delivery the job does not name", async () => {
+    // `mapCadence` put the tag in the text and lifted the sentence out as `instructions`; the
+    // job names no delivery, so nothing here puts the tag in twice.
+    const r = recording(() => new Response(WAV, { status: 200 }));
+    await new BreezeBlueClient(r.fetchImpl).submit("k", { model: BREEZE_MODEL, capability: "voice-tts",
+      params: { text: "(whispers) Do not open it.", voiceId: "voc_1", language: "en", instructions: "Whisper it.", voiceSettings: { guidance_scale: 4 } } });
+    const body = r.body();
+    assert.equal(body["text"], "(whispers) Do not open it.");
+    assert.equal(body["instructions"], "Whisper it.");
+    assert.equal(body["language_code"], "en");
+    // A delivery named beside a mapped sentence: the sentence rides as mapped, the tag as derived.
+    await new BreezeBlueClient(r.fetchImpl).submit("k", { model: BREEZE_MODEL, capability: "voice-tts",
+      params: { text: "Do not open it.", voiceId: "voc_1", language: "en", delivery: "whispered", instructions: "As mapped." } });
+    assert.equal(r.body()["instructions"], "As mapped.");
+    assert.equal(r.body()["text"], "(whispers) Do not open it.");
+    // An empty sentence is no sentence: the delivery's own carries.
+    await new BreezeBlueClient(r.fetchImpl).submit("k", { model: BREEZE_MODEL, capability: "voice-tts",
+      params: { text: "Do not open it.", voiceId: "voc_1", delivery: "whispered", instructions: "  " } });
+    assert.equal(r.body()["instructions"], BREEZE_DELIVERY.whispered.instruction);
   });
 });

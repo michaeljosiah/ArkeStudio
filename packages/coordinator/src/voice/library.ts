@@ -4,6 +4,7 @@ import { basename, isAbsolute, join, relative, sep } from "node:path";
 import {
   ArtifactSidecarSchema,
   CLONED_VOICES_PATH,
+  ClonedVoiceSchema,
   newClonedVoice,
   ulid,
   type ArtifactSidecar,
@@ -113,6 +114,8 @@ export interface CloneVoiceInput {
   name: string;
   description: string;
   consent: boolean;
+  /** The recording's language (ISO 639-1); English when not said (issue 1163). */
+  language?: string;
   /** The sheet this was cloned while casting, if any — a link, never ownership (§2.3). */
   sheetId?: string;
   mutation?: { source?: string; requestId?: string; precondition?: WorldStatePrecondition };
@@ -184,6 +187,7 @@ async function cloneVoiceSerialised(
     description: input.description,
     clip: "pending",
     consent: input.consent,
+    ...(input.language !== undefined ? { language: input.language } : {}),
     created: store.now(),
     taken,
   });
@@ -361,6 +365,60 @@ async function cloneVoiceSerialised(
   }
 
   return { ok: true, voice: entry };
+}
+
+export type DeleteVoiceOutcome = { ok: true; voice: ClonedVoice } | { ok: false; reason: string };
+
+/**
+ * Delete a cloned voice from the library (SPEC-046 R-15, issue 1162).
+ *
+ * The entry goes first and the clip after, under the same gate the clone holds: an id freed
+ * here is one the next clone may mint again, and its clip would land at the same path — so the
+ * removal cannot run beside a clone. The order is the safe one for a crash between the two: an
+ * entry whose clip is gone refuses a read with its reason (§1.3), while a clip nothing names is
+ * inert. The provenance artifact stays — it records that a recording was filed, which deleting
+ * the voice does not unmake — and what a hosted reader holds is the caller's to remove after,
+ * from the entry this returns: the ids on it are the only handle on the vendor's copies.
+ *
+ * The entries are patched as read, like every other write here: a neighbour this build cannot
+ * parse is left exactly as it was.
+ */
+export async function deleteVoice(
+  store: WorldStore,
+  voiceId: string,
+  mutation: { source?: string; requestId?: string } = {},
+): Promise<DeleteVoiceOutcome> {
+  try {
+    return await store.gateOp(async () => {
+      const existingRaw = await readLibraryRaw(store);
+      const entries = rawEntries(existingRaw);
+      const index = entries.findIndex((entry) => entry?.["id"] === voiceId);
+      const parsed = index === -1 ? null : ClonedVoiceSchema.safeParse(entries[index]);
+      if (existingRaw === null || parsed === null || !parsed.success) {
+        return { ok: false, reason: "that cloned voice is no longer in this world" };
+      }
+      const voice = parsed.data;
+      await store.commitUnserialised({
+        kind: "voice-delete",
+        source: mutation.source ?? "form",
+        files: [
+          {
+            path: CLONED_VOICES_PATH,
+            action: "replace",
+            content: JSON.stringify({ voices: entries.filter((_, at) => at !== index) }, null, 2) + "\n",
+            baseHash: sha256(existingRaw),
+          },
+        ],
+        ...(mutation.requestId !== undefined ? { requestId: mutation.requestId } : {}),
+      });
+      // The clip is removed only where the schema already confined it: a path that could reach
+      // outside `voices/` never parsed as a voice, and `clipFor` would have refused it too.
+      await rm(toExtendedLength(join(store.dir, fromPortable(voice.clip))), { force: true }).catch(() => {});
+      return { ok: true, voice };
+    });
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : "the voice library could not be written" };
+  }
 }
 
 /**

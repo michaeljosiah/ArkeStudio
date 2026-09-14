@@ -7,7 +7,9 @@ import {
   productionAspect,
   productionShape,
   DELIVERIES,
+  firstReadNotice,
   legacyVoiceModel,
+  voiceSourceFor,
   supportedDeliveries,
   type CompiledPass,
   type Delivery,
@@ -1150,6 +1152,13 @@ export function VoiceLineDialogScreen() {
         : `This production uses ${selectedVoiceModel.displayName}, but ${speaker?.name ?? "this character"}'s assigned voice uses ${voiceModel?.displayName ?? assignedVoiceModelId}. Choose the assigned model for this line.`
       : null;
   const voiceUnavailableReason = voiceModelConflict ?? assignedVoiceUnavailableReason;
+  // What the first read through a slot-keeping reader adds (SPEC-046 R-14, R-34), stated before
+  // the press: the library entry says whether the vendor already holds the voice.
+  const firstRead = (() => {
+    if (!speaker?.voice || !voiceModel) return null;
+    const source = voiceSourceFor(world?.clonedVoices ?? [], speaker.voice.provider, voiceModel.id, speaker.voice.voiceId);
+    return source.kind === "cloned" ? firstReadNotice(source.voice, speaker.voice.provider) : null;
+  })();
   useEffect(
     () =>
       subscribeQueueResults((result) => {
@@ -1295,6 +1304,11 @@ export function VoiceLineDialogScreen() {
           >
             {sending ? "Generating…" : "Generate line"}
           </Button>
+          {firstRead !== null && (
+            <span className="fy-mono" data-testid="voice-line-first-read" style={{ marginLeft: 12 }}>
+              {firstRead}
+            </span>
+          )}
         </div>
         {uploadConfirmation && (
           <RemoteVoiceUploadConfirmation

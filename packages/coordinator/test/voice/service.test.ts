@@ -1000,6 +1000,7 @@ describe("cloned voices join the catalogue", () => {
       attributes: ["low", "dry", "unhurried", "coastal"],
       consent: true,
       created: "2026-08-18T10:00:00.000Z",
+      language: "en",
     },
   ];
 

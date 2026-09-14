@@ -13,7 +13,8 @@ import {
 } from "@arke-studio/contracts";
 import { Button } from "../../components/ui.js";
 import { dismissPlayback, playClip, playbackSnapshot } from "../../lib/audio.js";
-import { generatePerformance, send, subscribePerformanceResults, subscribeQueueResults } from "../../lib/store.js";
+import { generatePerformance, send, subscribePerformanceResults, subscribeQueueResults, subscribeVoiceUploadConfirmations } from "../../lib/store.js";
+import { RemoteVoiceUploadConfirmation } from "../../components/remote-voice-upload-confirmation.js";
 
 /** One line the character speaks in the scene, as the dialog lists it (SPEC-044 R-16). */
 export interface SpokenLine { id: string; shotId: string; blockId?: string; number: number; text: string }
@@ -173,6 +174,9 @@ export function GenerateLineSheet({ world, production, scene, sheet, model, line
   const [hash, setHash] = useState("");
   const [quote, setQuote] = useState<PerformanceGenerationQuote | null>(null);
   const [busy, setBusy] = useState(false), [notice, setNotice] = useState("");
+  // A cloned voice through a hosted reader asks the vendor's question on the first Generate
+  // (SPEC-046 R-16): answered here, the same press goes again with the token.
+  const [uploadConfirmation, setUploadConfirmation] = useState<{ destinationLabel: string; confirmationToken: string; destinationNotice?: string } | null>(null);
   const pending = useRef<string | null>(null);
   const normalized = normalizeSpeechText(line?.text ?? "");
   // The quote follows the line as well as its wording (codex round 3): two lines that read the
@@ -197,6 +201,19 @@ export function GenerateLineSheet({ world, production, scene, sheet, model, line
     if (result.disposition === "accepted") { onClose(); return; }
     setQuote(null); setNotice(result.failures[0]?.reason ?? "Generation was not queued.");
   }), [onClose]);
+  useEffect(() => subscribeVoiceUploadConfirmations((confirmation) => {
+    if (confirmation.requestId !== pending.current) return;
+    pending.current = null; setBusy(false);
+    setUploadConfirmation({ destinationLabel: confirmation.destinationLabel, confirmationToken: confirmation.confirmationToken,
+      ...(confirmation.destinationNotice !== undefined ? { destinationNotice: confirmation.destinationNotice } : {}) });
+  }), []);
+  const generate = (voiceUploadConfirmedFor?: string) => {
+    if (!quote) return;
+    setBusy(true);
+    pending.current = generatePerformance({ worldId: world.meta.worldId, operationId: quote.operationId, confirmedMicroUsd: quote.estimatedMicroUsd,
+      ...(voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor } : {}) });
+    if (pending.current === null) { setBusy(false); setNotice("The studio is disconnected."); }
+  };
   const plan: CadencePlan = { schemaVersion: 1, sourceTextHash: hash, delivery: "measured", speed: 1, cues: [] };
   return (
     <div className="fy-linedoor" role="dialog" aria-label="Generate a line">
@@ -218,12 +235,16 @@ export function GenerateLineSheet({ world, production, scene, sheet, model, line
       ) : (
         <div className="fy-linedoor__keep">
           <pre className="fy-linedoor__wording">{quote.mapping.providerText}</pre>
+          {uploadConfirmation && (
+            <RemoteVoiceUploadConfirmation
+              destinationLabel={uploadConfirmation.destinationLabel}
+              destinationNotice={uploadConfirmation.destinationNotice}
+              onCancel={() => setUploadConfirmation(null)}
+              onConfirm={() => { const token = uploadConfirmation.confirmationToken; setUploadConfirmation(null); generate(token); }}
+            />
+          )}
           <div className="fy-linedoor__actions">
-            <Button size="sm" variant="primary" disabled={busy} onClick={() => {
-              setBusy(true);
-              pending.current = generatePerformance({ worldId: world.meta.worldId, operationId: quote.operationId, confirmedMicroUsd: quote.estimatedMicroUsd });
-              if (pending.current === null) { setBusy(false); setNotice("The studio is disconnected."); }
-            }}>Generate · {quote.estimatedMicroUsd === 0 ? "local" : formatMicroUsd(quote.estimatedMicroUsd)}</Button>
+            <Button size="sm" variant="primary" disabled={busy || uploadConfirmation !== null} onClick={() => generate()}>Generate · {quote.estimatedMicroUsd === 0 ? "local" : formatMicroUsd(quote.estimatedMicroUsd)}</Button>
             {busy && <Button size="sm" variant="ghost" onClick={() => send({ kind: "cancel-performance-generation", worldId: world.meta.worldId, operationId: quote.operationId })}>Cancel</Button>}
           </div>
         </div>

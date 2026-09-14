@@ -3,11 +3,11 @@ import { it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { ulid, orderedShots, resolvePerformanceLine, normalizeSpeechText, CLONED_VOICES_PATH, CLONED_VOICE_MODEL, CLONED_VOICE_PROVIDER,
+import { billableCharacters, ulid, orderedShots, resolvePerformanceLine, normalizeSpeechText, CLONED_VOICES_PATH, CLONED_VOICE_MODEL, CLONED_VOICE_PROVIDER,
   type PerformanceGenerationQuote } from "@arke-studio/contracts";
 import { WorldStore } from "../../src/world/store.js";
 import { VoiceService } from "../../src/voice/service.js";
-import { preparePerformanceGeneration, validatePerformanceGeneration, finalizeGeneratedPerformance, readPerformanceGenerationQuote, generatedVoiceCloudBasis } from "../../src/audio/performance-generation.js";
+import { preparePerformanceGeneration, validatePerformanceGeneration, finalizeGeneratedPerformance, readPerformanceGenerationQuote, generatedVoiceCloudBasis, performanceGenerationJob } from "../../src/audio/performance-generation.js";
 import { analyzePcmWav, audioHash } from "../../src/audio/qc.js";
 import { appendAudioRights } from "../../src/audio/rights.js";
 import { SHIPPED_MANIFEST } from "../../../providers/src/manifest-data.js";
@@ -99,4 +99,40 @@ it("a generated read's cloud basis is the voice's own: licensed stock, the sampl
   assert.equal(await generatedVoiceCloudBasis(store, cloned("vc_gone")), undefined, "a clone the library no longer holds says nothing");
   await appendAudioRights(store, { schemaVersion: 1, action: "withdraw", acknowledgementId: "ack-sample", audioHash: outputHash, at: AT });
   assert.equal(await generatedVoiceCloudBasis(store, cloned("vc_own")), undefined, "a withdrawal folds the basis away");
+});
+
+it("quotes a cloned voice through a hosted reader: the row's container, the clone's language deciding the tag, and a job that carries the clip marker (SPEC-046 issue 1149)", async t => {
+  const dir = await makeTempWorld();
+  const AT = "2026-09-14T09:00:00.000Z";
+  await mkdir(join(dir, "voices"), { recursive: true });
+  await writeFile(join(dir, "voices", "odile.wav"), wav(Array.from({ length: 4800 }, (_, i) => Math.round(Math.sin(i / 7) * 8000))));
+  await writeFile(join(dir, CLONED_VOICES_PATH), JSON.stringify({ voices: [{ id: "odile", name: "Odile", clip: "voices/odile.wav", consent: true, created: AT, language: "fr" }] }));
+  // The sheet reads with the clone through Breeze: the same recording, the vendor's row.
+  const sheetPath = join(dir, "characters", "maren-kest.md");
+  await writeFile(sheetPath, (await readFile(sheetPath, "utf8")).replace("provider: elevenlabs", "provider: breezeblue").replace(/(  voiceId: )v_8Kq2(\r?\n)/, "$1odile$2  model: breeze-tts-2$2"));
+  const store = await WorldStore.open(dir); t.after(() => store.close());
+  assert.deepEqual([store.getBundle().sheets.find(s => s.id === "maren-kest")?.voice?.provider, store.getBundle().sheets.find(s => s.id === "maren-kest")?.voice?.model], ["breezeblue", "breeze-tts-2"]);
+  const production = store.getBundle().productions.find(p => p.scenes.some(s => orderedShots(s).some(shot => { const line = resolvePerformanceLine(s, shot.id); return line.ok && line.speakerSheetId === "maren-kest"; })))!;
+  const scene = production.scenes.find(s => orderedShots(s).some(shot => { const line = resolvePerformanceLine(s, shot.id); return line.ok && line.speakerSheetId === "maren-kest"; }))!;
+  const shot = orderedShots(scene).find(shot => { const line = resolvePerformanceLine(scene, shot.id); return line.ok && line.speakerSheetId === "maren-kest"; })!;
+  const line = resolvePerformanceLine(scene, shot.id); assert.ok(line.ok);
+  const model = SHIPPED_MANIFEST.models.find(m => m.id === "breeze-tts-2")!;
+  const quote = await preparePerformanceGeneration(store, model, { kind: "prepare-performance-generation", requestId: ulid(), worldId: store.worldId,
+    productionId: production.meta.id, sceneId: scene.id, shotId: shot.id, expectedSceneVersion: scene.version, expectedVoiceId: "odile", modelId: model.id,
+    cadencePlan: { schemaVersion: 1, sourceTextHash: audioHash(Buffer.from(normalizeSpeechText(line.text))), delivery: "whispered", speed: 1, cues: [] } });
+  assert.equal(quote.audioFormat, "wav", "the row's container, not MP3 by assumption");
+  assert.equal(quote.language, "fr");
+  assert.equal(quote.local, false);
+  // A French line through a paren reader: no English tag in the text, the sentence beside it (R-23).
+  assert.equal(quote.mapping.providerText, normalizeSpeechText(line.text));
+  assert.equal(typeof quote.mapping.instructions, "string");
+  assert.equal(quote.estimatedMicroUsd, billableCharacters(model, quote.mapping.providerText) * 40);
+  const job = performanceGenerationJob(store, quote, ulid(), { voiceReference: true });
+  assert.equal(job.voiceReference, true, "the dispatcher's clip read prepares the slot");
+  assert.equal(job.params["language"], "fr");
+  assert.equal(job.params["instructions"], quote.mapping.instructions);
+  assert.equal(job.params["audioFormat"], "wav");
+  assert.equal(job.params["delivery"], undefined, "the mapping already placed the delivery; naming it would put the tag in twice");
+  assert.equal(job.landing?.name, "speech.wav");
+  assert.deepEqual(await readPerformanceGenerationQuote(store, quote.operationId), quote);
 });

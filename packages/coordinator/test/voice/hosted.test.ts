@@ -47,7 +47,7 @@ function wav(dataBytes: number, fill = 0): Uint8Array {
 
 /** One account per vendor: the voices each holds by id and name, and a record of what was asked. */
 function fakeSlots(failRemove = false) {
-  const saves: Array<{ provider: string; key: string; name: string; bytes: number; contentType: string }> = [];
+  const saves: Array<{ provider: string; key: string; name: string; bytes: number; contentType: string; language?: string }> = [];
   const removes: Array<{ provider: string; key: string; voiceId: string }> = [];
   const accounts = new Map<string, Map<string, string>>();
   const accountOf = (provider: string) => accounts.get(provider) ?? accounts.set(provider, new Map()).get(provider)!;
@@ -55,7 +55,7 @@ function fakeSlots(failRemove = false) {
   const slots: HostedVoiceSlots = {
     save: async (provider, key, input, signal) => {
       signal?.throwIfAborted();
-      saves.push({ provider, key, name: input.name, bytes: input.clip.length, contentType: input.contentType });
+      saves.push({ provider, key, name: input.name, bytes: input.clip.length, contentType: input.contentType, ...(input.language !== undefined ? { language: input.language } : {}) });
       const voiceId = `voc_${++counter}`;
       accountOf(provider).set(voiceId, input.name);
       return { voiceId };
@@ -172,7 +172,7 @@ describe("what the library remembers of each hosted reader (SPEC-046 R-13, R-16)
       // The slot is named with the clip's hash: the name is the key the account can be listed for.
       const firstName = hostedSlotName(voice(), clipHashOf(first));
       assert.match(firstName, /^Harbour glass · [0-9a-f]{12}$/);
-      assert.deepEqual(saves, [{ provider: "breezeblue", key: "k", name: firstName, bytes: first.data.length, contentType: "audio/wav" }]);
+      assert.deepEqual(saves, [{ provider: "breezeblue", key: "k", name: firstName, bytes: first.data.length, contentType: "audio/wav", language: "en" }]);
       assert.deepEqual(voice().remote?.["breezeblue"], { confirmedAt: CLOCK(), voiceId: "voc_1", clipHash: clipHashOf(first), savedAt: CLOCK() });
 
       const again = await prepareHostedClip(store, "breezeblue", "breeze-tts-2", voice(), first, deps);
@@ -458,7 +458,7 @@ async function harness() {
   const asked = () => events.filter((event) => event.type === "voice.upload-confirmation-required");
   const library = async () =>
     (JSON.parse(await readFile(join(worldDir, "voices", "voices.json"), "utf8")) as { voices: Array<{ remote?: Record<string, Record<string, string>> }> }).voices[0]!;
-  return { coordinator, events, mistral, breeze, fish, saves, removes, send, preview, asked, library };
+  return { coordinator, worldDir, events, mistral, breeze, fish, saves, removes, send, preview, asked, library };
 }
 
 describe("a vendor is a destination (SPEC-046 R-16, R-17)", () => {
@@ -514,7 +514,9 @@ describe("a vendor is a destination (SPEC-046 R-16, R-17)", () => {
       assert.equal(second.destinationLabel, "BreezeBlue · Harbour");
       assert.equal(second.confirmationToken, "vendor:breezeblue:harbour");
       assert.match(second.destinationNotice ?? "", /saved as a voice on the account/);
-      assert.doesNotMatch(second.destinationNotice ?? "", /removed when the voice is removed/, "no claim the app cannot yet keep");
+      // The removal clause is back (issue 1162): the app can now keep it, best-effort, and says
+      // on the delete when a vendor would not give a copy up.
+      assert.match(second.destinationNotice ?? "", /removed from the account when the voice is deleted here/);
 
       h.events.length = 0;
       await h.preview("breezeblue", "vendor:breezeblue:harbour");
@@ -524,6 +526,7 @@ describe("a vendor is a destination (SPEC-046 R-16, R-17)", () => {
       assert.equal(slot?.remoteVoiceId, "voc_1", "Breeze reads from the slot the library made on the way");
       assert.deepEqual(h.saves.map((save) => [save.provider, save.key]), [["breezeblue", "breeze-test-key"]]);
       assert.match(h.saves[0]?.name ?? "", /^Harbour · [0-9a-f]{12}$/);
+      assert.equal(h.saves[0]?.language, "en", "saved under the recording's language (issue 1163): English for an entry that never said");
       const entry = await h.library();
       assert.deepEqual(Object.keys(entry.remote?.["breezeblue"] ?? {}).sort(), ["clipHash", "confirmedAt", "savedAt", "voiceId"]);
       assert.equal(entry.remote?.["breezeblue"]?.["voiceId"], "voc_1");
@@ -546,8 +549,100 @@ describe("a vendor is a destination (SPEC-046 R-16, R-17)", () => {
       assert.equal((h.fish.submittedVoiceReference as { remoteVoiceId?: string } | null)?.remoteVoiceId, "voc_2", "a model of its own, not Breeze's slot");
       assert.deepEqual(h.saves.map((save) => [save.provider, save.key]), [["breezeblue", "breeze-test-key"], ["fishaudio", "fish-test-key"]]);
       assert.equal((await h.library()).remote?.["fishaudio"]?.["voiceId"], "voc_2");
+
+      // What a first read adds is said on the candidates until the library records the slot
+      // (R-14, R-34): both vendors hold one now, so nothing is said for either.
+      h.events.length = 0;
+      await h.send({ kind: "voice-candidates", worldId: WORLD_ID, sheetId: "maren-kest" });
+      const after = h.events.find((event) => event.type === "voice.candidates");
+      assert.ok(after && after.type === "voice.candidates");
+      assert.deepEqual(after.notices, {}, "a second read is a read");
+
+      // Deleting the voice (R-15, issue 1162): refused while a sheet reads with it, through any
+      // reader; then the entry and the clip go together, and every copy after.
+      await h.send({ kind: "assign-voice", requestId: REQUEST, worldId: WORLD_ID, path: "characters/maren-kest.md", voice: { provider: "mistral", model: VOXTRAL.id, voiceId: "harbour", label: "Harbour" } });
+      assert.equal(h.events.find((event) => event.type === "voice.assignment-result")?.status, "assigned");
+      h.events.length = 0;
+      await h.send({ kind: "delete-voice", requestId: REQUEST, worldId: WORLD_ID, voiceId: "harbour" });
+      const refused = h.events.find((event) => event.type === "voice.deleted");
+      assert.ok(refused && refused.type === "voice.deleted");
+      assert.equal(refused.status, "refused");
+      assert.match(refused.reason ?? "", /Maren Kest still reads with this voice — clear it on the sheet first/);
+      assert.ok(await h.library(), "the entry stays");
+      assert.equal(h.removes.length, 0, "and so does every copy");
+      await h.send({ kind: "assign-voice", requestId: REQUEST, worldId: WORLD_ID, path: "characters/maren-kest.md", voice: null });
+      h.events.length = 0;
+      await h.send({ kind: "delete-voice", requestId: REQUEST, worldId: WORLD_ID, voiceId: "harbour" });
+      const deleted = h.events.find((event) => event.type === "voice.deleted");
+      assert.ok(deleted && deleted.type === "voice.deleted");
+      assert.equal(deleted.status, "deleted");
+      assert.deepEqual(deleted.copies, [{ provider: "breezeblue", removed: true }, { provider: "fishaudio", removed: true }], "Mistral held nothing, so it has nothing to say");
+      assert.deepEqual(h.removes.map((r) => [r.provider, r.voiceId]).sort(), [["breezeblue", "voc_1"], ["fishaudio", "voc_2"]]);
+      assert.deepEqual((JSON.parse(await readFile(join(h.worldDir, "voices", "voices.json"), "utf8")) as { voices: unknown[] }).voices, [], "the entry is gone");
+      assert.equal(await readFile(join(h.worldDir, "voices", "harbour.wav")).then(() => true, () => false), false, "and the clip with it");
+      // A second delete finds nothing to delete, and says so rather than removing anything again.
+      h.events.length = 0;
+      await h.send({ kind: "delete-voice", requestId: REQUEST, worldId: WORLD_ID, voiceId: "harbour" });
+      assert.equal(h.events.find((event) => event.type === "voice.deleted")?.status, "refused");
     } finally {
       await h.coordinator.stop();
+    }
+  });
+
+  it("says what a first read through a slot-keeping reader adds, on the candidates, until the slot exists (R-14, R-34)", async () => {
+    const h = await harness();
+    try {
+      await h.coordinator.start(0);
+      await h.send({ kind: "set-credential", provider: "mistral", key: "mistral-test-key" });
+      await h.send({ kind: "set-credential", provider: "breezeblue", key: "breeze-test-key" });
+      await h.send({ kind: "set-credential", provider: "fishaudio", key: "fish-test-key" });
+      await h.send({ kind: "voice-candidates", worldId: WORLD_ID, sheetId: "maren-kest" });
+      const event = h.events.find((e) => e.type === "voice.candidates");
+      assert.ok(event && event.type === "voice.candidates");
+      const key = (provider: string, model: string) => JSON.stringify([provider, model, "harbour"]);
+      assert.match(event.notices[key("breezeblue", BREEZE.id)] ?? "", /clone charge, priced by BreezeBlue/);
+      assert.match(event.notices[key("fishaudio", FISH.id)] ?? "", /voice made on Fish Audio/);
+      assert.equal(event.notices[key("mistral", VOXTRAL.id)], undefined, "Mistral keeps nothing");
+      assert.equal(Object.keys(event.notices).length, 2);
+      // A vendor copy the delete could not remove is said once, on the event, and the delete
+      // itself has already happened: a key withdrawn between the read and the delete.
+      await h.preview("breezeblue", "vendor:breezeblue:harbour");
+      await until(() => h.breeze.submitCount === 1, "the confirmed read to reach Breeze");
+      await h.send({ kind: "clear-credential", provider: "breezeblue" });
+      h.events.length = 0;
+      await h.send({ kind: "delete-voice", requestId: REQUEST, worldId: WORLD_ID, voiceId: "harbour" });
+      const deleted = h.events.find((e) => e.type === "voice.deleted");
+      assert.ok(deleted && deleted.type === "voice.deleted");
+      assert.equal(deleted.status, "deleted", "the local delete never waits on a vendor");
+      assert.deepEqual(deleted.copies.map((copy) => [copy.provider, copy.removed]), [["breezeblue", false]]);
+      assert.match(deleted.copies[0]?.reason ?? "", /has no key in Settings/);
+      assert.equal(h.removes.length, 0);
+    } finally {
+      await h.coordinator.stop();
+    }
+  });
+});
+
+describe("the recording's language reaches the slot (issue 1163)", () => {
+  it("a French clone is saved as French, not as the English every reader assumed", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    const source = join(await tempDir("arke-hosted-fr-"), "recording.wav");
+    await writeFile(toExtendedLength(source), wav(64));
+    try {
+      const made = await cloneVoice(store, [], { sourcePath: source, name: "Odile", description: "Bas, sec.", consent: true, language: "fr" });
+      assert.ok(made.ok);
+      assert.equal(made.voice.language, "fr");
+      await recordVoiceReader(store, made.voice.id, "breezeblue", { confirmedAt: CLOCK() });
+      const clip = await clipFor(store, made.voice);
+      assert.ok(clip);
+      // The entry as it is now, not as the clone returned it: the confirmation landed after.
+      const voice = store.getBundle().clonedVoices.find((entry) => entry.id === made.voice.id)!;
+      const vendor = fakeSlots();
+      await prepareHostedClip(store, "breezeblue", "breeze-tts-2", voice, clip, { getKey: async () => "k", slots: vendor.slots, now: CLOCK });
+      assert.equal(vendor.saves[0]?.language, "fr");
+    } finally {
+      await store.close();
     }
   });
 });
