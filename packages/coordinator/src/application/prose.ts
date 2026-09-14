@@ -10,6 +10,14 @@ function prose(session: EngineWorldSession) {
   return session.prose;
 }
 
+async function proseProduction(session: EngineWorldSession, productionId: string) {
+  const records = (await session.snapshot()).bundle.productions.filter(p => p.meta.id === productionId);
+  if (records.length !== 1 || !productionShape(records[0]!.meta).hasChapters) {
+    throw new Error("A unique prose production is required.");
+  }
+  return records[0]!;
+}
+
 /** Scoped direct editing. The domain still owns chapter history and stale-base decisions. */
 export class ProseApplicationService {
   constructor(private readonly worlds: EngineWorldRepository, private readonly operations: EngineOperations) {}
@@ -43,6 +51,9 @@ export class ProseApplicationService {
           const created = (await session.snapshot()).bundle.productions.filter(p => !before.has(p.meta.id));
           if (created.length !== 1 || created[0]!.meta.id !== value.productionId) throw new Error("The production creation receipt names a different production.");
           if (!productionShape(created[0]!.meta).hasChapters) throw new Error("The created production does not support prose chapters.");
+          if (created[0]!.meta.title !== input.title || created[0]!.meta.logline !== input.logline) {
+            throw new Error("The created production differs from the requested metadata.");
+          }
           return value;
         });
       }));
@@ -57,13 +68,11 @@ export class ProseApplicationService {
       this.worlds.use(worldId, async session => {
         await this.operations.policy.authorise(context, "chapter-create", resource);
         const port = prose(session);
-        const before = new Set((await session.snapshot()).bundle.productions
-          .filter(p => p.meta.id === productionId).flatMap(p => p.chapters.map(c => c.id)));
+        const before = new Set((await proseProduction(session, productionId)).chapters.map(c => c.id));
         return this.saved(session, key, async () => {
           const value = proseChapterResult.parse(await port.createChapter(productionId, input, key));
           if (value.productionId !== productionId) throw new Error("The chapter belongs to a different production.");
-          const created = (await session.snapshot()).bundle.productions.filter(p => p.meta.id === productionId)
-            .flatMap(p => p.chapters).filter(c => !before.has(c.id));
+          const created = (await proseProduction(session, productionId)).chapters.filter(c => !before.has(c.id));
           if (created.length !== 1 || created[0]!.id !== value.chapterId) throw new Error("The chapter creation receipt names a different chapter.");
           return value;
         });
@@ -102,6 +111,7 @@ export class ProseApplicationService {
       if (!productionShape(raw[0]!.meta).hasChapters) throw new Error("Manuscript output requires a prose production.");
       const chapters = raw[0]!.chapters.filter(c => !c.retired).sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
       const ids = chapters.map(c => c.id);
+      if (new Set(ids).size !== ids.length) throw new Error("The manuscript has ambiguous chapter identities.");
       for (const chapterId of ids) await this.operations.policy.authorise(context, "read", { ...resource, chapterId });
       const port = prose(session);
       const records = [];
@@ -114,7 +124,7 @@ export class ProseApplicationService {
         }
         if (!read.body.trim()) throw new Error("Every active chapter needs committed prose before manuscript output.");
         records.push({ productionId, chapterId: chapter.id, version: read.version, hash: read.hash });
-        sections.push(`## ${read.title.replace(/[\r\n]+/g, " ")}\n\n${read.body.trim()}`);
+        sections.push(`## ${read.title.replace(/[\r\n]+/g, " ")}\n\n${read.body.trimEnd()}`);
       }
       const value = proseManuscript.parse({ productionId, title: raw[0]!.meta.title,
         contentType: "text/markdown; charset=utf-8", markdown: sections.join("\n\n") + "\n", chapters: records });

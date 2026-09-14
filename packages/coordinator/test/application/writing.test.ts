@@ -25,7 +25,7 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
     body: "Maren found the path home.", wrongTarget: false,
     retiredTarget: false, retireAfterRun: false,
     beforeClose: undefined as (() => Promise<void>) | undefined,
-    beforeReview: undefined as (() => Promise<void>) | undefined,
+    beforeReview: undefined as ((proposalId: string) => Promise<void>) | undefined,
     beforeSave: undefined as (() => Promise<void>) | undefined,
     revoked: false, held: false, failSave: false, hideOutline: false, denyChapter: "", hang: false,
     dispatched: undefined as (() => void) | undefined, beforeReply: undefined as (() => Promise<void>) | undefined };
@@ -55,7 +55,7 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
           .chapters.find(c => c.id === chapterId)!.retired = true;
         return snapshot;
       }, writing: {
-      review: async id => { await state.beforeReview?.(); return session.writing!.review(id); },
+      review: async id => { await state.beforeReview?.(id); return session.writing!.review(id); },
       run: async (...args) => {
         const value = await session.writing!.run(...args);
         if (state.retireAfterRun) state.retiredTarget = true;
@@ -389,6 +389,19 @@ it("nested world aliases cannot expose scratch files to the harness", async t =>
   await symlink(h.state.scratch, join(h.store().dir, "productions", productionId, "scratch-alias"), "junction");
   await assert.rejects(h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, input), /nested filesystem aliases/);
   assert.equal(h.state.calls, 0); assert.equal(h.state.closed, 1);
+});
+
+for (const [field, value] of [["id", "renamed"], ["order", 99], ["retired", true], ["synopsis", "A different plan"],
+  ["customField", "An unexpected change"]] as const) it(`local staged review preserves chapter ${field} metadata`, async t => {
+  const h = await harness(t);
+  h.state.beforeReview = async id => {
+    const path = join(h.store().dir, ".proposals", id, "productions", productionId, "chapters", "01-neap.md");
+    const doc = MarkdownFile.parse(await readFile(path, "utf8"));
+    doc.setData({ [field]: value }); await writeFile(path, doc.serialize());
+  };
+  await assert.rejects(h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, await h.input("metadata-" + field)),
+    /unsupported chapter metadata/);
+  assert.equal((await h.engine.operation(context, WORLD_ID, "metadata-" + field))!.status, "started");
 });
 
 it("hard-linked world files cannot be edited through the writing scratch", async t => {

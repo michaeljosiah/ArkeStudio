@@ -1,7 +1,8 @@
-import { relative, isAbsolute, sep } from "node:path";
-import { realpath } from "node:fs/promises";
-import { MarkdownFile } from "../world/text-files.js";
-import { ArkeTargetReadPageSchema, type WorldChatCheckReceipt } from "@arke-studio/contracts";
+import { relative, isAbsolute, sep, join } from "node:path";
+import { realpath, readFile } from "node:fs/promises";
+import { MarkdownFile, sha256 } from "../world/text-files.js";
+import { fromPortable, toExtendedLength } from "../world/paths.js";
+import { ArkeTargetReadPageSchema, countWords, type WorldChatCheckReceipt } from "@arke-studio/contracts";
 import { ProposalManager, type StageInput } from "../gate/proposals.js";
 import { ConversationActionLifecycle } from "../arke-actions/lifecycle.js";
 import { WorldChatRunner } from "../world-chat/run.js";
@@ -24,7 +25,22 @@ export function localWriting(store: WorldStore, assertScratch: (path: string) =>
       const gate = new ProposalManager(store);
       const proposal = await gate.readManifest(proposalId);
       if (proposal.kind !== "chapter-draft" || proposal.targets.length !== 1) throw new Error("A single chapter proposal is required.");
-      const doc = MarkdownFile.parse(await gate.readTarget(proposalId, proposal.targets[0]!.path));
+      const target = proposal.targets[0]!;
+      const matches = store.getBundle().productions.flatMap(production => production.chapters
+        .filter(chapter => target.path === `productions/${production.meta.id}/chapters/${chapter.file}.md`)
+        .map(chapter => ({ production, chapter })));
+      if (matches.length !== 1 || matches[0]!.chapter.retired) throw new Error("The writing target is unavailable.");
+      const live = await readFile(toExtendedLength(join(store.dir, fromPortable(target.path))), "utf8");
+      if (sha256(live) !== target.baseHash) throw new Error("The chapter changed before staged review.");
+      const base = MarkdownFile.parse(live);
+      const doc = MarkdownFile.parse(await gate.readTarget(proposalId, target.path));
+      // The local adapter owns this file format, including preservation of unknown frontmatter.
+      const expected = { ...base.data, title: doc.data.title, status: doc.data.status,
+        words: countWords(doc.body),
+        ...(matches[0]!.production.story ? { draftedAgainst: matches[0]!.production.story.version } : {}) };
+      if ((doc.data.status !== base.data.status && doc.data.status !== "draft") || engineHash(doc.data) !== engineHash(expected)) {
+        throw new Error("The staged draft changes unsupported chapter metadata.");
+      }
       return { proposal, title: String(doc.data.title ?? ""), body: doc.body };
     },
     async run(productionId, chapterId, input, options) {

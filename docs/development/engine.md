@@ -316,8 +316,15 @@ The conversation creation event records the operation key for host reconciliatio
 also finalise their conversation records. This slice has no automatic recovery/resubmission of
 an interrupted writing run.
 
-The application service assembles manuscript Markdown from authoritative chapter reads;
-there is no separate host manuscript blob to disagree with those reads. Each read must match
+Persistence ports are trusted implementations of the host contract. Their writing review must
+preserve unrelated chapter metadata while allowing the requested prose/title/draft status and
+derived bookkeeping. The local adapter checks complete staged frontmatter against the current
+chapter, including unknown fields. Each adapter owns this check in its own storage format;
+the public engine does not exchange raw filesystem frontmatter.
+
+The application service assembles manuscript Markdown from authoritative chapter reads.
+Leading chapter indentation is preserved and duplicate canonical chapter IDs refuse output.
+There is no separate host manuscript blob to disagree with those reads. Each read must match
 the current chapter identity, title, version and file hash. Save receipts likewise match the
 post-save chapter metadata before completion.
 

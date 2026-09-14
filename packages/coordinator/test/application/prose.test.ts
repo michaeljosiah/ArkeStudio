@@ -24,6 +24,7 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
   await provider.loadWorld(WORLD_ID);
   const state = { revoked: false, held: false, failSave: false, saves: 0, deniedChapter: "", unsupported: false,
     nonProse: false, wrongSavedBody: undefined as string | undefined,
+    productionOverride: {} as { title?: string; logline?: string }, duplicateChapter: false, chapterCalls: 0,
     mutationOverride: {} as { productionId?: string; chapterId?: string; hash?: string; version?: number },
     readOverride: {} as Partial<ProseChapterRead>, afterSave: undefined as (() => Promise<void>) | undefined };
   const deliveries: Array<{ resource: unknown; sha256: string }> = [];
@@ -47,11 +48,19 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
     } });
     return createEngine({ policy, operations: new FileEngineOperationStore(path),
       worlds: { use: (id, action) => local.use(id, session => action({ ...session,
+        snapshot: async () => {
+          const snapshot = structuredClone(await session.snapshot());
+          if (state.duplicateChapter) {
+            const production = snapshot.bundle.productions.find(p => p.meta.id === productionId)!;
+            production.chapters.push(structuredClone(production.chapters[0]!));
+          }
+          return snapshot;
+        },
         prose: state.unsupported ? undefined : { ...session.prose!,
           createProduction: async (...args) => ({ ...(state.nonProse
             ? { productionId: await createProduction(provider.openStore()!, { title: args[0].title, format: "video", requestId: args[1] }) }
-            : await session.prose!.createProduction(...args)), ...state.mutationOverride }),
-          createChapter: async (...args) => ({ ...await session.prose!.createChapter(...args), ...state.mutationOverride }),
+            : await session.prose!.createProduction({ ...args[0], ...state.productionOverride }, args[1])), ...state.mutationOverride }),
+          createChapter: async (...args) => { state.chapterCalls++; return { ...await session.prose!.createChapter(...args), ...state.mutationOverride }; },
           saveChapter: async (p, c, input, key) => ({ ...await session.prose!.saveChapter(p, c,
             { ...input, body: state.wrongSavedBody ?? input.body }, key), ...state.mutationOverride }),
           readChapter: async (p, c) => ({ ...await session.prose!.readChapter(p, c), ...state.readOverride }) } })),
@@ -73,6 +82,34 @@ it("a host cannot complete prose creation with a video production", async t => {
     /does not support prose chapters/);
   assert.equal(h.state.saves, 1);
   assert.equal((await h.engine.operation(context, WORLD_ID, "wrong-format"))!.status, "started");
+});
+
+for (const field of ["title", "logline"] as const) it(`production creation verifies the requested ${field}`, async t => {
+  const h = await harness(t); h.state.productionOverride = { [field]: "Different value" };
+  await assert.rejects(h.engine.prose.createProduction(context, WORLD_ID,
+    { operationId: "wrong-metadata", title: "Requested title", logline: "Requested logline" }), /requested metadata/);
+  assert.equal(h.state.saves, 1);
+});
+
+it("chapter creation refuses a video production before calling persistence", async t => {
+  const h = await harness(t);
+  await assert.rejects(h.engine.prose.createChapter(context, WORLD_ID, "saltlight",
+    { operationId: "video-chapter", title: "Chapter", order: 1 }), /unique prose production/);
+  assert.equal(h.state.chapterCalls, 0);
+});
+
+it("manuscripts refuse duplicate canonical chapter IDs", async t => {
+  const h = await harness(t); h.state.duplicateChapter = true;
+  await assert.rejects(h.engine.prose.manuscript(context, WORLD_ID, productionId), /ambiguous chapter identities/);
+});
+
+it("manuscripts preserve meaningful leading chapter indentation", async t => {
+  const h = await harness(t);
+  const chapter = await h.engine.prose.readChapter(context, WORLD_ID, productionId, chapterId);
+  await h.engine.prose.saveChapter(context, WORLD_ID, productionId, chapterId,
+    { operationId: "indented-manuscript", baseHash: chapter.hash, body: "    An indented block.\n" });
+  const manuscript = await h.engine.prose.manuscript(context, WORLD_ID, productionId);
+  assert.ok(manuscript.value.markdown.includes("\n\n    An indented block.\n"));
 });
 
 it("a host save with matching metadata still must contain the requested prose", async t => {

@@ -38,7 +38,12 @@ export type WritingRuntimeFactory = (input: {
 }) => Promise<WritingRuntime>;
 
 export interface EngineWritingSession {
-  /** Read the authoritative staged chapter, independently of the model/run receipt. */
+  /**
+   * Trusted persistence adapter: independently read the staged chapter and verify that only
+   * body, optional title, draft status and their derived bookkeeping changed. Reject other
+   * metadata changes here.
+   * The adapter owns its file/record format and preservation of unknown metadata.
+   */
   review(proposalId: string): Promise<{ proposal: WritingResult["proposal"]; title: string; body: string }>;
   run(productionId: string, chapterId: string, input: WritingInput, options: {
     mode: "draft" | "revise"; context: EngineContext; operationKey: string;
