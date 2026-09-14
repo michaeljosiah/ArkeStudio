@@ -61,8 +61,12 @@ export interface AudiobookRunDeps {
   confirmationToken?: string;
   /** These blocks alone, whatever their state — the panel's `Make again` (R-30); every block not made otherwise. */
   only?: readonly string[];
-  /** The book's run priced this chapter with the rest (R-17): read on that answer, never asked again. */
-  priced?: true;
+  /**
+   * The book's run priced this chapter with the rest (R-17): the chapter's own price token as
+   * the book computed it from its preparation. Read on that answer while the chapter is still
+   * what was priced, and refused — never read unpriced — once it has moved under the book's run.
+   */
+  priced?: string;
   /**
    * Ask for a cloned voice's recording to leave the machine (SPEC-046 R-16): per voice and
    * vendor for a hosted reader, whose answer is written onto the voice, per request for the
@@ -310,6 +314,18 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
   return { kind: "ready", prepared: { plan, record, toMake, speaking, misses, clones, priceOf, estimate } };
 }
 
+/**
+ * The price's name for a chapter as it stands (R-17): its words and its cloud misses, each with
+ * the reader and the direction it would be made under. The chapter's own press answers with
+ * it; the book's run computes it per chapter from the preparation it priced, and the chapter's
+ * run compares it against a fresh one before spending on the book's answer (codex on PR 1187).
+ */
+export function chapterPriceToken(worldId: string, productionId: string, chapterId: string, chapter: { version: number; hash: string }, misses: readonly Speaking[]): string {
+  return createHash("sha256")
+    .update(["audiobook", worldId, productionId, chapterId, String(chapter.version), chapter.hash, ...misses.map((block) => `${block.block.key}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.direction?.hash ?? ""}`)].join("\n"))
+    .digest("hex");
+}
+
 /** The price's lines (R-17): every cloud voice the words would go to, once each, with its share. */
 export function priceLines(misses: readonly Speaking[], priceOf: (block: Speaking) => number): { label: string; provider: string; characters: number; estimatedMicroUsd: number }[] {
   const voices = new Map<string, { label: string; provider: string; characters: number; estimatedMicroUsd: number }>();
@@ -347,13 +363,20 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   for (const reader of clones) {
     if (await deps.requireUploadConfirmation(reader)) return;
   }
-  // The book's run priced every chapter at once (R-17), and its chapters are read on that
-  // answer rather than asked again one by one.
-  if (estimate > 0 && deps.priced !== true) {
-    const token = createHash("sha256")
-      .update(["audiobook", deps.worldId, productionId, chapterId, String(plan.chapter.version), plan.chapter.hash, ...misses.map((block) => `${block.block.key}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.direction?.hash ?? ""}`)].join("\n"))
-      .digest("hex");
-    if (deps.confirmationToken !== token) {
+  if (estimate > 0) {
+    const token = chapterPriceToken(deps.worldId, productionId, chapterId, plan.chapter, misses);
+    if (deps.priced !== undefined) {
+      // The book's run priced every chapter at once (R-17), and its chapters are read on that
+      // answer rather than asked again one by one — but only the chapter that was priced. Each
+      // chapter is prepared afresh when the book reaches it, and prose, a reading or a voice
+      // changed while earlier chapters were read can put cloud work in that preparation the
+      // card never showed: that chapter is refused and left to its row rather than read on an
+      // answer given for other words (codex on PR 1187).
+      if (deps.priced !== token) {
+        finish("refused", { reason: "moved since the book was priced" });
+        return;
+      }
+    } else if (deps.confirmationToken !== token) {
       emit({ type: "priced", characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: token, voices: priceLines(misses, priceOf) });
       return;
     }

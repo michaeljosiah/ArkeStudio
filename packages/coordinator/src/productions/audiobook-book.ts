@@ -4,17 +4,19 @@ import {
   audiobookDirectionHash,
   audiobookTextHash,
   cadenceSupport,
+  DEFAULT_AUDIOBOOK_BOOK,
   type AudiobookDoor,
   type AudiobookPriceLine,
   type AudiobookRow,
   type AudiobookVoiceRow,
+  type ChapterAudiobook,
   type ChapterSummary,
   type ClonedVoice,
 } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
-import { checkDirection, directionPlan, effectiveReader, readAudiobook, updateAudiobook } from "./audiobook.js";
+import { checkDirection, directionPlan, effectiveReader, readAudiobook, readAudiobookBook, updateAudiobook } from "./audiobook.js";
 import { conformInput, directableBlocks } from "./audiobook-direction.js";
-import { prepareChapter, priceLines, type ChapterPreparation, type ReadingRoom, type Speaking } from "./audiobook-run.js";
+import { chapterPriceToken, prepareChapter, type ChapterPreparation, type ReadingRoom, type Speaking } from "./audiobook-run.js";
 
 /**
  * The book (design turn 146, SPEC-047 R-15..R-17, R-29): every chapter prepared as its own
@@ -56,13 +58,15 @@ function runningTime(store: WorldStore, preparation: Extract<ChapterPreparation,
 
 /**
  * The price's lines for a book (R-17), by who speaks: every cloud voice with its characters and
- * its share, the narrator on this machine with its characters and nothing to pay, and each
- * speaker the narrator stands in for as a line of its own — said in warning on the card, and
- * counted apart from the narrator's own share so the sum is exact.
+ * its share, each voice on this machine — the narrator's, and a cast voice that reads on the
+ * same engine as a line of its own (codex on PR 1187) — with its characters and nothing to
+ * pay, and each speaker the narrator stands in for as a line of its own — said in warning on
+ * the card, and counted apart from the narrator's own share so the sum is exact.
  */
 export function bookPriceLines(narrator: ReadingRoom["narrator"], speaking: readonly Speaking[], misses: readonly Speaking[], priceOf: (block: Speaking) => number, sheetName: (sheet: string) => string): AudiobookPriceLine[] {
   const stoodIn = new Map<string, AudiobookPriceLine>();
   const own: Speaking[] = [];
+  const isNarrator = (reader: Speaking["reader"]) => reader.provider === narrator.provider && reader.model === narrator.model && reader.voiceId === narrator.voiceId;
   for (const block of speaking) {
     if (block.refusal !== undefined) continue;
     const substituted = block.substitutedNow ?? block.substituted;
@@ -83,13 +87,25 @@ export function bookPriceLines(narrator: ReadingRoom["narrator"], speaking: read
     held.estimatedMicroUsd += misses.includes(block) ? priceOf(block) : 0;
     stoodIn.set(block.sheet, held);
   }
-  const lines: AudiobookPriceLine[] = [];
-  const local = own.filter((block) => block.local);
-  if (local.length > 0) {
-    lines.push({ label: narrator.label ?? narrator.voiceId, provider: narrator.provider, local: true, characters: local.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: 0 });
+  // A line a voice: every block of a voice on this machine, free; the cloud misses of a cloud
+  // voice, priced — as `priceLines` counts them for the chapter's own card.
+  const lines = new Map<string, AudiobookPriceLine>();
+  for (const block of own) {
+    if (!block.local && !misses.includes(block)) continue;
+    const key = `${block.reader.provider}\n${block.reader.voiceId}`;
+    const held = lines.get(key) ?? {
+      label: block.reader.label ?? block.reader.voiceId,
+      provider: block.reader.provider,
+      ...(isNarrator(block.reader) ? { narrator: true as const } : {}),
+      local: block.local,
+      characters: 0,
+      estimatedMicroUsd: 0,
+    };
+    held.characters += block.text.length;
+    held.estimatedMicroUsd += block.local ? 0 : priceOf(block);
+    lines.set(key, held);
   }
-  for (const line of priceLines(misses.filter((block) => own.includes(block)), priceOf)) lines.push({ ...line, local: false });
-  return [...lines, ...stoodIn.values()];
+  return [...lines.values(), ...stoodIn.values()];
 }
 
 /** What every chapter stands at, who reads, and what a press would spend (R-15, R-29). */
@@ -106,7 +122,10 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
     blocks: 0,
   };
   let unattributed = 0;
-  let reading: AudiobookDoor["reading"] = "narrator";
+  // The reading is the book's own (R-11), read from its file rather than off a chapter's plan:
+  // a production with no chapter yet still holds the seg where it was put (codex on PR 1187).
+  const bookFile = await readAudiobookBook(store, productionId);
+  const reading: AudiobookDoor["reading"] = bookFile === null || bookFile === "unreadable" ? DEFAULT_AUDIOBOOK_BOOK.reading : bookFile.reading;
   const toRead: Array<Extract<ChapterPreparation, { kind: "ready" }>["prepared"]> = [];
   for (const { summary, preparation } of book.chapters) {
     const base = { chapterId: summary.id, file: summary.file, order: summary.order, title: summary.title, version: summary.version };
@@ -115,7 +134,6 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
       continue;
     }
     const plan = preparation.kind === "ready" ? preparation.prepared.plan : preparation.plan;
-    reading = plan.reading;
     unattributed += plan.cast !== null && plan.cast !== "unreadable" ? plan.ambiguous : 0;
     const counts = { total: plan.blocks.length, made: 0, stale: 0, flagged: 0, notMade: 0 };
     for (const planned of plan.blocks) {
@@ -193,8 +211,8 @@ export interface AudiobookBookDeps {
   signal: AbortSignal;
   confirmationToken?: string;
   requireUploadConfirmation: (reader: { provider: string; voice: ClonedVoice }) => boolean | Promise<boolean>;
-  /** One chapter read on the book's answer: the chapter's own run, with `priced` set, under the book's signal. */
-  runChapter: (chapterId: string) => Promise<{ outcome: "read" | "stopped" | "unavailable" | "failed" | "refused"; made: number; flagged: number; reason?: string }>;
+  /** One chapter read on the book's answer: the chapter's own run under the book's signal, `priced` carrying the chapter's price token as the book priced it. */
+  runChapter: (chapterId: string, priced: string) => Promise<{ outcome: "read" | "stopped" | "unavailable" | "failed" | "refused"; made: number; flagged: number; reason?: string }>;
   emit: (event: AudiobookBookEvent) => void;
   now: () => string;
 }
@@ -272,7 +290,9 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
   let done = 0;
   for (const entry of toRead) {
     if (signal.aborted) break;
-    const result = await deps.runChapter(entry.summary.id);
+    // The chapter's price as the book priced it (R-17): the chapter's run reads on it only
+    // while the chapter is still what was priced (codex on PR 1187).
+    const result = await deps.runChapter(entry.summary.id, chapterPriceToken(deps.worldId, productionId, entry.summary.id, entry.prepared.plan.chapter, entry.prepared.misses));
     made += result.made;
     flagged += result.flagged;
     if (result.outcome === "refused") refused += 1;
@@ -309,33 +329,48 @@ export async function conformDirections(store: WorldStore, productionId: string,
       continue;
     }
     const { chapter, blocks } = readable;
-    const held = await readAudiobook(store, productionId, chapter.file);
-    if (held === null || held === "unreadable") continue;
-    const next: typeof held.direction = { ...held.direction };
-    let changed = false;
-    for (const block of blocks) {
-      const direction = audiobookDirectionFor(held, block);
-      if (direction === null) continue;
-      const support = cadenceSupport(block.model, block.language);
-      const input = { delivery: direction.plan.delivery, speed: direction.plan.speed, cues: direction.plan.cues, ...(direction.plan.phrase !== undefined ? { phrase: direction.plan.phrase } : {}) };
-      const conformed = conformInput(input, support);
-      const plan = conformed.input === null ? null : directionPlan(block.text, conformed.input);
-      const ok = plan !== null && checkDirection(block.text, plan, block.model, block.language).ok;
-      if (conformed.dropped === 0 && ok) continue;
-      if (!ok || plan === null) {
-        dropped += conformed.dropped + 1;
-        delete next[block.key];
+    // Every standing direction held to its reader's row, from whichever record is given: the
+    // blocks and their readers are the chapter's, so the same judgement holds for the record
+    // read here and for the one the lane hands over.
+    const conform = (record: Pick<ChapterAudiobook, "direction">): { direction: ChapterAudiobook["direction"]; dropped: number; changed: boolean } => {
+      const next: ChapterAudiobook["direction"] = { ...record.direction };
+      let count = 0;
+      let changed = false;
+      for (const block of blocks) {
+        const direction = audiobookDirectionFor(record, block);
+        if (direction === null) continue;
+        const support = cadenceSupport(block.model, block.language);
+        const input = { delivery: direction.plan.delivery, speed: direction.plan.speed, cues: direction.plan.cues, ...(direction.plan.phrase !== undefined ? { phrase: direction.plan.phrase } : {}) };
+        const conformed = conformInput(input, support);
+        const plan = conformed.input === null ? null : directionPlan(block.text, conformed.input);
+        const ok = plan !== null && checkDirection(block.text, plan, block.model, block.language).ok;
+        if (conformed.dropped === 0 && ok) continue;
+        if (!ok || plan === null) {
+          count += conformed.dropped + 1;
+          delete next[block.key];
+          changed = true;
+          continue;
+        }
+        if (audiobookDirectionHash(plan) === audiobookDirectionHash(direction.plan)) continue;
+        count += conformed.dropped;
+        next[block.key] = { textHash: audiobookTextHash(block.text), plan, at: store.now() };
         changed = true;
-        continue;
       }
-      if (audiobookDirectionHash(plan) === audiobookDirectionHash(direction.plan)) continue;
-      dropped += conformed.dropped;
-      next[block.key] = { textHash: audiobookTextHash(block.text), plan, at: store.now() };
-      changed = true;
-    }
-    if (!changed) continue;
-    chapters += 1;
-    await updateAudiobook(store, productionId, chapter, (current) => ({ ...current, updatedAt: store.now(), direction: next }));
+      return { direction: next, dropped: count, changed };
+    };
+    const held = await readAudiobook(store, productionId, chapter.file);
+    if (held === null || held === "unreadable" || !conform(held).changed) continue;
+    // Judged again from the record the lane hands over, never written from the one read above:
+    // a direction another window set or accepted meanwhile is conformed with the rest rather
+    // than erased by a stale map (codex on PR 1187).
+    let applied = { dropped: 0, changed: false };
+    await updateAudiobook(store, productionId, chapter, (current) => {
+      const conformed = conform(current);
+      applied = { dropped: conformed.dropped, changed: conformed.changed };
+      return conformed.changed ? { ...current, updatedAt: store.now(), direction: conformed.direction } : current;
+    });
+    dropped += applied.dropped;
+    if (applied.changed) chapters += 1;
   }
   return { dropped, chapters };
 }

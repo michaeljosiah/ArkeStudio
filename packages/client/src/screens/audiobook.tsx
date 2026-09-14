@@ -59,11 +59,13 @@ function VoiceChip({ name, voice, state, blocks }: { name: string; voice?: { lab
 }
 
 function priceLineWords(line: AudiobookPriceLine): { who: string; how: string; cost: string; warn: boolean } {
-  const cost = line.estimatedMicroUsd === 0 ? "free" : formatMicroUsd(line.estimatedMicroUsd);
+  const cost = `${line.characters.toLocaleString()} · ${line.estimatedMicroUsd === 0 ? "free" : formatMicroUsd(line.estimatedMicroUsd)}`;
   if (line.speaker !== undefined) {
-    return { who: line.speaker, how: `${line.substituted ?? "no voice"} · narrator`, cost: `${line.characters.toLocaleString()} · ${cost}`, warn: true };
+    // The narrator stands in (R-12): said as the speaker, and — when that narrator is a cloud
+    // voice — the vendor the speaker's words go to, named here as on every paid line (codex on PR 1187).
+    return { who: line.speaker, how: `${line.substituted ?? "no voice"} · narrator${line.local ? "" : ` · ${line.provider}`}`, cost, warn: true };
   }
-  return { who: line.label, how: `${line.local ? "narrator · " : ""}${line.provider}${line.local ? " · local" : ""}`, cost: `${line.characters.toLocaleString()} · ${cost}`, warn: false };
+  return { who: line.label, how: `${line.narrator === true ? "narrator · " : ""}${line.provider}${line.local ? " · local" : ""}`, cost, warn: false };
 }
 
 export function AudiobookScreen() {
@@ -280,7 +282,7 @@ function BookPriceSheet({ price, onClose, onConfirm }: {
   onClose: () => void;
   onConfirm: () => void;
 }) {
-  const vendors = [...new Set(price.voices.filter((line) => !line.local && line.speaker === undefined).map((line) => line.provider))];
+  const vendors = [...new Set(price.voices.filter((line) => !line.local).map((line) => line.provider))];
   return (
     <EditorDialog open title="Read the book" subtitle={`${price.chapters} chapter${price.chapters === 1 ? "" : "s"} · ${price.characters.toLocaleString()} characters · ${price.cloudBlocks} cloud line${price.cloudBlocks === 1 ? "" : "s"}`} onClose={onClose} width={460} labelledBy="read-book-title">
       <div className="fy-exsheet" data-testid="read-book-sheet">

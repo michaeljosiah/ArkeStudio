@@ -22,6 +22,7 @@ import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { audiobookBookPath, audiobookPath, checkDirection, directionPlan, legacyAudiobookPath, renderParts } from "../../src/productions/audiobook.js";
 import { verifyDirections, type DirectionDeriver, type DirectableBlock } from "../../src/productions/audiobook-direction.js";
+import { bookPriceLines } from "../../src/productions/audiobook-book.js";
 import { priorPartJob, type PartIdentity } from "../../src/productions/audiobook-run.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
@@ -129,6 +130,8 @@ async function withHarness(
     castHash?: string;
     /** Edits to the world's copy before it is loaded: a cloned voice, a sheet's voice. */
     before?: (worldDir: string) => Promise<void>;
+    /** Records written once the world is read and before it is watched: a second chapter's cast, keyed to the hash the scan gave it. */
+    seed?: (worldDir: string, bundle: import("@arke-studio/contracts").WorldBundle) => Promise<void>;
     /** A composition without voice at all. */
     voiceless?: boolean;
     /** The sidecar's synthesis, when a test needs to watch it or hold it. */
@@ -167,6 +170,7 @@ async function withHarness(
   const chapter = store.getBundle().productions.find((p) => p.meta.id === LEDGER)?.chapters.find((c) => c.id === "neap");
   assert.ok(chapter?.bodyHash, "the fixture's chapter carries its prose hash");
   await writeFile(join(castDir, "01-neap.json"), JSON.stringify(castRecord(input.castHash ?? chapter.bodyHash)), "utf8");
+  await input.seed?.(worldDir, store.getBundle());
   await store.reload();
   const events: DomainEvent[] = [];
   const spoken: string[] = [];
@@ -1130,6 +1134,161 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
         const first = await readRecord(worldDir, "01-neap");
         assert.ok(first.takes["title"] && Object.keys(first.takes).length > 1, "the first chapter's remaining blocks were made, the title kept");
       },
+    );
+  });
+
+  /** Maren's voice on Eleven v3 (a row that takes a whisper and a phrase), and the fixture's last two chapters retired. */
+  const marenOnV3 = async (worldDir: string) => {
+    await twoChapters(worldDir);
+    const sheet = join(worldDir, "characters", "maren-kest.md");
+    const raw = await readFile(sheet, "utf8");
+    const swapped = raw.replace(/voice:\r?\n  provider: elevenlabs\r?\n  voiceId: v_8Kq2\r?\n  label: Low tide\r?\n/, `voice:\n  provider: elevenlabs\n  model: ${V3.id}\n  voiceId: v_8Kq2\n  label: Low tide\n`);
+    assert.notEqual(swapped, raw);
+    await writeFile(sheet, swapped);
+  };
+  const V3_LOW_TIDE: VoiceCandidate = { provider: "elevenlabs", model: V3.id, voiceId: "v_8Kq2", label: "Low tide", attributes: [], local: false, canClone: false };
+  /** A cast for the second chapter too: one of Maren's lines in its first paragraph, keyed to the hash the scan gave the chapter. */
+  const secondChapterCast = async (worldDir: string, bundle: import("@arke-studio/contracts").WorldBundle) => {
+    const chapter = bundle.productions.find((p) => p.meta.id === LEDGER)?.chapters.find((c) => c.id === "the-same-ink");
+    assert.ok(chapter?.bodyHash);
+    await writeFile(
+      join(worldDir, "productions", LEDGER, ".voices", "02-the-same-ink.json"),
+      JSON.stringify({ ...castRecord(chapter.bodyHash), lines: [{ speaker: "Maren Kest", sheet: "maren-kest", paragraph: 0, occurrence: 0, quote: "Somebody rebound it in the fifties" }] }),
+      "utf8",
+    );
+  };
+
+  it("a chapter that moved after the book was priced is refused rather than read on that answer, and the next press prices it afresh (R-17; codex on PR 1187)", async () => {
+    let sendRef: ((message: ClientMessage) => Promise<void>) | null = null;
+    let redirected = false;
+    await withHarness(
+      {
+        models: [ELEVEN, KOKORO, FISH, V3],
+        cloud: [V3_LOW_TIDE],
+        before: marenOnV3,
+        seed: secondChapterCast,
+        // The first chapter's narration is where the book is: while it is being made, the
+        // second chapter's cloud line is directed — a whisper and a phrase its row takes —
+        // which changes what that chapter would send, and so its price.
+        synthesize: async () => {
+          if (!redirected && sendRef !== null) {
+            redirected = true;
+            await sendRef({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "02-the-same-ink", block: "p0.1", direction: { delivery: "whispered", speed: 1, cues: [], phrase: "under her breath" } });
+          }
+          return wav();
+        },
+      },
+      async ({ events, send }) => {
+        sendRef = send;
+        await send({ kind: "set-credential", provider: "elevenlabs", key: "k-test" });
+        await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "cast" });
+        const door = await openDoor(send, events);
+        assert.deepEqual(door.rows.map((row) => row.castTrouble), [undefined, undefined], "both chapters have a current cast");
+        assert.equal(door.price.chapters, 2);
+        assert.equal(door.price.cloudBlocks, 2, "Maren's line in each");
+        await readBook(send);
+        const priced = events.find((e): e is BookPriced => e.type === "audiobook.book-priced");
+        assert.ok(priced);
+        assert.equal(priced.chapters, 2);
+        await readBook(send, { confirmationToken: priced.confirmationToken });
+        assert.ok(redirected, "the second chapter was directed while the first was read");
+        const finished = events.find((e): e is BookFinished => e.type === "audiobook.book-finished");
+        assert.equal(finished?.outcome, "read", finished?.reason);
+        assert.equal(finished?.chaptersRead, 1);
+        assert.equal(finished?.chaptersRefused, 1, "the chapter that moved is left to its row");
+        const second = events.filter((e): e is Finished => e.type === "audiobook.finished" && e.chapterId === "the-same-ink");
+        assert.deepEqual(second.map((e) => [e.outcome, e.reason]), [["refused", "moved since the book was priced"]]);
+        assert.equal(events.filter((e) => e.type === "audiobook.priced").length, 0, "no chapter asks its own price under the book");
+
+        // The next press prices what stands now — the directed line — and reads it on that answer.
+        await readBook(send);
+        const again = events.filter((e): e is BookPriced => e.type === "audiobook.book-priced").at(-1);
+        assert.ok(again && again !== priced, "priced afresh");
+        assert.equal(again.chapters, 2, "the first chapter's cloud line was flagged behind the queue and is asked for again (R-16), beside the directed line");
+        assert.notEqual(again.confirmationToken, priced.confirmationToken, "the directed line is another price");
+        await readBook(send, { confirmationToken: again.confirmationToken });
+        const last = events.filter((e): e is BookFinished => e.type === "audiobook.book-finished").at(-1);
+        assert.equal(last?.outcome, "read", last?.reason);
+        assert.equal(last?.chaptersRead, 2);
+        assert.equal(last?.chaptersRefused, 0, "read on the price that names what stands now");
+      },
+    );
+  });
+
+  it("a chapter read pressed while the book is being read is refused in a word, and a chapter its own run holds is left to that run (codex on PR 1187)", async () => {
+    let releaseFirst: () => void = () => {};
+    const first = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let calls = 0;
+    await withHarness(
+      {
+        before: twoChapters,
+        synthesize: async () => {
+          calls += 1;
+          if (calls === 1) await first;
+          return wav();
+        },
+      },
+      async ({ events, send }) => {
+        const run = readBook(send);
+        while (calls < 1) await new Promise((resolve) => setTimeout(resolve, 5));
+        await read(send, { chapterFile: "02-the-same-ink" });
+        const refused = events.filter((e): e is Finished => e.type === "audiobook.finished");
+        assert.deepEqual(refused.map((e) => [e.chapterId, e.outcome, e.reason]), [["the-same-ink", "refused", "the book is being read"]], "the press is answered, and the book is not disturbed");
+        releaseFirst();
+        await run;
+        const finished = events.find((e): e is BookFinished => e.type === "audiobook.book-finished");
+        assert.equal(finished?.outcome, "read", finished?.reason);
+        assert.equal(finished?.chaptersRead, 2, "the book read both chapters itself");
+      },
+    );
+  });
+
+  it("the door's reading is the book's own, with no chapter to read it off (R-11; codex on PR 1187)", () =>
+    withHarness(
+      {
+        before: async (worldDir) => {
+          for (const file of ["01-neap", "02-the-same-ink", "03-nothing-wrong-with-it", "04-her-own-hand"]) {
+            const path = join(worldDir, "productions", LEDGER, "chapters", `${file}.md`);
+            const raw = await readFile(path, "utf8");
+            await writeFile(path, raw.replace(/^---\r?\n/, "---\nretired: true\n"));
+          }
+        },
+      },
+      async ({ events, send }) => {
+        await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "cast" });
+        const door = await openDoor(send, events);
+        assert.deepEqual(door.rows, [], "every chapter is retired");
+        assert.equal(door.reading, "cast", "the seg holds where it was put");
+        assert.equal(door.price.chapters, 0);
+      },
+    ));
+
+  it("the price's lines are one a voice: the narrator's own apart from a cast voice on the same engine, a cloud voice priced, a speaker stood in for apart (R-17; codex on PR 1187)", () => {
+    type Line = Parameters<typeof bookPriceLines>[1][number];
+    const george = { provider: "kokoro", model: KOKORO.id, voiceId: "bm_george", label: "George" };
+    const tide = { provider: "kokoro", model: KOKORO.id, voiceId: "af_tide", label: "Tide" };
+    const anna = { provider: "elevenlabs", model: ELEVEN.id, voiceId: "v_anna", label: "Anna" };
+    const block = (text: string, reader: typeof george, extra: Partial<Line> = {}): Line => ({ reader, local: reader.provider === "kokoro", text, ...extra }) as Line;
+    const speaking = [
+      block("Chapter 1 · Neap", george),
+      block("Maren counted the bells.", george),
+      block("“Six,” said Maren.", tide, { sheet: "maren-kest" }),
+      block("“Seven,” said Anna.", anna, { sheet: "anna-vale" }),
+      block("“Eight,” said Odile.", george, { sheet: "odile-sarn", substituted: "no voice" }),
+    ];
+    const misses = [speaking[3]!];
+    const lines = bookPriceLines(george, speaking, misses, (b) => b.text.length * 300, (sheet) => (sheet === "odile-sarn" ? "Odile Sarn" : sheet));
+    assert.deepEqual(
+      lines.map((line) => [line.label, line.narrator ?? false, line.local, line.speaker ?? null, line.characters, line.estimatedMicroUsd]),
+      [
+        ["George", true, true, null, "Chapter 1 · Neap".length + "Maren counted the bells.".length, 0],
+        ["Tide", false, true, null, "“Six,” said Maren.".length, 0],
+        ["Anna", false, false, null, "“Seven,” said Anna.".length, "“Seven,” said Anna.".length * 300],
+        ["George", false, true, "Odile Sarn", "“Eight,” said Odile.".length, 0],
+      ],
+      "Maren's Kokoro voice is her own line, not the narrator's",
     );
   });
 

@@ -1130,7 +1130,7 @@ export class Coordinator {
     requestId: string,
     command: QueueCommand,
     signal: AbortSignal,
-    options: { confirmationToken?: string; voiceUploadConfirmedFor?: string; only?: readonly string[]; priced?: true },
+    options: { confirmationToken?: string; voiceUploadConfirmedFor?: string; only?: readonly string[]; priced?: string },
   ): Promise<{ outcome: "read" | "stopped" | "unavailable" | "failed" | "refused"; made: number; flagged: number; reason?: string }> {
     const at = () => new Date().toISOString();
     let ending: { outcome: "read" | "stopped" | "unavailable" | "failed" | "refused"; made: number; flagged: number; reason?: string } = { outcome: "failed", made: 0, flagged: 0, reason: "the run ended without a word" };
@@ -11734,6 +11734,13 @@ export class Coordinator {
         if (this.readingAudiobooks.has(key)) return;
         const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id };
         const at = () => new Date().toISOString();
+        // While the book is being read the production is its (SPEC-047 R-16): a chapter read
+        // pressed meanwhile would run beside it, and the book reaching that chapter would find
+        // it taken; refused here instead, in a word (codex on PR 1187).
+        if (this.readingBooks.has(`${msg.worldId}/${msg.productionId}`)) {
+          this.emit({ at: at(), type: "audiobook.finished", ...ids, outcome: "refused", made: 0, flagged: 0, reason: "the book is being read" });
+          return;
+        }
         // A composition without voice answers rather than falling silent (codex on PR 1180):
         // the press is offered wherever the view is, and `unavailable` is a run's outcome.
         const voice = this.voiceService;
@@ -11829,16 +11836,18 @@ export class Coordinator {
               }),
             // Each chapter is its own run under the book's signal and request (R-16): its events
             // say how far it is on the door's row, and it is never priced or asked again.
-            runChapter: async (chapterId) => {
+            runChapter: async (chapterId, priced) => {
               const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.id === chapterId);
               if (!chapter) return { outcome: "failed", made: 0, flagged: 0, reason: "that chapter is no longer in this production" };
               const chapterKey = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
-              if (this.readingAudiobooks.has(chapterKey)) return { outcome: "failed", made: 0, flagged: 0, reason: `${chapter.title} is being read already` };
+              // A chapter its own run was reading when the book began is left to that run and
+              // counted, as a refused chapter is; it does not end the book (codex on PR 1187).
+              if (this.readingAudiobooks.has(chapterKey)) return { outcome: "refused", made: 0, flagged: 0, reason: `${chapter.title} is being read already` };
               this.readingAudiobooks.set(chapterKey, { control, worldId: msg.worldId, productionId: msg.productionId, chapterId });
               this.audiobookRequests.set(chapterKey, requestId);
               try {
                 return await this.readAudiobookChapter(store, voice, room, { ...ids, chapterId }, requestId, msg.kind, control.signal, {
-                  priced: true,
+                  priced,
                   ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
                 });
               } finally {

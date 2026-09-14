@@ -143,7 +143,20 @@ describe("the Audiobook door (turn 146)", () => {
     assert.equal(q(m, '[data-testid="audiobook-bar"]')?.getAttribute("aria-valuenow"), "46");
     assert.equal(q(m, '[data-testid="read-book"]')?.textContent, "Read the book · 1 chapter", "a local narrator costs nothing, so no price rides on the press");
     assert.ok(!/\bis\b.*\bbecause\b/.test(text(m)), "no sentence explains the door");
-    await act(async () => rows[1]!.click());
+    // The door is asked again as the book moves, and only the latest ask's answer stands: an
+    // older answer arriving late, or one for another world, changes nothing (codex on PR 1187).
+    const earlier = m.sent.findLast((message) => message.kind === "open-audiobook") as Extract<ClientMessage, { kind: "open-audiobook" }>;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-started", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", chapters: 2, blocks: 50 }));
+    const later = m.sent.findLast((message) => message.kind === "open-audiobook") as Extract<ClientMessage, { kind: "open-audiobook" }>;
+    assert.notEqual(later.requestId, earlier.requestId, "a run's start asks the door again");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.door", requestId: earlier.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", door: door("narrator", { rows: [] }) }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.door", requestId: later.requestId, worldId: "01J8F3K2QW9VZX4N7M0RTYB6HD", productionId: "inkbound", door: door("narrator", { rows: [] }) }));
+    assert.equal(all(m, '[data-testid="audiobook-row"]').length, 3, "the rows the latest answer gave stand");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.door", requestId: later.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", door: door("narrator", { rows: [] }) }));
+    assert.equal(all(m, '[data-testid="audiobook-row"]').length, 0, "the latest ask's answer is taken");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-finished", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", outcome: "read", chaptersRead: 2, chaptersRefused: 0, made: 50, flagged: 0 }));
+    await answerDoor(m, door("narrator"));
+    await act(async () => all(m, '[data-testid="audiobook-row"]')[1]!.click());
     assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/p/inkbound/story/chapters/neap?view=audiobook`, "a row opens the chapter in its Audiobook view");
   });
 
@@ -173,27 +186,22 @@ describe("the Audiobook door (turn 146)", () => {
     assert.match(chips[3]!.textContent ?? "", /unattributedno voice · narrator · 2 blocks/);
   });
 
+  // A cloud narrator (Charlotte), a cast voice (Anna), a local cast voice on the machine's
+  // engine (Maren's Tide) and a speaker the narrator stands in for: every line names its
+  // vendor, the narrator's own line apart from the cast's (codex on PR 1187).
+  const LINES = [
+    { label: "Charlotte", provider: "elevenlabs", narrator: true as const, local: false, characters: 99_000, estimatedMicroUsd: 9_900_000 },
+    { label: "Anna", provider: "elevenlabs", local: false, characters: 9400, estimatedMicroUsd: 940_000 },
+    { label: "Tide", provider: "kokoro", local: true, characters: 1200, estimatedMicroUsd: 0 },
+    { label: "Charlotte", provider: "elevenlabs", speaker: "Odile Sarn", substituted: "no voice" as const, local: false, characters: 300, estimatedMicroUsd: 30_000 },
+  ];
+  const PRICE = { chapters: 9, blocks: 120, cloudBlocks: 41, characters: 108_700, estimatedMicroUsd: 10_870_000 };
+
   it("Read the book is priced once, each voice named, and answered by token or declined (R-17)", async () => {
     const m = await mount(inkbound("cast"));
-    await answerDoor(
-      m,
-      door("cast", {
-        price: {
-          chapters: 9,
-          blocks: 120,
-          cloudBlocks: 41,
-          characters: 9400,
-          estimatedMicroUsd: 940_000,
-          voices: [
-            { label: "George", provider: "kokoro", local: true, characters: 99_000, estimatedMicroUsd: 0 },
-            { label: "Anna", provider: "elevenlabs", local: false, characters: 9400, estimatedMicroUsd: 940_000 },
-            { label: "George", provider: "kokoro", speaker: "Odile Sarn", substituted: "no voice", local: true, characters: 300, estimatedMicroUsd: 0 },
-          ],
-        },
-      }),
-    );
+    await answerDoor(m, door("cast", { price: { ...PRICE, voices: LINES } }));
     const press = q(m, '[data-testid="read-book"]')!;
-    assert.equal(press.textContent, "Read the book · 9 chapters · $0.94");
+    assert.equal(press.textContent, "Read the book · 9 chapters · $10.87");
     await act(async () => press.click());
     const presses = () => m.sent.filter((message) => message.kind === "read-audiobook-book");
     assert.equal(presses().length, 1);
@@ -201,22 +209,7 @@ describe("the Audiobook door (turn 146)", () => {
     const priced = async () => {
       await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", chapters: 9, blocks: 120 }));
       await act(async () =>
-        __applyEventForTest({
-          at: AT,
-          type: "audiobook.book-priced",
-          ...ids,
-          chapters: 9,
-          blocks: 120,
-          cloudBlocks: 41,
-          characters: 9400,
-          estimatedMicroUsd: 940_000,
-          confirmationToken: "tok",
-          voices: [
-            { label: "George", provider: "kokoro", local: true, characters: 99_000, estimatedMicroUsd: 0 },
-            { label: "Anna", provider: "elevenlabs", local: false, characters: 9400, estimatedMicroUsd: 940_000 },
-            { label: "George", provider: "kokoro", speaker: "Odile Sarn", substituted: "no voice", local: true, characters: 300, estimatedMicroUsd: 0 },
-          ],
-        }),
+        __applyEventForTest({ at: AT, type: "audiobook.book-priced", ...ids, ...PRICE, confirmationToken: "tok", voices: LINES }),
       );
     };
     await priced();
@@ -230,12 +223,17 @@ describe("the Audiobook door (turn 146)", () => {
     await priced();
     const sheet = q(m, '[data-testid="read-book-sheet"]');
     assert.ok(sheet, "priced again on the next press");
-    assert.match(text(m), /9 chapters · 9,400 characters · 41 cloud lines/);
+    assert.match(text(m), /9 chapters · 108,700 characters · 41 cloud lines/);
     const lines = all(m, '[data-testid="read-book-line"]').map((line) => line.textContent);
-    assert.deepEqual(lines, ["Georgenarrator · kokoro · local99,000 · free", "Annaelevenlabs9,400 · $0.94", "Odile Sarnno voice · narrator300 · free"]);
+    assert.deepEqual(lines, [
+      "Charlottenarrator · elevenlabs99,000 · $9.90",
+      "Annaelevenlabs9,400 · $0.94",
+      "Tidekokoro · local1,200 · free",
+      "Odile Sarnno voice · narrator · elevenlabs300 · $0.03",
+    ]);
     assert.match(text(m), /words and the voice to elevenlabs · text in Activity/);
     const confirm = q(m, '[data-testid="read-book-confirm"]')!;
-    assert.equal(confirm.textContent, "Confirm 9,400 characters · $0.94");
+    assert.equal(confirm.textContent, "Confirm 108,700 characters · $10.87");
     await act(async () => confirm.click());
     const answered = m.sent.findLast((message) => message.kind === "read-audiobook-book") as Extract<ClientMessage, { kind: "read-audiobook-book" }>;
     assert.equal(answered.confirmationToken, "tok");

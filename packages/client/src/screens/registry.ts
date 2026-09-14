@@ -80,6 +80,9 @@ export const SCREENS: ScreenEntry[] = [
   // The chapter, opened (turn 126); the fixture's story production is chapterless, so the sample
   // path renders the opening state and the chrome around it.
   { id: "chapter", samplePath: `${P}/story/chapters/neap` },
+  // The audiobook's door (turn 146): the fixture's story production has no chapters, so the
+  // sample path renders the head, the seg and the empty state under them.
+  { id: "audiobook", samplePath: `${P}/story/audiobook` },
   { id: "scenes", samplePath: `${P}/scenes` },
   { id: "scene-detail", samplePath: `${P}/scenes/sc_04` },
   { id: "shot", samplePath: `${P}/scenes/sc_04/shots/sh_12` },

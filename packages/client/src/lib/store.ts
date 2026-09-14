@@ -1589,7 +1589,12 @@ function handleFrame(json: string): void {
         };
       }
     } else if (event.type === "audiobook.door") {
-      audiobookDoor = { ...audiobookDoor, [event.productionId]: { door: event.door, requestId: event.requestId, ...(event.refused !== undefined ? { refused: event.refused } : {}) } };
+      // The latest ask's answer alone, and only for the world that is open: a superseded
+      // answer is older news, and one for a world since closed would repopulate a same-named
+      // production in the next (codex on PR 1187).
+      if (doorRequests.get(`${event.worldId}/${event.productionId}`) === event.requestId && current.state?.world?.meta.worldId === event.worldId) {
+        audiobookDoor = { ...audiobookDoor, [event.productionId]: { door: event.door, requestId: event.requestId, ...(event.refused !== undefined ? { refused: event.refused } : {}) } };
+      }
     } else if (event.type === "audiobook.book-started") {
       // A replayed start carries no counts: a window that holds the run keeps what it knows.
       if (event.replayed !== true || audiobookBook[event.productionId] === undefined) {
@@ -4429,10 +4434,20 @@ export function useAudiobookRecords(): StoreState["audiobookRecords"] {
 
 // ---- turn 146: the door ----------------------------------------------------
 
+/**
+ * The latest ask of each door, by world and production: the shell and the door ask by turns
+ * and every ask prepares the whole book, so a slower older answer would otherwise put older
+ * counts, voices and a price over newer ones (codex on PR 1187). Only the latest ask's answer
+ * is kept.
+ */
+const doorRequests = new Map<string, string>();
+
 /** Ask the door (SPEC-047 R-29): every chapter's state, who reads, the price; answered as `audiobook.door`. */
 export function openAudiobook(worldId: string, productionId: string): string | null {
   const requestId = ulid();
-  return send({ kind: "open-audiobook", worldId, productionId, requestId }) ? requestId : null;
+  if (!send({ kind: "open-audiobook", worldId, productionId, requestId })) return null;
+  doorRequests.set(`${worldId}/${productionId}`, requestId);
+  return requestId;
 }
 
 /** Read the book (SPEC-047 R-16, R-17): every chapter with prose, priced once; the token answers the price. */

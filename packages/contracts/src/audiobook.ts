@@ -338,6 +338,8 @@ export const AudiobookPriceLineSchema = z
   .object({
     label: z.string().min(1),
     provider: z.string().min(1),
+    /** The narrator's own line, apart from a cast voice that happens to read on the same engine. */
+    narrator: z.literal(true).optional(),
     /** Said as the speaker when the narrator stands in (`Odile Sarn · no voice · narrator · free`). */
     speaker: z.string().min(1).optional(),
     substituted: AudiobookSubstitutionSchema.optional(),
