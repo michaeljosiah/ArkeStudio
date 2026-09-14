@@ -36,5 +36,4 @@ export interface EngineProseSession {
   createChapter(productionId: string, input: ProseChapterInput, operationKey: string): Promise<ProseChapterResult>;
   readChapter(productionId: string, chapterId: string): Promise<ProseChapterRead>;
   saveChapter(productionId: string, chapterId: string, input: ProseSaveInput, operationKey: string): Promise<ProseSaveResult>;
-  manuscript?(productionId: string): Promise<ProseManuscript>;
 }

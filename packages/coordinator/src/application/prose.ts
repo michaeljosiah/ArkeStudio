@@ -101,14 +101,20 @@ export class ProseApplicationService {
       const ids = chapters.map(c => c.id);
       for (const chapterId of ids) await this.operations.policy.authorise(context, "read", { ...resource, chapterId });
       const port = prose(session);
-      if (!port.manuscript) throw new Error("This repository does not support manuscript output.");
-      const value = proseManuscript.parse(await port.manuscript(productionId));
-      if (value.productionId !== productionId || value.chapters.some(c => c.productionId !== productionId) ||
-        engineHash(value.chapters.map(c => c.chapterId)) !== engineHash(ids)) throw new Error("The manuscript chapter identities changed.");
-      if (value.title !== raw[0]!.meta.title || value.chapters.some((chapter, index) =>
-        chapter.version !== chapters[index]!.version || chapter.hash !== chapters[index]!.hash)) {
-        throw new Error("The manuscript provenance differs from the current chapters.");
+      const records = [];
+      const sections = [`# ${raw[0]!.meta.title.replace(/[\r\n]+/g, " ")}`];
+      for (const chapter of chapters) {
+        const read = proseChapterRead.parse(await port.readChapter(productionId, chapter.id));
+        if (read.productionId !== productionId || read.chapterId !== chapter.id || read.title !== chapter.title ||
+          read.version !== chapter.version || read.hash !== chapter.hash) {
+          throw new Error("The manuscript provenance differs from the current chapters.");
+        }
+        if (!read.body.trim()) throw new Error("Every active chapter needs committed prose before manuscript output.");
+        records.push({ productionId, chapterId: chapter.id, version: read.version, hash: read.hash });
+        sections.push(`## ${read.title.replace(/[\r\n]+/g, " ")}\n\n${read.body.trim()}`);
       }
+      const value = proseManuscript.parse({ productionId, title: raw[0]!.meta.title,
+        contentType: "text/markdown; charset=utf-8", markdown: sections.join("\n\n") + "\n", chapters: records });
       const after = await session.snapshot();
       if (engineHash(raw) !== engineHash(after.bundle.productions.filter(p => p.meta.id === productionId))) {
         throw new Error("The production changed during manuscript output.");
@@ -133,6 +139,11 @@ export class ProseApplicationService {
         return this.saved(session, key, async () => {
           const value = proseSaveResult.parse(await port.saveChapter(productionId, chapterId, input, key));
           if (value.productionId !== productionId || value.chapterId !== chapterId) throw new Error("The chapter identity changed.");
+          const records = (await session.snapshot()).bundle.productions.filter(p => p.meta.id === productionId)
+            .flatMap(p => p.chapters).filter(c => c.id === chapterId);
+          if (records.length !== 1 || records[0]!.version !== value.version || records[0]!.hash !== value.hash) {
+            throw new Error("The save receipt differs from the authoritative chapter.");
+          }
           return value;
         });
       }));

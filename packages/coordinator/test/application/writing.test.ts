@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it, type TestContext } from "node:test";
 import { join, dirname } from "node:path";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, symlink } from "node:fs/promises";
 import type { HarnessAdapter } from "@arke-studio/contracts";
 import { createEngine, type EngineContext, type EnginePolicy } from "../../src/application/engine.js";
 import { createLocalWorldRepository } from "../../src/application/local-worlds.js";
@@ -301,6 +301,13 @@ it("source changes across schema preparation refuse before opening the model", a
   await assert.rejects(h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, input), /before freezing writing sources/);
   assert.equal(h.state.opened, 0); assert.equal(h.state.calls, 0);
   assert.equal((await h.engine.prose.readChapter(context, WORLD_ID, productionId, chapterId)).body.trim(), "A newer author edit.");
+});
+
+it("nested world aliases cannot expose scratch files to the harness", async t => {
+  const h = await harness(t); const input = await h.input("nested-alias");
+  await symlink(h.state.scratch, join(h.store().dir, "productions", productionId, "scratch-alias"), "junction");
+  await assert.rejects(h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, input), /nested filesystem aliases/);
+  assert.equal(h.state.calls, 0); assert.equal(h.state.closed, 1);
 });
 
 it("replay refuses a durable writing receipt redirected to another chapter file", async t => {

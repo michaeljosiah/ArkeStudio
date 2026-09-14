@@ -90,13 +90,23 @@ export class FsWorldProvider implements WorldProvider {
         throw new Error("The writing scratch directory must be outside all managed worlds.");
       }
     };
+    const rejectNestedAliases = async (dir: string): Promise<void> => {
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
+        if (entry.isSymbolicLink()) throw new Error("Writing requires managed world trees without nested filesystem aliases.");
+        if (entry.isDirectory()) await rejectNestedAliases(join(dir, entry.name));
+      }
+    };
     for (const root of [this.worldsDir(), join(this.appRoot, "archive")]) {
       let canonical: string;
       try { canonical = await realpath(root); }
       catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; throw error; }
       exclude(canonical);
       // A world may be reached through a directory junction outside the library's physical root.
-      for (const entry of await readdir(root)) exclude(await realpath(join(root, entry)));
+      for (const entry of await readdir(root)) {
+        const target = await realpath(join(root, entry));
+        exclude(target);
+        if ((await stat(target)).isDirectory()) await rejectNestedAliases(target);
+      }
     }
   }
 

@@ -274,7 +274,9 @@ ID and an abort signal. It returns a shared `HarnessAdapter`, a private scratch 
 the resolved session model and input token limit, `createSession` and `close`. The directory
 must exist outside all managed worlds. The filesystem provider checks resolved paths against
 its world library, archive and directory aliases, rejecting both descendants and ancestors
-of those locations. Custom local providers must implement
+of those locations. Nested symlinks/junctions within managed or archived world trees refuse
+writing, so a nested alias cannot turn an external scratch path into authored storage.
+Custom local providers must implement
 `assertWritingScratch`; writing refuses without that check. The host must enforce
 actual harness confinement, disable unrelated tools/network access, use scoped credentials,
 honour cancellation and drain subprocesses in `close`. A scratch path alone is not a sandbox.
@@ -310,6 +312,11 @@ failed saves retain started operation evidence; they do not authorize retrying t
 The conversation creation event records the operation key for host reconciliation. Failed runs
 also finalise their conversation records. This slice has no automatic recovery/resubmission of
 an interrupted writing run.
+
+The application service assembles manuscript Markdown from authoritative chapter reads;
+there is no separate host manuscript blob to disagree with those reads. Each read must match
+the current chapter identity, title, version and file hash. Save receipts likewise match the
+post-save chapter metadata before completion.
 
 Manuscript output is Markdown from every active chapter, in chapter order. It excludes pending
 proposal bodies and refuses empty chapters, ambiguous IDs, denied chapters or a filtered
