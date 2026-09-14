@@ -1,18 +1,18 @@
-# Embeddable engine foundation
+# Embeddable engine services
 
-The supported journey is: read a world, propose a character from a sentence, accept or discard the proposal, request a portrait, read a permitted image, reconnect and close. Studio and an external Node host call the same application services. This is the first extraction from Coordinator.
+The supported journey is: read a world, propose a character from a sentence, accept or discard the proposal, request a portrait, read a permitted image, reconnect and close. Studio and an external Node host call the same application services. Version 0.2 also exposes direct prose production and chapter authoring through the existing domain writers.
 
 The sentence service stages a sketch using existing sheet authoring. Studio still owns its writing-harness continuation. The public service does not promise to run that harness or produce a finished book.
 
 ```mermaid
 flowchart LR
-  Studio[Studio desktop or dev host] --> Services[World, proposal and illustration services]
+  Studio[Studio desktop or dev host] --> Services[World, prose, proposal and illustration services]
   Backend[External Node backend] --> Services
   Services --> Policy[Host authority, content and allowance policy]
   Services --> Sessions[World sessions and authoritative save]
   Services --> Operations[Durable operation store]
   Services --> Queue[Existing job dispatcher]
-  Sessions --> Domain[Existing sheet authoring and proposal gate]
+  Sessions --> Domain[Existing authoring operations and proposal gate]
   Queue --> Providers[Scoped provider clients and credentials]
 ```
 
@@ -32,7 +32,7 @@ flowchart LR
 
 ## Public package
 
-`@arke-studio/engine` is an ESM Node package, initially version 0.1.0, requiring Node 22.12 or later. The root exports application services and host contracts. `@arke-studio/engine/local` exports optional folder adapters, filesystem provider, operation journal and existing dispatcher. Neither entry constructs Electron or starts a server.
+`@arke-studio/engine` is an ESM Node package, version 0.2.0, requiring Node 22.12 or later. The root exports application services and host contracts. `@arke-studio/engine/local` exports optional folder adapters, filesystem provider, operation journal and existing dispatcher. Neither entry constructs Electron or starts a server.
 
 Build with `npm run build --workspace @arke-studio/engine`; pack with `npm pack --workspace @arke-studio/engine`. Install that tarball into the backend. Do not import coordinator source paths. Registry publication is a separate release action.
 
@@ -125,3 +125,85 @@ Regression coverage includes `test/application/production-actions.test.ts`, prod
 acknowledgements, and the existing action lifecycle/coordinator/recovery suites. Production setup
 continues to use `productions/setup-command.ts` and its reviewed creation path. Public authoring
 contracts, scoped durable operations and the server host remain future work under #1182.
+
+
+## Direct prose authoring (0.2)
+
+`engine.prose` supports creating a Story production, creating a chapter, reading it by its
+canonical ID and saving direct author edits. This is the next public boundary under epic #1182.
+It does not yet run the writing harness, generate an outline or return an accepted manuscript.
+Studio's local workspace services and this API share `productions/ops.ts`; Studio transport
+and event sequencing retain their existing compatibility services.
+
+```ts
+const production = await engine.prose.createProduction(context, worldId, {
+  operationId: "story-1", title: "The river path", logline: "A fox finds a way home.",
+});
+const productionId = production.value.productionId;
+const chapter = await engine.prose.createChapter(context, worldId, productionId, {
+  operationId: "chapter-1", title: "Home", order: 1,
+});
+const chapterId = chapter.value.chapterId;
+const opened = await engine.prose.readChapter(context, worldId, productionId, chapterId);
+const saved = await engine.prose.saveChapter(context, worldId, productionId, chapterId, {
+  operationId: "edit-1", body: "Fenn followed the river home.", baseHash: opened.hash,
+  expectedRevision: chapter.revision,
+});
+// Use saved.value.hash as the next edit's base, with a new operationId.
+```
+
+Writes return `{ operationKey, revision, value }` after `session.saved` acknowledges authoritative
+storage. Production creation returns `productionId`; chapter creation adds `chapterId`; saving
+also returns the committed `version` and file `hash`. Reading returns those IDs, title, order,
+body, version, file hash and available historical version numbers. It exposes no filenames,
+audiobook records or internal workspace paths. Select existing productions/chapters from the
+caller's projected `worlds.read` bundle, then use their canonical IDs. A legacy filename is not
+an alternative public chapter identity.
+
+The required save `baseHash` is the `sha256:` file hash returned by a read or successful save.
+It protects unseen competing edits. An optional `expectedRevision` protects the whole world;
+the local adapter rechecks it after a fresh scan inside the domain write gate. Chapter saves
+also recheck production membership, filename identity, retirement and pending chapter proposals
+in that gate. Resolve a pending draft before editing directly. Direct edits keep the chapter
+version; generated prose must still arrive as a proposal and cut a version on acceptance
+(SPEC-012 R-5 and R-58). Saving a chapter does not silently add its story events to world canon.
+
+Titles accept 1–200 characters, loglines up to 2,000, chapter ranks 1–1,000,000 and bodies up to
+2,000,000 characters. Public production/chapter IDs are lowercase slug IDs. Chapter order uses
+the existing writer: it is at least one past the highest stored chapter rank. Inputs reject
+unknown fields. Hosts should translate validated product requests into this small contract.
+
+Mutation IDs and fingerprints use the existing durable operation store. Completed retries return
+the original receipt, even after later edits, subject to current authorization and delivery.
+Use `readChapter` to fetch current text. A failed authoritative save or uncertain completion
+leaves `started` evidence and refuses automatic re-execution, including after restart. The current
+conservative implementation also retains started records for domain refusals after admission.
+After resolving a known stale base or pending draft, submit a new logical edit with a new ID;
+never change input under the old ID or erase uncertain evidence.
+
+### Migrating host adapters from 0.1
+
+- Handle the new `production-create`, `chapter-create` and `chapter-save` authority actions.
+  The latter two include `productionId`; saves and chapter reads also include `chapterId`.
+  New production creation is authorized at world scope before an ID has been allocated.
+- Apply current read authority and exact-content delivery to `production` and `chapter`
+  results. Every response, including replay, is checked again. Chapter reads do not run bundle
+  projection: the policy must enforce per-chapter visibility and holds itself. Project private
+  chapter summaries out of world reads separately. Mutation receipts approve the returned
+  metadata, not permission to display a chapter body; read its exact content through `readChapter`.
+- Implement optional `EngineWorldSession.prose` to enable these calls. Its mutations must check
+  the supplied world revision and chapter eligibility in the same transaction as the write,
+  preserve base-hash refusal and direct-edit version semantics, and participate in `saved`.
+  The supplied local repository implements it. Hosts without it get an explicit unsupported
+  error and their existing world/proposal/illustration services remain available.
+- Extend durable operation codecs for the new action-specific receipts and resource IDs.
+  The local journal validates them and continues reading 0.1 records. Do not reopen a journal
+  containing 0.2 prose operations with a 0.1 engine. Use separate operational stores when testing
+  a downgrade; never discard unresolved operations to make an older reader accept the file.
+
+Coordinator `test/application/prose.test.ts` covers the local commit path, canonical IDs,
+scoped permissions, exact delivery, stale edits, retirement, pending proposals, save failure,
+restart and malformed receipts. The packed external consumer creates, edits, closes/reopens and
+replays a prose production alongside its existing character/portrait journey. These tests prove
+direct authoring and recovery boundaries; they do not establish the full epic's AI drafting,
+accepted manuscript, follow-on continuity, server host or hosted writer fencing.

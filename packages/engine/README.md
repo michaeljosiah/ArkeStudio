@@ -1,6 +1,6 @@
 # @arke-studio/engine
 
-An embeddable Node engine for reading worlds, proposing and accepting characters, and generating portrait candidates. ESM; Node 22.12+; AGPL-3.0-only.
+An embeddable Node engine for reading worlds, proposing and accepting characters, generating portrait candidates, and directly creating and editing prose chapters. Direct edits preserve the chapter version; generated drafts still require explicit proposal acceptance. ESM; Node 22.12+; AGPL-3.0-only.
 
 Import `createEngine` from `@arke-studio/engine` and supply world sessions, durable operations, policy and a queue. Optional folder adapters and the existing dispatcher are exported from `@arke-studio/engine/local`.
 

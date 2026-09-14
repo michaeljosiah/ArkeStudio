@@ -3,6 +3,7 @@ import { EngineOperations } from "./operations.js";
 import { WorldSessionService } from "./world-sessions.js";
 import { ProposalApplicationService } from "./proposals.js";
 import { IllustrationApplicationService } from "./generation.js";
+import { ProseApplicationService } from "./prose.js";
 
 export interface EngineOptions {
   worlds: EngineWorldRepository;
@@ -28,7 +29,10 @@ export function createEngine(options: EngineOptions) {
   const worlds = new WorldSessionService(options.worlds, options.policy);
   const proposals = new ProposalApplicationService(options.worlds, operations);
   const illustrations = new IllustrationApplicationService(options.worlds, operations, options.queue);
+  const prose = new ProseApplicationService(options.worlds, operations);
   return {
+    prose: { createProduction: tracked(prose.createProduction.bind(prose)), createChapter: tracked(prose.createChapter.bind(prose)),
+      readChapter: tracked(prose.readChapter.bind(prose)), saveChapter: tracked(prose.saveChapter.bind(prose)) },
     worlds: { read: tracked(worlds.read.bind(worlds)), media: tracked(worlds.media.bind(worlds)) },
     proposals: { propose: tracked(proposals.propose.bind(proposals)), accept: tracked(proposals.accept.bind(proposals)),
       discard: tracked(proposals.discard.bind(proposals)) },

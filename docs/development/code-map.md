@@ -195,3 +195,18 @@ lifecycle options for live decisions and recovery, including archive path reloca
 supplies the platform callbacks through `conversationActionDependencies` and translates results
 into events. See `test/application/production-actions.test.ts`,
 `test/productions/create-ack.test.ts`, and `test/arke-actions/` for the regression boundary.
+
+
+### Public direct prose authoring
+
+`engine.prose` routes through coordinator `application/prose.ts`: trusted context, durable
+operation identity, resource authorization, authoritative save receipts and exact delivery.
+`application/prose-contracts.ts` defines its bounded inputs and host session surface;
+`application/local-prose.ts` adapts canonical IDs to the existing production/chapter domain
+operations. `application/operation-record.ts` validates durable action-specific replay data.
+Studio's compatibility services continue sharing `productions/ops.ts` with this public path.
+
+Regression checks: coordinator `test/application/prose.test.ts` and
+`test/productions/chapters.test.ts`; engine `test/consumer.mjs` and `test/pack.test.mjs` exercise
+the installed package outside the monorepo. See [direct prose authoring](engine.md#direct-prose-authoring-02)
+for the API, version 0.2 adapter migration and remaining authoring/server boundaries.

@@ -57,7 +57,26 @@ try {
   const media = await engine.worlds.media({ ...context, actorId: "child" }, worldId, `${job.landing.dir}/${job.landing.name}`);
   assert.ok(media.bytes.length > 0);
   await engine.illustrations.reconcile(context, worldId, "image");
-  await engine.close(); engine = make();
+  const productionInput = { operationId: "prose-production", title: "The river path" };
+  const production = await engine.prose.createProduction(context, worldId, productionInput);
+  const proseId = production.value.productionId;
+  const chapterInput = { operationId: "prose-chapter", title: "Home", order: 1 };
+  const chapter = await engine.prose.createChapter(context, worldId, proseId, chapterInput);
+  const chapterId = chapter.value.chapterId;
+  const openedChapter = await engine.prose.readChapter(context, worldId, proseId, chapterId);
+  const saveInput = { operationId: "prose-save", body: "Fenn followed the river home.", baseHash: openedChapter.hash,
+    expectedRevision: chapter.revision };
+  const saved = await engine.prose.saveChapter(context, worldId, proseId, chapterId, saveInput);
+  assert.equal(saved.value.version, openedChapter.version);
+  await engine.close(); await provider.close(); await provider.loadWorld(worldId); engine = make();
+  assert.deepEqual(await engine.prose.createProduction(context, worldId, productionInput), production);
+  assert.deepEqual(await engine.prose.createChapter(context, worldId, proseId, chapterInput), chapter);
+  assert.deepEqual(await engine.prose.saveChapter(context, worldId, proseId, chapterId, saveInput), saved);
+  const reopenedChapter = await engine.prose.readChapter(context, worldId, proseId, chapterId);
+  assert.equal(reopenedChapter.body.trim(), saveInput.body);
+  assert.equal(reopenedChapter.hash, saved.value.hash);
+  await assert.rejects(engine.prose.saveChapter({ ...context, actorId: "child" }, worldId, proseId, chapterId,
+    { ...saveInput, operationId: "child-save" }), /Forbidden/);
   assert.deepEqual(await engine.proposals.accept(context, worldId, proposal.value.proposal.id, { operationId: "accept" }), accepted);
   assert.equal((await engine.operation(context, worldId, "image")).status, "completed");
   assert.equal(submissions, 1); assert.equal(generated.jobIds.length, 1);
