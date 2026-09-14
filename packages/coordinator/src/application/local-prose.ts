@@ -7,14 +7,18 @@ import { engineHash } from "./operations.js";
 export function localProse(store: WorldStore): EngineProseSession {
   const production = (id: string) => {
     proseId.parse(id);
-    const found = store.getBundle().productions.find(p => p.meta.id === id);
+    const matches = store.getBundle().productions.filter(p => p.meta.id === id);
+    if (matches.length > 1) throw new Error("The production ID is ambiguous.");
+    const found = matches[0];
     if (!found || !productionShape(found.meta).hasChapters) throw new Error("A prose production is required.");
     return found;
   };
   const chapter = (productionId: string, chapterId: string) => {
     proseId.parse(chapterId);
     // Public IDs are canonical: accepting a file alias here could bypass per-chapter policy.
-    const found = production(productionId).chapters.find(c => c.id === chapterId);
+    const matches = production(productionId).chapters.filter(c => c.id === chapterId);
+    if (matches.length > 1) throw new Error("The chapter ID is ambiguous.");
+    const found = matches[0];
     if (!found) throw new Error("That chapter is no longer in this production.");
     if (!found.file || /[\\/:]/.test(found.file) || found.file.includes("\0") || found.file === "." || found.file === "..") {
       throw new Error("The chapter filename is not a portable file stem.");

@@ -171,6 +171,11 @@ it("durable prose replay rejects malformed results and crossed resource identiti
     assert.throws(() => parseOperationRecord({ ...row, result: { ...row.result, value } }));
   }
   assert.throws(() => parseOperationRecord({ ...row, resource: { worldId: WORLD_ID } }));
+  const tooLong = "a".repeat(81);
+  assert.throws(() => parseOperationRecord({ ...row, resource: { ...row.resource, chapterId: tooLong },
+    result: { ...row.result, value: { ...row.result.value, chapterId: tooLong } } }));
+  assert.throws(() => parseOperationRecord({ ...row, action: "production-create", resource: { worldId: WORLD_ID },
+    result: { ...row.result, value: { productionId: tooLong } } }));
 });
 
 
@@ -234,4 +239,25 @@ it("canonical chapter reads and saves preserve a portable filename with spaces",
   await h.engine.prose.saveChapter(context, WORLD_ID, productionId, "portable-one",
     { operationId: "portable", body: "Revised text.", baseHash: before.hash });
   assert.match(await readFile(join(h.worldDir, "productions", productionId, "chapters", "My Chapter_One.md"), "utf8"), /Revised text/);
+});
+
+
+it("duplicate canonical IDs refuse both read and save even when projection hides one duplicate", async t => {
+  const h = await harness(t, async worldDir => {
+    const doc = MarkdownFile.parse(await readFile(join(worldDir, "productions", productionId, "chapters/01-neap.md"), "utf8"));
+    doc.setBody("Private duplicate.");
+    await writeFile(join(worldDir, "productions", productionId, "chapters/00-private.md"), doc.serialize());
+  });
+  h.policy.project = async (_ctx, bundle) => {
+    bundle.productions.find(p => p.meta.id === productionId)!.chapters =
+      bundle.productions.find(p => p.meta.id === productionId)!.chapters.filter(c => c.file !== "00-private");
+    return bundle;
+  };
+  const projected = await h.engine.worlds.read(context, WORLD_ID);
+  assert.equal(projected.bundle.productions.find(p => p.meta.id === productionId)!.chapters.filter(c => c.id === chapterId).length, 1);
+  await assert.rejects(h.engine.prose.readChapter(context, WORLD_ID, productionId, chapterId), /ambiguous/);
+  await assert.rejects(h.engine.prose.saveChapter(context, WORLD_ID, productionId, chapterId,
+    { operationId: "duplicate-id", body: "Replacement", baseHash: "sha256:" + "a".repeat(64) }), /ambiguous/);
+  assert.match(await readFile(join(h.worldDir, "productions", productionId, "chapters/00-private.md"), "utf8"), /Private duplicate/);
+  assert.equal(h.state.saves, 0);
 });

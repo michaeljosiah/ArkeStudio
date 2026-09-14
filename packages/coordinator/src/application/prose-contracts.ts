@@ -1,7 +1,8 @@
 import { z } from "zod";
+import { SlugSchema } from "@arke-studio/contracts";
 
 // IDs name records, never host paths. The local adapter maps canonical IDs to scanned filenames.
-export const proseId = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(500);
+export const proseId = SlugSchema;
 const title = z.string().min(1).max(200).refine(value => value.trim().length > 0);
 const mutation = { operationId: z.string().min(1).max(500).refine(value => value.trim().length > 0),
   expectedRevision: z.string().min(1).optional() };

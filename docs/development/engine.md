@@ -157,7 +157,8 @@ storage. Production creation returns `productionId`; chapter creation adds `chap
 also returns the committed `version` and file `hash`. Reading returns those IDs, title, order,
 body, version, file hash and available historical version numbers. It exposes no filenames,
 audiobook records or internal workspace paths. Select existing productions/chapters from the
-caller's projected `worlds.read` bundle, then use their canonical IDs. A legacy filename is not
+caller's projected `worlds.read` bundle, then use their canonical IDs. Ambiguous duplicate IDs refuse reads and saves even when projection hides a
+duplicate. A legacy filename is not
 an alternative public chapter identity.
 
 The required save `baseHash` is the `sha256:` file hash returned by a read or successful save.
@@ -169,7 +170,7 @@ version; generated prose must still arrive as a proposal and cut a version on ac
 (SPEC-012 R-5 and R-58). Saving a chapter does not silently add its story events to world canon.
 
 Titles accept 1–200 characters, loglines up to 2,000, chapter ranks 1–1,000,000 and bodies up to
-2,000,000 characters. Public production/chapter IDs are lowercase slug IDs. Chapter order uses
+2,000,000 characters. Public production/chapter IDs use the shared slug schema (at most 80 characters). Chapter order uses
 the existing writer: it is at least one past the highest stored chapter rank. Inputs reject
 unknown fields. Hosts should translate validated product requests into this small contract.
 
