@@ -56,6 +56,7 @@ export interface FsWorldProviderOptions {
 export class FsWorldProvider implements WorldProvider {
   private store: WorldStore | null = null;
   private closing = false;
+  private closeEpoch = 0;
   private closeAttempt: Promise<void> | null = null;
   private worldAccessTail: Promise<void> = Promise.resolve();
   private onAdoptedCb: ((worldId: string) => void) | null = null;
@@ -493,6 +494,7 @@ export class FsWorldProvider implements WorldProvider {
    * strand the screen on a world nothing has open.
    */
   async archiveWorld(worldId: string): Promise<{ folder: string }> {
+    const epoch = this.closeEpoch;
     const dir = await this.findWorldDir(worldId);
     const wasOpen = this.store?.worldId === worldId;
     if (wasOpen) await this.accessWorld(async () => {
@@ -517,7 +519,10 @@ export class FsWorldProvider implements WorldProvider {
       // back on top of it would close the world the screen has just been told about and leave
       // the provider serving one nobody selected, which is a worse version of the strand this
       // reopen exists to prevent.
-      if (wasOpen && !this.closing && this.store === null) await this.loadWorld(worldId).catch(() => {});
+      if (wasOpen) await this.accessWorld(async () => {
+        // Check inside the selection queue, including a close that already finished.
+        if (epoch === this.closeEpoch && !this.closing && this.store === null) await this.loadWorldOnce(worldId);
+      }).catch(() => {});
       throw err;
     }
   }
@@ -698,6 +703,7 @@ export class FsWorldProvider implements WorldProvider {
   close(): Promise<void> {
     if (this.closeAttempt) return this.closeAttempt;
     this.closing = true;
+    this.closeEpoch++;
     this.closeAttempt = (async () => {
       await this.worldAccessTail;
       await this.closeStore();

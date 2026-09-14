@@ -141,3 +141,23 @@ it("overlapping provider closes keep admission shut until the detached store fin
   await provider.loadWorld(other.worldId);
   assert.equal(provider.openStore()!.worldId, other.worldId);
 });
+
+
+it("archive recovery cannot reopen a provider that was closed during the move", async t => {
+  const { root } = await makeTempRoot();
+  let entered!: () => void; let release!: () => void;
+  const moving = new Promise<void>(resolve => { entered = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const provider = new FsWorldProvider(root, { rename: async () => {
+    entered(); await held; throw Object.assign(new Error("Archive refused"), { code: "EIO" });
+  } });
+  t.after(() => provider.close());
+  await provider.loadWorld(WORLD_ID);
+  const archiving = assert.rejects(provider.archiveWorld(WORLD_ID), /Archive refused/);
+  await moving;
+  try { await provider.close(); } finally { release(); }
+  await archiving;
+  assert.equal(provider.openStore(), null, "failed archive recovery must not resurrect a closed provider");
+  await provider.loadWorld(WORLD_ID);
+  assert.equal(provider.openStore()!.worldId, WORLD_ID, "explicit later reuse still works");
+});
