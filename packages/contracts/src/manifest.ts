@@ -35,7 +35,19 @@ export const PricingSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   z.object({ kind: z.literal("perMegapixel"), microUsdPerMegapixel: z.number().int().min(0) }).strict(),
-  z.object({ kind: z.literal("perCharacter"), microUsdPerCharacter: z.number().int().min(0) }).strict(),
+  z
+    .object({
+      kind: z.literal("perCharacter"),
+      microUsdPerCharacter: z.number().int().min(0),
+      /**
+       * What the vendor counts as one character (SPEC-046 R-8). Absent means a character is a
+       * character. `cjk-double`: a Chinese, Japanese or Korean character bills as two (Breeze).
+       * `utf8-byte`: the bill is per UTF-8 byte, so an accented letter is two and a CJK character
+       * three (Fish Audio). `billableCharacters` turns text into the count the rate multiplies.
+       */
+      unit: z.enum(["character", "cjk-double", "utf8-byte"]).optional(),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("perToken"),
@@ -486,6 +498,29 @@ export interface EstimateInput {
  * fractional intermediate (megapixels, token millionths) rounds once, up, at its own edge —
  * an estimate that errs low teaches the user not to trust it.
  */
+const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu;
+
+/**
+ * The characters a vendor will bill for this text, by the row's unit — what `estimateMicroUsd`
+ * wants in `characters`, never `text.length` alone for a row that counts differently (SPEC-046
+ * R-8; codex on PR 1153 found the CJK half-estimate). A row with no unit, or no per-character
+ * pricing, counts characters. A delivery the row carries as a tag in the text — `(whispers) `,
+ * `[voice breaking, through tears] ` — is billed as text too, so a caller that knows the
+ * delivery names it and the tag's characters are counted before the line is priced — but only
+ * when the tag will actually go: a paren-syntax vendor's English tag goes into a line stated to
+ * be English and no other (SPEC-046 R-23), so the estimate follows the same rule (codex on PR
+ * 1153). A bracket-syntax tag is a phrase the vendor reads in any language and always goes.
+ */
+export function billableCharacters(model: Pick<ManifestModel, "pricing"> & Partial<Pick<ManifestModel, "cadence">>, text: string, delivery?: string, language?: string): number {
+  const paren = model.cadence?.tagSyntax === "paren";
+  const tag = delivery !== undefined && (!paren || language === "en") ? model.cadence?.deliveryMappings[delivery]?.tag : undefined;
+  const counted = tag !== undefined ? `${paren ? `(${tag})` : `[${tag}]`} ${text}` : text;
+  const unit = model.pricing.kind === "perCharacter" ? model.pricing.unit : undefined;
+  if (unit === "utf8-byte") return new TextEncoder().encode(counted).length;
+  if (unit === "cjk-double") return counted.length + (counted.match(CJK)?.length ?? 0);
+  return counted.length;
+}
+
 export function estimateMicroUsd(model: ManifestModel, input: EstimateInput): number {
   const p = model.pricing;
   // Fractional quantities (seconds, megapixels) become integer milli-units before they meet a
@@ -1078,8 +1113,17 @@ export function modelPriceCopy(model: ManifestModel): string {
       return formatMicroUsd(pricing.microUsdPerImage);
     case "perMegapixel":
       return `${formatMicroUsd(pricing.microUsdPerMegapixel)} / megapixel`;
-    case "perCharacter":
-      return `${formatMicroUsd(pricing.microUsdPerCharacter)} / character`;
+    case "perCharacter": {
+      // Per million, as every vendor quotes it — a per-character rate is sub-cent and rendered
+      // "$0.00" — and in the unit the vendor bills, so the catalogue does not contradict the
+      // estimate (SPEC-046 R-8; codex on PR 1156).
+      const perMillion = formatMicroUsd(pricing.microUsdPerCharacter * 1_000_000);
+      return pricing.unit === "utf8-byte"
+        ? `${perMillion} / M bytes`
+        : pricing.unit === "cjk-double"
+          ? `${perMillion} / M characters, CJK ×2`
+          : `${perMillion} / M characters`;
+    }
     case "perToken":
       return `${formatMicroUsd(pricing.microUsdPerMillionInput)} / ${formatMicroUsd(
         pricing.microUsdPerMillionOutput,

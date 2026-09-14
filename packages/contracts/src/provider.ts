@@ -37,6 +37,9 @@ export const ProviderIdSchema = z.enum([
   "openai",
   "anthropic",
   "elevenlabs",
+  "mistral",
+  "breezeblue",
+  "fishaudio",
   "ollama",
   "kokoro",
   "whispercpp",
@@ -108,6 +111,31 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
   elevenlabs: {
     displayName: "ElevenLabs",
     capabilities: ["voice-tts", "voice-clone", "voice-conversion"],
+    local: false,
+    credential: "in-app",
+  },
+  /*
+   * The two hosted readers of the world's cloned voices (SPEC-046 R-1). `voice-clone` here means
+   * a cloned voice can be READ through the service — the clip goes with the request, or into a
+   * slot on the account — never that a voice is made there; the library is where a voice is made
+   * (SPEC-022 §2.3). Neither has a `keyHint`: neither vendor's keys carry a recognisable prefix.
+   * Neither joins `LLM_ENV_PROVIDERS`: a voice key has no business in a harness environment.
+   */
+  mistral: {
+    displayName: "Mistral",
+    capabilities: ["voice-tts", "voice-clone"],
+    local: false,
+    credential: "in-app",
+  },
+  breezeblue: {
+    displayName: "BreezeBlue",
+    capabilities: ["voice-tts", "voice-clone"],
+    local: false,
+    credential: "in-app",
+  },
+  fishaudio: {
+    displayName: "Fish Audio",
+    capabilities: ["voice-tts", "voice-clone"],
     local: false,
     credential: "in-app",
   },

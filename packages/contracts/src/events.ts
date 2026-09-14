@@ -562,6 +562,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       command: QueueCommandSchema,
       destinationLabel: z.string().min(1).max(512),
       confirmationToken: z.string().min(1).max(256),
+      /** For a hosted reader: what the vendor does with the clip, in its own terms (SPEC-046 R-17). */
+      destinationNotice: z.string().min(1).max(1024).optional(),
     })
     .strict(),
 

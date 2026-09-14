@@ -412,6 +412,59 @@ describe("the catalogue does not offer a voice the engine cannot speak", () => {
   });
 });
 
+describe("a hosted reader offers the library's voices as its own candidates (SPEC-046 R-10)", () => {
+  const harbour = { id: "harbour", name: "Harbour", clip: "voices/harbour.wav", attributes: ["low"] } as never;
+  const service = (keyed: string[]) =>
+    new VoiceService({
+      sidecar: null,
+      localPresets: [],
+      cloudSources: [],
+      hostedReaders: [{ provider: "mistral", model: "voxtral-mini-tts" }, { provider: "breezeblue", model: "breeze-tts-2" }],
+      getKey: async (provider) => (keyed.includes(provider) ? "key" : null),
+      emit: () => {},
+      clock: CLOCK,
+    });
+
+  it("one voice, three readers: the recipe's candidate and one per keyed vendor, all naming the same voice", async () => {
+    const voices = await service(["mistral", "breezeblue"]).catalogue([harbour]);
+    assert.deepEqual(
+      voices.map((v) => [v.provider, v.model, v.voiceId, v.readsClone, v.local]),
+      [
+        ["comfyui", "comfyui-cloned-voice", "harbour", "harbour", true],
+        ["mistral", "voxtral-mini-tts", "harbour", "harbour", false],
+        ["breezeblue", "breeze-tts-2", "harbour", "harbour", false],
+      ],
+    );
+  });
+
+  it("an unkeyed reader offers nothing, like an unkeyed cloud catalogue", async () => {
+    const voices = await service(["mistral"]).catalogue([harbour]);
+    assert.deepEqual(voices.map((v) => v.provider), ["comfyui", "mistral"]);
+    assert.deepEqual((await service([]).catalogue([harbour])).map((v) => v.provider), ["comfyui"]);
+  });
+
+  it("a keyed reader whose key the vendor rejected still lists its voice, marked with the reason (codex on PR 1153)", async () => {
+    // A rejected key is stored and reported invalid; the candidate stays visible so an existing
+    // assignment does, and carries the probe's reason so nothing is queued to fail at dispatch.
+    const marked = new VoiceService({
+      sidecar: null,
+      localPresets: [],
+      cloudSources: [],
+      hostedReaders: [{ provider: "mistral", model: "voxtral-mini-tts" }, { provider: "breezeblue", model: "breeze-tts-2" }],
+      readerAvailability: (provider) => (provider === "mistral" ? { unavailableReason: "Mistral rejected this key" } : {}),
+      getKey: async () => "key",
+      emit: () => {},
+      clock: CLOCK,
+    });
+    const voices = await marked.catalogue([harbour]);
+    assert.deepEqual(voices.map((v) => [v.provider, v.unavailableReason]), [
+      ["comfyui", undefined],
+      ["mistral", "Mistral rejected this key"],
+      ["breezeblue", undefined],
+    ]);
+  });
+});
+
 describe("candidates and the stated preview cost (R-7, R-10)", () => {
   it("emits ranked candidates with extraction, the preview line, and the cloud figure", async () => {
     const events: DomainEvent[] = [];

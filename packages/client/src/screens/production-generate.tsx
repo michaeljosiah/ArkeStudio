@@ -1136,6 +1136,7 @@ export function VoiceLineDialogScreen() {
   const [uploadConfirmation, setUploadConfirmation] = useState<{
     destinationLabel: string;
     confirmationToken: string;
+    destinationNotice?: string;
   } | null>(null);
   const rememberedVoiceModelId = production?.meta.models?.["voice-tts"];
   const effectiveVoiceModelId = voiceModelOverride ?? rememberedVoiceModelId ?? assignedVoiceModelId ?? undefined;
@@ -1298,6 +1299,7 @@ export function VoiceLineDialogScreen() {
         {uploadConfirmation && (
           <RemoteVoiceUploadConfirmation
             destinationLabel={uploadConfirmation.destinationLabel}
+            destinationNotice={uploadConfirmation.destinationNotice}
             onCancel={() => {
               pending.current = null;
               setSending(false);

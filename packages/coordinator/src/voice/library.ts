@@ -446,3 +446,69 @@ export async function clipFor(store: WorldStore, voice: ClonedVoice): Promise<Di
     return null;
   }
 }
+
+/**
+ * What a hosted reader holds of a voice (SPEC-046 R-13, R-16), written onto the library entry:
+ * the once-per-vendor confirmation, and — for a reader that keeps the clip on its account — the
+ * slot it keeps it under with the hash of the clip it was made from. Patched into the entries AS
+ * READ for the same reason the clone path appends to them: an entry this build does not
+ * understand survives, and a malformed neighbour is left exactly as it was.
+ */
+export async function recordVoiceReader(
+  store: WorldStore,
+  voiceId: string,
+  provider: string,
+  patch: { confirmedAt?: string; voiceId?: string; clipHash?: string; savedAt?: string; stale?: string[]; pending?: string[] },
+): Promise<void> {
+  // Read, patch and commit as one: two overlapping records — a confirmation for one reader while
+  // another's slot flow lands — would both read the file before either committed, and the second
+  // would reach the commit with a stale base hash and fail (codex on PR 1153). One at a time per
+  // store; the commit's own serialisation is below this and cannot see the read.
+  const previous = readerWrites.get(store) ?? Promise.resolve();
+  const run = previous.then(() => recordVoiceReaderNow(store, voiceId, provider, patch), () => recordVoiceReaderNow(store, voiceId, provider, patch));
+  const settled = run.then(() => undefined, () => undefined);
+  readerWrites.set(store, settled);
+  try {
+    await run;
+  } finally {
+    if (readerWrites.get(store) === settled) readerWrites.delete(store);
+  }
+}
+
+const readerWrites = new WeakMap<WorldStore, Promise<void>>();
+
+async function recordVoiceReaderNow(
+  store: WorldStore,
+  voiceId: string,
+  provider: string,
+  patch: { confirmedAt?: string; voiceId?: string; clipHash?: string; savedAt?: string; stale?: string[]; pending?: string[] },
+): Promise<void> {
+  const existingRaw = await readLibraryRaw(store);
+  if (existingRaw === null) throw new Error("the voice library is missing");
+  const entries = rawEntries(existingRaw);
+  const entry = entries.find((candidate) => candidate?.["id"] === voiceId);
+  if (!entry) throw new Error("that cloned voice is no longer in this world");
+  const remote = (typeof entry["remote"] === "object" && entry["remote"] !== null ? entry["remote"] : {}) as Record<string, Record<string, unknown>>;
+  const current = typeof remote[provider] === "object" && remote[provider] !== null ? remote[provider] : {};
+  const next: Record<string, unknown> = { ...current, ...patch };
+  // An emptied list is no list: the key comes off rather than sitting as `[]` forever.
+  for (const list of ["stale", "pending"]) if (Array.isArray(next[list]) && next[list].length === 0) delete next[list];
+  entry["remote"] = { ...remote, [provider]: next };
+  await store.commit({
+    kind: "voice-reader",
+    source: "app",
+    files: [
+      {
+        path: CLONED_VOICES_PATH,
+        action: "replace",
+        content: JSON.stringify({ voices: entries }, null, 2) + "\n",
+        baseHash: sha256(existingRaw),
+      },
+    ],
+  });
+}
+
+/** The hash the library compares a reader's slot against: the clip's bytes, as `clipFor` reads them. */
+export function clipHashOf(clip: DispatchVoiceReference): string {
+  return `sha256:${createHash("sha256").update(clip.data).digest("hex")}`;
+}

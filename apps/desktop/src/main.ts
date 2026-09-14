@@ -53,7 +53,11 @@ import {
   higgsfieldWorkspaces,
   probeRuntime,
   SHIPPED_MANIFEST,
+  BREEZE_MODEL,
+  FISH_MODEL,
+  VOXTRAL_MODEL,
   type VoiceCatalogueClient,
+  type VoiceSlotClient,
 } from "@arke-studio/providers";
 import {
   KOKORO_PRESETS,
@@ -84,6 +88,7 @@ import {
   comfyUiWeightsComponentId,
   ROSTER,
   skillFor,
+  type ProviderId,
   type ThemePreference,
   type VoiceRuntimeFailure,
   type VoiceRuntimeStatus,
@@ -1292,6 +1297,30 @@ async function initialize(): Promise<{ port: number }> {
       externallyPresent: async (entryId) =>
         entryId === "comfyui-runtime" ? comfyUiEngine.externallySelected() : false,
     },
+    // Breeze and Fish keep a cloned voice on the account — a slot, a model; the library asks for
+    // it here (SPEC-046 R-13). A reader whose client carries no slot calls keeps none.
+    hostedVoiceSlots: {
+      save: (provider, key, input, signal) => {
+        const client = providerClients[provider as ProviderId] as Partial<VoiceSlotClient> | undefined;
+        if (client?.saveVoice === undefined) return Promise.reject(new Error(`${provider} keeps no voice slots`));
+        return client.saveVoice(key, input, signal);
+      },
+      remove: (provider, key, voiceId, signal) => {
+        const client = providerClients[provider as ProviderId] as Partial<VoiceSlotClient> | undefined;
+        if (client?.deleteVoice === undefined) return Promise.resolve();
+        return client.deleteVoice(key, voiceId, signal);
+      },
+      find: (provider, key, name, signal) => {
+        const client = providerClients[provider as ProviderId] as Partial<VoiceSlotClient> | undefined;
+        if (client?.findVoice === undefined) return Promise.resolve(null);
+        return client.findVoice(key, name, signal);
+      },
+      has: (provider, key, voiceId, signal) => {
+        const client = providerClients[provider as ProviderId] as Partial<VoiceSlotClient> | undefined;
+        if (client?.hasVoice === undefined) return Promise.resolve(false);
+        return client.hasVoice(key, voiceId, signal);
+      },
+    },
     comfyui: {
       service: comfyUiEngine,
       choosePath: async () => {
@@ -1386,6 +1415,25 @@ async function initialize(): Promise<{ port: number }> {
           provider: "elevenlabs",
           list: (key: string) => (providerClients.elevenlabs as VoiceCatalogueClient).listVoicesCatalog(key),
         },
+        // The hosted readers' own presets (SPEC-046 R-32): Voxtral's thirty, Breeze's ranked first page.
+        {
+          provider: "mistral",
+          list: (key: string) => (providerClients.mistral as VoiceCatalogueClient).listVoicesCatalog(key),
+        },
+        {
+          provider: "breezeblue",
+          list: (key: string) => (providerClients.breezeblue as VoiceCatalogueClient).listVoicesCatalog(key),
+        },
+        {
+          provider: "fishaudio",
+          list: (key: string) => (providerClients.fishaudio as VoiceCatalogueClient).listVoicesCatalog(key),
+        },
+      ],
+      // And the library's own voices read through them (R-10), when keyed.
+      hostedReaders: [
+        { provider: "mistral", model: VOXTRAL_MODEL },
+        { provider: "breezeblue", model: BREEZE_MODEL },
+        { provider: "fishaudio", model: FISH_MODEL },
       ],
     },
     observeEvent: (event) => {

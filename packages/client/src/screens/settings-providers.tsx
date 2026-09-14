@@ -68,8 +68,12 @@ import {
  * reached, never for where its work runs.
  */
 
-/** The keyed services, in the column's order. Higgsfield's credential is external (issue 137). */
-export const KEYED_PROVIDERS: readonly ProviderId[] = ["fal", "higgsfield", "openai", "anthropic", "elevenlabs"];
+/**
+ * The keyed services, in the column's order. Higgsfield's credential is external (issue 137).
+ * Mistral and BreezeBlue are the hosted readers of the world's cloned voices (SPEC-046 R-29);
+ * neither ships a mark yet, so both sit on the monogram the slot already falls back to (R-4).
+ */
+export const KEYED_PROVIDERS: readonly ProviderId[] = ["fal", "higgsfield", "openai", "anthropic", "elevenlabs", "mistral", "breezeblue", "fishaudio"];
 
 const ENGINES: readonly EngineId[] = ["comfyui", "ollama", "voxa"];
 
