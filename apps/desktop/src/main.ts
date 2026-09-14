@@ -24,6 +24,7 @@ import {
   ChildSupervisor,
   ComfyUiEngineService,
   Coordinator,
+  createStudioCoordinator,
   AppSettingsFile,
   defaultAppRoot,
   FsWorldProvider,
@@ -1127,7 +1128,7 @@ async function initialize(): Promise<{ port: number }> {
   });
 
   const transportToken = randomBytes(32).toString("hex");
-  coordinator = new Coordinator({
+  coordinator = createStudioCoordinator({
     transportAuth: { token: transportToken, allowedOrigins: desktopTransportOrigins(process.env.ARKE_DEV_SERVER_URL) },
     provider,
     adapter,

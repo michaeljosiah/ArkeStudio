@@ -2,6 +2,8 @@ export { AppLog } from "./app-log.js";
 export { AppSettingsFile, routingFaults } from "./app-settings.js";
 export { ChangeLog, WriteQueue, type LogRecord } from "./change-log.js";
 export { Coordinator, type CoordinatorOptions } from "./coordinator.js";
+export { createStudioCoordinator } from "./application/studio-host.js";
+export { createStudioStorage } from "./application/studio-composition.js";
 export {
   ARKE_ACTION_REGISTRY,
   ARKE_BLOCKED_AUTHORITY_SEAMS,

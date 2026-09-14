@@ -8,7 +8,7 @@ import { createProviderClients, SHIPPED_MANIFEST } from "@arke-studio/providers"
 import { KOKORO_PRESETS, localCandidates } from "@arke-studio/voice";
 import { AppSettingsFile } from "./app-settings.js";
 import { ChildLedger } from "./child-ledger.js";
-import { Coordinator } from "./coordinator.js";
+import { createStudioCoordinator } from "./application/studio-host.js";
 import { devCipher } from "./credentials/dev-cipher.js";
 import { ProviderCallStore } from "./providers/call-store.js";
 import { SecretRegistry } from "./redact.js";
@@ -131,7 +131,7 @@ const transportToken = randomBytes(32).toString("hex");
 const devOrigins = process.env["ARKE_DEV_ORIGIN"]
   ? [new URL(process.env["ARKE_DEV_ORIGIN"]).origin]
   : ["http://localhost:5173", "http://127.0.0.1:5173"];
-const coordinator = new Coordinator({
+const coordinator = createStudioCoordinator({
   transportAuth: { token: transportToken, allowedOrigins: devOrigins },
   provider,
   adapter,

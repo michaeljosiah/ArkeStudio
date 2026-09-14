@@ -148,3 +148,5 @@ node --import tsx --test packages/contracts/test/staging.test.ts packages/contra
 Use the client scene-workspace tests for Keep/Discard and scope controls, and coordinator scene
 commands/bench tests for versioning, restore and reference admission. No paid generation is part
 of the normal gate.
+
+For the embeddable Node package, run `npm test --workspace @arke-studio/engine`. This builds and installs the packed artifact outside the checkout, runs the initial authoring journey and validates declarations. It requires registry access but no paid provider. Coordinator `test/application/engine.test.ts` covers the shared services; see the [engine guide](engine.md).

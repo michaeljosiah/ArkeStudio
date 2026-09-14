@@ -1,3 +1,7 @@
+import { createEngine } from "./application/engine.js";
+import { createLocalWorldRepository } from "./application/local-worlds.js";
+import { createLocalEnginePolicy, LOCAL_ENGINE_CONTEXT } from "./application/local-policy.js";
+import { createStudioStorage, type StudioStorage } from "./application/studio-composition.js";
 import { referenceInputProblem } from "@arke-studio/contracts";
 import { LocalGpu, memoryWait, queueableLocalMemory } from "./local-ai/gpu.js";
 import { withLocalGpu } from "./harness/local-gpu.js";
@@ -160,10 +164,10 @@ import {
   fileBenchSubjectTake,
 } from "./bench/filing.js";
 import { recordBenchOutcome, serialiseSceneConversation } from "./bench/outcome.js";
-import { AppLog } from "./app-log.js";
-import { AppSettingsFile, routingFaults } from "./app-settings.js";
+import type { AppLog } from "./app-log.js";
+import { type AppSettingsFile, routingFaults } from "./app-settings.js";
 import { AskService } from "./canon/ask.js";
-import { CredentialStore, type Cipher } from "./credentials/store.js";
+import type { CredentialStore, Cipher } from "./credentials/store.js";
 import { buildDiagnosticsBundle } from "./diagnostics.js";
 import { DiagnosticsSnapshotHolder } from "./diagnostics-snapshot.js";
 import {
@@ -379,7 +383,6 @@ import {
   establishRequests,
   imageModelFor,
   locationViewRequests,
-  mainPhotoRequests,
   missingTileAngles,
   tileRequest,
 } from "./references/generate.js";
@@ -437,9 +440,9 @@ import {
   type MainPhotoAcceptanceStage,
 } from "./references/main-photo.js";
 import { LLM_ENV_PROVIDERS } from "@arke-studio/contracts";
-import { diagnosticsBoundary, scrubAbsolutePaths, SecretRegistry } from "./redact.js";
+import { diagnosticsBoundary, scrubAbsolutePaths, type SecretRegistry } from "./redact.js";
 import { detectDrift, evaluateSpend, type LedgerRead } from "./spend/analytics.js";
-import { LedgerFile } from "./spend/ledger.js";
+import type { LedgerFile } from "./spend/ledger.js";
 import {
   amendCanonContent,
   openThread,
@@ -518,7 +521,6 @@ import { makeConversationSummariser } from "./world-chat/summarisation.js";
 import { blockingDependencies, explainBlocked, routeFor as mediaRouteFor } from "./world-chat/media.js";
 import { contradictionCandidates, refsForCanon, refsForSheet, ripplesForCanonEntry, searchCanon } from "./index-db/queries.js";
 import {
-  createSheetFromSentence,
   duplicateSheet,
   guestPromotionContent,
   sheetRenameContent,
@@ -689,6 +691,8 @@ async function landUploadedImage(
 }
 
 export interface CoordinatorOptions {
+  /** Explicit local infrastructure, normally supplied by desktop/dev composition. */
+  storage?: StudioStorage;
   /** Host-minted session capability. Omission creates a fresh capability, never an open socket. */
   transportAuth?: import("./transport.js").TransportAuth;
   provider: WorldProvider;
@@ -988,6 +992,7 @@ function worldOpenFailureKind(err: unknown): string {
 }
 
 export class Coordinator {
+  private readonly engine: ReturnType<typeof createEngine>;
   private readonly readModel: ReadModel;
   private readonly frameRunQuotes = new Map<string, FrameRunQuote>();
   private readonly transport: Transport;
@@ -1900,6 +1905,7 @@ export class Coordinator {
   private voiceModelsChanged = false;
   private started = false;
   private stopping = false;
+  private engineClosed = false;
   /** Page reads told to stop (codex, PR 879): the narration loop checks between blocks. */
   private readonly stoppedReads = new Set<string>();
   /** Cloud jobs queued for a page read, by requestId, so Stop can cancel what it already paid for. */
@@ -1958,6 +1964,7 @@ export class Coordinator {
   /** A conversation card fixes the export identity before the legacy renderer starts. */
   private readonly requestedExportIds = new Map<string, string>();
   /** Route layout and screen guards may ask for the same world before either receives its snapshot. */
+  private openWorldTail: Promise<void> = Promise.resolve();
   private readonly openingWorlds = new Map<string, Promise<void>>();
   /** Cancels the media backfill (issue 283) — optional migration work nothing should wait for. */
   private backfillAbort: AbortController | null = null;
@@ -1976,31 +1983,19 @@ export class Coordinator {
       withLocalGpu(opts.adapter, this.localGpu, () => { void this.refreshLocalResidency(); }),
       (reference, needsImages) => this.validateLanguageModel(reference, needsImages),
     );
-    this.secrets = opts.secretRegistry ?? new SecretRegistry();
+    const storage = opts.storage ?? createStudioStorage(opts);
+    this.secrets = storage.secrets;
     this.readModel = new ReadModel(opts.appVersion);
-    this.changeLog = new ChangeLog(opts.changeLogPath);
-    this.appLog = opts.appRoot
-      ? new AppLog(join(opts.appRoot, "logs", "app.jsonl"), this.secrets, () =>
-          // A landed record can change the fault correlation without any state event carrying
-          // it there (the append is async behind the write queue, so it can land after the
-          // event's own derivation already read the file). Re-read, then re-derive.
-          this.refreshDiagnosticsLogTail(),
-        )
-      : null;
+    this.changeLog = storage.changeLog;
+    this.appLog = storage.appLog;
+    storage.onLogChanged(() => this.refreshDiagnosticsLogTail());
     opts.providerCalls?.setTransportFailureSink((record) => {
       void this.appLog?.append(record);
     });
     opts.provider.onWorldLockError?.((worldId, message, consecutive) => {
       void this.appLog?.append({ kind: "world.lock-heartbeat-failed", worldId, message, consecutive });
     });
-    this.credentials =
-      opts.appRoot && opts.cipher
-        ? new CredentialStore(
-            join(opts.appRoot, opts.credentialsFileName ?? "credentials.dat"),
-            opts.cipher,
-            this.secrets,
-          )
-        : null;
+    this.credentials = storage.credentials;
     this.providerService = new ProviderService(this.credentials, opts.validators ?? {}, this.appLog);
     for (const [id, probe] of Object.entries(opts.toolProbes ?? {})) {
       if (!probe) continue;
@@ -2029,8 +2024,8 @@ export class Coordinator {
       registerSecret: (value) => this.secrets.register(value),
       log: this.appLog,
     });
-    this.ledger = opts.appRoot ? new LedgerFile(join(opts.appRoot, "ledger.jsonl")) : null;
-    this.appSettings = opts.appRoot ? new AppSettingsFile(join(opts.appRoot, "settings.json")) : null;
+    this.ledger = storage.ledger;
+    this.appSettings = storage.appSettings;
     this.jobQueue =
       opts.appRoot && opts.dispatchClients && this.ledger
         ? new JobQueue({
@@ -2597,6 +2592,19 @@ export class Coordinator {
           scratchRoot: opts.appRoot ? `${opts.appRoot}/.ask` : `${opts.changeLogPath}.ask`,
         })
       : null;
+    this.engine = createEngine({
+      worlds: createLocalWorldRepository(opts.provider),
+      operations: storage.operations,
+      policy: createLocalEnginePolicy(),
+      queue: {
+        enqueue: input => {
+          if (!this.jobQueue) throw new Error("The job queue is unavailable. Try again after restarting the studio.");
+          return this.jobQueue.enqueue(this.freezeLocalIdentity(input));
+        },
+        jobs: () => this.jobQueue?.listJobs() ?? [],
+      },
+    });
+
   }
 
   private readonly askService: AskService | null;
@@ -2870,6 +2878,7 @@ export class Coordinator {
   }
 
   async start(port = 0): Promise<{ port: number; token: string }> {
+    if (this.engineClosed) throw new Error("The coordinator is closed; create a new instance.");
     if (this.started) throw new Error("coordinator already started");
     this.started = true;
 
@@ -3154,7 +3163,12 @@ export class Coordinator {
   async openWorld(worldId: string): Promise<void> {
     const existing = this.openingWorlds.get(worldId);
     if (existing) return existing;
-    const opening = this.openWorldOnce(worldId);
+    if (this.stopping || this.engineClosed) throw new Error("The coordinator is stopping.");
+    const opening = this.openWorldTail.then(() => {
+      if (this.stopping) throw new Error("The coordinator is stopping.");
+      return this.openWorldOnce(worldId);
+    });
+    this.openWorldTail = opening.catch(() => {});
     this.openingWorlds.set(worldId, opening);
     try {
       await opening;
@@ -3169,7 +3183,7 @@ export class Coordinator {
     // rather than an abandoned one. Held here rather than trusted from the caller — the client
     // does check, but a repair that can destroy live state should not depend on it.
     const wasAlreadyOpen = this.opts.provider.openStore?.()?.worldId === worldId;
-    await this.opts.provider.loadWorld(worldId);
+    const loaded = await this.opts.provider.loadWorld(worldId);
     /*
      * Everything past the load is repair, and repair does not decide whether the world opened
      * (issue 571, Codex round 3).
@@ -3185,11 +3199,14 @@ export class Coordinator {
     await this.repairOnOpen(worldId, "job-finalizations", () =>
       this.jobQueue?.retryFinalizationsForWorld(worldId),
     );
-    const bundle =
-      this.opts.provider.openStore?.()?.getBundle() ?? (await this.opts.provider.loadWorld(worldId));
-    this.readModel.setWorld(bundle);
-    // Before the rows are broadcast, not after: recovery changes what several of them say.
     const store = this.opts.provider.openStore?.();
+    if (store && (store.worldId !== worldId || !this.stillOpen(store))) return;
+    const bundle = store
+      ? (await this.engine.worlds.read(LOCAL_ENGINE_CONTEXT, worldId)).bundle
+      : loaded;
+    if (bundle.meta.worldId !== worldId || (store && !this.stillOpen(store))) return;
+    this.readModel.setWorld(bundle);
+    // Recovery always receives the store that owns this bundle, even across awaited reads.
     if (store) await this.recoverFrameRuns(store, bundle).catch(() => {});
     if (store && !wasAlreadyOpen) {
       await this.repairOnOpen(worldId, "world-chat", () => this.recoverWorldChat(store));
@@ -3202,6 +3219,7 @@ export class Coordinator {
     // (issue 1037): the Library's `Portrait` remembers a failed decode per URL, so a poster drawn
     // a moment after the rows render would sit on disk unseen until the screen was rebuilt.
     if (store && !wasAlreadyOpen) await this.backfillArtifactPosters(store);
+    if (this.stopping || (store && !this.stillOpen(store))) return;
     this.emit({ at: new Date().toISOString(), type: "world.opened", worldId });
     // The bundle itself travels as a fresh snapshot — a world is small enough to re-send (D4).
     this.transport.broadcastSnapshot();
@@ -4981,12 +4999,9 @@ export class Coordinator {
         if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
         // Read before accepting: acceptance rewrites the manifest, and the origin is needed to
         // tell the conversation what became of its propositions.
-        const acceptedFrom = await gate.readManifest(msg.proposalId).catch(() => null);
         try {
-          const outcome = await gate.accept(
-            msg.proposalId,
-            msg.confirmRipples === undefined ? {} : { confirmRipples: msg.confirmRipples },
-          );
+          const outcome = (await this.engine.proposals.accept(LOCAL_ENGINE_CONTEXT, msg.worldId,
+            msg.proposalId, { operationId: ulid(), ...(msg.confirmRipples === undefined ? {} : { confirmRipples: msg.confirmRipples }) })).value;
           const at = new Date().toISOString();
           // `no-op` retires the proposal too (gate/proposals.ts): every target already reads as
           // proposed, so there is nothing to decide. It has to settle here for the same reason —
@@ -4995,10 +5010,6 @@ export class Coordinator {
           // accepted because that is what happened to the words: the world says them.
           if (landed(outcome)) {
             this.authoring?.release(msg.proposalId);
-            const store = this.opts.provider.openStore?.();
-            if (store && acceptedFrom) {
-              await recordResolution(store, acceptedFrom, "accepted", () => at);
-            }
             this.emit({
               at,
               type: "proposal.resolved",
@@ -5059,13 +5070,8 @@ export class Coordinator {
         // Discarding mid-run would delete the directory the agent is writing into (issue 239).
         // Cancel is the way to stop a run, and it leaves the proposal to be discarded after.
         if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
-        const discardedFrom = await gate.readManifest(msg.proposalId).catch(() => null);
         try {
-          await gate.discard(msg.proposalId);
-          const store = this.opts.provider.openStore?.();
-          if (store && discardedFrom) {
-            await recordResolution(store, discardedFrom, "discarded", () => new Date().toISOString());
-          }
+          await this.engine.proposals.discard(LOCAL_ENGINE_CONTEXT, msg.worldId, msg.proposalId, { operationId: ulid() });
           this.emit({
             at: new Date().toISOString(),
             type: "proposal.resolved",
@@ -6443,7 +6449,8 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!gate || !store) return;
         try {
-          const draft = await createSheetFromSentence(store, gate, {
+          const draft = (await this.engine.proposals.propose(LOCAL_ENGINE_CONTEXT, msg.worldId, {
+            operationId: ulid(),
             sheetType: msg.sheetType,
             name: msg.name,
             sentence: msg.sentence,
@@ -6453,7 +6460,7 @@ export class Coordinator {
               : {
                   attendedSurface: msg.production !== undefined ? "production-cast" : "sheet-list",
                 }),
-          });
+          })).value;
           this.emit({
             at: new Date().toISOString(),
             type: "proposal.staged",
@@ -13298,7 +13305,6 @@ export class Coordinator {
         }
         const bundle = store.getBundle();
         const sheet = bundle.sheets.find((candidate) => candidate.id === msg.sheetId);
-        const kit = (await readKit(store, msg.sheetId))?.kit ?? null;
         const model = imageModelFor(
           this.appSettings ? await this.appSettings.load() : null,
           this.opts.manifest,
@@ -13308,30 +13314,16 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, "The character or image model is no longer available.");
           return;
         }
-        let requests;
         try {
-          const stagedMainPhoto = stagedWorldImage(bundle, stagedReferenceKey("main-photo", msg.sheetId));
-          requests = mainPhotoRequests(bundle.meta, bundle.artDirection, sheet, kit, model, {
-            ...(stagedMainPhoto !== undefined ? { staged: stagedMainPhoto } : {}),
-            prompt: msg.prompt,
-            count: msg.count,
-            identityReferences: msg.identityReferences,
-            generationKey: Date.now().toString(36),
+          const outcome = await this.engine.illustrations.generate(LOCAL_ENGINE_CONTEXT, msg.worldId, {
+            operationId: msg.requestId, sheetId: msg.sheetId, model, prompt: msg.prompt,
+            count: msg.count, identityReferences: msg.identityReferences, generationKey: msg.requestId,
             ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
           });
-        } catch {
-          this.rejectEnqueue(
-            msg.requestId,
-            msg.kind,
-            "This image model could not be priced for the selected output size. Nothing was queued.",
-          );
-          return;
+          this.emitEnqueueResult(msg.requestId, msg.kind, msg.count, outcome.jobIds, outcome.failures);
+        } catch (error) {
+          this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error));
         }
-        await this.enqueueBatch(
-          msg.requestId,
-          msg.kind,
-          requests.map((request) => request.input),
-        );
         return;
       }
       case "generate-location-view": {
@@ -16270,6 +16262,7 @@ export class Coordinator {
       // set. Update-install handlers are deliberately excluded: one may be awaiting this stop.
       await transportStopped;
       await Promise.allSettled(this.activeMessages);
+      await this.openWorldTail;
       await setupStopped;
       await Promise.all([...this.stagedClips.keys()].map((clipId) => this.dropStagedClip(clipId)));
 
@@ -16287,6 +16280,8 @@ export class Coordinator {
       await this.opts.adapter?.dispose?.().catch(() => {});
       await this.worldQuery.stop();
       // Provider close is the critical gate: it saves pending state and releases the world lock.
+      this.engineClosed = true;
+      await this.engine.close();
       await this.opts.provider.close?.();
       await this.opts.providerCalls?.drain();
       await this.ledger?.drain();
@@ -16300,7 +16295,7 @@ export class Coordinator {
       await this.stopPromise;
     } catch (error) {
       this.stopPromise = null;
-      this.stopping = false;
+      this.stopping = this.engineClosed;
       throw error;
     }
   }
