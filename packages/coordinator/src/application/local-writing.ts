@@ -31,6 +31,14 @@ export function localWriting(store: WorldStore, assertScratch: (path: string) =>
     const { context, policy, signal, operationKey } = options;
     const resource = { worldId: store.worldId, productionId, chapterId };
     const prose = localProse(store);
+    const sourceRevisionNow = (admission = false) => {
+      const value = store.getBundle();
+      // The schema boundary may change only these operational metadata fields.
+      const meta = admission ? { ...value.meta, schemaVersion: 0, updated: "" } : value.meta;
+      return engineHash({ meta, bible: value.bible, canon: value.canon, sheets: value.sheets,
+        production: value.productions.filter(p => p.meta.id === productionId) });
+    };
+    let admittedSources = "";
     const pendingChapter = () => {
       const found = store.getBundle().productions.find(p => p.meta.id === productionId)?.chapters.find(c => c.id === chapterId);
       const path = `productions/${productionId}/chapters/${found?.file}.md`;
@@ -40,17 +48,14 @@ export function localWriting(store: WorldStore, assertScratch: (path: string) =>
       const chapter = await prose.readChapter(productionId, chapterId);
       if (chapter.hash !== input.baseHash) throw new Error("The chapter changed before writing.");
       if (pendingChapter()) throw new Error("Accept or discard the pending chapter proposal before writing again.");
+      admittedSources = sourceRevisionNow(true);
       return chapter;
     }, () => engineHash(store.getBundle()) === input.expectedRevision ? null : "The world changed before writing.");
     if (options.mode === "revise" && !initial.body.trim()) throw new Error("There is no committed prose to revise.");
     // This is the existing chapter-subject journal boundary, before freezing the run's sources.
     await store.raiseSchemaBoundary(17, "engine-writing");
+    if (sourceRevisionNow(true) !== admittedSources) throw new Error("The world changed before freezing writing sources.");
     // Conversation events are produced by this run; only authored source state fences staging.
-    const sourceRevisionNow = () => {
-      const value = store.getBundle();
-      return engineHash({ meta: value.meta, bible: value.bible, canon: value.canon, sheets: value.sheets,
-        production: value.productions.filter(p => p.meta.id === productionId) });
-    };
     const sourceRevision = sourceRevisionNow();
     const bundle = await policy.project(context, structuredClone(store.getBundle()));
     const projectedSources = (value: typeof bundle) => engineHash({ meta: value.meta, bible: value.bible,

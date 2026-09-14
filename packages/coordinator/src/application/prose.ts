@@ -36,7 +36,13 @@ export class ProseApplicationService {
       this.worlds.use(worldId, async session => {
         await this.operations.policy.authorise(context, "production-create", { worldId });
         const port = prose(session);
-        return this.saved(session, key, async () => proseProductionResult.parse(await port.createProduction(input, key)));
+        const before = new Set((await session.snapshot()).bundle.productions.map(p => p.meta.id));
+        return this.saved(session, key, async () => {
+          const value = proseProductionResult.parse(await port.createProduction(input, key));
+          const created = (await session.snapshot()).bundle.productions.filter(p => !before.has(p.meta.id));
+          if (created.length !== 1 || created[0]!.meta.id !== value.productionId) throw new Error("The production creation receipt names a different production.");
+          return value;
+        });
       }));
     await this.deliver(context, { worldId, productionId: result.value.productionId }, result.value);
     return result;
@@ -49,9 +55,14 @@ export class ProseApplicationService {
       this.worlds.use(worldId, async session => {
         await this.operations.policy.authorise(context, "chapter-create", resource);
         const port = prose(session);
+        const before = new Set((await session.snapshot()).bundle.productions
+          .filter(p => p.meta.id === productionId).flatMap(p => p.chapters.map(c => c.id)));
         return this.saved(session, key, async () => {
           const value = proseChapterResult.parse(await port.createChapter(productionId, input, key));
           if (value.productionId !== productionId) throw new Error("The chapter belongs to a different production.");
+          const created = (await session.snapshot()).bundle.productions.filter(p => p.meta.id === productionId)
+            .flatMap(p => p.chapters).filter(c => !before.has(c.id));
+          if (created.length !== 1 || created[0]!.id !== value.chapterId) throw new Error("The chapter creation receipt names a different chapter.");
           return value;
         });
       }));
@@ -86,13 +97,18 @@ export class ProseApplicationService {
       if (raw.length !== 1 || visible.length !== 1 || engineHash(raw[0]) !== engineHash(visible[0])) {
         throw new Error("A complete authorised production is required for manuscript output.");
       }
-      const ids = raw[0]!.chapters.filter(c => !c.retired).sort((a, b) => a.order - b.order || a.id.localeCompare(b.id)).map(c => c.id);
+      const chapters = raw[0]!.chapters.filter(c => !c.retired).sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+      const ids = chapters.map(c => c.id);
       for (const chapterId of ids) await this.operations.policy.authorise(context, "read", { ...resource, chapterId });
       const port = prose(session);
       if (!port.manuscript) throw new Error("This repository does not support manuscript output.");
       const value = proseManuscript.parse(await port.manuscript(productionId));
       if (value.productionId !== productionId || value.chapters.some(c => c.productionId !== productionId) ||
         engineHash(value.chapters.map(c => c.chapterId)) !== engineHash(ids)) throw new Error("The manuscript chapter identities changed.");
+      if (value.title !== raw[0]!.meta.title || value.chapters.some((chapter, index) =>
+        chapter.version !== chapters[index]!.version || chapter.hash !== chapters[index]!.hash)) {
+        throw new Error("The manuscript provenance differs from the current chapters.");
+      }
       const after = await session.snapshot();
       if (engineHash(raw) !== engineHash(after.bundle.productions.filter(p => p.meta.id === productionId))) {
         throw new Error("The production changed during manuscript output.");

@@ -6,6 +6,7 @@ import { createEngine, engineHash, type EngineContext, type EnginePolicy } from 
 import { createLocalWorldRepository } from "../../src/application/local-worlds.js";
 import { FileEngineOperationStore } from "../../src/application/local-operations.js";
 import { parseOperationRecord } from "../../src/application/operation-record.js";
+import type { ProseManuscript } from "../../src/application/prose-contracts.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { MarkdownFile, sha256 } from "../../src/world/text-files.js";
@@ -23,6 +24,7 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
   await provider.loadWorld(WORLD_ID);
   const state = { revoked: false, held: false, failSave: false, saves: 0, deniedChapter: "", unsupported: false,
     mutationOverride: {} as { productionId?: string; chapterId?: string },
+    manuscriptOverride: undefined as ProseManuscript | undefined,
     readOverride: {} as { title?: string; order?: number }, afterSave: undefined as (() => Promise<void>) | undefined };
   const deliveries: Array<{ resource: unknown; sha256: string }> = [];
   const policy: EnginePolicy = {
@@ -49,6 +51,7 @@ async function harness(t: TestContext, setup?: (worldDir: string) => Promise<voi
           createProduction: async (...args) => ({ ...await session.prose!.createProduction(...args), ...state.mutationOverride }),
           createChapter: async (...args) => ({ ...await session.prose!.createChapter(...args), ...state.mutationOverride }),
           saveChapter: async (...args) => ({ ...await session.prose!.saveChapter(...args), ...state.mutationOverride }),
+          manuscript: async id => state.manuscriptOverride ?? await session.prose!.manuscript!(id),
           readChapter: async (p, c) => ({ ...await session.prose!.readChapter(p, c), ...state.readOverride }) } })),
         close: () => local.close() },
       queue: { enqueue: async () => { throw new Error("No provider expected"); }, jobs: () => [] } });
@@ -122,6 +125,33 @@ it("manuscript delivery identifies the semantic manuscript value", async t => {
   const h = await harness(t);
   const result = await h.engine.prose.manuscript(context, WORLD_ID, productionId);
   assert.equal(h.deliveries.at(-1)?.sha256, engineHash(result.value));
+});
+
+for (const mutation of ["production", "chapter"] as const) {
+  it(`creation cannot acknowledge an existing ${mutation} instead of the newly created record`, async t => {
+    const h = await harness(t);
+    h.state.mutationOverride = mutation === "production" ? { productionId } : { chapterId };
+    const invoke = (engine: typeof h.engine) => mutation === "production"
+      ? engine.prose.createProduction(context, WORLD_ID, { operationId: "crossed-create", title: "New record" })
+      : engine.prose.createChapter(context, WORLD_ID, productionId, { operationId: "crossed-create", title: "New record", order: 99 });
+    await assert.rejects(invoke(h.engine), /creation receipt names a different/);
+    assert.equal(h.state.saves, 1); assert.equal(h.deliveries.length, 0);
+    const restarted = await h.restart();
+    await assert.rejects(invoke(restarted), /uncertain outcome/);
+    assert.equal(h.state.saves, 1);
+  });
+}
+
+it("a cached manuscript cannot claim the current world revision after a chapter save", async t => {
+  const h = await harness(t);
+  const old = await h.engine.prose.manuscript(context, WORLD_ID, productionId);
+  const chapter = await h.engine.prose.readChapter(context, WORLD_ID, productionId, chapterId);
+  await h.engine.prose.saveChapter(context, WORLD_ID, productionId, chapterId,
+    { operationId: "new-text", body: "A newer ending.", baseHash: chapter.hash });
+  h.state.manuscriptOverride = old.value;
+  const deliveries = h.deliveries.length;
+  await assert.rejects(h.engine.prose.manuscript(context, WORLD_ID, productionId), /provenance differs/);
+  assert.equal(h.deliveries.length, deliveries);
 });
 
 it("canonical chapter IDs preserve legacy filenames and prevent alias-based permission bypass", async t => {

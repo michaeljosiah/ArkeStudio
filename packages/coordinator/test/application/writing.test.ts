@@ -291,6 +291,18 @@ it("completed writing replays after restart without a configured model runtime",
   await assert.rejects(restarted.writing.draft(context, WORLD_ID, productionId, chapterId, input), /Forbidden/);
 });
 
+it("source changes across schema preparation refuse before opening the model", async t => {
+  const h = await harness(t); const input = await h.input("admission-race");
+  const store = h.store(), original = store.raiseSchemaBoundary.bind(store);
+  store.raiseSchemaBoundary = async (...args) => {
+    await original(...args);
+    await saveChapter(store, productionId, "01-neap", "A newer author edit.", { baseHash: input.baseHash });
+  };
+  await assert.rejects(h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, input), /before freezing writing sources/);
+  assert.equal(h.state.opened, 0); assert.equal(h.state.calls, 0);
+  assert.equal((await h.engine.prose.readChapter(context, WORLD_ID, productionId, chapterId)).body.trim(), "A newer author edit.");
+});
+
 it("replay refuses a durable writing receipt redirected to another chapter file", async t => {
   const h = await harness(t); const input = await h.input("replay-target");
   await h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, input);

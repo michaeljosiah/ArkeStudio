@@ -218,11 +218,16 @@ direct authoring and recovery boundaries.
 
 ## AI chapter writing and manuscript output (0.2)
 
-An external host can draft a planned chapter, revise committed prose, review the resulting
+An external host can draft or redraft a planned chapter, revise committed prose, review the resulting
 proposal and accept it through the same gate as Studio. The supported revision here is a complete
 chapter rewrite. It starts from committed text, not from another pending proposal. Accept or
 discard that proposal before continuing the review loop; a new call never silently replaces it.
 The public API does not yet expose passage selection or conversation history.
+
+Drafting may propose a replacement when committed text exists; revision specifically asks the
+model to rewrite that text and requires it to be nonempty. Both modes retain the current text,
+require its exact base hash and produce a proposal requiring explicit acceptance. Drafting is
+not an automatic overwrite or an empty-chapter-only operation.
 
 A pending proposal targeting that chapter blocks another writing call before the model opens.
 The staging gate checks again for a competing proposal that appeared during generation.
