@@ -10,6 +10,7 @@ import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 import { saveChapter } from "../../src/productions/ops.js";
 import { MarkdownFile } from "../../src/world/text-files.js";
+import { engineHash } from "../../src/application/operations.js";
 
 const context: EngineContext = { actorId: "parent", scopeId: "family", executorId: "worker", subjectId: "child" };
 const productionId = "the-ledger-of-nights", chapterId = "neap";
@@ -192,6 +193,44 @@ it("cancellation does not wait behind the world's active writing operation", asy
   await refused;
   assert.equal(h.state.closed, 1);
   assert.equal((await h.engine.operation(context, WORLD_ID, "cancel"))!.status, "started");
+});
+
+it("cancellation returns false when the run finishes during its permission check", async t => {
+  const h = await harness(t);
+  let releaseReply!: () => void, releaseCancel!: () => void, checking!: () => void, replyReady!: () => void;
+  const replying = new Promise<void>(resolve => { replyReady = resolve; });
+  h.state.beforeReply = () => new Promise<void>(resolve => { releaseReply = resolve; replyReady(); });
+  const checkStarted = new Promise<void>(resolve => { checking = resolve; });
+  const input = await h.input("late-cancel");
+  const original = h.policy.authorise;
+  h.policy.authorise = async (ctx, action, resource) => {
+    await original(ctx, action, resource);
+    if (ctx.actorId === "canceller") {
+      checking();
+      await new Promise<void>(resolve => { releaseCancel = resolve; });
+    }
+  };
+  const run = h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, input);
+  await Promise.race([replying, run]);
+  const cancel = h.engine.writing.cancel({ ...context, actorId: "canceller" }, WORLD_ID, input.operationId);
+  await checkStarted;
+  releaseReply(); await run;
+  h.policy.authorise = original;
+  releaseCancel();
+  assert.equal(await cancel, false);
+});
+
+it("retrieval delivery hashes the returned prose and the bounded brief excludes implied facts", async t => {
+  const h = await harness(t);
+  const source = await h.engine.prose.readChapter(context, WORLD_ID, productionId, chapterId);
+  const input = await h.input("body-digest");
+  const hashes: string[] = [];
+  h.policy.deliver = async (_ctx, resource, content) => {
+    if (resource.chapterId === chapterId && content.kind === "chapter") hashes.push(content.sha256);
+  };
+  await h.engine.writing.draft(context, WORLD_ID, productionId, chapterId, input);
+  assert.ok(hashes.includes(engineHash(source.body)));
+  assert.doesNotMatch(h.prompts.join("\n"), /Include newly implied world facts|Each changes.implies item/);
 });
 
 it("engine shutdown aborts and drains active writing before closing its repository", async t => {

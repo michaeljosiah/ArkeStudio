@@ -86,7 +86,7 @@ export function localWriting(store: WorldStore, assertScratch: (path: string) =>
         const sourceResource = { ...resource, chapterId: sourceId };
         await policy.authorise(context, "read", sourceResource);
         const source = chapters.get(sourceId) ?? await prose.readChapter(productionId, sourceId);
-        await policy.deliver(context, sourceResource, { kind: "chapter", id: sourceId, sha256: engineHash(source) });
+        await policy.deliver(context, sourceResource, { kind: "chapter", id: sourceId, sha256: engineHash(source.body) });
         chapters.set(sourceId, source);
         return source.body;
       },
@@ -172,7 +172,7 @@ export function localWriting(store: WorldStore, assertScratch: (path: string) =>
             receipts.push(value.receipt);
             return value;
           };
-          let text = await chapterDraftingBrief(bundle, productionId, chapterId, read, budgetChars);
+          let text = await chapterDraftingBrief(bundle, productionId, chapterId, read, budgetChars, { impliedFacts: false });
           for (const [tool, args] of [
             ["list_chapters", { productionId }],
             ["get_chapter", { productionId, chapterId }],

@@ -95,6 +95,7 @@ export class WritingApplicationService {
     if (!active) return false;
     if (active.context.subjectId !== context.subjectId) throw new Error("The writing run belongs to a different subject.");
     await this.operations.policy.authorise(context, "chapter-draft", active.resource);
+    if (this.active.get(key) !== active) return false;
     active.controller.abort(new Error("Writing cancelled."));
     return true;
   }
