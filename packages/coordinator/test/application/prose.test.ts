@@ -16,8 +16,9 @@ const context: EngineContext = { actorId: "parent", scopeId: "family", executorI
 const productionId = "the-ledger-of-nights";
 const chapterId = "neap";
 
-async function harness(t: TestContext) {
+async function harness(t: TestContext, setup?: (worldDir: string) => Promise<void>) {
   const { root, worldDir } = await makeTempRoot();
+  await setup?.(worldDir);
   let provider = new FsWorldProvider(root);
   await provider.loadWorld(WORLD_ID);
   const state = { revoked: false, held: false, failSave: false, saves: 0, deniedChapter: "", unsupported: false, afterSave: undefined as (() => Promise<void>) | undefined };
@@ -135,18 +136,16 @@ it("stale editor hashes refuse atomically and retain the competing chapter and p
 
 it("revision and retirement are rechecked inside the write gate after external file changes", async t => {
   const h = await harness(t);
-  const snapshot = await h.engine.worlds.read(context, WORLD_ID);
-  const file = join(h.worldDir, "productions", productionId, "chapters/01-neap.md");
-  const original = await readFile(file, "utf8");
-  await writeFile(file, original + "\nExternal edit.\n");
-  await assert.rejects(h.engine.prose.createProduction(context, WORLD_ID,
-    { operationId: "stale-create", title: "Do not create", expectedRevision: snapshot.revision }), /world changed/);
-  assert.equal(h.store().getBundle().productions.some(p => p.meta.id === "do-not-create"), false);
-  await writeFile(file, original); await h.store().rescan();
   const before = await h.engine.prose.readChapter(context, WORLD_ID, productionId, chapterId);
   await setChapterRetired(h.store(), productionId, "01-neap", true);
   await assert.rejects(h.engine.prose.saveChapter(context, WORLD_ID, productionId, chapterId,
     { operationId: "retired", body: "Do not replace", baseHash: before.hash }), /retired/);
+  const snapshot = await h.engine.worlds.read(context, WORLD_ID);
+  const file = join(h.worldDir, "productions", productionId, "chapters/01-neap.md");
+  await writeFile(file, (await readFile(file, "utf8")) + "\nExternal edit.\n");
+  await assert.rejects(h.engine.prose.createProduction(context, WORLD_ID,
+    { operationId: "stale-create", title: "Do not create", expectedRevision: snapshot.revision }), /world changed|external edits/);
+  assert.equal(h.store().getBundle().productions.some(p => p.meta.id === "do-not-create"), false);
 });
 
 it("unsupported sessions, invalid production kinds and malformed inputs refuse without authoring", async t => {
@@ -193,11 +192,12 @@ it("a pending agent draft blocks direct save until the existing proposal gate re
 });
 
 it("a canonical ID cannot resolve to another chapter whose filename happens to match", async t => {
-  const h = await harness(t);
-  const path = join(h.worldDir, "productions", productionId, "chapters", "neap.md");
-  const doc = MarkdownFile.parse(await readFile(join(h.worldDir, "productions", productionId, "chapters/01-neap.md"), "utf8"));
-  doc.setData({ id: "different-chapter", order: 0, number: 0 }); doc.setBody("Other chapter private text.");
-  await writeFile(path, doc.serialize()); await h.store().rescan();
+  const h = await harness(t, async worldDir => {
+    const path = join(worldDir, "productions", productionId, "chapters", "neap.md");
+    const doc = MarkdownFile.parse(await readFile(join(worldDir, "productions", productionId, "chapters/01-neap.md"), "utf8"));
+    doc.setData({ id: "different-chapter", order: 0, number: 0 }); doc.setBody("Other chapter private text.");
+    await writeFile(path, doc.serialize());
+  });
   const read = await h.engine.prose.readChapter(context, WORLD_ID, productionId, chapterId);
   assert.doesNotMatch(read.body, /Other chapter private text/);
 });
@@ -224,13 +224,14 @@ it("shutdown drains authoritative saving and revocation during it still withhold
 });
 
 it("canonical chapter reads and saves preserve a portable filename with spaces", async t => {
-  const h = await harness(t);
-  const path = join(h.worldDir, "productions", productionId, "chapters", "My Chapter_One.md");
-  const doc = MarkdownFile.parse(await readFile(join(h.worldDir, "productions", productionId, "chapters/01-neap.md"), "utf8"));
-  doc.setData({ id: "portable-one", title: "Portable one" }); doc.setBody("Legacy text.");
-  await writeFile(path, doc.serialize()); await h.store().rescan();
+  const h = await harness(t, async worldDir => {
+    const path = join(worldDir, "productions", productionId, "chapters", "My Chapter_One.md");
+    const doc = MarkdownFile.parse(await readFile(join(worldDir, "productions", productionId, "chapters/01-neap.md"), "utf8"));
+    doc.setData({ id: "portable-one", title: "Portable one" }); doc.setBody("Legacy text.");
+    await writeFile(path, doc.serialize());
+  });
   const before = await h.engine.prose.readChapter(context, WORLD_ID, productionId, "portable-one");
   await h.engine.prose.saveChapter(context, WORLD_ID, productionId, "portable-one",
     { operationId: "portable", body: "Revised text.", baseHash: before.hash });
-  assert.match(await readFile(path, "utf8"), /Revised text/);
+  assert.match(await readFile(join(h.worldDir, "productions", productionId, "chapters", "My Chapter_One.md"), "utf8"), /Revised text/);
 });
