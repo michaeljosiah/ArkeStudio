@@ -21,7 +21,13 @@ it("packed engine installs and executes with no source or workspace fallback", {
   try {
     const packed = JSON.parse((await run(npm, ["pack", "--json", "--pack-destination", root], process.cwd())).stdout)[0];
     await writeFile(join(root, "package.json"), JSON.stringify({ private: true, type: "module" }));
-    await run(npm, ["install", "--no-audit", "--no-fund", join(root, packed.filename)], root);
+    await run(npm, ["install", "--omit=optional", "--no-audit", "--no-fund", join(root, packed.filename)], root);
+    const core = await run(process.execPath, ["--input-type=module", "-e",
+      'import { createEngine } from "@arke-studio/engine"; console.log(typeof createEngine);'], root);
+    assert.match(core.stdout, /function/);
+    await assert.rejects(run(process.execPath, ["--input-type=module", "-e",
+      'await import("@arke-studio/engine/local");'], root), /adapter requires better-sqlite3/);
+    await run(npm, ["install", "--no-audit", "--no-fund", "better-sqlite3@^12.11.1"], root);
     await cp(resolve("../../fixtures/worlds/the-undersong"), join(root, "app/worlds/the-undersong"), { recursive: true });
     await cp(resolve("test/consumer.mjs"), join(root, "consumer.mjs"));
     const result = await run(process.execPath, ["consumer.mjs"], root);

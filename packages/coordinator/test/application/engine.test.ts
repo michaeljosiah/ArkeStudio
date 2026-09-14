@@ -267,3 +267,49 @@ it("a failed operation completion preserves the queue's durable admission receip
   assert.equal((await h.engine.illustrations.reconcile(parent, WORLD_ID, input.operationId)).status, "needs-reconciliation");
   assert.equal(h.fake.submitCount, 1);
 });
+
+
+it("overlapping portrait batches keep distinct landed bytes and settle only approved artifact hashes", async t => {
+  const h = await harness(t);
+  h.fake.pollState = "running";
+  let fetched = 0;
+  h.fake.fetchArtifacts = async () => {
+    const data = pngBytes(); data[12] = ++fetched;
+    return [{ name: "portrait.png", contentType: "image/png", data }];
+  };
+  const input = { sheetId: "maren-kest", model: FAL_MODELS.find(m => m.capability === "image")!,
+    prompt: "Happy", count: 1, identityReferences: [], generationKey: "same-caller-key" };
+  const [first, second] = await Promise.all([
+    h.engine.illustrations.generate(parent, WORLD_ID, { ...input, operationId: "batch-a" }),
+    h.engine.illustrations.generate(parent, WORLD_ID, { ...input, operationId: "batch-b" }),
+  ]);
+  await until(() => h.fake.submitCount >= 1 && h.queue.listJobs().length === 2, "both batches admitted before either completes");
+  h.fake.pollState = "succeeded";
+  for (const remote of h.fake.remote.values()) remote.state = "succeeded";
+  await until(() => h.queue.listJobs().every(job => job.status === "succeeded"), "both batches landed");
+  const a = h.queue.listJobs().find(job => job.id === first.jobIds[0])!.landedFiles![0]!;
+  const b = h.queue.listJobs().find(job => job.id === second.jobIds[0])!.landedFiles![0]!;
+  assert.notEqual(a, b);
+  assert.ok(a.includes(first.operationKey)); assert.ok(b.includes(second.operationKey));
+  const original = await h.engine.worlds.media(parent, WORLD_ID, a);
+  const other = await h.engine.worlds.media(parent, WORLD_ID, b);
+  assert.notEqual(original.sha256, other.sha256);
+  const deliver = h.policy.deliver;
+  h.policy.deliver = async (context, resource, content) => {
+    await deliver(context, resource, content);
+    if (content.kind === "artifact" && content.id === a && content.sha256 !== original.sha256) {
+      throw new Error("Replacement image requires approval");
+    }
+  };
+  await writeFile(join(h.worldDir, a), other.bytes);
+  assert.equal((await h.engine.illustrations.reconcile(parent, WORLD_ID, "batch-a")).status, "held");
+  assert.equal(h.state.charges + h.state.releases, 0);
+  await writeFile(join(h.worldDir, a), original.bytes);
+  const settle = h.policy.settle;
+  h.policy.settle = async (context, key, reservation, jobs) => {
+    assert.deepEqual(jobs[0]!.deliveredArtifacts, [{ id: a, sha256: original.sha256 }]);
+    await settle(context, key, reservation, jobs);
+  };
+  assert.equal((await h.engine.illustrations.reconcile(parent, WORLD_ID, "batch-a")).status, "settled");
+  assert.equal(h.state.charges, 1);
+});

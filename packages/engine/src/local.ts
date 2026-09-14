@@ -1,3 +1,4 @@
+import "./optional-sqlite.js";
 /** Optional materialised-folder adapter and existing dispatcher; no desktop construction. */
 export { createLocalWorldRepository } from "../../coordinator/src/application/local-worlds.js";
 export { FileEngineOperationStore } from "../../coordinator/src/application/local-operations.js";

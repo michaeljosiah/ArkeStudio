@@ -1,5 +1,6 @@
 import { MAX_IMAGE_PREVIEWS, describeError, ulid, type Job } from "@arke-studio/contracts";
-import type { EngineContext, EngineMutation, EngineQueue, EngineWorldRepository, IllustrationInput, IllustrationOutcome } from "./contracts.js";
+import type { EngineContext, EngineDeliveredJob, EngineMutation, EngineQueue, EngineWorldRepository, IllustrationInput, IllustrationOutcome } from "./contracts.js";
+import { WorldSessionService } from "./world-sessions.js";
 import { engineHash, EngineOperations } from "./operations.js";
 
 export class IllustrationApplicationService {
@@ -79,13 +80,18 @@ export class IllustrationApplicationService {
     }
     const settlementKey = engineHash([key, "settlement"]);
     const previousSettlement = await this.operations.store.read(settlementKey);
-    const permitted: Job[] = [];
+    const permitted: EngineDeliveredJob[] = [];
+    const media = new WorldSessionService(this.worlds, this.operations.policy);
     for (const job of jobs) {
       if (job.status !== "succeeded") continue;
       try {
-        await this.operations.policy.deliver(context, { worldId, sheetId: operation.resource.sheetId },
-          { kind: "job", id: job.id, sha256: engineHash(job) });
-        permitted.push(job);
+        if (!job.landedFiles?.length) throw new Error("Successful job has no landed artifacts.");
+        const deliveredArtifacts = [];
+        for (const id of job.landedFiles) {
+          const artifact = await media.media(context, worldId, id);
+          deliveredArtifacts.push({ id, sha256: artifact.sha256 });
+        }
+        permitted.push({ ...structuredClone(job), deliveredArtifacts });
       } catch {
         // A refusal and an unavailable check both withhold delivery. The host's idempotent
         // settlement policy decides how to treat held output; the engine never treats it as allowed.
@@ -101,7 +107,7 @@ export class IllustrationApplicationService {
       context, resource: operation.resource, action: "generate", status: "started",
       result: { reservation: result.reservation, jobs: permitted } });
     if (claim.operation.fingerprint !== fingerprint) throw new Error("Settlement identity changed.");
-    const decision = claim.operation.result as { reservation: string; jobs: Job[] };
+    const decision = claim.operation.result as { reservation: string; jobs: EngineDeliveredJob[] };
     if (claim.operation.status !== "completed") {
       if (decision.jobs.length === 0) await this.operations.policy.release(context, key, decision.reservation);
       else await this.operations.policy.settle(context, key, decision.reservation, decision.jobs);

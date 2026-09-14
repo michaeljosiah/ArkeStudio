@@ -1902,6 +1902,7 @@ export class Coordinator {
   private voiceModelsChanged = false;
   private started = false;
   private stopping = false;
+  private engineClosed = false;
   /** Page reads told to stop (codex, PR 879): the narration loop checks between blocks. */
   private readonly stoppedReads = new Set<string>();
   /** Cloud jobs queued for a page read, by requestId, so Stop can cancel what it already paid for. */
@@ -1960,6 +1961,7 @@ export class Coordinator {
   /** A conversation card fixes the export identity before the legacy renderer starts. */
   private readonly requestedExportIds = new Map<string, string>();
   /** Route layout and screen guards may ask for the same world before either receives its snapshot. */
+  private openWorldTail: Promise<void> = Promise.resolve();
   private readonly openingWorlds = new Map<string, Promise<void>>();
   /** Cancels the media backfill (issue 283) — optional migration work nothing should wait for. */
   private backfillAbort: AbortController | null = null;
@@ -2873,6 +2875,7 @@ export class Coordinator {
   }
 
   async start(port = 0): Promise<{ port: number; token: string }> {
+    if (this.engineClosed) throw new Error("The coordinator is closed; create a new instance.");
     if (this.started) throw new Error("coordinator already started");
     this.started = true;
 
@@ -3157,7 +3160,9 @@ export class Coordinator {
   async openWorld(worldId: string): Promise<void> {
     const existing = this.openingWorlds.get(worldId);
     if (existing) return existing;
-    const opening = this.openWorldOnce(worldId);
+    if (this.stopping || this.engineClosed) throw new Error("The coordinator is stopping.");
+    const opening = this.openWorldTail.then(() => this.openWorldOnce(worldId));
+    this.openWorldTail = opening.catch(() => {});
     this.openingWorlds.set(worldId, opening);
     try {
       await opening;
@@ -3188,13 +3193,14 @@ export class Coordinator {
     await this.repairOnOpen(worldId, "job-finalizations", () =>
       this.jobQueue?.retryFinalizationsForWorld(worldId),
     );
-    const bundle =
-      this.opts.provider.openStore?.()
-        ? (await this.engine.worlds.read(LOCAL_ENGINE_CONTEXT, worldId)).bundle
-        : await this.opts.provider.loadWorld(worldId);
-    this.readModel.setWorld(bundle);
-    // Before the rows are broadcast, not after: recovery changes what several of them say.
     const store = this.opts.provider.openStore?.();
+    if (store && (store.worldId !== worldId || !this.stillOpen(store))) return;
+    const bundle = store
+      ? (await this.engine.worlds.read(LOCAL_ENGINE_CONTEXT, worldId)).bundle
+      : await this.opts.provider.loadWorld(worldId);
+    if (bundle.meta.worldId !== worldId || (store && !this.stillOpen(store))) return;
+    this.readModel.setWorld(bundle);
+    // Recovery always receives the store that owns this bundle, even across awaited reads.
     if (store) await this.recoverFrameRuns(store, bundle).catch(() => {});
     if (store && !wasAlreadyOpen) {
       await this.repairOnOpen(worldId, "world-chat", () => this.recoverWorldChat(store));
@@ -3207,6 +3213,7 @@ export class Coordinator {
     // (issue 1037): the Library's `Portrait` remembers a failed decode per URL, so a poster drawn
     // a moment after the rows render would sit on disk unseen until the screen was rebuilt.
     if (store && !wasAlreadyOpen) await this.backfillArtifactPosters(store);
+    if (store && !this.stillOpen(store)) return;
     this.emit({ at: new Date().toISOString(), type: "world.opened", worldId });
     // The bundle itself travels as a fresh snapshot — a world is small enough to re-send (D4).
     this.transport.broadcastSnapshot();
@@ -16145,6 +16152,7 @@ export class Coordinator {
       // set. Update-install handlers are deliberately excluded: one may be awaiting this stop.
       await transportStopped;
       await Promise.allSettled(this.activeMessages);
+      await this.openWorldTail;
       await setupStopped;
       await Promise.all([...this.stagedClips.keys()].map((clipId) => this.dropStagedClip(clipId)));
 
@@ -16162,6 +16170,7 @@ export class Coordinator {
       await this.opts.adapter?.dispose?.().catch(() => {});
       await this.worldQuery.stop();
       // Provider close is the critical gate: it saves pending state and releases the world lock.
+      this.engineClosed = true;
       await this.engine.close();
       await this.opts.provider.close?.();
       await this.opts.providerCalls?.drain();
@@ -16176,7 +16185,7 @@ export class Coordinator {
       await this.stopPromise;
     } catch (error) {
       this.stopPromise = null;
-      this.stopping = false;
+      this.stopping = this.engineClosed;
       throw error;
     }
   }

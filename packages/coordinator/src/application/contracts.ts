@@ -16,6 +16,9 @@ export type EngineAction = "read" | "propose" | "accept" | "discard" | "generate
 export interface EngineResource { worldId: string; proposalId?: string; sheetId?: string; artifactId?: string }
 export interface DeliveryContent { kind: "world" | "proposal" | "job" | "artifact"; id: string; sha256: string }
 
+/** Exact output approved before the durable financial decision. */
+export type EngineDeliveredJob = Job & { deliveredArtifacts: Array<{ id: string; sha256: string }> };
+
 export interface EnginePolicy {
   /** Must recheck current authority, including revocation, on each invocation. */
   authorise(context: EngineContext, action: EngineAction, resource: EngineResource): Promise<void>;
@@ -25,7 +28,7 @@ export interface EnginePolicy {
   deliver(context: EngineContext, resource: EngineResource, content: DeliveryContent): Promise<void>;
   reserve(context: EngineContext, key: string, inputs: readonly EnqueueInput[]): Promise<string>;
   /** Both calls must be idempotent by key; an uncertain response is retried with that same key. */
-  settle(context: EngineContext, key: string, reservation: string, jobs: readonly Job[]): Promise<void>;
+  settle(context: EngineContext, key: string, reservation: string, jobs: readonly EngineDeliveredJob[]): Promise<void>;
   release(context: EngineContext, key: string, reservation: string): Promise<void>;
 }
 
