@@ -9,6 +9,7 @@
   "types": "./src/index.ts",
   "scripts": {
     "dev": "tsx src/dev-preflight.ts && tsx src/dev.ts",
+    "server": "tsx src/server-cli.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test \"test/**/*.test.ts\""
   },

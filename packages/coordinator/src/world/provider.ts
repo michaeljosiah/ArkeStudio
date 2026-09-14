@@ -634,6 +634,10 @@ export class FsWorldProvider implements WorldProvider {
     const ext = portable.slice(portable.lastIndexOf(".")).toLowerCase();
     const media = FsWorldProvider.MEDIA_TYPES[ext];
     if (media !== undefined) return media;
+    if (portable.startsWith("exports/")) {
+      if (ext === ".docx") return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      if (ext === ".epub") return "application/epub+zip";
+    }
     const text = FsWorldProvider.TEXT_TYPES[ext];
     if (text === undefined) return undefined;
     return portable.startsWith("artifacts/") ? text : undefined;

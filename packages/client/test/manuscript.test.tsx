@@ -144,6 +144,7 @@ describe("a manuscript out (turn 131)", () => {
     assert.match(text(m), /inkbound-20260906120002-01j8f3\.docx/);
     assert.match(text(m), /done/);
     assert.equal(button(m, /Show in folder/), undefined, "a browser session has no folder to open");
+    assert.ok(button(m, /^Download$/), "a browser can download the completed manuscript");
   });
 
   it("with no prose the sheet says so and the press stays live (codex on PR 916)", async () => {

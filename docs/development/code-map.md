@@ -18,6 +18,13 @@ Client, coordinator and integrations ──> shared contracts
 
 ## Change entry points
 
+The shared local host is coordinator `src/studio-server.ts`: it owns the authenticated
+transport and delegates initialization/draining to the application. Desktop and dev use
+`src/application/studio-host.ts` `createStudioHost`; standalone Node uses
+`src/node-studio-host.ts` and `src/server-cli.ts`. Start and stop the returned server.
+See [running the standalone server](standalone-server.md) and coordinator
+`test/studio-server.test.ts` for the browser prose, authentication and lifecycle journey.
+
 | Change | Implementation to follow | Relevant tests to start with |
 |---|---|---|
 | Route or screen | client `src/App.tsx` → `screens/registry.ts` → `screens/`, `components/`, `domain/connected.tsx` | client `test/routes.test.tsx`, matching screen test |

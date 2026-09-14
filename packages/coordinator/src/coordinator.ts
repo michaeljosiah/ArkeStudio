@@ -36,7 +36,6 @@ import { keepPerformanceRecording, performanceConversionRequest, readPerformance
 import { readCharacterAudioInputs, resolveCastVoices, resolveSubjectCastVoices, resolvePerformanceAudioReferences, preparePerformanceAudioRange, prepareMasterAudioReference, resolveMasterAudioReferences } from "./audio/reference-inputs.js";
 import { resumeCharacterSample, prepareCharacterSample, acceptCharacterSample, clearCharacterSample, withdrawCharacterSample, characterSpeakingRequest } from "./audio/character-sample.js";
 import type { AudioMediaTools } from "./audio/media-tools.js";
-import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import type { SessionInput } from "./harness/session-files.js";
 import { existsSync, mkdirSync } from "node:fs";
@@ -520,7 +519,7 @@ import {
 } from "./sheets/authoring.js";
 import { ReadModel } from "./read-model.js";
 import { ChildSupervisor, type SupervisorStatus } from "./supervisor.js";
-import { Transport } from "./transport.js";
+import { StudioServer, type StudioEventSink, type StudioServerApplication } from "./studio-server.js";
 import type { WorldProvider } from "./world-provider.js";
 import type { WorldStatePrecondition, WorldStore } from "./world/store.js";
 
@@ -590,9 +589,8 @@ function validSingleActUndo(operation: SingleActOperation, undo: SingleActUndo):
 }
 
 /**
- * The coordinator: the application's domain layer, embedded in the Electron main process
- * (SPEC-001 D2) — never a separately launched server. Wires the world provider, read model,
- * transport, change log, harness adapter and child supervisors into one lifecycle.
+ * Studio request/state coordination over application services. StudioServer owns the
+ * authenticated transport and host lifecycle for both Electron and standalone Node.
  */
 
 /**
@@ -985,8 +983,10 @@ export class Coordinator {
   private readonly engine: ReturnType<typeof createEngine>;
   private readonly readModel: ReadModel;
   private readonly frameRunQuotes = new Map<string, FrameRunQuote>();
-  private readonly transport: Transport;
-  private readonly transportAuth: import("./transport.js").TransportAuth;
+  private transport: StudioEventSink = { broadcast() {}, broadcastSnapshot() {} };
+  private transportAttached = false;
+  private legacyServer: StudioServer | null = null;
+  readonly serverApplication: StudioServerApplication;
   private readonly changeLog: ChangeLog;
   private readonly supervisors = new Map<HealthComponent, ChildSupervisor>();
   private readonly worldQuery: WorldQueryServer;
@@ -2483,10 +2483,15 @@ export class Coordinator {
           emit: (event) => this.emit(event),
         })
       : null;
-    this.transportAuth = opts.transportAuth ?? { token: randomBytes(32).toString("hex"), allowedOrigins: [] };
-    this.secrets.register(this.transportAuth.token);
-    this.transport = new Transport({
-      auth: this.transportAuth,
+    this.serverApplication = {
+      attachTransport: sink => {
+        if (this.transportAttached) throw new Error("The coordinator already belongs to a Studio server.");
+        this.transportAttached = true;
+        this.transport = sink;
+      },
+      registerSecret: token => this.secrets.register(token),
+      start: () => this.startApplication(),
+      stop: connectionsClosed => this.stopApplication(connectionsClosed),
       getSnapshot: () => this.getState(),
       getInitialEvents: () => {
         const replayed: DomainEvent[] = [...this.pendingPermissions].map(([permissionId, permission]) => ({
@@ -2581,7 +2586,7 @@ export class Coordinator {
         return this.opts.provider.serveMedia(match[1]!, match[2]!);
       },
       log: (line) => void this.appLog?.append({ kind: "transport.dropped", message: line }),
-    });
+    };
     this.worldQuery = new WorldQueryServer(() => this.opts.provider.openStore?.() ?? null);
     this.diagnosticsSnapshot = new DiagnosticsSnapshotHolder({
       sources: () => diagnosticsSources(this.getState().app),
@@ -3054,7 +3059,14 @@ export class Coordinator {
     });
   }
 
+  /** Compatibility entry for existing embedders; production shells own an explicit StudioServer. */
   async start(port = 0): Promise<{ port: number; token: string }> {
+    if (this.engineClosed) throw new Error("The coordinator is closed; create a new instance.");
+    this.legacyServer ??= new StudioServer(this.serverApplication, this.opts.transportAuth);
+    return this.legacyServer.start(port);
+  }
+
+  private async startApplication(): Promise<void> {
     if (this.engineClosed) throw new Error("The coordinator is closed; create a new instance.");
     if (this.started) throw new Error("coordinator already started");
     this.started = true;
@@ -3112,7 +3124,6 @@ export class Coordinator {
       this.readModel.setBuilds(this.foundingBuild.states());
     }
 
-    const boundPort = await this.transport.start(port);
     this.readModel.setHealth("coordinator", { status: "healthy" });
 
     // The harness adapter's readiness is reflected once at start; a live adapter's own events
@@ -3334,7 +3345,6 @@ export class Coordinator {
       })();
     }
 
-    return { port: boundPort, token: this.transportAuth.token };
   }
 
   async openWorld(worldId: string): Promise<void> {
@@ -16410,6 +16420,11 @@ export class Coordinator {
   }
 
   async stop(): Promise<void> {
+    if (this.legacyServer) return this.legacyServer.stop();
+    return this.stopApplication(Promise.resolve());
+  }
+
+  private async stopApplication(connectionsClosed: Promise<void>): Promise<void> {
     this.stageConstructor.cancel();
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
@@ -16421,7 +16436,6 @@ export class Coordinator {
     // but none can reserve work and receive an id from a queue shutdown has stopped accepting.
     this.jobQueue?.stopAccepting();
     this.stopPromise = (async () => {
-      const transportStopped = this.transport.stop();
       const setupStopped = this.setup?.dispose();
       for (const dispose of this.lifecycleDisposers) dispose();
       this.lifecycleDisposers.clear();
@@ -16445,7 +16459,7 @@ export class Coordinator {
       this.backfillAbort?.abort();
       // The door is already closing, so once it has stopped there can be no additions to this
       // set. Update-install handlers are deliberately excluded: one may be awaiting this stop.
-      await transportStopped;
+      await connectionsClosed;
       await Promise.allSettled(this.activeMessages);
       await this.openWorldTail;
       await setupStopped;
