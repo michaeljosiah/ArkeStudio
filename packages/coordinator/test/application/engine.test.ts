@@ -124,6 +124,13 @@ it("illustrations reuse the dispatcher, hold exact output and settle once after 
   h.state.held = false;
   const first = await restarted.worlds.media(child, WORLD_ID, file);
   await writeFile(join(h.worldDir, file), new Uint8Array([...pngBytes(), 1]));
+  const originalDelivery = h.policy.deliver;
+  h.policy.deliver = async (context, resource, content) => {
+    await originalDelivery(context, resource, content);
+    if (content.kind === "artifact" && content.sha256 !== first.sha256) throw new Error("Changed output needs review");
+  };
+  await assert.rejects(restarted.worlds.media(child, WORLD_ID, file), /Changed output/);
+  h.policy.deliver = originalDelivery;
   const second = await restarted.worlds.media(child, WORLD_ID, file);
   assert.notEqual(first.sha256, second.sha256);
   await assert.rejects(restarted.worlds.media(child, WORLD_ID, "../../secret.png"));
@@ -157,11 +164,28 @@ it("concurrent duplicate calls join, stale revisions refuse, and close drains a 
 it("loss of the local owner blocks writes without acknowledging a save", async t => {
   const h = await harness(t);
   const lock = join(h.worldDir, "world.lock");
-  const original = await readFile(lock, "utf8");
   const successor = { pid: process.pid, startedAt: "2000-01-01T00:00:00.000Z" };
   await writeFile(lock, JSON.stringify(successor));
   await assert.rejects(h.engine.proposals.propose(parent, WORLD_ID, draft), /ownership lost/);
   assert.deepEqual(JSON.parse(await readFile(lock, "utf8")), successor);
-  await writeFile(lock, original);
+  await assert.rejects(h.provider.close(), /ownership lost/);
+  assert.deepEqual(JSON.parse(await readFile(lock, "utf8")), successor);
   assert.equal(h.state.saves, 0);
+});
+
+
+it("an enqueue response lost after durable admission cannot blindly submit again", async t => {
+  const h = await harness(t);
+  const enqueue = h.queue.enqueue.bind(h.queue);
+  h.queue.enqueue = async input => { await enqueue(input); throw new Error("Lost enqueue receipt"); };
+  const input = { operationId: "uncertain-image", sheetId: "maren-kest", model: FAL_MODELS[0]!, prompt: "Happy",
+    count: 1, identityReferences: [], generationKey: "image" };
+  await assert.rejects(h.engine.illustrations.generate(parent, WORLD_ID, input), /Lost enqueue/);
+  h.queue.enqueue = enqueue;
+  await until(() => h.queue.listJobs().every(job => job.status === "succeeded"), "uncertain admitted job completion");
+  const restarted = await h.restart();
+  await assert.rejects(restarted.illustrations.generate(parent, WORLD_ID, input), /uncertain outcome/);
+  assert.equal((await restarted.illustrations.reconcile(parent, WORLD_ID, input.operationId)).status, "needs-reconciliation");
+  assert.equal(h.fake.submitCount, 1);
+  assert.equal(h.state.charges + h.state.releases, 0);
 });

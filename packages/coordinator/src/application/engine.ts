@@ -44,8 +44,8 @@ export function createEngine(options: EngineOptions) {
       closing = true;
       return closed ??= (async () => {
         await Promise.allSettled(active);
-        await operations.close();
-        await options.worlds.close();
+        try { await operations.close(); }
+        finally { await options.worlds.close(); }
       })();
     },
   };

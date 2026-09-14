@@ -15,6 +15,7 @@ export class ProposalApplicationService {
         if (expectedRevision !== undefined && (await session.snapshot()).revision !== expectedRevision) {
           throw new Error("The world changed before this proposal was started.");
         }
+        await this.operations.policy.authorise(context, "propose", { worldId });
         const value = await session.propose(draft, expectedRevision);
         const saved = await session.saved(key);
         return { operationKey: key, revision: saved.revision, value };
@@ -31,6 +32,7 @@ export class ProposalApplicationService {
     const result = await this.operations.run(context, "accept", { worldId, proposalId }, input.operationId, input, key =>
       this.worlds.use(worldId, async session => {
         const proposal = await session.proposal(proposalId);
+        await this.operations.policy.authorise(context, "accept", { worldId, proposalId });
         const value = await session.accept(proposalId, input);
         if (value.status === "accepted" || value.status === "no-op") await session.resolution(proposal, "accepted");
         const saved = await session.saved(key);
@@ -47,6 +49,7 @@ export class ProposalApplicationService {
     const result = await this.operations.run(context, "discard", { worldId, proposalId }, input.operationId, input, key =>
       this.worlds.use(worldId, async session => {
         const proposal = await session.proposal(proposalId);
+        await this.operations.policy.authorise(context, "discard", { worldId, proposalId });
         await session.discard(proposalId, input.expectedRevision);
         await session.resolution(proposal, "discarded");
         return { operationKey: key, ...(await session.saved(key)), value: { status: "discarded" as const } };
