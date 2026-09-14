@@ -1,8 +1,8 @@
 # Embeddable engine services
 
-The supported journey is: read a world, propose a character from a sentence, accept or discard the proposal, request a portrait, read a permitted image, reconnect and close. Studio and an external Node host call the same application services. Version 0.2 also exposes direct prose production and chapter authoring through the existing domain writers.
+The engine supports world reads, character proposals and portraits, plus a prose journey: create a Story and chapters, edit text, draft or revise with AI, accept a proposal, and read the committed manuscript. Studio and an external Node host share the existing domain writers, model runner and proposal gate.
 
-The sentence service stages a sketch using existing sheet authoring. Studio still owns its writing-harness continuation. The public service does not promise to run that harness or produce a finished book.
+The sentence-to-character service still stages a sketch; its harness continuation belongs to Studio. The separate chapter-writing API below runs through an explicit host-provided model runtime.
 
 ```mermaid
 flowchart LR
@@ -12,6 +12,9 @@ flowchart LR
   Services --> Sessions[World sessions and authoritative save]
   Services --> Operations[Durable operation store]
   Services --> Queue[Existing job dispatcher]
+  Services --> Writing[Existing writing runner and chapter receipts]
+  Writing --> Runtime[Host model session and cleanup]
+  Writing --> Domain
   Sessions --> Domain[Existing authoring operations and proposal gate]
   Queue --> Providers[Scoped provider clients and credentials]
 ```
@@ -25,6 +28,8 @@ flowchart LR
 | Per-caller world reads and exact media checks | `application/world-sessions.ts` | Host supplies projection and delivery policy; Studio retains its authenticated sole-author transport |
 | Sentence proposals, accept/discard and resolution | `application/proposals.ts` | Existing gate owns commits and ripple checks |
 | Portrait preparation, reservation and settlement | `application/generation.ts` | Other generation routes remain in their existing modules |
+| AI chapter drafting and revision | `application/writing.ts`, `application/local-writing.ts` | Host supplies the model runtime; revisions start from committed prose |
+| Committed manuscript Markdown | `application/prose.ts`, `application/local-prose.ts` | Complete readable, nonempty chapters; publishing formats are separate |
 | Scoped world lifetime | `application/local-worlds.ts` or host `EngineWorldRepository` | Materialised folders are not distributed authoritative storage |
 | Job state and provider recovery | Existing dispatcher with injected `JobStateStore` | Host must preserve credential, landing and ledger contracts |
 | Durable request identity | `EngineOperationStore`; flushed local implementation | Local file assumes one process owns it |
@@ -42,7 +47,7 @@ Consumers should pin a tested version. During 0.x, breaking public contract chan
 
 ## Host construction and authority
 
-Call `createEngine({ worlds, operations, policy, queue })`. All dependencies are required. The policy has no permissive fallback. Studio explicitly supplies its sole-author policy.
+Call `createEngine({ worlds, operations, policy, queue, writing })`. The first four dependencies are required; `writing` is optional and enables AI chapter calls. The policy has no permissive fallback. Studio explicitly supplies its sole-author policy.
 
 The host authenticates requests and constructs `EngineContext`: actor, security scope, executor and subject. Never trust these fields because a browser sent them. A scope is an authorization partition, not a world or subscription. Policy must check the relationship between scope, subject, actor and requested world, including revocation, on each call. Proposal decisions carry a proposal ID; portrait requests carry a sheet ID.
 
@@ -100,9 +105,8 @@ boundary, scratch/lease cleanup, rejected contexts, chapter grounding and stale-
 behaviour. Preserve the existing world-chat run, retry, cache, recovery and chapter/proposal
 suites. Model quality and production cloud persistence are not demonstrated by these tests.
 
-Next, move the remaining production creation/action orchestration behind scoped services and
-add the public authoring contracts, durable operation/save outcomes and external consumer proof.
-Only then consolidate the Studio server host: Electron-managed or standalone Node startup,
+The extraction established the base for the public authoring contracts and external consumer
+proof described below. Further orchestration work should precede consolidating the Studio server host: Electron-managed or standalone Node startup,
 using the existing authenticated transport for desktop and browser clients. Kidz embeds the
 engine in its own Node server and supplies its private product and Aonik integrations.
 
@@ -123,8 +127,8 @@ recovery state machine. There is no new permission journal or decision protocol.
 
 Regression coverage includes `test/application/production-actions.test.ts`, production creation
 acknowledgements, and the existing action lifecycle/coordinator/recovery suites. Production setup
-continues to use `productions/setup-command.ts` and its reviewed creation path. Public authoring
-contracts, scoped durable operations and the server host remain future work under #1182.
+continues to use `productions/setup-command.ts` and its reviewed creation path. The public
+authoring contracts below now add scoped durable operations; the server host remains future work under #1182.
 
 
 ## Direct prose authoring (0.2)
