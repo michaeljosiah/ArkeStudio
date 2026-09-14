@@ -171,6 +171,9 @@ export function localWriting(store: WorldStore): EngineWritingSession {
               cursor = page.success ? page.data.nextCursor ?? undefined : undefined;
             } while (cursor);
           }
+          text += '\n\nThis bounded chapter-writing API supports exactly one edit to the requested chapter. ' +
+            'Return its complete body with optional title and status "draft" only. ' +
+            'Do not include implies, plan edits, passage edits or other actions; those need separate authoring operations.';
           if (text.length > budgetChars) throw new Error("The chapter context is too large for this model.");
           groundedText = text;
           return text;
