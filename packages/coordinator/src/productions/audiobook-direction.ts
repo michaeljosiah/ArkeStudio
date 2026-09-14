@@ -130,6 +130,45 @@ function anchorSpan(text: string, anchor: string): { from: number; to: number } 
 }
 
 /**
+ * A plan held to what its reader can do (R-9, R-10, R-13): a delivery the row lacks falls to
+ * `measured`, or the first the row reads, and is counted; a phrase over the cap, or on a reader
+ * that takes none, is dropped; a speed outside the plan's range, or on a reader with none, drops
+ * to one; a cue of a kind the reader cannot carry is dropped, and cues past the fortieth. Null
+ * when the reader reads nothing at all. The derivation and the re-check on a reader change
+ * are one rule.
+ */
+export function conformInput(input: AudiobookDirectionInput, support: ReturnType<typeof cadenceSupport>): { input: AudiobookDirectionInput | null; dropped: number } {
+  let dropped = 0;
+  const readable = AUDIOBOOK_DELIVERIES.filter((delivery) => support.deliveries[delivery]?.status !== "unsupported");
+  if (readable.length === 0) return { input: null, dropped: 1 };
+  let delivery: CadencePlan["delivery"] = input.delivery;
+  if (!readable.includes(delivery)) {
+    dropped += 1;
+    delivery = readable.includes("measured") ? "measured" : readable[0]!;
+  }
+  let phrase: string | undefined;
+  if (input.phrase !== undefined && input.phrase !== "") {
+    if (input.phrase.length > CADENCE_PHRASE_MAX || support.phrase.status === "unsupported") dropped += 1;
+    else phrase = input.phrase;
+  }
+  let speed = 1;
+  if (input.speed !== 1) {
+    const within = input.speed >= 0.7 && input.speed <= 1.2 && support.speed.status !== "unsupported";
+    if (within) speed = input.speed;
+    else dropped += 1;
+  }
+  const cues: CadencePlan["cues"] = [];
+  for (const cue of input.cues) {
+    if (cues.length >= 40 || support[cue.kind].status === "unsupported") {
+      dropped += 1;
+      continue;
+    }
+    cues.push(cue);
+  }
+  return { input: { delivery, speed, cues, ...(phrase !== undefined ? { phrase } : {}) }, dropped };
+}
+
+/**
  * What the model said, held to each block and its reader (R-10). A control the reader declares
  * `unsupported` is dropped and counted; a delivery so dropped falls to `measured`, or the first
  * the reader reads; a cue whose words the block does not hold exactly once is dropped; and the
@@ -149,42 +188,11 @@ export function verifyDirections(raw: RawDirection, blocks: readonly DirectableB
     }
     seen.add(block.key);
     const support = cadenceSupport(block.model, block.language);
-    const readable = AUDIOBOOK_DELIVERIES.filter((delivery) => support.deliveries[delivery]?.status !== "unsupported");
-    if (readable.length === 0) {
-      dropped += 1;
-      continue;
-    }
-    const asked = DeliverySchema.safeParse(entry.delivery ?? "measured");
-    let delivery: CadencePlan["delivery"];
-    if (asked.success && readable.includes(asked.data)) delivery = asked.data;
-    else {
-      dropped += 1;
-      delivery = readable.includes("measured") ? "measured" : readable[0]!;
-    }
-    let phrase: string | undefined;
-    const phraseAsked = typeof entry.phrase === "string" ? normalizeSpeechText(entry.phrase) : "";
-    if (phraseAsked !== "") {
-      if (phraseAsked.length > CADENCE_PHRASE_MAX || support.phrase.status === "unsupported") dropped += 1;
-      else phrase = phraseAsked;
-    }
-    let speed = 1;
-    if (typeof entry.speed === "number" && entry.speed !== 1) {
-      const rounded = Math.round(entry.speed * 100) / 100;
-      const within = Number.isFinite(rounded) && rounded >= 0.7 && rounded <= 1.2 && support.speed.status !== "unsupported";
-      if (within) speed = rounded;
-      else dropped += 1;
-    }
+    // The model's words as a plan: the delivery it asked for, the phrase, the speed, and the
+    // cues placed at the words it named — those the block does not hold exactly once dropped.
     const text = normalizeSpeechText(block.text);
     const cues: CadencePlan["cues"] = [];
     for (const cue of entry.cues ?? []) {
-      if (cues.length >= 40) {
-        dropped += 1;
-        continue;
-      }
-      if (support[cue.kind].status === "unsupported") {
-        dropped += 1;
-        continue;
-      }
       const span = anchorSpan(text, cue.kind === "pause" ? cue.after : cue.kind === "breath" ? cue.before : cue.words);
       if (span === null) {
         dropped += 1;
@@ -195,7 +203,23 @@ export function verifyDirections(raw: RawDirection, blocks: readonly DirectableB
       else cues.push({ kind: "emphasis", span: { from: span.from, to: span.to, text: text.slice(span.from, span.to) }, level: cue.level });
     }
     cues.sort((a, b) => (a.kind === "emphasis" ? a.span.from : a.at) - (b.kind === "emphasis" ? b.span.from : b.at));
-    const input: AudiobookDirectionInput = { delivery, speed, cues, ...(phrase !== undefined ? { phrase } : {}) };
+    const asked = DeliverySchema.safeParse(entry.delivery ?? "measured");
+    const phraseAsked = typeof entry.phrase === "string" ? normalizeSpeechText(entry.phrase) : "";
+    const conformed = conformInput(
+      {
+        delivery: asked.success ? asked.data : "measured",
+        speed: typeof entry.speed === "number" && Number.isFinite(entry.speed) ? Math.round(entry.speed * 100) / 100 : 1,
+        cues,
+        ...(phraseAsked !== "" ? { phrase: phraseAsked } : {}),
+      },
+      support,
+    );
+    dropped += conformed.dropped + (asked.success ? 0 : entry.delivery === undefined ? 0 : 1);
+    if (conformed.input === null) {
+      dropped += 1;
+      continue;
+    }
+    const input = conformed.input;
     if (checkDirection(block.text, directionPlan(block.text, input), block.model, block.language).ok) {
       proposed[block.key] = input;
       directed += 1;

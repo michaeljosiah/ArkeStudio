@@ -30,7 +30,7 @@ import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { audioHash } from "../audio/qc.js";
-import { audiobookLanding, castRefusal, checkDirection, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type PlannedBlock } from "./audiobook.js";
+import { audiobookLanding, castRefusal, checkDirection, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type AudiobookPlan, type PlannedBlock } from "./audiobook.js";
 
 /**
  * A chapter read into kept takes (design turn 146, SPEC-047 R-16..R-19): every block that is
@@ -61,6 +61,12 @@ export interface AudiobookRunDeps {
   confirmationToken?: string;
   /** These blocks alone, whatever their state — the panel's `Make again` (R-30); every block not made otherwise. */
   only?: readonly string[];
+  /**
+   * The book's run priced this chapter with the rest (R-17): the chapter's own price token as
+   * the book computed it from its preparation. Read on that answer while the chapter is still
+   * what was priced, and refused — never read unpriced — once it has moved under the book's run.
+   */
+  priced?: string;
   /**
    * Ask for a cloned voice's recording to leave the machine (SPEC-046 R-16): per voice and
    * vendor for a hosted reader, whose answer is written onto the voice, per request for the
@@ -94,7 +100,7 @@ export interface AudiobookRunDeps {
 type Format = "wav" | "mp3" | "flac";
 
 /** The reader that will actually speak a block, after the catalogue has been asked. */
-interface Speaking extends PlannedBlock {
+export interface Speaking extends PlannedBlock {
   reader: AudiobookReader;
   model: ManifestModel;
   local: boolean;
@@ -175,46 +181,55 @@ export function priorPartJob(jobs: readonly Job[], identity: PartIdentity, part:
   return null;
 }
 
-export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void> {
-  const { store, productionId, chapterId, narrator, signal, emit } = deps;
-  let made = 0;
-  let flaggedCount = 0;
-  const finish = (outcome: Extract<AudiobookRunEvent, { type: "finished" }>["outcome"], extra: { record?: ChapterAudiobook; reason?: string } = {}) =>
-    emit({ type: "finished", outcome, made, flagged: flaggedCount, ...extra });
+/** What a run, the book's run and the door share of a chapter: its plan, its record, and every block to make with the reader that will speak it. */
+export interface PreparedChapter {
+  plan: AudiobookPlan;
+  record: ChapterAudiobook;
+  toMake: PlannedBlock[];
+  speaking: Speaking[];
+  /** The cloud blocks the cache does not hold: what a press would pay for (R-17). */
+  misses: Speaking[];
+  /** The cloned voices among the misses, hosted readers' first and the engine's last (R-17). */
+  clones: { provider: string; voice: ClonedVoice }[];
+  priceOf: (block: Speaking) => number;
+  estimate: number;
+}
 
-  const plan = await planAudiobook(store, productionId, chapterId, { narrator });
-  const chapterFile = plan.chapter.file;
+export type ChapterPreparation = { kind: "ready"; prepared: PreparedChapter } | { kind: "refused"; reason: string; plan: AudiobookPlan } | { kind: "unavailable"; reason: string };
+
+export interface ReadingRoom {
+  narrator: AudiobookReader;
+  models: readonly ManifestModel[];
+  catalogue: readonly VoiceCandidate[];
+}
+
+/**
+ * A chapter as a press sees it (R-16, R-17): the plan read once, every block to make with the
+ * reader that will actually speak it, its direction mapped for that reader or refused, the
+ * parts the cap makes of it, whether the cache already holds it, and what the rest would cost.
+ * The run, the book's run and the door read the same answer, so a price the door shows is the
+ * price the run asks for.
+ */
+export async function prepareChapter(store: WorldStore, productionId: string, chapterId: string, room: ReadingRoom, now: () => string, only?: readonly string[]): Promise<ChapterPreparation> {
+  const plan = await planAudiobook(store, productionId, chapterId, { narrator: room.narrator });
   // Under `cast` a run needs a cast that is current (R-12): a line whose speaker the cast cannot
   // name would otherwise be made in the narrator's voice without the door having said so.
   const castTrouble = castRefusal(plan);
-  if (castTrouble !== null) {
-    finish("refused", { reason: castTrouble });
-    return;
-  }
+  if (castTrouble !== null) return { kind: "refused", reason: castTrouble, plan };
   // An unreadable record is no record: the takes it named are still on the shelf, and a run
   // that cannot read which block each was for makes the chapter afresh rather than guessing.
-  let record: ChapterAudiobook =
+  const record: ChapterAudiobook =
     plan.record === null || plan.record === "unreadable"
-      ? emptyAudiobook(plan.chapter.version, plan.chapter.hash, deps.now())
+      ? emptyAudiobook(plan.chapter.version, plan.chapter.hash, now())
       : { ...plan.record, takes: { ...plan.record.takes }, flags: { ...plan.record.flags } };
-  const toMake = deps.only !== undefined ? plan.blocks.filter((planned) => deps.only!.includes(planned.block.key)) : plan.blocks.filter((planned) => planned.state !== "made");
-  emit({ type: "started", toMake: toMake.length, blocks: plan.blocks.length });
-  if (toMake.length === 0) {
-    finish("read", { record });
-    return;
-  }
-
-  const room = { narrator, models: deps.models, catalogue: deps.catalogue };
+  const toMake = only !== undefined ? plan.blocks.filter((planned) => only.includes(planned.block.key)) : plan.blocks.filter((planned) => planned.state !== "made");
   const clonedVoices = store.getBundle().clonedVoices ?? [];
 
   // Who actually speaks each block (R-12): the one rule the direction was verified against.
   const speaking: Speaking[] = [];
   for (const planned of toMake) {
     const speaks = await effectiveReader(store, planned.assigned, room);
-    if (speaks === null) {
-      finish("unavailable", { reason: "the narrator's voice model is not in the manifest" });
-      return;
-    }
+    if (speaks === null) return { kind: "unavailable", reason: "the narrator's voice model is not in the manifest" };
     const { reader, model, substitutedNow } = speaks;
     const text = normalizeSpeechText(planned.block.text);
     // The direction that stands for these words, mapped for the reader that will speak — the
@@ -285,37 +300,94 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   // since theirs persist, the engine's last, so the token the window holds at the end is the
   // one the price's answer must carry (codex on PR 1180: without the voice on the question,
   // a hosted reader's line was refused at dispatch and flagged without ever being asked).
-  const clones = new Map<string, { provider: string; voice: ClonedVoice }>();
+  const cloneMap = new Map<string, { provider: string; voice: ClonedVoice }>();
   for (const block of misses) {
-    if (block.clone !== null) clones.set(`${block.reader.provider}\n${block.clone.id}`, { provider: block.reader.provider, voice: block.clone });
+    if (block.clone !== null) cloneMap.set(`${block.reader.provider}\n${block.clone.id}`, { provider: block.reader.provider, voice: block.clone });
   }
-  const askOrder = [...clones.values()].sort((a, b) => Number(a.provider === CLONED_VOICE_PROVIDER) - Number(b.provider === CLONED_VOICE_PROVIDER));
-  for (const reader of askOrder) {
-    if (await deps.requireUploadConfirmation(reader)) return;
-  }
+  const clones = [...cloneMap.values()].sort((a, b) => Number(a.provider === CLONED_VOICE_PROVIDER) - Number(b.provider === CLONED_VOICE_PROVIDER));
   // Priced by the character as the row bills it (SPEC-046 R-8): bytes, or doubled CJK, for the
   // readers that count so — `text.length` alone understates a Fish or Breeze block by up to 3×
   // (codex on PR 1180). The counts the card and the job show stay the prose's, as the page
   // read's do; only the money is the vendor's count.
-  const billed = (block: Speaking, part: string) => billableCharacters(block.model, part);
-  const priceOf = (block: Speaking) => block.parts.reduce((sum, part) => sum + estimateMicroUsd(block.model, { characters: billed(block, part) }), 0);
+  const priceOf = (block: Speaking) => block.parts.reduce((sum, part) => sum + estimateMicroUsd(block.model, { characters: billableCharacters(block.model, part) }), 0);
   const estimate = misses.reduce((sum, block) => sum + priceOf(block), 0);
-  if (estimate > 0) {
-    const token = createHash("sha256")
-      .update(["audiobook", deps.worldId, productionId, chapterId, String(plan.chapter.version), plan.chapter.hash, ...misses.map((block) => `${block.block.key}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.direction?.hash ?? ""}`)].join("\n"))
-      .digest("hex");
-    if (deps.confirmationToken !== token) {
-      const voices = new Map<string, { label: string; provider: string; characters: number; estimatedMicroUsd: number }>();
-      for (const block of misses) {
-        const key = `${block.reader.provider}\n${block.reader.voiceId}`;
-        const held = voices.get(key) ?? { label: block.reader.label ?? block.reader.voiceId, provider: block.reader.provider, characters: 0, estimatedMicroUsd: 0 };
-        held.characters += block.text.length;
-        held.estimatedMicroUsd += priceOf(block);
-        voices.set(key, held);
-      }
-      emit({ type: "priced", characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: token, voices: [...voices.values()] });
-      return;
-    }
+  return { kind: "ready", prepared: { plan, record, toMake, speaking, misses, clones, priceOf, estimate } };
+}
+
+/**
+ * The price's name for a chapter as it stands (R-17): its words and its cloud misses, each with
+ * the reader and the direction it would be made under. The chapter's own press answers with
+ * it; the book's run computes it per chapter from the preparation it priced, and the chapter's
+ * run compares it against a fresh one before spending on the book's answer (codex on PR 1187).
+ */
+export function chapterPriceToken(worldId: string, productionId: string, chapterId: string, chapter: { version: number; hash: string }, misses: readonly Speaking[]): string {
+  return createHash("sha256")
+    .update(["audiobook", worldId, productionId, chapterId, String(chapter.version), chapter.hash, ...misses.map(missIdentity)].join("\n"))
+    .digest("hex");
+}
+
+/**
+ * What a miss is priced as: the block, the words it would send — their own hash, since the
+ * chapter's names the prose and not the spoken heading, and a title renamed keeps the version
+ * and the body hash while it lengthens the request (codex on PR 1187) — the reader, and the
+ * direction.
+ */
+export function missIdentity(block: Speaking): string {
+  return `${block.block.key}:${audiobookTextHash(block.text)}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.direction?.hash ?? ""}`;
+}
+
+/** The price's lines (R-17): every cloud voice the words would go to, once each, with its share. */
+export function priceLines(misses: readonly Speaking[], priceOf: (block: Speaking) => number): { label: string; provider: string; characters: number; estimatedMicroUsd: number }[] {
+  const voices = new Map<string, { label: string; provider: string; characters: number; estimatedMicroUsd: number }>();
+  for (const block of misses) {
+    const key = `${block.reader.provider}\n${block.reader.voiceId}`;
+    const held = voices.get(key) ?? { label: block.reader.label ?? block.reader.voiceId, provider: block.reader.provider, characters: 0, estimatedMicroUsd: 0 };
+    held.characters += block.text.length;
+    held.estimatedMicroUsd += priceOf(block);
+    voices.set(key, held);
+  }
+  return [...voices.values()];
+}
+
+export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void> {
+  const { store, productionId, chapterId, narrator, signal, emit } = deps;
+  let made = 0;
+  let flaggedCount = 0;
+  const finish = (outcome: Extract<AudiobookRunEvent, { type: "finished" }>["outcome"], extra: { record?: ChapterAudiobook; reason?: string } = {}) =>
+    emit({ type: "finished", outcome, made, flagged: flaggedCount, ...extra });
+
+  const preparation = await prepareChapter(store, productionId, chapterId, { narrator, models: deps.models, catalogue: deps.catalogue }, deps.now, deps.only);
+  if (preparation.kind !== "ready") {
+    if (preparation.kind === "unavailable") emit({ type: "started", toMake: 0, blocks: 0 });
+    finish(preparation.kind, { reason: preparation.reason });
+    return;
+  }
+  const { plan, toMake, speaking, misses, clones, priceOf, estimate } = preparation.prepared;
+  let record = preparation.prepared.record;
+  const chapterFile = plan.chapter.file;
+  emit({ type: "started", toMake: toMake.length, blocks: plan.blocks.length });
+  if (toMake.length === 0) {
+    finish("read", { record });
+    return;
+  }
+  const token = chapterPriceToken(deps.worldId, productionId, chapterId, plan.chapter, misses);
+  // The book's run priced every chapter at once (R-17), and its chapters are read on that
+  // answer rather than asked again one by one — but only the chapter that was priced. Each
+  // chapter is prepared afresh when the book reaches it, and prose, a reading or a voice
+  // changed while earlier chapters were read can put cloud work in that preparation the card
+  // never showed: that chapter is refused and left to its row rather than read on an answer
+  // given for other words (codex on PR 1187). Judged before any consent is asked, so a chapter
+  // that moved never puts a question under the book that the book's answer cannot follow.
+  if (deps.priced !== undefined && estimate > 0 && deps.priced !== token) {
+    finish("refused", { reason: "moved since the book was priced" });
+    return;
+  }
+  for (const reader of clones) {
+    if (await deps.requireUploadConfirmation(reader)) return;
+  }
+  if (estimate > 0 && deps.priced === undefined && deps.confirmationToken !== token) {
+    emit({ type: "priced", characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: token, voices: priceLines(misses, priceOf) });
+    return;
   }
 
   const landingDir = audiobookLanding(productionId, chapterFile);
@@ -517,7 +589,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
                     }
                   : {}),
               },
-              estimatedMicroUsd: estimateMicroUsd(block.model, { characters: billed(block, part) }),
+              estimatedMicroUsd: estimateMicroUsd(block.model, { characters: billableCharacters(block.model, part) }),
               landing: { dir: landingDir, name: `${block.block.key.replace(/[^a-z0-9]+/gi, "-")}-${index}.${block.format}` },
               ...(block.clone !== null ? { voiceReference: true } : {}),
             };

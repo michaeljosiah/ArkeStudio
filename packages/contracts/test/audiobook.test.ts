@@ -9,12 +9,17 @@ import {
   audiobookCounts,
   audiobookDirectionFor,
   audiobookDirectionHash,
+  audiobookDoorLine,
   audiobookHeading,
+  audiobookRowLabel,
   audiobookTextHash,
+  AudiobookDoorSchema,
   ChapterAudiobookSchema,
+  formatRunningTime,
   summariseAudiobook,
   type AudiobookDirection,
   type AudiobookReader,
+  type AudiobookRow,
   type ChapterAudiobook,
 } from "../src/audiobook.js";
 import type { CadencePlan } from "../src/cadence.js";
@@ -171,5 +176,54 @@ describe("the record", () => {
     assert.ok(!AudiobookDirectionSchema.safeParse({ textHash: "text-v1:x", plan: plan({ speed: 1.3 }), at: AT }).success, "speed is the plan's own 0.7–1.2");
     assert.deepEqual(summariseAudiobook(rec), { chapterVersion: 4, hash: "sha256:body", updatedAt: AT, takes: 1, flagged: 1 });
     assert.ok(!ChapterAudiobookSchema.safeParse({ ...rec, extra: true }).success, "strict: a field this build does not know is not a record");
+  });
+});
+
+describe("the door's words (turn 146, R-15, R-29)", () => {
+  const row = (over: Partial<AudiobookRow>): AudiobookRow => ({
+    chapterId: "neap", file: "02-neap", order: 2, title: "Neap", version: 4, planned: false, total: 26, made: 22, stale: 0, flagged: 0, notMade: 4, seconds: 1200, ...over,
+  });
+
+  it("writes a running time as hours only once there are hours", () => {
+    assert.equal(formatRunningTime(0), "0:00");
+    assert.equal(formatRunningTime(64), "1:04");
+    assert.equal(formatRunningTime(1864), "31:04");
+    assert.equal(formatRunningTime(7768.4), "2:09:28");
+    assert.equal(formatRunningTime(3600), "1:00:00", "the minutes take two figures once an hour stands before them");
+  });
+
+  it("labels a row by what stands in the way of it being read", () => {
+    assert.equal(audiobookRowLabel(row({ planned: true, total: 0, made: 0, notMade: 0, seconds: 0 })), "planned");
+    assert.equal(audiobookRowLabel(row({ castTrouble: "cast not current" })), "cast not current", "the cast's trouble outranks the count");
+    assert.equal(audiobookRowLabel(row({ made: 26, notMade: 0, seconds: 1864 })), "read · 31:04");
+    assert.equal(audiobookRowLabel(row({ made: 26, notMade: 0, seconds: null })), "read", "a take with no measured length is read, with no time claimed");
+    assert.equal(audiobookRowLabel(row({ made: 0, notMade: 26 })), "not read");
+    assert.equal(audiobookRowLabel(row({ made: 23, stale: 3, notMade: 0 })), "moved · 3 of 26 stale", "stale takes alone is the prose having moved");
+    assert.equal(audiobookRowLabel(row({ flagged: 1, notMade: 3 })), "22 of 26 made · 1 flagged");
+    assert.equal(audiobookRowLabel(row({ made: 20, stale: 2, flagged: 1, notMade: 3 })), "20 of 26 made · 2 stale · 1 flagged");
+  });
+
+  it("counts the chapters read of those with prose, sums the time of the read ones, and keeps the planned apart", () => {
+    const rows = [row({ chapterId: "a", made: 26, notMade: 0, seconds: 1864 }), row({ chapterId: "b" }), row({ chapterId: "c", planned: true, total: 0, made: 0, notMade: 0, seconds: 0 })];
+    assert.deepEqual(audiobookDoorLine(rows), { read: 1, withProse: 2, planned: 1, seconds: 1864, line: "1 of 2 chapters read · 31:04 · 1 planned" });
+    assert.equal(audiobookDoorLine([]).line, "0 of 0 chapters read");
+    assert.equal(audiobookDoorLine([row({ made: 26, notMade: 0, seconds: null })]).line, "1 of 1 chapter read", "an unmeasured take keeps the time off the line rather than understating it");
+    assert.equal(audiobookDoorLine([rows[1]!]).line, "0 of 1 chapter read");
+  });
+
+  it("the door parses strict, a row with a cast's trouble and a speaker with no voice among it", () => {
+    const door = {
+      reading: "cast",
+      voices: [
+        { name: "George", voice: { label: "George", provider: "kokoro", local: true }, state: "narrator", blocks: 19 },
+        { sheet: "odile-sarn", name: "Odile Sarn", state: "no voice", blocks: 3 },
+      ],
+      unattributed: 2,
+      rows: [row({ castTrouble: "cast not current" })],
+      price: { chapters: 1, blocks: 4, cloudBlocks: 0, characters: 0, estimatedMicroUsd: 0, voices: [{ label: "George", provider: "kokoro", local: true, characters: 610, estimatedMicroUsd: 0 }] },
+    };
+    assert.ok(AudiobookDoorSchema.safeParse(door).success);
+    assert.ok(!AudiobookDoorSchema.safeParse({ ...door, export: {} }).success, "strict: the export waits for its slice");
+    assert.ok(!AudiobookDoorSchema.safeParse({ ...door, voices: [{ name: "x", state: "reads", blocks: -1 }] }).success);
   });
 });

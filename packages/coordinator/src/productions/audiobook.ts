@@ -148,7 +148,8 @@ export async function updateAudiobook(
   store: WorldStore,
   productionId: string,
   chapter: { file: string; version: number; hash: string },
-  mutate: (current: ChapterAudiobook) => ChapterAudiobook,
+  /** The record to write, or null to leave the file as it is; may read the world afresh under the lane's turn. */
+  mutate: (current: ChapterAudiobook) => ChapterAudiobook | null | Promise<ChapterAudiobook | null>,
 ): Promise<ChapterAudiobook> {
   const key = `${store.dir}\n${productionId}\n${chapter.file}`;
   const ahead = recordLanes.get(key) ?? Promise.resolve();
@@ -157,7 +158,8 @@ export async function updateAudiobook(
     // An unreadable record is no record for a writer too: the takes it named stay on the shelf
     // as artifacts, and a run reads them afresh rather than guessing at a file it cannot read.
     const current = held === null || held === "unreadable" ? emptyAudiobook(chapter.version, chapter.hash, store.now()) : held;
-    const next = mutate(current);
+    const next = await mutate(current);
+    if (next === null) return current;
     await writeAudiobook(store, productionId, chapter.file, next);
     return next;
   });
