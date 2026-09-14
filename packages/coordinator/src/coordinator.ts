@@ -1,3 +1,6 @@
+import { ProseAuthoringService } from "./application/prose-authoring.js";
+import { ConversationAuthoringService } from "./application/conversation-authoring.js";
+import { conversationRunDependencies } from "./application/conversation-runs.js";
 import { createEngine } from "./application/engine.js";
 import { createLocalWorldRepository } from "./application/local-worlds.js";
 import { createLocalEnginePolicy, LOCAL_ENGINE_CONTEXT } from "./application/local-policy.js";
@@ -10,8 +13,7 @@ import { HarnessModelCatalog, selectHarnessModel, type LanguageModelSelection } 
 import { prepareReferences } from "./media/prepare-references.js";
 import { stageConstructionHandoff } from "./world-chat/actions.js";
 import { handleProductionSetupCommand } from "./productions/setup-command.js";
-import { productionSetups, recoverProductionSetups } from "./productions/setup.js";
-import { productionSetupBrief } from "./productions/setup-brief.js";
+import { recoverProductionSetups } from "./productions/setup.js";
 import { saveProductionNarrative } from "./productions/narrative.js";
 import { guardProductionSetupAuthority } from "./productions/setup-authority.js";
 import { StageConstructor } from "./productions/stage-construction.js";
@@ -34,7 +36,7 @@ import { resumeCharacterSample, prepareCharacterSample, acceptCharacterSample, c
 import type { AudioMediaTools } from "./audio/media-tools.js";
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
-import { createPreparedSession, type SessionInput } from "./harness/session-files.js";
+import type { SessionInput } from "./harness/session-files.js";
 import { existsSync, mkdirSync } from "node:fs";
 import { copyFile, mkdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
@@ -92,7 +94,6 @@ import {
   planScene,
   previewLineFor,
   type ConversationId,
-  type WorldChatCheckReceipt,
   type WorldChatReferenceImageDiscardAction,
   type WorldChatReferenceImageImportAction,
   type WorldChatReferenceImportAction,
@@ -142,7 +143,6 @@ import {
   COMFYUI_WEIGHTS_COMPONENT_PREFIX,
   isComfyUiWeightsComponent,
   orderedShots,
-  applyBibleEdits,
   characterAudioRoute,
 } from "@arke-studio/contracts";
 import { BenchStore, sessionDir as benchSessionDir, sessionMediaDir } from "./bench/store.js";
@@ -175,7 +175,6 @@ import {
   highestChapterRank,
   compileBoard,
   composeDispatches,
-  createChapter,
   createEpisode,
   createProduction,
   createScene,
@@ -194,13 +193,9 @@ import {
   reorderScenes,
   deleteScene,
   restoreScene,
-  saveChapter,
   setProductionAspect,
   setProductionModel,
   openChapter,
-  restoreChapter,
-  editChapterPlan,
-  setChapterRetired,
 } from "./productions/ops.js";
 import {
   advancePlan,
@@ -263,9 +258,9 @@ import {
 } from "./artifacts/filing.js";
 import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachments.js";
 import { makeAdapterExtractor } from "./artifacts/model.js";
-import { deriveContinuity, makeAdapterContinuityDeriver, readContinuity, type ContinuityDeriver } from "./productions/continuity.js";
+import { deriveContinuity, makeAdapterContinuityDeriver, type ContinuityDeriver } from "./productions/continuity.js";
 import { castLines, makeAdapterVoicesDeriver, readVoices, type VoicesDeriver } from "./productions/voices.js";
-import { presentTakes, readAudiobook, writeAudiobookBook } from "./productions/audiobook.js";
+import { writeAudiobookBook } from "./productions/audiobook.js";
 import { runAudiobookChapter } from "./productions/audiobook-run.js";
 import { exportManuscript, importManuscript, readManuscript } from "./productions/manuscript.js";
 import { manuscriptChapters, productionShape, type StructuredDocument } from "@arke-studio/contracts";
@@ -295,8 +290,7 @@ import { assertStageReferencesCurrent, filePlayblast } from "./productions/stage
 import { assembleTimelineScene, applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
 import { importEditorMedia } from "./productions/editor-import.js";
 import { AUDIO_TRACK_KINDS, effectiveAudioRole } from "@arke-studio/contracts";
-import { decideEditorRequest, EditorRequestRefused, readEditorRequest, stageEditorRequests } from "./productions/editor-requests.js";
-import { applySceneEdits, sceneVersionFor } from "./productions/scene-edits.js";
+import { decideEditorRequest, EditorRequestRefused, readEditorRequest } from "./productions/editor-requests.js";
 import {
   acceptStill,
   fileDrawnFrame,
@@ -365,18 +359,15 @@ import {
 import { hostedReaderDestination, hostedUploadConfirmed, hostedUploadToken, prepareHostedClip, type HostedVoiceSlots } from "./voice/hosted.js";
 import { deleteVoice } from "./voice/library.js";
 import { atomicWriteFile, serializeFileMutation } from "./world/atomic.js";
-import { BibleStaleError, readBible, restoreBible, saveBible } from "./world/bible.js";
+import { restoreBible, saveBible } from "./world/bible.js";
 import { changesForEntity } from "./world/change-writer.js";
 import { classify, CommitPlanError, MEDIA_HAS_VIDEO_SCHEMA_VERSION } from "./world/commit.js";
 import { describeCoordinatorError } from "./errors/user-message.js";
-import { MarkdownFile } from "./world/text-files.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
 import { WorldOpenError, scanWorld } from "./world/scan.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
-import { chapterDraftingBrief } from "./world-chat/chapter-brief.js";
 import type { ArkeExportReadRecord } from "./world-chat/target-reads.js";
-import { worldChatContextExists, worldChatSubjectExists } from "./world-chat/context-validation.js";
-
+import { worldChatContextExists } from "./world-chat/context-validation.js";
 import { imageFormatOf, verifyArtifact } from "./queue/verify.js";
 import { readContainedImageReferences, readContainedVideoReferences } from "./world/reference-files.js";
 import { sampleWorldAvailable } from "./world/sample-world.js";
@@ -488,25 +479,18 @@ import { rejectPoint, returnToRail, savePoint, wrapUp, WrapUpError } from "./wor
 import { materialiseDuplicateChoice } from "./world-chat/materialise.js";
 import { recoverConversations } from "./world-chat/recovery.js";
 import { recoverWrapUps } from "./world-chat/wrapup-recovery.js";
-import { cleanTitle, namingBrief, titleFrom } from "./world-chat/title.js";
-import { describeEntryContext } from "./world-chat/entry-context.js";
-import { budgetFor, currentLookContext } from "./world-chat/context.js";
+import { cleanTitle, namingBrief } from "./world-chat/title.js";
 import { discoverConversations } from "./world-chat/discover.js";
 import { recordResolution, sendBack } from "./world-chat/resolution.js";
 import { WorldChatStore, conversationDir } from "./world-chat/store.js";
 import { WorldChatRunner } from "./world-chat/run.js";
 import { WorldChatRunnerCache } from "./world-chat/runner-cache.js";
-import { QueryLeaseRegistry } from "./world-chat/lease.js";
-import { WorldChatRetrieval } from "./world-chat/retrieval.js";
 import {
   AttachmentError,
   CHAT_ATTACHMENT_EXTENSIONS,
   refuseUnreadable,
   WorldChatAttachmentStore,
-  MAX_TEXT_PER_RUN_CHARS,
 } from "./world-chat/attachments.js";
-import { planFor } from "./world-chat/check-plan.js";
-import { createRunScratch, removeRunScratch } from "./world-chat/run-scratch.js";
 import { projectWorkspace } from "./world-chat/project.js";
 import {
   ConversationActionLifecycle,
@@ -516,11 +500,9 @@ import {
   type ConversationActionLifecycleOptions,
 } from "./arke-actions/lifecycle.js";
 import {
-  prepareWorldChatActions,
   worldChatActionAdapters,
   type WorldChatActionAdapterDeps,
 } from "./world-chat/actions.js";
-import { makeConversationSummariser } from "./world-chat/summarisation.js";
 import { blockingDependencies, explainBlocked, routeFor as mediaRouteFor } from "./world-chat/media.js";
 import { contradictionCandidates, refsForCanon, refsForSheet, ripplesForCanonEntry, searchCanon } from "./index-db/queries.js";
 import {
@@ -5289,57 +5271,9 @@ export class Coordinator {
       case "world-chat-send": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
-        const service = new WorldChatService(store.dir);
-        const log = new WorldChatStore(conversationDir(store.dir, msg.conversationId));
-        if (!(await log.readMeta())) return;
-        const currentConversation = await service.load(msg.conversationId);
-        const entryContext = currentConversation?.entryContext ?? { kind: "world" as const };
-        const contextExists = entryContext.kind === "attachment"
-          ? currentConversation?.attachments.some((attachment) => attachment.id === entryContext.attachmentId) === true
-          : worldChatContextExists(store.getBundle(), entryContext);
-        if (
-          !currentConversation ||
-          !contextExists ||
-          msg.subject !== undefined &&
-          !worldChatSubjectExists(store.getBundle(), entryContext, msg.subject)
-        ) return;
-
-        /**
-         * A conversation is named by the first thing said in it.
-         *
-         * It is created before anyone knows what it is about, so it starts as "New conversation";
-         * leaving it there would give somebody a list of identical rows. The opening sentence is
-         * what they would have called it anyway, so it goes on the row now — synchronously, before
-         * anything is waited on, so the row is never blank and never the placeholder.
-         *
-         * Then the harness is asked for the name a person would have given the same message, and
-         * that replaces the cut sentence when it arrives (`nameConversation`). Ordered this way
-         * on purpose: the generated title is a promotion on top of something that already works,
-         * so a harness that is down, slow or unhelpful costs nothing at all.
-         */
-        const before = await log.read();
-        const isFirst = !before.events.some((e) => e.event.type === "turn.started");
-        const cutTitle = isFirst ? titleFrom(msg.text) : null;
-        if (cutTitle !== null) {
-          await service.rename(msg.conversationId, cutTitle).catch(() => {});
-        }
-
-        const runner = this.worldChatRunner(store, msg.conversationId);
-        // The screen shows the message and the spinner as soon as the turn starts, so the
-        // snapshot is pushed before the model is waited on rather than after.
-        const inFlight = runner.send(
-          log,
-          msg.conversationId,
-          msg.text,
-          msg.attachmentIds,
-          msg.subject,
-          msg.modelId,
-          msg.replyOnly === true,
-        );
-        // Started after the turn it names, so the person's own turn has first claim on the
-        // harness, and awaited last, so naming a row never delays the reply.
-        const naming =
-          cutTitle === null ? null : this.nameConversation(store, msg.conversationId, msg.text, cutTitle);
+        const started = await this.conversationAuthoring(store).send(msg);
+        if (!started) return;
+        const { completion: inFlight, naming } = started;
         // The title may have just changed, and the screen shows the message immediately.
         await this.refreshConversations(store);
         await this.openWorldChat(store, msg.conversationId);
@@ -5351,17 +5285,14 @@ export class Coordinator {
           await this.refreshConversations(store);
           await this.openWorldChat(store, msg.conversationId);
         }
-        void service;
         return;
       }
       case "world-chat-retry-turn": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
-        const log = new WorldChatStore(conversationDir(store.dir, msg.conversationId));
-        if (!(await log.readMeta())) return;
-
-        const runner = this.worldChatRunner(store, msg.conversationId);
-        const inFlight = runner.retry(log, msg.conversationId, msg.turnId);
+        const started = await this.conversationAuthoring(store).retry(msg.conversationId, msg.turnId);
+        if (!started) return;
+        const inFlight = started.completion;
         // The spinner replaces the failure notice immediately, so pressing it looks like it worked.
         await this.openWorldChat(store, msg.conversationId);
         await inFlight;
@@ -5723,10 +5654,7 @@ export class Coordinator {
       case "world-chat-cancel": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
-        const loaded = await store.ownedWrite(() => new WorldChatService(store.dir).load(msg.conversationId));
-        if (this.worldChatRunner(store, msg.conversationId).cancel(msg.conversationId) && loaded?.entryContext?.kind === "production-setup") {
-          await productionSetups(store).stop(msg.conversationId);
-        }
+        await this.conversationAuthoring(store).cancel(msg.conversationId);
         return;
       }
       case "world-chat-create": {
@@ -7577,7 +7505,7 @@ export class Coordinator {
         }
         let chapterId: string;
         try {
-          chapterId = await createChapter(store, msg.productionId, { title: msg.title, order: msg.order });
+          chapterId = await new ProseAuthoringService(store).create(msg.productionId, { title: msg.title, order: msg.order });
         } catch (err) {
           answer({ disposition: "failed", reason: describeCoordinatorError(err) });
           return;
@@ -7621,29 +7549,7 @@ export class Coordinator {
           return;
         }
         try {
-          const chapter = await openChapter(store, msg.productionId, msg.chapterId);
-          // The lines come with the chapter (turn 129, SPEC-012 R-42); the bundle's summary
-          // carries only the record's stamp and placings.
-          const continuity = await readContinuity(store, msg.productionId, chapter.file);
-          // The cast of lines too (turn 130), for the same reason: the bundle has only its stamp.
-          const voices = await readVoices(store, msg.productionId, chapter.file);
-          // The audiobook record too (turn 146): the takes come with the chapter, the bundle its
-          // stamp — and which of its takes are gone from the shelf, since the window cannot
-          // look at the media (codex on PR 1183).
-          const audiobook = await readAudiobook(store, msg.productionId, chapter.file);
-          const present = audiobook === null || audiobook === "unreadable" ? null : await presentTakes(store, audiobook);
-          const audiobookMissing = present === null || audiobook === null || audiobook === "unreadable" ? [] : [...new Set(Object.values(audiobook.takes).map((take) => take.artifactId))].filter((id) => !present.has(id));
-          answer({
-            disposition: "opened",
-            body: chapter.body,
-            version: chapter.version,
-            hash: chapter.hash,
-            versions: chapter.versions,
-            ...(continuity === "unreadable" ? { continuityUnreadable: true as const } : continuity !== null ? { continuity } : {}),
-            ...(voices === "unreadable" ? { voicesUnreadable: true as const } : voices !== null ? { voices } : {}),
-            ...(audiobook === "unreadable" ? { audiobookUnreadable: true as const } : audiobook !== null ? { audiobook } : {}),
-            ...(audiobookMissing.length > 0 ? { audiobookMissing } : {}),
-          });
+          answer({ disposition: "opened", ...await new ProseAuthoringService(store).open(msg.productionId, msg.chapterId) });
         } catch (err) {
           answer({ disposition: "failed", reason: describeCoordinatorError(err) });
         }
@@ -7676,8 +7582,7 @@ export class Coordinator {
         // rule, turn 126's second binding): the refusal is answered by name when the sender
         // asked to hear back, and the refreshed snapshot below says what the record is now.
         try {
-          const saving = saveChapter(
-            store,
+          const saving = new ProseAuthoringService(store).save(
             msg.productionId,
             msg.chapterFile,
             msg.body,
@@ -7697,7 +7602,7 @@ export class Coordinator {
       case "restore-chapter-retired": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
-        await setChapterRetired(store, msg.productionId, msg.chapterFile, msg.kind === "retire-chapter");
+        await new ProseAuthoringService(store).retire(msg.productionId, msg.chapterFile, msg.kind === "retire-chapter");
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -7706,14 +7611,14 @@ export class Coordinator {
         // save, world-checked like every other chapter write, and the snapshot says what landed.
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
-        await editChapterPlan(store, msg.productionId, msg.chapterFile, msg.changes).catch(() => {});
+        await new ProseAuthoringService(store).editPlan(msg.productionId, msg.chapterFile, msg.changes).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "restore-chapter": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
-        await restoreChapter(store, msg.productionId, msg.chapterFile, msg.version).catch(() => {});
+        await new ProseAuthoringService(store).restore(msg.productionId, msg.chapterFile, msg.version).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -15816,6 +15721,13 @@ export class Coordinator {
     return new ConversationActionLifecycle(this.conversationActionLifecycleOptions(store));
   }
 
+  private conversationAuthoring(store: WorldStore): ConversationAuthoringService {
+    return new ConversationAuthoringService(store, {
+      runner: (id) => this.worldChatRunner(store, id),
+      name: (id, text, title) => this.nameConversation(store, id, text, title),
+    });
+  }
+
   private worldChatRunner(store: WorldStore, conversationId: ConversationId): WorldChatRunner {
     /*
      * Cached per world, but only while it is the same open store.
@@ -15834,295 +15746,30 @@ export class Coordinator {
     const existing = this.worldChatRunners.runnerFor(store.worldId, store, conversationId);
     if (existing) return existing;
 
-    const leases = new QueryLeaseRegistry(() => this.opts.provider.openStore?.()?.worldId ?? null);
-    const attachments = new WorldChatAttachmentStore(store.dir);
-    const receipts = new Map<string, WorldChatCheckReceipt[]>();
-    /** Which token each run is reading under, so releasing it stops resolving at the server too. */
-    const tokenByRun = new Map<string, string>();
-    const retrieval = new WorldChatRetrieval({
-      leases,
-      // The same window the prompt is budgeted from: a run that may be handed a whole library
-      // should be able to page back through it as well.
-      textBudgetChars: () =>
-        Math.max(MAX_TEXT_PER_RUN_CHARS, budgetFor(this.opts.adapter?.knownInputTokenLimit?.() ?? undefined)),
-      getBundle: () => this.opts.provider.openStore?.()?.getBundle() ?? null,
-      getIndex: () => this.opts.provider.openStore?.()?.getIndex() ?? null,
-      getPlans: (productionId) => listPlans(store, productionId),
-      getJobs: () => this.jobQueue?.listJobs() ?? [],
-      getExports: () => this.durableExportReads(store.worldId),
-      getChapterBody: async (productionId, chapterFile) => {
-        try {
-          const raw = await readFile(
-            toExtendedLength(join(store.dir, "productions", productionId, "chapters", `${chapterFile}.md`)),
-            "utf8",
-          );
-          return MarkdownFile.parse(raw).body;
-        } catch {
-          return null;
-        }
-      },
-      // The record beside a chapter (turn 129), for get_chapter: the bundle has only its stamp.
-      getChapterContinuity: async (productionId, chapterFile) => {
-        const record = await readContinuity(store, productionId, chapterFile);
-        return record === "unreadable" ? null : record;
-      },
-      getChapterVoices: async (productionId, chapterFile) => {
-        const record = await readVoices(store, productionId, chapterFile);
-        return record === "unreadable" ? null : record;
-      },
-      attachments,
-      findAttachment: async (lease, id) => {
-        const loaded = await new WorldChatService(store.dir).load(lease.conversationId);
-        return loaded?.attachments.find((a) => a.id === id) ?? null;
-      },
-      // Off unless the person turned it on. Read at call time, not at construction, so switching
-      // it off takes effect on the next tool call rather than the next restart.
-      /*
-       * Asked at the moment the tool runs, not mirrored from somewhere else (driven 2026-08-22).
-       *
-       * This used to read a field that was only ever assigned inside `skillForPurpose` — a method
-       * the World Chat path never calls — so the answer was `false` for the whole life of the
-       * process no matter what the settings said. Turning research on and asking again changed
-       * nothing, and the refusal named a setting that was already on.
-       */
+    const runner = new WorldChatRunner(conversationRunDependencies(store, {
+      adapter: this.opts.adapter ?? null,
+      sessionInput: this.sessionInput,
+      scratchRoot: this.opts.appRoot ?? tmpdir(),
+      summaryDir: this.opts.appRoot ? join(this.opts.appRoot, ".summary") : `${this.opts.changeLogPath}.summary`,
+      activeStore: () => this.opts.provider.openStore?.() ?? null,
+      query: this.worldQuery,
+      actions: this.conversationActionLifecycle(store),
+      jobs: () => this.jobQueue?.listJobs() ?? [],
+      exports: () => this.durableExportReads(store.worldId),
+      actionExports: () => [...this.exportReads.values()].filter((entry) => entry.worldId === store.worldId),
       researchAllowed: async () => {
         const settings = this.appSettings ? await this.appSettings.load().catch(() => null) : null;
         return settings?.research.web === true;
       },
-    });
-
-    const actionLifecycle = this.conversationActionLifecycle(store);
-    const summarise = this.opts.adapter?.readiness().ready
-      ? makeConversationSummariser(
-          this.opts.adapter,
-          this.sessionInput,
-          this.opts.appRoot ? join(this.opts.appRoot, ".summary") : `${this.opts.changeLogPath}.summary`,
-        )
-      : undefined;
-    const runner = new WorldChatRunner({
-      closingSignal: store.closingSignal,
-      adapter: this.opts.adapter ?? null,
-      /*
-       * A look can only be rewritten by something that can read it — see currentLookContext.
-       *
-       * From this runner's own world, not from whichever store happens to be open: a turn can
-       * still be reading when somebody opens another world, and the provider's selection would
-       * have followed them. That would put world B's look, verbatim, in world A's prompt — one
-       * world's content shown while talking about another, and an invitation to rewrite A's look
-       * into B's words.
-       */
-      worldContext: () => currentLookContext(store.getBundle().artDirection),
-      // A turn held to a passage or to a reply fences this runner's own world first (codex on
-      // PR 903), for the same reason as the look above: never whichever world is open now.
-      raiseSchemaBoundary: (version) => store.raiseSchemaBoundary(version, "world-chat-constraints"),
-      // Read at the same instant as the look above, and from the same world, so what a draft
-      // says it was based on is what the model was actually shown — the words as well as the
-      // number, because a derived look is v1 however often the world's tone is edited under it.
-      artDirectionLook: () => {
-        const look = store.getBundle().artDirection;
-        return { version: look.version, description: look.description };
-      },
-      /*
-       * Straight off the disk, and from this runner's own world for the same reason as above.
-       *
-       * Not from the bundle: `bible.md` is the one authored file the app expects to be edited
-       * outside it, and the Studio's own edits land mid-conversation. The bundle is refreshed by
-       * a rescan, and a turn assembled between an edit and that rescan would show the model a
-       * bible one version behind the one it is about to be checked against — which fails the
-       * write it was meant to enable.
-       */
-      bible: async () => {
-        const current = await readBible(store.dir);
-        return { version: current.version, text: current.text };
-      },
-      validateBibleEdits: async ({ edits, baseVersion }) => {
-        const current = await readBible(store.dir);
-        if (current.version !== baseVersion) throw new BibleStaleError(baseVersion, current.version);
-        applyBibleEdits(current.text, edits);
-      },
-      validateEditorRequests: async ({ conversationId, entryContext, requests }) => {
-        await stageEditorRequests(store, { conversationId, entryContext, requests, now: store.now(), dryRun: true });
-      },
-      sceneVersion: (context) => sceneVersionFor(store, context),
-      validateSceneEdits: ({ entryContext, edits, baseVersion }) =>
-        applySceneEdits(store, { entryContext, edits, baseVersion, dryRun: true }),
-      prepareActions: (turn) => prepareWorldChatActions(store, actionLifecycle, turn, {
-        getExports: () => [...this.exportReads.values()].filter((entry) => entry.worldId === store.worldId),
-      }),
-      bindActions: async (actions) => {
-        // Every binding appends to the same conversation, and proposal staging is also guarded per
-        // conversation. Run them in turn; any failed intent remains durable for startup recovery.
-        for (const action of actions) {
-          await actionLifecycle.bindIntent(action.intent, action.payload).catch(() => {});
-        }
-      },
-      ...(summarise ? { summarise } : {}),
-      prepare: async ({ conversationId, runId, attachmentIds }) => {
-        const lease = leases.mint({
-          worldId: store.worldId,
-          conversationId,
-          runId,
-          allowedAttachmentIds: attachmentIds,
-        });
-        /*
-         * Started, not merely asked for.
-         *
-         * `leasedUrl` answers null until the server is up, and this was the only authoring flow
-         * that never started it — so whether World Chat could look anything up depended on
-         * whether some other flow had happened to start it first. Open a world and go straight to
-         * a conversation and the agent had no arke-world tools at all: it could not find the sheet
-         * behind a name, so it could not target an edit at one, and it said so rather than
-         * guessing an id. Every other caller starts the server before taking a URL from it.
-         */
-        await this.worldQuery.start().catch(() => {
-          /* a turn without retrieval is worse than one with it, and better than no turn at all */
-        });
-        /*
-         * The run's reads, reachable (#70 §8.2).
-         *
-         * Registering the lease with the server is what makes the URL below answer anything: it
-         * routes `/mcp/<token>` to this conversation's retrieval and records every receipt against
-         * the run that earned it. Without it the address was live and every request 404'd.
-         */
-        this.worldQuery.attachLease(lease.token, {
-          retrieval,
-          onReceipt: (receipt) => {
-            const seen = receipts.get(receipt.runId) ?? [];
-            receipts.set(receipt.runId, [...seen, receipt]);
-          },
-        });
-        tokenByRun.set(runId, lease.token);
-        // Without a configured app root — a dev or test coordinator — the OS temp directory
-        // still satisfies what §8.2 actually requires: somewhere outside the world.
-        const cwd = await createRunScratch({ appRoot: this.opts.appRoot ?? tmpdir(), conversationId, runId });
-        return { cwd, leaseToken: lease.token };
-      },
-      release: async ({ conversationId, runId }) => {
-        const token = tokenByRun.get(runId);
-        if (token) {
-          this.worldQuery.detachLease(token);
-          tokenByRun.delete(runId);
-        }
-        leases.revokeRun(runId);
-        retrieval.forgetRun(runId);
-        receipts.delete(runId);
-        await removeRunScratch(this.opts.appRoot ?? tmpdir(), conversationId, runId);
-      },
-      chapterBrief: ({ leaseToken, productionId, chapterId, budgetChars }) => chapterDraftingBrief(
-        store.getBundle(), productionId, chapterId, async (tool, args) => {
-          const outcome = await retrieval.call(leaseToken, tool, args);
-          const seen = receipts.get(outcome.receipt.runId) ?? [];
-          receipts.set(outcome.receipt.runId, [...seen, outcome.receipt]);
-          return outcome;
-        }, budgetChars,
-      ),
-      setupBrief: ({ leaseToken, draft, budgetChars }) => productionSetupBrief(
-        store.getBundle(), draft, async (tool, args) => {
-          const outcome = await retrieval.call(leaseToken, tool, args);
-          const seen = receipts.get(outcome.receipt.runId) ?? [];
-          receipts.set(outcome.receipt.runId, [...seen, outcome.receipt]);
-          return outcome;
-        }, budgetChars,
-      ),
-      receiptsFor: (runId) => receipts.get(runId) ?? [],
       resolveLanguageModel: (input) => this.languageModelFor(input.entryContext, input.modelId),
-      createSession: ({ cwd, runId, model }) => {
-        const token = tokenByRun.get(runId);
-        const url = token ? (this.worldQuery.leasedUrl(token) ?? undefined) : undefined;
-        return createPreparedSession(
-          this.opts.adapter!,
-          cwd,
-          this.sessionInput({
-            ...(url ? { worldQueryUrl: url } : {}),
-            ...(model !== undefined ? { model } : {}),
-          }),
-          { purpose: "world-chat", agent: "world-builder" },
-        );
-      },
-      runCheckPlan: async ({ draft, leaseToken }) => {
-        const plan = planFor(draft);
-        const produced: WorldChatCheckReceipt[] = [];
-        /*
-         * A call that failed is a check that could not run, not a check nobody asked for.
-         *
-         * Swallowing the error dropped its receipt, so the category stayed merely *missing* — and
-         * missing reads as `partial`, which readiness refuses. The receipt the error carries makes
-         * it `unavailable` instead, which deliberately does not block: a broken index is shown to
-         * the person and left to their judgement rather than turned into a broken app (§9.4).
-         */
-        const run = async (tool: string, args: Record<string, unknown>) => {
-          try {
-            produced.push((await retrieval.call(leaseToken, tool, args)).receipt);
-          } catch (err) {
-            const receipt = (err as { receipt?: WorldChatCheckReceipt }).receipt;
-            if (receipt) produced.push(receipt);
-          }
-        };
-
-        for (const [category, query] of Object.entries(plan.queries)) {
-          await run(category === "sheet-search" ? "search_sheets" : "search_canon", { query });
-        }
-        for (const target of plan.targets) {
-          // Only the world's own entities have a tool to read them. The production records a
-          // subject may now name (turn 95's fix) have no `get_entry`/`get_sheet` equivalent, so
-          // they are skipped exactly as `world` is rather than reaching a nonexistent call.
-          if (target.kind !== "canon" && target.kind !== "sheet") continue;
-          const id = target.kind === "canon" ? target.entryId : target.sheetId;
-          await run(target.kind === "canon" ? "get_entry" : "get_sheet", { id });
-          /*
-           * What else touches this entity, when the plan says the answer depends on it.
-           *
-           * `related-read` is required by `relationship.change` and satisfied by exactly one tool,
-           * which nothing here ever called — so every relationship a conversation described stayed
-           * `partial` for ever and could not be written. The classification existed, was proposed,
-           * reached the rail, and refused with "there is not enough behind it to write it down".
-           */
-          if (plan.required.includes("related-read")) await run("related", { id });
-        }
-        // This runner's own world, for the same reason worldContext reads from it: the provider's
-        // selection follows whatever the person opened while the turn was still running.
-        return { receipts: produced, canonRevision: store.getBundle().meta.canonRevision };
-      },
-      describeEntry: (context) => describeEntryContext(context, store.getBundle()),
       onTurnFailed: ({ conversationId, runId, cause }) => {
-        void this.appLog?.append({
-          level: "warn",
-          event: "world-chat.turn-failed",
-          conversationId,
-          runId,
-          cause,
-        });
-        // The same marking the authoring wiring does (SPEC-030 R-13): the recovery screen the
-        // failure message points at must already say which connection needs sign-in.
+        void this.appLog?.append({ level: "warn", event: "world-chat.turn-failed", conversationId, runId, cause });
         if (isAuthShapedFailure(cause)) void this.vendorAuth.noteAuthFailure().catch(() => {});
       },
       onProgress: (conversationId, label) => {
-        this.emit({
-          at: new Date().toISOString(),
-          type: "world-chat.progress",
-          conversationId,
-          label,
-        });
+        this.emit({ at: new Date().toISOString(), type: "world-chat.progress", conversationId, label });
       },
-      evidenceSources: (messages) => ({
-        messages,
-        bundle: store.getBundle(),
-        // The runner supplies these from the fold: it knows which attachments this run was
-        // given, and reading every attachment a conversation ever had would be both wasteful
-        // and wrong.
-        attachments: [],
-        attachmentText: new Map(),
-      }),
-      readAttachmentText: async (attachment) => {
-        // Whole. What reaches the model is the prompt budget's decision, taken against the
-        // window with every other section in view — not a per-document cut made before it.
-        return attachments.readWholeText(attachment).catch(() => null);
-      },
-      // Whatever this run pulled through get_attachment_text, so a passage the model paged to is
-      // quotable even though the prompt only ever inlined the document's opening.
-      attachmentReadsFor: (runId) => retrieval.textReadBy(runId),
-      now: () => new Date().toISOString(),
-    });
+    }));
 
     this.worldChatRunners.remember(store.worldId, store, runner);
     return runner;

@@ -172,3 +172,18 @@ operations and story dashboard tests named above.
 ## Embeddable engine foundation
 
 The [engine guide](engine.md) maps the initial extracted services and remaining Coordinator responsibilities. Public entry points are `packages/engine/src/index.ts` and `src/local.ts`; implementation lives in coordinator `src/application/`. Desktop/dev construct through `createStudioCoordinator`. World ownership and acceptance still belong to the existing store and gate; the dispatcher accepts a supplied durable job journal.
+
+### Internal authoring services (epic #1182)
+
+Coordinator's `world-chat-send`, `world-chat-retry-turn` and `world-chat-cancel` handlers call
+`application/conversation-authoring.ts`. `application/conversation-runs.ts` assembles the
+existing `world-chat/run.ts` state machine from explicit host dependencies; Coordinator retains
+the runner cache, host lifecycle and UI notifications. Chapter create/open/save/plan/restore/
+retirement handlers call `application/prose-authoring.ts`, which reuses `productions/ops.ts` and
+loads derived continuity, voice and audiobook records for the workspace. Pending chapter saves
+are still drained by Coordinator before shutdown.
+
+Start with coordinator `test/application/conversation-authoring.test.ts`, then the existing
+`test/world-chat/`, `test/productions/chapters.test.ts` and `test/gate/chapter-review.test.ts`.
+These local services are not yet exports of the public engine package; see the [engine guide](engine.md#coordinator-extraction-toward-a-server-host-epic-1182)
+for the remaining host and persistence boundaries.
