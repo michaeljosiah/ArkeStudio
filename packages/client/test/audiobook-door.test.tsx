@@ -299,7 +299,27 @@ describe("the Audiobook door (turn 146)", () => {
     assert.match(q(m, '[data-testid="audiobook-note"]')?.textContent ?? "", /stopped · the takes made stand/);
     assert.ok(!all(m, "button").some((b) => b.textContent === "Stop"), "a late replay does not flip a stopped book back to reading");
     assert.ok(q(m, '[data-testid="read-book"]'), "the press is back, for the rest");
-    assert.equal(m.sent.filter((message) => message.kind === "open-audiobook").length, asksBefore + 1, "the run's end asks the door once");
+    assert.equal(m.sent.filter((message) => message.kind === "open-audiobook").length, asksBefore + 2, "the chapter's end asks the door once, and the book's end once more");
+    // While a chapter is read, the seg holds: a reading switched under a run would leave every take it files stale.
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, chapterId: "neap", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H9", toMake: 26, blocks: 26 }));
+    assert.ok(all(m, '[aria-label="Reading"] button').every((b) => (b as HTMLButtonElement).disabled), "Narrator · Cast held while a chapter is read");
+    // The run tried the four blocks not made (R-16): three made, one flagged.
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.finished", ...ids, chapterId: "neap", outcome: "read", made: 3, flagged: 1 }));
+    assert.ok(all(m, '[aria-label="Reading"] button').every((b) => !(b as HTMLButtonElement).disabled));
+    // A chapter the book has read shows as its run ended until the door answers: the row's
+    // counts plus the run's.
+    assert.match(all(m, '[data-testid="audiobook-row"]')[1]?.textContent ?? "", /25 of 26 made · 1 flagged/);
+  });
+
+  it("a window that joins a run going elsewhere still asks for the door it has none of (codex on PR 1187)", async () => {
+    const m = await mount(inkbound());
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound" };
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", chapters: 9, blocks: 120, done: 2, replayed: true }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, chapterId: "neap", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 26, blocks: 26, made: 3, replayed: true }));
+    assert.ok(m.sent.some((message) => message.kind === "open-audiobook"), "asked though a chapter is being read: this window holds no door");
+    await answerDoor(m, door("narrator"));
+    assert.match(text(m), /reading… 2 of 9 chapters/);
+    assert.equal(all(m, '[data-testid="audiobook-row"]').length, 3);
   });
 
   it("a window that rejoins is told how far the book and its chapter are (codex on PR 1187)", async () => {

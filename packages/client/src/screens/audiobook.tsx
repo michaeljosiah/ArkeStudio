@@ -60,15 +60,25 @@ export function useAudiobookDoorStamp(
 }
 
 /**
- * Whether the book, or any chapter of it, is being read in this window's sight. While it is,
- * the rows read the runs' own counts and the door is not asked again for every take that
- * lands — each ask prepares the whole book, and a long book read block by block would ask
- * once a block (codex on PR 1187); it is asked once more when the run ends.
+ * Whether the book, or any chapter of it, is being read in this window's sight: the seg holds
+ * while it is, since a reading switched under a run would leave every take the run files
+ * stale (codex on PR 1187).
  */
 export function useAudiobookReading(worldId: string | undefined, prodId: string | undefined): boolean {
-  const runs = useAudiobookRuns();
   const book = useAudiobookBooks()[prodId ?? ""];
-  if (book?.state === "reading") return true;
+  const chapter = useChapterReading(worldId, prodId);
+  return book?.state === "reading" || chapter;
+}
+
+/**
+ * Whether a chapter of the production is being read. While one is, the rows read the run's
+ * own counts and the door is not asked again for every take that lands — each ask prepares
+ * the whole book, and a long book read block by block would ask once a block (codex on PR
+ * 1187); it is asked once more as each chapter's run ends, so a book read chapter by chapter
+ * shows each chapter read as it is.
+ */
+export function useChapterReading(worldId: string | undefined, prodId: string | undefined): boolean {
+  const runs = useAudiobookRuns();
   return Object.entries(runs).some(([key, run]) => key.startsWith(`${worldId}/${prodId}/`) && run.state === "reading");
 }
 
@@ -114,22 +124,28 @@ export function AudiobookScreen() {
   const records = useAudiobookRecords();
   const stamp = useAudiobookDoorStamp(production, world);
   const running = useAudiobookReading(worldId, prodId);
+  const chapterReading = useChapterReading(worldId, prodId);
   // The chapters' runs ending and the record's writes move the rows: asked again once they
-  // land — not once a block while a run is going, when the rows read the run's own counts.
+  // land — not once a block while a chapter is being read, when the rows read the run's own
+  // counts — and always when this window holds no door yet, as one that joins a run going
+  // elsewhere does not (codex on PR 1187).
   const runStamp = JSON.stringify(Object.entries(runs).filter(([key]) => key.startsWith(`${worldId}/${prodId}/`)).map(([key, run]) => [key, run.state]));
   const recordStamp = Object.entries(records)
     .filter(([key]) => key.startsWith(`${worldId}/${prodId}/`))
     .map(([, held]) => held.seq)
     .join(",");
   useEffect(() => {
-    if (!worldId || !prodId || connection !== "open" || running) return;
+    if (!worldId || !prodId || connection !== "open" || (chapterReading && door !== null)) return;
     openAudiobook(worldId, prodId);
-  }, [worldId, prodId, connection, running, stamp, runStamp, recordStamp, book?.state, note?.seq]);
+  }, [worldId, prodId, connection, chapterReading, door === null, stamp, runStamp, recordStamp, book?.state, note?.seq]);
   // The catalogue says who can speak now (turn 130's rule): asked for once the door is open,
-  // so a voice gone unavailable moves the voices row and the price.
+  // and again as the engines come and go — the local runtime, the studio's ComfyUI — so a
+  // voice gone unavailable, or back, moves the voices row and the price (codex on PR 1187).
+  const app = useStore().state?.app;
+  const engines = JSON.stringify([app?.runtime ?? null, app?.comfyui ?? null]);
   useEffect(() => {
     if (connection === "open") requestVoiceCatalogue(worldId);
-  }, [connection, worldId]);
+  }, [connection, worldId, engines]);
 
   // A cloned voice's recording leaving the machine (SPEC-022, SPEC-046): asked under the book's request, the answer kept for the price's answer and spent with the run (codex on PR 1180).
   const [upload, setUpload] = useState<{ destination: string; token: string; notice?: string } | null>(null);
@@ -237,10 +253,10 @@ export function AudiobookScreen() {
       </div>
       <div className="fy-abdoor__voices" data-testid="audiobook-voices">
         <nav className="fy-seg" aria-label="Reading">
-          <button type="button" className={cx("fy-seg__item", reading === "narrator" && "fy-seg__item--active")} disabled={readingNow} onClick={() => setAudiobookReading(worldId, prodId, "narrator")}>
+          <button type="button" className={cx("fy-seg__item", reading === "narrator" && "fy-seg__item--active")} disabled={running} onClick={() => setAudiobookReading(worldId, prodId, "narrator")}>
             Narrator
           </button>
-          <button type="button" className={cx("fy-seg__item", reading === "cast" && "fy-seg__item--active")} disabled={readingNow} onClick={() => setAudiobookReading(worldId, prodId, "cast")}>
+          <button type="button" className={cx("fy-seg__item", reading === "cast" && "fy-seg__item--active")} disabled={running} onClick={() => setAudiobookReading(worldId, prodId, "cast")}>
             Cast
           </button>
         </nav>
@@ -276,8 +292,14 @@ export function AudiobookScreen() {
         <div className="fy-ledger" data-testid="audiobook-rows">
           {rows.map((row) => {
             const run = runs[`${worldId}/${prodId}/${row.chapterId}`];
-            const label = run?.state === "reading" ? `reading… ${run.made} of ${run.toMake}` : audiobookRowLabel(row);
-            const warn = row.castTrouble !== undefined || (row.flagged > 0 && run?.state !== "reading");
+            // A chapter the book has read while the door's answer is still the old one reads
+            // as its run ended (codex on PR 1187): every block not made was tried (R-16), so
+            // the made and the flagged are the row's plus the run's; the time waits for the door.
+            const ended = run !== undefined && run.state !== "reading" && run.state !== "priced" && run.made + run.flagged > 0 && !row.planned && row.castTrouble === undefined
+              ? { ...row, made: Math.min(row.total, row.made + run.made), stale: 0, flagged: run.flagged, notMade: Math.max(0, row.total - row.made - run.made - run.flagged), seconds: null }
+              : row;
+            const label = run?.state === "reading" ? `reading… ${run.made} of ${run.toMake}` : audiobookRowLabel(ended);
+            const warn = row.castTrouble !== undefined || (ended.flagged > 0 && run?.state !== "reading");
             return (
               <button
                 key={row.chapterId}

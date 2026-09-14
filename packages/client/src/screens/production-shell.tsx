@@ -72,7 +72,7 @@ import {
   useStore,
 } from "../lib/store.js";
 import { audiobookDoorLine } from "@arke-studio/contracts";
-import { useAudiobookDoorStamp, useAudiobookReading } from "./audiobook.js";
+import { useAudiobookDoorStamp, useChapterReading } from "./audiobook.js";
 import { takeMediaPath, type TakeEpisodeOption, episodeLabel, filterTakeEpisodes } from "./production-generate.js";
 import { useNewScene, useNewChapter, NewSceneContext, useSharedNewScene, NewChapterContext, ChapterPlan, ChapterOutlineRow } from "./production-story.js";
 import { exportViewFor } from "./editor-export.js";
@@ -335,11 +335,11 @@ export function ProductionLayout() {
   const audiobookDoor = useAudiobookDoors()[prodId ?? ""]?.door ?? null;
   const shellConnection = useStore().connection;
   const audiobookStamp = useAudiobookDoorStamp(production, world);
-  const audiobookReading = useAudiobookReading(worldId, prodId);
+  const audiobookReading = useChapterReading(worldId, prodId);
   useEffect(() => {
-    if (!worldId || !prodId || !isStory || shellConnection !== "open" || audiobookReading) return;
+    if (!worldId || !prodId || !isStory || shellConnection !== "open" || (audiobookReading && audiobookDoor !== null)) return;
     openAudiobook(worldId, prodId);
-  }, [worldId, prodId, isStory, shellConnection, audiobookReading, audiobookStamp]);
+  }, [worldId, prodId, isStory, shellConnection, audiobookReading, audiobookDoor === null, audiobookStamp]);
   const audiobookCount = audiobookDoor === null ? "—" : (() => {
     const line = audiobookDoorLine(audiobookDoor.rows);
     return `${line.read}/${line.withProse}`;

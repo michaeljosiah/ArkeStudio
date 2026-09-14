@@ -1357,12 +1357,15 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
           return wav();
         },
       },
-      async ({ events, send, replay }) => {
+      async ({ events, send, replay, bundle }) => {
         const run = readBook(send);
         while (calls < 1) await new Promise((resolve) => setTimeout(resolve, 5));
         await read(send, { chapterFile: "02-the-same-ink" });
         const refused = events.filter((e): e is Finished => e.type === "audiobook.finished");
         assert.deepEqual(refused.map((e) => [e.chapterId, e.outcome, e.reason]), [["the-same-ink", "refused", "the book is being read"]], "the press is answered, and the book is not disturbed");
+        // The reading holds while the book is read, whichever window asks (codex on PR 1187).
+        await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "cast" });
+        assert.notEqual(bundle().productions.find((p) => p.meta.id === LEDGER)?.audiobook?.reading, "cast", "a switch under the run is refused");
         // A window that rejoins now is told how far the book and the chapter are, not `0 of 0`.
         const replayedBook = replay().find((e): e is BookStarted => e.type === "audiobook.book-started");
         assert.deepEqual([replayedBook?.chapters, replayedBook?.done, replayedBook?.replayed], [2, 0, true]);

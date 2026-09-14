@@ -11728,6 +11728,15 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
+        // The reading holds while the book or a chapter of it is being read (codex on PR
+        // 1187): switched under a run, every take the run files from then on would be stale
+        // under the new reading — the paid ones too — so the seg is held in the window and
+        // the switch refused here, whichever window asks.
+        const reading = this.readingBooks.has(`${msg.worldId}/${msg.productionId}`) || [...this.readingAudiobooks.values()].some((run) => run.worldId === msg.worldId && run.productionId === msg.productionId);
+        if (reading) {
+          void this.appLog?.append({ kind: "audiobook.reading-refused", production: msg.productionId, message: "the book is being read" });
+          return;
+        }
         try {
           await writeAudiobookBook(store, msg.productionId, { schemaVersion: 1, reading: msg.reading });
           // The reading switched moves blocks between the narrator and the cast's voices (R-13):
