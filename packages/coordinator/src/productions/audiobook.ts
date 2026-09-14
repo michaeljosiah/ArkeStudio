@@ -30,6 +30,7 @@ import {
 } from "@arke-studio/contracts";
 import { audioHash } from "../audio/qc.js";
 import { clipFor } from "../voice/library.js";
+import { splitForSpeech } from "../voice/service.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -142,7 +143,7 @@ export async function writeAudiobook(store: WorldStore, productionId: string, ch
  * again. So each writer reads the record afresh under the lane, merges its own change into it,
  * and writes; nothing is written from a snapshot.
  */
-const recordLanes = new Map<string, Promise<unknown>>();
+const recordLanes = new Map<string, Promise<void>>();
 export async function updateAudiobook(
   store: WorldStore,
   productionId: string,
@@ -160,8 +161,19 @@ export async function updateAudiobook(
     await writeAudiobook(store, productionId, chapter.file, next);
     return next;
   });
-  recordLanes.set(key, turn.catch(() => undefined));
-  return turn;
+  // The lane holds nothing once its last turn settles (codex on PR 1186), as the file
+  // mutation serialiser does: a long session across many chapters would otherwise keep a
+  // settled promise, and the record it resolved to, for every chapter ever written.
+  const tail = turn.then(
+    () => undefined,
+    () => undefined,
+  );
+  recordLanes.set(key, tail);
+  try {
+    return await turn;
+  } finally {
+    if (recordLanes.get(key) === tail) recordLanes.delete(key);
+  }
 }
 
 /**
@@ -235,13 +247,62 @@ export function readerLanguage(clonedVoices: readonly ClonedVoice[], reader: Aud
   return source.kind === "cloned" ? source.voice.language : undefined;
 }
 
-export type DirectionCheck = { ok: true; mapped: ReturnType<typeof mapCadence> } | { ok: false; reason: string };
+export type DirectionCheck = { ok: true; mapped: ReturnType<typeof mapCadence>; parts: string[] } | { ok: false; reason: string };
+
+/**
+ * A directed block in parts, each rendered on its own (R-5; codex on PR 1186): the words are
+ * split at sentence ends within the reader's cap, each piece carries the cues that fall in it
+ * at their positions in the piece, and each is mapped whole, so the delivery's tag and the
+ * phrase's lead every part rather than the first alone. A piece whose rendering still runs
+ * over the cap — the tags are extra ink — is split again at half its size until it fits, so the
+ * bound holds after rendering for any authored text. An emphasis whose span a seam would cut
+ * cannot be carried by either piece: the direction is refused in one clause rather than sent
+ * with the emphasis silently gone and its name on the take. One part for a block within the cap.
+ */
+export function renderParts(text: string, plan: CadencePlan, model: ManifestModel, language: string | undefined, cap: number | undefined): string[] {
+  const whole = normalizeSpeechText(text);
+  const render = (piece: string, cues: CadencePlan["cues"]): string =>
+    mapCadence(piece, directionSourceHash(piece), { ...plan, sourceTextHash: directionSourceHash(piece), cues }, model, language).providerText;
+  if (cap === undefined) return [render(whole, plan.cues)];
+  const out: string[] = [];
+  const place = (piece: string, from: number, max: number): void => {
+    const to = from + piece.length;
+    for (const cue of plan.cues) {
+      if (cue.kind === "emphasis" && ((cue.span.from < from && cue.span.to > from) || (cue.span.from < to && cue.span.to > to))) {
+        throw new Error(`emphasis “${cue.span.text}” straddles the cap's split · shorten the span`);
+      }
+    }
+    const cues = plan.cues
+      .filter((cue) => (cue.kind === "emphasis" ? cue.span.from >= from && cue.span.to <= to : cue.at >= from && cue.at <= to))
+      .map((cue) => (cue.kind === "emphasis" ? { ...cue, span: { ...cue.span, from: cue.span.from - from, to: cue.span.to - from } } : { ...cue, at: cue.at - from }));
+    const rendered = render(piece, cues);
+    if (rendered.length <= cap || max <= 1 || piece.length <= 1) {
+      out.push(rendered);
+      return;
+    }
+    let offset = 0;
+    for (const smaller of splitForSpeech(piece, Math.max(1, Math.floor(max / 2)))) {
+      const at = piece.indexOf(smaller, offset);
+      place(smaller, from + Math.max(at, 0), Math.floor(max / 2));
+      offset = Math.max(at, 0) + smaller.length;
+    }
+  };
+  const pieces = whole.length > cap ? splitForSpeech(whole, cap) : [whole];
+  let offset = 0;
+  for (const piece of pieces) {
+    const at = whole.indexOf(piece, offset);
+    place(piece, Math.max(at, 0), cap);
+    offset = Math.max(at, 0) + piece.length;
+  }
+  return out;
+}
 
 /**
  * A direction held to its block and its reader (R-9): the plan must map with every control
  * `mapped` or `best-effort` — a delivery the row lacks, a phrase it takes nowhere, a cue it
  * cannot place is refused in one clause, before a run could only flag it. Every cue is checked
- * by `mapCadence` against the words it names.
+ * by `mapCadence` against the words it names, and the parts the reader's cap makes of the block
+ * are rendered here too, so a cue no part can carry is refused where the direction is written.
  */
 export function checkDirection(text: string, plan: CadencePlan, model: ManifestModel, language?: string): DirectionCheck {
   let mapped: ReturnType<typeof mapCadence>;
@@ -255,7 +316,13 @@ export function checkDirection(text: string, plan: CadencePlan, model: ManifestM
     const name = refused.control === "delivery" ? plan.delivery : refused.control;
     return { ok: false, reason: `${name} · ${model.displayName} ${refused.reason ?? `takes no ${refused.control}`}`.replace(/\.$/, "") };
   }
-  return { ok: true, mapped };
+  let parts: string[];
+  try {
+    parts = renderParts(text, plan, model, language, model.limits.maxPromptChars);
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+  return { ok: true, mapped, parts };
 }
 
 /**

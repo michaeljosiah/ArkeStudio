@@ -2892,6 +2892,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       chapterFile: z.string().min(1),
       block: z.string().min(1),
       direction: AudiobookDirectionInputSchema.nullable(),
+      /** Echoed on the record's answer, so a window can tell its own write's answer from another's. */
+      requestId: UlidSchema.optional(),
     })
     .strict(),
   z.object({ kind: z.literal("direct-chapter"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
@@ -2903,6 +2905,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       productionId: SlugSchema,
       chapterFile: z.string().min(1),
+      /** The card's acceptance, named, so its answer — the record, or the refusal — is this one's and no other write's (codex on PR 1186). */
+      requestId: UlidSchema,
       /** The prose the directions were made for: a chapter that moved since refuses them. */
       hash: z.string().min(1),
       directions: z.record(z.string().min(1), AudiobookDirectionInputSchema),

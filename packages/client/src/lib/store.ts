@@ -267,6 +267,8 @@ interface StoreState {
     string,
     {
       state: "directing" | "directed" | "accepting" | "accepted" | "stopped" | "unavailable" | "failed";
+      /** The acceptance's own name while it is on its way, so only its answer moves the card. */
+      requestId?: string;
       directed: number;
       dropped: number;
       summary?: string;
@@ -1527,13 +1529,16 @@ function handleFrame(json: string): void {
       const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
       const seq = (audiobookRecords[key]?.seq ?? 0) + 1;
       audiobookRecords = { ...audiobookRecords, [key]: { seq, ...(event.record !== undefined ? { record: event.record } : {}), ...(event.refused !== undefined ? { refused: event.refused } : {}) } };
+      // Only its own answer (codex on PR 1186): another window's block write lands as the same
+      // event, and would otherwise mark the card accepted while the acceptance itself is still
+      // on its way to a refusal it could no longer show.
       const card = direction[key];
-      if (card?.state === "accepting") {
+      if (card?.state === "accepting" && event.requestId !== undefined && event.requestId === card.requestId) {
         direction = {
           ...direction,
           [key]: event.record !== undefined
-            ? { ...card, state: "accepted", dropped: card.dropped + (event.dropped ?? 0), proposed: undefined }
-            : { ...card, state: "directed", ...(event.refused !== undefined ? { reason: event.refused } : {}) },
+            ? { ...card, state: "accepted", dropped: card.dropped + (event.dropped ?? 0), proposed: undefined, requestId: undefined }
+            : { ...card, state: "directed", requestId: undefined, ...(event.refused !== undefined ? { reason: event.refused } : {}) },
         };
       }
     } else if (event.type === "direction.started") {
@@ -4307,8 +4312,9 @@ export function acceptDirection(worldId: string, productionId: string, chapterId
   const key = `${worldId}/${productionId}/${chapterId}`;
   const card = current.direction[key];
   if (card === undefined || card.state !== "directed" || card.proposed === undefined || card.hash === undefined) return false;
-  const sent = send({ kind: "accept-direction", worldId, productionId, chapterFile, hash: card.hash, directions: card.proposed });
-  if (sent) emitChange({ ...current, direction: { ...current.direction, [key]: { ...card, state: "accepting" } } });
+  const requestId = ulid();
+  const sent = send({ kind: "accept-direction", worldId, productionId, chapterFile, requestId, hash: card.hash, directions: card.proposed });
+  if (sent) emitChange({ ...current, direction: { ...current.direction, [key]: { ...card, state: "accepting", requestId } } });
   return sent;
 }
 

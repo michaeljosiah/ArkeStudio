@@ -161,29 +161,37 @@ export interface CadenceControlSupport { status: "mapped" | "best-effort" | "uns
  * What a reader does with each control before any plan is written (SPEC-047 R-9): the block
  * panel says it on the control, one clause, and a derivation drops what a reader declares
  * `unsupported` rather than accepting a direction the read could only flag (R-10). Read off the
- * row alone, so it agrees with `mapCadence` on every plan that reaches it.
+ * row and the line's language, so it agrees with `mapCadence` on every plan that reaches it: a
+ * paren row's tags are English words that go in only when the line is stated English (SPEC-046
+ * R-23), so on such a row a tag-carried delivery, a pause, a breath and a tagged phrase are
+ * `unsupported` for a line not stated English — a preset's, a French clone's — rather than
+ * offered and then refused (codex on PR 1186).
  */
-export function cadenceSupport(model: Pick<ManifestModel, "cadence">): {
+export function cadenceSupport(model: Pick<ManifestModel, "cadence">, language?: string): {
   deliveries: Record<string, CadenceControlSupport>; speed: CadenceControlSupport;
   pause: CadenceControlSupport; breath: CadenceControlSupport; emphasis: CadenceControlSupport; phrase: CadenceControlSupport;
 } {
   const cap = model.cadence;
+  const tagged = cap?.tagSyntax !== "paren" || language === "en";
+  const UNTAGGED = "tags need a line stated English";
   const reads = cap?.deliveries.join(" · ") ?? "";
   const deliveries: Record<string, CadenceControlSupport> = {};
   for (const delivery of DeliverySchema.options) {
     const mapping = cap?.deliveries.includes(delivery) ? cap.deliveryMappings[delivery] : undefined;
     deliveries[delivery] = mapping === undefined ? { status: "unsupported", reason: reads === "" ? "no delivery" : `reads ${reads}` }
       : mapping.instruction !== undefined ? { status: "best-effort", method: "instruction" }
-      : mapping.tag !== undefined ? { status: "best-effort", method: "tag" } : { status: "mapped", method: "settings" };
+      : mapping.tag !== undefined ? (tagged ? { status: "best-effort", method: "tag" } : { status: "unsupported", reason: UNTAGGED })
+      : { status: "mapped", method: "settings" };
   }
   const cue = (declared: string | undefined, name: string): CadenceControlSupport =>
     declared === undefined || declared === "unsupported" ? { status: "unsupported", reason: `no ${name}` }
-      : { status: "best-effort", method: declared === "best-effort-capitalization" ? "capitals" : "tag" };
+      : declared === "best-effort-capitalization" ? { status: "best-effort", method: "capitals" }
+      : tagged ? { status: "best-effort", method: "tag" } : { status: "unsupported", reason: UNTAGGED };
   return {
     deliveries,
     speed: cap?.speed ? { status: "mapped", method: `${cap.speed.min}–${cap.speed.max}` } : { status: "unsupported", reason: "no speed" },
     pause: cue(cap?.pause, "pause"), breath: cue(cap?.breath, "breath"), emphasis: cue(cap?.emphasis, "emphasis"),
-    phrase: cap?.phrase === "best-effort-tag" ? { status: "best-effort", method: "tag" }
+    phrase: cap?.phrase === "best-effort-tag" ? (tagged ? { status: "best-effort", method: "tag" } : { status: "unsupported", reason: UNTAGGED })
       : cap?.phrase === "best-effort-instruction" ? { status: "best-effort", method: "instruction" } : { status: "unsupported", reason: "no phrase" },
   };
 }

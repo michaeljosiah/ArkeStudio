@@ -1102,6 +1102,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       worldId: UlidSchema,
       productionId: SlugSchema,
       chapterId: SlugSchema,
+      /** The write this answers, when it was named: a card's acceptance takes only its own answer. */
+      requestId: UlidSchema.optional(),
       record: ChapterAudiobookSchema.optional(),
       /** Why the write was refused — a control the reader cannot express, prose that moved — when it was. */
       refused: z.string().min(1).optional(),

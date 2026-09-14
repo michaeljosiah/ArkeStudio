@@ -18,9 +18,9 @@ import {
 } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
-import { audiobookBookPath, audiobookPath, directionPlan, legacyAudiobookPath } from "../../src/productions/audiobook.js";
+import { audiobookBookPath, audiobookPath, checkDirection, directionPlan, legacyAudiobookPath, renderParts } from "../../src/productions/audiobook.js";
 import { verifyDirections, type DirectionDeriver, type DirectableBlock } from "../../src/productions/audiobook-direction.js";
-import { priorPartJob, renderParts, type PartIdentity } from "../../src/productions/audiobook-run.js";
+import { priorPartJob, type PartIdentity } from "../../src/productions/audiobook-run.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
@@ -115,6 +115,8 @@ async function withHarness(
     durations?: () => number;
     /** The direction model seam: what the model would say of a chapter's blocks. */
     direction?: DirectionDeriver;
+    /** The manifest's voice rows, when a test needs a narrator the manifest lacks. */
+    models?: readonly ManifestModel[];
   },
   run: (h: {
     root: string;
@@ -153,7 +155,7 @@ async function withHarness(
     appRoot: root,
     cipher: devCipher(),
     credentialsFileName: "credentials.dev.dat",
-    manifest: { manifestVersion: 1, generated: "2026-09-14", models: [ELEVEN, KOKORO, FISH] },
+    manifest: { manifestVersion: 1, generated: "2026-09-14", models: [...(input.models ?? [ELEVEN, KOKORO, FISH])] },
     observeEvent: (event) => events.push(event),
     ...(input.durations ? { mediaProbe: { durationSec: async () => input.durations!(), info: async () => ({ durationSec: input.durations!(), hasAudio: true }) } } : {}),
     ...(input.direction ? { directionDeriver: input.direction } : {}),
@@ -332,6 +334,35 @@ describe("a direction held to its block and its reader (SPEC-047 R-10)", () => {
     assert.ok(parts.some((part) => part.includes("NOBODY")), "the emphasis fell in the part that holds its words");
     assert.equal(parts.join(" ").split("[long pause]").length, 2, "and once only");
     assert.deepEqual(renderParts("Short.", plan, V3, undefined, 5000).length, 1, "one part within the cap");
+    // An emphasis a seam would cut is refused, never sent with the emphasis silently gone.
+    const across = directionPlan(text, { delivery: "measured", speed: 1, cues: [{ kind: "emphasis", span: { from: text.indexOf("tide."), to: text.indexOf("They") + 4, text: "tide. They" }, level: "strong" }] });
+    assert.throws(() => renderParts(text, across, V3, undefined, 60), /straddles the cap's split/, "a cap whose seam falls between the two sentences the span joins");
+    assert.equal(checkDirection(text, across, { ...V3, limits: { ...V3.limits, maxPromptChars: 60 } }).ok, false, "and the check that guards every write says so");
+    assert.equal(checkDirection(text, across, V3).ok, true, "within a cap that holds both sentences the span is whole");
+  });
+
+  it("a paren row's tags are offered only for a line stated English, in the prompt and the verification (codex on PR 1186)", () => {
+    const BREEZE: ManifestModel = {
+      id: "breeze-tts-2",
+      provider: "breezeblue",
+      capability: "voice-tts",
+      displayName: "Breeze TTS 2",
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+      limits: { maxPromptChars: 1000, audioFormat: "wav" },
+      pricing: { kind: "perCharacter", microUsdPerCharacter: 40 },
+      cadence: { deliveries: ["measured", "whispered"], speed: { min: 0.7, max: 1.2 }, pause: "best-effort-audio-tag", emphasis: "unsupported", breath: "best-effort-audio-tag", outputTimestamps: "none", tagSyntax: "paren",
+        phrase: "best-effort-instruction", deliveryMappings: { measured: { settings: {}, instruction: "Read it evenly." }, whispered: { settings: {}, tag: "whispers" } } },
+    };
+    const french: DirectableBlock = { key: "p1.0", text: line.text, reader: ANNA, model: BREEZE, language: "fr" };
+    const english: DirectableBlock = { ...french, language: "en" };
+    const raw = { blocks: [{ block: "p1.0", delivery: "whispered", cues: [{ kind: "pause" as const, after: "works,”", length: "long" as const }] }] };
+    const fr = verifyDirections(raw, [french]);
+    assert.deepEqual(fr.proposed["p1.0"], { delivery: "measured", speed: 1, cues: [] }, "a French line on a paren row: no tag goes in, so no whisper and no pause");
+    assert.equal(fr.dropped, 2);
+    const en = verifyDirections(raw, [english]);
+    assert.equal(en.proposed["p1.0"]?.delivery, "whispered");
+    assert.equal(en.proposed["p1.0"]?.cues.length, 1);
+    assert.equal(en.dropped, 0);
   });
 
   it("a speed outside the plan's range is dropped to one, and a plan that cannot place its cues keeps the rest", () => {
@@ -726,7 +757,7 @@ describe("the audiobook run (turn 146)", () => {
         assert.ok(!existsSync(recordPath(worldDir)), "directing writes nothing");
 
         // Accepted whole: the record holds a direction per block, and nothing else changed.
-        await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", hash: directed.hash!, directions: directed.proposed! });
+        await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H4", hash: directed.hash!, directions: directed.proposed! });
         type Recorded = Extract<DomainEvent, { type: "audiobook.record" }>;
         const accepted = events.find((e): e is Recorded => e.type === "audiobook.record");
         assert.ok(accepted?.record, accepted?.refused);
@@ -772,7 +803,7 @@ describe("the audiobook run (turn 146)", () => {
         // Cleared: the direction goes; and a card made for other prose is refused.
         await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p0.0", direction: null });
         assert.equal((await readRecord(worldDir)).direction["p0.0"], undefined);
-        await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", hash: `sha256:${"0".repeat(64)}`, directions: {} });
+        await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H4", hash: `sha256:${"0".repeat(64)}`, directions: {} });
         const moved = events.filter((e): e is Recorded => e.type === "audiobook.record").at(-1)!;
         assert.equal(moved.refused, "the prose moved · direct again");
       },
@@ -790,7 +821,7 @@ describe("the audiobook run (turn 146)", () => {
         await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap" });
         type Directed = Extract<DomainEvent, { type: "direction.finished" }>;
         const directed = events.find((e): e is Directed => e.type === "direction.finished")!;
-        await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", hash: directed.hash!, directions: directed.proposed! });
+        await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H4", hash: directed.hash!, directions: directed.proposed! });
         assert.equal(await schema(), 24, "a direction on the record fences the world past the build that cannot read it");
         assert.ok("direction" in (JSON.parse(await readFile(recordPath(worldDir), "utf8")) as Record<string, unknown>));
       },
@@ -872,6 +903,22 @@ describe("the audiobook run (turn 146)", () => {
       },
     ));
 
+  it("without the narrator's model in the manifest a direction is refused, never a card of nothing (codex on PR 1186)", () =>
+    withHarness(
+      { models: [ELEVEN, FISH], direction: async (input) => ({ blocks: input.blocks.map((block) => ({ block: block.key, delivery: "measured" })) }) },
+      async ({ events, send }) => {
+        await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap" });
+        type Directed = Extract<DomainEvent, { type: "direction.finished" }>;
+        const directed = events.find((e): e is Directed => e.type === "direction.finished");
+        assert.equal(directed?.outcome, "failed");
+        assert.equal(directed?.reason, "the narrator's voice model is not in the manifest");
+        assert.equal(directed?.proposed, undefined);
+        await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "title", direction: { delivery: "measured", speed: 1, cues: [] } });
+        type Recorded = Extract<DomainEvent, { type: "audiobook.record" }>;
+        assert.equal(events.find((e): e is Recorded => e.type === "audiobook.record")?.refused, "the narrator's voice model is not in the manifest");
+      },
+    ));
+
   it("a proposal is held for a window that connects until it is accepted or discarded (R-10)", () =>
     withHarness(
       { direction: async (input) => ({ blocks: input.blocks.map((block) => ({ block: block.key, delivery: "measured" })) }) },
@@ -888,7 +935,7 @@ describe("the audiobook run (turn 146)", () => {
         await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap" });
         const again = events.filter((e): e is Directed => e.type === "direction.finished").at(-1)!;
         assert.ok(replay().some((e) => e.type === "direction.finished"));
-        await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", hash: again.hash!, directions: again.proposed! });
+        await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H4", hash: again.hash!, directions: again.proposed! });
         assert.equal(replay().some((e) => e.type === "direction.finished"), false, "accepted, it is the record's now");
       },
     ));

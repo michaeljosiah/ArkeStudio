@@ -17,6 +17,7 @@ import {
   legacyVoiceModel,
   narratorFor,
   supportsVoiceUse,
+  voiceSourceFor,
   type ArtifactSidecar,
   type AudiobookBlock,
   type AudiobookBlockState,
@@ -41,6 +42,7 @@ import {
   dismissDirection,
   readAudiobookBlocks,
   readAudiobookChapter,
+  requestVoiceCatalogue,
   setAudiobookBlock,
   stopAudiobook,
   subscribeVoiceUploadConfirmations,
@@ -87,7 +89,16 @@ export interface BlockRow {
   /** What the margin says: `title`, `narrator`, or the speaker's name. */
   mark: string;
   markWarn: boolean;
+  /** The reader the block is meant for — what its state is judged against (R-13). */
   assigned: AudiobookReader;
+  /**
+   * The reader that will actually speak it, by the run's rule (R-12; codex on PR 1186): the
+   * assigned voice when the catalogue says it can speak now, the narrator otherwise — so the
+   * panel offers what that reader can do, and prices what it costs.
+   */
+  speaker: AudiobookReader;
+  /** The cloned voice's recording language, the line's (issue 1163); none for a catalogue voice. */
+  language?: string;
   artifact: ArtifactSidecar | null;
 }
 
@@ -153,9 +164,25 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       }
       const take = recordOrNull?.takes[block.key];
       const artifact = take === undefined ? null : (world?.artifacts.find((candidate) => candidate.id === take.artifactId) ?? null);
-      return { block, state: audiobookBlockState(block, recordOrNull, assigned, hasArtifact), mark, markWarn, assigned, artifact };
+      // Who will speak (codex on PR 1186): the assigned voice only when the manifest knows its
+      // model and the catalogue, once asked, says it can speak now and its clone is still in
+      // the library; the narrator otherwise, whose row the panel then reads. A catalogue not
+      // yet answered leaves the assignment standing rather than guessing at a fallback.
+      const sameAsNarrator = assigned.provider === narrator.provider && assigned.model === narrator.model && assigned.voiceId === narrator.voiceId;
+      const listed = catalogue === null ? undefined : catalogue.find((candidate) => candidate.provider === assigned.provider && candidate.model === assigned.model && candidate.voiceId === assigned.voiceId);
+      const source = voiceSourceFor(world?.clonedVoices ?? [], assigned.provider, assigned.model, assigned.voiceId);
+      const cannot = !sameAsNarrator && (modelOf(assigned) === null || (catalogue !== null && (listed === undefined || listed.unavailableReason !== undefined)) || source.kind === "missing-clone");
+      const speaker = cannot ? narrator : assigned;
+      const spokenSource = voiceSourceFor(world?.clonedVoices ?? [], speaker.provider, speaker.model, speaker.voiceId);
+      const language = spokenSource.kind === "cloned" ? spokenSource.voice.language : undefined;
+      return { block, state: audiobookBlockState(block, recordOrNull, assigned, hasArtifact), mark, markWarn, assigned, speaker, ...(language !== undefined ? { language } : {}), artifact };
     });
-  }, [derived.blocks, narrator, reading, world, recordOrNull, hasArtifact]);
+  }, [derived.blocks, narrator, reading, world, recordOrNull, hasArtifact, catalogue, modelOf]);
+  // The catalogue says who can speak now (turn 130's rule): asked for once the view is open,
+  // so the panel's readers are the run's.
+  useEffect(() => {
+    if (connection === "open") requestVoiceCatalogue(worldId);
+  }, [connection, worldId]);
   const counts = useMemo(
     () => audiobookCounts(derived.blocks, recordOrNull, (block) => rows.find((row) => row.block.key === block.key)?.assigned ?? narrator, hasArtifact),
     [derived.blocks, recordOrNull, rows, narrator, hasArtifact],
@@ -166,8 +193,8 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const estimate = useMemo(
     () =>
       rows.reduce((sum, row) => {
-        if (row.state === "made" || row.assigned.provider === "kokoro") return sum;
-        const model = modelOf(row.assigned);
+        if (row.state === "made" || row.speaker.provider === "kokoro") return sum;
+        const model = modelOf(row.speaker);
         return model === null ? sum : sum + estimateMicroUsd(model, { characters: billableCharacters(model, row.block.text) });
       }, 0),
     [rows, modelOf],
@@ -534,7 +561,16 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
 }) {
   const row = rows.find((candidate) => candidate.block.key === selected) ?? null;
   const [phraseDraft, setPhraseDraft] = useState<string | null>(null);
-  useEffect(() => setPhraseDraft(null), [selected]);
+  // Edits compose while the record's answer is on its way (codex on PR 1186): a delivery then
+  // a speed pressed before the first write answers would otherwise both be built from the same
+  // record, the second undoing the first. The pending plan is this panel's until the record
+  // answers — with its own word, or with a refusal — or another block is chosen.
+  const [pending, setPending] = useState<{ key: string; plan: AudiobookDirectionInput | null } | null>(null);
+  useEffect(() => {
+    setPhraseDraft(null);
+    setPending(null);
+  }, [selected]);
+  useEffect(() => setPending(null), [record?.updatedAt, refused]);
   if (row === null) return null;
   const take = record?.takes[row.block.key];
   const flag = record?.flags[row.block.key];
@@ -550,25 +586,31 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
         artifact.retiredAt === undefined,
     )
     .sort((a, b) => (a.created < b.created ? 1 : -1));
-  const readerLabel = `${row.assigned.label ?? row.assigned.voiceId} · ${row.assigned.provider}`;
-  // The direction that stands for these words, and what this reader does with each control
-  // (R-9): read off the reader's row, so a delivery the row lacks is struck with the reason
-  // before it is pressed, and the plan's own report says how each control went.
-  const model = modelOf(row.assigned);
-  const support = model === null ? null : cadenceSupport(model);
+  const readerLabel = `${row.speaker.label ?? row.speaker.voiceId} · ${row.speaker.provider}${row.speaker !== row.assigned ? " · stands in" : ""}`;
+  // The direction that stands for these words, and what the reader that will speak does with
+  // each control (R-9): read off that reader's row and the line's language, so a delivery the
+  // row lacks is struck with the reason before it is pressed, and the plan's own report says
+  // how each control went.
+  const model = modelOf(row.speaker);
+  const support = model === null ? null : cadenceSupport(model, row.language);
   const direction = audiobookDirectionFor(record, row.block);
+  const held = pending !== null && pending.key === row.block.key ? pending.plan : direction === null ? null : { delivery: direction.plan.delivery, speed: direction.plan.speed, cues: direction.plan.cues, ...(direction.plan.phrase !== undefined ? { phrase: direction.plan.phrase } : {}) };
   const plan = direction?.plan ?? null;
   const text = normalizeSpeechText(row.block.text);
   const report = (() => {
-    if (plan === null || model === null) return null;
+    if (plan === null || model === null || pending !== null) return null;
     try {
-      return reportLine(plan, mapCadence(row.block.text, plan.sourceTextHash, plan, model).controls);
+      return reportLine(plan, mapCadence(row.block.text, plan.sourceTextHash, plan, model, row.language).controls);
     } catch {
       return null;
     }
   })();
-  const base: AudiobookDirectionInput = plan === null ? { delivery: "measured", speed: 1, cues: [] } : { delivery: plan.delivery, speed: plan.speed, cues: plan.cues, ...(plan.phrase !== undefined ? { phrase: plan.phrase } : {}) };
-  const write = (next: Partial<AudiobookDirectionInput>) => onSetDirection(row.block.key, { ...base, ...next });
+  const base: AudiobookDirectionInput = held ?? { delivery: "measured", speed: 1, cues: [] };
+  const send = (next: AudiobookDirectionInput | null) => {
+    setPending({ key: row.block.key, plan: next });
+    onSetDirection(row.block.key, next);
+  };
+  const write = (next: Partial<AudiobookDirectionInput>) => send({ ...base, ...next });
   const addCue = (kind: "pause" | "breath" | "emphasis") => {
     const span = selectedSpan(blockHost(row.block.key), row.block.text);
     if (span === null || (kind === "emphasis" && span.to <= span.from)) return;
@@ -586,10 +628,10 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
     if (phraseDraft === null) return;
     const trimmed = phraseDraft.trim();
     setPhraseDraft(null);
-    if (trimmed === (plan?.phrase ?? "")) return;
+    if (trimmed === (base.phrase ?? "")) return;
     if (trimmed === "") {
       const { phrase: _gone, ...rest } = base;
-      onSetDirection(row.block.key, rest);
+      send(rest);
     } else write({ phrase: trimmed.slice(0, 60) });
   };
   const seg = (name: string, items: readonly { key: string; label: string; active: boolean; off: boolean; title: string; press: () => void }[]) => (
@@ -635,14 +677,14 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
             "Delivery",
             AUDIOBOOK_DELIVERIES.map((delivery) => {
               const word = support?.deliveries[delivery];
-              const active = plan?.delivery === delivery;
+              const active = held?.delivery === delivery;
               return {
                 key: delivery,
                 label: delivery,
                 active,
                 off: word === undefined || word.status === "unsupported",
                 title: word === undefined ? "no reader" : supportWord(word),
-                press: () => (active ? onSetDirection(row.block.key, null) : write({ delivery })),
+                press: () => (active ? send(null) : write({ delivery })),
               };
             }),
           )}
@@ -652,7 +694,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
           {phraseSupported ? (
             <input
               className="fy-ab__phrase fy-mono"
-              value={phraseDraft ?? plan?.phrase ?? ""}
+              value={phraseDraft ?? held?.phrase ?? ""}
               maxLength={60}
               aria-label="Phrase"
               onChange={(event) => setPhraseDraft(event.target.value)}
@@ -674,7 +716,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
               return {
                 key: String(speed),
                 label: speed.toFixed(1),
-                active: (plan?.speed ?? 1) === speed,
+                active: (held?.speed ?? 1) === speed,
                 off,
                 title: off ? (support === null ? "no reader" : supportWord(support.speed)) : `${speed.toFixed(1)}×`,
                 press: () => write({ speed }),
@@ -757,7 +799,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
           <div className="fy-ab__again">
             <Button variant="ghost" onClick={() => onMakeAgain(row.block.key)} data-testid="audiobook-make-again">
               Make again
-              {model !== null && row.assigned.provider !== "kokoro" ? ` · ${formatMicroUsd(estimateMicroUsd(model, { characters: billableCharacters(model, row.block.text) }))}` : ""}
+              {model !== null && row.speaker.provider !== "kokoro" ? ` · ${formatMicroUsd(estimateMicroUsd(model, { characters: billableCharacters(model, row.block.text) }))}` : ""}
             </Button>
           </div>
         )}

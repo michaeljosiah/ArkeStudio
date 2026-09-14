@@ -148,7 +148,7 @@ export function verifyDirections(raw: RawDirection, blocks: readonly DirectableB
       continue;
     }
     seen.add(block.key);
-    const support = cadenceSupport(block.model);
+    const support = cadenceSupport(block.model, block.language);
     const readable = AUDIOBOOK_DELIVERIES.filter((delivery) => support.deliveries[delivery]?.status !== "unsupported");
     if (readable.length === 0) {
       dropped += 1;
@@ -241,23 +241,21 @@ export async function directableBlocks(
   productionId: string,
   chapterId: string,
   input: DirectionRoom,
-): Promise<{ chapter: { id: string; file: string; title: string; version: number; hash: string }; blocks: DirectableBlock[]; planned: PlannedBlock[]; skipped: number }> {
+): Promise<{ chapter: { id: string; file: string; title: string; version: number; hash: string }; blocks: DirectableBlock[]; planned: PlannedBlock[] }> {
   const plan = await planAudiobook(store, productionId, chapterId, { narrator: input.narrator });
   const refusal = castRefusal(plan);
   if (refusal !== null) throw new Error(refusal);
   const clonedVoices = store.getBundle().clonedVoices ?? [];
   const blocks: DirectableBlock[] = [];
-  let skipped = 0;
   for (const planned of plan.blocks) {
     const speaking = await effectiveReader(store, planned.assigned, input);
-    if (speaking === null) {
-      skipped += 1;
-      continue;
-    }
+    // The narrator's own model missing is the run's `unavailable`, not a block dropped (codex
+    // on PR 1186): a card of nothing, accepted, would clear the chapter's directions.
+    if (speaking === null) throw new Error("the narrator's voice model is not in the manifest");
     const language = readerLanguage(clonedVoices, speaking.reader);
     blocks.push({ key: planned.block.key, text: planned.block.text, reader: speaking.reader, model: speaking.model, ...(language !== undefined ? { language } : {}) });
   }
-  return { chapter: plan.chapter, blocks, planned: plan.blocks, skipped };
+  return { chapter: plan.chapter, blocks, planned: plan.blocks };
 }
 
 /**
@@ -273,7 +271,7 @@ export async function directChapter(
   input: DirectionRoom,
   signal?: AbortSignal,
 ): Promise<DirectedChapter> {
-  const { chapter, blocks, skipped } = await directableBlocks(store, productionId, chapterId, input);
+  const { chapter, blocks } = await directableBlocks(store, productionId, chapterId, input);
   const passes: DirectableBlock[][] = [];
   let held: DirectableBlock[] = [];
   let length = 0;
@@ -289,7 +287,7 @@ export async function directChapter(
   if (held.length > 0) passes.push(held);
   const proposed: Record<string, AudiobookDirectionInput> = {};
   let directed = 0;
-  let dropped = skipped;
+  let dropped = 0;
   const summaries: string[] = [];
   for (const [index, pass] of passes.entries()) {
     if (signal?.aborted) throw new Error("stopped");
@@ -298,7 +296,7 @@ export async function directChapter(
         title: chapter.title,
         pass: { index: index + 1, of: passes.length },
         blocks: pass.map((block) => {
-          const support = cadenceSupport(block.model);
+          const support = cadenceSupport(block.model, block.language);
           return {
             key: block.key,
             text: normalizeSpeechText(block.text),

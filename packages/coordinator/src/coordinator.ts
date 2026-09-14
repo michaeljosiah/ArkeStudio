@@ -11456,7 +11456,7 @@ export class Coordinator {
           const { chapter: opened, blocks, planned } = await directableBlocks(store, msg.productionId, chapter.id, { narrator, models: this.opts.manifest?.models ?? [], catalogue });
           const block = blocks.find((candidate) => candidate.key === msg.block);
           if (block === undefined) {
-            this.emit({ at: at(), type: "audiobook.record", ...ids, refused: planned.some((p) => p.block.key === msg.block) ? "no reader for this block" : "that block is no longer in the chapter" });
+            this.emit({ at: at(), type: "audiobook.record", ...ids, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}), refused: "that block is no longer in the chapter" });
             return;
           }
           let direction: AudiobookDirection | null = null;
@@ -11464,17 +11464,17 @@ export class Coordinator {
             const plan = directionPlan(block.text, msg.direction);
             const check = checkDirection(block.text, plan, block.model, block.language);
             if (!check.ok) {
-              this.emit({ at: at(), type: "audiobook.record", ...ids, refused: check.reason });
+              this.emit({ at: at(), type: "audiobook.record", ...ids, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}), refused: check.reason });
               return;
             }
             direction = { textHash: audiobookTextHash(block.text), plan, at: store.now() };
           }
           const record = await writeBlockDirection(store, msg.productionId, opened, planned.map((p) => p.block), msg.block, direction);
           this.refreshIfStillOpen(store);
-          this.emit({ at: at(), type: "audiobook.record", ...ids, record });
+          this.emit({ at: at(), type: "audiobook.record", ...ids, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}), record });
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.direction-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
-          this.emit({ at: at(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(err) });
+          this.emit({ at: at(), type: "audiobook.record", ...ids, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}), refused: describeCoordinatorError(err) });
         }
         return;
       }
@@ -11561,15 +11561,15 @@ export class Coordinator {
           const { narrator, catalogue } = await this.audiobookNarrator(store, this.voiceService);
           const accepted = await acceptDirections(store, msg.productionId, chapter.id, { hash: msg.hash, directions: msg.directions }, { narrator, models: this.opts.manifest?.models ?? [], catalogue });
           if (accepted.outcome === "refused") {
-            this.emit({ at: at(), type: "audiobook.record", ...ids, refused: accepted.reason });
+            this.emit({ at: at(), type: "audiobook.record", ...ids, requestId: msg.requestId, refused: accepted.reason });
             return;
           }
           this.heldDirections.delete(`${msg.worldId}/${msg.productionId}/${chapter.file}`);
           this.refreshIfStillOpen(store);
-          this.emit({ at: at(), type: "audiobook.record", ...ids, record: accepted.record, dropped: accepted.dropped });
+          this.emit({ at: at(), type: "audiobook.record", ...ids, requestId: msg.requestId, record: accepted.record, dropped: accepted.dropped });
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.direction-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
-          this.emit({ at: at(), type: "audiobook.record", ...ids, refused: describeCoordinatorError(err) });
+          this.emit({ at: at(), type: "audiobook.record", ...ids, requestId: msg.requestId, refused: describeCoordinatorError(err) });
         }
         return;
       }

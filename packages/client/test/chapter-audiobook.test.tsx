@@ -535,14 +535,41 @@ describe("the Audiobook view (turn 146)", () => {
     assert.ok(accepted, "accepted whole");
     assert.equal(accepted.hash, HASH);
     assert.deepEqual(accepted.directions, proposed);
+    assert.ok(accepted.requestId, "the acceptance is named");
     assert.match(q(m, '[data-testid="direction-card"]')?.textContent ?? "", /accepting…/);
     const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells." };
     const written = record([], texts);
     written.direction = { title: directed(texts.title, "measured"), "p0.0": directed(texts["p0.0"], "urgent") };
-    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, record: { ...written, updatedAt: "2026-09-14T10:00:00.000Z" } }));
+    // Another window's block write answers first (codex on PR 1186): it is not this card's answer.
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H9", record: { ...written, updatedAt: "2026-09-14T09:30:00.000Z" } }));
+    assert.match(q(m, '[data-testid="direction-card"]')?.textContent ?? "", /accepting…/, "still on its way");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, requestId: accepted.requestId, record: { ...written, updatedAt: "2026-09-14T10:00:00.000Z" } }));
     assert.match(q(m, '[data-testid="direction-card"]')?.textContent ?? "", /✓ directed · chapter 02 · direction v4 · 2 blocks · 1 dropped/);
     assert.ok(all(m, ".fy-arke__prompt").some((b) => b.textContent === "Direct again"), "a direction stands, so the prompt is Direct again");
     assert.equal(all(m, ".fy-arke__prompt").some((b) => b.textContent === "Direct this chapter"), false);
+  });
+
+  it("edits compose before the record answers, and the panel reads the reader that will speak (codex on PR 1186)", async () => {
+    const m = await mount(voiced(inkbound("cast")));
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": "“You hear it too,”", "p1.1": "she said.", "p3.0": "Six, and the tide <br> not yet called." };
+    await answerOpen(m, { audiobook: record(Object.keys(texts), texts), voices: CAST });
+    // Two presses before the first answer: the second carries the first.
+    await act(async () => all(m, ".fy-ab__block")[1]!.click());
+    await act(async () => all(m, '[aria-label="Delivery"] button').find((b) => b.textContent === "urgent")!.click());
+    await act(async () => all(m, '[aria-label="Speed"] button').find((b) => b.textContent === "1.0")!.click());
+    const writes = m.sent.filter((message) => message.kind === "set-audiobook-block") as Extract<ClientMessage, { kind: "set-audiobook-block" }>[];
+    assert.equal(writes.length, 2);
+    assert.equal(writes[1]!.direction?.delivery, "urgent", "the speed press did not undo the delivery");
+    // Maren's line: her ElevenLabs voice is assigned, but the catalogue says it cannot speak now,
+    // so the panel reads Kokoro's row — whispered struck — and says who stands in.
+    await act(async () => __applyEventForTest({ at: AT, type: "voice.catalogue", worldId: FIXTURE_WORLD_ID, voices: [{ provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george", label: "George", attributes: [], local: true, canClone: false, usedBy: [] }] }));
+    await act(async () => all(m, ".fy-ab__block")[2]!.click());
+    const panel = q(m, '[data-testid="audiobook-direction"]')!;
+    const whispered = panel.querySelector('[aria-label="Delivery"] button:nth-child(2)') as HTMLButtonElement;
+    assert.equal(whispered.textContent, "whispered");
+    assert.ok(whispered.disabled, "Kokoro will speak this line, and Kokoro cannot whisper");
+    assert.match(q(m, '[data-testid="audiobook-block"]')?.textContent ?? "", /George · kokoro · stands in/);
+    assert.equal(all(m, ".fy-ab__block")[2]!.getAttribute("data-state"), "stale", "the state is judged against the voice the line is meant for, not the one that stands in");
   });
 
   it("Make again kept past a save still names its block, and so does the answer to its price (codex on PR 1186)", async () => {

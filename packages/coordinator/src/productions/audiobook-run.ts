@@ -8,7 +8,6 @@ import {
   audiobookTextHash,
   billableCharacters,
   estimateMicroUsd,
-  mapCadence,
   normalizeSpeechText,
   voiceFormatForModel,
   voiceSourceFor,
@@ -17,7 +16,6 @@ import {
   type AudiobookReader,
   type AudiobookSubstitution,
   type AudiobookTake,
-  type CadencePlan,
   type ChapterAudiobook,
   type ClonedVoice,
   type Job,
@@ -32,7 +30,7 @@ import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { audioHash } from "../audio/qc.js";
-import { audiobookLanding, castRefusal, checkDirection, directionSourceHash, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type PlannedBlock } from "./audiobook.js";
+import { audiobookLanding, castRefusal, checkDirection, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type PlannedBlock } from "./audiobook.js";
 
 /**
  * A chapter read into kept takes (design turn 146, SPEC-047 R-16..R-19): every block that is
@@ -131,47 +129,6 @@ export function concatMp3(parts: readonly Uint8Array[]): Uint8Array {
 /** The record could not be written: the world's claim is gone, or it closed under the run. Nothing more can be kept. */
 class RecordWriteError extends Error {}
 
-/**
- * A directed block in parts, each rendered on its own (R-5; codex on PR 1186): the words are
- * split at sentence ends within the reader's cap, each piece carries the cues that fall in it
- * at their positions in the piece, and each is mapped whole, so the delivery's tag and the
- * phrase's lead every part rather than the first alone. A piece whose rendering still runs
- * over the cap — the tags are extra ink — is split again at half its size until it fits, so the
- * bound holds after rendering for any authored text. A cue whose span straddles a seam goes
- * with neither piece. One part for a block within the cap.
- */
-export function renderParts(text: string, plan: CadencePlan, model: ManifestModel, language: string | undefined, cap: number | undefined): string[] {
-  const whole = normalizeSpeechText(text);
-  const render = (piece: string, cues: CadencePlan["cues"]): string =>
-    mapCadence(piece, directionSourceHash(piece), { ...plan, sourceTextHash: directionSourceHash(piece), cues }, model, language).providerText;
-  if (cap === undefined) return [render(whole, plan.cues)];
-  const out: string[] = [];
-  const place = (piece: string, from: number, max: number): void => {
-    const to = from + piece.length;
-    const cues = plan.cues
-      .filter((cue) => (cue.kind === "emphasis" ? cue.span.from >= from && cue.span.to <= to : cue.at >= from && cue.at <= to))
-      .map((cue) => (cue.kind === "emphasis" ? { ...cue, span: { ...cue.span, from: cue.span.from - from, to: cue.span.to - from } } : { ...cue, at: cue.at - from }));
-    const rendered = render(piece, cues);
-    if (rendered.length <= cap || max <= 1 || piece.length <= 1) {
-      out.push(rendered);
-      return;
-    }
-    let offset = 0;
-    for (const smaller of splitForSpeech(piece, Math.max(1, Math.floor(max / 2)))) {
-      const at = piece.indexOf(smaller, offset);
-      place(smaller, from + Math.max(at, 0), Math.floor(max / 2));
-      offset = Math.max(at, 0) + smaller.length;
-    }
-  };
-  const pieces = whole.length > cap ? splitForSpeech(whole, cap) : [whole];
-  let offset = 0;
-  for (const piece of pieces) {
-    const at = whole.indexOf(piece, offset);
-    place(piece, Math.max(at, 0), cap);
-    offset = Math.max(at, 0) + piece.length;
-  }
-  return out;
-}
 
 /** What names one part's job, frozen into its params so a later run can find it (R-16). */
 export interface PartIdentity {
@@ -272,15 +229,14 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     if (held !== null) {
       const check = checkDirection(planned.block.text, held.plan, model, language);
       if (check.ok) {
-        const rendered = renderParts(text, held.plan, model, language, cap);
         direction = {
           hash: audiobookDirectionHash(held.plan),
           delivery: held.plan.delivery,
-          rendered: rendered.join(" "),
+          rendered: check.parts.join(" "),
           voiceSettings: check.mapped.voiceSettings,
           ...(check.mapped.instructions !== undefined ? { instructions: check.mapped.instructions } : {}),
         };
-        parts = rendered;
+        parts = check.parts;
       } else {
         refusal = check.reason;
         parts = [text];

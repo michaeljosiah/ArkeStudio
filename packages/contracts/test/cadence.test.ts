@@ -141,4 +141,16 @@ it("the support report reads off the row what each control would do, one clause 
   assert.deepEqual(eleven.emphasis, { status: "best-effort", method: "capitals" });
   assert.deepEqual(eleven.speed, { status: "mapped", method: "0.7–1.2" });
   assert.deepEqual(cadenceSupport({}).deliveries["measured"], { status: "unsupported", reason: "no delivery" }, "a row with no cadence at all");
+  // A paren row's tags are English words (SPEC-046 R-23): offered only for a line stated English.
+  const breeze: Pick<ManifestModel, "cadence"> = { cadence: { deliveries: ["measured", "whispered", "breaking"], speed: { min: 0.7, max: 1.2 }, pause: "best-effort-audio-tag",
+    emphasis: "unsupported", breath: "best-effort-audio-tag", outputTimestamps: "none", tagSyntax: "paren", phrase: "best-effort-instruction",
+    deliveryMappings: { measured: { settings: {}, instruction: "Read it evenly." }, whispered: { settings: {}, tag: "whispers" }, breaking: { settings: {}, tag: "sobs", instruction: "The voice is breaking." } } } };
+  const french = cadenceSupport(breeze, "fr");
+  assert.deepEqual(french.pause, { status: "unsupported", reason: "tags need a line stated English" });
+  assert.deepEqual(french.deliveries["whispered"], { status: "unsupported", reason: "tags need a line stated English" }, "a tag-only delivery cannot go in");
+  assert.deepEqual(french.deliveries["breaking"], { status: "best-effort", method: "instruction" }, "the sentence carries it whatever the language");
+  assert.deepEqual(french.phrase, { status: "best-effort", method: "instruction" });
+  assert.deepEqual(cadenceSupport(breeze).pause, { status: "unsupported", reason: "tags need a line stated English" }, "no language stated is not English");
+  assert.deepEqual(cadenceSupport(breeze, "en").pause, { status: "best-effort", method: "tag" });
+  assert.deepEqual(cadenceSupport(breeze, "en").deliveries["whispered"], { status: "best-effort", method: "tag" });
 });
