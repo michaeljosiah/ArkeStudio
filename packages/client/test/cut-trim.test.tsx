@@ -332,7 +332,10 @@ describe("the artifact panel and the overlay lane (82a)", () => {
     assert.match(html, /Add audio track/);
   });
 
-  it("draws a lane for the highest one a clip actually uses", () => {
+  it("folds a legacy lane placement onto a typed track named for its lane, at its own window", () => {
+    // The numbered lanes are gone (issue 1159): a placement still in `cut.json` is drawn on the
+    // track the first write will fold it onto — the bells are sound, so lane 4's sound track —
+    // with the clip id that fold reserves, and nothing is drawn for lanes nothing used.
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const production = state.world!.productions[0]!;
     production.cut = {
@@ -342,11 +345,11 @@ describe("the artifact panel and the overlay lane (82a)", () => {
       ],
     } as typeof production.cut;
     const html = renderCut(ClientStateSchema.parse(state));
-    assert.equal(
-      (html.match(/fy-track__label">Overlay L\d/g) ?? []).length,
-      5,
-      "L4 down to L0, so nothing is hidden",
-    );
+    assert.doesNotMatch(html, /fy-clanes|fy-ovlane|fy-ovclip/, "no legacy lane is drawn");
+    assert.equal((html.match(/fy-track__name"[^>]*>Overlay L\d/g) ?? []).length, 1, "one track, for the one lane used");
+    assert.match(html, /data-track-id="tr_lane-4-sound"/);
+    assert.match(html, /data-clip="cl_ov-01J8G0000000000000000000A1"/, "the id the fold will save");
+    assert.match(html, /The Vigil, 00:00:01:00 to 00:00:03:00/, "the placement's window, to the frame");
   });
 
   it("counts what was placed, not what a split filed", () => {
@@ -385,7 +388,7 @@ describe("the artifact panel and the overlay lane (82a)", () => {
     assert.doesNotMatch(html, /2 of 3 shots/);
   });
 
-  it("marks the sound half of a split, and lays no picture for it", () => {
+  it("folds the sound half of a split onto a sound track, and lays no picture for it", () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const production = state.world!.productions[0]!;
     production.cut = {
@@ -395,8 +398,8 @@ describe("the artifact panel and the overlay lane (82a)", () => {
       ],
     } as typeof production.cut;
     const html = renderCut(ClientStateSchema.parse(state));
-    assert.match(html, /fy-ovclip--sound/, "the sound half reads as sound");
-    assert.match(html, /sound only/, "and says so where a person can read it");
+    assert.match(html, /data-track-id="tr_lane-0-sound"[^>]*>/, "the sound half is an Ambience row");
+    assert.doesNotMatch(html, /data-track-id="tr_lane-0"/, "and no picture row is made for it");
   });
 
   it("places a filed artifact by its own window, and counts it apart from coverage", () => {
@@ -515,13 +518,13 @@ describe("the unified editor shell (#685)", () => {
     }
   });
 
-  it("inspects a real overlay once it is selected", async () => {
+  it("inspects a folded legacy placement as the placed picture it will be saved as", async () => {
     const screen = await mountCut(mediaOnlyState());
     try {
-      const inspector = await select(screen, ".fy-ovclip");
-      assert.match(inspector.textContent ?? "", /OVERLAY CLIP/);
-      assert.match(inspector.textContent ?? "", /plate\.mp4/);
-      assert.match(inspector.textContent ?? "", /Overlay L1/);
+      const inspector = await select(screen, "[data-clip='cl_ov-01J8G0000000000000000000A1']");
+      assert.match(inspector.textContent ?? "", /PLACED PICTURE/);
+      assert.equal(row(inspector, "Source"), "plate.mp4");
+      assert.equal(row(inspector, "Track"), "Overlay L1", "the track named for the lane it came off");
     } finally {
       await close(screen);
     }

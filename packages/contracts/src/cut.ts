@@ -417,9 +417,6 @@ export interface ExportPlan {
  * the canvas did.
  */
 
-/** Room to work in before anything is placed. A canvas of zero cannot be dropped onto. */
-export const MEDIA_CANVAS_MIN_SEC = 60;
-
 /** Space kept past the last clip, so there is always somewhere to drop the next one. */
 export const MEDIA_CANVAS_HEADROOM_SEC = 15;
 
@@ -441,11 +438,6 @@ export function isMediaOnly(cut: DerivedCut): boolean {
  */
 export function placedExtentSec(placed: readonly { endSec: number }[]): number {
   return placed.reduce((furthest, one) => Math.max(furthest, one.endSec), 0);
-}
-
-/** How much timeline to draw: the work, plus somewhere to put the next thing. */
-export function mediaCanvasSec(placed: readonly { endSec: number }[]): number {
-  return Math.max(MEDIA_CANVAS_MIN_SEC, placedExtentSec(placed) + MEDIA_CANVAS_HEADROOM_SEC);
 }
 
 /** Which artifact kinds are picture. A document is not a frame; audio has no picture to lay. */
@@ -559,28 +551,6 @@ export function exportAudioClips(
     resolved.push({ path: artifactPath(artifact), startSec: overlay.startSec, endSec: overlay.endSec, gainDb: 0 });
   }
   return resolved;
-}
-
-/**
- * How long a production with no story runs: everything the export can use, measured to its
- * furthest reach.
- *
- * Resolved rather than counted off the lane records, because no surface may advertise a film the
- * encode will not produce — a document stretched to 60s beside a 5s image is a 5s film.
- *
- * It lives here because several surfaces state this length and they have to state the same one.
- * Two of them resolved the clips and the rail read the derived clock, which is zero for a
- * production that never had a story: the rail and the switcher advertised a `0s` cut for a film
- * the Cut header, the Exports button and the rendered file all agreed ran 28 seconds (issue 508).
- */
-export function placedFilmSec(
-  overlays: readonly CutOverlay[],
-  artifacts: readonly ClipArtifact[],
-): number {
-  return placedExtentSec([
-    ...exportOverlays(overlays, artifacts),
-    ...exportAudioClips(overlays, artifacts),
-  ]);
 }
 
 /** Assemble from the derived cut: accepted material as clips, gaps as slates (D10, D11). */

@@ -212,7 +212,7 @@ describe("durable Picture controls (#678)", () => {
     const screen = await mountCut(state);
     try {
       assert.match(screen.container.querySelector(".fy-cuttimeline-error")?.textContent ?? "", /history cannot be replayed/);
-      assert.equal(screen.container.querySelector(".fy-clanes"), null);
+      assert.equal(screen.container.querySelector("[data-clip]"), null, "nothing is drawn to edit");
       assert.equal(button(screen, "Export film").disabled, true);
     } finally {
       await close(screen);

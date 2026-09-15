@@ -6225,16 +6225,6 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-tip--end::after { left: auto; right: 0; transform: none; }
 .fy-timeline__toolbar button:disabled { cursor: default; }
 .fy-timeline__refusal { padding: 6px 10px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--destructive) 7%, var(--background)); color: var(--destructive); font: 500 9px/1.4 var(--font-mono); }
-/* The OV lane is shorter than V on purpose: it is not the film, it is what is laid over it. */
-.fy-ovlane { position: relative; height: 44px; border: 1px dashed transparent; border-radius: 5px; }
-.fy-ovlane--over { border-color: var(--foreground); background: color-mix(in srgb, var(--accent) 60%, transparent); }
-.fy-ovlane__empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 400 9px var(--font-mono); color: var(--neutral-400); pointer-events: none; }
-.fy-ovclip { position: absolute; top: 0; height: 44px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; background: var(--muted); display: flex; align-items: center; gap: 6px; padding: 0 6px 0 8px; overflow: hidden; }
-.fy-ovclip__name { flex: 1; min-width: 0; font: 400 8.5px var(--font-mono); color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fy-ovclip__x { border: 0; background: none; color: var(--neutral-400); font: 400 13px var(--font-sans); line-height: 1; padding: 2px 4px; cursor: pointer; flex: none; transition: var(--transition-control); }
-.fy-ovclip__x:hover { color: var(--destructive); }
-
-/* Lanes: a stack of rows that hold clips, plus the gestures on a clip and its menu. */
 /* ---- The Picture track as an editable sequence (SPEC-037 R-19..R-23, issue 679) ------------
    Clips are laid by frame, so a hole is empty lane rather than a missing cell, and a drag is a
    preview of the algebra's answer rather than a hand-drawn approximation of it. */
@@ -6308,21 +6298,7 @@ select.fy-set__pill { padding-right: 26px; }
 /* Over the black stage, so the neutral ramp rather than the theme: white words in either mode. */
 .fy-cutviewer__cue { position: absolute; left: 8%; right: 8%; bottom: 46px; text-align: center; color: var(--neutral-50); font: 500 15px/1.35 var(--font-sans); text-shadow: 0 0 3px var(--neutral-950), 0 0 6px var(--neutral-950); white-space: pre-line; pointer-events: none; }
 .fy-cutviewer__cue--box { background: color-mix(in srgb, var(--neutral-950) 60%, transparent); border-radius: 4px; padding: 4px 8px; margin: 0 auto; display: table; text-shadow: none; }
-.fy-clanes { position: relative; }
-.fy-clanes__foot { display: flex; align-items: center; gap: 10px; padding: 8px 0 0 28px; }
-.fy-ovclip { cursor: grab; user-select: none; touch-action: none; }
-.fy-ovclip:active { cursor: grabbing; }
-.fy-ovclip--dragging { border-color: var(--foreground); box-shadow: var(--shadow-sm); z-index: 3; }
-.fy-ovclip--selected { border-color: var(--foreground); box-shadow: inset 0 0 0 1px var(--foreground); z-index: 2; }
-.fy-ovclip--sound { background: color-mix(in srgb, var(--accent) 70%, var(--muted)); }
-.fy-ovclip__swatch { width: 34px; height: 22px; border-radius: 3px; overflow: hidden; flex: none; display: inline-flex; align-items: center; justify-content: center; }
-.fy-ovclip__swatch--wave { background: none; color: var(--neutral-400); }
-.fy-ovclip__badge { font: 500 7.5px var(--font-mono); letter-spacing: 0.06em; color: var(--neutral-400); border: 1px solid var(--border); border-radius: 3px; padding: 1px 3px; flex: none; }
-/* Wide enough to grab, narrow enough that the body is still the move gesture. */
-.fy-ovclip__grip { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; touch-action: none; }
-.fy-ovclip__grip--start { left: 0; }
-.fy-ovclip__grip--end { right: 0; }
-.fy-ovclip__grip:hover { background: color-mix(in srgb, var(--foreground) 22%, transparent); }
+/* A clip's menu, opened on the clip and kept inside the viewport (`editor-clip-menu.tsx`). */
 .fy-clipmenu { position: fixed; z-index: 40; min-width: 216px; background: var(--popover); border: 1px solid var(--border); border-radius: 9px; box-shadow: var(--shadow-md); padding: 5px; display: flex; flex-direction: column; }
 .fy-clipmenu__item { text-align: left; border: 0; background: none; border-radius: 6px; padding: 7px 9px; font: 400 12px var(--font-sans); color: var(--foreground); cursor: pointer; transition: var(--transition-control); }
 .fy-clipmenu__item:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--accent); }
