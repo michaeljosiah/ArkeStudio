@@ -209,19 +209,27 @@ describe("legacy placements before the first write (issue 1159)", () => {
     }
   });
 
-  it("names a placement the fold cannot carry, and previews the film without it", async () => {
-    // The lanes drew a placement of a lost file with a `missing artifact` label and the plan
-    // refused the preview over it by name (SPEC-039 R-39). The fold drops it, as the write will,
-    // so the preview plays; the footer says what was left behind, with the reason in its tip.
+  it("refuses the preview and the export by name for a placement the world cannot resolve, and names it in the footer", async () => {
+    // The fold drops a placement of a lost file, as the write will; the export sheet and the
+    // coordinator still refuse that cut by its name (SPEC-039 R-39), so the preview refuses the
+    // same way rather than playing a film the export will not produce (Codex review, PR 1203).
+    // The footer says what the write will leave behind, with the reason in its tip.
     const screen = await mount(legacyState({ gone: true }));
     try {
       assert.equal(screen.container.querySelector(`[data-clip='cl_ov-01J8G0000000000000000000C1']`), null, "not on any track");
+      const reason = /ov_01J8G0000000000000000000C1 cites artifact ar_01J8G0000000000000000000ZZ, which this world does not have/;
+      assert.match(screen.container.querySelector(".fy-cuttimeline-error")?.textContent ?? "", /^Preview and export unavailable · /);
+      assert.match(screen.container.querySelector(".fy-cuttimeline-error")?.textContent ?? "", reason);
+      const exportButton = [...screen.container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Export film");
+      assert.equal(exportButton?.disabled, true, "the export is refused for the same reason");
       const chip = screen.container.querySelector<HTMLElement>("[data-testid='not-carried']");
       assert.ok(chip, "the footer says so");
       assert.equal(chip.textContent, "1 legacy placement not carried");
-      assert.match(chip.getAttribute("title") ?? "", /ov_01J8G0000000000000000000C1 cites artifact ar_01J8G0000000000000000000ZZ, which this world does not have/);
-      assert.equal(screen.container.querySelector(".fy-cuttimeline-error"), null, "the preview is not refused over it");
-      assert.match(screen.container.querySelector(".fy-cuthead__meta")?.textContent ?? "", /^16s · no story/);
+      assert.match(chip.getAttribute("title") ?? "", reason);
+      // The other placements are still drawn and editable: mend the reference, or edit and let
+      // the write fold it away.
+      clip(screen, A1);
+      clip(screen, A2);
     } finally {
       await close(screen);
     }

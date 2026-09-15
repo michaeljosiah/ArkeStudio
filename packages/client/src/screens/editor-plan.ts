@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import {
   buildRenderPlan,
+  legacyArtifactScopeRefusal,
   type ArtifactSidecar,
   type ProductionBundle,
   type ProductionTimeline,
@@ -49,6 +50,13 @@ export interface EditorRenderPlan {
  * the first write will save them (issue 1159). A song not yet opened on the timeline has no
  * record to draw and no plan; the spine's own spans carry its preview.
  *
+ * The fold drops a placement it cannot resolve — a file the world has lost, or another
+ * production's — and the projected record no longer names it, so planning from the projection
+ * alone would preview a film the export sheet and the coordinator still refuse by that name
+ * (Codex review of PR 1203). The saved state is asked first, with the same question they ask, so
+ * the preview refuses as they do (SPEC-039 R-39) until the reference is mended or the first write
+ * folds it away; the screen's footer says which placements that write will leave behind.
+ *
  * Memoised here, in a hook the editor owns, and the identity matters as much as the cost. The
  * transport reports four times a second, so derived in a screen body this ran four times a
  * second for the whole length of every film — resolving the picture timeline, building every
@@ -72,21 +80,20 @@ export function useRenderPlan({
     () => (timeline !== null ? { status: "ready", timeline } : timelineState),
     [timeline, timelineState],
   );
-  const renderPlan = useMemo(
-    () =>
-      production && (!production.spine || timelineState.status === "ready") && timelineError === null
-        ? buildRenderPlan({
-            production,
-            artifacts: artifacts ?? [],
-            timeline: previewState,
-            scope: { kind: "production" },
-            preset: "review-cut",
-            // A hidden (muted) track is not asked for: the plan would refuse it and take the whole
-            // preview with it (round nine). Hiding captions leaves the film.
-            ...(subtitleView !== null && !subtitleHidden ? { subtitles: { trackId: subtitleView, mode: "none" as const } } : {}),
-          })
-        : null,
-    [production, artifacts, previewState, timelineState.status, timelineError, subtitleView, subtitleHidden],
-  );
+  const renderPlan = useMemo((): RenderPlanResult | null => {
+    if (!production || (production.spine && timelineState.status !== "ready") || timelineError !== null) return null;
+    const legacyRefusal = legacyArtifactScopeRefusal(production, artifacts ?? [], timelineState);
+    if (legacyRefusal !== null) return { ok: false, reason: legacyRefusal };
+    return buildRenderPlan({
+      production,
+      artifacts: artifacts ?? [],
+      timeline: previewState,
+      scope: { kind: "production" },
+      preset: "review-cut",
+      // A hidden (muted) track is not asked for: the plan would refuse it and take the whole
+      // preview with it (round nine). Hiding captions leaves the film.
+      ...(subtitleView !== null && !subtitleHidden ? { subtitles: { trackId: subtitleView, mode: "none" as const } } : {}),
+    });
+  }, [production, artifacts, previewState, timelineState, timelineError, subtitleView, subtitleHidden]);
   return { previewState, renderPlan };
 }

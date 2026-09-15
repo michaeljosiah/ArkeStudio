@@ -186,6 +186,17 @@ describe("the editor's render plan (issue 1158)", () => {
       assert.ok(folded.renderPlan?.ok);
       assert.deepEqual(folded.renderPlan.plan.audio.map((clip) => [clip.path, clip.startSec, clip.endSec]), [["artifacts/harbour-bells.wav", 1, 3]]);
 
+      // A legacy placement of a file the world does not have is dropped by the fold, but the saved
+      // state still names it and the export refuses it by that name — so the preview does too.
+      const lost: ProductionBundle = {
+        ...legacy,
+        cut: { audio: [], overlays: [...legacy.cut.overlays, { id: "ov_01J8G0000000000000000000A2", artifactId: "ar_01J8G0000000000000000000ZZ", startSec: 4, endSec: 6, lane: 0, audio: "keep" }] },
+      };
+      await mounted.render(inputsFor(lost, state.world!.artifacts, 4));
+      const refused = results.at(-1)!.renderPlan;
+      assert.equal(refused?.ok, false);
+      assert.match(refused && !refused.ok ? refused.reason : "", /ov_01J8G0000000000000000000A2 cites artifact ar_01J8G0000000000000000000ZZ, which this world does not have/);
+
       // A song not yet opened on the timeline has no record to draw and no plan of its own.
       const song: ProductionBundle = {
         ...production,
@@ -198,7 +209,7 @@ describe("the editor's render plan (issue 1158)", () => {
           updatedAt: "2026-06-11T10:00:00Z",
         } as ProductionBundle["spine"],
       };
-      const inputs = inputsFor(song, state.world!.artifacts, 4);
+      const inputs = inputsFor(song, state.world!.artifacts, 5);
       assert.equal(inputs.timeline, null);
       await mounted.render(inputs);
       assert.equal(results.at(-1)!.previewState.status, "absent");
