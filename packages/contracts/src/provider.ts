@@ -218,14 +218,21 @@ export const ProviderStatusSchema = z
     /** A mid-session credential failure — a provider fault, never a work failure (R-4). */
     fault: z.string().nullable(),
     /**
-     * What the fault is about: the credential in use, or the store that could not hold one
-     * (issue 1191) — a key that never reached the provider is not a rejected key, and the
-     * settings say so rather than sending the person to replace it.
+     * What the fault is about: the credential in use, or the store that could not save a key,
+     * or could not clear one (issue 1191) — a key that never reached the provider is not a
+     * rejected key, and the settings say so rather than sending the person to replace it. A
+     * store fault leaves the credential the provider holds as it was, so it never disables what
+     * that credential unlocks (codex on PR 1195).
      */
-    faultKind: z.enum(["credential", "storage"]).optional(),
+    faultKind: z.enum(["credential", "not-saved", "not-cleared"]).optional(),
   })
   .strict();
 export type ProviderStatus = z.infer<typeof ProviderStatusSchema>;
+
+/** A fault about the credential in use, which disables what it unlocked; a store's fault is not one. */
+export function credentialFaulted(status: Pick<ProviderStatus, "fault" | "faultKind"> | undefined): boolean {
+  return status !== undefined && status.fault !== null && (status.faultKind === undefined || status.faultKind === "credential");
+}
 
 /**
  * Capability availability, derived from configured and validated providers (R-2). A capability
@@ -343,7 +350,7 @@ export function deriveCapabilityAvailability(statuses: ProviderStatus[]): Capabi
       const probe = status.probes.find((p) => p.capability === capability);
       const unlocked =
         status.configured &&
-        status.fault === null &&
+        !credentialFaulted(status) &&
         (status.validation === "valid" ? (probe?.available ?? false) : status.validation === "untested");
       if (unlocked) via.push(status.id);
     }

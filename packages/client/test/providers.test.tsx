@@ -224,7 +224,7 @@ describe("Providers holds the credential (SPEC-042 R-3, R-9, R-18)", () => {
 
   it("a key the store could not hold is not saved, never rejected (issue 1191)", () => {
     const state = stateWith({});
-    state.app.providers = [{ id: "fal", configured: false, validation: "untested", probes: [], fault: "the key was not saved — credential encryption is unavailable on this machine", faultKind: "storage" }];
+    state.app.providers = [{ id: "fal", configured: false, validation: "untested", probes: [], fault: "the key was not saved — credential encryption is unavailable on this machine", faultKind: "not-saved" }];
     __setStateForTest(state);
     const html = providers("/settings/providers?provider=fal");
     assert.match(html.slice(0, html.indexOf('data-testid="provider-pane"')), /FAL<\/span><span class="fy-src__note">not saved/);
@@ -232,6 +232,21 @@ describe("Providers holds the credential (SPEC-042 R-3, R-9, R-18)", () => {
     assert.match(pane, /not saved/);
     assert.doesNotMatch(pane, /key rejected/i);
     assert.match(pane, /credential encryption is unavailable on this machine/, "the store's own reason");
+  });
+
+  it("a key the store could not clear is still the one held: not cleared, and its models stay on (codex on PR 1195)", () => {
+    const state = stateWith({});
+    state.app.providers = [{ id: "fal", configured: true, credentialFingerprint: "1C7D9A20", validation: "valid", lastValidated: "2026-09-15T05:05:21.000Z", probes: [{ capability: "image", available: true }, { capability: "video", available: true }], fault: "the key was not cleared — the file is read-only", faultKind: "not-cleared" }];
+    __setStateForTest(state);
+    const html = providers("/settings/providers?provider=fal");
+    assert.match(html.slice(0, html.indexOf('data-testid="provider-pane"')), /FAL<\/span><span class="fy-src__note">not cleared/);
+    assert.doesNotMatch(plain(html.slice(html.indexOf('data-testid="provider-pane"'))), /not saved|key rejected/i);
+    // On AI models the group is untroubled: the key the provider holds is the one it always had.
+    const page = models("/settings/models?half=cloud&kind=image");
+    const at = page.indexOf('class="fy-by__name">FAL<');
+    assert.ok(at >= 0);
+    assert.match(page.slice(at, at + 400), /1 of 1 on/, "the image kind: on, untroubled");
+    assert.doesNotMatch(page.slice(at, at + 400), /Replace key/);
   });
 });
 

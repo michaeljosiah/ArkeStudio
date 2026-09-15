@@ -3818,7 +3818,7 @@ export class Coordinator {
   }
 
   /** A credential failed mid-session: a provider fault naming the provider, never a work failure (R-4). */
-  reportProviderFault(provider: ProviderId, message: string, kind: "credential" | "storage" = "credential"): void {
+  reportProviderFault(provider: ProviderId, message: string, kind: "credential" | "not-saved" | "not-cleared" = "credential"): void {
     this.providerService.markFault(provider, message, kind);
     this.emit({
       at: new Date().toISOString(),
@@ -6945,7 +6945,7 @@ export class Coordinator {
             ? "this build has no credential storage, so the key was not saved"
             : "this session has no app root, so there is nowhere to save a key";
           // reportProviderFault logs it too — one line, not two.
-          this.reportProviderFault(msg.provider, reason, "storage");
+          this.reportProviderFault(msg.provider, reason, "not-saved");
           return;
         }
         try {
@@ -6969,7 +6969,7 @@ export class Coordinator {
           void this.appLog?.append({ kind: "credential.store-failed", provider: msg.provider, message });
           // The log alone left the same silence on screen: the store threw, the key was not
           // written, and Settings showed exactly what it had shown a moment earlier.
-          this.reportProviderFault(msg.provider, `the key was not saved — ${describeCoordinatorError(err)}`, "storage");
+          this.reportProviderFault(msg.provider, `the key was not saved — ${describeCoordinatorError(err)}`, "not-saved");
         }
         return;
       }
@@ -6991,7 +6991,7 @@ export class Coordinator {
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           void this.appLog?.append({ kind: "credential.clear-failed", provider: msg.provider, message });
-          this.reportProviderFault(msg.provider, `the key was not cleared — ${describeCoordinatorError(err)}`, "storage");
+          this.reportProviderFault(msg.provider, `the key was not cleared — ${describeCoordinatorError(err)}`, "not-cleared");
         }
         return;
       }

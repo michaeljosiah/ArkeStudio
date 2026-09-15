@@ -5,6 +5,7 @@ import {
   ENGINE_PROVIDERS,
   PROVIDERS as PROVIDER_TABLE,
   comfyUiWeightsComponentId,
+  credentialFaulted,
   deriveCapabilityAvailability,
   engineOfProvider,
   modelPriceCopy,
@@ -167,7 +168,9 @@ function CloudSection({ provider, models, visual }: { provider: ProviderId; mode
   const status = (state?.app.providers ?? []).find((p) => p.id === provider);
   const disabled = new Set(state?.app.models.disabled ?? []);
   const external = info.credential === "external";
-  const troubled = Boolean(status?.fault) || status?.validation === "invalid";
+  // A store's fault — a key not saved, or not cleared — leaves the credential the provider
+  // holds as it was, so it troubles nothing here (codex on PR 1195).
+  const troubled = credentialFaulted(status) || status?.validation === "invalid";
   const unpaid = cannotPay(status);
   // What this credential actually unlocks, capability by capability — the same question the
   // generation pickers ask. A key can authenticate and still not do images.

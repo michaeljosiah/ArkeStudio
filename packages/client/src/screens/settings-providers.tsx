@@ -5,6 +5,7 @@ import {
   ENGINE_PROVIDERS,
   PROVIDERS as PROVIDER_TABLE,
   comfyUiWeightsRecipeId,
+  credentialFaulted,
   deriveCapabilityAvailability,
   type EngineId,
   type ProviderId,
@@ -404,9 +405,11 @@ export function cannotPay(status: ProviderStatus | undefined): boolean {
 function connectionWords(id: ProviderId, status: ProviderStatus | undefined): { word: string; tone: RuntimeTone } {
   const external = PROVIDER_TABLE[id].credential === "external";
   // A key that never reached the provider — the store refused it, nothing rejected it (issue
-  // 1191) — is not a rejected key; the fault's own words are on the pane.
-  if (status?.faultKind === "storage") return { word: "not saved", tone: "warn" };
-  const troubled = Boolean(status?.fault) || status?.validation === "invalid";
+  // 1191) — is not a rejected key, and a key the store could not clear is still the one held;
+  // the fault's own words are on the pane.
+  if (status?.faultKind === "not-saved") return { word: "not saved", tone: "warn" };
+  if (status?.faultKind === "not-cleared") return { word: "not cleared", tone: "warn" };
+  const troubled = credentialFaulted(status) || status?.validation === "invalid";
   if (troubled) return { word: external ? "sign-in needed" : "key rejected", tone: "warn" };
   if (status?.configured === true) {
     if (status.validation === "valid") {

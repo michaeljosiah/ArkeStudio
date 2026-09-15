@@ -155,11 +155,15 @@ export class ProviderService {
   /** A credential failed mid-session — a provider fault naming the provider, never a work failure (R-4). */
   /**
    * A fault about the credential in use marks the key invalid; one about the store that could
-   * not hold a key (issue 1191) leaves the validation as it was — nothing rejected the key, it
-   * never left — and says which it is, so the settings say "not saved" rather than "rejected".
+   * not save a key, or clear one (issue 1191), leaves the validation as it was — nothing
+   * rejected the key the provider holds, and the new one never left — and says which it is,
+   * so the settings say "not saved" or "not cleared" rather than "rejected". A store fault
+   * changes no credential, so it neither turns a validation's generation (a probe in flight
+   * still lands, and "Test again" is not left testing) nor disables what the held credential
+   * unlocks (codex on PR 1195).
    */
-  markFault(id: ProviderId, message: string, kind: "credential" | "storage" = "credential"): ProviderStatus {
-    this.validationGenerations.set(id, (this.validationGenerations.get(id) ?? 0) + 1);
+  markFault(id: ProviderId, message: string, kind: "credential" | "not-saved" | "not-cleared" = "credential"): ProviderStatus {
+    if (kind === "credential") this.validationGenerations.set(id, (this.validationGenerations.get(id) ?? 0) + 1);
     // The category rides the record (SPEC-032 R-20.9): the fault correlation must not offer a
     // key row for a quota that a replaced key would not refill, and stamping at the producer is
     // what keeps that a fact of the record rather than a re-reading of its sentence.
@@ -169,6 +173,6 @@ export class ProviderService {
       message,
       category: providerFaultCategory(message),
     });
-    return kind === "storage" ? this.patch(id, { fault: message, faultKind: "storage" }) : this.patch(id, { fault: message, faultKind: "credential", validation: "invalid" });
+    return kind === "credential" ? this.patch(id, { fault: message, faultKind: "credential", validation: "invalid" }) : this.patch(id, { fault: message, faultKind: kind });
   }
 }
