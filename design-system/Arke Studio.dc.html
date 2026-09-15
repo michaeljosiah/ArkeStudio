@@ -72,10 +72,54 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
 <section class="dv-turn" id="t0" style="padding:36px 44px 28px">
   <div style="max-width:760px;display:flex;flex-direction:column;gap:10px">
     <div style="font:650 20px/1.2 var(--font-sans);letter-spacing:-0.02em;color:var(--dv-ink)">Arke Studio · design master</div>
-    <div style="font:500 13px/1.5 var(--font-sans);color:var(--dv-ink)"><a href="#t147">Latest: 147 · The takes in context</a> · 13 September 2026</div>
+    <div style="font:500 13px/1.5 var(--font-sans);color:var(--dv-ink)"><a href="#t148">Latest: 148 · Harness settings</a> · 15 September 2026</div>
     <div style="font:400 13px/1.65 var(--font-sans);color:var(--dv-ink-body)">Design decisions are recorded below in numbered turns, newest first; earlier explorations remain as history. The original sample world is <strong>The Undersong</strong>, a coastal fantasy where a drowned god still sings beneath the harbour. Its image placeholders accept dropped artwork. Approved image references keep their supplied artwork intact. Chrome stays neutral monochrome so the creator's imagery carries the colour.</div>
   </div>
 </section>
+<section class="dv-turn" id="t148">
+<div class="dv-thd"><a class="dv-tid" href="#t148">148</a><span class="dv-tname">Harness settings — what is running, what starts next, and what needs attention (issue 1154)</span></div>
+<p class="dv-next">Records Settings → Harness: detected engine states, executable selection, restart choice and Advanced per-agent model overrides. Before the first snapshot, the desktop shows “Starting Arke Studio…” and its host version; it does not invent an engine choice. While discovery is pending, keep the engine list empty and offer Check again.</p>
+<p class="dv-rule">The engine list distinguishes running now, selected for next restart, available, absent and needs attention. No choice is shown until discovery supplies it. Advanced model choices belong to the running harness.</p>
+<div class="dv-opts"><div class="dv-opt" id="148a">
+<div class="dv-olabel"><a class="dv-oid" href="#148a">148a</a><span>Settings · Harness, detected engines and agent models</span></div>
+<div class="dv-card"><div id="harness148" data-screen-label="148a Settings · Harness">
+<style>
+#harness148{width:1360px;height:850px;background:var(--background);color:var(--foreground);font:var(--type-body);display:flex;flex-direction:column;overflow:hidden}
+#harness148 *{box-sizing:border-box}
+#harness148 .head{padding:14px 24px;border-bottom:1px solid var(--border);font:var(--type-ui)}
+#harness148 .body{display:flex;flex:1;min-height:0}
+#harness148 aside{width:210px;flex:none;border-right:1px solid var(--border);padding:24px;display:flex;flex-direction:column;gap:20px}
+#harness148 main{flex:1;padding:32px;min-width:0}
+#harness148 .engines{display:flex;border:1px solid var(--border);border-radius:var(--radius-md);min-height:340px}
+#harness148 .list{width:230px;padding:12px;border-right:1px solid var(--border);display:flex;flex-direction:column;gap:10px}
+#harness148 .pane{flex:1;padding:24px}
+#harness148 button,#harness148 select{font:var(--type-ui);color:inherit;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--background);padding:10px 12px}
+#harness148 button[aria-selected=true]{background:var(--secondary)}
+#harness148 button:disabled{opacity:.5}
+#harness148 h1{font:var(--type-title);margin:0 0 20px}
+#harness148 h2{font:var(--type-heading);margin:0 0 8px}
+#harness148 .meta{font:var(--type-meta);color:var(--muted-foreground)}
+#harness148 .row{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:16px 0;border-bottom:1px solid var(--border)}
+#harness148 .active{font-weight:600}
+</style>
+<div class="head">Arke Studio · Settings</div>
+<div class="body"><aside><span>Providers</span><span>AI models</span><span>General</span><span class="active">Harness</span><span>Appearance</span><span>Notifications</span><span>Diagnostics</span><span>About</span><span style="flex:1"></span><span class="meta">v0.5.49</span></aside>
+<main><h1>Harness</h1><div class="engines"><div class="list" role="tablist" aria-label="Harnesses">
+<button role="tab" aria-selected="false">OpenCode<br><span class="meta">next restart</span></button>
+<button role="tab" aria-selected="false">Claude Code<br><span class="meta">running now</span></button>
+<button role="tab" aria-selected="true">Codex<br><span class="meta">needs attention</span></button>
+</div><div class="pane"><h2>Codex</h2><span class="meta">YOUR INSTALLATION · needs attention</span>
+<div class="row"><div>Found on this machine<div class="meta">Codex 0.144.0 is installed, but 0.154.0 or newer is needed.</div></div><button>Check again</button></div>
+<div class="row"><div>Executable<div class="meta">Choose a file if Arke Studio cannot find yours</div></div><button>Choose…</button></div>
+<div class="row"><div>Not available for authoring<div class="meta">Update Codex before selecting it</div></div><button disabled>Use Codex</button></div>
+</div></div>
+<div class="row"><strong>Advanced · per-agent models</strong><span class="meta">Which model runs each writing agent</span></div>
+<div class="row"><div>world-builder<div class="meta">Chat and world development</div></div><select aria-label="Model for world-builder"><option>Ask the harness</option></select></div>
+<div class="row"><div>stage-designer<div class="meta">Build a Stage</div></div><select aria-label="Model for stage-designer"><option>Sonnet</option></select></div>
+<p class="meta">Other agents follow the same row pattern. Model choices come from the running harness.</p>
+</main></div></div></div></div></div>
+</section>
+
 <section class="dv-turn" id="t147">
 <div class="dv-thd"><a class="dv-tid" href="#t147">147</a><span class="dv-tname">The takes in context — the built episode, scene and shot filters, and the selected take's verdict (issue 1165; updates <a class="dv-oid" href="#102c">102c</a>)</span></div>
 <p class="dv-next">The current Generate takes view, drawn from <code>production-generate.tsx</code>. Each card is selectable and a clip plays in place. The shared action bar applies to that selected card; Accept and Reject are not duplicated inside every card. Episode controls appear only on an episodic production, scene controls when the scope holds more than one scene. This frame records the shipped surface, not a new generation workflow.</p>

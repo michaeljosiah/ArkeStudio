@@ -82,6 +82,9 @@ const SCREENS = [
     controls: ["EPISODE", "SCENE", "SHOT", "Open in generator", "Accept take", "Reject", "Contact sheet", "Advanced"],
     notes: ["Turn 147 records the shipped episode/scene/shot scope, selectable playable cards and shared verdict bar for the picked take. The bar acts on the selected card; it is not duplicated on each card (issue 1165).", "Measured durations use one decimal. Accepted contact-sheet frames name their shot and mark acceptance as done."] },
 
+  { group: "Around it", screen: "Settings · Harness", frame: "148a", route: "#/settings/harness", status: "built", checked: "2026-09-15",
+    controls: ["OpenCode", "Claude Code", "Codex", "Check again", "Choose…", "Advanced"],
+    notes: ["Detected engine state is distinct from the saved next-restart choice. Found-but-blocked installations say needs attention. The initial desktop connection displays Starting Arke Studio, with no invented default engine (issue 1154)."] },
   { group: "Around it", screen: "Settings", frame: "124a", route: "#/settings", status: "built", checked: "2026-09-06",
     controls: ["Providers", "General", "Diagnostics"],
     notes: ["SPEC-042 / PR 875: a page, not a modal. Providers holds credentials; AI models holds models by kind then supplier. Sample clips on the card are issue 876."] },

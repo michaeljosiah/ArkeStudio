@@ -370,3 +370,9 @@ export function carriesStageConstruction(raw: string): boolean {
     ));
   } catch { return false; }
 }
+
+/** Evaluator-versioned playblast pins must not make a scene disappear in older readers (#1128). */
+export function carriesStageEvaluatorVersion(raw: string): boolean {
+  try { return orderedShots(parseSceneRecord(raw)).some(shot => shot.staging?.playblast?.evaluatorVersion !== undefined); }
+  catch { return false; }
+}

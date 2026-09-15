@@ -48,10 +48,11 @@ export function sceneCast(scene: SceneRecord, sheets: readonly Sheet[]): string[
  */
 export function SheetPicture({ world, sheet }: { world: WorldBundle; sheet: Sheet }) {
   const path = sheet.type === "location" ? locationPortraitPath(world, sheet.id) : characterPortraitPath(world, sheet.id);
+  const hasPicture = world.referenceKits.some(kit => kit.sheetId === sheet.id);
   return (
     <>
       <span aria-hidden="true">{initials(sheet.name).slice(0, 1)}</span>
-      <img
+      {hasPicture && <img
         // Keyed by its path: a picture that failed and was then replaced on the kit is a new
         // element, not a hidden one that never comes back.
         key={path}
@@ -59,7 +60,7 @@ export function SheetPicture({ world, sheet }: { world: WorldBundle; sheet: Shee
         alt=""
         draggable={false}
         onError={(event) => { event.currentTarget.style.display = "none"; }}
-      />
+      />}
     </>
   );
 }

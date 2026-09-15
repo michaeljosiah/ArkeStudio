@@ -2065,6 +2065,7 @@ select.fy-sheetselect { padding-right: 24px; }
  */
 .fy-playhead__grab { position: absolute; top: 0; bottom: 0; left: -6px; width: 13px; pointer-events: auto; cursor: ew-resize; touch-action: none; }
 .fy-playhead__grab:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; border-radius: 3px; }
+.fy-playhead__grab[data-pointer-seeking="true"]:focus-visible, .fy-scrub[data-pointer-seeking="true"]:focus-visible { outline: none; }
 /* Blade and Hand want the lane the band covers; it stands aside and keeps only its keyboard seat. */
 .fy-playhead__grab--idle { pointer-events: none; }
 .fy-track { display: flex; align-items: stretch; gap: 0; border-top: 1px solid var(--line-soft); }

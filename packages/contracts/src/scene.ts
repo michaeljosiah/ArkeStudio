@@ -97,10 +97,10 @@ export const StagingKeySchema = z
     anchor: SlugSchema.optional(),
     /** The cast sheet the aim follows live. */
     track: SlugSchema.optional(),
-    /** Fraction of the incoming leg spent decelerating into this mark. */
-    easeIn: z.number().min(0).max(1).optional(),
-    /** Fraction of the outgoing leg spent accelerating away from this mark. */
-    easeOut: z.number().min(0).max(1).optional(),
+    /** Ease into a camera rest; ignored at passing keys. */
+    easeIn: z.number().min(0).max(1).optional().describe("Decelerating into a camera rest; ignored at passing keys."),
+    /** Ease away from a camera rest; ignored at passing keys. */
+    easeOut: z.number().min(0).max(1).optional().describe("Accelerating away from a camera rest; ignored at passing keys."),
   })
   .strict();
 export type StagingKey = z.infer<typeof StagingKeySchema>;
@@ -238,6 +238,7 @@ export const ShotStagingSchema = z
      */
     playblast: z
       .object({
+        evaluatorVersion: z.number().int().positive().optional(),
         sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
         artifactId: ArtifactIdSchema,
         openingFrameArtifactId: ArtifactIdSchema.optional(),

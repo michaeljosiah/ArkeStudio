@@ -173,6 +173,9 @@ function stillPreferred(): boolean {
  * session, and it self-qualifies for the case that is not.
  */
 function WaitingForCoordinator() {
+  if (typeof window !== "undefined" && window.arke) {
+    return <Callout tone="warning" title="Starting Arke Studio…">Connecting to your workspace. The app keeps retrying on its own.</Callout>;
+  }
   return (
     <Callout tone="warning" title="Waiting for the coordinator">
       The app keeps retrying on its own. If this is a dev browser session, start it with
@@ -1530,7 +1533,7 @@ export function SettingsLayout() {
               </NavLink>
             ))}
             <div style={{ flex: 1 }} />
-            <div className="fy-settings__version">v{state?.app.version ?? "0.1.0"}</div>
+            <div className="fy-settings__version">v{state?.app.version ?? (typeof window === "undefined" ? undefined : window.arke?.appVersion) ?? "—"}</div>
           </nav>
           <div className="fy-settings__pane">
             {/* Most panes in here draw from the coordinator's snapshot, and with no snapshot they
@@ -1945,11 +1948,16 @@ export function SettingsHarnessScreen() {
   useEffect(() => {
     if (focusAgent !== undefined) setAgentsOpen(true);
   }, [focusAgent]);
+  if (!hasSnapshot) return (
+    <div data-screen="settings-harness" className="fy-set fy-set--runtime">
+      {connection !== "closed" && <WaitingForCoordinator />}
+    </div>
+  );
   return (
     <div data-screen="settings-harness" className="fy-set fy-set--runtime">
       <div className="fy-rt">
         <div className="fy-rt__rail" role="tablist" aria-label="Harnesses">
-          {harnesses.map((h) => (
+          {harness !== null && harnesses.map((h) => (
             <button
               type="button"
               key={h.id}
@@ -1962,7 +1970,7 @@ export function SettingsHarnessScreen() {
               <span>{h.label}</span>
               <span style={{ flex: 1 }} />
               <span className="fy-rt__count">
-                {h.id === runningEngine ? activeStatus : h.id === engine ? "next restart" : h.installed ? "available" : "not here"}
+                {h.id === runningEngine ? activeStatus : h.blocked ? (h.version !== null || h.source !== null ? "needs attention" : "not here") : h.id === engine ? "next restart" : h.installed ? "available" : "not here"}
               </span>
             </button>
           ))}
@@ -1971,9 +1979,10 @@ export function SettingsHarnessScreen() {
           {harness === null && (
             <div className="fy-set__note" role="status">
               {connection === "open" && hasSnapshot ? "Detecting available harnesses…" : "Connecting to detect available harnesses…"}
+              <Button disabled={connection !== "open"} onClick={() => detectHarnesses()}>Check again</Button>
             </div>
           )}
-          <HarnessPane
+          {harness !== null && <HarnessPane
             harness={chosen}
             engine={engine}
             runningEngine={runningEngine}
@@ -1981,7 +1990,7 @@ export function SettingsHarnessScreen() {
             detected={harness !== null}
             canDetect={connection === "open" && hasSnapshot}
             executablePath={chosen.id === "codex" ? harness?.codexPath ?? null : harness?.claudePath ?? null}
-          />
+          />}
           {harness?.launchOverride && (
             <div className="fy-set__note" role="status">
               ARKE_HARNESS selects {harnesses.find(h => h.id === harness.launchOverride)?.label ?? harness.launchOverride} at launch.
@@ -2074,12 +2083,12 @@ function HarnessPane({
         title={harness.label}
         caps={harness.bundled ? "BUNDLED" : "YOUR INSTALLATION"}
         tone={active && !running && health?.status !== "starting" ? "warn" : running ? "ok" : harness.installed ? "idle" : "warn"}
-        state={active ? running ? "running now" : health?.status === "starting" ? "starting" : "unavailable" : selected ? "next restart" : harness.installed ? "available" : "not here"}
+        state={active ? running ? "running now" : health?.status === "starting" ? "starting" : "unavailable" : harness.blocked ? (harness.version !== null || harness.source !== null ? "needs attention" : "not here") : selected ? "next restart" : harness.installed ? "available" : "not here"}
       />
       <RuntimeSection label="ON THIS MACHINE" />
       <div className="fy-set__row">
         <div className="fy-set__name fy-set__name--wide">
-          <div className="fy-set__title">{harness.bundled ? "Ships with Arke Studio" : "Found on this machine"}</div>
+          <div className="fy-set__title">{harness.bundled ? "Ships with Arke Studio" : harness.installed || harness.version !== null || harness.source !== null ? "Found on this machine" : "Not found on this machine"}</div>
           <div className="fy-set__caps">
             {/* The refusal, in the words the coordinator sent — not a re-derived summary. */}
             {harness.blocked ?? (harness.version ? `version ${harness.version}` : "installed")}

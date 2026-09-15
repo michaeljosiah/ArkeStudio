@@ -5,7 +5,12 @@ const hold = (duration:number, p:[number,number,number], l:[number,number,number
 const vertigo: ResolvedShotStaging = { version: 1, cast: [{ sheetId: "actor", x: 0, z: 0 }], sets: [],
   keys: [{ t: 0, p: [0, 1.6, 10], l: [0, 1.17, 0], focalMm: 85 }],
 };
+export const walkingOrbit: ResolvedShotStaging = {
+  version: 1, cast: [{ sheetId: "walker", x: 0, z: 4.6, to: [0, -3] }], sets: [], keys:
+    Array.from({ length: 9 }, (_, i) => ({ t: i * .75, p: [2 * Math.sin(i * Math.PI / 4), 1.5, 2 * Math.cos(i * Math.PI / 4)], l: [0, 1.2, 0], anchor: "walker", track: "walker", easeIn: .2, easeOut: .2 })),
+};
 export const stageFixtures: Array<{name:string;duration:number;stage:ResolvedShotStaging}> = [
+  {name:"walking-orbit",duration:6,stage:walkingOrbit},
   {name:"vertigo",duration:6,stage:{...vertigo,keys:stageCameraMove("vertigo",vertigo,{durationSec:6})}},
   {name:"dialogue",duration:6,stage:{version:1,cast:[{sheetId:"speaker-one",x:-.7,z:0},{sheetId:"speaker-two",x:.7,z:0}],sets:[],keys:hold(6,[0,1.5,4.5],[0,1.1,0])}},
   {name:"over-shoulder",duration:6,stage:{version:1,cast:[{sheetId:"speaker-one",x:-.8,z:1.4,facing:180},{sheetId:"speaker-two",x:.3,z:0}],sets:[],keys:hold(6,[-.25,1.7,3],[.3,1.35,0])}},

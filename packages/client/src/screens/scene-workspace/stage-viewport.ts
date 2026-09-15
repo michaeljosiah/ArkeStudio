@@ -26,7 +26,7 @@ import {
   Object3D,
   OctahedronGeometry,
   OrthographicCamera,
-  PCFSoftShadowMap,
+  PCFShadowMap,
   PerspectiveCamera,
   PlaneGeometry,
   Raycaster,
@@ -43,7 +43,7 @@ import {
 } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
-import { STAGE_FRAME_RATE, stageFrameCount, stageRigOffset, stagingEase, type StageRig, type StagingKey, type StagingSet } from "@arke-studio/contracts";
+import { STAGE_FRAME_RATE, stageFrameCount, stageRigOffset, stageCameraScalar, type StageRig, type StagingKey, type StagingSet } from "@arke-studio/contracts";
 
 /**
  * The Stage viewport: one canvas, one renderer, two cameras, and the greybox previs of a shot
@@ -320,6 +320,7 @@ export class StageViewport {
   private path: Line | null = null;
   private marks: Array<{ index: number; mesh: Mesh }> = [];
   private data: StageData;
+  private samplingKeys: StagingKey[] = [];
   private structure = "";
   private selection: StageSelection = null;
   private framed = false;
@@ -343,7 +344,7 @@ export class StageViewport {
     const renderer = new WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = PCFSoftShadowMap;
+    renderer.shadowMap.type = PCFShadowMap;
     renderer.domElement.style.cssText = "display:block;width:100%;height:100%";
     host.appendChild(renderer.domElement);
     this.renderer = renderer;
@@ -1100,7 +1101,12 @@ export class StageViewport {
   private sampleCam(s: number, clock: number): Vector3 { return new Vector3(...this.sampleCamera(s, clock).p); }
   private sampleAim(s: number, clock: number): Vector3 { return new Vector3(...this.sampleCamera(s, clock).l); }
   private resolved() {
-    return { version: 1, keys: [...this.data.keys], sets: [...this.data.sets], cast: this.data.cast.map(f => ({ ...f, pose: f.pose ?? undefined, to: f.to ? [...f.to] as [number,number] : undefined })), ...(this.data.performances ? { performances: [...this.data.performances] } : {}), ...(this.data.objectMotions ? { objectMotions: [...this.data.objectMotions] } : {}) };
+    // The evaluator caches spatial curves by key-array identity. Keep that identity through
+    // refresh/path/export samples, while accepting replaced keys and in-place key edits.
+    if (this.samplingKeys.length !== this.data.keys.length || this.samplingKeys.some((key, i) => key !== this.data.keys[i])) {
+      this.samplingKeys = [...this.data.keys];
+    }
+    return { version: 1, keys: this.samplingKeys, sets: [...this.data.sets], cast: this.data.cast.map(f => ({ ...f, pose: f.pose ?? undefined, to: f.to ? [...f.to] as [number,number] : undefined })), ...(this.data.performances ? { performances: [...this.data.performances] } : {}), ...(this.data.objectMotions ? { objectMotions: [...this.data.objectMotions] } : {}) };
   }
   private sampleCamera(at: number, clock: number) {
     return sampleStageCamera(this.resolved(),at,this.data.durationSec,clock);
@@ -1164,10 +1170,10 @@ export class StageViewport {
       this.cam.rig.rotateX(motion.rotation[0]);
       this.cam.rig.rotateY(motion.rotation[1]);
       const span = this.span(at);
-      const mix = stagingEase(span.a, span.b, span.k);
-      this.cam.rig.rotateZ(motion.rotation[2] + ((span.a.roll ?? 0) + ((span.b.roll ?? 0) - (span.a.roll ?? 0)) * mix) * Math.PI / 180);
+
+      this.cam.rig.rotateZ(motion.rotation[2] + stageCameraScalar(this.data.keys, this.data.keys.map(key => key.roll ?? 0), at) * Math.PI / 180);
       const defaultFocal = stagingFocalForFov(this.data.fov,this.data.aspect);
-      const focal = span.a.focalMm === undefined && span.b.focalMm === undefined ? null : (span.a.focalMm ?? defaultFocal) + ((span.b.focalMm ?? defaultFocal) - (span.a.focalMm ?? defaultFocal)) * mix;
+      const focal = span.a.focalMm === undefined && span.b.focalMm === undefined ? null : stageCameraScalar(this.data.keys, this.data.keys.map(key => key.focalMm ?? defaultFocal), at);
       this.shot.fov = focal === null ? this.data.fov : stagingFov(`${focal}mm`, `${this.data.aspect}:1`);
       this.shot.updateProjectionMatrix();
       segment(this.cam.stem, new Vector3(position.x, 0, position.z), position);
@@ -1346,7 +1352,7 @@ export class StageViewport {
     renderer.setSize(width, height, false);
     renderer.setClearColor(0xe6e3dd, 1);
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = PCFSoftShadowMap;
+    renderer.shadowMap.type = PCFShadowMap;
     const times = [...new Set([0,this.data.durationSec/2,Math.max(0,this.data.durationSec-1/30),this.data.durationSec,...this.data.keys.map(k=>k.t),...(this.data.performances??[]).flatMap(p=>p.keys.map(k=>k.t)),...(this.data.objectMotions??[]).flatMap(p=>p.keys.map(k=>k.t))])].sort((a,b)=>a-b);
     const essential = [...new Set([0,this.data.durationSec,Math.max(0,this.data.durationSec-1/30),...requested.filter(t=>t>=0&&t<=this.data.durationSec)])];
     const slots = 7-essential.length;
@@ -1410,7 +1416,7 @@ export class StageViewport {
     renderer.setSize(width, height, false);
     renderer.setClearColor(0xe6e3dd, 1);
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = PCFSoftShadowMap;
+    renderer.shadowMap.type = PCFShadowMap;
     let jobId: string | null = null;
     let complete = false;
     let gizmoDetached = false;

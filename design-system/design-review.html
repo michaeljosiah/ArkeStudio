@@ -153,6 +153,7 @@ x-import[hint-size^="100%"] { width: 100%; }
       <a class="rail__item" href="#generate-takes"><i class="dot dot--built"></i><span>Generate · takes</span><b>147a</b></a>
 
       <div class="rail__group">Around it</div>
+      <a class="rail__item" href="#settings-harness"><i class="dot dot--built"></i><span>Settings · Harness</span><b>148a</b></a>
       <a class="rail__item" href="#settings"><i class="dot dot--built"></i><span>Settings</span><b>124a</b></a>
       <a class="rail__item" href="#settings-ai-models"><i class="dot dot--built"></i><span>Settings · AI models</span><b>125a</b></a>
       <a class="rail__item" href="#settings-providers"><i class="dot dot--built"></i><span>Settings · Providers</span><b>125d</b></a>
@@ -169,7 +170,7 @@ x-import[hint-size^="100%"] { width: 100%; }
   <main class="main">
     <div class="top">
       <h1>Arke Studio · design review</h1>
-      <p>Generated 2026-09-14 from <code>Arke Studio.dc.html</code> by <code>npm run design:review</code>; this page never edits the master. Each screen is its latest frame, copied verbatim, then what shipped, then the turn's binding rules. A screen the master has deliberately not drawn says so. The build refuses a missing frame, a bitmap in place of a drawing, and a frame that does not carry a control the build shipped.</p>
+      <p>Generated 2026-09-15 from <code>Arke Studio.dc.html</code> by <code>npm run design:review</code>; this page never edits the master. Each screen is its latest frame, copied verbatim, then what shipped, then the turn's binding rules. A screen the master has deliberately not drawn says so. The build refuses a missing frame, a bitmap in place of a drawing, and a frame that does not carry a control the build shipped.</p>
     </div>
     <div class="legend"><span><i class="dot dot--built"></i> built</span><span><i class="dot dot--drifted"></i> built · drifted from the drawing</span><span><i class="dot dot--drawn"></i> drawn · not built</span></div>
     
@@ -553,6 +554,52 @@ x-import[hint-size^="100%"] { width: 100%; }
 </div></div></div>
       <div class="built built--built"><div class="built__head"><span class="tag tag--built">built</span><span class="built__label">what shipped</span></div><ul><li>Turn 147 records the shipped episode/scene/shot scope, selectable playable cards and shared verdict bar for the picked take. The bar acts on the selected card; it is not duplicated on each card (issue 1165).</li><li>Measured durations use one decimal. Accepted contact-sheet frames name their shot and mark acceptance as done.</li></ul></div>
       <div class="rules"><div class="rules__head">Binding · turn <a href="Arke%20Studio.dc.html#t147">147</a> <span>The takes in context — the built episode, scene and shot filters, and the selected take's verdict (issue 1165; updates <a class="dv-oid" href="Arke%20Studio.dc.html#102c">102c</a>)</span></div><p class="dv-rule"><b>Labels describe the work.</b> Measured take durations round to one decimal; whole seconds have no trailing zero. Contact-sheet frames use their shot title, with the file name available as a tooltip; an accepted frame reads <b>Accepted</b> and cannot be accepted again. In the Cut, Take N and its model identify the candidate, while its immutable id stays in the tooltip. Episode rail labels use sorted position, retaining the duplicate-order warning without changing the saved record. A preview image exists only while its frame-clock source is a still.</p></div>
+    </section>
+
+    <section class="screen" id="settings-harness">
+      <div class="screen__head">
+        <div><h2>Settings · Harness</h2><div class="screen__meta"><span class="tag tag--built">built</span><code>#/settings/harness</code><span>checked 2026-09-15</span></div></div>
+        <a class="screen__frame" href="Arke%20Studio.dc.html#148a">148a in the master →</a>
+      </div>
+      <p class="screen__caption"><span>Settings · Harness, detected engines and agent models</span></p>
+      <div class="stage" data-width="1360"><div class="stage__scale" style="width:1360px"><div id="harness148" data-screen-label="148a Settings · Harness">
+<style>
+#harness148{width:1360px;height:850px;background:var(--background);color:var(--foreground);font:var(--type-body);display:flex;flex-direction:column;overflow:hidden}
+#harness148 *{box-sizing:border-box}
+#harness148 .head{padding:14px 24px;border-bottom:1px solid var(--border);font:var(--type-ui)}
+#harness148 .body{display:flex;flex:1;min-height:0}
+#harness148 aside{width:210px;flex:none;border-right:1px solid var(--border);padding:24px;display:flex;flex-direction:column;gap:20px}
+#harness148 main{flex:1;padding:32px;min-width:0}
+#harness148 .engines{display:flex;border:1px solid var(--border);border-radius:var(--radius-md);min-height:340px}
+#harness148 .list{width:230px;padding:12px;border-right:1px solid var(--border);display:flex;flex-direction:column;gap:10px}
+#harness148 .pane{flex:1;padding:24px}
+#harness148 button,#harness148 select{font:var(--type-ui);color:inherit;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--background);padding:10px 12px}
+#harness148 button[aria-selected=true]{background:var(--secondary)}
+#harness148 button:disabled{opacity:.5}
+#harness148 h1{font:var(--type-title);margin:0 0 20px}
+#harness148 h2{font:var(--type-heading);margin:0 0 8px}
+#harness148 .meta{font:var(--type-meta);color:var(--muted-foreground)}
+#harness148 .row{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:16px 0;border-bottom:1px solid var(--border)}
+#harness148 .active{font-weight:600}
+</style>
+<div class="head">Arke Studio · Settings</div>
+<div class="body"><aside><span>Providers</span><span>AI models</span><span>General</span><span class="active">Harness</span><span>Appearance</span><span>Notifications</span><span>Diagnostics</span><span>About</span><span style="flex:1"></span><span class="meta">v0.5.49</span></aside>
+<main><h1>Harness</h1><div class="engines"><div class="list" role="tablist" aria-label="Harnesses">
+<button role="tab" aria-selected="false">OpenCode<br><span class="meta">next restart</span></button>
+<button role="tab" aria-selected="false">Claude Code<br><span class="meta">running now</span></button>
+<button role="tab" aria-selected="true">Codex<br><span class="meta">needs attention</span></button>
+</div><div class="pane"><h2>Codex</h2><span class="meta">YOUR INSTALLATION · needs attention</span>
+<div class="row"><div>Found on this machine<div class="meta">Codex 0.144.0 is installed, but 0.154.0 or newer is needed.</div></div><button>Check again</button></div>
+<div class="row"><div>Executable<div class="meta">Choose a file if Arke Studio cannot find yours</div></div><button>Choose…</button></div>
+<div class="row"><div>Not available for authoring<div class="meta">Update Codex before selecting it</div></div><button disabled>Use Codex</button></div>
+</div></div>
+<div class="row"><strong>Advanced · per-agent models</strong><span class="meta">Which model runs each writing agent</span></div>
+<div class="row"><div>world-builder<div class="meta">Chat and world development</div></div><select aria-label="Model for world-builder"><option>Ask the harness</option></select></div>
+<div class="row"><div>stage-designer<div class="meta">Build a Stage</div></div><select aria-label="Model for stage-designer"><option>Sonnet</option></select></div>
+<p class="meta">Other agents follow the same row pattern. Model choices come from the running harness.</p>
+</main></div></div></div></div>
+      <div class="built built--built"><div class="built__head"><span class="tag tag--built">built</span><span class="built__label">what shipped</span></div><ul><li>Detected engine state is distinct from the saved next-restart choice. Found-but-blocked installations say needs attention. The initial desktop connection displays Starting Arke Studio, with no invented default engine (issue 1154).</li></ul></div>
+      <div class="rules"><div class="rules__head">Binding · turn <a href="Arke%20Studio.dc.html#t148">148</a> <span>Harness settings — what is running, what starts next, and what needs attention (issue 1154)</span></div><p class="dv-rule">The engine list distinguishes running now, selected for next restart, available, absent and needs attention. No choice is shown until discovery supplies it. Advanced model choices belong to the running harness.</p></div>
     </section>
 
     <section class="screen" id="settings">
