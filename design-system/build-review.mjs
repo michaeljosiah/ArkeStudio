@@ -72,9 +72,9 @@ const SCREENS = [
     controls: [],
     notes: ["Built, not drawn: the master says so in turn 140. The view plays the scene's frames and clips in order (preview.tsx)."] },
 
-  { group: "Make", screen: "Bench", frame: "142a", route: "#/w/:worldId/generate", status: "built", checked: "2026-09-15",
+  { group: "Make", screen: "Bench", frame: "142a", route: "#/w/:worldId/artifacts/bench/:sessionId", status: "built", checked: "2026-09-15",
     controls: ["Reference", "Keyframe", "End frame", "Image 1", "Presets", "Generate", "voice refs"],
-    notes: ["Keyframe slots (PR 900), voice references (PR 856) and Presets ship; drawn for the first time in 142a.", "Issue 1096: filters run horizontally, the model fills the dispatch row, voice references are a disclosure, and camera guidance is the Keyframe hint. In subject sessions the price appears once, on Generate."] },
+    notes: ["Keyframe slots (PR 900), voice references (PR 856) and Presets ship; drawn for the first time in 142a.", "A shot's generation session is now the Bench 142a draws, not the prototype's second dress: the shot and the session's spend on the chrome's pills, the production's rail, icon tabs, one dispatch row with the name alone in the select and the price as one mono figure, <code>voice refs · on</code> as an option chip (absent without a voiced cast), the route fact on the Keyframe hint, the wall's pills, the clip's own transport, <code>Accept · file onto shot N</code>, and a numbered strip. Not built: the bar's filter and the two lenses, Voice on a shot, the seed and advanced buttons — none has a function behind it yet."] },
   { group: "Make", screen: "Cut", frame: "122a", route: "#/w/:worldId/p/:prodId/cut", status: "built", checked: "2026-09-09",
     controls: ["Library"],
     notes: ["The library beside the cut with one drag engine and posters by artifact id (PR 1054); typed trims in the Inspector and audio import (PR 944); the export sheet at <code>/cut?export=1</code> owns delivery."] },

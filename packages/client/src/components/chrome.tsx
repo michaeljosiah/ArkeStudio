@@ -35,6 +35,7 @@ export function AppChrome({
   back,
   context,
   menu,
+  aside,
   controls = true,
   current,
   divided = true,
@@ -44,6 +45,12 @@ export function AppChrome({
   context?: { label: string; to?: string };
   /** Rendered after the context — the bench's session switcher lives here (design 68b). */
   menu?: React.ReactNode;
+  /**
+   * Rendered at the right, before the app's own icons — the Bench's subject and its session
+   * spend as pills (design 142a). Facts about the screen, not controls, so they sit apart from
+   * the buttons rather than among them.
+   */
+  aside?: React.ReactNode;
   /** Launch is the one screen without them: nothing is set up yet and nothing has happened. */
   controls?: boolean;
   current?: "proposals" | "activity" | "settings";
@@ -99,6 +106,7 @@ export function AppChrome({
         <span className="fy-brand__studio">Studio</span>
       </button>
       <div className="fy-titlebar__side fy-titlebar__side--right">
+        {aside}
         {controls && (
           <>
             {/* Proposals sits before activity: AppChrome's own settlement is that activity and
