@@ -2502,7 +2502,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
 
   for (const entry of shots) {
     entry.audioReferences = planCharacterAudio({ scene, shots: [entry.shot], sheets, kits, model,
-      imageCount: entry.bound.length, taskMode: entry.continuation?.kind === "extend" ? "continue" : entry.frame ? "first-frame" : "generate",
+      imageCount: entry.bound.length, videoCount: entry.continuation?.kind === "carry" ? 1 : 0, taskMode: entry.continuation?.kind === "extend" ? "continue" : entry.frame ? "first-frame" : "generate",
       disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences, masterReferences: input.masterReferences });
     const audioText = characterAudioInstructions(entry.audioReferences);
     if (audioText) entry.parts.preamble = [entry.parts.preamble, audioText].filter(Boolean).join("\n");

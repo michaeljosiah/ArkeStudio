@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
-import type { BenchSession, ClientMessage, ClientState, DomainEvent, ManifestModel } from "@arke-studio/contracts";
+import { orderedShots, type BenchSession, type ClientMessage, type ClientState, type DomainEvent, type ManifestModel } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -253,10 +253,12 @@ function bridge(sent: ClientMessage[]): ArkeBridge {
 
 const open: Bench[] = [];
 
-async function openBench(session: BenchSession, id = SESSION_ID): Promise<Bench> {
+async function openBench(session: BenchSession, id = SESSION_ID, configure?: (state: ClientState) => void): Promise<Bench> {
   const sent: ClientMessage[] = [];
   __setBridgeForTest(bridge(sent));
-  __setStateForTest(stateWith(session));
+  const state = structuredClone(stateWith(session));
+  configure?.(state);
+  __setStateForTest(state);
   const container = dom.document.createElement("div");
   dom.document.body.append(container);
   const root = createRoot(container);
@@ -303,6 +305,21 @@ async function apply(event: DomainEvent): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 20));
   });
 }
+
+it("voice-reference blockers open the disclosure beside a disabled Generate", async () => {
+  const bench = await openBench(shotSession("video"), SESSION_ID, state => {
+    state.world!.referenceKits[0]!.designatedVoiceSample = { file: "legacy.wav" } as never;
+    const scene = state.world!.productions.find(p => p.meta.id === "saltlight")!.scenes.find(s => s.id === "sc_04")!;
+    const shot = orderedShots(scene).find(s => s.id === "sh_12")!;
+    shot.covers = undefined;
+    shot.audio = { kind: "dialogue", speaker: "maren-kest", line: "Hello" };
+  });
+  const options = q(bench, '[aria-label="Character audio references"]');
+  assert.equal(options.hasAttribute("open"), true);
+  assert.match(options.querySelector('[role="alert"]')?.textContent ?? "", /assigned voice reference/);
+  const generate = [...bench.container.querySelectorAll("button")].find(button => button.textContent?.includes("Generate"))!;
+  assert.equal(generate.disabled, true);
+});
 
 describe("the generation session's header and frame (R-24; design 2607-2615)", () => {
   it("names where you are in four parts and drops the world bench's rail and switcher", async () => {

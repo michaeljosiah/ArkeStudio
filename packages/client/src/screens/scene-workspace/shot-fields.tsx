@@ -4,6 +4,7 @@ import {
   assemblePrompt,
   overrideStaleAgainst,
   promptFor,
+  productionShape,
   propSlug,
   resolveCast,
   resolvePropStates,
@@ -96,7 +97,8 @@ export function ShotFields({
   const assembledPrompt = assemblePrompt(world.meta, sheets, scene, shot, style, undefined, capability);
   const currentPrompt = promptFor(world.meta, sheets, scene, shot, style, undefined, capability);
   // A still-image editor must not replace the video override it cannot display.
-  const videoOverride = shot.promptOverride?.capability === "video";
+  const videoOverride = shot.promptOverride !== undefined && (shot.promptOverride.capability === "video" ||
+    (shot.promptOverride.capability === undefined && productionShape(production.meta).dispatchCapability === "video"));
   const durableOverride = videoOverride ? null : shot.promptOverride?.text ?? null;
   const [promptDraft, setPromptDraft] = useState<string | null>(null);
   const [promptWhole, setPromptWhole] = useState(false);
@@ -300,7 +302,7 @@ export function ShotFields({
             disabled={disabled || videoOverride}
           />
         </div>
-        {videoOverride ? <p className="fy-shot__stale">Frame prompt follows the script. This shot’s separate video prompt is retained.</p> : null}
+        {videoOverride ? <p className="fy-shot__stale">Video prompt retained. Frame editing is unavailable for this shot.</p> : null}
         {videoOverride || stale.length === 0 ? null : (
           <p className="fy-shot__stale" role="status">
             The world moved under this prompt: {stale.map((entry) => `${entry.sheetId} v${entry.from} → v${entry.to}`).join(" · ")}

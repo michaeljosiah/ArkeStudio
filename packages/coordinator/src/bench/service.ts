@@ -839,7 +839,7 @@ export function planBenchDispatch(
   }
   const preamble = session.subject === undefined || frame !== null ? null : bindingPreamble(bound);
   const resolvedAudio = params.kind === "video" && session.subject ? (options.fromTake ? options.fromTake.request.audioReferences : planSubjectCharacterAudio({
-    world: bundle, subject: session.subject, model, imageCount: frame?.paths.length ?? referencePaths.length,
+    world: bundle, subject: session.subject, model, imageCount: frame?.paths.length ?? referencePaths.length, videoCount: videoPaths.length,
     taskMode, disabled: params.audioReferencesDisabled,
     ...(options.performanceReferences?.length ? { performanceReferences: options.performanceReferences } : {}) })) : undefined;
   const audioReferences = resolvedAudio && (resolvedAudio.disabled || resolvedAudio.references.length || resolvedAudio.problems.length) ? resolvedAudio : undefined;

@@ -921,7 +921,8 @@ function BenchWorkspace({
   // freezes the real thing at dispatch.
   const castVoices = world && subject ? castVoiceSummary(world, subject) : [];
   const characterAudio = world && model && subject && draft.params.kind === "video" ? planSubjectCharacterAudio({
-    world, subject, model, imageCount: session.composer.keyframeTokens.length || carried.length,
+    world, subject, model, imageCount: session.composer.keyframeTokens.length || carried.filter(ref => ref.kind === "image").length,
+    videoCount: carried.filter(ref => ref.kind === "video").length,
     taskMode, disabled: draft.params.audioReferencesDisabled,
     performanceReferences: castVoices.flatMap(v => v.preview ? [v.preview] : []) }) : null;
   // The track's geometry and its states, worked out in one place so the fill, the ends, the
@@ -1945,7 +1946,7 @@ function BenchWorkspace({
             )}
           </div>
 
-            {characterAudio && <details className="fy-bench__audio-options" aria-label="Character audio references"><summary>Voice refs · {characterAudio.disabled ? "off" : "on"}</summary>
+            {characterAudio && <details className="fy-bench__audio-options" aria-label="Character audio references" open={characterAudio.problems.length > 0 || undefined}><summary>Voice refs · {characterAudio.disabled ? "off" : "on"}</summary>
               <label><input type="checkbox" checked={!characterAudio.disabled} onChange={e => compose({ ...draft,
                 params: { ...draft.params, kind: "video", audioReferencesDisabled: !e.target.checked } as BenchParams })} /> Use voice refs</label>
               {characterAudio.references.map(r => <p key={r.label}>{r.characterName} · {"performance" in r ? `${castVoices.find(v => v.sheetId === r.sheetId)?.line ?? "read"} · ` : ""}{r.label} · {("sample" in r ? r.sample : "master" in r ? r.prepared : r.performance).provenance.outputTechnical.durationSec?.toFixed(1)}s · voice guidance, new scene dialogue</p>)}
