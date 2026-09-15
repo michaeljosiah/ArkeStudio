@@ -396,7 +396,7 @@ export class FalClient implements ProviderClient {
         ...imageOutput,
         ...imagePayload,
         ...(allAudioUrls.length ? { audio_urls: allAudioUrls } : {}),
-        ...(audioPlan ? { generate_audio: audioPlan.references[0]?.intent !== "performance-sync" } : {}),
+        ...(audioUrls.length ? { generate_audio: audioPlan!.references[0]!.intent !== "performance-sync" } : {}),
       }),
       // Deliberately NOT abortable, unlike the synchronous providers. This POST is an enqueue:
       // fal takes the work and answers with the `request_id` that `cancel()` needs to call it off.

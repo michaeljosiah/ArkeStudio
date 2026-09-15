@@ -63,3 +63,16 @@ it("fal queue completion with no media is a generation failure with the provider
   assert.deepEqual(await client.poll("test", "fal-ai/nano-banana-2::request"),
     { state: "failed", error: "fal: References to missing attachments. (HTTP 422)" });
 });
+
+for (const disabled of [true, false]) it(`an empty voice plan (disabled=${disabled}) preserves Sound off`, async () => {
+  let payload: Record<string, unknown> = {};
+  const client = new FalClient(async (_url, init) => {
+    payload = JSON.parse(String(init?.body));
+    return Response.json({ request_id: "silent" });
+  });
+  await client.submit("test", { model: "seedance-2.0", capability: "video",
+    params: { prompt: "A silent scene", sound: false, durationSec: 5,
+      audioReferences: { version: 1, route: null, disabled, references: [], problems: [] } } });
+  assert.equal(payload.generate_audio, false);
+  assert.equal(payload.audio_urls, undefined);
+});
