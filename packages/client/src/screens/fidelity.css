@@ -8606,3 +8606,6 @@ button.fy-abdoor__voice:hover { background: var(--accent); border-color: var(--n
 .fy-bench__modelwrap > select { width: 100%; min-width: 0; }
 .fy-bench__audio-options { margin-top: 8px; font-size: 11px; }
 .fy-bench__audio-options > summary { cursor: pointer; }
+
+/* Session recovery stays visible on any route without unmounting an unsaved editor. */
+.fy-session-refusal { position: fixed; top: 48px; right: 24px; max-width: min(480px, calc(100vw - 48px)); z-index: 1000; }

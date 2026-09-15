@@ -135,7 +135,7 @@ function setupSteps(
       label: "Studio core",
       ...(connection === "open" && state !== null
         ? { state: "ready", settled: true }
-        : { state: connection === "closed" ? "retrying…" : "starting…", settled: false }),
+        : { state: (connection === "closed" || connection === "auth-refused") ? "retrying…" : "starting…", settled: false }),
     },
     {
       label: "Your data folder",
@@ -169,17 +169,26 @@ function stillPreferred(): boolean {
  * Three screens had reason to say it — the setup reel, the same reel with nothing to download,
  * and the settings pane, whose rows draw `—` from an absent snapshot exactly as they draw `—`
  * from an unconfigured provider (issue 599). Three copies of one sentence drift; one does not.
- * The remedy stays in it because the case that produces this is nearly always a dev browser
- * session, and it self-qualifies for the case that is not.
+ * Browser recovery distinguishes an expired capability from an offline host without assuming
+ * which Studio launcher the author chose.
  */
+export function SessionRefusal() {
+  const { connection } = useStore();
+  if (connection !== "auth-refused") return null;
+  return <div role="alert" className="fy-session-refusal">
+    <Callout tone="warning" title="Session link is out of date">Restart the frontend and open the new Arke session link from its terminal. If it still fails, check that the server allows this browser address.</Callout>
+  </div>;
+}
+
 function WaitingForCoordinator() {
+  const { connection } = useStore();
   if (typeof window !== "undefined" && window.arke) {
     return <Callout tone="warning" title="Starting Arke Studio…">Connecting to your workspace. The app keeps retrying on its own.</Callout>;
   }
+  if (connection === "auth-refused") return null;
   return (
     <Callout tone="warning" title="Waiting for the coordinator">
-      The app keeps retrying on its own. If this is a dev browser session, start it with
-      `npm run dev:coordinator`.
+      The app keeps retrying on its own. Check that your Studio server is running.
     </Callout>
   );
 }
@@ -317,7 +326,7 @@ export function StartupScreen() {
             <span style={{ flex: 1 }} />
             <span className="fy-mono">{remaining !== null ? aboutLeft(remaining) : ""}</span>
           </div>
-          {connection === "closed" && startup?.status !== "initializing" && <WaitingForCoordinator />}
+          {(connection === "closed" || connection === "auth-refused") && startup?.status !== "initializing" && <WaitingForCoordinator />}
           <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 14, justifyContent: "center" }}>
             <span style={{ font: "400 11.5px var(--font-sans)", color: "var(--muted-foreground)" }}>
               One-time setup. After this, Arke runs on your machine. Your worlds never leave it.
@@ -340,7 +349,7 @@ export function StartupScreen() {
               answer is "opening", which a button that says so already gives.
             */
             <>
-              {connection === "closed" && startup?.status !== "initializing" && <WaitingForCoordinator />}
+              {(connection === "closed" || connection === "auth-refused") && startup?.status !== "initializing" && <WaitingForCoordinator />}
               <div className="fy-startup__done">
                 <Button
                   variant="primary"
@@ -1539,7 +1548,7 @@ export function SettingsLayout() {
                 capability rows, `not measured` in the machine header. A dev coordinator that died
                 at import produces exactly that screen, which reads as a data bug in whatever you
                 last changed (issue 599). */}
-            {connection === "closed" && (
+            {(connection === "closed" || connection === "auth-refused") && (
               <div className="fy-settings__waiting">
                 <WaitingForCoordinator />
               </div>
@@ -1946,7 +1955,7 @@ export function SettingsHarnessScreen() {
   }, [focusAgent]);
   if (!hasSnapshot) return (
     <div data-screen="settings-harness" className="fy-set fy-set--runtime">
-      {connection !== "closed" && <WaitingForCoordinator />}
+      {(connection !== "closed" && connection !== "auth-refused") && <WaitingForCoordinator />}
     </div>
   );
   return (

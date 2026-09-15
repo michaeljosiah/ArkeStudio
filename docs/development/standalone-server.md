@@ -17,7 +17,7 @@ it at a time. Existing world ownership checks still apply.
 In a second terminal, run `npm run dev` and open the **Arke session** link it prints.
 The private launch capability passes through the existing restricted local handoff file and
 URL fragment. Vite does not serve that file. Restart Vite after restarting the server to obtain
-the new session link. Keep the link private.
+the new session link. Vite checks the saved capability against the running server before printing it. If verification fails, check that both terminals use the same checkout, the endpoint port matches, and the server allows the frontend origin. The browser distinguishes a rejected session link from a server that is offline. Keep the link private.
 
 Options:
 
