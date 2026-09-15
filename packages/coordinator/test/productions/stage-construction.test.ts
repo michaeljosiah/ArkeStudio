@@ -219,7 +219,9 @@ it(`${ending} while awaiting inspection preserves the partial draft and never wr
     assert.match(terminal?.detail ?? "", ending === "cancel" ? /stopped/ : /limit/);
     if (ending === "timeout") {
       assert.match(terminal?.draft?.assessment ?? "", /Inspection incomplete/);
-      assert.equal(terminal?.draft?.staging.authorship, undefined);
+      assert.equal(terminal?.draft?.staging.authorship?.inspectedFrames, 0);
+      assert.equal(terminal?.draft?.staging.authorship?.model, "test/vision");
+      assert.match(terminal?.draft?.staging.authorship?.assessment ?? "", /incomplete/);
     }
     assert.ok(terminal?.draft);
     assert.equal(shot.staging, undefined);

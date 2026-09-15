@@ -1,13 +1,23 @@
 import { ReferenceMediaBindingsSchema } from "@arke-studio/contracts";
 import type { Job, ManifestModel } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
-import { readContainedAudioReferences } from "../world/reference-files.js";
+import { readContainedAudioReferences, readContainedVideoReferences } from "../world/reference-files.js";
 import type { DispatchVideoSource, DispatchVoiceReference } from "../queue/dispatcher.js";
 import type { FfmpegRunner } from "../takes/export.js";
 import type { MediaProbe } from "./probe.js";
 import { prepareReferenceVideo, checkSeedanceVideo, measureReferenceAudio, referenceHash } from "./reference-media.js";
 
-export async function prepareReferences(store: WorldStore, job: Job, model: ManifestModel | undefined,
+/** Use the dispatch checks before journal admission too, so oversized media is a refusal,
+ * not a durable failed job. Dispatch repeats them because files can change after enqueue. */
+export async function validateSeedanceReferences(store: WorldStore, params: Job["params"], model: ManifestModel,
+  probe: MediaProbe | undefined) {
+  const paths = params.videoReferences ?? [];
+  if (!Array.isArray(paths) || !paths.every(path => typeof path === "string")) throw new Error("Invalid video reference paths.");
+  const videos = await readContainedVideoReferences(store.dir, paths);
+  await prepareReferences(store, { params }, model, videos, { probe }, AbortSignal.timeout(60_000));
+}
+
+export async function prepareReferences(store: WorldStore, job: Pick<Job, "params">, model: ManifestModel | undefined,
   videos: DispatchVideoSource[], tools: { ffmpeg?: FfmpegRunner; probe?: MediaProbe }, signal: AbortSignal) {
   const audio: Array<DispatchVoiceReference & { durationSec: number }> = [];
   if (model?.limits.referenceSyntax === "seedance") {
@@ -29,7 +39,7 @@ export async function prepareReferences(store: WorldStore, job: Job, model: Mani
     for (const [index, clip] of clips.entries()) {
       const binding = audioBindings[index]!;
       if (!referenceHash(clip.data).replace(/^sha256:/, "").startsWith(binding.hash.replace(/^sha256:/, ""))) throw new Error("Reference media changed since review.");
-      const durationSec = await measureReferenceAudio(clip, tools.probe, signal, { min: model.id === "seedance-2.5" ? 1.8 : 0, max: model.limits.maxReferenceAudioSec ?? 0 });
+      const durationSec = await measureReferenceAudio(clip, tools.probe, signal, { min: model.limits.minReferenceAudioFileSec ?? 0, max: model.limits.maxReferenceAudioSec ?? 0 });
       if (Math.abs(durationSec - binding.durationSec) > 0.15) throw new Error("Audio duration changed since review.");
       audio.push({ ...clip, durationSec });
     }

@@ -95,7 +95,9 @@ export function ShotFields({
   const capability = "image" as const;
   const assembledPrompt = assemblePrompt(world.meta, sheets, scene, shot, style, undefined, capability);
   const currentPrompt = promptFor(world.meta, sheets, scene, shot, style, undefined, capability);
-  const durableOverride = shot.promptOverride?.text ?? null;
+  // A still-image editor must not replace the video override it cannot display.
+  const videoOverride = shot.promptOverride?.capability === "video";
+  const durableOverride = videoOverride ? null : shot.promptOverride?.text ?? null;
   const [promptDraft, setPromptDraft] = useState<string | null>(null);
   const [promptWhole, setPromptWhole] = useState(false);
   const promptDirty = useRef(false);
@@ -124,6 +126,7 @@ export function ShotFields({
     }
   }, [refusalVersion]);
   const commitPrompt = (value: string) => {
+    if (videoOverride || locked) return;
     const next = value.trim();
     promptDirty.current = false;
     if (next === currentPrompt.text.trim()) {
@@ -143,12 +146,13 @@ export function ShotFields({
   // durable override needs a command; a local draft is just let go.
   const canRebuild = durableOverride !== null || promptDraft !== null;
   const rebuildPrompt = () => {
+    if (videoOverride || locked) return;
     promptDirty.current = false;
     if (durableOverride === null) {
       setPromptDraft(null);
       return;
     }
-    if (onCommand({ kind: "set-prompt-override", shotId: shot.id, text: null })) {
+    if (onCommand({ kind: "set-prompt-override", shotId: shot.id, text: null, capability })) {
       pendingRebuildVersion.current = refusalVersion;
       promptWrite.current = { expected: null, refusalVersion };
       setPromptDraft(assembledPrompt);
@@ -273,13 +277,13 @@ export function ShotFields({
         }}
         head={
           <>
-            {shot.promptOverride === undefined ? null : <span className="fy-shot__tag">Authored</span>}
+            {durableOverride === null ? null : <span className="fy-shot__tag">Authored</span>}
             {coverage === "changed" ? <span className="fy-shot__tag" data-tone="warning">script changed</span> : null}
             <span className="fy-shot__spacer" />
             <button type="button" className="fy-shot__link" aria-pressed={promptWhole} onClick={() => setPromptWhole((whole) => !whole)}>
               {promptWhole ? "Show less" : "View full prompt"}
             </button>
-            <button type="button" className="fy-shot__link" title="Rebuild from the script, references and camera" disabled={disabled || !canRebuild} onClick={rebuildPrompt}>
+            <button type="button" className="fy-shot__link" title="Rebuild from the script, references and camera" disabled={disabled || videoOverride || !canRebuild} onClick={rebuildPrompt}>
               Rebuild
             </button>
           </>
@@ -293,10 +297,11 @@ export function ShotFields({
             worldSlug={slug}
             underlay={promptValue}
             label={`Frame prompt for shot ${shot.number}`}
-            disabled={disabled}
+            disabled={disabled || videoOverride}
           />
         </div>
-        {stale.length === 0 ? null : (
+        {videoOverride ? <p className="fy-shot__stale">Frame prompt follows the script. This shot’s separate video prompt is retained.</p> : null}
+        {videoOverride || stale.length === 0 ? null : (
           <p className="fy-shot__stale" role="status">
             The world moved under this prompt: {stale.map((entry) => `${entry.sheetId} v${entry.from} → v${entry.to}`).join(" · ")}
           </p>

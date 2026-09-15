@@ -254,6 +254,24 @@ describe("the shot page (design turn 145)", () => {
     assert.equal(q(authored, ".fy-shot__prompt")?.getAttribute("data-whole"), "true");
   });
 
+  it("the frame editor preserves a video override that it does not display", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const override = { text: "Authored camera motion", capability: "video" as const, sheetVersions: {} };
+    sceneOf(state).shots[0]!.promptOverride = override;
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(state);
+    const card = q(mounted, '.fy-shot__section[aria-label="Frame prompt"]')!;
+    const textarea = card.querySelector("textarea") as HTMLTextAreaElement;
+    assert.equal(textarea.disabled, true);
+    assert.notEqual(textarea.value, override.text);
+    assert.equal(byText(card, "Rebuild").disabled, true);
+    await click(byText(card, "Rebuild"));
+    await act(async () => card.dispatchEvent(new dom.window.Event("focusout", { bubbles: true })));
+    assert.deepEqual(commands(sent), []);
+    assert.deepEqual(sceneOf(state).shots[0]!.promptOverride, override);
+  });
+
   it("rebuilds a dirty prompt without saving the draft first, and a blur out of the card writes it", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     sceneOf(state).shots[0]!.promptOverride = { text: "A hand-written prompt", sheetVersions: {} };
@@ -272,7 +290,7 @@ describe("the shot page (design turn 145)", () => {
     await act(async () => card.dispatchEvent(movingInside));
     assert.equal(commands(sent).length, 0, "moving from the prompt to Rebuild does not commit the draft");
     await click(rebuild);
-    assert.deepEqual(commands(sent), [{ kind: "set-prompt-override", shotId: "sh_12", text: null }]);
+    assert.deepEqual(commands(sent), [{ kind: "set-prompt-override", shotId: "sh_12", text: null, capability: "image" }]);
     assert.notEqual(textarea.value, "A dirty draft that must not land");
     assert.notEqual(textarea.value, "A hand-written prompt", "the assembled prompt is visible while the clear is pending");
   });

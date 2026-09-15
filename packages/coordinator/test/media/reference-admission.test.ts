@@ -21,7 +21,7 @@ test("H3 admission combines standalone and voice durations and refuses empty req
   assert.equal(referenceInputProblem(model, { references: ["image.png"] }), null);
   assert.equal(referenceInputProblem(model, { audioReferences }), null);
   assert.equal(referenceInputProblem(model, { referenceMedia }), null);
-  assert.match(referenceInputProblem(model, { referenceMedia, audioReferences })!, /together exceed fifteen/);
+  assert.match(referenceInputProblem(model, { referenceMedia, audioReferences })!, /together exceed the route duration limit/);
   referenceMedia[0]!.durationSec = 4.8;
   assert.equal(referenceInputProblem(model, { referenceMedia, audioReferences }), null);
 });

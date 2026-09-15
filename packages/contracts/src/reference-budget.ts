@@ -309,7 +309,7 @@ export function admitReference(
   if (typeof item.durationSec !== "number" || !Number.isFinite(item.durationSec) || item.durationSec <= 0) {
     return { ok: false, binding: "unknown-duration", reason: "duration could not be read" };
   }
-  const minimum = item.kind === "video" ? model.limits.minReferenceVideoFileSec : undefined;
+  const minimum = item.kind === "video" ? model.limits.minReferenceVideoFileSec : model.limits.minReferenceAudioFileSec;
   const maximum = item.kind === "video" ? model.limits.maxReferenceVideoFileSec : model.limits.maxReferenceAudioFileSec;
   if ((minimum !== undefined && item.durationSec < minimum) || (maximum !== undefined && item.durationSec > maximum)) {
     return { ok: false, binding: item.kind === "video" ? "video-seconds" : "audio-seconds", reason: `${item.kind} reference must be ${minimum ?? 0}–${maximum ?? "unlimited"} seconds` };

@@ -40,7 +40,7 @@ import {
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { StageUnderlay } from "./stage-underlay.js";
-import { Eyebrow, Link, Row, Stepper, Triad, Value, fieldEscape, sameLine } from "./stage-inspector.js";
+import { Eyebrow, Link, Row, Stepper, Triad, Value, StageEditContext, fieldEscape, sameLine } from "./stage-inspector.js";
 import { selectedShotId, useWorkspaceSelection } from "./selection.js";
 import { figureColour, StageViewport, type StageData, type StageSelection } from "./stage-viewport.js";
 import { send, subscribeStageConstruction, beginStageExport, cancelStageExport, failStagePlayblastAction, stagePlayblast, writeStageExportFrame } from "../../lib/store.js";
@@ -987,6 +987,7 @@ export function SceneStage({
   const ghostable = previous?.staging !== undefined;
   const busy = staging && persisted === null;
   return (
+    <StageEditContext.Provider value={() => { const original = draft; return () => setDraft(original); }}>
     <section ref={stageRoot} className="fy-swstage" data-testid="workspace-stage" aria-label="Stage" tabIndex={0} onKeyDown={timelineKey}>
       {head || fullscreen !== null ? (
         <div className="fy-swstage__head" data-stepper={head ? "true" : undefined}>
@@ -1635,5 +1636,6 @@ export function SceneStage({
         </div>
       )}
     </section>
+    </StageEditContext.Provider>
   );
 }

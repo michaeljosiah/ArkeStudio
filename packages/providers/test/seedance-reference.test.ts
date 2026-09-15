@@ -1,12 +1,20 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { createHash } from "node:crypto";
-import { referencePrompt, referenceInputProblem, multimediaCapacity } from "@arke-studio/contracts";
+import { referencePrompt, referenceInputProblem, multimediaCapacity, admitReference } from "@arke-studio/contracts";
 import { FAL_MODELS } from "../src/fal-catalogue.generated.js";
 import { FalClient } from "../src/clients/fal.js";
 
 const data = Uint8Array.from([1, 2, 3]);
 const hash = createHash("sha256").update(data).digest("hex");
+it("Seedance 2.5 refuses short audio at attachment and dispatch review", () => {
+  const model = FAL_MODELS.find(row => row.id === "seedance-2.5")!;
+  assert.equal(admitReference({ kind: "audio", durationSec: 1 }, [], model).ok, false);
+  assert.match(referenceInputProblem(model, { references: ["frame.png"], referenceMedia: [
+    { kind: "audio", file: "sound.wav", hash, durationSec: 1 },
+  ] }) ?? "", /per-file minimum/);
+  assert.equal(model.limits.maxReferenceVideoBytes, 48 * 1024 * 1024);
+});
 it("fal rows without an audio transport field do not offer standalone audio", () => {
   assert.equal(multimediaCapacity([], FAL_MODELS.find(row => row.id === "minimax-h3")!).audioCeilingSec, 0);
   assert.equal(multimediaCapacity([], FAL_MODELS.find(row => row.id === "seedance-2.0")!).audioCeilingSec, 15);

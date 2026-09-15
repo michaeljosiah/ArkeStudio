@@ -12,7 +12,7 @@ import { LocalGpu, memoryWait, queueableLocalMemory } from "./local-ai/gpu.js";
 import { withLocalGpu } from "./harness/local-gpu.js";
 import { withModelValidation } from "./harness/model-validation.js";
 import { HarnessModelCatalog, selectHarnessModel, type LanguageModelSelection } from "./harness/model-catalog.js";
-import { prepareReferences } from "./media/prepare-references.js";
+import { prepareReferences, validateSeedanceReferences } from "./media/prepare-references.js";
 import { stageConstructionHandoff } from "./world-chat/actions.js";
 import { handleProductionSetupCommand } from "./productions/setup-command.js";
 import { recoverProductionSetups } from "./productions/setup.js";
@@ -2388,6 +2388,23 @@ export class Coordinator {
             // refused with the readiness reason before anything is journalled. `unknown`
             // dispatches (D15) — the floor could not be checked, which is not a refusal.
             admit: async (input) => {
+              const referenceModel = this.opts.manifest?.models.find(row => row.id === input.model && row.provider === input.provider);
+              if (referenceModel?.limits.referenceSyntax === "seedance") {
+                const problem = referenceInputProblem(referenceModel, input.params);
+                if (problem) return { ok: false, reason: problem };
+                if ((Array.isArray(input.params.videoReferences) && input.params.videoReferences.length > 0) ||
+                    (Array.isArray(input.params.referenceMedia) && input.params.referenceMedia.length > 0)) {
+                  try {
+                    const check = (store: WorldStore) => validateSeedanceReferences(store, input.params, referenceModel, this.opts.mediaProbe);
+                    if (this.opts.provider.withWorldStore) await this.opts.provider.withWorldStore(input.worldId, check);
+                    else {
+                      const store = this.opts.provider.openStore?.();
+                      if (!store || store.worldId !== input.worldId) throw new Error("The owning world is unavailable.");
+                      await check(store);
+                    }
+                  } catch (error) { return { ok: false, reason: error instanceof Error ? error.message : String(error) }; }
+                }
+              }
               if (input.provider !== "comfyui") return { ok: true };
               const service = this.opts.comfyui?.service;
               if (!service) return { ok: false, reason: "local recipes are not configured in this build" };

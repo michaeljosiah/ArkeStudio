@@ -304,7 +304,6 @@ export class StageConstructor {
           await writeFile(join(dir, name), bytes);
           names.push(name);
         }
-        inspectedFrames += frames.length;
         const prior = latest;
         const lineWarnings = stageLineCrossings(source.scene, source.aspect, { shotId: source.shot.id, staging: { ...prior.staging, version: 1, cast: prior.cast, sets: prior.sets } })
           .filter(finding => finding.shotIds.includes(source.shot.id)).map(finding => finding.message);
@@ -323,6 +322,7 @@ export class StageConstructor {
           throw new Error(
             "The model could not inspect all rendered views. Choose an image-capable language model; the partial draft is retained.",
           );
+        inspectedFrames += frames.length;
         if (
           round === 2 &&
           fingerprint([latest.staging, latest.cast, latest.sets]) !==
@@ -348,10 +348,13 @@ export class StageConstructor {
       if (abort.signal.reason === timeLimit && latest && sourceFingerprint) {
         try { current = fingerprint(context()) === sourceFingerprint; } catch { /* source is no longer usable */ }
       }
-      if (current && latest) {
-        delete latest.staging.authorship;
-        latest.inspected = [];
+      if (current && latest && sourceFingerprint) {
         latest.assessment = "Inspection incomplete: the time limit was reached. Review this blockout before keeping it.";
+        latest.staging.authorship = {
+          model: deps.model, sourceVersion: request.baseVersion, sourceFingerprint,
+          instruction: request.instruction, assumptions: latest.assumptions,
+          assessment: latest.assessment, inspectedFrames,
+        };
         emit("ready", "Blockout built; inspection incomplete (time limit). Review before keeping.", latest);
       } else {
         emit("failed", error instanceof Error ? error.message : String(error), latest);

@@ -203,6 +203,7 @@ export const ModelLimitsSchema = z
     maxReferenceVideoSec: z.number().min(0).optional(),
     /** Aggregate seconds of audio reference this model accepts across all clips (R-40, R-41). */
     maxReferenceAudioSec: z.number().min(0).optional(),
+    minReferenceAudioFileSec: z.number().positive().optional(),
     minReferenceVideoFileSec: z.number().positive().optional(),
     maxReferenceVideoFileSec: z.number().positive().optional(),
     maxReferenceAudioFileSec: z.number().positive().optional(),

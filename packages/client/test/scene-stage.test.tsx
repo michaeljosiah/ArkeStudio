@@ -484,8 +484,12 @@ it("a group's references follow it: cleared, its track and the camera's anchor g
   assert.equal(stageItem(q, "Cart"), undefined);
 });
 
-it("Escape restores the focus value after valid live numeric edits", async () => {
-  const { q } = await mount(movingShot);
+it("Escape restores the whole authored draft after valid live numeric edits", async () => {
+  const { q } = await mount(shot => {
+    movingShot(shot);
+    shot.staging!.authorship = { model: "test/vision", sourceVersion: 1, sourceFingerprint: "a".repeat(64),
+      instruction: "Frame the doorway", assumptions: [], assessment: "Reviewed framing", inspectedFrames: 3 };
+  });
   const input = q('[aria-label="Rig intensity"]') as HTMLInputElement;
   const props = () => (input as unknown as Record<string, {
     onFocus: () => void;
@@ -499,7 +503,9 @@ it("Escape restores the focus value after valid live numeric edits", async () =>
   await act(async () => props().onKeyDown({ key: "Escape", currentTarget: input, preventDefault() {}, stopPropagation() {} }));
   await act(async () => props().onBlur({ currentTarget: input }));
   assert.equal(input.value, "1.00");
-
+  assert.equal(q('[data-testid="stage-moved"]'), null);
+  assert.match(q(".fy-swstage__inspection").textContent ?? "", /Reviewed framing/);
+  assert.match(q(".fy-swstage__inspection").textContent ?? "", /3 views inspected/);
 });
 
 it("Escape in a field is the field's: it drops what was typed without committing, and stops there; other keys pass", async () => {

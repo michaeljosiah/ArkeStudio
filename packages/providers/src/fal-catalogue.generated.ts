@@ -322,6 +322,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
       "minReferenceVideoFileSec": 1.8,
       "maxReferenceVideoFileSec": 30.2,
       "maxReferenceVideoFileBytes": 200000000,
+      "maxReferenceVideoBytes": 50331648,
       "referenceVideoSides": {
         "min": 300,
         "max": 6000
@@ -335,6 +336,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
         "max": 60
       },
       "maxReferenceAudioSec": 30.2,
+      "minReferenceAudioFileSec": 1.8,
       "referencesField": "image_urls",
       "referenceVideoField": "video_urls",
       "referenceAudioField": "audio_urls",

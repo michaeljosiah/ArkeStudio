@@ -22,6 +22,7 @@ export function referenceInputProblem(model: ManifestModel, params: Record<strin
   const images = Array.isArray(params.references) ? params.references.length : 0;
   const videos = (Array.isArray(params.videoReferences) ? params.videoReferences.length : 0) + (params.continuedFrom ? 1 : 0);
   if (model.limits.referenceSyntax === "seedance") {
+    if (audio.some(duration => duration < (model.limits.minReferenceAudioFileSec ?? 0))) return "Audio reference is shorter than this route's per-file minimum.";
     if (audio.length && images + videos === 0) return "Seedance audio references need an image or video reference.";
     if (images + videos + audio.length > (model.limits.maxCombinedReferences ?? Infinity)) return "Too many combined references.";
     if (videos > (model.accepts.referenceVideos ?? 0)) return "Too many video references.";

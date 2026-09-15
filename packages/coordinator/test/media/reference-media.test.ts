@@ -1,16 +1,24 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { access, readFile, writeFile } from "node:fs/promises";
+import { access, open, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Job, ManifestModel } from "@arke-studio/contracts";
 import { checkSeedanceVideo, prepareReferenceVideo } from "../../src/media/reference-media.js";
-import { prepareReferences } from "../../src/media/prepare-references.js";
+import { prepareReferences, validateSeedanceReferences } from "../../src/media/prepare-references.js";
 import { readContainedAudioReferences } from "../../src/world/reference-files.js";
 import type { WorldStore } from "../../src/world/store.js";
 import { tempDir } from "../tmp.js";
 import { createHash } from "node:crypto";
+
+test("Seedance admission refuses the actual inline size before probing or enqueue", async () => {
+  const dir = await tempDir("arke-seedance-admission-");
+  const file = await open(join(dir, "large.mp4"), "w");
+  try { await file.truncate(48 * 1024 * 1024 + 1); } finally { await file.close(); }
+  const model = { id: "seedance-2.5", limits: { referenceSyntax: "seedance" } } as ManifestModel;
+  await assert.rejects(validateSeedanceReferences({ dir } as WorldStore, { videoReferences: ["large.mp4"] }, model, undefined), /48 MB inline limit/);
+});
 
 test("video preparation uses 24 fps, preserves sound, and removes its private files", async () => {
   for (const hasAudio of [true, false]) {
