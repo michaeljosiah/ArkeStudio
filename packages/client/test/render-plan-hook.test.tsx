@@ -11,6 +11,7 @@ import {
   type ProductionBundle,
 } from "@arke-studio/contracts";
 import { ABSENT_TIMELINE, useRenderPlan, type EditorRenderPlan, type RenderPlanInputs } from "../src/screens/editor-plan.js";
+import { editorTimeline } from "../src/lib/editor-timeline.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -69,12 +70,14 @@ function savedStory(): { production: ProductionBundle; artifacts: readonly Artif
   return { production, artifacts: state.world!.artifacts };
 }
 
-function inputsFor(production: ProductionBundle, artifacts: RenderPlanInputs["artifacts"], tick: number, more: Partial<RenderPlanInputs> = {}): RenderPlanInputs & { tick: number } {
+/** The screen's own inputs: the record it edits is projected once per snapshot and catalog, as the screen memoises it. */
+function inputsFor(production: ProductionBundle, artifacts: readonly ArtifactSidecar[], tick: number, more: Partial<RenderPlanInputs> = {}): RenderPlanInputs & { tick: number } {
+  const timelineState = production.timeline ?? ABSENT_TIMELINE;
   return {
     production,
     artifacts,
-    timelineState: production.timeline ?? ABSENT_TIMELINE,
-    mediaOnly: false,
+    timelineState,
+    timeline: editorTimeline(production, timelineState, artifacts),
     timelineError: null,
     subtitleView: null,
     subtitleHidden: false,
@@ -93,11 +96,12 @@ describe("the editor's render plan (issue 1158)", () => {
     const { production, artifacts } = savedStory();
     const mounted = await mount();
     try {
-      await mounted.render(inputsFor(production, artifacts, 1));
+      const inputs = inputsFor(production, artifacts, 1);
+      await mounted.render(inputs);
       const first = results.at(-1)!;
       assert.ok(first.renderPlan?.ok, "the saved story plans");
       // Four playhead reports, as the transport would make them: a render each, no plan each.
-      for (const tick of [2, 3, 4, 5]) await mounted.render(inputsFor(production, artifacts, tick));
+      for (const tick of [2, 3, 4, 5]) await mounted.render({ ...inputs, tick });
       assert.equal(results.length, 5);
       for (const later of results.slice(1)) {
         assert.equal(later.renderPlan, first.renderPlan, "the plan object is the one the mix and the spans are keyed on");
@@ -112,7 +116,8 @@ describe("the editor's render plan (issue 1158)", () => {
     const { production, artifacts } = savedStory();
     const mounted = await mount();
     try {
-      await mounted.render(inputsFor(production, artifacts, 1));
+      const inputs = inputsFor(production, artifacts, 1);
+      await mounted.render(inputs);
       const before = results.at(-1)!.renderPlan;
       assert.ok(before?.ok);
 
@@ -123,55 +128,81 @@ describe("the editor's render plan (issue 1158)", () => {
         ...production,
         timeline: { status: "ready", timeline: applyTimelineCommands(saved.timeline, [{ kind: "move-adjacent", clipId: "cl_sh-13", direction: "earlier" }]) },
       };
-      await mounted.render(inputsFor(edited, artifacts, 2));
+      const afterEditInputs = inputsFor(edited, artifacts, 2);
+      await mounted.render(afterEditInputs);
       const afterEdit = results.at(-1)!.renderPlan;
       assert.ok(afterEdit?.ok);
       assert.notEqual(afterEdit, before, "an edit is a new plan");
       assert.equal(afterEdit.plan.revision, saved.timeline.revision + 1, "built from the record that moved");
 
       // The world's files changed under it: the store replaces the catalog, so the plan follows.
-      await mounted.render(inputsFor(edited, [...artifacts], 3));
+      await mounted.render({ ...afterEditInputs, artifacts: [...artifacts], tick: 3 });
       const afterMedia = results.at(-1)!.renderPlan;
       assert.notEqual(afterMedia, afterEdit, "a new catalog is a new plan");
 
       // Viewing a subtitle track asks the plan for it; the fixture has none, so the plan says so by name.
-      await mounted.render(inputsFor(edited, artifacts, 4, { subtitleView: "tr_sub-en" }));
+      await mounted.render({ ...afterEditInputs, subtitleView: "tr_sub-en", tick: 4 });
       const withSubtitles = results.at(-1)!.renderPlan;
       assert.notEqual(withSubtitles, afterMedia);
       assert.equal(withSubtitles?.ok, false);
 
       // A hidden track is not asked for, so the film comes back.
-      await mounted.render(inputsFor(edited, artifacts, 5, { subtitleView: "tr_sub-en", subtitleHidden: true }));
+      await mounted.render({ ...afterEditInputs, subtitleView: "tr_sub-en", subtitleHidden: true, tick: 5 });
       assert.equal(results.at(-1)!.renderPlan?.ok, true);
 
       // An unresolvable record blocks the plan outright rather than planning something else.
-      await mounted.render(inputsFor(edited, artifacts, 6, { timelineError: "history cannot be replayed" }));
+      await mounted.render({ ...afterEditInputs, timelineError: "history cannot be replayed", tick: 6 });
       assert.equal(results.at(-1)!.renderPlan, null);
     } finally {
       await close(mounted);
     }
   });
 
-  it("previews the empty first state of an unsaved story production, and the legacy film of one with no story", async () => {
+  it("previews the record the editor edits: an unsaved story's empty first state, a legacy cut's projected fold", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const production = state.world!.productions[0]!;
     delete production.timeline;
     const mounted = await mount();
     try {
-      await mounted.render(inputsFor(production, state.world!.artifacts, 1));
+      const first = inputsFor(production, state.world!.artifacts, 1);
+      await mounted.render(first);
       const story = results.at(-1)!;
       assert.equal(story.previewState.status, "ready", "the record the first write would save");
       assert.ok(story.renderPlan?.ok);
       assert.equal(story.renderPlan.plan.items.length, 0, "and it is empty (decided 2026-09-02)");
-      await mounted.render(inputsFor(production, state.world!.artifacts, 2));
-      assert.equal(results.at(-1)!.previewState, story.previewState, "the seeded record is not re-seeded on the clock");
+      await mounted.render({ ...first, tick: 2 });
+      assert.equal(results.at(-1)!.previewState, story.previewState, "the same record is the same preview");
 
-      // No story: the placements are the film until the first write folds them (SPEC-037 R-2).
-      await mounted.render(inputsFor(production, state.world!.artifacts, 3, { mediaOnly: true }));
-      const media = results.at(-1)!;
-      assert.equal(media.previewState.status, "absent");
-      assert.ok(media.renderPlan?.ok);
-      assert.equal(media.renderPlan.plan.revision, null, "planned from the legacy derivation, not a record");
+      // Legacy placements are previewed folded onto typed tracks, exactly as the first write
+      // will save them (issue 1159): the bells at 1s→3s are an Ambience clip in the plan.
+      const legacy: ProductionBundle = {
+        ...production,
+        cut: { audio: [], overlays: [{ id: "ov_01J8G0000000000000000000A1", artifactId: "ar_01J8G0000000000000000000R1", startSec: 1, endSec: 3, lane: 0, audio: "keep" }] },
+      };
+      await mounted.render(inputsFor(legacy, state.world!.artifacts, 3));
+      const folded = results.at(-1)!;
+      assert.equal(folded.previewState.status, "ready");
+      assert.ok(folded.previewState.status === "ready" && folded.previewState.timeline.migratedCut === true, "the fold, not the seed");
+      assert.ok(folded.renderPlan?.ok);
+      assert.deepEqual(folded.renderPlan.plan.audio.map((clip) => [clip.path, clip.startSec, clip.endSec]), [["artifacts/harbour-bells.wav", 1, 3]]);
+
+      // A song not yet opened on the timeline has no record to draw and no plan of its own.
+      const song: ProductionBundle = {
+        ...production,
+        spine: {
+          schemaVersion: 1,
+          revision: 1,
+          trackArtifactId: "ar_01J8G0000000000000000000R1",
+          markers: [],
+          anchors: { sh_12: { startSec: 10, endSec: 18, clipAudio: { mode: "mute" } } },
+          updatedAt: "2026-06-11T10:00:00Z",
+        } as ProductionBundle["spine"],
+      };
+      const inputs = inputsFor(song, state.world!.artifacts, 4);
+      assert.equal(inputs.timeline, null);
+      await mounted.render(inputs);
+      assert.equal(results.at(-1)!.previewState.status, "absent");
+      assert.equal(results.at(-1)!.renderPlan, null);
     } finally {
       await close(mounted);
     }

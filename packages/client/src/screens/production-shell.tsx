@@ -5,10 +5,8 @@ import {
   guestsOf,
   isMediaOnly,
   pickableSheets,
-  placedFilmSec,
   productionShape,
   resolvePictureTimeline,
-  seedFirstPictureTimeline,
   sortScenes,
   type ProductionBundle,
 } from "@arke-studio/contracts";
@@ -39,6 +37,7 @@ import { Loading } from "../components/loading.js";
 import { cx } from "../components/ui.js";
 import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
 import { productionShelf } from "../lib/artifact-view.js";
+import { editorTimeline } from "../lib/editor-timeline.js";
 import { runtimeSeconds } from "../lib/format.js";
 import { defaultEpisodeFor } from "../lib/production-navigation.js";
 import { useRailCollapsed } from "../lib/rail-collapsed.js";
@@ -218,14 +217,16 @@ export function ProductionLayout() {
   const shape = production ? productionShape(production.meta) : null;
   const isStory = shape?.hasChapters === true;
   let cut: ReturnType<typeof deriveCut> | null = null;
+  /** The record the Cut edits and previews (`lib/editor-timeline.ts`), so the rail measures the same film. */
+  let record: ReturnType<typeof editorTimeline> = null;
   if (production) {
     try {
       const timeline = production.timeline ?? { status: "absent" as const };
-      cut = production.spine && timeline.status !== "ready"
+      if (timeline.status === "invalid") throw new Error(timeline.message);
+      record = editorTimeline(production, timeline, world?.artifacts ?? []);
+      cut = record === null
         ? deriveCut(production)
-        : resolvePictureTimeline(production, timeline.status === "absent"
-          ? { status: "ready", timeline: seedFirstPictureTimeline(production) }
-          : timeline, world?.artifacts ?? []);
+        : resolvePictureTimeline(production, { status: "ready", timeline: record }, world?.artifacts ?? []);
     } catch {
       // Invalid timeline state is stated in the editor and Exports; the rail must not substitute
       // the legacy runtime while those screens correctly block it.
@@ -245,11 +246,11 @@ export function ProductionLayout() {
   const mediaOnly =
     cut !== null && isMediaOnly(cut) && exportViewFor(world, production).kind === "scene-order";
   let filmSec = 0;
-  if (mediaOnly && production) {
-    if (production.timeline?.status === "ready") {
-      const planned = buildRenderPlan({ production, timeline: production.timeline, artifacts: world?.artifacts ?? [], scope: { kind: "production" }, preset: "review-cut" });
-      filmSec = planned.ok ? planned.plan.totalSec : 0;
-    } else filmSec = placedFilmSec(production.cut.overlays, world?.artifacts ?? []);
+  if (mediaOnly && production && record !== null) {
+    // The plan's length, off the same record the Cut header states — legacy placements folded
+    // in until the first write saves them (issue 1159) — so the two never disagree again.
+    const planned = buildRenderPlan({ production, timeline: { status: "ready", timeline: record }, artifacts: world?.artifacts ?? [], scope: { kind: "production" }, preset: "review-cut" });
+    filmSec = planned.ok ? planned.plan.totalSec : 0;
   }
   /*
    * The row's count is its own page's set (design 134): the world's shelf plus what this

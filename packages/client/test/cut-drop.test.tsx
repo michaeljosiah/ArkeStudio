@@ -284,28 +284,24 @@ describe("where a drop lands", () => {
     }
   });
 
-  it("leaves a desktop file on a legacy overlay lane to the chrome, which appends it", async () => {
-    // An unmigrated cut still draws its overlay lanes. They take artifact drags only; a file they
-    // claimed went nowhere, because the chrome's append fallback stands down for a drop a lane
-    // has answered. So they answer nothing for files, and the fallback appends.
+  it("takes a desktop file on a folded legacy lane like any typed lane", async () => {
+    // A saved record that has not absorbed its `cut.json` placements shows them folded onto the
+    // typed tracks the first write will make (issue 1159), so a file dropped on one lands on that
+    // track by name, the way it lands on any lane — there is no legacy lane left to stand down.
     const state = lanesState();
     const production = state.world!.productions[0]!;
     production.cut = { audio: [], overlays: [{ id: "ov_01J8G0000000000000000000A1", artifactId: state.world!.artifacts[0]!.id, startSec: 0, endSec: 4, lane: 1, audio: "keep" }] } as typeof production.cut;
     const screen = await mount(state);
     try {
-      const lane = screen.container.querySelector<HTMLElement>(".fy-ovlane");
-      assert.ok(lane, "the legacy lanes are drawn");
-      let claimed = 0;
-      await act(async () => reactProps(lane)["onDragOver"]!({ ...dragEvent([video()]), preventDefault() { claimed += 1; } }));
-      await act(async () => reactProps(lane)["onDrop"]!({ ...dragEvent([video()]), preventDefault() { claimed += 1; } }));
-      assert.equal(claimed, 0, "the lane does not claim a file");
-      assert.equal(uploads(screen).length, 0);
-      const drop = new Event("drop", { bubbles: true, cancelable: true });
-      Object.defineProperty(drop, "dataTransfer", { value: fileTransfer([video()]) });
-      Object.defineProperty(drop, "clientX", { value: 50 });
-      await act(async () => { lane.dispatchEvent(drop); });
-      const [appended] = uploads(screen);
-      assert.equal(appended?.editor?.destination, "append", "the chrome appends what the lane left alone");
+      assert.equal(screen.container.querySelector(".fy-ovlane"), null, "no legacy lane is drawn");
+      const lane = screen.container.querySelector<HTMLElement>("[data-track-id='tr_lane-1'] .fy-track__lane");
+      assert.ok(lane, "the placement's lane is a typed track");
+      assert.ok(lane.querySelector("[data-clip='cl_ov-01J8G0000000000000000000A1']"), "holding the placement as the clip the fold will save");
+      await act(async () => reactProps(lane)["onDrop"]!(dragEvent([video()], 50)));
+      const [request] = uploads(screen);
+      assert.ok(request, "the drop was imported");
+      assert.deepEqual(Object.keys(request.editor!.destination as object).sort(), ["frame", "trackId"]);
+      assert.equal((request.editor!.destination as { trackId: string }).trackId, "tr_lane-1");
     } finally {
       await close(screen);
     }

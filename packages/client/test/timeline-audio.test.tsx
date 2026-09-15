@@ -8,6 +8,7 @@ import {
   applyTimelineCommands,
   migrateLegacyCut,
   seedStoryPictureTimeline,
+  storyTimelineFingerprint,
   type ClientMessage,
   type ClientState,
   type ProductionTimeline,
@@ -131,7 +132,7 @@ describe("typed tracks on the editor (issue 681)", () => {
     const { state } = migratedState();
     const screen = await mountCut(state);
     try {
-      assert.equal(screen.container.querySelector(".fy-clanes"), null, "the legacy lanes have no writer and are not drawn");
+      assert.equal(screen.container.querySelector("[data-track-id='tr_lane-0-sound-2']"), null, "the record is shown as saved, not folded again");
       const row = screen.container.querySelector<HTMLElement>("[data-track-id='tr_lane-0-sound']");
       assert.ok(row, "the lane's sound became an Ambience row");
       assert.equal(row.dataset["track"], "ambience");
@@ -223,17 +224,25 @@ describe("typed tracks on the editor (issue 681)", () => {
     }
   });
 
-  it("keeps the legacy lanes while the timeline has not absorbed them", async () => {
+  it("edits an unsaved cut's legacy placements as typed clips, fenced for the first write", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
-    // Only a cut that still holds a legacy placement draws its lanes (the target has none).
-    state.world!.productions[0]!.cut = {
+    const production = state.world!.productions[0]!;
+    production.cut = {
       audio: [],
       overlays: [{ id: "ov_01J8G0000000000000000000A1", artifactId: BELLS, startSec: 1, endSec: 3, lane: 0, audio: "keep" }],
     } as never;
     const screen = await mountCut(state);
     try {
-      assert.ok(screen.container.querySelector(".fy-clanes"), "an unsaved cut still edits on lanes");
-      assert.equal(screen.container.querySelector("[data-track='ambience'] .fy-typedlane"), null);
+      // Nothing is folded on read (SPEC-037 R-2, A-1): the record is projected in memory, the
+      // same fold the first write will save, so the lanes have nothing left to draw (issue 1159).
+      assert.equal(screen.container.querySelector(".fy-clanes"), null, "no legacy lanes");
+      assert.ok(screen.container.querySelector("[data-track-id='tr_lane-0-sound'] [data-clip='cl_ov-01J8G0000000000000000000A1']"), "the bells are an Ambience clip already");
+      await act(async () => byLabel(screen, "Mute Overlay L0 sound").click());
+      const sent = commandsSent(screen).at(-1);
+      assert.ok(sent);
+      assert.deepEqual(sent.commands, [{ kind: "set-track", trackId: "tr_lane-0-sound", muted: true }], "against the id the fold reserves");
+      assert.equal(sent.baseRevision, null, "the first write materialises the record and folds the placement in");
+      assert.equal(sent.sourceFingerprint, storyTimelineFingerprint(production));
     } finally {
       await close(screen);
     }

@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import {
   buildRenderPlan,
-  seedFirstPictureTimeline,
   type ArtifactSidecar,
   type ProductionBundle,
+  type ProductionTimeline,
   type RenderPlanResult,
   type TimelineState,
   type TimelineTrackId,
@@ -21,8 +21,8 @@ export interface RenderPlanInputs {
   /** The world's whole catalog: the plan resolves scope itself, and a scoped-out file is a named refusal. */
   artifacts: readonly ArtifactSidecar[] | undefined;
   timelineState: TimelineState;
-  /** A production with no story keeps its legacy preview until the first write folds the placements. */
-  mediaOnly: boolean;
+  /** The record the editor edits (`lib/editor-timeline.ts`); null while there is none to edit. */
+  timeline: ProductionTimeline | null;
   /** Why the timeline could not be resolved, which blocks the plan by name (SPEC-039 R-39). */
   timelineError: string | null;
   /** The subtitle track viewed, or none (SPEC-038 R-26). */
@@ -32,7 +32,7 @@ export interface RenderPlanInputs {
 }
 
 export interface EditorRenderPlan {
-  /** The record the preview draws: the saved one, or the first state an unsaved production would save. */
+  /** The record the preview draws: the one the editor edits, or the timeline's own state while there is none. */
   previewState: TimelineState;
   /** Null while there is no production, or the song has not been opened on the timeline, or the record is blocked. */
   renderPlan: RenderPlanResult | null;
@@ -44,8 +44,10 @@ export interface EditorRenderPlan {
  * refuses is a production the export refuses, so the refusal blocks the editor by name.
  *
  * The preview draws the record the editor edits (decided 2026-09-02): an unsaved story
- * production previews its empty first state, not the film the story would derive. A production
- * with no story and legacy placements keeps its legacy preview until the first write folds them.
+ * production previews its empty first state, not the film the story would derive, and a
+ * production still holding legacy placements previews them folded onto typed tracks, exactly as
+ * the first write will save them (issue 1159). A song not yet opened on the timeline has no
+ * record to draw and no plan; the spine's own spans carry its preview.
  *
  * Memoised here, in a hook the editor owns, and the identity matters as much as the cost. The
  * transport reports four times a second, so derived in a screen body this ran four times a
@@ -61,19 +63,14 @@ export function useRenderPlan({
   production,
   artifacts,
   timelineState,
-  mediaOnly,
+  timeline,
   timelineError,
   subtitleView,
   subtitleHidden,
 }: RenderPlanInputs): EditorRenderPlan {
   const previewState: TimelineState = useMemo(
-    () =>
-      production && timelineState.status === "absent" && production.spine === null && !mediaOnly
-        ? { status: "ready", timeline: seedFirstPictureTimeline(production) }
-        : timelineState,
-    // The saved record travels inside the production snapshot, so the snapshot is the dependency
-    // and the status says which way the branch goes.
-    [production, timelineState.status, mediaOnly],
+    () => (timeline !== null ? { status: "ready", timeline } : timelineState),
+    [timeline, timelineState],
   );
   const renderPlan = useMemo(
     () =>

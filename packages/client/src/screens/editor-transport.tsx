@@ -155,12 +155,12 @@ export function CutScrubber({ totalSec, frameRate, transport }: { totalSec: numb
  * What a press on the track stack lands on, when it lands on something that owns the press.
  *
  * Clips are buttons, and so are the grips inside them and a lane's Mute and Solo, so one
- * `closest` covers most of it. The three that are not: a legacy overlay clip is a `div`, the
- * pinned label gutter is not lane at all (a press there means no second of the film), and the
- * new-lane strip is a drop target. The playhead's own band answers as a slider.
+ * `closest` covers most of it. The three that are not: a clip's menu is a `div`, the pinned
+ * label gutter is not lane at all (a press there means no second of the film), and the new-lane
+ * strip is a drop target. The playhead's own band answers as a slider.
  */
 export const LANE_PRESS_OWNERS =
-  "button, input, select, textarea, a, [role='slider'], .fy-ovclip, .fy-clipmenu, .fy-track__label, .fy-track--new";
+  "button, input, select, textarea, a, [role='slider'], .fy-clipmenu, .fy-track__label, .fy-track--new";
 
 /**
  * How near an edge the playhead may run before the canvas pages after it.

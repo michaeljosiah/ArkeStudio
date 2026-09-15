@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { useNavigate } from "react-router";
 import {
   type BorrowableArtifact,
+  CLIP_DEFAULT_SEC,
   type MediaDestination,
   productionFrameRate,
   libraryItemKey,
@@ -53,7 +54,6 @@ import {
 import { Wave } from "../components/wave.js";
 import { takeMediaPath } from "../lib/take-presentation.js";
 import { useMediaQuery } from "../lib/media-query.js";
-import { CLIP_DEFAULT_SEC } from "./editor-legacy-lanes.js";
 
 /**
  * Below this width the Library is a drawer (the SPEC-039 editor shell in `fidelity.css`): kept

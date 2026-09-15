@@ -28,7 +28,6 @@ export function CutPreview({
   slug,
   spans,
   totalSec,
-  soundSec = 0,
   restartToken,
   transport,
   cueStyle = null,
@@ -37,8 +36,6 @@ export function CutPreview({
   slug: string | undefined;
   spans: PlaybackSpan[];
   totalSec: number;
-  /** How far placed sound reaches, so a film with no picture is not reported as nothing. */
-  soundSec?: number;
   restartToken: number;
   transport: Transport;
   /** The saved subtitle style, worn in full so the preview and the burn-in agree (SPEC-038 R-26). */
@@ -187,12 +184,6 @@ export function CutPreview({
   }, [playing, time, spans, slug, timeRef, paintStill, syncCue, syncOverlayVideo]);
 
   const current = spanAt(spans, time);
-  /*
-   * A film can run on sound alone (issue 453). Its length counts placed sound, so an audio-only
-   * production has a real runtime and no picture at any second of it — and "nothing here yet" is
-   * then simply false, said to somebody who has placed something and can see it on a lane.
-   */
-  const soundOnly = soundSec > 0 && spans.length === 0;
   const showingVideo = videoSrcFor(current);
   const showingStill = current?.still ? srcFor(current) : null;
   const showing = showingVideo ?? showingStill;
@@ -221,7 +212,7 @@ export function CutPreview({
       <span ref={stillLayer} />
       {showing === null && (
         <span className="fy-cutviewer__empty">
-          {current ? current.label : soundOnly ? "sound only" : "nothing here yet"}
+          {current ? current.label : "nothing here yet"}
         </span>
       )}
       {liveCue !== null && (

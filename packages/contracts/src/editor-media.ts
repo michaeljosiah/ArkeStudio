@@ -28,6 +28,13 @@ export type MediaDestination =
 const STILL_KINDS = new Set<ArtifactSidecar["kind"]>(["image", "board"]);
 const PLAYABLE_KINDS = new Set<ArtifactSidecar["kind"]>(["video", "audio", "image", "board"]);
 
+/**
+ * What a placed still covers when nothing says otherwise: about a shot's worth. The editor's
+ * own placements and the import's use the same figure, so a plate dropped from the Library and
+ * a plate dropped from Explorer are the same length on the lane.
+ */
+export const CLIP_DEFAULT_SEC = 4;
+
 /** Whether a filed artifact can sit on a lane of this kind; the reason it cannot, in plain words. */
 export function laneRefusal(artifact: ArtifactSidecar, sound: boolean): string | null {
   if (sound) {
@@ -77,7 +84,7 @@ export function mediaPlacementCommands(
       ? [] : [{ kind: "add-to-library", items: [{ kind: "artifact", artifactId: artifact.id }] }];
     if (destination !== "library") {
       const still = STILL_KINDS.has(artifact.kind);
-      const seconds = still ? 4 : artifact.mediaInfo?.durationSec;
+      const seconds = still ? CLIP_DEFAULT_SEC : artifact.mediaInfo?.durationSec;
       if (seconds === undefined || seconds <= 0) throw new TimelineOperationRefused(`${artifact.file} needs a measured duration before placement; add it from the Library after measuring`);
       const durationFrames = Math.max(1, secondsToFrames(seconds, timeline.frameRate));
       let trackId: TimelineTrackId = picture?.id ?? PICTURE_TRACK_ID;
