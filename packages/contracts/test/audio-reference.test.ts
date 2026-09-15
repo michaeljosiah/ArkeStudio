@@ -57,6 +57,13 @@ it("a scene-cast read rides where its character speaks, stays out where nobody d
   assert.match(explicit.problems.join(" "), /cannot carry/, "one chosen per dispatch keeps its refusal");
 });
 
+it("character voices can ride a motion reference and share its combined budget", () => {
+  const base = { scene: SCENE, shots: [SPEAKING as never], sheets: SHEETS, kits: [], model: model("seedance-2.0"), performanceReferences: [READ] };
+  assert.deepEqual(planCharacterAudio({ ...base, imageCount: 0, videoCount: 1 }).problems, []);
+  assert.match(planCharacterAudio({ ...base, imageCount: 0, videoCount: 0 }).problems.join(" "), /image or video/);
+  assert.match(planCharacterAudio({ ...base, imageCount: 9, videoCount: 3 }).problems.join(" "), /shared input budget/);
+});
+
 it("the cast authority says why a read will not be asked for, in the card's words (SPEC-044 R-28)", () => {
   const chosen = { kind: "performance", performanceId: RECORD.id, hash: HASH };
   const asked = castVoiceRequests(SHEETS, production(), castScene(chosen));

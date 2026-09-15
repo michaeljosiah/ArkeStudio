@@ -3383,3 +3383,32 @@ describe("the header's cast row and place chip (SPEC-044 R-1, R-2, R-4; T-1, T-2
     assert.equal(q(mounted, ".fy-castpicker"), null);
   });
 });
+
+it("completed plans collapse to a line and can be reopened", async () => {
+  const mounted = await mountState(FIXTURE_STATE);
+  await apply({ at: "2026-09-15T12:00:00Z", type: "production.plan-state",
+    worldId: FIXTURE_WORLD_ID, productionId: "saltlight", states: [{
+      planId: "dp_finished", productionId: "saltlight", sceneId: "sc_04",
+      mode: "whole-scene", policy: "pre-authorized", capMicroUsd: 120000,
+      status: "completed", passes: [], spentEstimateMicroUsd: 100000, next: { kind: "none" },
+    }] });
+  const summary = q(mounted, ".fy-swplans > button")!;
+  assert.equal(summary.getAttribute("aria-expanded"), "false");
+  assert.ok(!q(mounted, ".fy-swplans .fy-boardcard"));
+  await click(summary);
+  assert.equal(summary.getAttribute("aria-expanded"), "true");
+  assert.ok(q(mounted, ".fy-swplans .fy-boardcard"));
+});
+
+it("completed plans keep failed passes visible", async () => {
+  const mounted = await mountState(FIXTURE_STATE);
+  await apply({ at: "2026-09-15T12:00:00Z", type: "production.plan-state",
+    worldId: FIXTURE_WORLD_ID, productionId: "saltlight", states: [{
+      planId: "dp_failed", productionId: "saltlight", sceneId: "sc_04",
+      mode: "whole-scene", policy: "pre-authorized", capMicroUsd: 120000,
+      status: "completed", passes: [{ passIndex: 0, state: "failed", estimatedMicroUsd: 0, reason: "Provider rejected the clip" }],
+      spentEstimateMicroUsd: 0, next: { kind: "none" },
+    }] });
+  assert.equal(q(mounted, ".fy-swplans > button")!.getAttribute("aria-expanded"), "true");
+  assert.match(q(mounted, ".fy-swplans")!.textContent ?? "", /Provider rejected the clip/);
+});

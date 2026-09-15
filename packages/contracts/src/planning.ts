@@ -233,7 +233,7 @@ function sentence(text: string): string {
 function firstClause(sheet: Sheet, heading: string): string | null {
   const body = sheet.sections.find((s) => s.heading === heading)?.body;
   const clause = body?.split(/[.!?]/)[0]?.trim();
-  return clause !== undefined && clause.length > 0 ? clause : null;
+  return clause !== undefined && clause.length > 0 && !/^[-–—.\s]+$/.test(clause) ? clause : null;
 }
 
 function styleFor(world: WorldMeta, artDirection?: string): string {
@@ -401,7 +401,12 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
   // 3 — body: the shot's direction, mentions resolved to names. The appearance clause is not
   // inlined here at all now: it is said once above, or carried as an image, never both.
   let description = shot.description;
-  for (const { sheet } of cast) description = description.replaceAll(`@${sheet.id}`, sheet.name);
+  // Match whole mentions, including locations and dangling world slugs. Never send
+  // a missing attachment token to the provider or replace a prefix of another identity.
+  for (const span of mentionSpans(description).reverse()) {
+    const name = sheets.find(sheet => sheet.id === span.slug)?.name ?? span.slug;
+    description = description.slice(0, span.start) + name + description.slice(span.end);
+  }
   const body = sentence(description);
 
   // 4 — the camera's own block, when there is a room to place it in. Verbatim: whatever the shot
@@ -2497,7 +2502,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
 
   for (const entry of shots) {
     entry.audioReferences = planCharacterAudio({ scene, shots: [entry.shot], sheets, kits, model,
-      imageCount: entry.bound.length, taskMode: entry.continuation?.kind === "extend" ? "continue" : entry.frame ? "first-frame" : "generate",
+      imageCount: entry.bound.length, videoCount: entry.continuation?.kind === "carry" ? 1 : 0, taskMode: entry.continuation?.kind === "extend" ? "continue" : entry.frame ? "first-frame" : "generate",
       disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences, masterReferences: input.masterReferences });
     const audioText = characterAudioInstructions(entry.audioReferences);
     if (audioText) entry.parts.preamble = [entry.parts.preamble, audioText].filter(Boolean).join("\n");

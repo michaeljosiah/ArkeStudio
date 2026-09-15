@@ -80,13 +80,15 @@ export class StageConstructor {
     const active: NonNullable<StageConstructor["active"]> = { request, abort, round: 0 };
     this.active = active;
     const dir = join(deps.scratchRoot, `stage-${request.requestId}`);
+    const timeLimit = new Error("Stage construction reached its five-minute limit.");
     const timer = setTimeout(
-      () => abort.abort(new Error("Stage construction reached its five-minute limit.")),
+      () => abort.abort(timeLimit),
       300_000,
     );
     let sessionId: string | undefined;
     let latest: StageConstructionDraft | undefined;
     let inspectedFrames = 0;
+    let sourceFingerprint: string | undefined;
     const interrupt = () => {
       if (sessionId) void deps.adapter.interrupt?.(sessionId).catch(() => {});
     };
@@ -146,7 +148,7 @@ export class StageConstructor {
     };
     try {
       const source = context();
-      const sourceFingerprint = fingerprint(source);
+      sourceFingerprint = fingerprint(source);
       const duration = source.shot.durationSec ?? DEFAULT_SHOT_SEC;
       const original = source.shot.staging
         ? resolvedShotStaging(source.scene, source.shot.staging)
@@ -201,8 +203,12 @@ export class StageConstructor {
               abort.abort(new Error("Stage construction reached its 30,000-token budget."));
             abort.signal.throwIfAborted();
             if (event.type === "tool.activity" && /read/i.test(event.tool)) reads.add(event.summary);
-            if (event.type === "tool.refused")
-              throw new Error(`The model could not inspect its scene: ${event.summary}`);
+            // Refusals have no call id or path. Invalidate earlier attempts conservatively;
+            // a later successful retry can supply fresh receipts without aborting the build.
+            if (event.type === "tool.refused" && /read/i.test(event.tool)) reads.clear();
+            // The adapter enforces the boundary and tells the model about refusals. A probe
+            // outside the session is not evidence that required local images were unread.
+            // The requiredReads check below still demands their actual read receipts.
             if (event.type === "session.error") throw new Error(event.message);
             if (event.type === "message.completed") {
               final = event.text;
@@ -301,7 +307,6 @@ export class StageConstructor {
           await writeFile(join(dir, name), bytes);
           names.push(name);
         }
-        inspectedFrames += frames.length;
         const prior = latest;
         const lineWarnings = stageLineCrossings(source.scene, source.aspect, { shotId: source.shot.id, staging: { ...prior.staging, version: 1, cast: prior.cast, sets: prior.sets } })
           .filter(finding => finding.shotIds.includes(source.shot.id)).map(finding => finding.message);
@@ -320,6 +325,7 @@ export class StageConstructor {
           throw new Error(
             "The model could not inspect all rendered views. Choose an image-capable language model; the partial draft is retained.",
           );
+        inspectedFrames += frames.length;
         if (
           round === 2 &&
           fingerprint([latest.staging, latest.cast, latest.sets]) !==
@@ -339,7 +345,23 @@ export class StageConstructor {
       };
       emit("ready", "Blockout ready to review. Keep applies this shot's override.", latest);
     } catch (error) {
-      emit("failed", error instanceof Error ? error.message : String(error), latest);
+      // A budget expiry can leave a validated blockout. Keep it reviewable without
+      // claiming inspection; cancellation and stale-source failures remain failures.
+      let current = false;
+      if (abort.signal.reason === timeLimit && latest && sourceFingerprint) {
+        try { current = fingerprint(context()) === sourceFingerprint; } catch { /* source is no longer usable */ }
+      }
+      if (current && latest && sourceFingerprint) {
+        latest.assessment = "Inspection incomplete: the time limit was reached. Review this blockout before keeping it.";
+        latest.staging.authorship = {
+          model: deps.model, sourceVersion: request.baseVersion, sourceFingerprint,
+          instruction: request.instruction, assumptions: latest.assumptions,
+          assessment: latest.assessment, inspectedFrames,
+        };
+        emit("ready", "Blockout built; inspection incomplete (time limit). Review before keeping.", latest);
+      } else {
+        emit("failed", error instanceof Error ? error.message : String(error), latest);
+      }
     } finally {
       clearTimeout(timer);
       abort.abort();

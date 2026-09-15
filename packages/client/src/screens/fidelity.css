@@ -5290,7 +5290,7 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-bench__chip--refs { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-sans); font-weight: 500; }
 
 .fy-bench__dispatch { display: flex; align-items: center; gap: 6px; margin-top: 11px; flex: none; min-width: 0; }
-.fy-bench__modelwrap { position: relative; display: inline-flex; flex: 0 1 auto; min-width: 0; }
+.fy-bench__modelwrap { position: relative; display: inline-flex; flex: 1 1 160px; min-width: 0; }
 .fy-bench__modelwrap > svg {
   position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
   color: var(--neutral-400); pointer-events: none;
@@ -5475,7 +5475,7 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-bench--subject .fy-bench__dispatch { border-top: 1px solid var(--border); padding-top: 12px; }
 
 /* The wall: filters on a track, a light plate, mono states (2690-2715). */
-.fy-bench__filters { display: inline-flex; align-items: center; gap: 2px; background: var(--secondary); border-radius: 9px; padding: 3px; }
+.fy-bench__filters { display: inline-flex; flex-direction: row; align-items: center; gap: 2px; background: var(--secondary); border-radius: 9px; padding: 3px; }
 .fy-bench__filters .fy-bench__tab { padding: 4px 12px; border-radius: 7px; font-size: 11px; }
 .fy-bench__filters .fy-bench__tab--active { background: var(--background); box-shadow: var(--shadow-xs); color: var(--foreground); }
 .fy-bench__filters .fy-bench__tab--active:hover { color: var(--foreground); }
@@ -7605,8 +7605,6 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-swstage__eyebrow > span:first-child { flex: 1; color: var(--muted-foreground); font: 500 10px var(--font-sans); letter-spacing: .08em; text-transform: uppercase; }
 .fy-swstage__eyebrow > span:last-child:not(:first-child) { color: var(--neutral-400); font: 400 9.5px var(--font-mono); }
 .fy-swstage__row { display: flex; align-items: center; gap: 8px; min-height: 22px; }
-.fy-swstage__row > span:first-child { width: 48px; flex: none; color: var(--neutral-400); font: 400 10px var(--font-mono); }
-.fy-swstage__row > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11.5px var(--font-sans); }
 .fy-swstage__nudge { display: inline-flex; align-items: center; gap: 1px; flex: none; }
 .fy-swstage__nudge button { width: 19px; height: 19px; display: inline-grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--muted-foreground); cursor: pointer; transition: var(--transition-control); }
 .fy-swstage__nudge button:hover { background: var(--accent); color: var(--foreground); }
@@ -7660,7 +7658,7 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-swpreview__larger { position: absolute; z-index: 3; right: 12px; top: 12px; border: 1px solid color-mix(in srgb, var(--media-overlay-fg) 28%, transparent); border-radius: 7px; background: color-mix(in srgb, var(--media-overlay-bg) 72%, transparent); color: var(--media-overlay-fg); padding: 4px 9px; cursor: pointer; font: 500 10px var(--font-sans); transition: var(--transition-control); }
 .fy-swpreview__larger:hover { background: color-mix(in srgb, var(--media-overlay-bg) 88%, transparent); }
 /* The stage ground is the theme-invariant neutral-900, so its badges are literal white-on-dark and dark-on-white in both themes. */
-.fy-swpreview__badges { position: absolute; z-index: 2; top: 12px; left: 14px; display: inline-flex; align-items: center; gap: 8px; }
+.fy-swpreview__badges { right: 80px; flex-wrap: wrap; position: absolute; z-index: 2; top: 12px; left: 14px; display: inline-flex; align-items: center; gap: 8px; }
 .fy-swpreview__shot { padding: 2px 7px; border-radius: 5px; background: color-mix(in srgb, var(--neutral-50) 92%, transparent); color: var(--neutral-900); font: 500 10px var(--font-mono); }
 .fy-swpreview__kind { padding: 2px 7px; border-radius: 5px; background: color-mix(in srgb, var(--neutral-950) 60%, transparent); color: var(--neutral-50); font: 400 9.5px var(--font-mono); }
 .fy-swpreview__caption { position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 12px 16px 14px; background: linear-gradient(transparent, color-mix(in srgb, var(--neutral-950) 78%, transparent)); }
@@ -8604,3 +8602,7 @@ button.fy-abdoor__voice:hover { background: var(--accent); border-color: var(--n
 .fy-abdoor__line { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: baseline; font: 400 12.5px var(--font-sans); }
 .fy-abdoor__line--warn .fy-abdoor__line-how { color: var(--warning); }
 .fy-abdoor__line-how, .fy-abdoor__line-cost { font-size: 10.5px; color: var(--muted-foreground); white-space: nowrap; }
+
+.fy-bench__modelwrap > select { width: 100%; min-width: 0; }
+.fy-bench__audio-options { margin-top: 8px; font-size: 11px; }
+.fy-bench__audio-options > summary { cursor: pointer; }

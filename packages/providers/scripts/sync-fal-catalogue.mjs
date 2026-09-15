@@ -118,6 +118,7 @@ const CURATED = {
   // https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bytedance/seedance-2.0/text-to-video
   "bytedance/seedance-2.0/text-to-video": {
     id: "seedance-2.0",
+    displayName: "Seedance 2.0",
     capability: "video",
     family: "seedance",
     // Exercised end to end for the character speaking sample (issue 858): a face in,
@@ -136,11 +137,18 @@ const CURATED = {
     },
     editRoute: "bytedance/seedance-2.0/reference-to-video",
     // "Refer to them in the prompt as @Image1, @Image2" — references, not keyframes.
-    accepts: { referenceImages: 9, startFrame: false, endFrame: false },
+    accepts: { referenceImages: 9, referenceVideos: 3, referenceAudio: 3, startFrame: false, endFrame: false },
     limits: {
+      minReferenceVideoSec: 2,
       maxReferenceVideoSec: 15,
+      maxReferenceVideoBytes: 50_000_000,
+      referenceVideoPixels: { min: 640 * 640, max: 834 * 1112 },
       maxReferenceAudioSec: 15,
       referencesField: "image_urls",
+      referenceVideoField: "video_urls",
+      referenceAudioField: "audio_urls",
+      referenceSyntax: "seedance",
+      maxCombinedReferences: 12,
       soundChoice: true,
       durationAuto: true,
       maxDurationSec: 15,
@@ -154,6 +162,7 @@ const CURATED = {
   },
   "bytedance/seedance-2.0/fast/text-to-video": {
     id: "seedance-2.0-fast",
+    displayName: "Seedance 2.0 Fast",
     capability: "video",
     family: "seedance",
     // Exercised end to end for the character speaking sample (issue 858): a face in,
@@ -171,13 +180,20 @@ const CURATED = {
       "first-and-last-frame": { route: "bytedance/seedance-2.0/fast/image-to-video", locked: ["aspect"] },
     },
     editRoute: "bytedance/seedance-2.0/fast/reference-to-video",
-    accepts: { referenceImages: 9, startFrame: false, endFrame: false },
+    accepts: { referenceImages: 9, referenceVideos: 3, referenceAudio: 3, startFrame: false, endFrame: false },
     // The fast route tops out at 720p — its schema offers 480p and 720p only. It was listed at
     // 1080p, a size it cannot make, which the picker offered and the price list charged for.
     limits: {
+      minReferenceVideoSec: 2,
       maxReferenceVideoSec: 15,
+      maxReferenceVideoBytes: 50_000_000,
+      referenceVideoPixels: { min: 640 * 640, max: 834 * 1112 },
       maxReferenceAudioSec: 15,
       referencesField: "image_urls",
+      referenceVideoField: "video_urls",
+      referenceAudioField: "audio_urls",
+      referenceSyntax: "seedance",
+      maxCombinedReferences: 12,
       soundChoice: true,
       durationAuto: true,
       maxDurationSec: 15,
@@ -212,6 +228,7 @@ const CURATED = {
    */
   "bytedance/seedance-2.5/text-to-video": {
     id: "seedance-2.5",
+    displayName: "Seedance 2.5",
     capability: "video",
     family: "seedance",
     modes: {
@@ -227,12 +244,24 @@ const CURATED = {
     // image sibling, and the way a row says "I can close on a frame" is the task mode above —
     // which is what the picker and the dispatch dialog both read (issue 154). Setting the flag
     // here instead would promise a frame on the route that cannot take one.
-    accepts: { referenceImages: 9, startFrame: false, endFrame: false },
+    accepts: { referenceImages: 9, referenceVideos: 3, referenceAudio: 3, startFrame: false, endFrame: false },
     limits: {
       // "Each file must be 1.8 to 30.2 seconds" — the route's own bound, on both audio and video.
-      maxReferenceVideoSec: 30,
-      maxReferenceAudioSec: 30,
+      maxReferenceVideoSec: 30.2,
+      minReferenceVideoFileSec: 1.8,
+      maxReferenceVideoFileSec: 30.2,
+      maxReferenceVideoFileBytes: 200_000_000,
+      maxReferenceVideoBytes: 48 * 1024 * 1024,
+      referenceVideoSides: { min: 300, max: 6000 },
+      referenceVideoAspect: { min: 0.4, max: 2.5 },
+      referenceVideoFps: { min: 24, max: 60 },
+      maxReferenceAudioSec: 30.2,
+      minReferenceAudioFileSec: 1.8,
       referencesField: "image_urls",
+      referenceVideoField: "video_urls",
+      referenceAudioField: "audio_urls",
+      referenceSyntax: "seedance",
+      maxCombinedReferences: 12,
       soundChoice: true,
       durationAuto: true,
       maxDurationSec: 30,

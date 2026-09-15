@@ -86,7 +86,7 @@ describe("the shipped manifest (R-9, §3.2)", () => {
     // flags. The no-refs-yet-frames case that proved it left with the ltx rows (dropped
     // 2026-08-28); the accepting side still exercises both authorities at once.
     // On video: references from the edit sibling, frames from the modes.
-    assert.equal(modelCapabilityCopy(model("seedance-2.0")), "refs ×9 · frames · 15s");
+    assert.equal(modelCapabilityCopy(model("seedance-2.0")), "refs ×9 · video refs ×3 · audio refs ×3 · frames · 15s");
     // A row with neither modes nor accepts flags promises nothing about frames.
     assert.equal(modelCapabilityCopy(model("veo-3.1")), "no refs · 8s");
     // And on image. This used to be Higgsfield's "halcyon-1.5", whose row claimed both frames —

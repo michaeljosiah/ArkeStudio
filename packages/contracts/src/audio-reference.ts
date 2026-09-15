@@ -110,10 +110,18 @@ export function characterAudioRoute(model: { provider: string; id: string }, tas
     !["seedance-2.0", "seedance-2.0-fast"].includes(model.id)))) return null;
   return { endpoint: local ? model.id : model.id === "seedance-2.0-fast" ? "bytedance/seedance-2.0/fast/reference-to-video" : "bytedance/seedance-2.0/reference-to-video", field: local ? "ref_audios" : "audio_urls", maxFiles: 3,
     local, requiresImages: !local, supportsPerformanceSync: !local, maxFileDurationSec: local ? 5.2 : 15,
-    maxBytesPerFile: 15_000_000, maxTotalDurationSec: 15, maxImages: 9, maxCombinedReferences: local ? 15 : 12,
+    maxBytesPerFile: 15_000_000, maxTotalDurationSec: 15, maxImages: 9, maxVideos: 3, maxCombinedReferences: local ? 15 : 12,
     formats: ["audio/wav", "audio/mpeg"], incrementalInputMicroUsd: 0, providerDurationMode: "requested",
     effects: { wording: "prompt-guided", timing: "not-preserved", identity: "guidance", cadence: "guidance",
       lipSync: "generated", generatedAudio: true, suppliedAudioPreserved: false, separateAudioArtifact: false } } as const;
+}
+
+/** Shared by prompt review and frozen-audio reading, so motion can provide the visual reference. */
+export function characterAudioReferenceProblem(route: NonNullable<ReturnType<typeof characterAudioRoute>>, images: number, videos: number, audio: number): string | null {
+  if (route.requiresImages && images + videos === 0) return "Voice references require an image or video on this route.";
+  if (images > route.maxImages || videos > route.maxVideos || audio > route.maxFiles || images + videos + audio > route.maxCombinedReferences)
+    return "The complete character reference set exceeds this route's shared input budget.";
+  return null;
 }
 
 /** Who speaks in these shots, in coverage order: authored speaking roles, never incidental mentions. */
@@ -186,7 +194,7 @@ export function castVoiceRequests(sheets: readonly Sheet[], production: Producti
 
 /** Resolve authored speaking roles, never incidental mentions. Ordering follows reviewed script coverage. */
 export function planCharacterAudio(input: { scene: SceneRecord; shots: readonly Shot[]; sheets: readonly Sheet[];
-  kits: readonly ReferenceKit[]; model: ManifestModel; imageCount: number; taskMode?: string; disabled?: boolean; performanceReferences?: readonly FrozenPerformanceAudio[]; masterReferences?: readonly FrozenMasterAudio[] }): CharacterAudioPlan {
+  kits: readonly ReferenceKit[]; model: ManifestModel; imageCount: number; videoCount?: number; taskMode?: string; disabled?: boolean; performanceReferences?: readonly FrozenPerformanceAudio[]; masterReferences?: readonly FrozenMasterAudio[] }): CharacterAudioPlan {
   const route = characterAudioRoute(input.model, input.taskMode);
   const plan: CharacterAudioPlan = { version: 1, disabled: input.disabled === true, route: route?.endpoint ?? null, references: [], problems: [] };
   if (plan.disabled || input.model.capability !== "video" || (!input.kits.some(k => k.designatedVoiceSample) && !input.performanceReferences?.length && !input.masterReferences?.length)) return plan;
@@ -236,8 +244,8 @@ export function planCharacterAudio(input: { scene: SceneRecord; shots: readonly 
       if (referenceAudioAsset(ref).provenance.outputTechnical.sizeBytes > route.maxBytesPerFile) plan.problems.push(`${ref.characterName}: audio exceeds the route's 15 MB file limit.`);
       if ((referenceAudioAsset(ref).provenance.outputTechnical.durationSec ?? Infinity) > route.maxFileDurationSec) plan.problems.push(`${ref.characterName}: audio exceeds the route's ${route.maxFileDurationSec} second file limit.`);
     }
-    if (route.requiresImages && !input.imageCount) plan.problems.push("Voice references require character imagery on this route.");
-    if (input.imageCount > route.maxImages || plan.references.length > route.maxFiles || plan.references.length + input.imageCount > route.maxCombinedReferences) plan.problems.push("The complete character reference set exceeds this route's shared input budget.");
+    const visualProblem = characterAudioReferenceProblem(route, input.imageCount, input.videoCount ?? 0, plan.references.length);
+    if (visualProblem) plan.problems.push(visualProblem);
     if (plan.references.reduce((n, r) => n + (referenceAudioAsset(r).provenance.outputTechnical.durationSec ?? Infinity), 0) > 15) plan.problems.push("Voice samples exceed the route's combined 15 second limit. Review shorter samples or explicitly disable references.");
   }
   return plan;
@@ -279,7 +287,7 @@ export function castVoiceSummary(world: WorldBundle, subject: { productionId: st
 
 export function planSubjectCharacterAudio(input: { world: WorldBundle; subject: { productionId: string; sceneId: string;
   kind: string; shotId?: string; members?: readonly { shotId: string }[] }; model: ManifestModel;
-  imageCount: number; taskMode?: string; disabled?: boolean; performanceReferences?: readonly FrozenPerformanceAudio[] }): CharacterAudioPlan {
+  imageCount: number; videoCount?: number; taskMode?: string; disabled?: boolean; performanceReferences?: readonly FrozenPerformanceAudio[] }): CharacterAudioPlan {
   const production = input.world.productions.find(p => p.meta.id === input.subject.productionId);
   const scene = production?.scenes.find(s => s.id === input.subject.sceneId);
   if (!scene) return { version: 1, disabled: input.disabled === true, route: null, references: [], problems: ["The scene is no longer available."] };

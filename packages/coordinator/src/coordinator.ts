@@ -12,7 +12,7 @@ import { LocalGpu, memoryWait, queueableLocalMemory } from "./local-ai/gpu.js";
 import { withLocalGpu } from "./harness/local-gpu.js";
 import { withModelValidation } from "./harness/model-validation.js";
 import { HarnessModelCatalog, selectHarnessModel, type LanguageModelSelection } from "./harness/model-catalog.js";
-import { prepareReferences } from "./media/prepare-references.js";
+import { prepareReferences, validateSeedanceReferences } from "./media/prepare-references.js";
 import { stageConstructionHandoff } from "./world-chat/actions.js";
 import { handleProductionSetupCommand } from "./productions/setup-command.js";
 import { recoverProductionSetups } from "./productions/setup.js";
@@ -271,20 +271,8 @@ import { exportManuscript, importManuscript, readManuscript } from "./production
 import { manuscriptChapters, productionShape, type StructuredDocument } from "@arke-studio/contracts";
 import { voicedBlocks, type ChapterContinuity, type ChapterVoices } from "@arke-studio/contracts";
 import { recordTakesFromJob } from "./takes/arrival.js";
-import { materialiseForContinuation } from "./productions/continuation.js";
+import { readContinuationSource } from "./productions/continuation.js";
 
-/**
- * The four extensions `isVideoMedia` admits, each as the type a data URI must declare it to be
- * (SPEC-019 R-50). A map rather than a ternary because the wrong label does not fail as "we do
- * not support webm" — the route decodes the bytes as what we said they were and reports a corrupt
- * file, which reads as the model's fault rather than as ours.
- */
-const VIDEO_CONTENT_TYPES: Record<string, "video/mp4" | "video/quicktime" | "video/webm"> = {
-  ".mp4": "video/mp4",
-  ".m4v": "video/mp4",
-  ".mov": "video/quicktime",
-  ".webm": "video/webm",
-};
 import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { IMPORT_POSTER_BUDGET_MS, backfillArtifactPosters, writeArtifactPoster } from "./artifacts/poster.js";
@@ -2273,7 +2261,7 @@ export class Coordinator {
             },
             prepareReferences: async (job, videos, signal) => {
               const model = this.opts.manifest?.models.find(row => row.id === job.model && row.provider === job.provider);
-              if (model?.limits.referenceSyntax !== "minimax-h3" && job.params.referenceMedia === undefined) return { videos, audio: [] };
+              if (model?.limits.referenceSyntax !== "minimax-h3" && model?.limits.referenceSyntax !== "seedance" && job.params.referenceMedia === undefined) return { videos, audio: [] };
               const prepare = (store: WorldStore) => prepareReferences(store, job, model, videos,
                 { ffmpeg: this.opts.ffmpeg, probe: this.opts.mediaProbe }, signal);
               if (this.opts.provider.withWorldStore) return this.opts.provider.withWorldStore(job.worldId, prepare);
@@ -2335,36 +2323,7 @@ export class Coordinator {
               return prepare(store);
             },
             readVideoSource: async (job) => {
-              const prepare = async (store: WorldStore) => {
-                const predecessorId = job.params["continuedFrom"];
-                const production = store
-                  .getBundle()
-                  .productions.find((candidate) => candidate.meta.id === job.productionId);
-                const take = production?.takes.find((candidate) => candidate.id === predecessorId);
-                if (!take) {
-                  throw new Error("the take this shot was continuing is no longer in this production");
-                }
-                // A pass segment is a RANGE into media holding several shots (SPEC-013 R-3), so
-                // sending its backing file would extend whatever sits at that file's end — usually
-                // a different shot, and the result reads as a model failure rather than as the
-                // wrong footage being dispatched. Cut it out first, losslessly (R-50, T-32).
-                const { path } = await materialiseForContinuation(
-                  store,
-                  production!.meta.id,
-                  take,
-                  this.opts.ffmpeg ?? null,
-                  new AbortController().signal,
-                );
-                // Named from the file, not guessed. A data URI IS its declared type as far as the
-                // route is concerned, so labelling a webm as mp4 would not fail as "wrong format"
-                // — it would fail as a corrupt file, which reads as the model's fault.
-                const type = VIDEO_CONTENT_TYPES[extname(path).toLowerCase()];
-                if (type === undefined) {
-                  throw new Error(`${extname(path) || "that file"} is not a video this can send`);
-                }
-                const data = await readFile(toExtendedLength(join(store.dir, fromPortable(path))));
-                return { contentType: type, data };
-              };
+              const prepare = (store: WorldStore) => readContinuationSource(store, job, this.opts.ffmpeg ?? null, new AbortController().signal);
               if (this.opts.provider.withWorldStore) {
                 return this.opts.provider.withWorldStore(job.worldId, prepare);
               }
@@ -2388,6 +2347,23 @@ export class Coordinator {
             // refused with the readiness reason before anything is journalled. `unknown`
             // dispatches (D15) — the floor could not be checked, which is not a refusal.
             admit: async (input) => {
+              const referenceModel = this.opts.manifest?.models.find(row => row.id === input.model && row.provider === input.provider);
+              if (referenceModel?.limits.referenceSyntax === "seedance") {
+                const problem = referenceInputProblem(referenceModel, input.params);
+                if (problem) return { ok: false, reason: problem };
+                if ((Array.isArray(input.params.videoReferences) && input.params.videoReferences.length > 0) ||
+                    (Array.isArray(input.params.referenceMedia) && input.params.referenceMedia.length > 0) || input.params.continuedFrom !== undefined) {
+                  try {
+                    const check = (store: WorldStore) => validateSeedanceReferences(store, input, referenceModel, { probe: this.opts.mediaProbe, ffmpeg: this.opts.ffmpeg });
+                    if (this.opts.provider.withWorldStore) await this.opts.provider.withWorldStore(input.worldId, check);
+                    else {
+                      const store = this.opts.provider.openStore?.();
+                      if (!store || store.worldId !== input.worldId) throw new Error("The owning world is unavailable.");
+                      await check(store);
+                    }
+                  } catch (error) { return { ok: false, reason: error instanceof Error ? error.message : String(error) }; }
+                }
+              }
               if (input.provider !== "comfyui") return { ok: true };
               const service = this.opts.comfyui?.service;
               if (!service) return { ok: false, reason: "local recipes are not configured in this build" };

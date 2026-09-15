@@ -612,7 +612,6 @@ function ShotWorkspace({
           shotId={shot.id}
           returnFocus={generateReturnFocus}
           onClose={() => setGenerating(false)}
-          onStarted={() => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/cut?assemble=${scene.id}`)}
         />
         <ShotLightbox
           scene={scene}

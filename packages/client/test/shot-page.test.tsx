@@ -120,7 +120,7 @@ const commands = (sent: ClientMessage[]) =>
 type SceneShape = {
   version: number;
   defaults?: Record<string, string>;
-  shots: Array<{ id: string; number: number; title: string; description: string; durationSec: number; framing?: Record<string, string>; promptOverride?: { text: string; sheetVersions: Record<string, never> }; notes?: string; staging?: unknown }>;
+  shots: Array<{ id: string; number: number; title: string; description: string; durationSec: number; framing?: Record<string, string>; promptOverride?: { text: string; capability?: "image" | "video"; sheetVersions: Record<string, never> }; notes?: string; staging?: unknown }>;
 };
 
 /** The fixture with one attended scene-edit proposal staged over sc_04, drafted by `mutate`. */
@@ -244,7 +244,7 @@ describe("the shot page (design turn 145)", () => {
     plain.container.remove();
     open.splice(open.indexOf(plain), 1);
     const state = structuredClone(FIXTURE_STATE) as ClientState;
-    sceneOf(state).shots[0]!.promptOverride = { text: "A hand-written prompt", sheetVersions: {} };
+    sceneOf(state).shots[0]!.promptOverride = { text: "A hand-written prompt", capability: "image", sheetVersions: {} };
     const authored = await mountState(state);
     assert.equal(byText(authored.container, "Rebuild").disabled, false, "a stored override is something to rebuild from");
     assert.equal(q(authored, ".fy-shot__tag")?.textContent, "Authored");
@@ -254,9 +254,27 @@ describe("the shot page (design turn 145)", () => {
     assert.equal(q(authored, ".fy-shot__prompt")?.getAttribute("data-whole"), "true");
   });
 
+  for (const capability of ["video", undefined] as const) it(`the frame editor preserves a ${capability ?? "legacy"} video-compatible override`, async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const override = { text: "Authored camera motion", ...(capability ? { capability } : {}), sheetVersions: {} };
+    sceneOf(state).shots[0]!.promptOverride = override;
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(state);
+    const card = q(mounted, '.fy-shot__section[aria-label="Frame prompt"]')!;
+    const textarea = card.querySelector("textarea") as HTMLTextAreaElement;
+    assert.equal(textarea.disabled, true);
+    if (capability) assert.notEqual(textarea.value, override.text);
+    assert.equal(byText(card, "Rebuild").disabled, true);
+    await click(byText(card, "Rebuild"));
+    await act(async () => card.dispatchEvent(new dom.window.Event("focusout", { bubbles: true })));
+    assert.deepEqual(commands(sent), []);
+    assert.deepEqual(sceneOf(state).shots[0]!.promptOverride, override);
+  });
+
   it("rebuilds a dirty prompt without saving the draft first, and a blur out of the card writes it", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
-    sceneOf(state).shots[0]!.promptOverride = { text: "A hand-written prompt", sheetVersions: {} };
+    sceneOf(state).shots[0]!.promptOverride = { text: "A hand-written prompt", capability: "image", sheetVersions: {} };
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
     const mounted = await mountState(state);
@@ -272,7 +290,7 @@ describe("the shot page (design turn 145)", () => {
     await act(async () => card.dispatchEvent(movingInside));
     assert.equal(commands(sent).length, 0, "moving from the prompt to Rebuild does not commit the draft");
     await click(rebuild);
-    assert.deepEqual(commands(sent), [{ kind: "set-prompt-override", shotId: "sh_12", text: null }]);
+    assert.deepEqual(commands(sent), [{ kind: "set-prompt-override", shotId: "sh_12", text: null, capability: "image" }]);
     assert.notEqual(textarea.value, "A dirty draft that must not land");
     assert.notEqual(textarea.value, "A hand-written prompt", "the assembled prompt is visible while the clear is pending");
   });
@@ -288,7 +306,7 @@ describe("the shot page (design turn 145)", () => {
       props<{ onChange: (event: { target: HTMLTextAreaElement }) => void }>(textarea).onChange({ target: textarea });
     });
     await act(async () => card.dispatchEvent(new dom.window.Event("focusout", { bubbles: true })));
-    assert.deepEqual(commands(sent), [{ kind: "set-prompt-override", shotId: "sh_12", text: "Maren at the rail, the lamp behind her.", capability: "video" }]);
+    assert.deepEqual(commands(sent), [{ kind: "set-prompt-override", shotId: "sh_12", text: "Maren at the rail, the lamp behind her.", capability: "image" }]);
     assert.equal(textarea.value, "Maren at the rail, the lamp behind her.", "the draft stays on screen while the write is in flight");
   });
 
