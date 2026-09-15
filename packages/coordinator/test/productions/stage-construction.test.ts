@@ -230,7 +230,7 @@ it(`${ending} while awaiting inspection preserves the partial draft and never wr
   }
 });
 
-for (const mode of ["protected-blocking", "source-changed", "unread-images"] as const)
+for (const mode of ["protected-blocking", "source-changed", "unread-images", "refused-images"] as const)
   it(`refuses ${mode} without applying a model draft`, async () => {
     const dir = await makeTempWorld();
     const store = await WorldStore.open(dir);
@@ -270,7 +270,13 @@ for (const mode of ["protected-blocking", "source-changed", "unread-images"] as 
           draft.inspected = input.parts.flatMap(
             (p) => p.text?.match(/round-\d-\d-(?:camera|overview)\.png/g) ?? [],
           );
-          deliver!([{ type: "message.completed", sessionId: "test", text: JSON.stringify(draft) }]);
+          deliver!([
+            ...(mode === "refused-images" ? [
+              ...draft.inspected.map(summary => ({ type: "tool.activity" as const, sessionId: "test", tool: "Read", summary })),
+              { type: "tool.refused" as const, sessionId: "test", tool: "Read", summary: "outside the working directory" },
+            ] : []),
+            { type: "message.completed", sessionId: "test", text: JSON.stringify(draft) },
+          ]);
           return { sessionId: "test", correlationId: "1" };
         },
       };

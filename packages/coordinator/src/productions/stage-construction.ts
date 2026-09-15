@@ -203,6 +203,9 @@ export class StageConstructor {
               abort.abort(new Error("Stage construction reached its 30,000-token budget."));
             abort.signal.throwIfAborted();
             if (event.type === "tool.activity" && /read/i.test(event.tool)) reads.add(event.summary);
+            // Refusals have no call id or path. Invalidate earlier attempts conservatively;
+            // a later successful retry can supply fresh receipts without aborting the build.
+            if (event.type === "tool.refused" && /read/i.test(event.tool)) reads.clear();
             // The adapter enforces the boundary and tells the model about refusals. A probe
             // outside the session is not evidence that required local images were unread.
             // The requiredReads check below still demands their actual read receipts.

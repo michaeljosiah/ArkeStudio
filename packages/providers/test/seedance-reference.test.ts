@@ -34,13 +34,14 @@ for (const id of ["seedance-2.0", "seedance-2.0-fast", "seedance-2.5"]) {
     assert.equal(prompt, "Use @Video1 with @Audio1 and @Image1.");
     assert.equal(referenceInputProblem(model, { videoReferences: ["stage.mp4"], referenceMedia: media }), null);
     await client.submit("test", { model: id, capability: "video",
-      params: { prompt, durationSec: 5, videoReferences: ["stage.mp4"], referenceMedia: media },
+      params: { prompt, sound: false, durationSec: 5, videoReferences: ["stage.mp4"], referenceMedia: media },
       videoReferences: [{ contentType: "video/mp4", data, durationSec: 4 }],
       mediaAudioReferences: [{ name: "sound.wav", contentType: "audio/wav", data, durationSec: 2 }] });
     assert.match(endpoint, /reference-to-video$/);
     assert.deepEqual(payload.video_urls, ["data:video/mp4;base64,AQID"]);
     assert.deepEqual(payload.audio_urls, ["data:audio/wav;base64,AQID"]);
     assert.equal(payload.prompt, prompt);
+    assert.equal(payload.generate_audio, false, "standalone audio preserves Sound off");
     assert.equal(payload.referenceMedia, undefined);
     assert.equal(payload.videoReferences, undefined);
     assert.ok(referenceInputProblem(model, { referenceMedia: media.filter(ref => ref.kind === "audio") }));
