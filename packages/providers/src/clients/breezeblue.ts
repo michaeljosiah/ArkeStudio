@@ -189,25 +189,47 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
   /**
    * Save a clip as a voice on the account — Breeze's two-step clone, preview then save (SPEC-046
    * §2.4). The service transcribes the first sixty seconds and keeps at most thirty, so nothing on
-   * this side writes a transcript. Saving consumes a voice slot (5 · 20 · 50 · 300 by plan) and a
-   * flat per-clone charge the docs do not quantify; a full plan is a rejection with the count.
+   * this side writes a transcript. Saving consumes a voice slot (5 · 20 · 50 · 300 by plan); the
+   * preview is what bills — a read of the default script the service writes for the recording,
+   * at the per-character rate (probed 2026-09-15: 89 characters, 168 units, 16.8 credits on this
+   * clip) — and the save bills nothing.
+   *
+   * Live, the preview takes `name` and `files` and nothing else: the docs' `text`,
+   * `instructions` and `language_code` are each `400 "Clone previews generate their script and
+   * language automatically; unsupported fields: …"`, so the charge cannot be shortened with a
+   * script of our own. The save takes a language but holds the vendor's own analysis of the
+   * recording above it — `422 "Saved voice must use the analyzed reference language"`.
+   * That analysis is the transcript's language, which the vendor has and this side does not, so
+   * the save defers to it and answers with what the vendor heard; the library records the
+   * difference (R-13), and reads still state the library's language as the speech language.
    */
-  async saveVoice(key: string, input: { name: string; clip: Uint8Array; contentType: "audio/wav" | "audio/mpeg"; language?: string }, signal?: AbortSignal): Promise<{ voiceId: string }> {
+  async saveVoice(key: string, input: { name: string; clip: Uint8Array; contentType: "audio/wav" | "audio/mpeg"; language?: string }, signal?: AbortSignal): Promise<{ voiceId: string; language?: string }> {
     const form = new FormData();
     form.append("name", input.name.slice(0, 80));
-    if (input.language !== undefined) form.append("language_code", input.language);
     form.append("files", new Blob([new Uint8Array(input.clip)], { type: input.contentType }), input.contentType === "audio/wav" ? "voice.wav" : "voice.mp3");
     const preview = await this.fetchImpl(`${this.baseUrl}/v1/voice-previews/clone`, { method: "POST", headers: { "xi-api-key": key }, body: form, ...(signal ? { signal } : {}) });
     if (preview.status >= 400) throw await this.failure(preview);
     const generated = ((await preview.json().catch(() => null)) as { generated_voice_id?: unknown } | null)?.generated_voice_id;
     if (typeof generated !== "string" || generated === "") throw new Error("breezeblue: the clone preview carried no generated_voice_id");
-    const saved = await this.fetchImpl(`${this.baseUrl}/v1/voice-previews/${encodeURIComponent(generated)}/save`, {
-      method: "POST", headers: this.headers(key), body: JSON.stringify({ voice_name: input.name.slice(0, 80), language_code: input.language ?? "en" }), ...(signal ? { signal } : {}),
-    });
+    const save = (language: string | undefined) =>
+      this.fetchImpl(`${this.baseUrl}/v1/voice-previews/${encodeURIComponent(generated)}/save`, {
+        method: "POST", headers: this.headers(key), body: JSON.stringify({ voice_name: input.name.slice(0, 80), ...(language !== undefined ? { language_code: language } : {}) }), ...(signal ? { signal } : {}),
+      });
+    let saved = await save(input.language);
+    let deferred = false;
+    if (saved.status === 422 && input.language !== undefined) {
+      const detail = ((await saved.clone().json().catch(() => null)) as BreezeError | null)?.detail;
+      if (typeof detail === "string" && /analy[sz]ed reference language/i.test(detail)) {
+        signal?.throwIfAborted();
+        saved = await save(undefined);
+        deferred = true;
+      }
+    }
     if (saved.status >= 400) throw await this.failure(saved);
-    const voiceId = ((await saved.json().catch(() => null)) as { voice_id?: unknown } | null)?.voice_id;
+    const body = (await saved.json().catch(() => null)) as { voice_id?: unknown; language_code?: unknown } | null;
+    const voiceId = body?.voice_id;
     if (typeof voiceId !== "string" || voiceId === "") throw new Error("breezeblue: saving the voice returned no voice_id");
-    return { voiceId };
+    return { voiceId, ...(deferred && typeof body?.language_code === "string" ? { language: body.language_code } : {}) };
   }
 
   /** Remove a saved voice (R-15). A voice already gone is not an error: the outcome is the same. */

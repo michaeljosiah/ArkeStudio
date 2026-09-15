@@ -79,7 +79,8 @@ export function hostedSlotName(voice: Pick<ClonedVoice, "name">, clipHash: strin
  * bills no slot after the person said stop.
  */
 export interface HostedVoiceSlots {
-  save(provider: string, key: string, input: { name: string; clip: Uint8Array; contentType: "audio/wav" | "audio/mpeg"; language?: string }, signal?: AbortSignal): Promise<{ voiceId: string }>;
+  /** The slot, and the language the vendor kept the voice under when it overrode the one stated (R-13). */
+  save(provider: string, key: string, input: { name: string; clip: Uint8Array; contentType: "audio/wav" | "audio/mpeg"; language?: string }, signal?: AbortSignal): Promise<{ voiceId: string; language?: string }>;
   remove(provider: string, key: string, voiceId: string, signal?: AbortSignal): Promise<void>;
   /** The id of the account's voice saved under exactly this name, or null; a listing that fails throws. */
   find(provider: string, key: string, name: string, signal?: AbortSignal): Promise<string | null>;
@@ -185,18 +186,22 @@ export async function prepareHostedClip(
     const found = await slots.find(provider, key, name, signal);
     signal?.throwIfAborted();
     let voiceId = found;
+    let heard: string | undefined;
     if (voiceId === null) {
       // The intent goes on the entry before the call leaves: whatever happens to the answer,
       // the title the slot would carry is remembered and reconciled on the next read.
       await recordVoiceReader(store, voice.id, provider, { pending: [name], stale: remaining });
-      // Saved under the recording's language (issue 1163): Breeze requires one and would
-      // otherwise take every voice for English; Fish reads it as a hint its detection outranks.
-      voiceId = (await slots.save(provider, key, { name, clip: clip.data, contentType: clip.contentType, language: current.language }, signal)).voiceId;
+      // Saved under the recording's language (issue 1163). A vendor that holds its own analysis
+      // of the recording above the stated language says what it heard, and that goes on the
+      // entry beside the slot: the copy is in the vendor's language, the reads in the library's.
+      const saved = await slots.save(provider, key, { name, clip: clip.data, contentType: clip.contentType, language: current.language }, signal);
+      voiceId = saved.voiceId;
+      heard = saved.language;
     }
     const replaced = held?.voiceId !== undefined && held.voiceId !== voiceId ? [held.voiceId] : [];
     // Recorded before the old slot is removed, with the old id kept as stale until it is: a
     // cancellation or a crash between the two loses no handle.
-    await recordVoiceReader(store, voice.id, provider, { voiceId, clipHash: hash, savedAt: deps.now(), stale: [...remaining, ...replaced], pending: [] });
+    await recordVoiceReader(store, voice.id, provider, { voiceId, clipHash: hash, savedAt: deps.now(), ...(heard !== undefined ? { language: heard } : {}), stale: [...remaining, ...replaced], pending: [] });
     const left = await removeStale(slots, provider, key, [...remaining, ...replaced], signal);
     if (left.length !== remaining.length + replaced.length) await recordVoiceReader(store, voice.id, provider, { stale: left });
     return { ...clip, remoteVoiceId: voiceId };

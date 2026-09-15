@@ -516,7 +516,7 @@ export async function recordVoiceReader(
   store: WorldStore,
   voiceId: string,
   provider: string,
-  patch: { confirmedAt?: string; voiceId?: string; clipHash?: string; savedAt?: string; stale?: string[]; pending?: string[] },
+  patch: { confirmedAt?: string; voiceId?: string; clipHash?: string; savedAt?: string; stale?: string[]; pending?: string[]; language?: string },
 ): Promise<void> {
   // Read, patch and commit as one: two overlapping records — a confirmation for one reader while
   // another's slot flow lands — would both read the file before either committed, and the second
@@ -539,7 +539,7 @@ async function recordVoiceReaderNow(
   store: WorldStore,
   voiceId: string,
   provider: string,
-  patch: { confirmedAt?: string; voiceId?: string; clipHash?: string; savedAt?: string; stale?: string[]; pending?: string[] },
+  patch: { confirmedAt?: string; voiceId?: string; clipHash?: string; savedAt?: string; stale?: string[]; pending?: string[]; language?: string },
 ): Promise<void> {
   const existingRaw = await readLibraryRaw(store);
   if (existingRaw === null) throw new Error("the voice library is missing");
@@ -551,6 +551,9 @@ async function recordVoiceReaderNow(
   const next: Record<string, unknown> = { ...current, ...patch };
   // An emptied list is no list: the key comes off rather than sitting as `[]` forever.
   for (const list of ["stale", "pending"]) if (Array.isArray(next[list]) && next[list].length === 0) delete next[list];
+  // A new slot without a language of the vendor's is one the stated language stood for: what an
+  // older slot was heard as says nothing about this one.
+  if ("voiceId" in patch && !("language" in patch)) delete next["language"];
   entry["remote"] = { ...remote, [provider]: next };
   await store.commit({
     kind: "voice-reader",

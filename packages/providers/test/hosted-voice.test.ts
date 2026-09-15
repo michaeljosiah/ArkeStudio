@@ -274,12 +274,39 @@ describe("BreezeBlue · Breeze TTS 2 as a hosted reader (SPEC-046 §2.4)", () =>
     const form = r.calls[0]!.init!.body;
     assert.ok(form instanceof FormData, "the preview is multipart: the file goes as bytes, not base64 in JSON");
     assert.equal(form.get("name"), "Harbour glass");
-    assert.equal(form.get("language_code"), "en");
+    // Live (2026-09-15) the preview takes the name and the file and refuses every other field the
+    // docs list — `400 unsupported fields: language_code` / `text`; the save takes the language.
+    assert.deepEqual([...form.keys()].sort(), ["files", "name"]);
     const file = form.get("files");
     assert.ok(file instanceof Blob && file.size === WAV.length && file.type === "audio/wav");
     assert.equal((r.calls[0]!.init!.headers as Record<string, string>)["xi-api-key"], "k");
     assert.equal(r.calls[1]?.url, "https://api.breeze.blue/v1/voice-previews/gen_1/save");
     assert.deepEqual(r.body(), { voice_name: "Harbour glass", language_code: "en" });
+  });
+
+  it("defers to the language the vendor heard when it refuses the stated one, and says which (R-13; probed 2026-09-15)", async () => {
+    // Live: an English-described clip that Breeze analysed as Japanese. The stated language is
+    // refused with a 422 naming the analysis; the save without one is accepted under the
+    // vendor's finding, which comes back so the library can record it.
+    const r = recording((url, init) => {
+      if (url.endsWith("/v1/voice-previews/clone")) return json(200, { generated_voice_id: "gen_1", requires_verification: false });
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return "language_code" in body
+        ? json(422, { ok: false, code: "VALIDATION_ERROR", detail: "Saved voice must use the analyzed reference language." })
+        : json(200, { voice_id: "voc_ja", name: "Harbour glass", language_code: "ja", origin: "cloned" });
+    });
+    assert.deepEqual(await new BreezeBlueClient(r.fetchImpl).saveVoice("k", { name: "Harbour glass", clip: WAV, contentType: "audio/wav", language: "en" }), { voiceId: "voc_ja", language: "ja" });
+    assert.deepEqual(r.calls.map((c) => c.url.replace("https://api.breeze.blue", "")), ["/v1/voice-previews/clone", "/v1/voice-previews/gen_1/save", "/v1/voice-previews/gen_1/save"]);
+    assert.deepEqual(JSON.parse(String(r.calls[1]!.init!.body)), { voice_name: "Harbour glass", language_code: "en" });
+    assert.deepEqual(JSON.parse(String(r.calls[2]!.init!.body)), { voice_name: "Harbour glass" }, "the second save leaves the language to the vendor");
+    // A stated language the vendor accepts is not reported back: nothing was overridden.
+    const agreed = recording((url) => url.endsWith("/clone") ? json(200, { generated_voice_id: "gen_2" }) : json(200, { voice_id: "voc_en", language_code: "en" }));
+    assert.deepEqual(await new BreezeBlueClient(agreed.fetchImpl).saveVoice("k", { name: "x", clip: WAV, contentType: "audio/wav", language: "en" }), { voiceId: "voc_en" });
+    assert.equal(agreed.calls.length, 2);
+    // Any other 422 is the refusal it is: no second save.
+    const other = recording((url) => url.endsWith("/clone") ? json(200, { generated_voice_id: "gen_3" }) : json(422, { ok: false, code: "VALIDATION_ERROR", detail: "voice_name must be 80 characters or fewer" }));
+    await assert.rejects(new BreezeBlueClient(other.fetchImpl).saveVoice("k", { name: "x", clip: WAV, contentType: "audio/wav", language: "en" }), ProviderRequestRejectedError);
+    assert.equal(other.calls.length, 2);
   });
 
   it("a refused save is classed by Breeze's code, not its status (R-26)", async () => {

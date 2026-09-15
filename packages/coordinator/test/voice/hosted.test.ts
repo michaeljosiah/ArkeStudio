@@ -623,6 +623,42 @@ describe("a vendor is a destination (SPEC-046 R-16, R-17)", () => {
   });
 });
 
+describe("what the vendor heard the recording as (R-13; probed 2026-09-15)", () => {
+  it("goes on the entry beside the slot when the vendor overrode the stated language, and comes off with the next slot that it did not", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    const source = join(await tempDir("arke-hosted-heard-"), "recording.wav");
+    await writeFile(toExtendedLength(source), wav(64));
+    try {
+      const made = await cloneVoice(store, [], { sourcePath: source, name: "Harbour glass", description: "Low, dry.", consent: true });
+      assert.ok(made.ok);
+      const voice = () => store.getBundle().clonedVoices.find((v) => v.id === made.voice.id)!;
+      const first = await clipFor(store, voice());
+      assert.ok(first);
+      await recordVoiceReader(store, "harbour-glass", "breezeblue", { confirmedAt: CLOCK() });
+      const vendor = fakeSlots();
+      const save = vendor.slots.save;
+      // Breeze on the Harbour glass clip: the stated `en` refused, the voice kept as `ja`.
+      vendor.slots.save = async (provider, key, input, signal) => ({ ...(await save(provider, key, input, signal)), language: "ja" });
+      const deps = { getKey: async () => "k", slots: vendor.slots, now: CLOCK };
+      await prepareHostedClip(store, "breezeblue", "breeze-tts-2", voice(), first, deps);
+      assert.equal(voice().remote?.["breezeblue"]?.voiceId, "voc_1");
+      assert.equal(voice().remote?.["breezeblue"]?.language, "ja", "the vendor's copy is in the vendor's language");
+      assert.equal(voice().language, "en", "the library's stays what the person said: it is the speech language of every read");
+      // A re-recorded clip, saved under the stated language this time: the old note comes off.
+      vendor.slots.save = save;
+      await writeFile(toExtendedLength(join(dir, "voices", "harbour-glass.wav")), wav(96, 1));
+      const second = await clipFor(store, voice());
+      assert.ok(second);
+      await prepareHostedClip(store, "breezeblue", "breeze-tts-2", voice(), second, deps);
+      assert.equal(voice().remote?.["breezeblue"]?.voiceId, "voc_2");
+      assert.equal(voice().remote?.["breezeblue"]?.language, undefined);
+    } finally {
+      await store.close();
+    }
+  });
+});
+
 describe("the recording's language reaches the slot (issue 1163)", () => {
   it("a French clone is saved as French, not as the English every reader assumed", async () => {
     const dir = await makeTempWorld();

@@ -227,6 +227,13 @@ export const ClonedVoiceSchema = z
             stale: z.array(z.string().min(1)).optional(),
             /** Titles of saves whose answer never came back: looked up and reconciled at the next read. */
             pending: z.array(z.string().min(1)).optional(),
+            /**
+             * The language the vendor saved the voice under when it overrode the one stated — its
+             * own analysis of the recording (Breeze, probed 2026-09-15: an English-described clip
+             * heard as Japanese). Reads still state the library's language as the speech language;
+             * this records what the vendor's copy is, so the difference is on the entry rather than lost.
+             */
+            language: z.string().min(1).optional(),
           })
           .passthrough(),
       )
