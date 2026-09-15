@@ -218,12 +218,12 @@ export function ProductionLayout() {
   const isStory = shape?.hasChapters === true;
   let cut: ReturnType<typeof deriveCut> | null = null;
   /** The record the Cut edits and previews (`lib/editor-timeline.ts`), so the rail measures the same film. */
-  let record: ReturnType<typeof editorTimeline> = null;
+  let record: ReturnType<typeof editorTimeline>["timeline"] = null;
   if (production) {
     try {
       const timeline = production.timeline ?? { status: "absent" as const };
       if (timeline.status === "invalid") throw new Error(timeline.message);
-      record = editorTimeline(production, timeline, world?.artifacts ?? []);
+      record = editorTimeline(production, timeline, world?.artifacts ?? []).timeline;
       cut = record === null
         ? deriveCut(production)
         : resolvePictureTimeline(production, { status: "ready", timeline: record }, world?.artifacts ?? []);

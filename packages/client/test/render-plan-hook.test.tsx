@@ -77,7 +77,7 @@ function inputsFor(production: ProductionBundle, artifacts: readonly ArtifactSid
     production,
     artifacts,
     timelineState,
-    timeline: editorTimeline(production, timelineState, artifacts),
+    timeline: editorTimeline(production, timelineState, artifacts).timeline,
     timelineError: null,
     subtitleView: null,
     subtitleHidden: false,

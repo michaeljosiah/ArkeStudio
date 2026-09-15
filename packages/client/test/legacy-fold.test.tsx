@@ -45,9 +45,11 @@ Object.assign(globalThis, {
 
 const PLATE = "ar_01J8G0000000000000000000V1";
 const BED = "ar_01J8G0000000000000000000V2";
+const GONE = "ar_01J8G0000000000000000000ZZ";
 const A1 = "ov_01J8G0000000000000000000A1";
 const A2 = "ov_01J8G0000000000000000000A2";
 const B1 = "ov_01J8G0000000000000000000B1";
+const C1 = "ov_01J8G0000000000000000000C1";
 
 interface Mounted {
   container: HTMLElement;
@@ -68,9 +70,10 @@ function bridge(sent: ClientMessage[]) {
 /**
  * A production with no story, cut on the old lanes and never opened on the timeline: a plate at
  * 0→4 and again at 12→16 on lane 1, and — when asked for — a bed on lane 0 running to 30s, well
- * past the last picture. Nothing in `timeline.json`.
+ * past the last picture, or a placement of a file the world no longer has. Nothing in
+ * `timeline.json`.
  */
-function legacyState(options: { bed?: boolean; saved?: boolean } = {}): ClientState {
+function legacyState(options: { bed?: boolean; saved?: boolean; gone?: boolean } = {}): ClientState {
   const base = structuredClone(FIXTURE_STATE) as ClientState;
   const world = base.world!;
   world.artifacts = [
@@ -89,6 +92,7 @@ function legacyState(options: { bed?: boolean; saved?: boolean } = {}): ClientSt
       { id: A1, artifactId: PLATE, startSec: 0, endSec: 4, lane: 1, audio: "keep" },
       { id: A2, artifactId: PLATE, startSec: 12, endSec: 16, lane: 1, audio: "keep" },
       ...(options.bed ? [{ id: B1, artifactId: BED, startSec: 0, endSec: 30, lane: 0, audio: "keep" as const }] : []),
+      ...(options.gone ? [{ id: C1, artifactId: GONE, startSec: 4, endSec: 8, lane: 2, audio: "keep" as const }] : []),
     ],
   } as typeof production.cut;
   // A record saved before the fold shipped: nothing on it, and `migratedCut` unset.
@@ -205,6 +209,24 @@ describe("legacy placements before the first write (issue 1159)", () => {
     }
   });
 
+  it("names a placement the fold cannot carry, and previews the film without it", async () => {
+    // The lanes drew a placement of a lost file with a `missing artifact` label and the plan
+    // refused the preview over it by name (SPEC-039 R-39). The fold drops it, as the write will,
+    // so the preview plays; the footer says what was left behind, with the reason in its tip.
+    const screen = await mount(legacyState({ gone: true }));
+    try {
+      assert.equal(screen.container.querySelector(`[data-clip='cl_ov-01J8G0000000000000000000C1']`), null, "not on any track");
+      const chip = screen.container.querySelector<HTMLElement>("[data-testid='not-carried']");
+      assert.ok(chip, "the footer says so");
+      assert.equal(chip.textContent, "1 legacy placement not carried");
+      assert.match(chip.getAttribute("title") ?? "", /ov_01J8G0000000000000000000C1 cites artifact ar_01J8G0000000000000000000ZZ, which this world does not have/);
+      assert.equal(screen.container.querySelector(".fy-cuttimeline-error"), null, "the preview is not refused over it");
+      assert.match(screen.container.querySelector(".fy-cuthead__meta")?.textContent ?? "", /^16s · no story/);
+    } finally {
+      await close(screen);
+    }
+  });
+
   it("projects exactly the fold the coordinator will save", () => {
     // The editor's record and the write's base are the same function over the same inputs: the
     // seed the coordinator materialises for a story-ordered production, folded against the whole
@@ -213,11 +235,11 @@ describe("legacy placements before the first write (issue 1159)", () => {
     const production = state.world!.productions[0]!;
     const projected = editorTimeline(production, { status: "absent" }, state.world!.artifacts);
     const saved = migrateLegacyCut(seedFirstPictureTimeline(production), production, state.world!.artifacts);
-    assert.deepEqual(projected, saved.timeline);
-    assert.deepEqual(saved.dropped, [], "nothing this fold could not carry");
-    assert.ok(projected?.migratedCut === true);
+    assert.deepEqual(projected, saved);
+    assert.deepEqual(projected.dropped, [], "nothing this fold could not carry");
+    assert.ok(projected.timeline?.migratedCut === true);
     assert.deepEqual(
-      projected.tracks.map((track) => [track.id, track.kind, track.clips.map((entry) => entry.id)]),
+      projected.timeline.tracks.map((track) => [track.id, track.kind, track.clips.map((entry) => entry.id)]),
       [
         ["tr_picture", "picture", []],
         ["tr_lane-0-sound", "ambience", ["cl_ov-01J8G0000000000000000000B1"]],
@@ -226,6 +248,6 @@ describe("legacy placements before the first write (issue 1159)", () => {
     );
     // A record that has absorbed its placements is handed back untouched: the same object.
     const absorbed = { ...saved.timeline, revision: 7 };
-    assert.equal(editorTimeline(production, { status: "ready", timeline: absorbed }, state.world!.artifacts), absorbed);
+    assert.equal(editorTimeline(production, { status: "ready", timeline: absorbed }, state.world!.artifacts).timeline, absorbed);
   });
 });

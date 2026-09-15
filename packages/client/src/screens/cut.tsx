@@ -213,12 +213,12 @@ export function CutScreen() {
    * order that repeats a shot — and the refusal is the timeline's error, stated below by name.
    */
   const worldArtifacts = world?.artifacts;
-  const edited = useMemo((): { timeline: ProductionTimeline | null; error: string | null } => {
-    if (!production) return { timeline: null, error: null };
+  const edited = useMemo((): { timeline: ProductionTimeline | null; dropped: string[]; error: string | null } => {
+    if (!production) return { timeline: null, dropped: [], error: null };
     try {
-      return { timeline: editorTimeline(production, production.timeline ?? ABSENT_TIMELINE, worldArtifacts ?? []), error: null };
+      return { ...editorTimeline(production, production.timeline ?? ABSENT_TIMELINE, worldArtifacts ?? []), error: null };
     } catch (error) {
-      return { timeline: null, error: error instanceof Error ? error.message : String(error) };
+      return { timeline: null, dropped: [], error: error instanceof Error ? error.message : String(error) };
     }
   }, [production, worldArtifacts]);
   const editableTimeline = edited.timeline;
@@ -1467,6 +1467,15 @@ export function CutScreen() {
                 ]
                   .filter((part) => part !== null)
                   .join(" · ")}
+              </span>
+            )}
+            {/* What the fold leaves behind (SPEC-037 R-30), by name in the tip: a placement citing a
+                file the world has lost is not on the timeline and never will be, and nothing else
+                says so before the write logs it. */}
+            {edited.dropped.length > 0 && (
+              <span className="fy-warnchip" role="status" data-testid="not-carried" title={edited.dropped.join("\n")}>
+                <span className="fy-dot fy-dot--warn" />
+                {edited.dropped.length} legacy placement{edited.dropped.length === 1 ? "" : "s"} not carried
               </span>
             )}
             {spineCut
