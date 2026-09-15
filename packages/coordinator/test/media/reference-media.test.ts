@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { access, open, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -17,7 +17,7 @@ test("Seedance admission refuses the actual inline size before probing or enqueu
   const file = await open(join(dir, "large.mp4"), "w");
   try { await file.truncate(48 * 1024 * 1024 + 1); } finally { await file.close(); }
   const model = { id: "seedance-2.5", limits: { referenceSyntax: "seedance" } } as ManifestModel;
-  await assert.rejects(validateSeedanceReferences({ dir } as WorldStore, { videoReferences: ["large.mp4"] }, model, undefined), /48 MB inline limit/);
+  await assert.rejects(validateSeedanceReferences({ dir } as WorldStore, { params: { videoReferences: ["large.mp4"] } }, model, {}), /48 MB inline limit/);
 });
 
 test("a carried predecessor supplies the combined minimum for short attached clips", async () => {
@@ -33,8 +33,18 @@ test("a carried predecessor supplies the combined minimum for short attached cli
   const params = { videoReferences: ["short.mp4"], referenceMedia: [
     { kind: "video", file: "short.mp4", hash: createHash("sha256").update(data).digest("hex"), durationSec: 1 },
   ] };
-  await validateSeedanceReferences({ dir } as WorldStore, { ...params, continuedFrom: "prior" }, model, probe);
-  await assert.rejects(validateSeedanceReferences({ dir } as WorldStore, params, model, probe), /combined duration/);
+  const takeDir = join(dir, "productions", "test", "takes", "prior");
+  await mkdir(takeDir, { recursive: true });
+  await writeFile(join(takeDir, "clip.mp4"), data);
+  const store = { dir, getBundle: () => ({ productions: [{ meta: { id: "test" }, takes: [{ id: "prior", media: "clip.mp4" }] }] }) } as unknown as WorldStore;
+  const job = { productionId: "test", params: { ...params, continuedFrom: "prior" } };
+  await validateSeedanceReferences(store, job, model, { probe });
+  await assert.rejects(validateSeedanceReferences(store, { params }, model, { probe }), /combined duration/);
+  await assert.rejects(validateSeedanceReferences(store, { productionId: "test", params: { continuedFrom: "prior" } }, model, {}), /local media tools/);
+  await assert.rejects(validateSeedanceReferences(store, job, model, { probe: { ...probe, info: async () => ({ durationSec: 16, width: 1280, height: 720, hasAudio: false }) } }), /duration/);
+  const file = await open(join(takeDir, "clip.mp4"), "w");
+  try { await file.truncate(48 * 1024 * 1024 + 1); } finally { await file.close(); }
+  await assert.rejects(validateSeedanceReferences(store, job, model, { probe }), /inline reference size limit/);
 });
 
 test("video preparation uses 24 fps, preserves sound, and removes its private files", async () => {

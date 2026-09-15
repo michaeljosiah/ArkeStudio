@@ -4,20 +4,24 @@ import type { WorldStore } from "../world/store.js";
 import { readContainedAudioReferences, readContainedVideoReferences } from "../world/reference-files.js";
 import type { DispatchVideoSource, DispatchVoiceReference } from "../queue/dispatcher.js";
 import type { FfmpegRunner } from "../takes/export.js";
+import { readContinuationSource } from "../productions/continuation.js";
 import type { MediaProbe } from "./probe.js";
 import { prepareReferenceVideo, checkSeedanceVideo, measureReferenceAudio, referenceHash } from "./reference-media.js";
 
 /** Use the dispatch checks before journal admission too, so oversized media is a refusal,
  * not a durable failed job. Dispatch repeats them because files can change after enqueue. */
-export async function validateSeedanceReferences(store: WorldStore, params: Job["params"], model: ManifestModel,
-  probe: MediaProbe | undefined) {
-  const paths = params.videoReferences ?? [];
+export async function validateSeedanceReferences(store: WorldStore, job: Pick<Job, "params" | "productionId">, model: ManifestModel,
+  tools: { probe?: MediaProbe; ffmpeg?: FfmpegRunner }) {
+  const paths = job.params.videoReferences ?? [];
   if (!Array.isArray(paths) || !paths.every(path => typeof path === "string")) throw new Error("Invalid video reference paths.");
   const videos = await readContainedVideoReferences(store.dir, paths);
-  // This preflight sees only attached clips. The carried predecessor joins them at dispatch,
-  // where the real combined minimum is checked against all prepared bytes.
-  const attachedModel = params.continuedFrom ? { ...model, limits: { ...model.limits, minReferenceVideoSec: 0 } } : model;
-  await prepareReferences(store, { params: { ...params, continuedFrom: undefined } }, attachedModel, videos, { probe }, AbortSignal.timeout(60_000));
+  const signal = AbortSignal.timeout(60_000);
+  if (job.params.continuedFrom !== undefined) {
+    if (!tools.probe?.info) throw new Error("Video references need the local media tools.");
+    videos.unshift(await readContinuationSource(store, job, tools.ffmpeg ?? null, signal,
+      Math.min(48 * 1024 * 1024, model.limits.maxReferenceVideoBytes ?? Infinity)));
+  }
+  await prepareReferences(store, job, model, videos, tools, signal);
 }
 
 export async function prepareReferences(store: WorldStore, job: Pick<Job, "params">, model: ManifestModel | undefined,

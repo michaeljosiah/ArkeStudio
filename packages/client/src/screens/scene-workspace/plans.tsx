@@ -87,7 +87,7 @@ export function PlansPanel({
   const timingLines = (state: PlanState, pass: PlanState["passes"][number]): string[] =>
     (pass.carries?.timing ?? []).map((entry) =>
       `shot ${entry.number} · not on the Cut · ${state.mode === "per-shot" ? `uses its ${entry.durationSec.toFixed(1)}s` : "left out"}`);
-  const needsAttention = refused !== null || (states ?? []).some(state => state.status !== "completed" && state.status !== "cancelled");
+  const needsAttention = refused !== null || (states ?? []).some(state => (state.status !== "completed" && state.status !== "cancelled") || state.passes.some(pass => pass.state === "failed"));
   return (
     <div className="fy-swplans" style={{ marginTop: 8 }}>
       <button type="button" className="fy-linkbtn" aria-expanded={needsAttention || expanded}

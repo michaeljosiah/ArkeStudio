@@ -242,3 +242,5 @@ chapter briefing/read receipts, conversation action lifecycle and proposal gate 
 through `local-prose.ts`, returning Markdown with version/file-hash provenance.
 Regression checks: `test/application/writing.test.ts` and the packed engine consumer cover the
 draft/accept/revise/manuscript journey and its failure boundaries.
+
+Seedance enqueue validation in `packages/coordinator/src/media/prepare-references.ts` checks the complete reference set before job creation. It shares `readContinuationSource` in `productions/continuation.ts` with dispatch, so a carried take is resolved to the same whole video or extracted segment at both boundaries.
