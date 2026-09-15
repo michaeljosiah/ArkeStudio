@@ -14,7 +14,10 @@ export async function validateSeedanceReferences(store: WorldStore, params: Job[
   const paths = params.videoReferences ?? [];
   if (!Array.isArray(paths) || !paths.every(path => typeof path === "string")) throw new Error("Invalid video reference paths.");
   const videos = await readContainedVideoReferences(store.dir, paths);
-  await prepareReferences(store, { params: { ...params, continuedFrom: undefined } }, model, videos, { probe }, AbortSignal.timeout(60_000));
+  // This preflight sees only attached clips. The carried predecessor joins them at dispatch,
+  // where the real combined minimum is checked against all prepared bytes.
+  const attachedModel = params.continuedFrom ? { ...model, limits: { ...model.limits, minReferenceVideoSec: 0 } } : model;
+  await prepareReferences(store, { params: { ...params, continuedFrom: undefined } }, attachedModel, videos, { probe }, AbortSignal.timeout(60_000));
 }
 
 export async function prepareReferences(store: WorldStore, job: Pick<Job, "params">, model: ManifestModel | undefined,

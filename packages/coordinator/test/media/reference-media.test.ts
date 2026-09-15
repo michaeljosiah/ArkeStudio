@@ -20,6 +20,23 @@ test("Seedance admission refuses the actual inline size before probing or enqueu
   await assert.rejects(validateSeedanceReferences({ dir } as WorldStore, { videoReferences: ["large.mp4"] }, model, undefined), /48 MB inline limit/);
 });
 
+test("a carried predecessor supplies the combined minimum for short attached clips", async () => {
+  const dir = await tempDir("arke-seedance-carried-");
+  const data = Buffer.concat(["ftyp", "moov", "mdat"].map(tag => {
+    const box = Buffer.alloc(8); box.writeUInt32BE(8); box.write(tag, 4); return box;
+  }));
+  await writeFile(join(dir, "short.mp4"), data);
+  const model = { id: "seedance-2.0", accepts: { referenceVideos: 3 }, limits: {
+    referenceSyntax: "seedance", minReferenceVideoSec: 2, maxReferenceVideoSec: 15,
+  } } as ManifestModel;
+  const probe = { durationSec: async () => 1, info: async () => ({ durationSec: 1, width: 1280, height: 720, hasAudio: false }) };
+  const params = { videoReferences: ["short.mp4"], referenceMedia: [
+    { kind: "video", file: "short.mp4", hash: createHash("sha256").update(data).digest("hex"), durationSec: 1 },
+  ] };
+  await validateSeedanceReferences({ dir } as WorldStore, { ...params, continuedFrom: "prior" }, model, probe);
+  await assert.rejects(validateSeedanceReferences({ dir } as WorldStore, params, model, probe), /combined duration/);
+});
+
 test("video preparation uses 24 fps, preserves sound, and removes its private files", async () => {
   for (const hasAudio of [true, false]) {
     let args: string[] = [], path = "";
