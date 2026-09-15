@@ -211,6 +211,20 @@ describe("provider statuses and availability (R-1..R-4, §3.2)", () => {
     assert.equal(availability.find((a) => a.capability === "image")?.available, false);
   });
 
+  it("a key the store could not hold is a storage fault: the validation stands, the kind is said, and a later probe clears it (issue 1191)", async () => {
+    const service = await makeService([{ capability: "image", available: true }]);
+    await service.validate("fal");
+    const faulted = service.markFault("fal", "the key was not saved — credential encryption is unavailable on this machine", "storage");
+    assert.equal(faulted.faultKind, "storage");
+    assert.equal(faulted.validation, "valid", "nothing rejected the key it already holds");
+    const rejected = service.markFault("fal", "FAL rejected the key mid-session (HTTP 401)");
+    assert.equal(rejected.faultKind, "credential");
+    assert.equal(rejected.validation, "invalid");
+    const cleared = await service.validate("fal");
+    assert.equal(cleared.fault, null);
+    assert.equal(cleared.faultKind, undefined, "a fault cleared takes its kind with it");
+  });
+
   it("local runtimes are configured without any key (R-18 posture)", async () => {
     const service = await makeService([]);
     const ollama = service.list().find((s) => s.id === "ollama");

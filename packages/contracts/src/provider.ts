@@ -217,6 +217,12 @@ export const ProviderStatusSchema = z
     lastValidated: IsoDateTimeSchema.optional(),
     /** A mid-session credential failure — a provider fault, never a work failure (R-4). */
     fault: z.string().nullable(),
+    /**
+     * What the fault is about: the credential in use, or the store that could not hold one
+     * (issue 1191) — a key that never reached the provider is not a rejected key, and the
+     * settings say so rather than sending the person to replace it.
+     */
+    faultKind: z.enum(["credential", "storage"]).optional(),
   })
   .strict();
 export type ProviderStatus = z.infer<typeof ProviderStatusSchema>;

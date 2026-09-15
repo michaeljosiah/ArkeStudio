@@ -504,6 +504,21 @@ describe("a cloned voice's readers on the Voice page (SPEC-046 R-30, R-31, R-34;
     },
   });
 
+  it("the entrance counts voices as the picker does and names every provider, or how many (issues 1169, 1191)", () => {
+    // One clone with three readers and one preset: two voices, as the picker's All says, and
+    // three providers named — not "4 voices" with a subset of the providers.
+    const html = render(page, stateWith(undefined), { voiceCandidates: candidates() });
+    assert.match(html, /2 voices/);
+    assert.match(html, /comfyui · mistral · breezeblue/);
+    const wide = {
+      [sheetId]: { ...candidates()[sheetId]!, ranked: [...ranked, reader("elevenlabs", "eleven_multilingual_v2", false), reader("fishaudio", "fish-s2.1-pro", false)] },
+    };
+    const five = render(page, stateWith(undefined), { voiceCandidates: wide });
+    assert.match(five, /2 voices/, "more readers of the same voice are not more voices");
+    assert.match(five, /5 providers/);
+    assert.doesNotMatch(five, /comfyui · mistral · breezeblue/, "never three names of five");
+  });
+
   it("names the reader and its price on Reads lines, in the row's own figures (R-30)", () => {
     assert.match(render(page, stateWith(through("mistral", "voxtral-mini-tts")), { voiceCandidates: candidates() }), /Harbour · Voxtral · \$0\.016 per 1k/);
     assert.match(render(page, stateWith(through("comfyui", "comfyui-cloned-voice")), { voiceCandidates: candidates() }), /Harbour · IndexTTS · free/);

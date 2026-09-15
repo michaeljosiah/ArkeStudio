@@ -358,8 +358,12 @@ export function CharacterVoiceScreen() {
   // Zero productions is not worth a clause: what a change reaches is only interesting once a
   // change would reach something.
   // Which engines the catalogue actually reaches, named on the tile: "58 voices" says nothing
-  // about whether any of them can run here without a key.
-  const engines = [...new Set((candidates?.ranked ?? []).map(({ candidate }) => candidate.provider))].slice(0, 3);
+  // about whether any of them can run here without a key. Every one of them, or how many
+  // (issues 1169, 1191): three names of five read as the list of what is on offer, and it was
+  // not. The count is the picker's own — voices, a cloned voice's readers folded into one.
+  const providers = [...new Set((candidates?.ranked ?? []).map(({ candidate }) => candidate.provider))];
+  const engines = providers.length > 3 ? [`${providers.length} providers`] : providers;
+  const voiceCount = candidates ? catalogueRows(candidates.ranked, "all").length : 0;
   // Delivery examples live beside the performance they were taken from (design 132). The one
   // case that surface cannot reach is a slot whose production or scene has since gone: nothing
   // resolves this character as a speaker any more, so the panel appears here to be cleared.
@@ -477,7 +481,7 @@ export function CharacterVoiceScreen() {
           <EntranceTile
             icon={<Waveform size={18} />}
             title="Choose a voice"
-            what={candidates ? `${candidates.ranked.length} voices` : "reading the catalogue…"}
+            what={candidates ? `${voiceCount} voice${voiceCount === 1 ? "" : "s"}` : "reading the catalogue…"}
             where={engines.length > 0 ? engines.join(" · ") : "cloud and on this machine"}
             sets={["reads"]}
             onOpen={() => open("choose")}

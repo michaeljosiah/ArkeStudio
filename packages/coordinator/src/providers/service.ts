@@ -64,7 +64,9 @@ export class ProviderService {
       probes: [],
       fault: null,
     };
-    const next = { ...current, ...changes } as ProviderStatus;
+    // A fault cleared takes its kind with it: the kind describes the fault, never the provider.
+    const { faultKind: _kind, ...kept } = current;
+    const next = { ...(changes.fault === null ? kept : current), ...changes } as ProviderStatus;
     this.statuses.set(id, next);
     return next;
   }
@@ -151,7 +153,12 @@ export class ProviderService {
   }
 
   /** A credential failed mid-session — a provider fault naming the provider, never a work failure (R-4). */
-  markFault(id: ProviderId, message: string): ProviderStatus {
+  /**
+   * A fault about the credential in use marks the key invalid; one about the store that could
+   * not hold a key (issue 1191) leaves the validation as it was — nothing rejected the key, it
+   * never left — and says which it is, so the settings say "not saved" rather than "rejected".
+   */
+  markFault(id: ProviderId, message: string, kind: "credential" | "storage" = "credential"): ProviderStatus {
     this.validationGenerations.set(id, (this.validationGenerations.get(id) ?? 0) + 1);
     // The category rides the record (SPEC-032 R-20.9): the fault correlation must not offer a
     // key row for a quota that a replaced key would not refill, and stamping at the producer is
@@ -162,6 +169,6 @@ export class ProviderService {
       message,
       category: providerFaultCategory(message),
     });
-    return this.patch(id, { fault: message, validation: "invalid" });
+    return kind === "storage" ? this.patch(id, { fault: message, faultKind: "storage" }) : this.patch(id, { fault: message, faultKind: "credential", validation: "invalid" });
   }
 }

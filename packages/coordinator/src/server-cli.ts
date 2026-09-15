@@ -2,6 +2,7 @@ import { parseArgs } from "node:util";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createNodeStudioHost } from "./node-studio-host.js";
+import { productVersion } from "./product-version.js";
 import { writeServerSession } from "./server-session.js";
 
 const { values } = parseArgs({ options: {
@@ -24,7 +25,7 @@ if (values.help) {
     return url.origin;
   });
   const { randomBytes } = await import("node:crypto");
-  const creating = createNodeStudioHost({ appRoot: resolve(values.root), appVersion: "standalone",
+  const creating = createNodeStudioHost({ appRoot: resolve(values.root), appVersion: await productVersion(dirname(fileURLToPath(import.meta.url))),
     transportAuth: { token: randomBytes(32).toString("hex"), allowedOrigins: origins },
     ...(values["no-harness"] ? { adapter: null } : {}) });
   let stopRequested = false;
