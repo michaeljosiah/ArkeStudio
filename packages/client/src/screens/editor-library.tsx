@@ -52,7 +52,15 @@ import {
 } from "../lib/store.js";
 import { Wave } from "../components/wave.js";
 import { takeMediaPath } from "../lib/take-presentation.js";
+import { useMediaQuery } from "../lib/media-query.js";
 import { CLIP_DEFAULT_SEC } from "./editor-legacy-lanes.js";
+
+/**
+ * Below this width the Library is a drawer (the SPEC-039 editor shell in `fidelity.css`): kept
+ * off screen until it is opened, and closed again by its own control or Escape. Above it the
+ * column is always shown and `open` says nothing.
+ */
+export const LIBRARY_DRAWER_QUERY = "(max-width: 1199px)";
 
 /**
  * How a clip's source is named in the Library's use index: the kind, and the thing it points at.
@@ -238,6 +246,22 @@ export function ArtifactPanel({
     if (filter === "needs-take") setFilter("all");
     if (kindFilter === "shots") setKindFilter("all");
   }, [hasShots, production?.meta.id, filter, kindFilter]);
+  /*
+   * A closed drawer draws its shell and nothing else (issue 1157).
+   *
+   * Everything below this line is the rows: every shot, line and file indexed, filtered and
+   * rendered. A closed panel used to do all of it on every render — and the transport re-renders
+   * the screen four times a second while the film plays — for a list the CSS had translated off
+   * screen. The shell stays because the screen holds it: the ref the toggle focuses into once
+   * the rows are back, the id its button controls, the `data-open` the drawer's own styles read.
+   * What a person set stays in the hooks above — the search, the filters, the picked row, the
+   * shelf being browsed, where Locate got to — so reopening finds the panel as it was left.
+   * Above the breakpoint the column is always shown and `open` is not consulted.
+   */
+  const drawer = useMediaQuery(LIBRARY_DRAWER_QUERY);
+  if (drawer && !open) {
+    return <aside ref={panelRef} className="fy-artpanel" id="cut-library" data-open={false} aria-label="Library" />;
+  }
   // The panel can outlive a production change (the router keeps the screen); a scene of the last
   // production is no filter here. Nor is any scene while another world's shelf is shown: its
   // files belong to no scene of this production, so the control goes and the scope is every row.

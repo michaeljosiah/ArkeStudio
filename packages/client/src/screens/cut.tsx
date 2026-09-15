@@ -105,7 +105,7 @@ import {
 } from "../lib/store.js";
 import { storyShotCount } from "./production-story.js";
 import { CLIP_DEFAULT_SEC, ClipLanes } from "./editor-legacy-lanes.js";
-import { type PendingImport, type LibraryFilter, ArtifactPanel, AddToLibraryDialog } from "./editor-library.js";
+import { type PendingImport, type LibraryFilter, ArtifactPanel, AddToLibraryDialog, LIBRARY_DRAWER_QUERY } from "./editor-library.js";
 import { seekDrag, CutScrubber, LANE_PRESS_OWNERS, CutPlayhead, useCutTransport } from "./editor-transport.js";
 import { CutPreview } from "./editor-preview.js";
 import { SpineCutTrack, EmptyEditorTrack, NewLaneStrip, SceneBands } from "./editor-tracks.js";
@@ -342,7 +342,7 @@ export function CutScreen() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       if (document.querySelector(".fy-clipmenu")) return;
-      if (libraryOpen && editorMediaMatches("(max-width: 1199px)")) {
+      if (libraryOpen && editorMediaMatches(LIBRARY_DRAWER_QUERY)) {
         setLibraryOpen(false);
         queueMicrotask(() => libraryToggleRef.current?.focus());
       } else if (rightOpen && editorMediaMatches("(max-width: 899px)")) {
@@ -589,7 +589,7 @@ export function CutScreen() {
     setRightOpen(true);
     if (
       editorMediaMatches("(max-width: 899px)") ||
-      (libraryOpen && editorMediaMatches("(max-width: 1199px)"))
+      (libraryOpen && editorMediaMatches(LIBRARY_DRAWER_QUERY))
     ) {
       queueMicrotask(() => focusFirstControl(rightPanelRef.current));
     }
@@ -1019,7 +1019,7 @@ export function CutScreen() {
   const deselect = (): boolean => {
     // Panes and dialogs own Escape first; the selection is only cleared when nothing else is open.
     if (keysOpen || document.querySelector(".fy-clipmenu, .fy-editordialog")) return false;
-    if (libraryOpen && editorMediaMatches("(max-width: 1199px)")) return false;
+    if (libraryOpen && editorMediaMatches(LIBRARY_DRAWER_QUERY)) return false;
     if (rightOpen && editorMediaMatches("(max-width: 899px)")) return false;
     if (activeSelection === null) return false;
     setSelected(null);
@@ -1140,7 +1140,7 @@ export function CutScreen() {
         open={libraryOpen}
         onClose={() => {
           setLibraryOpen(false);
-          if (editorMediaMatches("(max-width: 1199px)")) queueMicrotask(() => libraryToggleRef.current?.focus());
+          if (editorMediaMatches(LIBRARY_DRAWER_QUERY)) queueMicrotask(() => libraryToggleRef.current?.focus());
         }}
         panelRef={libraryPanelRef}
       />
