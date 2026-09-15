@@ -37,6 +37,7 @@ import {
   mediaTakeFor,
   takeDecisions,
   takesForShot,
+  reviewableTakesForShot,
   useProduction,
 } from "../lib/selectors.js";
 import { lookTileLabel } from "./character-reference.js";
@@ -350,9 +351,7 @@ function TakesView({
   const shots = showAllScenes ? all : found === null ? [] : orderedShots(found);
   /** Only takes with resolvable pixels, plus anything still in flight. */
   const takes = production && shotId
-    ? takesForShot(production, shotId).filter(
-        (take) => mediaTakeFor(production, take) !== null || take.completedAt === undefined,
-      )
+    ? reviewableTakesForShot(production, shotId)
     : [];
   const acceptedId = production && shotId ? acceptedTakeId(production, shotId) : null;
   /*
@@ -1378,20 +1377,22 @@ function ContactSheet({
           {stills.map((take) => {
             const decision = decisions[take.id];
             const shotId = take.coversShots[0];
+            const shot = production?.scenes.flatMap(orderedShots).find((candidate) => candidate.id === shotId);
+            const title = shot?.title ?? "Unassigned frame";
             return (
               <div key={take.id} className="fy-shotcard">
                 <div className="fy-shotcard__frame">
                   <Portrait
                     worldSlug={worldSlug}
                     path={takeMediaPath(production!, take) ?? ""}
-                    label={shotId?.replace("sh_", "shot ") ?? take.id}
+                    label={title}
                     radius={0}
                   />
                 </div>
                 <div className="fy-shotcard__body">
                   <div className="fy-shotcard__head">
                     <span className="fy-shotcard__num">{shotId?.replace("sh_", "") ?? "—"}</span>
-                    <span className="fy-shotcard__title">{take.media ?? take.id}</span>
+                    <span className="fy-shotcard__title" title={take.media ?? take.id}>{title}</span>
                     <span className={`fy-dot fy-dot--${decisionTone(decision)}`} />
                   </div>
                   <span className="fy-mono">
@@ -1402,13 +1403,13 @@ function ContactSheet({
                   <div className="fy-shotcard__actions">
                     <Button
                       variant={decision === "accepted" ? "primary" : "ghost"}
-                      disabled={!shotId}
+                      disabled={!shotId || decision === "accepted"}
                       onClick={() => {
                         // Accept = decision + selection in one commit (SPEC-013 R-9).
                         if (worldId && prodId && shotId) acceptTake(worldId, prodId, take.id, shotId);
                       }}
                     >
-                      Accept
+                      {decision === "accepted" ? "Accepted" : "Accept"}
                     </Button>
                     <Button
                       variant="ghost"

@@ -20,6 +20,7 @@ import {
   type ArtifactSidecar,
 } from "@arke-studio/contracts";
 import { clock } from "../components/player.js";
+import { reviewableTakesForShot } from "../lib/selectors.js";
 import {
   PictureClipTiming,
   DetachAudio,
@@ -123,6 +124,11 @@ export function CutInspector({
       : null;
   const selectedShotId = selectedSpine?.shotId ?? clipShotId ?? selectedStory?.shot.id ?? null;
   const selectedTakeId = selectedSpine?.takeId ?? selectedStory?.takeId ?? null;
+  const shotTakes = production && selectedShotId ? reviewableTakesForShot(production, selectedShotId) : [];
+  const takeIndex = shotTakes.findIndex((take) => take.id === selectedTakeId);
+  const takeLabel = takeIndex >= 0
+    ? `Take ${takeIndex + 1} · ${shotTakes[takeIndex]!.model}`
+    : selectedTakeId ? "Take unavailable" : "no accepted take";
   const ceiling =
     production && selectedShotId && selectedTakeId
       ? trimCeilingSec(production, selectedShotId, selectedTakeId)
@@ -222,7 +228,7 @@ export function CutInspector({
         <div className="fy-cutinspect__rows">
           {sceneNumber > 0 && <InspectorRow label="Scene">SC {sceneNumber}</InspectorRow>}
           {selectedShotId && <InspectorRow label="Shot">{selectedShotId.replace("sh_", "shot ")}</InspectorRow>}
-          <InspectorRow label="Take">{selectedTakeId ?? "no accepted take"}</InspectorRow>
+          <InspectorRow label="Take"><span title={selectedTakeId ?? undefined}>{takeLabel}</span></InspectorRow>
           <InspectorRow label={selectedSpine ? "Window" : "Shot length"}>{duration.toFixed(1)}s</InspectorRow>
           {takeSec !== undefined && <InspectorRow label="Take length">{takeSec.toFixed(1)}s</InspectorRow>}
         </div>
@@ -237,7 +243,7 @@ export function CutInspector({
             shotId={selectedShotId}
             heading={`SC ${sceneNumber} · ${selectedShotId.replace("sh_", "shot ")}`}
             title={title}
-            figures={`${selectedTakeId ?? "no take"} · ${selectedSpine ? "budget" : "shot"} ${duration.toFixed(1)}s${takeSec !== undefined && !selectedSpine ? ` · take ${takeSec.toFixed(1)}s` : ""}`}
+            figures={`${takeLabel} · ${selectedSpine ? "budget" : "shot"} ${duration.toFixed(1)}s${takeSec !== undefined && !selectedSpine ? ` · take ${takeSec.toFixed(1)}s` : ""}`}
             trim={trim}
             ceiling={ceiling}
           />

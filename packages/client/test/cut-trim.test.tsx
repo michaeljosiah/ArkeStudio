@@ -266,6 +266,9 @@ describe("the Cut on the song clock (80a)", () => {
     try {
       const inspector = await select(screen, "[data-clip='cl_sh-12']");
       assert.equal(row(inspector, "Shot length"), "4.0s", "the authored duration is the slot");
+      assert.match(row(inspector, "Take") ?? "", /^Take 1 · /);
+      assert.ok(inspector.querySelector(`[title="${CLIP}"]`), "the immutable id stays available in a tooltip");
+      assert.ok(!inspector.textContent?.includes(CLIP), "the id is not the take's visible name");
       assert.ok(row(inspector, "Take length") === null, "no length claimed for unmeasured material");
       assert.doesNotMatch(inspector.textContent ?? "", /budget|Window/, "budget is the song clock's word, not this one's");
     } finally {
@@ -504,7 +507,8 @@ describe("the unified editor shell (#685)", () => {
     try {
       const inspector = await select(screen, "[data-clip='cl_sh-12']");
       assert.match(inspector.textContent ?? "", /PICTURE CLIP/);
-      assert.match(inspector.textContent ?? "", /tk_01J8F0000000000000000000B2/);
+      assert.match(row(inspector, "Take") ?? "", /^Take 1 · /);
+      assert.ok(inspector.querySelector('[title="tk_01J8F0000000000000000000B2"]'));
       assert.ok(inspector.querySelector("[aria-label='In one frame later']"), "the clip's timing is authored in the reactive Inspector");
     } finally {
       await close(screen);

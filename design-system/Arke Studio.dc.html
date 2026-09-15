@@ -72,9 +72,72 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
 <section class="dv-turn" id="t0" style="padding:36px 44px 28px">
   <div style="max-width:760px;display:flex;flex-direction:column;gap:10px">
     <div style="font:650 20px/1.2 var(--font-sans);letter-spacing:-0.02em;color:var(--dv-ink)">Arke Studio · design master</div>
-    <div style="font:500 13px/1.5 var(--font-sans);color:var(--dv-ink)"><a href="#t146">Latest: 146 · The audiobook</a> · 13 September 2026</div>
+    <div style="font:500 13px/1.5 var(--font-sans);color:var(--dv-ink)"><a href="#t147">Latest: 147 · The takes in context</a> · 13 September 2026</div>
     <div style="font:400 13px/1.65 var(--font-sans);color:var(--dv-ink-body)">Design decisions are recorded below in numbered turns, newest first; earlier explorations remain as history. The original sample world is <strong>The Undersong</strong>, a coastal fantasy where a drowned god still sings beneath the harbour. Its image placeholders accept dropped artwork. Approved image references keep their supplied artwork intact. Chrome stays neutral monochrome so the creator's imagery carries the colour.</div>
   </div>
+</section>
+<section class="dv-turn" id="t147">
+<div class="dv-thd"><a class="dv-tid" href="#t147">147</a><span class="dv-tname">The takes in context — the built episode, scene and shot filters, and the selected take's verdict (issue 1165; updates <a class="dv-oid" href="#102c">102c</a>)</span></div>
+<p class="dv-next">The current Generate takes view, drawn from <code>production-generate.tsx</code>. Each card is selectable and a clip plays in place. The shared action bar applies to that selected card; Accept and Reject are not duplicated inside every card. Episode controls appear only on an episodic production, scene controls when the scope holds more than one scene. This frame records the shipped surface, not a new generation workflow.</p>
+
+<div class="dv-opts"><div class="dv-opt" id="147a">
+<div class="dv-olabel"><a class="dv-oid" href="#147a">147a</a><span>Generate · takes, scoped and watched</span></div>
+<div class="dv-card"><div id="takes147" data-screen-label="147a Generate · takes, scoped and watched">
+<style>
+#takes147{width:1360px;height:850px;display:flex;flex-direction:column;background:var(--background);color:var(--foreground);font:var(--type-body);overflow:hidden}
+#takes147 *{box-sizing:border-box}
+#takes147 button,#takes147 select,#takes147 textarea{font:var(--type-ui);color:inherit;background:var(--background);border:1px solid var(--border);border-radius:var(--radius-md);padding:8px 12px}
+#takes147 button[aria-pressed=true]{background:var(--secondary);border-color:var(--foreground)}
+#takes147 button:disabled{opacity:.45}
+#takes147 .head{height:44px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);padding:0 18px;flex:none}
+#takes147 .body{display:flex;flex:1;min-height:0}
+#takes147 .rail{width:210px;flex:none;border-right:1px solid var(--border);padding:22px 14px;display:flex;flex-direction:column;gap:8px}
+#takes147 .rail p{margin:0;padding:9px 12px;font:var(--type-ui)}
+#takes147 .rail .active{background:var(--secondary);border-radius:var(--radius-md)}
+#takes147 main{padding:26px 26px 20px;min-width:0;flex:1;display:flex;flex-direction:column}
+#takes147 .muted{color:var(--muted-foreground);font:var(--type-meta)}
+#takes147 .filters{display:flex;flex-direction:column;gap:12px}
+#takes147 .filter{display:flex;align-items:center;gap:8px}
+#takes147 .filter>span:first-child{width:58px;flex:none;font:var(--type-label);color:var(--muted-foreground)}
+#takes147 .filter button{padding:6px 10px}
+#takes147 h1{font:var(--type-title);margin:26px 0 8px;letter-spacing:var(--tracking-tight)}
+#takes147 .cards{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:22px}
+#takes147 article{border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
+#takes147 article.selected{border-color:var(--foreground);box-shadow:0 0 0 1px var(--foreground)}
+#takes147 .picture{position:relative;height:205px;background:var(--neutral-950)}
+#takes147 .picture img{width:100%;height:100%;object-fit:cover;display:block}
+#takes147 .play{position:absolute;bottom:12px;left:12px;border-radius:50%;width:36px;height:36px;padding:0;background:var(--background)}
+#takes147 .caption{display:flex;justify-content:space-between;align-items:center;padding:13px 14px;font:var(--type-ui)}
+#takes147 .actions{display:flex;align-items:center;gap:8px;margin-top:auto;flex-wrap:wrap}
+#takes147 .primary{background:var(--foreground);color:var(--background);border-color:var(--foreground)}
+#takes147 .links{margin-left:auto;display:flex;gap:12px;font:var(--type-meta);color:var(--muted-foreground)}
+#takes147 .dock{width:290px;flex:none;border-left:1px solid var(--border);display:flex;flex-direction:column;padding:24px 20px;gap:18px}
+#takes147 .dock h2{font:var(--type-ui);margin:0}
+#takes147 .dock p{font:var(--type-body);line-height:var(--leading-body);margin:0}
+#takes147 .dock textarea{width:100%;height:96px;resize:none;margin-top:auto}
+</style>
+  <div class="head"><span class="muted">The Undersong · Saltlight · Generate</span><strong>Arke Studio</strong><span class="muted">Activity · Settings</span></div>
+  <div class="body">
+    <aside class="rail"><p><strong>Saltlight</strong><br><span class="muted">series · 2 episodes · 3 scenes</span></p><p>Overview</p><p>Episodes</p><p class="muted">Episode 1 · The vigil</p><p class="muted">Episode 2 · The bell</p><p class="active">Takes</p><p>Artifacts</p><p>Generate</p><p>Cut</p><p style="margin-top:auto">The Undersong</p></aside>
+    <main>
+      <nav class="filters" aria-label="Take filters">
+        <div class="filter"><span>EPISODE</span><select aria-label="Episode"><option>01 · The vigil</option><option>02 · The bell</option></select><span class="muted">2 episodes</span></div>
+        <div class="filter"><span>SCENE</span><button>All</button><button aria-pressed="true">4 · The vigil breaks</button><button>5 · The lamps hold</button></div>
+        <div class="filter"><span>SHOT</span><button aria-pressed="true">● Shot 12</button><button>○ Shot 13</button><button>○ Shot 14</button><button>○ Shot 15</button></div>
+      </nav>
+      <h1>Shot 12</h1><div style="display:flex;justify-content:space-between"><span class="muted">Maren at the rail · 4s</span><span class="muted">1 of 2 accepted</span></div>
+      <div class="cards">
+        <article class="selected" aria-label="Take 1 selected for review"><div class="picture"><img src="assets/scene4-shot12.png" alt="Maren at the rail"><button class="play" aria-label="Play Take 1">▶</button></div><div class="caption"><span>Take 1</span><span class="muted">✓ SELECTED</span></div></article>
+        <article aria-label="Take 2"><div class="picture"><img src="assets/scene4-shot12b-detail.png" alt="An alternate frame of Maren"><button class="play" aria-label="Play Take 2">▶</button></div><div class="caption"><span>Take 2</span><span class="muted">2.5s</span></div></article>
+      </div>
+      <div class="actions"><button class="primary">Open in generator</button><button disabled>Accept take 1</button><button>Reject</button></div>
+      <div class="links" style="margin-top:16px"><span>Contact sheet</span><span>Advanced</span></div>
+    </main>
+    <aside class="dock"><h2>Arke · Shot 12</h2><span class="muted">Maren at the rail</span><p>Watch the takes side by side. Tell me what should change in this shot.</p><textarea aria-label="Message Arke" placeholder="Tell Arke what to change…"></textarea><span class="muted">Shot 12 · current scene</span></aside>
+  </div>
+</div></div>
+</div></div>
+<p class="dv-rule"><b>Labels describe the work.</b> Measured take durations round to one decimal; whole seconds have no trailing zero. Contact-sheet frames use their shot title, with the file name available as a tooltip; an accepted frame reads <b>Accepted</b> and cannot be accepted again. In the Cut, Take N and its model identify the candidate, while its immutable id stays in the tooltip. Episode rail labels use sorted position, retaining the duplicate-order warning without changing the saved record. A preview image exists only while its frame-clock source is a still.</p>
 </section>
 <section class="dv-turn" id="t146">
 <div class="dv-thd"><a class="dv-tid" href="#t146">146</a><span class="dv-tname">The audiobook &#8212; a kept take for every block, direction beside the prose, and the book out as chapter files (story mode, slice 7; extends <a class="dv-oid" href="#126a">126a</a>, <a class="dv-oid" href="#130a">130a</a> and <a class="dv-oid" href="#131a">131a</a>; amends <a class="dv-oid" href="#t130">130</a>&#8217;s Voices panel)</span></div>
