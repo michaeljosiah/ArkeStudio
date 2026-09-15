@@ -979,3 +979,20 @@ describe("edit-scene writes the place and the cast, and refuses a place the worl
     assert.equal((await sceneOnDisk(store)).version, before.version);
   });
 });
+
+it("refuses shared blocking that would strand another shot's camera (#1105)", async () => {
+  const { dir, store } = await open();
+  const before = await sceneOnDisk(store);
+  const [first, second] = orderedShots(before);
+  assert.ok(first && second);
+  const shared = { cast: [], sets: [{ name: "Cart", group: "cart", x: 0, z: 0, w: 1, h: 1, d: 1 }] };
+  await applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID,
+    baseVersion: before.version, command: { kind: "edit-stage", shotId: first.id, blocking: shared,
+      staging: { keys: [{ t: 0, p: [0, 1.5, 3], l: [0, 1.2, 0], anchor: "cart" }] } } });
+  const staged = await sceneOnDisk(store);
+  const print = await worldPrint(dir);
+  await assert.rejects(applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID,
+    baseVersion: staged.version, command: { kind: "edit-stage", shotId: second.id, blocking: { cast: [], sets: [] } } }),
+    new RegExp(`shot ${first.number}`, "i"));
+  assert.equal(await worldPrint(dir), print, "a refused shared edit writes nothing");
+});
