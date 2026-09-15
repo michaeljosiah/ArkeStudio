@@ -506,12 +506,10 @@ describe("the notification raised for a request", () => {
 describe("a subject-bound Bench (SPEC-036 R-23..R-25)", () => {
   it("names and locks a shot while keeping unsupported production references visible", async () => {
     const bench = await openBench(subjectSession("shot"));
-    // The chain, as the header now splits it: crumb, then the subject (design 2609-2610).
-    assert.match(bench.container.textContent ?? "", /Saltlight · scene 4/);
-    assert.match(bench.container.textContent ?? "", /Shot 12/);
-    assert.match(bench.container.textContent ?? "", /aspect · 16:9/);
-    assert.match(bench.container.textContent ?? "", /duration · 4s/);
-    assert.match(bench.container.textContent ?? "", /seed · auto/);
+    // The subject on the chrome's pill (design 142a); the shot's aspect as a bare fact chip.
+    assert.equal(bench.container.querySelector('[data-testid="bench-subject-pill"]')?.textContent, "Shot 12 · Maren at the rail");
+    assert.equal(bench.container.querySelector('[data-testid="bench-provenance"]')?.textContent, "/Bench");
+    assert.match(bench.container.textContent ?? "", /16:9/);
     assert.match(bench.container.textContent ?? "", /Maren Kest · v4/);
     assert.match(bench.container.textContent ?? "", /voice sample · @maren-kest/);
     assert.match(bench.container.textContent ?? "", /Maren Kest · 9\.0s/);
@@ -525,8 +523,8 @@ describe("a subject-bound Bench (SPEC-036 R-23..R-25)", () => {
     const square = bench.container.querySelector<HTMLOptionElement>('option[value="fal/square-image"]');
     assert.equal(square?.hasAttribute("disabled"), true, "a locked 16:9 subject cannot spend on a square-only model");
     assert.equal(bench.container.querySelector('[data-testid="bench-keep"]'), null);
-    assert.ok(bench.container.querySelector('[data-testid="bench-accept"]'));
-    assert.match(bench.container.textContent ?? "", /accepting files the frame onto shot 12/);
+    assert.equal(bench.container.querySelector('[data-testid="bench-accept"]')?.textContent, "Accept · file onto shot 12");
+    assert.doesNotMatch(bench.container.textContent ?? "", /accepting files/);
     await close(bench);
   });
 
@@ -584,11 +582,10 @@ describe("a subject-bound Bench (SPEC-036 R-23..R-25)", () => {
 
   it("states one board pass and files its accepted clip onto every member", async () => {
     const bench = await openBench(subjectSession("board"));
-    // The subject and its line are two spans in the header now (design 2610-2611).
-    assert.match(bench.container.textContent ?? "", /Board A/);
-    assert.match(bench.container.textContent ?? "", /2 shots · 10s · one pass/);
+    // The subject and its line on the chrome's pill (design 142a).
+    assert.equal(bench.container.querySelector('[data-testid="bench-subject-pill"]')?.textContent, "Board A · 2 shots · 10s · one pass");
     assert.match(bench.container.textContent ?? "", /sound · on/);
-    assert.match(bench.container.textContent ?? "", /accepting files the clip onto 2 shots/);
+    assert.equal(bench.container.querySelector('[data-testid="bench-accept"]')?.textContent, "Accept · file onto 2 shots");
     const video = [...bench.container.querySelectorAll<HTMLButtonElement>('[aria-label="What to make"] button')]
       .find((button) => button.textContent === "Video");
     assert.equal(video?.getAttribute("aria-pressed"), "true");
@@ -599,7 +596,8 @@ describe("a subject-bound Bench (SPEC-036 R-23..R-25)", () => {
       true,
       "a board cannot use a route that leaves its duration to the provider",
     );
-    assert.match(bench.container.querySelector('[data-testid="bench-generate"]')?.textContent ?? "", /Generate · ~\$/);
+    assert.equal(bench.container.querySelector('[data-testid="bench-generate"]')?.textContent, "Generate");
+    assert.match(bench.container.querySelector('[data-testid="bench-estimate"]')?.textContent ?? "", /~\$/);
     await close(bench);
   });
 });

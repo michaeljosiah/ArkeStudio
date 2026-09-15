@@ -516,6 +516,10 @@ export const Collapse = icon(<><path d="M10 6 4 12l6 6" /><path d="m14 6 6 6-6 6
 export const Snap = icon(<><path d="M9 3v18" /><path d="M15 3v18" /></>);
 export const Duck = icon(<><path d="M2 12h3l3-8 4 16 3-8h5" /></>);
 export const Locate = icon(<><circle cx="12" cy="12" r="3" /><path d="M12 2v3" /><path d="M12 19v3" /><path d="M2 12h3" /><path d="M19 12h3" /></>);
+/* The Bench rail's Cut mark (design 142a): a clapperboard, so Takes and Cut do not share a camera. */
+export const Clapper = icon(<><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z" /><path d="m6.2 5.3 3.1 3.9" /><path d="m12.4 3.4 3.1 4" /><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></>);
+/* The Bench's "Not this" on a take's session line (design 142a). */
+export const ThumbsDown = icon(<><path d="M17 14V2" /><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z" /></>);
 
 // ---- Settings actions (SPEC-042 R-18): the verb's icon, beside the verb ----------------------
 export const Pencil = icon(<><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></>);
