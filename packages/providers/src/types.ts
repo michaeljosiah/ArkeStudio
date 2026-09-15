@@ -281,11 +281,16 @@ export interface VoiceCatalogueClient extends ProviderClient {
  * once as a slot the reads then address, and removed when the library lets go of it (R-15).
  */
 export interface VoiceSlotClient extends ProviderClient {
+  /**
+   * The slot's id, and the language the vendor saved the voice under when it overrode the one
+   * stated — its own analysis of the recording (Breeze, probed 2026-09-15). Absent when the
+   * stated language stood, or the vendor keeps none.
+   */
   saveVoice(
     key: string,
     input: { name: string; clip: Uint8Array; contentType: "audio/wav" | "audio/mpeg"; language?: string },
     signal?: AbortSignal,
-  ): Promise<{ voiceId: string }>;
+  ): Promise<{ voiceId: string; language?: string }>;
   deleteVoice(key: string, voiceId: string, signal?: AbortSignal): Promise<void>;
   /** The id of the account's own voice saved under exactly this name, or null when the listing answered and holds none; a listing that fails throws. */
   findVoice(key: string, name: string, signal?: AbortSignal): Promise<string | null>;
