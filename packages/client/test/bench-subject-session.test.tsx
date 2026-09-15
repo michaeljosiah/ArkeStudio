@@ -12,14 +12,13 @@ import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
- * The generation session (SPEC-036 R-23..R-25) is the bench in the scene workspace's dress.
- *
- * Everything asserted here is keyed on `session.subject`: the header that names where you are
- * instead of offering a switcher, the two text tabs whose off tab opens the shot in the other
- * mode, the references with an eyebrow and a name beneath each tile, the prompt's own eyebrow
- * and hint, the priced model rows, the wall's track of filters and mono states, and the rail of
- * thumbnails with `take N · ready` beneath. R-23 binds the world bench to change by nothing,
- * which is why every one of these is a subject-only branch rather than a new default.
+ * The generation session (SPEC-036 R-23..R-25) is the Bench that design 142a draws, with the
+ * shot named on the chrome: the subject and the session's spend as pills at the right, "Bench"
+ * as the crumb, the production's rail, the same icon tabs and lanes as the world bench, one
+ * dispatch row with the price as one mono figure, the wall's pills and a numbered strip. What is
+ * still a subject-only branch is what a subject changes about the WORK — the other tab opens
+ * the shot in that mode, Accept files onto the shot, the voice-references chip exists only where
+ * the shot's cast has a voice — which is why R-23's world bench changes by nothing here.
  */
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -306,49 +305,85 @@ async function apply(event: DomainEvent): Promise<void> {
   });
 }
 
-it("voice-reference blockers open the disclosure beside a disabled Generate", async () => {
-  const bench = await openBench(shotSession("video"), SESSION_ID, state => {
-    state.world!.referenceKits[0]!.designatedVoiceSample = { file: "legacy.wav" } as never;
-    const scene = state.world!.productions.find(p => p.meta.id === "saltlight")!.scenes.find(s => s.id === "sc_04")!;
-    const shot = orderedShots(scene).find(s => s.id === "sh_12")!;
-    shot.covers = undefined;
-    shot.audio = { kind: "dialogue", speaker: "maren-kest", line: "Hello" };
+describe("voice references (design 142: an option chip, not a disclosure)", () => {
+  it("is a chip that reads the state, and a blocker is one refusal line beside a disabled Generate", async () => {
+    const bench = await openBench(shotSession("video"), SESSION_ID, state => {
+      state.world!.referenceKits[0]!.designatedVoiceSample = { file: "legacy.wav" } as never;
+      const scene = state.world!.productions.find(p => p.meta.id === "saltlight")!.scenes.find(s => s.id === "sc_04")!;
+      const shot = orderedShots(scene).find(s => s.id === "sh_12")!;
+      shot.covers = undefined;
+      shot.audio = { kind: "dialogue", speaker: "maren-kest", line: "Hello" };
+    });
+    const chip = q(bench, '[data-testid="bench-voice-refs"]');
+    assert.equal(chip.textContent, "voice refs · on");
+    assert.equal(chip.getAttribute("aria-pressed"), "true");
+    assert.ok(chip.classList.contains("fy-bench__chip"), "among the option chips");
+    assert.equal(bench.container.querySelector("details"), null, "no disclosure");
+    assert.equal(bench.container.querySelector('input[type="checkbox"]'), null, "no native checkbox");
+    const problem = q(bench, '[data-testid="bench-voice-problem"]');
+    assert.equal(problem.getAttribute("role"), "alert");
+    assert.match(problem.textContent ?? "", /assigned voice reference/);
+    assert.doesNotMatch(text(bench), /guidance, not guaranteed reproduction/, "no explainer under the chip");
+    const generate = q(bench, '[data-testid="bench-generate"]') as HTMLButtonElement;
+    assert.equal(generate.disabled, true);
   });
-  const options = q(bench, '[aria-label="Character audio references"]');
-  assert.equal(options.hasAttribute("open"), true);
-  assert.match(options.querySelector('[role="alert"]')?.textContent ?? "", /assigned voice reference/);
-  const generate = [...bench.container.querySelectorAll("button")].find(button => button.textContent?.includes("Generate"))!;
-  assert.equal(generate.disabled, true);
+
+  it("is absent when no cast in the shot has a voice", async () => {
+    const bench = await openBench(shotSession("video"));
+    assert.equal(bench.container.querySelector('[data-testid="bench-voice-refs"]'), null);
+    assert.equal(bench.container.querySelector('[data-testid="bench-voice-problem"]'), null);
+  });
 });
 
-describe("the generation session's header and frame (R-24; design 2607-2615)", () => {
-  it("names where you are in four parts and drops the world bench's rail and switcher", async () => {
+describe("the generation session's chrome and frame (design 142a)", () => {
+  it("names the subject on a pill at the right, says Bench on the left, and keeps the world bench's switcher off", async () => {
     const bench = await openBench(shotSession());
-    const header = q(bench, '[data-testid="bench-provenance"]');
-    assert.equal(header.querySelector(".fy-bench__provenance")?.textContent, "Saltlight · episode 2 · scene 4");
-    assert.equal(header.querySelector(".fy-bench__subjectname")?.textContent, "Shot 12");
-    assert.equal(header.querySelector(".fy-bench__subjectsub")?.textContent, "Maren at the rail");
-    assert.equal(header.querySelector(".fy-bench__sessionkind")?.textContent, "generation session");
+    assert.equal(q(bench, '[data-testid="bench-subject-pill"]').textContent, "Shot 12 · Maren at the rail");
+    assert.equal(q(bench, '[data-testid="bench-provenance"]').textContent, "/Bench");
     assert.equal(bench.container.querySelector(".fy-bench__session"), null, "nothing to switch between");
-    assert.equal(bench.container.querySelector(".fy-bench__rail"), null, "the chrome's back is the way out");
-    assert.ok(bench.container.querySelector(".fy-bench--subject"), "the subject dress is one class on the frame");
+    assert.equal(bench.container.querySelector(".fy-bench__sessionkind"), null, "no fifth part on the crumb");
+    // A class selector with a double dash that matches nothing spins linkedom's matcher, so the
+    // markup is read as text here.
+    assert.doesNotMatch(bench.container.innerHTML, /fy-bench--subject/, "one dress for the Bench");
   });
 
-  it("a board's line is its members, and it offers video alone", async () => {
+  it("wears the production's rail with the generator lit, and the production's initial on top", async () => {
+    const bench = await openBench(shotSession());
+    const rail = q(bench, '[aria-label="Production destinations"]');
+    assert.equal(rail.querySelector(".fy-bench__railmark")?.textContent, "S");
+    const marks = [...rail.querySelectorAll(".fy-bench__raildest")].map((node) => node.getAttribute("title"));
+    assert.deepEqual(marks, ["Home", "Scenes", "Takes", "Files", "Arke", "Cut"]);
+    const lit = [...rail.querySelectorAll('.fy-bench__raildest[aria-current="true"]')].map((node) => node.getAttribute("title"));
+    assert.deepEqual(lit, ["Arke"]);
+  });
+
+  it("states the session's spend on a second pill once something was spent", async () => {
+    const session = shotSession();
+    const spent = { ...session, takes: [{ ...take("image"), cost: { estimatedMicroUsd: 60000, actualMicroUsd: 50000 } }] } as unknown as BenchSession;
+    const bench = await openBench(spent);
+    assert.equal(q(bench, '[data-testid="bench-session-spend"]').textContent, "$0.05 this session");
+  });
+
+  it("has no spend pill while nothing has been spent", async () => {
+    const bench = await openBench(shotSession());
+    assert.equal(bench.container.querySelector('[data-testid="bench-session-spend"]'), null);
+  });
+
+  it("a board's pill is its letter and its members, and it offers video alone", async () => {
     const bench = await openBench(boardSession());
-    assert.equal(q(bench, ".fy-bench__subjectname").textContent, "Board A");
-    assert.equal(q(bench, ".fy-bench__subjectsub").textContent, "2 shots · 10s · one pass");
+    assert.equal(q(bench, '[data-testid="bench-subject-pill"]').textContent, "Board A · 2 shots · 10s · one pass");
     const modes = all(bench, '[aria-label="What to make"] button');
     assert.deepEqual(modes.map((button) => button.textContent), ["Video"]);
   });
 });
 
-describe("Image / Video (R-23; design 2616-2621)", () => {
-  it("are two text tabs, and the off one opens the shot in that mode and moves there on the answer", async () => {
+describe("Image / Video (R-23; design 142a)", () => {
+  it("are the world bench's icon tabs, and the off one opens the shot in that mode and moves there on the answer", async () => {
     const bench = await openBench(shotSession());
     const modes = all(bench, '[aria-label="What to make"] button');
     assert.deepEqual(modes.map((button) => button.textContent), ["Image", "Video"]);
-    assert.equal(bench.container.querySelector('[aria-label="What to make"] svg'), null, "no icons");
+    assert.equal(all(bench, '[aria-label="What to make"] button svg').length, 2, "an icon on each");
+    assert.doesNotMatch(bench.container.innerHTML, /fy-bench__mode--subject/, "the same pill as the world bench");
 
     await pressLabelled(bench, "Video");
     const sent = bench.sent.at(-1) as unknown as Record<string, unknown>;
@@ -391,94 +426,116 @@ describe("Image / Video (R-23; design 2616-2621)", () => {
     const video = all(bench, '[aria-label="What to make"] button').find((button) => button.textContent === "Video");
     assert.equal((video as HTMLButtonElement | undefined)?.disabled, false, "and the tab is free to try again");
   });
+
+  it("the bin at the bar's end rebuilds the prompt and references from the shot", async () => {
+    const bench = await openBench(shotSession());
+    const bin = q(bench, '.fy-bench__composerbar [data-testid="bench-rebuild"]');
+    assert.match(bin.getAttribute("title") ?? "", /Clear the bench/);
+    await act(async () => bin.click());
+    assert.equal(bench.sent.at(-1)?.kind, "bench-rebuild-subject");
+    assert.doesNotMatch(bench.container.innerHTML, /fy-bench__eyebrow--refs/, "no PROMPT eyebrow to hold a link");
+  });
 });
 
-describe("references (R-23; design 2623-2661)", () => {
-  it("carry an eyebrow with the count, a corner index, the name beneath, and the playblast's stand-in", async () => {
+describe("references (R-23; design 142a)", () => {
+  it("are tiles with the name pill, one mono line beneath, and the playblast's stand-in — no eyebrow", async () => {
     const bench = await openBench(shotSession());
-    assert.equal(q(bench, '[data-testid="bench-references-eyebrow"]').textContent, "References3 referenced");
+    assert.equal(bench.container.querySelector('[data-testid="bench-references-eyebrow"]'), null);
     const refs = all(bench, ".fy-bench__ref");
     assert.equal(refs.length, 3);
-    assert.equal(bench.container.querySelector(".fy-bench__refcaption"), null, "no overlay of three lines");
 
     const [image, audio, block] = refs as [HTMLElement, HTMLElement, HTMLElement];
     assert.equal(image.querySelector(".fy-bench__tokenchip")?.textContent, "Image 1");
-    assert.equal(image.querySelector(".fy-bench__reflabel")?.textContent, "Maren Kest · v4");
-    assert.equal(image.querySelector(".fy-bench__refmeta")?.textContent, "@maren-kest · character reference");
+    assert.equal(image.querySelector(".fy-bench__refname")?.textContent, "Maren Kest · v4 · @maren-kest · character reference");
 
     // The route cannot carry the sample: dimmed AND named as not riding, as R-23 asks.
     assert.equal(audio.getAttribute("data-riding"), "false");
-    assert.equal(audio.querySelector(".fy-bench__reflabel")?.textContent, "voice sample · @maren-kest · v4");
-    assert.equal(audio.querySelector(".fy-bench__refmeta")?.textContent, "Maren Kest · 9.0s · not riding");
+    assert.equal(audio.querySelector(".fy-bench__refname")?.textContent, "voice sample · @maren-kest · v4 · Maren Kest · 9.0s · not riding");
 
     assert.ok(block.querySelector(".fy-bench__blockstand"), "a clip with no poster is the greybox figures");
-    assert.equal(block.querySelector(".fy-bench__reflabel")?.textContent, "Staging · Playblast v2");
+    assert.match(block.querySelector(".fy-bench__refname")?.textContent ?? "", /^Staging · Playblast v2/);
 
     const add = q(bench, '[data-testid="bench-add-reference"]');
-    assert.equal(add.textContent, "reference");
-    assert.ok(add.querySelector("svg path[d='M5 12h14']"), "a plus, not a picture");
+    assert.equal(add.textContent, "Reference");
+    assert.ok(add.querySelector("svg"), "with the picture mark");
   });
 });
 
-describe("the prompt and what follows it (design 2665-2686)", () => {
-  it("has its eyebrow with Rebuild, no caption beneath, and the context chips after — with no second add", async () => {
-    const bench = await openBench(shotSession());
-    const prompt = all(bench, ".fy-bench__eyebrow--refs").find((node) => node.textContent?.startsWith("Prompt"));
-    assert.ok(prompt, "a Prompt eyebrow");
-    assert.ok(prompt.querySelector('[data-testid="bench-rebuild"]'), "with Rebuild at its right");
-    assert.equal(bench.container.querySelector(".fy-bench__rebuild"), null, "and not in the mode bar");
+describe("the prompt, the chips and the dispatch row (design 142)", () => {
+  it("has no eyebrow and no line beneath; the shot's facts lead the chips as bare values", async () => {
+    const bench = await openBench(shotSession("video"));
+    assert.doesNotMatch(bench.container.innerHTML, /fy-bench__eyebrow--refs/);
     assert.equal(bench.container.querySelector(".fy-bench__athint"), null);
-
     const order = all(bench, '.fy-bench__brief, [data-testid="bench-subject-context"]');
     assert.equal(order.length, 2);
     assert.ok(order[0]?.classList.contains("fy-bench__brief"), "the chips come after the words");
-    assert.equal(bench.container.querySelector(".fy-bench__chip--refs"), null, "the dashed tile is the add");
+    const facts = all(bench, '[data-testid="bench-subject-context"] .fy-bench__chip')
+      .filter((chip) => chip.className.includes("fy-bench__chip--fact"))
+      .map((chip) => chip.textContent);
+    assert.deepEqual(facts, ["4s", "16:9", "sound · on"]);
+    assert.doesNotMatch(bench.container.innerHTML, /fy-bench__chip--refs/, "the dashed tile is the add");
   });
 
-  it("prices every model it offers, says what the figure is for, and keeps the price on Generate (R-25)", async () => {
+  it("names the model alone, prices it once as a mono figure, and keeps Generate at its full size", async () => {
     const bench = await openBench(shotSession());
-    assert.equal(q(bench, 'option[value="fal/test-image"]').textContent, "Test Image · ~$0.06");
-    assert.equal(bench.container.querySelector('[data-testid="bench-estimate"]'), null, "the price already stands on Generate");
+    assert.equal(q(bench, 'option[value="fal/test-image"]').textContent, "Test Image");
+    const estimate = q(bench, '[data-testid="bench-estimate"]');
+    assert.equal(estimate.textContent, "~$0.06");
+    assert.equal(estimate.getAttribute("title"), "a take");
     const generate = q(bench, '[data-testid="bench-generate"]');
-    assert.ok(generate.classList.contains("ui-btn--sm"));
-    assert.equal(generate.textContent, "Generate · ~$0.06");
+    assert.equal(generate.classList.contains("ui-btn--sm"), false);
+    assert.equal(generate.textContent, "Generate");
   });
 });
 
-describe("the wall and the rail (R-24; design 2689-2773)", () => {
-  it("filters on a track without 4K, states the outcome in mono, and keeps Discard quiet", async () => {
+describe("the wall and the strip (R-24; design 142a)", () => {
+  it("filters as pills without 4K, says where Accept files on the button, and draws Discard as the outline", async () => {
     const bench = await openBench(boardSession());
-    const filters = q(bench, ".fy-bench__filters");
-    assert.deepEqual([...filters.querySelectorAll("button")].map((button) => button.textContent), ["All", "Filed", "Discarded"]);
-    assert.equal(q(bench, ".fy-bench__acceptoutcome").textContent, "accepting files the clip onto 2 shots");
+    assert.equal(bench.container.querySelector(".fy-bench__filters"), null, "no track");
+    assert.deepEqual(all(bench, ".fy-bench__wallbar .fy-bench__tab").map((button) => button.textContent), ["All", "Filed", "Discarded"]);
+    assert.equal(bench.container.querySelector(".fy-bench__acceptoutcome"), null, "no line under the buttons");
     const discard = [...bench.container.querySelectorAll("button")].find((button) => button.textContent === "Discard");
-    assert.ok(discard?.classList.contains("ui-btn--ghost") && discard.classList.contains("ui-btn--sm"));
-    assert.ok(q(bench, '[data-testid="bench-accept"]').classList.contains("ui-btn--sm"));
+    assert.ok(discard?.classList.contains("ui-btn--outline"));
+    assert.equal(q(bench, '[data-testid="bench-accept"]').textContent, "Accept · file onto 2 shots");
   });
 
-  it("the rail stacks a thumbnail over `take N · ready`, with a play badge on a clip", async () => {
+  it("the session line carries its four marks for the selected take", async () => {
     const bench = await openBench(boardSession());
-    const rail = q(bench, '[data-testid="strip-take"]');
-    assert.equal(rail.querySelector(".fy-bench__takeline")?.textContent, "take 1ready");
-    assert.ok(rail.querySelector(".fy-bench__takeplay"), "a clip says it plays");
-    assert.equal(rail.querySelector(".fy-bench__takeframe")?.getAttribute("data-inflight"), null);
+    const marks = all(bench, ".fy-bench__briefrow .fy-bench__rowicon").map((node) => node.getAttribute("aria-label"));
+    assert.deepEqual(marks, ["Run it again", "What was sent", "Not this", "Clear the wall"]);
+    assert.ok(q(bench, '.fy-bench__wallbar [aria-label^="Download"]'), "a download in the bar");
   });
 
-  it("while a take is out: a hatched, spinning placeholder on the rail and the mono lines in the plate", async () => {
+  it("a clip on the wall wears the design's transport, not the browser's", async () => {
+    const bench = await openBench(boardSession());
+    assert.equal(bench.container.querySelector("video[controls]"), null);
+    assert.ok(q(bench, '[data-testid="bench-transport"]'));
+    assert.ok(q(bench, ".fy-bench__playdisc"));
+  });
+
+  it("the strip is a number beside a small thumbnail, with a play badge on a clip", async () => {
+    const bench = await openBench(boardSession());
+    const row = q(bench, '[data-testid="strip-take"]');
+    assert.equal(row.querySelector(".fy-bench__taken")?.textContent, "1");
+    assert.ok(row.querySelector(".fy-bench__takeplay"), "a clip says it plays");
+    assert.equal(row.querySelector(".fy-bench__takeline"), null, "no words under the thumbnail");
+    assert.equal(row.querySelector(".fy-bench__takeframe")?.getAttribute("data-inflight"), null);
+  });
+
+  it("while a take is out: a hatched, spinning thumbnail and the mono lines in the plate", async () => {
     const session = shotSession();
     const bench = await openBench({ ...session, takes: [take("image", "running", false)] } as BenchSession);
     assert.equal(q(bench, '[data-testid="bench-rendering"]').textContent, "rendering…Test Image · take 1");
-    assert.equal(bench.container.querySelector("strong"), null, "no bold sans sentence");
     const frame = q(bench, ".fy-bench__takeframe");
     assert.equal(frame.getAttribute("data-inflight"), "true");
     assert.ok(frame.querySelector(".fy-bench__takespin"));
-    assert.equal(q(bench, ".fy-bench__takeline").textContent, "take 1rendering");
   });
 
-  it("with nothing made yet, the plate says so in the design's words", async () => {
+  it("with nothing made yet, the plate states the fact and no more", async () => {
     const session = shotSession();
     const bench = await openBench({ ...session, takes: [], selectedTakeId: null, nextTake: 1 } as unknown as BenchSession);
-    assert.match(q(bench, ".fy-bench__empty").textContent ?? "", /no takes yet · generate to see one here/);
-    assert.doesNotMatch(text(bench), /The bench is empty/);
+    assert.equal(q(bench, ".fy-bench__empty").textContent, "No takes yet");
+    assert.doesNotMatch(text(bench), /takes land here/);
+    assert.doesNotMatch(text(bench), /generate to see one here/);
   });
 });
