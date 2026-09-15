@@ -228,7 +228,8 @@ export function multimediaCapacity(carried: readonly MultimediaReference[], mode
   return {
     imageCeiling: model.unverified === true ? 0 : model.accepts.referenceImages,
     imagesUsed: images,
-    audioCeilingSec: model.unverified === true ? 0 : (model.limits.maxReferenceAudioSec ?? 0),
+    audioCeilingSec: model.unverified === true || (model.provider === "fal" && !model.limits.referenceAudioField)
+      ? 0 : (model.limits.maxReferenceAudioSec ?? 0),
     audioUsedSec: audio,
     // Seconds the route publishes count only where the row names the field the clip goes in
     // (issue 852): an allowance with nowhere to put the bytes would admit a clip at the tile

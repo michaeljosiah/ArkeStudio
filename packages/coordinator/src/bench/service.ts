@@ -750,7 +750,7 @@ export function planBenchDispatch(
   // be refused at dispatch as a picture that is not one.
   const referencePaths = resolvedRefs.filter(({ resolved }) => resolved.kind === "image").map(({ resolved }) => resolved.path);
   const videoPaths = resolvedRefs.filter(({ resolved }) => resolved.kind === "video").map(({ resolved }) => resolved.path);
-  const mediaReferences = model.limits.referenceSyntax === "minimax-h3" ? resolvedRefs.filter(({ resolved }) => resolved.kind !== "image").map(({ resolved }) => ({
+  const mediaReferences = (model.limits.referenceSyntax === "minimax-h3" || model.limits.referenceSyntax === "seedance") ? resolvedRefs.filter(({ resolved }) => resolved.kind !== "image").map(({ resolved }) => ({
     kind: resolved.kind, file: resolved.path, hash: resolved.source.hash, durationSec: resolved.durationSec,
   })) : [];
   const standaloneAudioCount = mediaReferences.filter(ref => ref.kind === "audio").length;
@@ -846,7 +846,9 @@ export function planBenchDispatch(
   if (audioReferences?.problems.length) return { ok: false, reason: audioReferences.problems.join(" ") };
   const referenceProblem = referenceInputProblem(model, { references: referencePaths, videoReferences: videoPaths, referenceMedia: mediaReferences, audioReferences });
   if (referenceProblem) return { ok: false, reason: referenceProblem };
-  const wirePrompt = [preamble ? referencePrompt(preamble, model, videoPaths.length, 0, true) : null,
+  const motionBindings = model.limits.referenceSyntax === "seedance"
+    ? videoPaths.map((_, index) => `Use @Video${index + 1} as a motion reference.`).join("\n") : "";
+  const wirePrompt = [motionBindings || null, preamble ? referencePrompt(preamble, model, videoPaths.length, 0, true) : null,
     referencePrompt(body, model, videoPaths.length),
     audioReferences ? referencePrompt(characterAudioInstructions(audioReferences), model, videoPaths.length, standaloneAudioCount) : null].filter(Boolean).join("\n\n");
   // The cap was held against the brief, which is what the author can shorten; the words that

@@ -168,6 +168,14 @@ export const ModelLimitsSchema = z
      * put the clip would accept a file and never send it, the failure the budget exists to stop.
      */
     referenceVideoField: z.string().min(1).optional(),
+    referenceAudioField: z.string().min(1).optional(),
+    minReferenceVideoSec: z.number().positive().optional(),
+    maxReferenceVideoBytes: z.number().int().positive().optional(),
+    maxReferenceVideoFileBytes: z.number().int().positive().optional(),
+    referenceVideoPixels: z.object({ min: z.number().positive(), max: z.number().positive() }).optional(),
+    referenceVideoSides: z.object({ min: z.number().positive(), max: z.number().positive() }).optional(),
+    referenceVideoAspect: z.object({ min: z.number().positive(), max: z.number().positive() }).optional(),
+    referenceVideoFps: z.object({ min: z.number().positive(), max: z.number().positive() }).optional(),
     resolutions: z.array(z.string()).optional(),
     /**
      * Normalised tier → the provider's own word for it. The tier is what a user chooses; the
@@ -205,7 +213,7 @@ export const ModelLimitsSchema = z
      * the Krea 2 rebalance node reuses: each picture is handed to the encoder behind a
      * `Picture N:` label ahead of the prompt, so the prose has to call it that (issue 1083).
      */
-    referenceSyntax: z.enum(["minimax-h3", "picture-labels"]).optional(),
+    referenceSyntax: z.enum(["minimax-h3", "picture-labels", "seedance"]).optional(),
     /**
      * The longest output the *reference* route will make, where it is shorter than the text
      * route's (probed 2026-08-16).

@@ -2273,7 +2273,7 @@ export class Coordinator {
             },
             prepareReferences: async (job, videos, signal) => {
               const model = this.opts.manifest?.models.find(row => row.id === job.model && row.provider === job.provider);
-              if (model?.limits.referenceSyntax !== "minimax-h3" && job.params.referenceMedia === undefined) return { videos, audio: [] };
+              if (model?.limits.referenceSyntax !== "minimax-h3" && model?.limits.referenceSyntax !== "seedance" && job.params.referenceMedia === undefined) return { videos, audio: [] };
               const prepare = (store: WorldStore) => prepareReferences(store, job, model, videos,
                 { ffmpeg: this.opts.ffmpeg, probe: this.opts.mediaProbe }, signal);
               if (this.opts.provider.withWorldStore) return this.opts.provider.withWorldStore(job.worldId, prepare);

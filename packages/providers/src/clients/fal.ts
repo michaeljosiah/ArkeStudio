@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { CharacterAudioPlanSchema, characterAudioRoute, referenceAudioAsset } from "@arke-studio/contracts";
+import { ReferenceMediaBindingsSchema, CharacterAudioPlanSchema, characterAudioRoute, referenceAudioAsset } from "@arke-studio/contracts";
 import {
   PROVIDERS,
   durationLimitsFor,
@@ -7,7 +7,7 @@ import {
   type ClientDeclarations,
   type TaskMode,
 } from "@arke-studio/contracts";
-import { jsonRequest, tryProbe } from "./http.js";
+import { responseReason, jsonRequest, tryProbe } from "./http.js";
 // Generated beside the manifest rows, from the same fetch, so a model can never be offered
 // with no route behind it — the failure that used to read "no endpoint mapping" at dispatch,
 // long after the estimate had been shown and accepted.
@@ -198,7 +198,8 @@ export class FalClient implements ProviderClient {
     // A clip alone is still a reference dispatch (issue 852): the video array lives on the
     // reference route, so a carried predecessor with no sheet beside it lands there too.
     const clips = request.videoReferences ?? [];
-    const withReferences = withImages || clips.length > 0;
+    const standaloneAudio = request.mediaAudioReferences ?? [];
+    const withReferences = withImages || clips.length > 0 || standaloneAudio.length > 0;
     const prepared = request.imageReferences ?? [];
     // A task mode is a ROUTE on this provider (SPEC-019 T-1): a dispatch that planned one sends
     // its endpoint in `route`, resolved from the manifest's own mode spec via routeFor. Route
@@ -267,8 +268,17 @@ export class FalClient implements ProviderClient {
       const field = REFERENCE_VIDEO_FIELD.get(request.model);
       if (field === undefined) throw new Error(`fal: ${request.model} names no field for a video reference`);
       if (taskMode !== "generate") throw new Error(`fal: a video reference rides on the reference route, not ${taskMode}`);
+      const model = FAL_MODELS.find(row => row.id === request.model);
+      if (model?.limits.referenceSyntax === "seedance") {
+        const seconds = clips.reduce((sum, clip) => sum + (clip.durationSec ?? Infinity), 0);
+        if (clips.length > (model.accepts.referenceVideos ?? 0) || seconds < (model.limits.minReferenceVideoSec ?? 0) ||
+            seconds > (model.limits.maxReferenceVideoSec ?? 0) ||
+            clips.some(clip => !["video/mp4", "video/quicktime"].includes(clip.contentType) ||
+              clip.data.byteLength > (model.limits.maxReferenceVideoFileBytes ?? Infinity)))
+          throw new Error("fal: video references exceed this Seedance route's limits");
+      }
       const clipBytes = clips.reduce((total, clip) => total + clip.data.byteLength, 0);
-      if (clipBytes > MAX_INLINE_VIDEO_BYTES) {
+      if (clipBytes > Math.min(MAX_INLINE_VIDEO_BYTES, model?.limits.maxReferenceVideoBytes ?? Infinity)) {
         throw new Error(
           `fal: ${clips.length} reference clip${clips.length === 1 ? "" : "s"} total ${Math.round(clipBytes / 1024 / 1024)}MB, over the inline limit`,
         );
@@ -283,8 +293,8 @@ export class FalClient implements ProviderClient {
     const audioRoute = characterAudioRoute({ provider: "fal", id: request.model }, taskMode);
     if (audioPlan?.problems.length || (audioPlan?.disabled && (audio.length || audioPlan.references.length)) ||
       audio.length !== (audioPlan?.references.length ?? 0)) throw new Error("fal: incomplete audio reference plan");
-    if (audio.length && (!audioRoute || endpoint !== audioRoute.endpoint || audioPlan?.route !== endpoint || !imageUrls.length ||
-      imageUrls.length > audioRoute.maxImages || audio.length > 3 || audio.length + imageUrls.length > 12)) throw new Error("fal: unsupported audio reference route or budget");
+    if (audio.length && (!audioRoute || endpoint !== audioRoute.endpoint || audioPlan?.route !== endpoint || (!imageUrls.length && !clips.length) ||
+      imageUrls.length > audioRoute.maxImages || audio.length > 3 || audio.length + imageUrls.length + clips.length > 12)) throw new Error("fal: unsupported audio reference route or budget");
     if (new Set(audioPlan?.references.map(ref => ref.intent)).size > 1) throw new Error("fal: mixed audio intents");
     if (audioPlan && audioPlan.references.reduce((sum, ref) => sum + (referenceAudioAsset(ref).provenance.outputTechnical.durationSec ?? Infinity), 0) > 15) throw new Error("fal: audio duration exceeds route limit");
     const audioUrls = audio.map((clip, index) => {
@@ -295,7 +305,27 @@ export class FalClient implements ProviderClient {
       }
       return `data:${clip.contentType};base64,${Buffer.from(clip.data).toString("base64")}`;
     });
+    const row = FAL_MODELS.find(model => model.id === request.model);
+    const audioBindings = ReferenceMediaBindingsSchema.parse(request.params.referenceMedia ?? []).filter(ref => ref.kind === "audio");
+    if (standaloneAudio.length !== audioBindings.length) throw new Error("fal: incomplete standalone audio references");
+    if (standaloneAudio.length && (row?.limits.referenceAudioField !== "audio_urls" || taskMode !== "generate" || !withImages && !clips.length))
+      throw new Error("fal: unsupported standalone audio route");
+    const allAudio = [...standaloneAudio, ...audio];
+    if (allAudio.length > (row?.accepts.referenceAudio ?? 3) || allAudio.length + imageUrls.length + clips.length > (row?.limits.maxCombinedReferences ?? Infinity))
+      throw new Error("fal: combined reference count exceeds route limit");
+    const standaloneUrls = standaloneAudio.map((clip, index) => {
+      const binding = audioBindings[index]!;
+      if (!["audio/mpeg", "audio/wav", "audio/x-wav"].includes(clip.contentType) || clip.data.byteLength > 15_000_000 ||
+          !createHash("sha256").update(clip.data).digest("hex").startsWith(binding.hash.replace(/^sha256:/, "")) ||
+          Math.abs(clip.durationSec - binding.durationSec) > 0.15) throw new Error("fal: audio bytes do not match reviewed binding");
+      return `data:${clip.contentType};base64,${Buffer.from(clip.data).toString("base64")}`;
+    });
+    const audioSeconds = standaloneAudio.reduce((sum, clip) => sum + clip.durationSec, 0) +
+      (audioPlan?.references.reduce((sum, ref) => sum + (referenceAudioAsset(ref).provenance.outputTechnical.durationSec ?? Infinity), 0) ?? 0);
+    if (audioSeconds > (row?.limits.maxReferenceAudioSec ?? 0)) throw new Error("fal: combined audio duration exceeds route limit");
+    const allAudioUrls = [...standaloneUrls, ...audioUrls];
     const internal = new Set([
+      "referenceMedia",
       "audioReferences",
       "references",
       "referenceRoles",
@@ -365,7 +395,7 @@ export class FalClient implements ProviderClient {
           : {}),
         ...imageOutput,
         ...imagePayload,
-        ...(audioUrls.length ? { audio_urls: audioUrls, generate_audio: audioPlan?.references[0]?.intent !== "performance-sync" } : {}),
+        ...(allAudioUrls.length ? { audio_urls: allAudioUrls, generate_audio: audioPlan?.references[0]?.intent !== "performance-sync" } : {}),
       }),
       // Deliberately NOT abortable, unlike the synchronous providers. This POST is an enqueue:
       // fal takes the work and answers with the `request_id` that `cancel()` needs to call it off.
@@ -414,7 +444,16 @@ export class FalClient implements ProviderClient {
     );
     if (status >= 400) return { state: "failed", error: `fal: status read failed (HTTP ${status})` };
     const remote = (body as { status?: string } | null)?.status ?? "UNKNOWN";
-    if (remote === "COMPLETED") return { state: "succeeded" };
+    if (remote === "COMPLETED") {
+      // fal completes queue processing even when generation produced a validation error.
+      // Read that outcome before the coordinator settles a successful job for finalization.
+      const result = await jsonRequest(this.fetchImpl, this.id,
+        `${this.baseUrl}/${this.queueApp(endpoint)}/requests/${requestId}`, { headers: this.headers(key) });
+      if (result.status >= 400 && result.status < 500 && result.status !== 429)
+        return { state: "failed", error: `fal: ${responseReason(result.body) ?? "Generation failed"} (HTTP ${result.status})` };
+      if (result.status >= 400) throw new Error(`fal: result unavailable (HTTP ${result.status})`);
+      return { state: "succeeded" };
+    }
     if (remote === "IN_PROGRESS") return { state: "running" };
     if (remote === "IN_QUEUE") return { state: "queued" };
     return { state: "failed", error: `fal: unexpected status "${remote}"` };
@@ -428,7 +467,7 @@ export class FalClient implements ProviderClient {
       `${this.baseUrl}/${this.queueApp(endpoint)}/requests/${requestId}`,
       { headers: this.headers(key) },
     );
-    if (status >= 400) throw new Error(`fal: result fetch failed (HTTP ${status})`);
+    if (status >= 400) throw new Error(`fal: ${responseReason(body) ?? "Result unavailable"} (HTTP ${status})`);
     const out: FetchedArtifact[] = [];
     const payload = body as {
       images?: Array<{ url?: string; content_type?: string }>;

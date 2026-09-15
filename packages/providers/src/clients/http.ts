@@ -1,13 +1,21 @@
 import type { ProviderId } from "@arke-studio/contracts";
 import { ProviderAuthError, type FetchLike } from "../types.js";
 
-function responseReason(body: unknown): string | null {
+export function responseReason(body: unknown): string | null {
   if (typeof body === "string") return body.trim() || null;
   if (typeof body !== "object" || body === null) return null;
   const record = body as Record<string, unknown>;
   const error = record["error"];
   const nestedMessage =
     typeof error === "object" && error !== null ? (error as Record<string, unknown>)["message"] : error;
+  if (Array.isArray(record["detail"])) {
+    const messages = record["detail"].flatMap(item => {
+      if (!item || typeof item !== "object") return [];
+      const value = item as Record<string, unknown>;
+      return typeof value.msg === "string" ? [value.msg] : [];
+    });
+    if (messages.length) return messages.join("; ");
+  }
   const reason = [record["detail"], record["message"], nestedMessage].find(
     (value) => typeof value === "string" && value.trim().length > 0,
   );

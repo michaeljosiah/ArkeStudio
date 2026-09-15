@@ -288,7 +288,7 @@ describe("the shot page (design turn 145)", () => {
       props<{ onChange: (event: { target: HTMLTextAreaElement }) => void }>(textarea).onChange({ target: textarea });
     });
     await act(async () => card.dispatchEvent(new dom.window.Event("focusout", { bubbles: true })));
-    assert.deepEqual(commands(sent), [{ kind: "set-prompt-override", shotId: "sh_12", text: "Maren at the rail, the lamp behind her.", capability: "video" }]);
+    assert.deepEqual(commands(sent), [{ kind: "set-prompt-override", shotId: "sh_12", text: "Maren at the rail, the lamp behind her.", capability: "image" }]);
     assert.equal(textarea.value, "Maren at the rail, the lamp behind her.", "the draft stays on screen while the write is in flight");
   });
 

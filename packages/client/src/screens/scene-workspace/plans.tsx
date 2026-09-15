@@ -23,6 +23,7 @@ export function PlansPanel({
   refused: string | null;
 }) {
   const [states, setStates] = useState<PlanState[] | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const [optionsFor, setOptionsFor] = useState<string | null>(null);
   useEffect(() => {
     setStates(null);
@@ -86,9 +87,12 @@ export function PlansPanel({
   const timingLines = (state: PlanState, pass: PlanState["passes"][number]): string[] =>
     (pass.carries?.timing ?? []).map((entry) =>
       `shot ${entry.number} · not on the Cut · ${state.mode === "per-shot" ? `uses its ${entry.durationSec.toFixed(1)}s` : "left out"}`);
+  const needsAttention = refused !== null || (states ?? []).some(state => state.status !== "completed" && state.status !== "cancelled");
   return (
-    <div style={{ marginTop: 14 }}>
-      <div className="fy-listhead">Plans</div>
+    <div className="fy-swplans" style={{ marginTop: 8 }}>
+      <button type="button" className="fy-linkbtn" aria-expanded={needsAttention || expanded}
+        onClick={() => setExpanded(value => !value)}>Plans · {states?.length ?? 0}</button>
+      {needsAttention || expanded ? <>
       {refused !== null && (
         <Callout tone="warning" title="Plan refused">
           {refused}
@@ -170,6 +174,7 @@ export function PlansPanel({
           </div>
         </div>
       ))}
+      </> : null}
     </div>
   );
 }

@@ -5,11 +5,42 @@ import { readContainedAudioReferences } from "../world/reference-files.js";
 import type { DispatchVideoSource, DispatchVoiceReference } from "../queue/dispatcher.js";
 import type { FfmpegRunner } from "../takes/export.js";
 import type { MediaProbe } from "./probe.js";
-import { prepareReferenceVideo, measureReferenceAudio, referenceHash } from "./reference-media.js";
+import { prepareReferenceVideo, checkSeedanceVideo, measureReferenceAudio, referenceHash } from "./reference-media.js";
 
 export async function prepareReferences(store: WorldStore, job: Job, model: ManifestModel | undefined,
   videos: DispatchVideoSource[], tools: { ffmpeg?: FfmpegRunner; probe?: MediaProbe }, signal: AbortSignal) {
   const audio: Array<DispatchVoiceReference & { durationSec: number }> = [];
+  if (model?.limits.referenceSyntax === "seedance") {
+    const bindings = ReferenceMediaBindingsSchema.parse(job.params.referenceMedia ?? []);
+    const videoBindings = bindings.filter(ref => ref.kind === "video");
+    const paths = Array.isArray(job.params.videoReferences) ? job.params.videoReferences : [];
+    if (job.params.referenceMedia !== undefined && (videoBindings.length !== videos.length ||
+        videoBindings.length !== paths.length || videoBindings.some((ref, index) => ref.file !== paths[index])))
+      throw new Error("Video reference order changed.");
+    const checked = [];
+    for (const [index, video] of videos.entries()) {
+      const binding = videoBindings[index];
+      if (binding && !referenceHash(video.data).replace(/^sha256:/, "").startsWith(binding.hash.replace(/^sha256:/, ""))) throw new Error("Reference media changed since review.");
+      checked.push(await checkSeedanceVideo(video, model, tools.probe, signal));
+      if (binding && Math.abs(checked[index]!.durationSec! - binding.durationSec) > 0.15) throw new Error("Video duration changed since review.");
+    }
+    const audioBindings = bindings.filter(ref => ref.kind === "audio");
+    const clips = await readContainedAudioReferences(store.dir, audioBindings.map(ref => ref.file));
+    for (const [index, clip] of clips.entries()) {
+      const binding = audioBindings[index]!;
+      if (!referenceHash(clip.data).replace(/^sha256:/, "").startsWith(binding.hash.replace(/^sha256:/, ""))) throw new Error("Reference media changed since review.");
+      const durationSec = await measureReferenceAudio(clip, tools.probe, signal, { min: model.id === "seedance-2.5" ? 1.8 : 0, max: model.limits.maxReferenceAudioSec ?? 0 });
+      if (Math.abs(durationSec - binding.durationSec) > 0.15) throw new Error("Audio duration changed since review.");
+      audio.push({ ...clip, durationSec });
+    }
+    const seconds = checked.reduce((sum, clip) => sum + clip.durationSec!, 0);
+    const bytes = checked.reduce((sum, clip) => sum + clip.data.byteLength, 0);
+    if (checked.length > (model.accepts.referenceVideos ?? 0) ||
+        (checked.length > 0 && (seconds < (model.limits.minReferenceVideoSec ?? 0) || seconds > (model.limits.maxReferenceVideoSec ?? 0))) ||
+        bytes > (model.limits.maxReferenceVideoBytes ?? Infinity))
+      throw new Error("Video references exceed this Seedance route's combined duration, count or size limit.");
+    return { videos: checked as DispatchVideoSource[], audio };
+  }
   if (model?.limits.referenceSyntax !== "minimax-h3") {
     if (job.params.referenceMedia !== undefined) throw new Error("This route cannot carry standalone audio references.");
     return { videos, audio };
@@ -20,7 +51,7 @@ export async function prepareReferences(store: WorldStore, job: Job, model: Mani
   if (job.params.referenceMedia !== undefined && (videoBindings.length !== paths.length || videoBindings.some((ref, index) => ref.file !== paths[index]))) throw new Error("Video reference order changed.");
   if (videos.length > 3 || audioBindings.length > 3) throw new Error("Too many multimedia references.");
   const check = (data: Uint8Array, hash: string) => {
-    if (referenceHash(data).replace(/^sha256:/, "") !== hash.replace(/^sha256:/, "")) throw new Error("Reference media changed since review.");
+    if (!referenceHash(data).replace(/^sha256:/, "").startsWith(hash.replace(/^sha256:/, ""))) throw new Error("Reference media changed since review.");
   };
   const preparedVideos: DispatchVideoSource[] = [];
   for (const [index, video] of videos.entries()) {

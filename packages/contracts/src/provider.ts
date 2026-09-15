@@ -91,7 +91,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     // Motion rides where a row names the field for it (issue 852): the client puts a clip into
     // `limits.referenceVideoField`, and the budget refuses video on any row that names none, so
     // mapping the kind here admits nothing a row has not declared.
-    mapsReferenceKinds: ["image", "video"],
+    mapsReferenceKinds: ["image", "video", "audio"],
   },
   higgsfield: { displayName: "Higgsfield", capabilities: ["image", "video"], local: false, credential: "external" },
   openai: {

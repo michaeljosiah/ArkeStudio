@@ -742,6 +742,14 @@ function BenchWorkspace({
     setAcceptNote("Connection lost - check production before trying again.");
   }, [connection]);
   const jobs = new Map((state?.app.jobs ?? []).map((j) => [j.id, j]));
+  const takeRouteName = (take: BenchTake): string => {
+    const job = take.jobId ? jobs.get(take.jobId) : undefined;
+    const name = modelName(take.request.provider, take.request.model);
+    const route = job?.params.route;
+    const mode = job?.params.taskMode;
+    return typeof route === "string" ? `${name} · ${route.split("/").at(-1)}`
+      : typeof mode === "string" && mode !== "generate" ? `${name} · ${mode}` : name;
+  };
   /** The queue's own vocabulary, live — the durable log only records terminal states. */
   const liveStatus = (take: BenchTake): BenchTake["status"] => {
     const job = take.jobId ? jobs.get(take.jobId) : undefined;
@@ -1289,15 +1297,6 @@ function BenchWorkspace({
 
         {/* ---- composer -------------------------------------------------- */}
         <div className="fy-bench__composer">
-          {draft.mode === "video" && subject?.kind === "shot" && session.tokenRegistry.some(ref => ref.label?.startsWith("Staging")) ? (
-            <p role="status" data-testid="stage-guidance-mode">
-              {session.tokenRegistry.some(ref => ref.kind === "video" && ref.label?.startsWith("Staging") && session.composer.activeTokens.includes(ref.token))
-                ? "Camera guidance: motion video and timed instructions. Review the generated take for adherence."
-                : session.tokenRegistry.some(ref=>ref.kind==="image" && ref.label?.startsWith("Staging") && [...session.composer.activeTokens,...session.composer.keyframeTokens].includes(ref.token))
-                  ? "Camera guidance: opening frame and timed instructions only. This route is not receiving the motion video."
-                  : "Camera guidance: timed instructions only. This route is not receiving Stage images or motion video."}
-            </p>
-          ) : null}
           <div className="fy-bench__composerbar">
             {subject !== undefined ? (
               /* Two text tabs on the design's track (2616-2621). A shot's other tab opens the
@@ -1364,6 +1363,11 @@ function BenchWorkspace({
                   type="button"
                   role="tab"
                   aria-selected={lane === l}
+                  title={l === "keyframe" ? (session.tokenRegistry.some(ref => ref.kind === "video" && ref.label?.startsWith("Staging") && session.composer.activeTokens.includes(ref.token))
+                ? "Camera guidance: motion video and timed instructions. Review the generated take for adherence."
+                : session.tokenRegistry.some(ref=>ref.kind==="image" && ref.label?.startsWith("Staging") && [...session.composer.activeTokens,...session.composer.keyframeTokens].includes(ref.token))
+                  ? "Camera guidance: opening frame and timed instructions only. This route is not receiving the motion video."
+                  : "Camera guidance: timed instructions only. This route is not receiving Stage images or motion video.") : undefined}
                   onClick={() => setLane(l)}
                 >
                   {l === "reference" ? "Reference" : "Keyframe"}
@@ -1651,9 +1655,6 @@ function BenchWorkspace({
               )}
             </div>
           </div>
-              {subject !== undefined && (
-                <span className="fy-bench__athint">type @ to bring in anything from the world</span>
-              )}
             </>,
             "fy-bench__group--prompt",
           )}
@@ -1944,6 +1945,19 @@ function BenchWorkspace({
             )}
           </div>
 
+            {characterAudio && <details className="fy-bench__audio-options" aria-label="Character audio references"><summary>Voice refs · {characterAudio.disabled ? "off" : "on"}</summary>
+              <label><input type="checkbox" checked={!characterAudio.disabled} onChange={e => compose({ ...draft,
+                params: { ...draft.params, kind: "video", audioReferencesDisabled: !e.target.checked } as BenchParams })} /> Use voice refs</label>
+              {characterAudio.references.map(r => <p key={r.label}>{r.characterName} · {"performance" in r ? `${castVoices.find(v => v.sheetId === r.sheetId)?.line ?? "read"} · ` : ""}{r.label} · {("sample" in r ? r.sample : "master" in r ? r.prepared : r.performance).provenance.outputTechnical.durationSec?.toFixed(1)}s · voice guidance, new scene dialogue</p>)}
+              {characterAudio.references.length > 0 && <p>The model generates synchronized audio. Voice identity and cadence are guidance, not guaranteed reproduction.</p>}
+              {/* A read the record rules out is said as the plan card would say it (R-31); a route with no audio says so once, on the voice. */}
+              {!characterAudio.disabled && castVoices.filter(v => v.reason !== undefined).map(v => (
+                <p key={`cast/${v.sheetId}`}>{v.name} · {v.line} · voice · not riding · {v.reason}</p>
+              ))}
+              {!characterAudio.disabled && characterAudio.route === null && castVoices.some(v => v.preview !== undefined) && <p>voice · not riding · takes no audio</p>}
+              {characterAudio.problems.map((problem, i) => <p key={i} role="alert">{problem}</p>)}
+            </details>}
+
           {/* dispatch row */}
           <div className="fy-bench__dispatch">
             {/* Presets (issue 305 §3): saved setups, applied into the draft — the ghost
@@ -2120,8 +2134,8 @@ function BenchWorkspace({
                 <ChevronDown size={12} />
               </span>
             )}
-            {models.length > 0 && <span style={{ flex: 1 }} />}
-            {estimateCopy !== null && (
+
+            {estimateCopy !== null && subject === undefined && (
               <span data-testid="bench-estimate" className="fy-bench__estimate">
                 {/* Exact for speech, because the characters are already typed. A ceiling for a
                     song, because the route stops when the song is done — and a tilde would read
@@ -2130,18 +2144,6 @@ function BenchWorkspace({
                 {subject === undefined ? estimateCopy : `${estimateCopy} a take`}
               </span>
             )}
-            {characterAudio && <div aria-label="Character audio references" style={{ flexBasis: "100%" }}>
-              <label><input type="checkbox" checked={!characterAudio.disabled} onChange={e => compose({ ...draft,
-                params: { ...draft.params, kind: "video", audioReferencesDisabled: !e.target.checked } as BenchParams })} /> Use assigned character voice references for this dispatch</label>
-              {characterAudio.references.map(r => <p key={r.label}>{r.characterName} · {"performance" in r ? `${castVoices.find(v => v.sheetId === r.sheetId)?.line ?? "read"} · ` : ""}{r.label} · {("sample" in r ? r.sample : "master" in r ? r.prepared : r.performance).provenance.outputTechnical.durationSec?.toFixed(1)}s · voice guidance, new scene dialogue</p>)}
-              {characterAudio.references.length > 0 && <p>The model generates synchronized audio. Voice identity and cadence are guidance, not guaranteed reproduction.</p>}
-              {/* A read the record rules out is said as the plan card would say it (R-31); a route with no audio says so once, on the voice. */}
-              {!characterAudio.disabled && castVoices.filter(v => v.reason !== undefined).map(v => (
-                <p key={`cast/${v.sheetId}`}>{v.name} · {v.line} · voice · not riding · {v.reason}</p>
-              ))}
-              {!characterAudio.disabled && characterAudio.route === null && castVoices.some(v => v.preview !== undefined) && <p>voice · not riding · takes no audio</p>}
-              {characterAudio.problems.map((problem, i) => <p key={i} role="alert">{problem}</p>)}
-            </div>}
             <Button
               variant="primary"
               size={subject === undefined ? "default" : "sm"}
@@ -2207,7 +2209,7 @@ function BenchWorkspace({
           {selected && (
             <div className="fy-bench__briefrow">
               <span className="fy-bench__briefline">
-                {`${modelName(selected.request.provider, selected.request.model)} · ${selected.request.brief}`}
+                {`${takeRouteName(selected)} · ${selected.request.brief}`}
               </span>
               <button
                 type="button"
@@ -2351,7 +2353,7 @@ function BenchWorkspace({
                 <span className="fy-bench__rendering" data-testid="bench-rendering">
                   <span className="fy-bench__emptyline">rendering…</span>
                   <span className="fy-bench__emptysub">
-                    {`${modelName(selected.request.provider, selected.request.model)} · take ${selected.n}`}
+                    {`${takeRouteName(selected)} · take ${selected.n}`}
                   </span>
                 </span>
               ) : (

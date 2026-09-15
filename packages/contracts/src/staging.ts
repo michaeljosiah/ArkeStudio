@@ -772,7 +772,7 @@ export function stagingPromptClause(
     ? []
     : [`Set massing — ${staging.sets.map((set) => `${set.name}: ${set.w.toFixed(2)}m wide, ${set.h.toFixed(2)}m high, ${set.d.toFixed(2)}m deep at x ${set.x.toFixed(2)}m, z ${set.z.toFixed(2)}m`).join("; ")}.`];
   return [
-    "Use the blockout for composition, action and camera motion. Replace greybox geometry with the approved character, location and style references.",
+    "Follow the described composition, action and camera motion. Use the authored character, location and style for the finished scene.",
     `Camera move, ${stagingMotionWord(staging,durationSec)}, blocked out on the stage (${keys.length} keys).${walk}${posture}`,
     ...sets,
     ...(staging.performances ?? []).flatMap(performance => performance.keys.map((key, index) => {

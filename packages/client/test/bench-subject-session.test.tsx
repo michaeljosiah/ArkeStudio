@@ -404,13 +404,13 @@ describe("references (R-23; design 2623-2661)", () => {
 });
 
 describe("the prompt and what follows it (design 2665-2686)", () => {
-  it("has its eyebrow with Rebuild, the @ hint beneath, and the context chips after — with no second add", async () => {
+  it("has its eyebrow with Rebuild, no caption beneath, and the context chips after — with no second add", async () => {
     const bench = await openBench(shotSession());
     const prompt = all(bench, ".fy-bench__eyebrow--refs").find((node) => node.textContent?.startsWith("Prompt"));
     assert.ok(prompt, "a Prompt eyebrow");
     assert.ok(prompt.querySelector('[data-testid="bench-rebuild"]'), "with Rebuild at its right");
     assert.equal(bench.container.querySelector(".fy-bench__rebuild"), null, "and not in the mode bar");
-    assert.equal(q(bench, ".fy-bench__athint").textContent, "type @ to bring in anything from the world");
+    assert.equal(bench.container.querySelector(".fy-bench__athint"), null);
 
     const order = all(bench, '.fy-bench__brief, [data-testid="bench-subject-context"]');
     assert.equal(order.length, 2);
@@ -421,7 +421,7 @@ describe("the prompt and what follows it (design 2665-2686)", () => {
   it("prices every model it offers, says what the figure is for, and keeps the price on Generate (R-25)", async () => {
     const bench = await openBench(shotSession());
     assert.equal(q(bench, 'option[value="fal/test-image"]').textContent, "Test Image · ~$0.06");
-    assert.equal(q(bench, '[data-testid="bench-estimate"]').textContent, "~$0.06 a take");
+    assert.equal(bench.container.querySelector('[data-testid="bench-estimate"]'), null, "the price already stands on Generate");
     const generate = q(bench, '[data-testid="bench-generate"]');
     assert.ok(generate.classList.contains("ui-btn--sm"));
     assert.equal(generate.textContent, "Generate · ~$0.06");

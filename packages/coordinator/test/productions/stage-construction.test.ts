@@ -76,6 +76,7 @@ it("constructs, inspects, revises and returns an editable draft without writing 
         draft.inspected = names;
         draft.assessment = calls === 1 ? "Initial" : "Reviewed the camera framing and corrected height.";
         deliver!([
+          { type: "tool.refused", sessionId: "stage-test", tool: "Read", summary: "outside: /dev/null" },
           ...names.map((name) => ({
             type: "tool.activity" as const,
             sessionId: "stage-test",
@@ -142,7 +143,8 @@ it("constructs, inspects, revises and returns an editable draft without writing 
   }
 });
 
-it("cancellation while awaiting inspection preserves the partial draft and never writes", async () => {
+for (const ending of ["cancel", "timeout", "stale-timeout"] as const)
+it(`${ending} while awaiting inspection preserves the partial draft and never writes`, async (t) => {
   const dir = await makeTempWorld();
   const store = await WorldStore.open(dir);
   try {
@@ -179,6 +181,7 @@ it("cancellation while awaiting inspection preserves the partial draft and never
         yield { type: "message.completed", sessionId: "test", text };
       },
     };
+    t.mock.timers.enable({ apis: ["setTimeout"] });
     const constructor = new StageConstructor();
     let terminal: Extract<DomainEvent, { type: "stage.construction" }> | undefined;
     await constructor.run(
@@ -201,12 +204,23 @@ it("cancellation while awaiting inspection preserves the partial draft and never
         scratchRoot: join(dir, ".scratch"),
         current: () => true,
         emit: (event) => {
-          if (event.status === "inspect") constructor.cancel();
-          if (event.status === "failed") terminal = event;
+          if (event.status === "inspect") {
+            if (ending === "cancel") constructor.cancel();
+            else {
+              if (ending === "stale-timeout") scene.version++;
+              t.mock.timers.tick(300_000);
+            }
+          }
+          if (event.status === "failed" || event.status === "ready") terminal = event;
         },
       },
     );
-    assert.match(terminal?.detail ?? "", /stopped/);
+    assert.equal(terminal?.status, ending === "timeout" ? "ready" : "failed");
+    assert.match(terminal?.detail ?? "", ending === "cancel" ? /stopped/ : /limit/);
+    if (ending === "timeout") {
+      assert.match(terminal?.draft?.assessment ?? "", /Inspection incomplete/);
+      assert.equal(terminal?.draft?.staging.authorship, undefined);
+    }
     assert.ok(terminal?.draft);
     assert.equal(shot.staging, undefined);
   } finally {

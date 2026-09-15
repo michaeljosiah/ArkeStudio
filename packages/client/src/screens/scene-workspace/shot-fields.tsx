@@ -3,7 +3,6 @@ import {
   DEFAULT_SHOT_SEC,
   assemblePrompt,
   overrideStaleAgainst,
-  productionShape,
   promptFor,
   propSlug,
   resolveCast,
@@ -93,7 +92,7 @@ export function ShotFields({
 
   // ---- Frame prompt -------------------------------------------------------------------------
   const style = production.meta.styleOverride?.trim() || world.artDirection.description;
-  const capability = productionShape(production.meta).dispatchCapability === "image" ? "image" : "video";
+  const capability = "image" as const;
   const assembledPrompt = assemblePrompt(world.meta, sheets, scene, shot, style, undefined, capability);
   const currentPrompt = promptFor(world.meta, sheets, scene, shot, style, undefined, capability);
   const durableOverride = shot.promptOverride?.text ?? null;

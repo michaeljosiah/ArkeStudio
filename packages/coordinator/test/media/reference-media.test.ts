@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Job, ManifestModel } from "@arke-studio/contracts";
-import { prepareReferenceVideo } from "../../src/media/reference-media.js";
+import { checkSeedanceVideo, prepareReferenceVideo } from "../../src/media/reference-media.js";
 import { prepareReferences } from "../../src/media/prepare-references.js";
 import { readContainedAudioReferences } from "../../src/world/reference-files.js";
 import type { WorldStore } from "../../src/world/store.js";
@@ -70,4 +70,24 @@ test("real 30 fps silent input becomes a 24 fps reference with an audio slot", {
   assert.equal(measured.streams.find(stream => stream.codec_type === "video")!.r_frame_rate, "24/1");
   assert.equal(measured.streams.some(stream => stream.codec_type === "audio"), true);
   assert.ok(Math.abs(Number(measured.format.duration) - 2) < 0.15);
+});
+
+test("Seedance probes dimensions before dispatch, retains bytes and refuses out-of-range media", async () => {
+  const model = { id: "seedance-2.0", accepts: { referenceVideos: 3 }, limits: { referenceSyntax: "seedance",
+    maxReferenceVideoSec: 15, minReferenceVideoSec: 2, maxReferenceVideoBytes: 50_000_000,
+    referenceVideoPixels: { min: 409600, max: 927408 } } } as ManifestModel;
+  let width = 1280, height = 720, durationSec = 4;
+  const input = { contentType: "video/mp4", data: Uint8Array.from([1, 2]) };
+  const probe = { durationSec: async () => durationSec, info: async () => ({ width, height, durationSec, hasAudio: false, hasVideo: true, frameRate: 30 }) };
+  const signal = new AbortController().signal;
+  assert.deepEqual(await checkSeedanceVideo(input, model, probe, signal), { ...input, durationSec: 4 });
+  width = 1920; height = 1080;
+  await assert.rejects(checkSeedanceVideo(input, model, probe, signal), /resolution/);
+  width = 1280; height = 720; durationSec = 16;
+  await assert.rejects(checkSeedanceVideo(input, model, probe, signal), /duration/);
+  durationSec = 8;
+  const store = { dir: await tempDir("arke-seedance-budget-") } as WorldStore;
+  await assert.rejects(prepareReferences(store, { params: {} } as Job, model, [
+    { ...input, contentType: "video/mp4" }, { ...input, contentType: "video/mp4" },
+  ], { probe }, signal), /combined duration/);
 });

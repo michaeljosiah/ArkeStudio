@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ManifestModel } from "@arke-studio/contracts";
 import type { FfmpegRunner } from "../takes/export.js";
 import type { MediaProbe } from "./probe.js";
 
@@ -39,14 +40,41 @@ export async function prepareReferenceVideo(input: ReferenceMedia, tools: { ffmp
 
 export function referenceHash(data: Uint8Array): string { return `sha256:${createHash("sha256").update(data).digest("hex")}`; }
 
-export async function measureReferenceAudio(input: ReferenceMedia, probe: MediaProbe | undefined, signal: AbortSignal): Promise<number> {
+export async function measureReferenceAudio(input: ReferenceMedia, probe: MediaProbe | undefined, signal: AbortSignal, limits = { min: 0, max: 5.2 }): Promise<number> {
   if (!probe?.info) throw new Error("Audio references need the local media tools.");
   const dir = await mkdtemp(join(tmpdir(), "arke-h3-audio-"));
   try {
     const path = join(dir, "source");
     await writeFile(path, input.data);
     const info = await probe.info(path, { signal });
-    if (!info?.hasAudio || info.durationSec <= 0 || info.durationSec > 5.2) throw new Error("H3 audio references must be at most five seconds. Trim and review the clip first.");
+    if (!info?.hasAudio || info.durationSec <= 0 || info.durationSec < limits.min || info.durationSec > limits.max) throw new Error("Audio reference duration is outside this route's limits.");
     return info.durationSec;
+  } finally { await rm(dir, { recursive: true, force: true }); }
+}
+
+
+// Probe the contained bytes before the paid request. Seedance accepts native frame rates,
+// so unlike H3 this path validates without changing the authored clip.
+export async function checkSeedanceVideo(input: ReferenceMedia, model: ManifestModel, probe: MediaProbe | undefined, signal: AbortSignal): Promise<ReferenceMedia> {
+  if (!probe?.info) throw new Error("Video references need the local media tools.");
+  if (!["video/mp4", "video/quicktime"].includes(input.contentType)) throw new Error("Seedance video references must be MP4 or MOV.");
+  const limits = model.limits;
+  if (limits.maxReferenceVideoFileBytes !== undefined && input.data.byteLength > limits.maxReferenceVideoFileBytes)
+    throw new Error("Video reference exceeds the route's file size limit.");
+  const dir = await mkdtemp(join(tmpdir(), "arke-seedance-reference-"));
+  try {
+    const path = join(dir, "source");
+    await writeFile(path, input.data);
+    const info = await probe.info(path, { signal });
+    if (!info?.width || !info.height || info.hasVideo === false) throw new Error("Video reference dimensions could not be read.");
+    const within = (value: number | undefined, range: { min: number; max: number } | undefined) =>
+      !range || (value !== undefined && value >= range.min && value <= range.max);
+    if (!within(info.width * info.height, limits.referenceVideoPixels) ||
+        !within(info.width, limits.referenceVideoSides) || !within(info.height, limits.referenceVideoSides) ||
+        !within(info.width / info.height, limits.referenceVideoAspect) || !within(info.frameRate, limits.referenceVideoFps))
+      throw new Error("Video reference resolution or frame rate is outside this Seedance route's limits.");
+    if (info.durationSec < (limits.minReferenceVideoFileSec ?? 0) || info.durationSec > (limits.maxReferenceVideoFileSec ?? limits.maxReferenceVideoSec ?? Infinity))
+      throw new Error("Video reference duration is outside this Seedance route's limits.");
+    return { ...input, durationSec: info.durationSec };
   } finally { await rm(dir, { recursive: true, force: true }); }
 }
