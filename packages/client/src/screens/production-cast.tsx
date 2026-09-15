@@ -1,29 +1,30 @@
-import { useState } from "react";
-import { useNavigate, useParams } from "react-router";
 import {
+  attachmentFor,
   guestsOf,
+  lookHoldingScope,
   pendingGuestsOf,
   pendingSheets,
-  type CompiledReference,
   worldSheets,
-  attachmentFor,
-  lookHoldingScope,
+  type CharacterLook,
+  type CompiledReference,
   type ProductionBundle,
   type Sheet,
   type WorldBundle,
 } from "@arke-studio/contracts";
+import { useState } from "react";
+import { useNavigate, useParams } from "react-router";
 import { EmptyState, Screen } from "../components/layout.js";
+import {
+  characterPortraitPath,
+  locationPortraitPath,
+  Portrait,
+  sheetPortraitPath,
+} from "../components/portrait.js";
 import { Button, Card, Input, Textarea } from "../components/ui.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
-import { characterPortraitPath, locationPortraitPath, Portrait, sheetPortraitPath } from "../components/portrait.js";
-import {
-  useProduction,
-} from "../lib/selectors.js";
-import {
-  attachCharacterLook,
-  createSheetFromSentence,
-} from "../lib/store.js";
-import { lookPickerLabels, lookOptionScope } from "./production-generate.js";
+import { useProduction } from "../lib/selectors.js";
+import { attachCharacterLook, createSheetFromSentence } from "../lib/store.js";
+import { lookTileLabel } from "./character-reference.js";
 
 /**
  * What each character wears in this production (design 67).
@@ -391,4 +392,76 @@ export function carriedSubjects(references: readonly CompiledReference[]): strin
   return [...subjects.values()]
     .map((entry) => (entry.look ? `${entry.subject} (look)` : entry.subject))
     .join(", ");
+}
+
+// ---- Cast (SPEC-020) -------------------------------------------------------
+
+/**
+ * The production's cast, in two bands: the guests it owns, and the world's cast it draws on.
+ *
+ * The bands are the whole point of the screen (R-9). Both sets of people are equally usable in a
+ * shot — a guest is a full sheet, and resolution never asks who owns it (R-5) — so the only thing
+ * separating them is what happens to them when this production ends. Naming that on the surface
+ * is cheaper than discovering it later, when a one-off barman has quietly become part of the
+ * world's permanent record.
+ */
+/**
+ * The picker's labels, disambiguated only where they collide (codex round 2).
+ *
+ * A look's caption is the exploration's own words, and one exploration returns several results —
+ * so accepting more than one from a batch gives looks whose `prompt` and `kind` are identical and
+ * whose ids and files are not. The picker is text, unlike the gallery it came from, so those
+ * arrived as several indistinguishable options over different images.
+ *
+ * Numbered in acceptance order, which is the order the kit stores them in, and only where a
+ * caption is claimed more than once — a lone look carries no number to read.
+ */
+export function lookPickerLabels(looks: readonly CharacterLook[]): Map<string, string> {
+  const caption = (look: CharacterLook): string => lookTileLabel(look.prompt, look.kind);
+  const claims = new Map<string, number>();
+  for (const look of looks) claims.set(caption(look), (claims.get(caption(look)) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  const labels = new Map<string, string>();
+  for (const look of looks) {
+    const text = caption(look);
+    if ((claims.get(text) ?? 0) < 2) {
+      labels.set(look.id, text);
+      continue;
+    }
+    const nth = (seen.get(text) ?? 0) + 1;
+    seen.set(text, nth);
+    labels.set(look.id, `${text} ${nth}`);
+  }
+  return labels;
+}
+
+/**
+ * What choosing this option would take it away from (design 67, codex round 1).
+ *
+ * A look holds one `attachedTo`, so picking one that is already spoken for is a *move*: the
+ * other production silently drops back to its identity package, or a scene loses its override.
+ * The option says where it currently rides, so the move is visible at the point of choice — a
+ * label rather than a confirmation, because the change is one field and reattaching undoes it.
+ *
+ * The look this production already holds says nothing: it is the selected option, and "here" is
+ * not news.
+ */
+export function lookOptionScope(
+  look: CharacterLook,
+  production: ProductionBundle,
+  productions: readonly ProductionBundle[],
+): string | null {
+  const scope = look.attachedTo;
+  if (!scope) return null;
+  if (scope.productionId === production.meta.id) {
+    if (scope.kind === "production") return null;
+    const scene = production.scenes.find((candidate) => candidate.id === scope.sceneId);
+    return scene ? `Sc ${scene.number}` : null;
+  }
+  const owner = productions.find((candidate) => candidate.meta.id === scope.productionId);
+  if (!owner) return null;
+  if (scope.kind === "production") return `in ${owner.meta.title}`;
+  const scene = owner.scenes.find((candidate) => candidate.id === scope.sceneId);
+  // A scope whose scene is gone rides nowhere, so there is nothing here to warn about taking.
+  return scene ? `in ${owner.meta.title} Sc ${scene.number}` : null;
 }

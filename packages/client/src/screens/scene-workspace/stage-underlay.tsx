@@ -7,7 +7,7 @@ import { artifactsForProduction } from "../../lib/artifact-view.js";
 import { mediaUrl } from "../../lib/media.js";
 import { onMediaReady, syncMediaElement } from "../../lib/playback-engine.js";
 import { uploadArtifacts } from "../../lib/store.js";
-import { takeMediaView } from "../production-generate.js";
+import { takeMediaView } from "../../lib/take-presentation.js";
 import { fitPreviewStage } from "./preview.js";
 
 interface PlateSource extends PickerSource { path: string; inSec: number; outSec?: number }

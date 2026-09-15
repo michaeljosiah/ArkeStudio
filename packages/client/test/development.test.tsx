@@ -9,7 +9,7 @@ import { legacySceneView, type ClientMessage, type ClientState, type Episode, ty
 import { App } from "../src/App.js";
 import { ProductionChatScreen } from "../src/screens/production-shell.js";
 import { StoryScreen } from "../src/screens/production-story.js";
-import { takeMediaPath } from "../src/screens/production-generate.js";
+import { takeMediaPath } from "../src/lib/take-presentation.js";
 import { EpisodeChatScreen, EpisodeDetailScreen, StoryStructureScreen } from "../src/screens/development.js";
 import { acceptedTakeId, isDayOne, mediaTakeFor, takesForShot } from "../src/lib/selectors.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";

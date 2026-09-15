@@ -51,7 +51,7 @@ import {
   browseWorldArtifacts,
 } from "../lib/store.js";
 import { Wave } from "../components/wave.js";
-import { takeMediaPath } from "./production-generate.js";
+import { takeMediaPath } from "../lib/take-presentation.js";
 import { CLIP_DEFAULT_SEC } from "./editor-legacy-lanes.js";
 
 /**
