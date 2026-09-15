@@ -563,9 +563,9 @@ describe("Flow canvas controls (§11.4, §11.8)", () => {
     assert.equal(Number.parseFloat(socket.style.left), left - 7);
   });
 
-  it("the corner hint says right-click, and shots sit at the prototype's pitch", async () => {
+  it("the instruction hint is absent, and shots sit at the prototype's pitch", async () => {
     const mounted = await openFlow();
-    assert.equal(q(mounted, ".fy-swcanvas__hint")?.textContent, "right-click for actions");
+    assert.equal(q(mounted, ".fy-swcanvas__hint"), null);
     const shots = all(mounted, '.fy-swnode[data-kind="shot"]');
     assert.equal(Number.parseFloat(shots[1]!.style.top) - Number.parseFloat(shots[0]!.style.top), 118);
   });
@@ -577,13 +577,17 @@ it("fits Flow once on fullscreen entry and restores the previous zoom on exit (#
   const workspace = q(mounted, '.fy-sw')!;
   Object.defineProperty(canvas, "getBoundingClientRect", { configurable: true,
     value: () => { const full = workspace.getAttribute("data-full") === "true";
-      return { x: 0, y: 0, left: 0, top: 0, width: full ? 1600 : 800, height: full ? 1000 : 400 }; } });
+      return { x: 0, y: 0, left: 0, top: 0, width: full ? 1600 : 500, height: full ? 1000 : 400 }; } });
   await act(async () => dom.window.dispatchEvent(new dom.window.Event("resize")));
   const zoom = () => q(mounted, '.fy-swzoom__label')!.textContent;
+  await click(all(mounted, '.fy-swzoom button').find(button => button.getAttribute('aria-label') === 'Zoom out')!);
   const before = zoom();
+  const layout = canvas.getAttribute('data-layout');
   const node = q(mounted, '.fy-swnode[data-kind="shot"]');
   await click(q(mounted, '.fy-sw__full')!);
+  await act(async () => dom.window.dispatchEvent(new dom.window.Event("resize")));
   assert.notEqual(zoom(), before, "the larger viewport gets a fresh fit");
+  assert.equal(canvas.getAttribute('data-layout'), layout, "fullscreen keeps the working graph layout");
   assert.equal(q(mounted, '.fy-swnode[data-kind="shot"]'), node);
   await click(q(mounted, '.fy-sw__fullexit')!);
   assert.equal(zoom(), before, "leaving restores the working view");

@@ -244,3 +244,6 @@ Regression checks: `test/application/writing.test.ts` and the packed engine cons
 draft/accept/revise/manuscript journey and its failure boundaries.
 
 Seedance enqueue validation in `packages/coordinator/src/media/prepare-references.ts` checks the complete reference set before job creation. It shares `readContinuationSource` in `productions/continuation.ts` with dispatch, so a carried take is resolved to the same whole video or extracted segment at both boundaries.
+Shared Stage blocking changes are validated against every staged shot before the scene command commits. An invalid inherited camera or object reference refuses the complete edit and identifies the shot (issue 1105).
+
+Flow retains its working graph layout in fullscreen, fits once on entry, and restores pan/zoom on exit. The resize observer resumes with the normal workspace. Local setup detection retains a newer requested dependency closure when a paused receipt rewrite is pending (issue 1091).

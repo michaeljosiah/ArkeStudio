@@ -564,7 +564,21 @@ describe("fetching the local runtimes at setup", () => {
     await firstDeps.firstDurable;
     first.pause("weights");
     await first.run();
+    // Hold the receipt rewrite so detect must read the earlier closure. This is the
+    // real interleaving behind #1091, without depending on filesystem scheduling.
+    const receiptWriter = first as unknown as { writeReceipt(path: string, receipt: unknown): Promise<void> };
+    const writeReceipt = receiptWriter.writeReceipt.bind(first);
+    let releaseRewrite!: () => void, rewriteStarted!: () => void;
+    const heldRewrite = new Promise<void>(resolve => { releaseRewrite = resolve; });
+    const startedRewrite = new Promise<void>(resolve => { rewriteStarted = resolve; });
+    receiptWriter.writeReceipt = async (path, receipt) => {
+      rewriteStarted();
+      await heldRewrite;
+      await writeReceipt(path, receipt);
+    };
     first.installClosure("model");
+    await startedRewrite;
+    try { await first.detect(); } finally { releaseRewrite(); }
     await first.dispose();
 
     freeMb = 1;

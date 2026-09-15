@@ -9625,7 +9625,7 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
 </div>
 </div>
 <div class="dv-opt" id="35d">
-<div class="dv-olabel"><a class="dv-oid" href="#35d">35d</a>Appearance tab · three modes, and the one the machine resolved to</div>
+<div class="dv-olabel"><a class="dv-oid" href="#35d">35d</a>Appearance tab · one Theme row with Dark, Light and System (#1093)</div>
 <div class="dv-card" style="width:1360px">
 <div data-screen-label="35d Settings, appearance tab" style="width:1360px;height:850px;font-family:var(--font-sans);color:var(--foreground);position:relative;overflow:hidden;background:var(--background)">
   <div style="position:absolute;inset:0;filter:blur(7px) saturate(.8);opacity:.4"><img src="assets/world-undersong.png" alt="" style="display:block;width:100%;height:100%;object-fit:cover"></div>
@@ -9648,29 +9648,9 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
         <div style="font:400 9.5px var(--font-mono);color:var(--neutral-400);padding:0 12px 4px">v0.4.2</div>
         </div>
         <div style="flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden">
-          <div style="font:500 10.5px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">THEME</div>
-          <div style="margin-top:4px">
-          <label style="display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--border);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent)"><span style="display:block;flex:1;min-width:0"><span style="display:block;font:600 13px var(--font-sans)">System</span><span style="display:block;font:400 10px var(--font-mono);color:var(--muted-foreground);letter-spacing:.05em;margin-top:3px">Follow Windows appearance</span></span><span style="width:15px;height:15px;border-radius:99px;border:4.5px solid var(--foreground);flex:none"></span></label>
-          <label style="display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--border);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent)"><span style="display:block;flex:1;min-width:0"><span style="display:block;font:600 13px var(--font-sans)">Light</span><span style="display:block;font:400 10px var(--font-mono);color:var(--muted-foreground);letter-spacing:.05em;margin-top:3px">Always use the light theme</span></span><span style="width:15px;height:15px;border-radius:99px;border:1.5px solid var(--neutral-300);flex:none"></span></label>
-          <label style="display:flex;align-items:center;gap:12px;padding:11px 0;cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent)"><span style="display:block;flex:1;min-width:0"><span style="display:block;font:600 13px var(--font-sans)">Dark</span><span style="display:block;font:400 10px var(--font-mono);color:var(--muted-foreground);letter-spacing:.05em;margin-top:3px">Always use the dark theme</span></span><span style="width:15px;height:15px;border-radius:99px;border:1.5px solid var(--neutral-300);flex:none"></span></label>
-          </div>
-          <div style="font:400 10px/1.6 var(--font-mono);color:var(--neutral-400);margin-top:14px">currently using dark</div>
-          <div style="flex:1"></div>
-          <div style="display:flex;gap:12px">
-            <div style="flex:1;border:1px solid var(--border);border-radius:10px;overflow:hidden">
-              <div style="height:74px;background:var(--neutral-50);display:flex;align-items:center;gap:9px;padding:0 14px">
-                <span style="width:26px;height:26px;border-radius:7px;background:var(--neutral-900);flex:none"></span>
-                <span style="flex:1"><span style="display:block;height:6px;width:70%;border-radius:99px;background:var(--neutral-200)"></span><span style="display:block;height:6px;width:45%;border-radius:99px;background:var(--neutral-100);margin-top:5px"></span></span>
-              </div>
-              <div style="padding:8px 12px;border-top:1px solid var(--border);font:500 10px var(--font-mono);letter-spacing:.05em;color:var(--muted-foreground)">LIGHT</div>
-            </div>
-            <div style="flex:1;border:1px solid var(--border);border-radius:10px;overflow:hidden">
-              <div style="height:74px;background:var(--neutral-950);display:flex;align-items:center;gap:9px;padding:0 14px">
-                <span style="width:26px;height:26px;border-radius:7px;background:var(--neutral-50);flex:none"></span>
-                <span style="flex:1"><span style="display:block;height:6px;width:70%;border-radius:99px;background:var(--neutral-800)"></span><span style="display:block;height:6px;width:45%;border-radius:99px;background:var(--neutral-700);margin-top:5px"></span></span>
-              </div>
-              <div style="padding:8px 12px;border-top:1px solid var(--border);font:500 10px var(--font-mono);letter-spacing:.05em;color:var(--muted-foreground)">DARK</div>
-            </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:24px;padding:14px 0;border-bottom:1px solid var(--border)">
+            <label for="appearance-theme-35d" style="font:500 13px var(--font-sans)">Theme</label>
+            <select id="appearance-theme-35d" style="min-width:140px;height:34px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:var(--background);color:var(--foreground);font:400 13px var(--font-sans)"><option>Dark</option><option>Light</option><option selected>System</option></select>
           </div>
         </div>
       </div>

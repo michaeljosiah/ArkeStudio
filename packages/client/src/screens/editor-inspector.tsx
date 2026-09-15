@@ -157,7 +157,6 @@ export function CutInspector({
             {mode === "only" ? "sound only" : mode === "mute" ? "muted" : "kept where supported"}
           </InspectorRow>
         </div>
-        <p className="fy-cutinspect__note">Drag the clip to move it. Drag either edge to trim; right-click for sound and remove actions.</p>
       </div>
     );
   }
@@ -317,7 +316,7 @@ export function CutInspector({
           onTranscribe={onTranscribe}
         />
       )}
-      <p className="fy-cutinspect__note">Select a clip to inspect its source and timing.</p>
+      <p className="fy-cutinspect__note">No clip selected.</p>
     </div>
   );
 }

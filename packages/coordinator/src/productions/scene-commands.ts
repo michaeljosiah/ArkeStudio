@@ -355,7 +355,7 @@ async function candidateFor(
         const problems = stageProblems(resolvedShotStaging(next, { ...command.staging, version: 1 }), current.durationSec ?? 4);
         if (problems.length) throw new SceneCommandRefused(problems);
       }
-      return command.staging === undefined
+      next = command.staging === undefined
         ? next
         : editShot(next, {
           shotId: command.shotId,
@@ -369,6 +369,14 @@ async function candidateFor(
               },
           },
         });
+      if (command.blocking !== undefined) {
+        for (const shot of orderedShots(next)) {
+          if (!shot.staging) continue;
+          const problems = stageProblems(resolvedShotStaging(next, shot.staging), shot.durationSec ?? 4);
+          if (problems.length) throw new SceneCommandRefused(problems.map(problem => `Shot ${shot.number}: ${problem}`));
+        }
+      }
+      return next;
     }
     case "insert-shot": {
       const production = productionOrThrow(store, input.productionId);
