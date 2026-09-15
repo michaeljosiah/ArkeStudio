@@ -287,6 +287,12 @@ export const AUDIOBOOK_TAKE_SCHEMA_VERSION = 23;
  * carries them, as the take itself was.
  */
 export const AUDIOBOOK_DIRECTION_SCHEMA_VERSION = 24;
+/**
+ * A remade take's sidecar names the take it stands beside (SPEC-047 R-4, issue 1190):
+ * `remakeOf` on the generation, a field the builds before it read as unknown and refuse with
+ * the whole sidecar. Fenced with the first sidecar that carries it, as the direction was.
+ */
+export const AUDIOBOOK_REMAKE_SCHEMA_VERSION = 25;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {
@@ -294,10 +300,11 @@ function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: strin
   for (const file of files) {
     if (!file.newContent || !file.path.endsWith(".json")) continue;
     try {
-      const record = JSON.parse(file.newContent) as { mediaInfo?: Record<string, unknown>; retiredAt?: unknown; generation?: { source?: unknown; directionHash?: unknown } } | null;
+      const record = JSON.parse(file.newContent) as { mediaInfo?: Record<string, unknown>; retiredAt?: unknown; generation?: { source?: unknown; directionHash?: unknown; remakeOf?: unknown } } | null;
       if (file.path.startsWith("artifacts/") && record?.retiredAt !== undefined) boundary = Math.max(boundary, ARTIFACT_RETIREMENT_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook") boundary = Math.max(boundary, AUDIOBOOK_TAKE_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook" && record.generation.directionHash !== undefined) boundary = Math.max(boundary, AUDIOBOOK_DIRECTION_SCHEMA_VERSION);
+      if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook" && record.generation.remakeOf !== undefined) boundary = Math.max(boundary, AUDIOBOOK_REMAKE_SCHEMA_VERSION);
       const info = record?.mediaInfo;
       if (info == null) continue;
       if ("hasVideo" in info) boundary = Math.max(boundary, MEDIA_HAS_VIDEO_SCHEMA_VERSION);

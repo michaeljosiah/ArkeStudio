@@ -24,7 +24,9 @@ import { audiobookBookPath, audiobookPath, checkDirection, directionPlan, legacy
 import { verifyDirections, type DirectionDeriver, type DirectableBlock } from "../../src/productions/audiobook-direction.js";
 import { bookPriceLines } from "../../src/productions/audiobook-book.js";
 import { priorPartJob, type PartIdentity } from "../../src/productions/audiobook-run.js";
+import { fileGeneratedArtifact } from "../../src/artifacts/filing.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
+import type { WorldStore } from "../../src/world/store.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
 /**
@@ -146,6 +148,7 @@ async function withHarness(
   run: (h: {
     root: string;
     worldDir: string;
+    store: WorldStore;
     events: DomainEvent[];
     spoken: string[];
     /** Every request the sidecar was sent, with the settings beside the words. */
@@ -224,6 +227,7 @@ async function withHarness(
     await run({
       root,
       worldDir,
+      store,
       events,
       spoken,
       requests,
@@ -430,7 +434,7 @@ describe("the audiobook run (turn 146)", () => {
     }));
 
   it("a block made again is a new take beside the kept one, which stands until purged; a directed remake is another reading of the same words (R-4; issue 1190)", () =>
-    withHarness({}, async ({ worldDir, events, spoken, send, bundle }) => {
+    withHarness({}, async ({ worldDir, events, spoken, send, bundle, store }) => {
       await read(send);
       const first = (await readRecord(worldDir)).takes["title"];
       assert.ok(first);
@@ -454,8 +458,31 @@ describe("the audiobook run (turn 146)", () => {
       const third = (await readRecord(worldDir)).takes["title"];
       assert.ok(third && third.artifactId !== second.artifactId && third.directionHash !== undefined);
       assert.equal(shelf().length, 3);
-      assert.equal(bundle().artifacts.find((a) => a.id === third.artifactId)?.generation?.source === "audiobook" && (bundle().artifacts.find((a) => a.id === third.artifactId)!.generation as { delivery?: string }).delivery, "urgent");
+      const generationOf = (id: string) => bundle().artifacts.find((a) => a.id === id)?.generation as { delivery?: string; remakeOf?: string } | undefined;
+      assert.equal(generationOf(third.artifactId)?.delivery, "urgent");
+      // Each remake is named for the take it stands beside (codex on PR 1193): the first take
+      // for none, the second for the first, the third for the second.
+      assert.deepEqual([generationOf(first.artifactId)?.remakeOf, generationOf(second.artifactId)?.remakeOf, generationOf(third.artifactId)?.remakeOf], [undefined, first.artifactId, second.artifactId]);
       assert.equal(events.filter((e) => e.type === "audiobook.finished").length, 3);
+
+      // A retry of the same remake — the file landed, the record never took it — finds the
+      // take it made rather than filing another; a remake with the same name is one take.
+      const retried = await fileGeneratedArtifact(store, {
+        sourcePath: join(store.dir, "artifacts", bundle().artifacts.find((a) => a.id === third.artifactId)!.file),
+        generation: generationOf(third.artifactId) as never,
+        production: LEDGER,
+      });
+      assert.equal(retried.id, third.artifactId);
+      assert.equal(shelf().length, 3, "no fourth copy");
+
+      // The kept take retired, `Make again` is still a new performance: the older take of the
+      // same words is not handed back for it (codex on PR 1193).
+      await send({ kind: "retire-artifact", worldId: WORLD_ID, artifactId: third.artifactId });
+      await read(send, { blocks: ["title"] });
+      const fourth = (await readRecord(worldDir)).takes["title"];
+      assert.ok(fourth && fourth.artifactId !== third.artifactId && fourth.artifactId !== second.artifactId && fourth.artifactId !== first.artifactId, "a fourth take, none of the three");
+      assert.equal(generationOf(fourth.artifactId)?.remakeOf, third.artifactId, "named for the retired one it replaces");
+      assert.equal(shelf().length, 3, "three unretired takes: the first, the second, the fourth");
     }));
 
   it("under cast, a cloud voice is priced once and named before anything leaves; confirmed, the narration is still made locally (R-17)", () =>

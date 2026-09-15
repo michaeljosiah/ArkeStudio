@@ -503,8 +503,12 @@ function generatedIdentity(
     // when a local take was made without the queue — a run that ended after the file landed
     // and before the record took it finds the take it already made, never a second copy. The
     // direction is in it (issue 1190): a block directed since its take is another reading of
-    // the same words, and the undirected take is not the one to hand back for it.
-    const local = (g: ArtifactAudiobookGeneration) => `${g.textHash}/${g.provider}/${g.model}/${g.voiceId}/${g.directionHash ?? ""}`;
+    // the same words, and the undirected take is not the one to hand back for it. So is the
+    // take a remake stands beside (SPEC-047 R-4): a block made again while the record holds a
+    // take names that take, which makes it another artifact than the one on the shelf and
+    // still the same one on a retry — and a retired selection, named, cannot be answered by
+    // an older take of the same words (codex on PR 1193).
+    const local = (g: ArtifactAudiobookGeneration) => `${g.textHash}/${g.provider}/${g.model}/${g.voiceId}/${g.directionHash ?? ""}/${g.remakeOf ?? ""}`;
     const made = generation.jobId ?? local(generation);
     return {
       producedBy: "audiobook",
@@ -564,14 +568,6 @@ export async function fileGeneratedArtifact(
      * character's reference stay the world's, as they were.
      */
     production?: string;
-    /**
-     * A take beside the ones on the shelf, never one of them handed back (SPEC-047 R-4, issue
-     * 1190): a block made again while its kept take is still there gets a new take, the
-     * earlier one standing beneath it in the block's list until it is purged. Without this a
-     * remake of the same words in the same voice — the point of `Make again` — was the old
-     * file returned and the new performance thrown away.
-     */
-    another?: true;
   },
 ): Promise<ArtifactSidecar> {
   const bytes = await readFile(toExtendedLength(input.sourcePath));
@@ -584,7 +580,7 @@ export async function fileGeneratedArtifact(
   const filed = await store.gateOp(async () => {
     // A retired artifact is off the shelf by the person's word: the same identity made again
     // is a new artifact beside it, never the retired one handed back.
-    const existing = input.another === true ? undefined : store.getBundle().artifacts.find((artifact) => identity.isSame(artifact) && artifact.retiredAt === undefined);
+    const existing = store.getBundle().artifacts.find((artifact) => identity.isSame(artifact) && artifact.retiredAt === undefined);
     if (existing) {
       // The same take filed again is the take already on the shelf — unless its media is gone,
       // as a world carried by hand can lose it: then the file is restored under the sidecar it

@@ -266,7 +266,9 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
     const local = reader.provider === "kokoro";
     const format = voiceFormatForModel(model);
     const source = voiceSourceFor(clonedVoices, reader.provider, reader.model, reader.voiceId);
-    const remake = only !== undefined && planned.state === "made";
+    // An explicit `Make again`, whatever the block's state (codex on PR 1193): with its kept
+    // take retired, the older take of the same words must not be the answer either.
+    const remake = only !== undefined;
     speaking.push({
       ...planned,
       ...(substitutedNow !== undefined ? { substitutedNow } : {}),
@@ -403,6 +405,8 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   const progress = (block: Speaking, outcome: "made" | "adopted" | "flagged", reason?: string) =>
     emit({ type: "progress", block: block.block.key, outcome, ...(reason !== undefined ? { reason } : {}), made, toMake: toMake.length });
   const file = async (block: Speaking, sourcePath: string, input: { jobId?: string; parts: number; estimatedMicroUsd: number; costMicroUsd: number | null; adopted?: true }): Promise<ArtifactSidecar> => {
+    const kept = record.takes[block.block.key];
+    const remakeOf = kept !== undefined && (plan.present.has(kept.artifactId) || block.remake) ? kept.artifactId : undefined;
     const generation: ArtifactAudiobookGeneration = {
       source: "audiobook",
       ...(input.jobId !== undefined ? { jobId: input.jobId } : {}),
@@ -427,19 +431,19 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
       ...(block.direction !== null
         ? { directionHash: block.direction.hash, delivery: block.direction.delivery, providerTextHash: audioHash(Buffer.from(block.direction.rendered)) }
         : {}),
+      // A block whose kept take is still on the shelf, or that is made again on purpose, is
+      // another take beside that one (SPEC-047 R-4, issue 1190), named for it: filed as its
+      // own artifact, found again by a retry, and never the older take of the same words
+      // returned for a retired selection (codex on PR 1193). A block with no take, or whose
+      // take's media is gone and is not asked for again, takes the shelf's own rule instead —
+      // the same words, voice and direction already filed are the take it made before the
+      // record could say so, or the sidecar its restored file belongs under.
+      ...(remakeOf !== undefined ? { remakeOf } : {}),
     };
-    // A block whose kept take is still on the shelf is being made again (SPEC-047 R-4, issue
-    // 1190): the new take goes beside the old one, which stands in the block's list until it
-    // is purged. A block with no take, or whose take's media is gone, takes the shelf's own
-    // rule instead — the same words, voice and direction already filed are the take it made
-    // before the record could say so, or the sidecar its restored file belongs under.
-    const kept = record.takes[block.block.key];
-    const another = kept !== undefined && plan.present.has(kept.artifactId);
     return fileGeneratedArtifact(store, {
       sourcePath,
       generation,
       production: productionId,
-      ...(another ? { another: true as const } : {}),
       ...(deps.mediaProbe !== undefined ? { mediaProbe: deps.mediaProbe } : {}),
       abandoned: () => signal.aborted,
     });
