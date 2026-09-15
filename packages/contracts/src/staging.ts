@@ -1,7 +1,7 @@
 import { PerspectiveCamera, Vector3 } from "three";
 import { DEFAULT_SHOT_SEC, effectiveFraming } from "./scene.js";
 import { orderedShots } from "./scene-flow.js";
-import { stagePathPoint, stageWorldPoint, stageCameraKeyAt, sampleStageCamera, stageTargetTransform, stageObjectAt, stageLocalPoint } from "./stage-camera.js";
+import { stageCameraRest, stagePathPoint, stageWorldPoint, stageCameraKeyAt, sampleStageCamera, stageTargetTransform, stageObjectAt, stageLocalPoint } from "./stage-camera.js";
 import type { Shot, ShotStaging, StageRig, StagingFigure, StagingKey, StagingSet, StagePerformance, StageObjectMotion, StageReferenceFrame, StageGait, StagePerformanceKey } from "./scene.js";
 import type { SceneRecord } from "./scene-flow.js";
 import { parseAspect } from "./manifest.js";
@@ -12,12 +12,13 @@ import { parseAspect } from "./manifest.js";
  * panel readouts) and the coordinator (the bench prefill), so the numbers a person reads on
  * the panel are the numbers the generator is told.
  *
- * Camera positions curve through keys; key ease maps time onto distance along each leg.
+ * Camera positions curve through keys with continuous speed; ease shapes starts, stops and holds.
  */
 
 const SUPER_35_WIDTH_MM = 24.89;
 const SUPER_35_HEIGHT_MM = 18.66;
 export const STAGE_FRAME_RATE = 30;
+export const STAGE_CAMERA_EVALUATOR_VERSION = 2;
 export const STAGE_CAMERA_NEAR = .1;
 /** Ordered for admission: an end-frame route receives the pair before optional key/overview stills. */
 export function stageReferenceFrames(keys: readonly { t: number }[], durationSec: number): StageReferenceFrame[] {
@@ -138,7 +139,7 @@ export function resolvedShotStaging(scene: Pick<SceneRecord, "blocking">, stagin
 export function stageSourceFingerprintInput(scene: SceneRecord, shot: Shot, aspect: string): string {
   if (!shot.staging) return "";
   const { playblast: _playblast, authorship: _authorship, ...staging } = resolvedShotStaging(scene, shot.staging);
-  return JSON.stringify({ staging, durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC, lens: effectiveFraming(scene, shot).lens ?? "", aspect });
+  return JSON.stringify({ evaluatorVersion: STAGE_CAMERA_EVALUATOR_VERSION, staging, durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC, lens: effectiveFraming(scene, shot).lens ?? "", aspect });
 }
 
 /** Whether a filed Stage image no longer depicts this camera, blocking, lens, or duration. */
@@ -153,7 +154,7 @@ export function stagePlayblastIsStale(
   const blockingMoved = current.owner === "shot"
     ? pinned.blocking !== undefined && pinned.blocking.owner !== "shot"
     : pinned.blocking === undefined || pinned.blocking.owner !== "scene" || pinned.blocking.version !== current.version;
-  return pinned.version !== staging.version || blockingMoved ||
+  return pinned.evaluatorVersion !== STAGE_CAMERA_EVALUATOR_VERSION || pinned.version !== staging.version || blockingMoved ||
     (pinned.durationSec !== undefined && pinned.durationSec !== shown.durationSec) ||
     (pinned.aspect !== undefined && pinned.aspect !== shown.aspect) ||
     (pinned.lens !== undefined && pinned.lens !== (shown.lens ?? "")) ||
@@ -605,7 +606,7 @@ export function stagingBeats(
   staging = stagingRetimed(staging,durationSec) as ResolvedShotStaging;
   const keys = staging.keys;
   const warnings = stageSpeedWarnings(staging, nameOf, durationSec);
-  const camera = keys.map((k) => {
+  const camera = keys.map((k, index) => {
     const subject = k.anchor ?? k.track ?? null;
     const pose = sampleStageCamera({...staging,keys},k.t,durationSec);
     const target = subject ? stageTargetTransform(staging,subject,k.t,durationSec) : null;
@@ -618,8 +619,8 @@ export function stagingBeats(
     const who = subject === null ? "the aim point" : nameOf(subject);
     const aim = k.track === undefined ? `, aim (${pose.l.map(v=>v.toFixed(2)).join(", ")})m in world space` : `, aimed at ${nameOf(k.track)}`;
     const ease = [
-      k.easeIn === undefined ? "" : `ease in ${Math.round(k.easeIn * 100)}%`,
-      k.easeOut === undefined ? "" : `ease out ${Math.round(k.easeOut * 100)}%`,
+      !stageCameraRest(keys, index) || k.easeIn === undefined ? "" : `ease in ${Math.round(k.easeIn * 100)}%`,
+      !stageCameraRest(keys, index) || k.easeOut === undefined ? "" : `ease out ${Math.round(k.easeOut * 100)}%`,
     ].filter(Boolean).join(", ");
     return `${k.t.toFixed(1)}s — ${flat}m ${where} ${who}, ${height}m high${aim}${k.roll === undefined ? "" : `, roll ${k.roll}°`}${k.focalMm === undefined ? "" : `, lens ${k.focalMm}mm`}${ease === "" ? "" : `, ${ease}`}`;
   });

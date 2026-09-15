@@ -241,3 +241,5 @@ chapter briefing/read receipts, conversation action lifecycle and proposal gate 
 through `local-prose.ts`, returning Markdown with version/file-hash provenance.
 Regression checks: `test/application/writing.test.ts` and the packed engine consumer cover the
 draft/accept/revise/manuscript journey and its failure boundaries.
+
+Camera continuity and draft advisories (#1126, #1128) live in contracts `stage-camera.ts`: spatial curves, shared scalar timing, moving-subject standoff and passing-key motion findings. The viewport, inserted keys and construction feedback use these functions. The numerical baseline is `contracts/test/stage-camera-continuity.test.ts`; the walking orbit also participates in the encoded [Stage evaluation](stage-evaluation.md) gate. Playblast evaluator pins are filed by coordinator `productions/stage-playblast.ts` and fenced by the normal scene commit schema boundary.

@@ -56,6 +56,7 @@ export function seekDrag(opts: {
     // up dragging the label instead of the transport. It costs the click its own focus, which
     // the arrow keys need, so the element asks for what the default would have given it.
     e.preventDefault();
+    el.dataset.pointerSeeking = "true";
     el.focus();
     el.setPointerCapture(e.pointerId);
     // Scrubbing while it runs fights the transport for the same value; stop, then seek.
@@ -82,6 +83,7 @@ export function seekDrag(opts: {
 function seekKeys(transport: Transport, totalSec: number): (e: React.KeyboardEvent) => void {
   const { time, seek } = transport;
   return (e: React.KeyboardEvent) => {
+    delete (e.currentTarget as HTMLElement).dataset.pointerSeeking;
     if (e.key === "ArrowRight") seek(time + 1);
     else if (e.key === "ArrowLeft") seek(time - 1);
     else if (e.key === "Home") seek(0);
@@ -258,6 +260,7 @@ export function CutPlayhead({ totalSec, frameRate, transport, tool }: { totalSec
         className={cx("fy-playhead__grab", tool !== "select" && "fy-playhead__grab--idle")}
         onPointerDown={onPointerDown}
         onKeyDown={seekKeys(transport, totalSec)}
+        onBlur={(event) => { delete event.currentTarget.dataset.pointerSeeking; }}
         role="slider"
         tabIndex={0}
         aria-label="Playhead"

@@ -123,7 +123,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // gains a member the strict union of an older build cannot parse, so it would drop every take.
 // Twenty-four is a directed take's sidecar (SPEC-047 R-6, R-8): the direction's name, delivery
 // and provider-text digest on the generation, which the first audiobook build reads as unknown.
-export const SUPPORTED_SCHEMA_VERSION = 25;
+// Twenty-six adds the evaluator version to the strict playblast pin (#1128).
+export const SUPPORTED_SCHEMA_VERSION = 26;
 
 export class WorldOpenError extends Error {
   constructor(

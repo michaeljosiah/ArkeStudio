@@ -25,7 +25,7 @@ it("constructs, inspects, revises and returns an editable draft without writing 
     const shot = orderedShots(scene).find((s) => s.id === "sh_12")!;
     const fresh = stageShot(shot, { cast: ["maren-kest"], sets: [], durationSec: 4 });
     const second = store.getBundle().sheets.find(sheet => sheet.id !== "maren-kest")!.id;
-    fresh.cast = [{ sheetId: "maren-kest", x: -1, z: 0 }, { sheetId: second, x: 1, z: 0 }];
+    fresh.cast = [{ sheetId: "maren-kest", x: -1, z: 0, to: [-1, 1] }, { sheetId: second, x: 1, z: 0 }];
     fresh.keys = [{ t: 0, p: [0, 1.5, 4], l: [0, 1, 0] }, { t: 4, p: [0, 1.5, -4], l: [0, 1, 0] }];
     scene.blocking = { version: 1, cast: fresh.cast, sets: [] };
     const { version: _v, cast, sets, ...staging } = fresh;
@@ -119,6 +119,8 @@ it("constructs, inspects, revises and returns an editable draft without writing 
     assert.match(prompts[0]!, /verse, under the water/);
     assert.match(prompts[1]!, /round-1-0-camera.png/);
     assert.match(prompts[1]!, /180° line: Shot .* crosses/, "inspection feedback includes the draft's screen-direction finding");
+    assert.match(prompts[0]!, /Interior camera keys are passing waypoints/);
+    assert.match(prompts[1]!, /Camera approaches moving @maren-kest/, "inspection receives whole-path standoff findings");
     assert.match(prompts[1]!, /frame-observation-39/, "line warnings must not displace any measured frame observations");
     assert.equal(
       store

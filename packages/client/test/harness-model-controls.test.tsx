@@ -426,3 +426,53 @@ describe("live harness model controls (#1123, #1124)", () => {
     assert.doesNotMatch(container.textContent!, /Selected for the next restart/);
   });
 });
+
+describe("round-64 harness regressions (#1154)", () => {
+  it("shows a desktop startup state without inventing an engine before the snapshot", async () => {
+    const previous = window.arke;
+    window.arke = { appVersion: "0.5.49" } as typeof window.arke;
+    try {
+      await mount(modelState(), <SettingsHarnessScreen />, "/settings/harness", true);
+      assert.match(container.textContent!, /Starting Arke Studio/);
+      assert.doesNotMatch(container.textContent!, /dev:coordinator|OpenCode|next restart|0\.1\.0/);
+    } finally { window.arke = previous; }
+  });
+
+  it("labels an installed but blocked engine as needing attention", async () => {
+    const state = modelState();
+    state.app.harness = { engine: "opencode", claudePath: null, codexPath: null, harnesses: [OPENCODE_AVAILABILITY,
+      { ...OPENCODE_AVAILABILITY, id: "codex", label: "Codex", bundled: false, installed: true, blocked: "Codex is installed, but a newer version is needed." }], };
+    await mount(state, <SettingsHarnessScreen />, "/settings/harness?harness=codex");
+    const tab = [...container.querySelectorAll('[role="tab"]')].find(element => element.textContent!.includes("Codex"))!;
+    assert.match(tab.textContent!, /needs attention/);
+    assert.doesNotMatch(tab.textContent!, /not here/);
+    assert.match(container.textContent!, /newer version is needed/);
+  });
+
+  it("keeps a replacement for a legacy saved model visible until its save arrives", async () => {
+    const state = modelState();
+    state.world!.productions[0]!.meta.models = { llm: "claude-sonnet-5" };
+    await mount(state, conversation());
+    await choose("Language model", OPUS);
+    // Restore linkedom's getter so the assertion reads React's selected option, not our event shim.
+    Reflect.deleteProperty(select("Language model"), "value");
+    await press("Remember for this production");
+    assert.equal(select("Language model").value, OPUS);
+    assert.match(container.textContent!, /THIS TURN/);
+    const saved = structuredClone(state);
+    saved.world!.productions[0]!.meta.models = { llm: OPUS };
+    await act(async () => __setStateForTest(saved));
+    assert.equal(select("Language model").value, OPUS);
+    assert.match(container.textContent!, /THIS PRODUCTION/);
+  });
+
+  it("retains an explicit turn choice equal to the production default ahead of an agent override", async () => {
+    const state = modelState();
+    state.app.agents[0]!.model = OPUS;
+    await mount(state, conversation());
+    await choose("Language model", CLAUDE);
+    Reflect.deleteProperty(select("Language model"), "value");
+    assert.equal(select("Language model").value, CLAUDE);
+    assert.match(container.textContent!, /THIS TURN/);
+  });
+});

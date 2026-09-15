@@ -66,6 +66,22 @@ export function SubtitleTrackRow({
           >
             M
           </button>
+          <button
+            type="button"
+            className="fy-trackbtns__add"
+            disabled={disabled || (track.cues ?? []).some((cue) => playheadFrame >= cue.startFrame && playheadFrame < cue.endFrame)}
+            aria-label={`Add subtitle at ${formatFrames(playheadFrame, frameRate)}`}
+            onClick={() => {
+              const next = cues.find((cue) => cue.startFrame > playheadFrame);
+              const endFrame = Math.min(playheadFrame + frameRate * 2, next?.startFrame ?? Number.MAX_SAFE_INTEGER);
+              onCommands(
+                [{ kind: "add-cue", trackId: track.id, cue: { id: `cu_${ulid()}`, text: "New subtitle", startFrame: playheadFrame, endFrame: Math.max(playheadFrame + 1, endFrame) } }],
+                "Add subtitle",
+              );
+            }}
+          >
+            +
+          </button>
         </span>
       </span>
       <div className="fy-track__lane fy-typedlane fy-cuelane">
@@ -99,24 +115,6 @@ export function SubtitleTrackRow({
           );
         })}
       </div>
-      <span className="fy-track__tail">
-        <button
-          type="button"
-          className="fy-trackbtns__add"
-          disabled={disabled || (track.cues ?? []).some((cue) => playheadFrame >= cue.startFrame && playheadFrame < cue.endFrame)}
-          aria-label={`Add subtitle at ${formatFrames(playheadFrame, frameRate)}`}
-          onClick={() => {
-            const next = cues.find((cue) => cue.startFrame > playheadFrame);
-            const endFrame = Math.min(playheadFrame + frameRate * 2, next?.startFrame ?? Number.MAX_SAFE_INTEGER);
-            onCommands(
-              [{ kind: "add-cue", trackId: track.id, cue: { id: `cu_${ulid()}`, text: "New subtitle", startFrame: playheadFrame, endFrame: Math.max(playheadFrame + 1, endFrame) } }],
-              "Add subtitle",
-            );
-          }}
-        >
-          +
-        </button>
-      </span>
     </div>
   );
 }

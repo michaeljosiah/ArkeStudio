@@ -829,6 +829,7 @@ export function ProductionConversation({
   const navigate = useNavigate();
   const [message, setMessage] = useState("");
   const [languageModelId, setLanguageModelId] = useState<string | undefined>();
+  const pendingRemember = useRef<string | undefined>(undefined);
   /*
    * Wrap-up state lives here rather than inside WrapUp (review 2026-08-22): retry is a way of
    * saying something again, so it is held back while a wrap-up commits — a condition the
@@ -879,6 +880,7 @@ export function ProductionConversation({
   useEffect(() => {
     setMessage("");
     setLanguageModelId(undefined);
+    pendingRemember.current = undefined;
     setOpening(null);
     setBusyMedia(null);
     setMediaRefusal(null);
@@ -890,6 +892,13 @@ export function ProductionConversation({
     }
   }, [state?.app.health.harness.status, state?.app.harnessInfo?.generation]);
   const rememberedLanguageModel = productionModel(state, productionId, "llm");
+  // Keep the chosen model visible until the authoritative save arrives, including legacy ids.
+  useEffect(() => {
+    if (pendingRemember.current !== undefined && pendingRemember.current === rememberedLanguageModel) {
+      if (languageModelId === pendingRemember.current) setLanguageModelId(undefined);
+      pendingRemember.current = undefined;
+    }
+  }, [languageModelId, rememberedLanguageModel]);
   const agentLanguageModel = state?.app.agents.find((agent) => agent.name === "world-builder")?.model;
   const effectiveLanguageModelId = languageModelId ?? agentLanguageModel ?? rememberedLanguageModel;
   const languageUnavailableReason = languageChoiceReason(state, effectiveLanguageModelId);
@@ -1086,8 +1095,8 @@ export function ProductionConversation({
           className="fy-set__link"
           disabled={languageUnavailableReason !== undefined}
           onClick={() => {
+            pendingRemember.current = languageModelId;
             setProductionModel(worldId, productionId, "llm", languageModelId);
-            setLanguageModelId(undefined);
           }}
         >
           Remember for this production

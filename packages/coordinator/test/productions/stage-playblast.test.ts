@@ -137,7 +137,7 @@ describe("filing a playblast from the Stage", () => {
       assert.equal(pinned.rig, "dolly");
       assert.equal(pinned.seed, staged.shot.staging?.seed);
       assert.equal(pinned.rigIntensity, 1);
-      assert.equal(bundle().meta.schemaVersion, 20, "the expanded strict pin fences older readers");
+      assert.equal(bundle().meta.schemaVersion, 26, "the evaluator-versioned strict pin fences older readers");
       await assert.rejects(readWorldMeta(worldDir, { supports: 19 }), /schema|version|newer/i);
       assert.equal(after.scene.version, sceneVersion + 1, "the pin is a versioned scene write");
       const artifact = bundle().artifacts.find((candidate) => candidate.id === pinned.artifactId);
