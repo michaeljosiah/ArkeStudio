@@ -7,7 +7,8 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { storyProgressDay } from "@arke-studio/contracts";
 import { ChapterTreeScreen } from "../src/screens/production-story.js";
-import { ProductionChatScreen, ProductionDashboardScreen } from "../src/screens/production-shell.js";
+import { ProductionChatScreen } from "../src/screens/production-shell.js";
+import { ProductionDashboardScreen } from "../src/screens/production-dashboard.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 

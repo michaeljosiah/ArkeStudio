@@ -61,9 +61,11 @@ import { EpisodeChatScreen, EpisodeDetailScreen } from "./screens/development.js
 import { ChapterTreeScreen, SceneDetailScreen, ScenesScreen, StoryScreen } from "./screens/production-story.js";
 import { AudiobookScreen } from "./screens/audiobook.js";
 import { CutScreen } from "./screens/cut.js";
-import { GenerateScreen, VoiceLineDialogScreen } from "./screens/production-generate.js";
+import { GenerateScreen } from "./screens/production-generate.js";
+import { VoiceLineDialogScreen } from "./screens/production-voice-line.js";
 import { ProductionCastScreen } from "./screens/production-cast.js";
-import { ProductionHomeScreen, ProductionLayout, ProductionChatScreen } from "./screens/production-shell.js";
+import { ProductionHomeScreen } from "./screens/production-dashboard.js";
+import { ProductionLayout, ProductionChatScreen } from "./screens/production-shell.js";
 import { ChapterScreen } from "./screens/chapter-workspace.js";
 import { ShotPage } from "./screens/scene-workspace/shot-page.js";
 import { StoryStructureScreen } from "./screens/development.js";

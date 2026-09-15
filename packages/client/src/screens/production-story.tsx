@@ -57,7 +57,7 @@ import {
   reorderChapters,
 } from "../lib/store.js";
 import { continuityRows, continuityRowStamp, rememberChaptersView, rememberedChaptersView, type ChaptersView } from "../lib/continuity.js";
-import { defaultEpisodeFor } from "./production-shell.js";
+import { defaultEpisodeFor } from "../lib/production-navigation.js";
 
 /**
  * The scene's on-disk stem, from the bundle's scan-captured record (issue 387) — never a

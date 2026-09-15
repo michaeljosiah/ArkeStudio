@@ -5,7 +5,8 @@ import { MemoryRouter } from "react-router";
 import type { CharacterLook, ClientState, CompiledPass, CompiledReference } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { carriedSubjects } from "../src/screens/production-cast.js";
-import { lookOptionScope, lookPickerLabels, passRow } from "../src/screens/production-generate.js";
+import { lookOptionScope, lookPickerLabels } from "../src/screens/production-cast.js";
+import { passRow } from "../src/screens/production-generate.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
