@@ -194,6 +194,14 @@ export const ArtifactAudiobookGenerationSchema = z
     directionHash: z.string().min(1).optional(),
     delivery: z.string().min(1).optional(),
     providerTextHash: z.string().min(1).optional(),
+    /**
+     * The take the record held when this one was made (SPEC-047 R-4, issue 1190): a block made
+     * again is another take beside that one, never the one on the shelf handed back, and the
+     * take it stands beside is its name — so a run that ended after this file landed and before
+     * the record took it finds it again, and the next remake is another. Absent for a block's
+     * first take, and for one that restores a take whose media was gone.
+     */
+    remakeOf: ArtifactIdSchema.optional(),
   })
   .strict();
 export type ArtifactAudiobookGeneration = z.infer<typeof ArtifactAudiobookGenerationSchema>;

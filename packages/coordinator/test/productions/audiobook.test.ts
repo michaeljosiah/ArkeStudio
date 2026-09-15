@@ -24,7 +24,9 @@ import { audiobookBookPath, audiobookPath, checkDirection, directionPlan, legacy
 import { verifyDirections, type DirectionDeriver, type DirectableBlock } from "../../src/productions/audiobook-direction.js";
 import { bookPriceLines } from "../../src/productions/audiobook-book.js";
 import { priorPartJob, type PartIdentity } from "../../src/productions/audiobook-run.js";
+import { fileGeneratedArtifact } from "../../src/artifacts/filing.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
+import type { WorldStore } from "../../src/world/store.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
 /**
@@ -146,6 +148,7 @@ async function withHarness(
   run: (h: {
     root: string;
     worldDir: string;
+    store: WorldStore;
     events: DomainEvent[];
     spoken: string[];
     /** Every request the sidecar was sent, with the settings beside the words. */
@@ -224,6 +227,7 @@ async function withHarness(
     await run({
       root,
       worldDir,
+      store,
       events,
       spoken,
       requests,
@@ -240,7 +244,7 @@ async function withHarness(
   }
 }
 
-const read = (send: (message: ClientMessage) => Promise<void>, extra: { confirmationToken?: string; voiceUploadConfirmedFor?: string; chapterFile?: string } = {}) =>
+const read = (send: (message: ClientMessage) => Promise<void>, extra: { confirmationToken?: string; voiceUploadConfirmedFor?: string; chapterFile?: string; blocks?: string[] } = {}) =>
   send({ kind: "read-audiobook-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", ...extra });
 const recordPath = (worldDir: string, chapterFile = "01-neap") => join(worldDir, "productions", LEDGER, ".audiobook", "chapters", `${chapterFile}.json`);
 const readRecord = async (worldDir: string, chapterFile = "01-neap") => ChapterAudiobookSchema.parse(JSON.parse(await readFile(recordPath(worldDir, chapterFile), "utf8")));
@@ -427,6 +431,58 @@ describe("the audiobook run (turn 146)", () => {
       assert.equal(again[1]!.outcome, "read");
       assert.equal(spoken.length, before, "nothing made twice (R-16)");
       assert.equal(bundle().artifacts.filter((a) => a.generation?.source === "audiobook").length, takes.length);
+    }));
+
+  it("a block made again is a new take beside the kept one, which stands until purged; a directed remake is another reading of the same words (R-4; issue 1190)", () =>
+    withHarness({}, async ({ worldDir, events, spoken, send, bundle, store }) => {
+      await read(send);
+      const first = (await readRecord(worldDir)).takes["title"];
+      assert.ok(first);
+      const shelf = () => bundle().artifacts.filter((a) => a.generation?.source === "audiobook" && a.generation.block === "title" && a.retiredAt === undefined);
+      assert.equal(shelf().length, 1);
+
+      // Make again, nothing changed: another performance of the same words in the same voice.
+      const before = spoken.length;
+      await read(send, { blocks: ["title"] });
+      assert.equal(spoken.length, before + 1, "the title was read again");
+      const second = (await readRecord(worldDir)).takes["title"];
+      assert.ok(second && second.artifactId !== first.artifactId, "the record's choice moved to a new take");
+      const takes = shelf();
+      assert.equal(takes.length, 2, "the earlier take stands beside the new one");
+      assert.ok(takes.some((a) => a.id === first.artifactId), "the first take is still on the shelf, unretired");
+      assert.notEqual(takes.find((a) => a.id === first.artifactId)?.file, takes.find((a) => a.id === second.artifactId)?.file, "two files");
+
+      // Directed, the block reads stale; made again it is a third take, named for its direction.
+      await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "title", direction: { delivery: "urgent", speed: 1, cues: [] } });
+      await read(send, { blocks: ["title"] });
+      const third = (await readRecord(worldDir)).takes["title"];
+      assert.ok(third && third.artifactId !== second.artifactId && third.directionHash !== undefined);
+      assert.equal(shelf().length, 3);
+      const generationOf = (id: string) => bundle().artifacts.find((a) => a.id === id)?.generation as { delivery?: string; remakeOf?: string } | undefined;
+      assert.equal(generationOf(third.artifactId)?.delivery, "urgent");
+      // Each remake is named for the take it stands beside (codex on PR 1193): the first take
+      // for none, the second for the first, the third for the second.
+      assert.deepEqual([generationOf(first.artifactId)?.remakeOf, generationOf(second.artifactId)?.remakeOf, generationOf(third.artifactId)?.remakeOf], [undefined, first.artifactId, second.artifactId]);
+      assert.equal(events.filter((e) => e.type === "audiobook.finished").length, 3);
+
+      // A retry of the same remake — the file landed, the record never took it — finds the
+      // take it made rather than filing another; a remake with the same name is one take.
+      const retried = await fileGeneratedArtifact(store, {
+        sourcePath: join(store.dir, "artifacts", bundle().artifacts.find((a) => a.id === third.artifactId)!.file),
+        generation: generationOf(third.artifactId) as never,
+        production: LEDGER,
+      });
+      assert.equal(retried.id, third.artifactId);
+      assert.equal(shelf().length, 3, "no fourth copy");
+
+      // The kept take retired, `Make again` is still a new performance: the older take of the
+      // same words is not handed back for it (codex on PR 1193).
+      await send({ kind: "retire-artifact", worldId: WORLD_ID, artifactId: third.artifactId });
+      await read(send, { blocks: ["title"] });
+      const fourth = (await readRecord(worldDir)).takes["title"];
+      assert.ok(fourth && fourth.artifactId !== third.artifactId && fourth.artifactId !== second.artifactId && fourth.artifactId !== first.artifactId, "a fourth take, none of the three");
+      assert.equal(generationOf(fourth.artifactId)?.remakeOf, third.artifactId, "named for the retired one it replaces");
+      assert.equal(shelf().length, 3, "three unretired takes: the first, the second, the fourth");
     }));
 
   it("under cast, a cloud voice is priced once and named before anything leaves; confirmed, the narration is still made locally (R-17)", () =>
@@ -1055,6 +1111,15 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
       await readBook(send);
       assert.equal(spoken.length, count, "a second press makes nothing");
       assert.equal(events.filter((e): e is BookStarted => e.type === "audiobook.book-started").at(-1)?.chapters, 0);
+
+      // Under `cast` these chapters are refused — no cast — but the takes made stand, and so
+      // does their running time in the line (issue 1191).
+      await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "cast" });
+      const cast = await openDoor(send, events, "01J8F3K2QW9VZX4N7M0RTYB6D3");
+      assert.equal(cast.rows[1]?.castTrouble, "not cast · cast the lines first", "the chapter with no cast is refused");
+      assert.ok(cast.rows[1]!.seconds !== null && cast.rows[1]!.seconds > 0, "and keeps its running time");
+      // The first chapter's cast line is Maren's under `cast` and was read by the narrator: stale (R-13), so one chapter reads whole.
+      assert.match(audiobookDoorLine(cast.rows).line, /^1 of 2 chapters read · \d+:\d\d$/, "the time is the kept takes', whatever the reading");
     }));
 
   it("the book is priced once for every chapter's cloud blocks, and the chapters read on that answer", () =>

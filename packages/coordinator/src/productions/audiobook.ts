@@ -425,6 +425,8 @@ export interface AudiobookPlan {
   cast: ChapterVoices | "unreadable" | null;
   ambiguous: number;
   record: ChapterAudiobook | "unreadable" | null;
+  /** The artifact ids of the record's takes that are still on the shelf with their media (codex on PR 1180). */
+  present: Set<string>;
   reading: AudiobookReading;
   blocks: PlannedBlock[];
 }
@@ -460,6 +462,7 @@ export async function planAudiobook(
     cast,
     ambiguous: derived.ambiguous,
     record,
+    present,
     reading,
     blocks,
   };

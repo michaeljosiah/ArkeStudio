@@ -6,6 +6,7 @@ import {
   audioSourceOf,
   pickableArtifacts,
   ulid,
+  type ArtifactAudiobookGeneration,
   type ArtifactGeneration,
   type ArtifactKind,
   type ArtifactSidecar,
@@ -498,10 +499,17 @@ function generatedIdentity(
   }
   if (generation.source === "audiobook") {
     // One take per block per run: the same block read again is a new take with a new job, so
-    // the identity is the job when there is one and the block's words and voice when a local
-    // take was made without the queue — a retry of the same words in the same voice is the
-    // take it already made, never a second copy (SPEC-047 R-4).
-    const made = generation.jobId ?? `${generation.textHash}/${generation.provider}/${generation.model}/${generation.voiceId}`;
+    // the identity is the job when there is one and the block's words, voice and direction
+    // when a local take was made without the queue — a run that ended after the file landed
+    // and before the record took it finds the take it already made, never a second copy. The
+    // direction is in it (issue 1190): a block directed since its take is another reading of
+    // the same words, and the undirected take is not the one to hand back for it. So is the
+    // take a remake stands beside (SPEC-047 R-4): a block made again while the record holds a
+    // take names that take, which makes it another artifact than the one on the shelf and
+    // still the same one on a retry — and a retired selection, named, cannot be answered by
+    // an older take of the same words (codex on PR 1193).
+    const local = (g: ArtifactAudiobookGeneration) => `${g.textHash}/${g.provider}/${g.model}/${g.voiceId}/${g.directionHash ?? ""}/${g.remakeOf ?? ""}`;
+    const made = generation.jobId ?? local(generation);
     return {
       producedBy: "audiobook",
       isSame: (artifact) =>
@@ -511,7 +519,7 @@ function generatedIdentity(
         artifact.generation.productionId === generation.productionId &&
         artifact.generation.chapterId === generation.chapterId &&
         artifact.generation.block === generation.block &&
-        (artifact.generation.jobId ?? `${artifact.generation.textHash}/${artifact.generation.provider}/${artifact.generation.model}/${artifact.generation.voiceId}`) === made,
+        (artifact.generation.jobId ?? local(artifact.generation)) === made,
       // The chapter and the block, then a short tail so two takes of one block are two files.
       stem: `${slugify(generation.chapterId).slice(0, 40) || "chapter"}-${generation.block.replace(/[^a-z0-9]+/gi, "-")}-${generation.textHash.slice(-6)}`,
       // The chapter it belongs to, and the speaker when a sheet's voice read it.

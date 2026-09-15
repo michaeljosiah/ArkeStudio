@@ -213,6 +213,17 @@ describe("the Audiobook door (turn 146)", () => {
     assert.match(chips[2]!.textContent ?? "", /Odile Sarnno voice · narrator · 3 blocks/);
     assert.ok(chips[2]!.className.includes("fy-abdoor__voice--warn"), "in warning");
     assert.match(chips[3]!.textContent ?? "", /unattributedno voice · narrator · 2 blocks/);
+    // A chip goes to where its voice is set (issue 1191); the unattributed lines have nowhere to go.
+    assert.deepEqual(chips.map((chip) => chip.tagName.toLowerCase()), ["button", "button", "button", "span"]);
+    await act(async () => chips[2]!.click());
+    assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/cast/odile-sarn/voice`, "a speaker's chip opens their voice page");
+  });
+
+  it("the narrator's chip opens the setting that chooses the narrator (issue 1191)", async () => {
+    const m = await mount(inkbound());
+    await answerDoor(m, door("narrator"));
+    await act(async () => all(m, '[data-testid="audiobook-voice"]')[0]!.click());
+    assert.equal(m.where(), "/settings/general");
   });
 
   // A cloud narrator (Charlotte), a cast voice (Anna), a local cast voice on the machine's

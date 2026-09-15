@@ -14,7 +14,7 @@ import {
   type ClonedVoice,
 } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
-import { checkDirection, directionPlan, effectiveReader, readAudiobookBook, updateAudiobook } from "./audiobook.js";
+import { checkDirection, directionPlan, effectiveReader, readAudiobookBook, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
 import { conformInput, directableBlocks, type DirectableBlock } from "./audiobook-direction.js";
 import { chapterPriceToken, missIdentity, prepareChapter, type ChapterPreparation, type ReadingRoom, type Speaking } from "./audiobook-run.js";
 
@@ -42,8 +42,8 @@ export async function prepareBook(store: WorldStore, productionId: string, room:
 }
 
 /** The made takes' running time, when every one of them was measured; null otherwise. */
-function runningTime(store: WorldStore, preparation: Extract<ChapterPreparation, { kind: "ready" }>): number | null {
-  const { plan, record } = preparation.prepared;
+function runningTime(store: WorldStore, plan: Pick<AudiobookPlan, "blocks">, record: ChapterAudiobook | "unreadable" | null): number | null {
+  if (record === null || record === "unreadable") return 0;
   let seconds = 0;
   for (const planned of plan.blocks) {
     if (planned.state !== "made") continue;
@@ -175,11 +175,15 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
       } else narratorRow.blocks += 1;
       voices.set(key, held);
     }
+    // The takes made stand whatever the reading (R-13), so a chapter refused under `cast` —
+    // its cast not current — keeps its running time on the row and in the door's line (issue
+    // 1191): the time is the kept takes', and they are still there.
+    const seconds = counts.made > 0 ? runningTime(store, plan, plan.record) : 0;
     if (preparation.kind === "refused") {
-      rows.push({ ...base, planned: plan.blocks.length === 0, ...counts, seconds: null, castTrouble: preparation.reason });
+      rows.push({ ...base, planned: plan.blocks.length === 0, ...counts, seconds, castTrouble: preparation.reason });
       continue;
     }
-    rows.push({ ...base, planned: plan.blocks.length === 0, ...counts, seconds: counts.made > 0 ? runningTime(store, preparation) : 0 });
+    rows.push({ ...base, planned: plan.blocks.length === 0, ...counts, seconds });
     if (preparation.prepared.toMake.length > 0) toRead.push(preparation.prepared);
   }
   const speaking = toRead.flatMap((prepared) => prepared.speaking);
