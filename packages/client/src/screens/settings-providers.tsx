@@ -5,6 +5,7 @@ import {
   ENGINE_PROVIDERS,
   PROVIDERS as PROVIDER_TABLE,
   comfyUiWeightsRecipeId,
+  credentialFaulted,
   deriveCapabilityAvailability,
   type EngineId,
   type ProviderId,
@@ -33,10 +34,8 @@ import {
   OllamaDetail,
   OtherComponentsDetail,
   VoxaDetail,
-  comfyUiTone,
   componentsFor,
   componentsTone,
-  processTone,
 } from "./engine-panes.js";
 import { MachineRow, VoiceLines } from "./local-models.js";
 import {
@@ -392,18 +391,29 @@ export function ProviderKeyLine({ id }: { id: ProviderId }) {
   );
 }
 
+/**
+ * The key was accepted and nothing is unlocked (issue 1167): the account is what needs
+ * attention — a balance, a plan — and "key rejected" would send the person to replace a key
+ * that is fine. The probe's own reason is on the pane's "Last tested" line. Shared with the
+ * models page, whose group note said "Not unlocked by this key" of the same key (issue 1191).
+ */
+export function cannotPay(status: ProviderStatus | undefined): boolean {
+  return status?.configured === true && status.validation === "valid" && !status.probes.some((p) => p.available) && status.probes.some((p) => p.authenticated === true);
+}
+
 /** Stored, tested, or neither — in the words the head prints (SPEC-028 R-33). */
 function connectionWords(id: ProviderId, status: ProviderStatus | undefined): { word: string; tone: RuntimeTone } {
   const external = PROVIDER_TABLE[id].credential === "external";
-  const troubled = Boolean(status?.fault) || status?.validation === "invalid";
+  // A key that never reached the provider — the store refused it, nothing rejected it (issue
+  // 1191) — is not a rejected key, and a key the store could not clear is still the one held;
+  // the fault's own words are on the pane.
+  if (status?.faultKind === "not-saved") return { word: "not saved", tone: "warn" };
+  if (status?.faultKind === "not-cleared") return { word: "not cleared", tone: "warn" };
+  const troubled = credentialFaulted(status) || status?.validation === "invalid";
   if (troubled) return { word: external ? "sign-in needed" : "key rejected", tone: "warn" };
   if (status?.configured === true) {
     if (status.validation === "valid") {
-      // The key was accepted and nothing is unlocked (issue 1167): the account is what needs
-      // attention — a balance, a plan — and "key rejected" would send the person to replace a
-      // key that is fine. The probe's own reason is on the pane's "Last tested" line.
-      const unpaid = !status.probes.some((p) => p.available) && status.probes.some((p) => p.authenticated === true);
-      return unpaid ? { word: "can't pay", tone: "warn" } : { word: "connected", tone: "ok" };
+      return cannotPay(status) ? { word: "can't pay", tone: "warn" } : { word: "connected", tone: "ok" };
     }
     return { word: status.validation === "testing" ? "testing" : "untested", tone: "idle" };
   }
@@ -541,22 +551,20 @@ export function SettingsProvidersScreen() {
     const { word, tone } = connectionWords(id, status);
     return { id, label: PROVIDER_TABLE[id].displayName, note: tone === "ok" ? null : word, kind: "service" };
   });
-  const engineTone = (engine: EngineId): RuntimeTone =>
-    engine === "comfyui"
-      ? comfyUiTone(comfyui?.engine ?? null)
-      : engine === "ollama"
-        ? processTone(providerStatus.find((p) => p.id === "ollama")?.validation)
-        : processTone(voiceRuntime?.processState);
-  const engineNote = (engine: EngineId): string | null => {
+  // An engine's row always carries its state (issue 1191): a running engine says so, where a
+  // connected service says nothing beside its name, since the engine is machinery this
+  // machine runs and whether it is up is the fact the column is for.
+  const engineNote = (engine: EngineId): string => {
     // `elsewhere` in place of a state (SPEC-034 R-9): for a machine down the hall, how it is
     // doing here is not a question with an answer.
     if (engine === "comfyui" && comfyui?.engine.locality === "remote") return "elsewhere";
-    if (engineTone(engine) !== "warn") return null;
-    return engine === "comfyui"
-      ? (comfyui?.engine.state ?? "not running")
-      : engine === "ollama"
-        ? "not answering"
-        : (voiceRuntime?.processState ?? "not running");
+    if (engine === "comfyui") return comfyui === null ? "not started" : comfyui.engine.state;
+    if (engine === "ollama") {
+      const validation = providerStatus.find((p) => p.id === "ollama")?.validation;
+      return validation === "valid" ? "answering" : validation === "testing" ? "testing" : validation === undefined || validation === "untested" ? "untested" : "not answering";
+    }
+    const process = voiceRuntime?.processState;
+    return process === "healthy" ? "running" : process === undefined || process === "unconfigured" ? "not set up" : process === "unhealthy" ? "not answering" : process;
   };
   const engines: Row[] = ENGINES.map((engine) => ({
     id: engine,

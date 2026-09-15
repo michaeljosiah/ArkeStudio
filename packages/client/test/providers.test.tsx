@@ -40,6 +40,16 @@ const GPT: ManifestModel = {
   pricing: { kind: "perImage", microUsdPerImage: 40_000 },
 };
 
+const FISH: ManifestModel = {
+  id: "fish-s2.1-pro",
+  provider: "fishaudio",
+  capability: "voice-tts",
+  displayName: "Fish Audio S2.1 Pro",
+  accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+  limits: { maxPromptChars: 5000, audioFormat: "mp3" },
+  pricing: { kind: "perCharacter", microUsdPerCharacter: 15 },
+};
+
 const stateWith = (patch: { disabled?: string[]; faults?: ClientState["app"]["routing"]["faults"] }) => ({
   ...FIXTURE_STATE,
   app: {
@@ -118,6 +128,15 @@ describe("Providers holds the credential (SPEC-042 R-3, R-9, R-18)", () => {
     assert.doesNotMatch(pane, /key rejected/i);
     assert.match(pane, /top up on fish\.audio/, "the probe's own reason, on the Last tested line");
     assert.match(html.slice(0, html.indexOf('data-testid="provider-pane"')), /Fish Audio<\/span><span class="fy-src__note">can&#x27;t pay/);
+    // The models page's group note carries the same word (issue 1191), never "Not unlocked by this key".
+    state.app.manifest = { ...state.app.manifest!, models: [...state.app.manifest!.models, FISH] };
+    __setStateForTest(state);
+    const page = models("/settings/models?half=cloud&kind=voice-tts");
+    const at = page.indexOf('class="fy-by__name">Fish Audio<');
+    assert.ok(at >= 0, "the Fish Audio group is on the voice page");
+    const group = page.slice(at, at + 1200);
+    assert.match(group, /Can&#x27;t pay/);
+    assert.doesNotMatch(group, /Not unlocked by this key/);
   });
 
   it("carries no model, and says one line about them", () => {
@@ -172,6 +191,62 @@ describe("Providers holds the credential (SPEC-042 R-3, R-9, R-18)", () => {
     assert.match(html, /THIS MACHINE/);
     assert.match(html, /Downloads/);
     assert.doesNotMatch(html, /role="switch"/);
+  });
+
+  it("an engine's row always says its state, a running one included (issue 1191)", () => {
+    const state = stateWith({});
+    const engine = { state: "ready" as const };
+    state.app.voiceRuntime = {
+      source: "bundled",
+      configured: true,
+      bundledAvailable: true,
+      executableName: "voxa.exe",
+      version: "1.0.0",
+      protocolVersion: 1,
+      architecture: "x64",
+      expectedArchitecture: "x64",
+      processState: "healthy",
+      endpointCompatible: true,
+      failureCategory: null,
+      detail: "running",
+      configurationWarning: null,
+      engines: ["kokoro", "whisper"],
+      engineStatus: { kokoro: engine, phonemizer: engine, whisper: engine },
+    } as ClientState["app"]["voiceRuntime"];
+    state.app.comfyui = null;
+    __setStateForTest(state);
+    const html = providers("/settings/providers?provider=voxa");
+    const column = html.slice(0, html.indexOf('data-testid="provider-pane"'));
+    assert.match(column, /Voxa<\/span><span class="fy-src__note">running/);
+    assert.match(column, /ComfyUI<\/span><span class="fy-src__note">not started/, "an engine nothing has launched says so, on the standalone host too");
+    assert.match(column, /Ollama<\/span><span class="fy-src__note">(untested|not answering|answering)/);
+  });
+
+  it("a key the store could not hold is not saved, never rejected (issue 1191)", () => {
+    const state = stateWith({});
+    state.app.providers = [{ id: "fal", configured: false, validation: "untested", probes: [], fault: "the key was not saved — credential encryption is unavailable on this machine", faultKind: "not-saved" }];
+    __setStateForTest(state);
+    const html = providers("/settings/providers?provider=fal");
+    assert.match(html.slice(0, html.indexOf('data-testid="provider-pane"')), /FAL<\/span><span class="fy-src__note">not saved/);
+    const pane = plain(html.slice(html.indexOf('data-testid="provider-pane"')));
+    assert.match(pane, /not saved/);
+    assert.doesNotMatch(pane, /key rejected/i);
+    assert.match(pane, /credential encryption is unavailable on this machine/, "the store's own reason");
+  });
+
+  it("a key the store could not clear is still the one held: not cleared, and its models stay on (codex on PR 1195)", () => {
+    const state = stateWith({});
+    state.app.providers = [{ id: "fal", configured: true, credentialFingerprint: "1C7D9A20", validation: "valid", lastValidated: "2026-09-15T05:05:21.000Z", probes: [{ capability: "image", available: true }, { capability: "video", available: true }], fault: "the key was not cleared — the file is read-only", faultKind: "not-cleared" }];
+    __setStateForTest(state);
+    const html = providers("/settings/providers?provider=fal");
+    assert.match(html.slice(0, html.indexOf('data-testid="provider-pane"')), /FAL<\/span><span class="fy-src__note">not cleared/);
+    assert.doesNotMatch(plain(html.slice(html.indexOf('data-testid="provider-pane"'))), /not saved|key rejected/i);
+    // On AI models the group is untroubled: the key the provider holds is the one it always had.
+    const page = models("/settings/models?half=cloud&kind=image");
+    const at = page.indexOf('class="fy-by__name">FAL<');
+    assert.ok(at >= 0);
+    assert.match(page.slice(at, at + 400), /1 of 1 on/, "the image kind: on, untroubled");
+    assert.doesNotMatch(page.slice(at, at + 400), /Replace key/);
   });
 });
 
