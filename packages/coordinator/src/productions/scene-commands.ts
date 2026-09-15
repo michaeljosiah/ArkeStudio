@@ -371,7 +371,7 @@ async function candidateFor(
         });
       if (command.blocking !== undefined) {
         for (const shot of orderedShots(next)) {
-          if (!shot.staging) continue;
+          if (!shot.staging || (shot.staging.cast !== undefined && shot.staging.sets !== undefined)) continue;
           const problems = stageProblems(resolvedShotStaging(next, shot.staging), shot.durationSec ?? 4);
           if (problems.length) throw new SceneCommandRefused(problems.map(problem => `Shot ${shot.number}: ${problem}`));
         }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { linearizeSceneFlow, orderedShots, SceneRecordSchema, type SceneRecord, type ShotStaging } from "@arke-studio/contracts";
 import {
@@ -1003,6 +1003,15 @@ it(`refuses ${action} shared blocking that would strand another shot's camera (#
     await applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID,
       baseVersion: staged.version, command: { kind: "edit-stage", shotId: first.id, blocking,
         staging: { cast: [], sets: shared.sets, keys: [{ t: 0, p: [0, 1.5, 3], l: [0, 1.2, 0], anchor: "cart" }] } } });
-    assert.equal((await sceneOnDisk(store)).blocking?.sets.length, 0);
+    const privateScene = await sceneOnDisk(store);
+    assert.equal(privateScene.blocking?.sets.length, 0);
+    orderedShots(privateScene)[0]!.staging!.keys[0]!.anchor = "missing-private-group";
+      privateScene.version += 1;
+    await writeFile(join(dir, "productions", PRODUCTION, "scenes", `${SCENE}.json`), JSON.stringify(privateScene));
+    await applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID,
+      baseVersion: privateScene.version, command: { kind: "edit-stage", shotId: second.id,
+        blocking: { cast: [{ sheetId: "maren-kest", x: 1, z: 0 }], sets: [] } } });
+    assert.equal(orderedShots(await sceneOnDisk(store))[0]!.staging!.keys[0]!.anchor, "missing-private-group",
+      "unrelated invalid private staging does not block shared editing or get rewritten");
   }
 });

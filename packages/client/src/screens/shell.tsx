@@ -1880,7 +1880,7 @@ export function SettingsAppearanceScreen() {
           <h2 className="fy-appearance__title">Theme</h2>
 
         </div>
-        <fieldset className="fy-theme-options" aria-describedby="appearance-theme-description">
+        <fieldset className="fy-theme-options">
           <legend className="fy-sr-only">Theme</legend>
           {APPEARANCE_OPTIONS.map((option) => (
             <label key={option.preference} className="fy-theme-option">
