@@ -10,6 +10,7 @@ import { SettingsProvidersScreen } from "./screens/settings-providers.js";
 import {
   FirstRunScreen,
   StartupScreen,
+  SessionRefusal,
   NewWorldScreen,
   SettingsAboutScreen,
   SettingsAppearanceScreen,
@@ -185,6 +186,7 @@ export function App() {
           on every screen — not only the ones that happen to draw a titlebar. Invisible, takes
           no clicks, contributes nothing but geometry. */}
       <div className="fy-dragstrip" aria-hidden="true" />
+      <SessionRefusal />
       <QueueToaster />
       <ActivityPanel />
       {/* Right-click any picture, anywhere, and copy it. One listener rather than a control on

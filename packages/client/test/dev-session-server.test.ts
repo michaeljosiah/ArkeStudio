@@ -15,7 +15,9 @@ it("Vite prints a fragment sign-in link but never serves the capability in HTML 
   const token = randomBytes(32).toString("hex");
   const host = createHttpServer((req, res) => {
     assert.equal(req.method, "HEAD");
-    res.writeHead(req.headers.authorization === "Bearer " + token ? 404 : 401).end();
+    assert.equal(req.url, "/session");
+    if (req.headers.authorization === "Bearer " + token) res.writeHead(204, { "X-Arke-Session": "authenticated" }).end();
+    else res.writeHead(404).end(); // An unrelated service's generic 404 is not proof of authentication.
   });
   host.listen(0, "127.0.0.1");
   await once(host, "listening");

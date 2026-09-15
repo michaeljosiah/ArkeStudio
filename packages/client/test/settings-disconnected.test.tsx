@@ -63,3 +63,11 @@ it("distinguishes an expired session from an offline server", () => {
   assert.match(html, /new Arke session link/);
   assert.doesNotMatch(html, /Waiting for the coordinator|dev:coordinator/);
 });
+
+
+it("keeps session recovery visible outside settings without replacing the route", () => {
+  for (const path of ["/worlds", `/w/${FIXTURE_STATE.world!.meta.worldId}`, `/w/${FIXTURE_STATE.world!.meta.worldId}/p/saltlight/story`]) {
+    const html = render(path, "auth-refused");
+    assert.equal(html.split("Session link is out of date").length - 1, 1);
+  }
+});

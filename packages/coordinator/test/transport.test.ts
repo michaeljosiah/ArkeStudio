@@ -470,3 +470,16 @@ describe("the media route", () => {
     }
   });
 });
+
+
+it("session verification identifies Arke only after capability and origin authentication", async (t) => {
+  const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE });
+  const port = await transport.start(0);
+  t.after(() => transport.stop());
+  for (const [token, origin, expected] of [[TOKEN, "http://localhost:5173", 204], ["bad", "http://localhost:5173", 401], [TOKEN, "http://other.invalid", 401]] as const) {
+    const response = await fetch(`http://127.0.0.1:${port}/session`, { method: "HEAD", headers: { Authorization: "Bearer " + token, Origin: origin } });
+    assert.equal(response.status, expected);
+    assert.equal(response.headers.get("X-Arke-Session"), expected === 204 ? "authenticated" : null);
+    assert.equal(await response.text(), "");
+  }
+});

@@ -172,14 +172,20 @@ function stillPreferred(): boolean {
  * Browser recovery distinguishes an expired capability from an offline host without assuming
  * which Studio launcher the author chose.
  */
+export function SessionRefusal() {
+  const { connection } = useStore();
+  if (connection !== "auth-refused") return null;
+  return <div role="alert" className="fy-session-refusal">
+    <Callout tone="warning" title="Session link is out of date">Restart the frontend and open the new Arke session link from its terminal. If it still fails, check that the server allows this browser address.</Callout>
+  </div>;
+}
+
 function WaitingForCoordinator() {
   const { connection } = useStore();
   if (typeof window !== "undefined" && window.arke) {
     return <Callout tone="warning" title="Starting Arke Studio…">Connecting to your workspace. The app keeps retrying on its own.</Callout>;
   }
-  if (connection === "auth-refused") {
-    return <Callout tone="warning" title="Session link is out of date">Restart the frontend and open the new Arke session link from its terminal. If it still fails, check that the server allows this browser address.</Callout>;
-  }
+  if (connection === "auth-refused") return null;
   return (
     <Callout tone="warning" title="Waiting for the coordinator">
       The app keeps retrying on its own. Check that your Studio server is running.

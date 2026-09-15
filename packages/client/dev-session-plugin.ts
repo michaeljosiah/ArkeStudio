@@ -28,11 +28,11 @@ export function devSessionPlugin(): Plugin {
           const origin = process.env.ARKE_DEV_ORIGIN ?? "http://localhost:" + address.port;
           // A handoff can outlive its server or belong to another checkout. Authenticate a
           // bodyless request before printing it; never send the capability through a redirect.
-          const probe = new URL(endpoint.origin);
+          const probe = new URL("/session", endpoint.origin);
           probe.protocol = endpoint.protocol === "wss:" ? "https:" : "http:";
           const response = await fetch(probe, { method: "HEAD", redirect: "error",
             headers: { Authorization: "Bearer " + session.token, Origin: origin }, signal: AbortSignal.timeout(3000) });
-          if (response.status !== 404) throw new Error("session was not accepted");
+          if (response.status !== 204 || response.headers.get("X-Arke-Session") !== "authenticated") throw new Error("session was not accepted");
           server.config.logger.info("Arke session: " + origin + "/#/?arke-session=" + session.token);
         })().catch(() => server.config.logger.warn("Could not verify the Arke session. Start your Studio server from this checkout, check VITE_ARKE_WS and the allowed browser origin, then restart the frontend for a fresh link."));
       });

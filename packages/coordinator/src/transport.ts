@@ -124,6 +124,10 @@ export class Transport {
           return;
         }
         if (req.headers.origin !== undefined) res.setHeader("Access-Control-Allow-Origin", req.headers.origin);
+        if (req.method === "HEAD" && url.pathname === "/session") {
+          res.writeHead(204, { "X-Arke-Session": "authenticated", "Cache-Control": "no-store" }).end();
+          return;
+        }
         if (req.method !== "GET" || !req.url || !this.opts.serveFile) {
           res.writeHead(404).end();
           return;
