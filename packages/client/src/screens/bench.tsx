@@ -1364,7 +1364,7 @@ function BenchWorkspace({
                   type="button"
                   role="tab"
                   aria-selected={lane === l}
-                  title={l === "keyframe" ? (session.tokenRegistry.some(ref => ref.kind === "video" && ref.label?.startsWith("Staging") && session.composer.activeTokens.includes(ref.token))
+                  title={l === "keyframe" && session.subject?.kind === "shot" && session.tokenRegistry.some(ref => ref.label?.startsWith("Staging")) ? (session.tokenRegistry.some(ref => ref.kind === "video" && ref.label?.startsWith("Staging") && session.composer.activeTokens.includes(ref.token))
                 ? "Camera guidance: motion video and timed instructions. Review the generated take for adherence."
                 : session.tokenRegistry.some(ref=>ref.kind==="image" && ref.label?.startsWith("Staging") && [...session.composer.activeTokens,...session.composer.keyframeTokens].includes(ref.token))
                   ? "Camera guidance: opening frame and timed instructions only. This route is not receiving the motion video."

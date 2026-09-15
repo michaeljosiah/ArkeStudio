@@ -1907,8 +1907,9 @@ function resolveContinuations(
         });
         continue;
       }
-      if (clipSec < (model.limits.minReferenceVideoFileSec ?? 0)) {
-        states.set(shot.id, { unavailable: `shot ${from.number}'s take is shorter than the ${model.limits.minReferenceVideoFileSec}s reference minimum` });
+      const minimum = Math.max(model.limits.minReferenceVideoFileSec ?? 0, model.limits.minReferenceVideoSec ?? 0);
+      if (clipSec < minimum) {
+        states.set(shot.id, { unavailable: `shot ${from.number}'s take is shorter than the ${minimum}s reference minimum` });
         continue;
       }
     }
