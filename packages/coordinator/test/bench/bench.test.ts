@@ -484,7 +484,7 @@ describe("reference allocation (issue 305 §4)", () => {
     const opened = await freshBench(dir);
     const bundle = store.getBundle();
     // The model declares an allowance, so the KIND is fine — the unknown length is not.
-    const model = { ...IMAGE_MODEL, limits: { ...IMAGE_MODEL.limits, maxReferenceAudioSec: 60 } };
+    const model = { ...IMAGE_MODEL, limits: { ...IMAGE_MODEL.limits, maxReferenceAudioSec: 60, referenceAudioField: "audio_urls" } };
     const outcome = await addBenchReference(opened, bundle, model, {
       source: { source: "artifact", artifactId },
       requestId: "r1",
