@@ -987,7 +987,10 @@ export function SceneStage({
   const ghostable = previous?.staging !== undefined;
   const busy = staging && persisted === null;
   return (
-    <StageEditContext.Provider value={() => { const original = draft; return () => setDraft(original); }}>
+    <StageEditContext.Provider value={() => {
+      const original = draft, cameraWasDirty = cameraDirty.current, blockingWasDirty = blockingDirty.current;
+      return () => { cameraDirty.current = cameraWasDirty; blockingDirty.current = blockingWasDirty; setDraft(original); };
+    }}>
     <section ref={stageRoot} className="fy-swstage" data-testid="workspace-stage" aria-label="Stage" tabIndex={0} onKeyDown={timelineKey}>
       {head || fullscreen !== null ? (
         <div className="fy-swstage__head" data-stepper={head ? "true" : undefined}>
