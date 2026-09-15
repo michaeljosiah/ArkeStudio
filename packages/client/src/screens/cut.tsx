@@ -30,7 +30,6 @@ import {
   mediaPlacementCommands,
   newAudioTrack,
   migrateLegacyCut,
-  buildRenderPlan,
   orderedTrackClips,
   secondsToFrames,
   sourceLengthFramesFor,
@@ -111,6 +110,7 @@ import { CutPreview } from "./editor-preview.js";
 import { SpineCutTrack, EmptyEditorTrack, NewLaneStrip, SceneBands } from "./editor-tracks.js";
 import { type CutSelection, CutInspector } from "./editor-inspector.js";
 import { ExportSheet, exportViewFor } from "./editor-export.js";
+import { ABSENT_TIMELINE, useRenderPlan } from "./editor-plan.js";
 
 function focusFirstControl(pane: HTMLElement | null): void {
   pane?.querySelector<HTMLElement>("button:not(:disabled), input:not(:disabled), [href], [tabindex='0']")?.focus();
@@ -207,7 +207,7 @@ export function CutScreen() {
   const { connection, state: studio } = useStore();
   const worlds = studio?.worlds ?? [];
   const { world, production } = useProduction(worldId, prodId);
-  const timelineState = production?.timeline ?? { status: "absent" as const };
+  const timelineState = production?.timeline ?? ABSENT_TIMELINE;
   const frameRate: FrameRate = production ? productionFrameRate(production.meta) : 24;
   let cut: ResolvedPictureCut | null = null;
   let timelineError: string | null = null;
@@ -400,51 +400,20 @@ export function CutScreen() {
    * old story timeline can sit well beyond the minimum canvas.
    */
   /*
-   * One render plan for the preview and the export (SPEC-038 R-1, issue 680). The viewer asks
-   * the plan what is visible; the coordinator hands the same plan to FFmpeg. A production the
-   * plan refuses is a production the export refuses, so the refusal blocks the editor by name.
+   * One render plan for the preview and the export (SPEC-038 R-1, issue 680), derived by the
+   * editor's own hook from these inputs and nothing else: the transport's clock is not among
+   * them, so playback reuses the plan and only an authored change rebuilds it (issue 1158).
    */
-  /*
-   * The preview draws the record the editor edits (decided 2026-09-02): an unsaved story
-   * production previews its empty first state, not the film the story would derive. A production
-   * with no story and legacy placements keeps its legacy preview until the first write folds them.
-   */
-  const previewState: typeof timelineState = useMemo(
-    () =>
-      production && timelineState.status === "absent" && production.spine === null && !mediaOnly
-        ? { status: "ready", timeline: seedFirstPictureTimeline(production) }
-        : timelineState,
-    [production, timelineState.status, mediaOnly],
-  );
-  /*
-   * Memoised, and the identity matters as much as the cost.
-   *
-   * The transport reports four times a second, so this ran four times a second for the whole
-   * length of every film — resolving the picture timeline, building every overlay and merging
-   * the speech regions, none of which had changed. Worse than the work was the churn: the plan
-   * is what the monitor mix, the preview's spans and the cue lookup are keyed on, and a fresh
-   * object each render restarted all three. The sound heard that as four pause/play cycles a
-   * second. The inputs below are the only things the plan is made of, and each of them is either
-   * a snapshot the store replaces or a value the screen chooses.
-   */
-  const planArtifacts = world?.artifacts;
   const subtitleHidden = subtitleTracks.some((track) => track.id === subtitleView && track.muted);
-  const renderPlan = useMemo(
-    () =>
-      production && (!production.spine || timelineState.status === "ready") && timelineError === null
-        ? buildRenderPlan({
-            production,
-            artifacts: planArtifacts ?? [],
-            timeline: previewState,
-            scope: { kind: "production" },
-            preset: "review-cut",
-            // A hidden (muted) track is not asked for: the plan would refuse it and take the whole
-            // preview with it (round nine). Hiding captions leaves the film.
-            ...(subtitleView !== null && !subtitleHidden ? { subtitles: { trackId: subtitleView, mode: "none" as const } } : {}),
-          })
-        : null,
-    [production, planArtifacts, previewState, timelineState.status, timelineError, subtitleView, subtitleHidden],
-  );
+  const { previewState, renderPlan } = useRenderPlan({
+    production,
+    artifacts: world?.artifacts,
+    timelineState,
+    mediaOnly,
+    timelineError,
+    subtitleView,
+    subtitleHidden,
+  });
   /*
    * A plan the projection refuses — a placed artifact the world no longer has, say — blocks the
    * preview and the export by name, and nothing else (SPEC-039 R-39, R-40): the editor stays
