@@ -919,7 +919,7 @@ describe("the Stage's handoff to the bench", () => {
     });
     assert.ok(legacy.ok);
     if (!legacy.ok) return;
-    assert.equal(legacy.prefill.references.some(reference => reference.label.startsWith("Staging")), false,
+    assert.equal(legacy.prefill.references.some(reference => reference.label?.startsWith("Staging")), false,
       "a playblast from the previous evaluator must be re-exported before Bench admits it (#1128)");
     shot.staging.playblast!.evaluatorVersion = 2;
 

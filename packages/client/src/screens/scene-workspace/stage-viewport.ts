@@ -320,6 +320,7 @@ export class StageViewport {
   private path: Line | null = null;
   private marks: Array<{ index: number; mesh: Mesh }> = [];
   private data: StageData;
+  private samplingKeys: StagingKey[] = [];
   private structure = "";
   private selection: StageSelection = null;
   private framed = false;
@@ -1100,7 +1101,12 @@ export class StageViewport {
   private sampleCam(s: number, clock: number): Vector3 { return new Vector3(...this.sampleCamera(s, clock).p); }
   private sampleAim(s: number, clock: number): Vector3 { return new Vector3(...this.sampleCamera(s, clock).l); }
   private resolved() {
-    return { version: 1, keys: [...this.data.keys], sets: [...this.data.sets], cast: this.data.cast.map(f => ({ ...f, pose: f.pose ?? undefined, to: f.to ? [...f.to] as [number,number] : undefined })), ...(this.data.performances ? { performances: [...this.data.performances] } : {}), ...(this.data.objectMotions ? { objectMotions: [...this.data.objectMotions] } : {}) };
+    // The evaluator caches spatial curves by key-array identity. Keep that identity through
+    // refresh/path/export samples, while accepting replaced keys and in-place key edits.
+    if (this.samplingKeys.length !== this.data.keys.length || this.samplingKeys.some((key, i) => key !== this.data.keys[i])) {
+      this.samplingKeys = [...this.data.keys];
+    }
+    return { version: 1, keys: this.samplingKeys, sets: [...this.data.sets], cast: this.data.cast.map(f => ({ ...f, pose: f.pose ?? undefined, to: f.to ? [...f.to] as [number,number] : undefined })), ...(this.data.performances ? { performances: [...this.data.performances] } : {}), ...(this.data.objectMotions ? { objectMotions: [...this.data.objectMotions] } : {}) };
   }
   private sampleCamera(at: number, clock: number) {
     return sampleStageCamera(this.resolved(),at,this.data.durationSec,clock);

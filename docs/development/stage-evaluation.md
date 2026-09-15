@@ -71,3 +71,5 @@ First-pass edge cases retain clearance of one quarter of subject height plus the
 Camera evaluator 2 (#1128) uses continuous time-to-distance interpolation through passing keys. Ease applies at endpoints and holds; position and aim holds remain independent. Roll and lens use monotone interpolation too. Existing camera keys remain readable, but older playblasts become stale. New pins record evaluator version 2 and raise the world's reader boundary to schema 26. Re-export is required before those older references can be admitted again.
 
 `stage-camera-continuity.test.ts` checks orbit velocity, irregular timing, panning through aim keys, exact holds and rest ramps. Whole-path standoff and passing-key motion findings appear in Stage and in construction inspection feedback (#1126). They are advisories; deterministic tests and the local encoder gate do not score a live model's cinematic judgment.
+
+The encoded gate also refreshes a 120-key version of the walking orbit and counts distinct spatial curves. The viewport must reuse them across refresh, path drawing and recording; a pure-evaluator benchmark alone does not catch a caller that copies keys on every sample.

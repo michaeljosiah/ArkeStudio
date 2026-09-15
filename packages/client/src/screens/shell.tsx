@@ -1950,7 +1950,7 @@ export function SettingsHarnessScreen() {
   }, [focusAgent]);
   if (!hasSnapshot) return (
     <div data-screen="settings-harness" className="fy-set fy-set--runtime">
-      <WaitingForCoordinator />
+      {connection !== "closed" && <WaitingForCoordinator />}
     </div>
   );
   return (

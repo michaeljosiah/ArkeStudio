@@ -20,20 +20,34 @@ await build({
 await build({
   stdin: {
     contents: `
+import {CatmullRomCurve3} from "three";
 import {StageViewport,figureColour} from "./packages/client/src/screens/scene-workspace/stage-viewport.ts";
 import {stageFixtures} from "./packages/contracts/test/fixtures/stage-scenes.ts";
 window.runStageSmoke=async()=>{
   const host=document.getElementById("stage");
+  const spatialCurves=new Set();
+  const getLengths=CatmullRomCurve3.prototype.getLengths;
+  CatmullRomCurve3.prototype.getLengths=function(divisions){spatialCurves.add(this);return getLengths.call(this,divisions);};
   for(const fixture of stageFixtures) {
+    spatialCurves.clear();
     const s=fixture.stage;
     const data={cast:s.cast.map((f,i)=>({...f,name:f.sheetId,colour:figureColour(i),pose:f.pose??null,to:f.to??null,ghost:null})),sets:s.sets,keys:s.keys,performances:s.performances,objectMotions:s.objectMotions,durationSec:fixture.duration,active:0,mode:"look",at:0,fov:40,aspect:16/9,lensLabel:"fixture",rig:undefined,seed:undefined,rigIntensity:undefined};
     const viewport=new StageViewport(host,data,{autokey(){},autoaim(){},castchange(){},walkchange(){},selchange(){},trackpick(){}});
+    if(fixture.name==="walking-orbit") {
+      const dense=Array.from({length:120},(_,i)=>({...s.keys[0],t:fixture.duration*i/119,p:[2*Math.sin(i*2*Math.PI/119),1.5,2*Math.cos(i*2*Math.PI/119)]}));
+      for(let at=0;at<4;at++) viewport.set({...data,keys:dense,at});
+      if(spatialCurves.size>2) throw new Error("Viewport rebuilt spatial curves while refreshing a dense camera path: "+spatialCurves.size);
+      console.log("walking-orbit: dense viewport reused "+spatialCurves.size+" spatial curves");
+      viewport.set(data);
+      spatialCurves.clear();
+    }
     viewport.frame();
     const frames=await viewport.inspectFrames([fixture.duration/3,fixture.duration*2/3]);
     await window.smoke.inspect(fixture.name,frames);
     const result=await viewport.record({start:window.smoke.start,write:window.smoke.write,cancel:window.smoke.cancel},()=>{});
     const references=await Promise.all(result.referenceFrames.map(async({png,...frame})=>({...frame,bytes:new Uint8Array(await png.arrayBuffer())})));
     await window.smoke.finish(fixture.name,result.jobId,new Uint8Array(await result.openingFrame.arrayBuffer()),fixture.duration,references,s.keys.filter(key=>key.t>0&&key.t<fixture.duration).map(key=>key.t));
+    if(fixture.name==="walking-orbit" && spatialCurves.size>1) throw new Error("Export rebuilt the orbit spatial curve: "+spatialCurves.size);
     viewport.dispose();
   }
 };`,

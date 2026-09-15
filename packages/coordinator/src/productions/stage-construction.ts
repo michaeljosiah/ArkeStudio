@@ -305,10 +305,15 @@ export class StageConstructor {
         const prior = latest;
         const lineWarnings = stageLineCrossings(source.scene, source.aspect, { shotId: source.shot.id, staging: { ...prior.staging, version: 1, cast: prior.cast, sets: prior.sets } })
           .filter(finding => finding.shotIds.includes(source.shot.id)).map(finding => finding.message);
-        lineWarnings.push(...stageCameraStandoffWarnings({ ...prior.staging, version: 1, cast: prior.cast, sets: prior.sets }, duration));
-        lineWarnings.push(...stageCameraMotionWarnings({ ...prior.staging, version: 1, cast: prior.cast, sets: prior.sets }, duration));
+        const warningStage = { ...prior.staging, version: 1, cast: prior.cast, sets: prior.sets };
+        const standoffWarnings = stageCameraStandoffWarnings(warningStage, duration);
+        const motionWarnings = stageCameraMotionWarnings(warningStage, duration);
+        // Reserve room for every category; a busy scene's screen-direction pairs must not
+        // crowd the new whole-path warnings out of either inspection turn.
+        const findings = Object.fromEntries(Object.entries({ screenDirection: lineWarnings, standoff: standoffWarnings, motion: motionWarnings })
+          .map(([kind, warnings]) => [kind, { total: warnings.length, shown: warnings.slice(0, 4) }]));
         latest = await turn(
-          `Read EVERY local PNG with your read tool: ${names.join(", ")}. Their times/views and measured observations: ${JSON.stringify(frames.map(({ at, view, observations }) => ({ at, view, observations })))}. Camera findings (${lineWarnings.length} total; up to 12 shown): ${JSON.stringify(lineWarnings.slice(0, 12))}. These are actual renders of ${JSON.stringify(prior)}. Inspect identities, placement, framing, occlusion, screen direction and camera/action timing against the script. ${round === 1 ? "Correct composition problems while preserving protected fields; return a complete revised draft." : "Final inspection: return the SAME staging, cast and sets exactly; state remaining issues for human review in assessment. Do not revise geometry in this final turn."} Include all filenames actually viewed in inspected; if image inspection is unavailable, return inspected:[] and explain. Return the same JSON contract.`,
+          `Read EVERY local PNG with your read tool: ${names.join(", ")}. Their times/views and measured observations: ${JSON.stringify(frames.map(({ at, view, observations }) => ({ at, view, observations })))}. Camera findings (up to 4 per category): ${JSON.stringify(findings)}. These are actual renders of ${JSON.stringify(prior)}. Inspect identities, placement, framing, occlusion, screen direction and camera/action timing against the script. ${round === 1 ? "Correct composition problems while preserving protected fields; return a complete revised draft." : "Final inspection: return the SAME staging, cast and sets exactly; state remaining issues for human review in assessment. Do not revise geometry in this final turn."} Include all filenames actually viewed in inspected; if image inspection is unavailable, return inspected:[] and explain. Return the same JSON contract.`,
           names,
         );
         if (!names.every((name) => latest!.inspected.includes(name)))

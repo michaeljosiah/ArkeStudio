@@ -133,6 +133,7 @@ export function CutScrubber({ totalSec, frameRate, transport }: { totalSec: numb
       className="fy-timeline__ruler fy-scrub"
       onPointerDown={onPointerDown}
       onKeyDown={seekKeys(transport, totalSec)}
+      onBlur={(event) => { delete event.currentTarget.dataset.pointerSeeking; }}
       role="slider"
       tabIndex={0}
       aria-label="Seek"

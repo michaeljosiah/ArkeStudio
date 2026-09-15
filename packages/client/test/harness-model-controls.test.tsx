@@ -3,10 +3,10 @@ import { afterEach, describe, it } from "node:test";
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { OPENCODE_AVAILABILITY, type ClientMessage, type ClientState } from "@arke-studio/contracts";
 import { AgentsPanel } from "../src/screens/agents.js";
-import { SettingsHarnessScreen } from "../src/screens/shell.js";
+import { SettingsHarnessScreen, SettingsLayout } from "../src/screens/shell.js";
 import { ProductionConversation } from "../src/components/conversation.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -62,8 +62,8 @@ function modelState(): ClientState {
 let root: Root | undefined;
 let container: HTMLDivElement;
 let sent: ClientMessage[];
-async function mount(state: ClientState, children: ReactNode, path = "/settings/harness", waitingForSnapshot = false) {
-  __setStateForTest(state, waitingForSnapshot ? { state: null, connection: "connecting" } : {});
+async function mount(state: ClientState, children: ReactNode, path = "/settings/harness", waitingForSnapshot: boolean | "closed" = false) {
+  __setStateForTest(state, waitingForSnapshot ? { state: null, connection: waitingForSnapshot === "closed" ? "closed" : "connecting" } : {});
   sent = [];
   __setBridgeForTest({
     appVersion: "test", platform: "test", connect: () => {}, subscribe: () => {},
@@ -481,4 +481,14 @@ describe("round-64 harness regressions (#1154)", () => {
     assert.equal(select("Language model").value, CLAUDE);
     assert.match(container.textContent!, /THIS TURN/);
   });
+});
+
+it("shows one startup warning and the bundled version on a closed desktop connection", async () => {
+  const previous = window.arke;
+  window.arke = { appVersion: "0.5.49" } as typeof window.arke;
+  try {
+    await mount(modelState(), <Routes><Route path="/settings" element={<SettingsLayout />}><Route path="harness" element={<SettingsHarnessScreen />} /></Route></Routes>, "/settings/harness", "closed");
+    assert.equal(container.textContent!.split("Starting Arke Studio").length - 1, 1);
+    assert.equal(container.querySelector(".fy-settings__version")?.textContent, "v0.5.49");
+  } finally { window.arke = previous; }
 });
