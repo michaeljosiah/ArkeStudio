@@ -55,7 +55,7 @@ function emptyGenesis(): StoreState["genesis"][string] {
  * as the coordinator's read model. View state (tabs, panels) stays in components.
  */
 
-export type ConnectionStatus = "connecting" | "open" | "closed";
+export type ConnectionStatus = "connecting" | "open" | "closed" | "auth-refused";
 
 /** The last blocked-accept notice per proposal (SPEC-004): why it did not land, and what to offer. */
 export interface GateNotice {
@@ -2015,7 +2015,7 @@ function handleStatus(status: ConnectionStatus): void {
 }
 
 /** Dev fallback: the same bridge surface over a plain WebSocket to the dev coordinator. */
-function devBridge(url: string): ArkeBridge {
+export function devBridge(url: string): ArkeBridge {
   let socket: WebSocket | null = null;
   let onFrame: ((json: string) => void) | null = null;
   let onStatus: ((s: ConnectionStatus) => void) | null = null;
@@ -2028,9 +2028,9 @@ function devBridge(url: string): ArkeBridge {
       onStatus?.("connecting");
       socket = new WebSocket(url);
       socket.addEventListener("open", () => onStatus?.("open"));
-      socket.addEventListener("close", () => {
+      socket.addEventListener("close", (event) => {
         socket = null;
-        onStatus?.("closed");
+        onStatus?.(event.code === 1008 && event.reason === "session authentication required" ? "auth-refused" : "closed");
       });
       socket.addEventListener("message", (e) => {
         if (typeof e.data === "string") onFrame?.(e.data);

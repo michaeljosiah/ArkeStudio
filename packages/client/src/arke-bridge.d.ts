@@ -15,7 +15,7 @@ export interface ArkeBridge {
   send(json: string): void;
   subscribe(
     onFrame: (frameJson: string) => void,
-    onStatus: (status: "connecting" | "open" | "closed") => void,
+    onStatus: (status: "connecting" | "open" | "closed" | "auth-refused") => void,
   ): void;
   onActivateActivity?(listener: () => void): () => void;
   setHostTheme?(preference: ThemePreference): void;
