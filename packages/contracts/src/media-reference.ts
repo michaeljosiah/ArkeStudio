@@ -27,7 +27,9 @@ export function referenceInputProblem(model: ManifestModel, params: Record<strin
     if (images + videos + audio.length > (model.limits.maxCombinedReferences ?? Infinity)) return "Too many combined references.";
     if (videos > (model.accepts.referenceVideos ?? 0)) return "Too many video references.";
     const duration = media.data.filter(ref => ref.kind === "video").reduce((sum, ref) => sum + ref.durationSec, 0);
-    if (videos && (duration < (model.limits.minReferenceVideoSec ?? 0) || duration > (model.limits.maxReferenceVideoSec ?? Infinity)))
+    // The planner validates a carried predecessor; its bytes are resolved separately from
+    // Bench bindings. Do not treat that absent binding as a zero-second clip here.
+    if (videos && ((!params.continuedFrom && duration < (model.limits.minReferenceVideoSec ?? 0)) || duration > (model.limits.maxReferenceVideoSec ?? Infinity)))
       return "Video references exceed the route's combined duration limits.";
   }
   if (model.limits.referenceSyntax === "minimax-h3" && images + videos + audio.length === 0) return "H3 Reference Video needs at least one image, video or audio reference.";

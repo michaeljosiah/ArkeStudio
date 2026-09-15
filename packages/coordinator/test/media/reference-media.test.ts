@@ -98,4 +98,11 @@ test("Seedance probes dimensions before dispatch, retains bytes and refuses out-
   await assert.rejects(prepareReferences(store, { params: {} } as Job, model, [
     { ...input, contentType: "video/mp4" }, { ...input, contentType: "video/mp4" },
   ], { probe }, signal), /combined duration/);
+  durationSec = 4;
+  const continued = await prepareReferences(store, { params: { continuedFrom: "previous-take", videoReferences: ["stage.mp4"],
+    referenceMedia: [{ kind: "video", file: "stage.mp4", hash: createHash("sha256").update(input.data).digest("hex"), durationSec: 4 }],
+  } }, model, [
+    { contentType: "video/mp4", data: Uint8Array.from([3, 4]) }, { ...input, contentType: "video/mp4" },
+  ], { probe }, signal);
+  assert.equal(continued.videos.length, 2, "the predecessor is probed separately from the reviewed Bench binding");
 });

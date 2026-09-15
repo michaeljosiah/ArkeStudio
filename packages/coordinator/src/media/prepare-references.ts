@@ -14,7 +14,7 @@ export async function validateSeedanceReferences(store: WorldStore, params: Job[
   const paths = params.videoReferences ?? [];
   if (!Array.isArray(paths) || !paths.every(path => typeof path === "string")) throw new Error("Invalid video reference paths.");
   const videos = await readContainedVideoReferences(store.dir, paths);
-  await prepareReferences(store, { params }, model, videos, { probe }, AbortSignal.timeout(60_000));
+  await prepareReferences(store, { params: { ...params, continuedFrom: undefined } }, model, videos, { probe }, AbortSignal.timeout(60_000));
 }
 
 export async function prepareReferences(store: WorldStore, job: Pick<Job, "params">, model: ManifestModel | undefined,
@@ -24,12 +24,13 @@ export async function prepareReferences(store: WorldStore, job: Pick<Job, "param
     const bindings = ReferenceMediaBindingsSchema.parse(job.params.referenceMedia ?? []);
     const videoBindings = bindings.filter(ref => ref.kind === "video");
     const paths = Array.isArray(job.params.videoReferences) ? job.params.videoReferences : [];
-    if (job.params.referenceMedia !== undefined && (videoBindings.length !== videos.length ||
+    const predecessorCount = job.params.continuedFrom ? 1 : 0;
+    if (job.params.referenceMedia !== undefined && (videoBindings.length + predecessorCount !== videos.length ||
         videoBindings.length !== paths.length || videoBindings.some((ref, index) => ref.file !== paths[index])))
       throw new Error("Video reference order changed.");
     const checked = [];
     for (const [index, video] of videos.entries()) {
-      const binding = videoBindings[index];
+      const binding = videoBindings[index - predecessorCount];
       if (binding && !referenceHash(video.data).replace(/^sha256:/, "").startsWith(binding.hash.replace(/^sha256:/, ""))) throw new Error("Reference media changed since review.");
       checked.push(await checkSeedanceVideo(video, model, tools.probe, signal));
       if (binding && Math.abs(checked[index]!.durationSec! - binding.durationSec) > 0.15) throw new Error("Video duration changed since review.");

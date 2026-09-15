@@ -28,6 +28,7 @@ for (const id of ["seedance-2.0", "seedance-2.0-fast", "seedance-2.5"]) {
       return Response.json({ request_id: "reference" });
     });
     assert.equal(referenceInputProblem(model, {}), null, "text-only generation needs no references");
+    assert.equal(referenceInputProblem(model, { continuedFrom: "previous-take" }), null, "a carried predecessor has no Bench media binding");
     const media = [{ kind: "video", file: "stage.mp4", hash, durationSec: 4 }, { kind: "audio", file: "sound.wav", hash, durationSec: 2 }];
     const prompt = referencePrompt("Use @video1 with @Audio1 and @Image1.", model);
     assert.equal(prompt, "Use @Video1 with @Audio1 and @Image1.");
