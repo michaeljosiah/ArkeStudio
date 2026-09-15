@@ -333,7 +333,7 @@ describe("the generate dialog (SPEC-036 R-15, R-16)", () => {
     assert.match(dialog.querySelector(".fy-swgen__packing-head")?.textContent ?? "", /^Packing2 shots → 1 board15s clip limit$/);
     assert.match(dialog.querySelector(".fy-swgen__board-head")?.textContent ?? "", /^Board Ashots 12–1310\.0s \/ 15s$/);
     assert.match(dialog.querySelector(".fy-swgen__board-foot")?.textContent ?? "", /5\.0s spare/);
-    assert.match(dialog.querySelector(".fy-swgen__packing .fy-swgen__hint")?.textContent ?? "", /^Boards break at the clip limit/);
+    assert.equal(dialog.querySelector(".fy-swgen__packing .fy-swgen__hint"), null, "instruction captions remain off the dialog (#1093)");
     assert.match(dialog.querySelector('[aria-label="Image model"] [aria-checked="true"]')?.textContent ?? "", /^Frame image1536×864 · 4 refs$/);
     const context = dialog.querySelector(".fy-swgen__context")?.textContent ?? "";
     assert.match(context, /^applies the scene context · .*16:9$/);

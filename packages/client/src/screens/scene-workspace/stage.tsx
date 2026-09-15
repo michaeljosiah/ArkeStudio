@@ -1110,7 +1110,7 @@ export function SceneStage({
 
         <aside className="fy-swstage__panel" aria-label="Stage inspector">
           {working === null ? (
-            <p className="fy-swstage__note">Stage the shot to place the cast, put down the set and start a camera move.</p>
+            <p className="fy-swstage__note">Nothing staged yet.</p>
           ) : (
             <>
               {/* The stage list (turn 144): what is on the stage, one line each with its state. A press

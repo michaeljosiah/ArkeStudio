@@ -406,9 +406,7 @@ export function FirstRunScreen() {
                 <Plus size={22} />
               </div>
               <div className="fy-createcard__title">Your first world</div>
-              <div className="fy-createcard__sub">
-                A name and a sentence are enough. We'll hold everything it becomes.
-              </div>
+
               <div style={{ marginTop: 4 }}>
                 <Button variant="primary">Create a world</Button>
               </div>
@@ -1880,11 +1878,9 @@ export function SettingsAppearanceScreen() {
       <div className="fy-appearance__theme">
         <div className="fy-appearance__copy">
           <h2 className="fy-appearance__title">Theme</h2>
-          <p id="appearance-theme-description" className="fy-appearance__description">
-            Choose how the Arke Studio window looks.
-          </p>
+
         </div>
-        <fieldset className="fy-theme-options" aria-describedby="appearance-theme-description">
+        <fieldset className="fy-theme-options">
           <legend className="fy-sr-only">Theme</legend>
           {APPEARANCE_OPTIONS.map((option) => (
             <label key={option.preference} className="fy-theme-option">
@@ -2443,9 +2439,6 @@ export function SettingsAboutScreen() {
         <div className="fy-set__name fy-set__name--wide">
           <div className="fy-set__title">Updates</div>
           <div className="fy-set__caps">{updateCopy}</div>
-          {(update?.status === "ready" || update?.status === "install-on-close") && (
-            <div className="fy-set__note">Install when I close will not reopen Arke Studio.</div>
-          )}
         </div>
         {update?.status === "available" && (
           <Button variant="primary" onClick={() => downloadUpdate()}>
@@ -2457,7 +2450,7 @@ export function SettingsAboutScreen() {
             <Button variant="primary" onClick={() => installUpdateAndRestart()}>
               Install and restart
             </Button>
-            <button type="button" className="fy-set__link" onClick={() => installUpdateOnClose()}>
+            <button type="button" className="fy-set__link" title="Install on close without reopening Arke Studio" onClick={() => installUpdateOnClose()}>
               Install when I close
             </button>
           </>

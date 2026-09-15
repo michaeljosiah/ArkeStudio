@@ -401,6 +401,10 @@ export async function addBenchReference(
   // offer capacity it cannot state.
   if (model === null) return { outcome: "refused", reason: "choose a model first" };
 
+  if (resolved.kind === "video" && model.limits.referenceSyntax === "seedance" && !/\.(mp4|m4v|mov)$/i.test(resolved.path)) {
+    return { outcome: "refused", reason: "Seedance video references must be MP4 or MOV." };
+  }
+
   if (lane === "keyframe") {
     // Frames are not budgeted references — the lane's ceiling is the frame task modes' own,
     // and the plan that admits the pick is the plan dispatch will re-run (issue 305 §3).

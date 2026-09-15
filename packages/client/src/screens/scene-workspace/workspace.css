@@ -285,3 +285,10 @@
   :where([data-screen="scene-detail"]) .fy-swrow__body { grid-column: 2; padding-left: 0; }
   :where([data-screen="scene-detail"]) .fy-swrow__actions { grid-column: 2; padding-left: 0; }
 }
+
+/* Issue 1095: expand real controls, avoiding invisible hit areas over adjacent content. */
+:where([data-screen="scene-detail"]) .fy-swrow__timing > button { min-width: 44px; min-height: 44px; }
+:where([data-screen="scene-detail"]) .fy-swdivider { height: 44px; }
+:where([data-screen="scene-detail"]) .fy-swdivider button { min-width: 44px; min-height: 44px; justify-content: center; }
+/* Issue 1094: enter and leave use the Stage's approved 32px surface. */
+.fy-sw .fy-sw__full, .fy-sw .fy-sw__fullexit { width: 32px; height: 32px; box-sizing: border-box; padding: 0; display: inline-grid; place-items: center; border: 1px solid var(--border); border-radius: 8px; background: var(--secondary); color: var(--foreground); }

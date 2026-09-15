@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { linearizeSceneFlow, orderedShots, SceneRecordSchema, type SceneRecord, type ShotStaging } from "@arke-studio/contracts";
 import {
@@ -978,4 +978,40 @@ describe("edit-scene writes the place and the cast, and refuses a place the worl
     );
     assert.equal((await sceneOnDisk(store)).version, before.version);
   });
+});
+
+for (const action of ["remove", "rename", "clear-group", "clear-blocking"] as const)
+it(`refuses ${action} shared blocking that would strand another shot's camera (#1105)`, async () => {
+  const { dir, store } = await open();
+  const before = await sceneOnDisk(store);
+  const [first, second] = orderedShots(before);
+  assert.ok(first && second);
+  const shared = { cast: [], sets: [{ name: "Cart", group: "cart", x: 0, z: 0, w: 1, h: 1, d: 1 }] };
+  await applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID,
+    baseVersion: before.version, command: { kind: "edit-stage", shotId: first.id, blocking: shared,
+      staging: { keys: [{ t: 0, p: [0, 1.5, 3], l: [0, 1.2, 0], anchor: "cart" }] } } });
+  const staged = await sceneOnDisk(store);
+  const print = await worldPrint(dir);
+  const blocking = action === "clear-blocking" ? null : { ...shared, sets: action === "remove" ? []
+    : shared.sets.map(set => ({ ...set, group: action === "rename" ? "wagon" : undefined })) };
+  await assert.rejects(applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID,
+    baseVersion: staged.version, command: { kind: "edit-stage", shotId: second.id, blocking } }),
+    new RegExp(`shot ${first.number}`, "i"));
+  assert.equal(await worldPrint(dir), print, "a refused shared edit writes nothing");
+  if (action === "remove") {
+    // A complete shot override does not inherit the scene group being removed.
+    await applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID,
+      baseVersion: staged.version, command: { kind: "edit-stage", shotId: first.id, blocking,
+        staging: { cast: [], sets: shared.sets, keys: [{ t: 0, p: [0, 1.5, 3], l: [0, 1.2, 0], anchor: "cart" }] } } });
+    const privateScene = await sceneOnDisk(store);
+    assert.equal(privateScene.blocking?.sets.length, 0);
+    orderedShots(privateScene)[0]!.staging!.keys[0]!.anchor = "missing-private-group";
+      privateScene.version += 1;
+    await writeFile(join(dir, "productions", PRODUCTION, "scenes", `${SCENE}.json`), JSON.stringify(privateScene));
+    await applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID,
+      baseVersion: privateScene.version, command: { kind: "edit-stage", shotId: second.id,
+        blocking: { cast: [{ sheetId: "maren-kest", x: 1, z: 0 }], sets: [] } } });
+    assert.equal(orderedShots(await sceneOnDisk(store))[0]!.staging!.keys[0]!.anchor, "missing-private-group",
+      "unrelated invalid private staging does not block shared editing or get rewritten");
+  }
 });

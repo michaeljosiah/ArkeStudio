@@ -547,7 +547,6 @@ export function AudioClipSettings({ clip, track, disabled, onCommands }: {
         {roles.map(([role, label]) => <option key={role} value={role}>{label}</option>)}
       </select>
     </label>
-    <p className="fy-cutinspect__note">The track default applies to future clips. This clip keeps its own role.</p>
   </div>;
 }
 
