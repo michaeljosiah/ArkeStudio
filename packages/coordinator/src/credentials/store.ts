@@ -39,7 +39,7 @@ function isStringRecord(value: unknown): value is Record<string, string> {
 }
 
 /** Reset the file's ACL to the current user alone, inherited permissions removed (R-5). */
-async function lockDownAcl(path: string): Promise<void> {
+export async function lockDownAcl(path: string): Promise<void> {
   if (process.platform === "win32") {
     const user = `${process.env["USERDOMAIN"] ?? "."}\\${process.env["USERNAME"] ?? ""}`;
     await execFileAsync("icacls.exe", [path, "/inheritance:r", "/grant:r", `${user}:F`], {

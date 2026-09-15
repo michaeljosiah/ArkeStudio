@@ -24,7 +24,8 @@ import {
   ChildSupervisor,
   ComfyUiEngineService,
   Coordinator,
-  createStudioCoordinator,
+  createStudioHost,
+  type StudioServer,
   AppSettingsFile,
   defaultAppRoot,
   FsWorldProvider,
@@ -193,6 +194,7 @@ function fetchedHiggsfieldPath(appRoot: string): string | null {
 }
 
 let coordinator: Coordinator | null = null;
+let studioServer: StudioServer | null = null;
 let window: BrowserWindow | null = null;
 let shuttingDown = false;
 let allowQuit = false;
@@ -1131,7 +1133,7 @@ async function initialize(): Promise<{ port: number }> {
   });
 
   const transportToken = randomBytes(32).toString("hex");
-  coordinator = createStudioCoordinator({
+  const studioHost = createStudioHost({
     transportAuth: { token: transportToken, allowedOrigins: desktopTransportOrigins(process.env.ARKE_DEV_SERVER_URL) },
     provider,
     adapter,
@@ -1445,6 +1447,8 @@ async function initialize(): Promise<{ port: number }> {
       if (event.type === "appearance.changed") applyHostTheme(event.preference);
     },
   });
+  coordinator = studioHost.coordinator;
+  studioServer = studioHost.server;
   startupProvider = null;
 
   // Both children are allowed to be absent: the app opens, browses and navigates regardless,
@@ -1452,7 +1456,7 @@ async function initialize(): Promise<{ port: number }> {
   if (opencodeSupervisor) coordinator.superviseAs("harness", opencodeSupervisor);
   coordinator.superviseAs("voice", voxaSupervisor);
 
-  const { port } = await coordinator.start(0);
+  const { port } = await studioServer.start(0);
   transportSession = { port, token: transportToken };
   void updateController.initialize();
   backgroundNotifications.arm(coordinator.getState());
@@ -1473,7 +1477,7 @@ async function shutdownConfirmed(): Promise<void> {
   backgroundNotifications.stop();
   const stop = (async () => {
     try {
-      await (coordinator?.stop() ?? startupProvider?.close() ?? Promise.resolve());
+      await (studioServer?.stop() ?? startupProvider?.close() ?? Promise.resolve());
     } finally {
       await closeProviderTransport();
     }
@@ -1509,9 +1513,10 @@ if (!gotLock) {
     startupController = new StartupController({
       initialize,
       cleanup: async () => {
-        const started = coordinator;
+        const started = studioServer;
         const provider = startupProvider;
         coordinator = null;
+        studioServer = null;
         startupProvider = null;
         try {
           if (started) await started.stop();

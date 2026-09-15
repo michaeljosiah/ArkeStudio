@@ -2,7 +2,9 @@ export { AppLog } from "./app-log.js";
 export { AppSettingsFile, routingFaults } from "./app-settings.js";
 export { ChangeLog, WriteQueue, type LogRecord } from "./change-log.js";
 export { Coordinator, type CoordinatorOptions } from "./coordinator.js";
-export { createStudioCoordinator } from "./application/studio-host.js";
+export { createStudioCoordinator, createStudioHost } from "./application/studio-host.js";
+export { StudioServer, type StudioServerApplication, type StudioEventSink } from "./studio-server.js";
+export { createNodeStudioHost, type NodeStudioHostOptions } from "./node-studio-host.js";
 export { createStudioStorage } from "./application/studio-composition.js";
 export {
   ARKE_ACTION_REGISTRY,

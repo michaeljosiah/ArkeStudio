@@ -46,6 +46,13 @@ Coordinator `test/harness/stage-model-journey.test.ts` carries a live Stage mode
 
 ## Fixtures and cleanup
 
+Standalone host changes also run coordinator `test/studio-server.test.ts`, existing
+`test/transport.test.ts` and Studio host lifecycle tests. The Node journey uses a copied
+world, disables paid AI, exercises authenticated manuscript download and reopens saved prose.
+Run client `test/manuscript.test.tsx`, `test/image-download.test.tsx`,
+`test/dev-session.test.ts` and `test/dev-session-server.test.ts` for the browser path.
+Desktop composition changes still require the desktop checks below.
+
 Client `test/fixture-state.ts` provides fixture state; navigation samples are in `src/screens/registry.ts`. Read an adjacent screen test for DOM/store setup. Coordinator tests commonly copy world fixtures into temporary directories and inject providers or clocks. Reuse `test/queue/fake-provider.ts` for suitable queue scenarios and adjacent domain helpers rather than calling paid providers in ordinary regression tests.
 
 Close stores, sockets, watchers, timers and supervisors in test cleanup before deleting temporary files. A leaked watcher can leave the runner alive after assertions finish. Fixture data under [fixtures](../../fixtures) also supplies the development/sample world: edit it intentionally and check its consumers, not as disposable test output.

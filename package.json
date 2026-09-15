@@ -18,6 +18,7 @@
   "scripts": {
     "dev": "npm run dev --workspace @arke-studio/client",
     "dev:coordinator": "npm run dev --workspace @arke-studio/coordinator",
+    "server": "npm run server --workspace @arke-studio/coordinator --",
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "node scripts/check-source-text.mjs && node scripts/check-client-policy.mjs && node scripts/check-spec-ids.mjs && node scripts/private-docs.mjs --check && node design-system/check-master.mjs && node design-system/build-review.mjs --check && oxlint packages apps",

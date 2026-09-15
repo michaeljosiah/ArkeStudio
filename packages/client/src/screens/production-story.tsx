@@ -30,6 +30,7 @@ import { ReadAloud } from "../components/read-aloud.js";
 import { PageReadControl, useProsePageRead, type PageReadBlock } from "../components/page-read.js";
 import { Portrait } from "../components/portrait.js";
 import { seconds } from "../lib/format.js";
+import { downloadMedia } from "../lib/download.js";
 import {
   acceptedTakeId,
   useProduction,
@@ -48,6 +49,7 @@ import {
   createScene,
   useExports,
   useStore,
+  useWorld,
   subscribeSceneCreateResults,
   createChapter,
   subscribeChapterCreateResults,
@@ -762,6 +764,8 @@ function ManuscriptExportSheet({
   // reader may refuse, so the press waits until the field is one.
   const languageOk = format !== "epub" || isManuscriptLanguage(language.trim());
   const exportsState = useExports();
+  const world = useWorld();
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const withProse = chapters.filter((c) => (c.words ?? 0) > 0);
   const words = withProse.reduce((sum, c) => sum + (c.words ?? 0), 0);
   const leftOut = chapters.length - withProse.length;
@@ -813,6 +817,15 @@ function ManuscriptExportSheet({
                     Show in folder
                   </button>
                 )}
+                {entry.status === "done" && !hosted && entry.output && world && world.meta.worldId === worldId && (
+                  <button type="button" className="fy-exsheet__chip" onClick={async () => {
+                    setDownloadError(null);
+                    const result = await downloadMedia(world.meta.slug, entry.output!, null, "manuscript");
+                    if (!result.ok && !result.cancelled) setDownloadError(result.reason);
+                  }}>
+                    Download
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -822,6 +835,7 @@ function ManuscriptExportSheet({
             chapters themselves and refuses in these words only when there is truly nothing. */}
         {withProse.length === 0 && <div className="fy-ms__line fy-ms__line--warn">nothing to export · no chapter has prose yet</div>}
         {!languageOk && <div className="fy-ms__line fy-ms__line--warn">language · not a BCP 47 tag</div>}
+        {downloadError && <div role="alert" className="fy-ms__line fy-ms__line--warn">{downloadError}</div>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <Button variant="ghost" onClick={onClose}>
             Cancel
