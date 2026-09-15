@@ -6,6 +6,7 @@ import {
   audioSourceOf,
   pickableArtifacts,
   ulid,
+  type ArtifactAudiobookGeneration,
   type ArtifactGeneration,
   type ArtifactKind,
   type ArtifactSidecar,
@@ -498,10 +499,13 @@ function generatedIdentity(
   }
   if (generation.source === "audiobook") {
     // One take per block per run: the same block read again is a new take with a new job, so
-    // the identity is the job when there is one and the block's words and voice when a local
-    // take was made without the queue — a retry of the same words in the same voice is the
-    // take it already made, never a second copy (SPEC-047 R-4).
-    const made = generation.jobId ?? `${generation.textHash}/${generation.provider}/${generation.model}/${generation.voiceId}`;
+    // the identity is the job when there is one and the block's words, voice and direction
+    // when a local take was made without the queue — a run that ended after the file landed
+    // and before the record took it finds the take it already made, never a second copy. The
+    // direction is in it (issue 1190): a block directed since its take is another reading of
+    // the same words, and the undirected take is not the one to hand back for it.
+    const local = (g: ArtifactAudiobookGeneration) => `${g.textHash}/${g.provider}/${g.model}/${g.voiceId}/${g.directionHash ?? ""}`;
+    const made = generation.jobId ?? local(generation);
     return {
       producedBy: "audiobook",
       isSame: (artifact) =>
@@ -511,7 +515,7 @@ function generatedIdentity(
         artifact.generation.productionId === generation.productionId &&
         artifact.generation.chapterId === generation.chapterId &&
         artifact.generation.block === generation.block &&
-        (artifact.generation.jobId ?? `${artifact.generation.textHash}/${artifact.generation.provider}/${artifact.generation.model}/${artifact.generation.voiceId}`) === made,
+        (artifact.generation.jobId ?? local(artifact.generation)) === made,
       // The chapter and the block, then a short tail so two takes of one block are two files.
       stem: `${slugify(generation.chapterId).slice(0, 40) || "chapter"}-${generation.block.replace(/[^a-z0-9]+/gi, "-")}-${generation.textHash.slice(-6)}`,
       // The chapter it belongs to, and the speaker when a sheet's voice read it.
@@ -560,6 +564,14 @@ export async function fileGeneratedArtifact(
      * character's reference stay the world's, as they were.
      */
     production?: string;
+    /**
+     * A take beside the ones on the shelf, never one of them handed back (SPEC-047 R-4, issue
+     * 1190): a block made again while its kept take is still there gets a new take, the
+     * earlier one standing beneath it in the block's list until it is purged. Without this a
+     * remake of the same words in the same voice — the point of `Make again` — was the old
+     * file returned and the new performance thrown away.
+     */
+    another?: true;
   },
 ): Promise<ArtifactSidecar> {
   const bytes = await readFile(toExtendedLength(input.sourcePath));
@@ -572,7 +584,7 @@ export async function fileGeneratedArtifact(
   const filed = await store.gateOp(async () => {
     // A retired artifact is off the shelf by the person's word: the same identity made again
     // is a new artifact beside it, never the retired one handed back.
-    const existing = store.getBundle().artifacts.find((artifact) => identity.isSame(artifact) && artifact.retiredAt === undefined);
+    const existing = input.another === true ? undefined : store.getBundle().artifacts.find((artifact) => identity.isSame(artifact) && artifact.retiredAt === undefined);
     if (existing) {
       // The same take filed again is the take already on the shelf — unless its media is gone,
       // as a world carried by hand can lose it: then the file is restored under the sidecar it

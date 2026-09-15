@@ -120,6 +120,12 @@ export interface Speaking extends PlannedBlock {
   format: Format;
   cacheFile: string | null;
   substitutedNow?: AudiobookSubstitution;
+  /**
+   * `Make again` on a block that is made and unchanged (R-30, issue 1190): another performance
+   * of the same words, so neither cache — the speech cache nor a cloud line's — may stand in
+   * for the reading, and the take goes beside the kept one rather than in its place (R-4).
+   */
+  remake: boolean;
 }
 
 /** MP3 frames concatenate; a later part's ID3v2 tag would not, so it is dropped (R-5). */
@@ -260,6 +266,7 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
     const local = reader.provider === "kokoro";
     const format = voiceFormatForModel(model);
     const source = voiceSourceFor(clonedVoices, reader.provider, reader.model, reader.voiceId);
+    const remake = only !== undefined && planned.state === "made";
     speaking.push({
       ...planned,
       ...(substitutedNow !== undefined ? { substitutedNow } : {}),
@@ -272,10 +279,12 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
       direction,
       parts,
       format,
+      remake,
       // A whole block already in the cache is adopted without a call (R-19); parts are never
-      // cached as a block, so a block over the cap is always made, and the cache holds no
-      // direction, so a directed block never comes from it.
-      cacheFile: local || parts.length > 1 || direction !== null ? null : speechCacheFile({ provider: model.provider, model: model.id, voiceId: reader.voiceId, text, format }),
+      // cached as a block, so a block over the cap is always made, the cache holds no
+      // direction, so a directed block never comes from it, and a block made again unchanged
+      // is another performance, not the cached one handed back (issue 1190).
+      cacheFile: local || parts.length > 1 || direction !== null || remake ? null : speechCacheFile({ provider: model.provider, model: model.id, voiceId: reader.voiceId, text, format }),
     });
   }
 
@@ -419,10 +428,18 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
         ? { directionHash: block.direction.hash, delivery: block.direction.delivery, providerTextHash: audioHash(Buffer.from(block.direction.rendered)) }
         : {}),
     };
+    // A block whose kept take is still on the shelf is being made again (SPEC-047 R-4, issue
+    // 1190): the new take goes beside the old one, which stands in the block's list until it
+    // is purged. A block with no take, or whose take's media is gone, takes the shelf's own
+    // rule instead — the same words, voice and direction already filed are the take it made
+    // before the record could say so, or the sidecar its restored file belongs under.
+    const kept = record.takes[block.block.key];
+    const another = kept !== undefined && plan.present.has(kept.artifactId);
     return fileGeneratedArtifact(store, {
       sourcePath,
       generation,
       production: productionId,
+      ...(another ? { another: true as const } : {}),
       ...(deps.mediaProbe !== undefined ? { mediaProbe: deps.mediaProbe } : {}),
       abandoned: () => signal.aborted,
     });
@@ -483,10 +500,12 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           await flag(block, block.refusal);
           continue;
         }
-        if (block.local && block.direction !== null) {
+        if (block.local && (block.direction !== null || block.remake)) {
           // A directed local block is a fresh synthesis with the direction's settings (R-6):
-          // the speech cache keys on the words alone, so it can neither serve nor keep one.
-          const made = await deps.synthesizeLocal(block.reader.voiceId, block.direction.rendered, block.direction.voiceSettings, signal);
+          // the speech cache keys on the words alone, so it can neither serve nor keep one. So
+          // is a block made again unchanged (issue 1190): the cache would hand back the very
+          // take being remade.
+          const made = await deps.synthesizeLocal(block.reader.voiceId, block.direction?.rendered ?? block.text, block.direction?.voiceSettings ?? {}, signal);
           if (signal.aborted) break;
           const sourcePath = join(store.dir, fromPortable(`${landingDir}/${block.block.key.replace(/[^a-z0-9]+/gi, "-")}-directed.${block.format}`));
           await atomicWriteFile(sourcePath, made.audio);

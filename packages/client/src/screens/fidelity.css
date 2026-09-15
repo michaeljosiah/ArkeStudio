@@ -8590,6 +8590,9 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
    reading's seg, a row's state as data, a 4px read bar. */
 .fy-abdoor__voices { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 14px; }
 .fy-abdoor__voice { display: inline-flex; flex-direction: column; gap: 1px; padding: 5px 10px; border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
+/* A chip that goes somewhere — the narrator to Settings, a speaker to their voice page — presses; one that names nothing to set is plain (issue 1191). */
+button.fy-abdoor__voice { background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: var(--transition-control); }
+button.fy-abdoor__voice:hover { background: var(--accent); border-color: var(--neutral-400); }
 .fy-abdoor__voice--warn { border-color: var(--warning); }
 .fy-abdoor__voice--warn .fy-abdoor__voice-what { color: var(--warning); }
 .fy-abdoor__voice-name { font: 500 12px var(--font-sans); color: var(--foreground); }

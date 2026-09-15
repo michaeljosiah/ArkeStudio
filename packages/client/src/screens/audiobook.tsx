@@ -82,8 +82,13 @@ export function useChapterReading(worldId: string | undefined, prodId: string | 
   return Object.entries(runs).some(([key, run]) => key.startsWith(`${worldId}/${prodId}/`) && run.state === "reading");
 }
 
-/** The voices row (R-12): who reads, in what, or why the narrator does instead. */
-function VoiceChip({ name, voice, state, blocks }: { name: string; voice?: { label: string; provider: string; local: boolean }; state: string; blocks: number }) {
+/**
+ * The voices row (R-12): who reads, in what, or why the narrator does instead. A chip goes to
+ * where its voice is set (issue 1191) — the narrator's to Settings, a speaker's to their voice
+ * page — and one with nowhere to go, the unattributed lines, is plain.
+ */
+function VoiceChip({ name, voice, state, blocks, to }: { name: string; voice?: { label: string; provider: string; local: boolean }; state: string; blocks: number; to?: string }) {
+  const navigate = useNavigate();
   const warn = state === "no voice" || state === "voice unavailable";
   const what =
     state === "narrator"
@@ -91,13 +96,23 @@ function VoiceChip({ name, voice, state, blocks }: { name: string; voice?: { lab
       : state === "reads" && voice !== undefined
         ? `${voice.label} · ${voice.provider}`
         : `${state} · narrator`;
-  return (
-    <span className={cx("fy-abdoor__voice", warn && "fy-abdoor__voice--warn")} data-testid="audiobook-voice" data-state={state}>
+  const inside = (
+    <>
       <span className="fy-abdoor__voice-name">{name}</span>
       <span className="fy-abdoor__voice-what fy-mono">
         {what} · {blocks} block{blocks === 1 ? "" : "s"}
       </span>
+    </>
+  );
+  const className = cx("fy-abdoor__voice", warn && "fy-abdoor__voice--warn");
+  return to === undefined ? (
+    <span className={className} data-testid="audiobook-voice" data-state={state}>
+      {inside}
     </span>
+  ) : (
+    <button type="button" className={className} data-testid="audiobook-voice" data-state={state} onClick={() => navigate(to)}>
+      {inside}
+    </button>
   );
 }
 
@@ -261,7 +276,14 @@ export function AudiobookScreen() {
           </button>
         </nav>
         {(door?.voices ?? []).map((voice) => (
-          <VoiceChip key={`${voice.sheet ?? ""}:${voice.name}`} name={voice.name} voice={voice.voice} state={voice.state} blocks={voice.blocks} />
+          <VoiceChip
+            key={`${voice.sheet ?? ""}:${voice.name}`}
+            name={voice.name}
+            voice={voice.voice}
+            state={voice.state}
+            blocks={voice.blocks}
+            to={voice.state === "narrator" ? "/settings/general" : voice.sheet !== undefined ? `/w/${worldId}/cast/${encodeURIComponent(voice.sheet)}/voice` : undefined}
+          />
         ))}
         {door !== null && door.unattributed > 0 && <VoiceChip name="unattributed" state="no voice" blocks={door.unattributed} />}
       </div>
