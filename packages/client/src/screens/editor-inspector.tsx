@@ -19,7 +19,6 @@ import {
   type TimelineTrack,
   type ArtifactSidecar,
 } from "@arke-studio/contracts";
-import { clock } from "../components/player.js";
 import { reviewableTakesForShot } from "../lib/selectors.js";
 import {
   PictureClipTiming,
@@ -30,7 +29,7 @@ import { ClipGain, MixPanel, AudioClipSettings } from "./editor-audio.js";
 import { CueInspector, SubtitleSources } from "./editor-subtitles.js";
 import { TrimStrip } from "./editor-preview.js";
 
-export type CutSelection = { kind: "picture"; id: string } | { kind: "overlay"; id: string } | { kind: "cue"; id: string };
+export type CutSelection = { kind: "picture"; id: string } | { kind: "cue"; id: string };
 
 function InspectorRow({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -103,13 +102,6 @@ export function CutInspector({
   if (selectedCue !== null && production) {
     return <CueInspector track={selectedCue.track} cue={selectedCue.cue} frameRate={frameRate} production={production} disabled={commandsDisabled} onCommands={onCommands} />;
   }
-  const selectedOverlay =
-    selection?.kind === "overlay"
-      ? (production?.cut.overlays.find((clip) => clip.id === selection.id) ?? null)
-      : null;
-  const overlayArtifact = selectedOverlay
-    ? (artifacts.find((artifact) => artifact.id === selectedOverlay.artifactId) ?? null)
-    : null;
   const selectedSpine =
     selection?.kind === "picture"
       ? (spineCut?.segments.find(
@@ -137,29 +129,6 @@ export function CutInspector({
   const takeSec = selectedTakeId
     ? production?.takeMediaInfo[selectedTakeId]?.mediaInfo.durationSec
     : undefined;
-
-  if (selectedOverlay) {
-    const mode = selectedOverlay.audio ?? "keep";
-    return (
-      <div className="fy-cutinspect">
-        <div className="fy-cutinspect__eyebrow">OVERLAY CLIP</div>
-        <h2>{overlayArtifact?.file.split("/").pop() ?? "Missing artifact"}</h2>
-        <div className="fy-cutinspect__rows">
-          <InspectorRow label="Source">{overlayArtifact?.file ?? selectedOverlay.artifactId}</InspectorRow>
-          <InspectorRow label="Type">{overlayArtifact?.kind ?? "missing"}</InspectorRow>
-          <InspectorRow label="In">{clock(selectedOverlay.startSec)}</InspectorRow>
-          <InspectorRow label="Out">{clock(selectedOverlay.endSec)}</InspectorRow>
-          <InspectorRow label="Duration">
-            {(selectedOverlay.endSec - selectedOverlay.startSec).toFixed(1)}s
-          </InspectorRow>
-          <InspectorRow label="Lane">Overlay L{selectedOverlay.lane ?? 0}</InspectorRow>
-          <InspectorRow label="Sound">
-            {mode === "only" ? "sound only" : mode === "mute" ? "muted" : "kept where supported"}
-          </InspectorRow>
-        </div>
-      </div>
-    );
-  }
 
   if (selectedClip && selectedTrack && selectedTrack.kind !== "picture" && production) {
     const label = selectedClip.source.label;

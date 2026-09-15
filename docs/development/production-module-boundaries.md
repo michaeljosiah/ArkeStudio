@@ -79,22 +79,26 @@ an import.
 
 ## Keep the editor and story boundaries for now
 
-**Cut:** its render-plan derivation is memoised, but still assembled in the screen alongside
-preview state, source lengths and playback spans. The shortcut block reads current selection,
-command availability and action refs. Extracting that block cannot turn a roughly 1,500-line
-component into an 800-line module, and extracting arbitrary hook groups would introduce a
-large argument surface. Handle render-plan ownership in
-[1158](https://github.com/michaeljosiah/ArkeStudio/issues/1158), then reassess the remaining
-component using the resulting dependencies. Preserve optimistic timeline state and command
-acknowledgement order throughout.
+**Cut:** the render plan is now derived by `useRenderPlan` in `editor-plan.ts`
+([1158](https://github.com/michaeljosiah/ArkeStudio/issues/1158), 2026-09-15), from the
+production snapshot, the catalog, the timeline state, the record the editor edits and the
+subtitle choice — the transport's clock is not an input. The record itself comes from
+`lib/editor-timeline.ts`, memoised in the screen on the snapshot and the catalog. The shortcut
+block still reads current selection, command availability and action refs; extracting it cannot
+turn the component into an 800-line module, and extracting arbitrary hook groups would introduce
+a large argument surface. Reassess the remaining component against those dependencies. Preserve
+optimistic timeline state and command acknowledgement order throughout.
 
 **Library:** ArtifactPanel has its own search/filter state, foreign-world browsing subscriptions
 and locate bookkeeping, while Cut owns pending imports and the mutation callbacks.
 AddToLibraryDialog already has an independent component boundary; moving its roughly 120
-lines now offers little benefit. First resolve
-[1157](https://github.com/michaeljosiah/ArkeStudio/issues/1157), including which state survives
-closing and reopening the library. Retiring the separate legacy ClipLanes path remains
-[1159](https://github.com/michaeljosiah/ArkeStudio/issues/1159).
+lines now offers little benefit.
+[1157](https://github.com/michaeljosiah/ArkeStudio/issues/1157) (2026-09-15) settled which state
+survives closing: all of the panel's own — the search, the filters, the picked row, the browsed
+shelf and Locate's bookmark — because the guard sits inside the component after its hooks, and a
+closed drawer renders only its shell. The separate legacy ClipLanes path was retired in
+[1159](https://github.com/michaeljosiah/ArkeStudio/issues/1159): legacy placements are folded in
+memory into the record the editor edits until the first write saves that fold.
 
 **Story:** retain the shared creation hooks/contexts, overview, chapter tree and manuscript
 sheets. The export/import sheets are plausible future moves because they already receive

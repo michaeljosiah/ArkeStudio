@@ -1,22 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 import {
+  CLIP_DEFAULT_SEC,
   deriveCut,
-  exportAudioClips,
-  exportOverlays,
-  mediaCanvasSec,
   MEDIA_CANVAS_HEADROOM_SEC,
-  placedExtentSec,
   type MediaDestination,
   productionFrameRate,
+  type ProductionTimeline,
   resolvePictureTimeline,
-  seedFirstPictureTimeline,
   previewEditorRequest,
   editorRequestStaleness,
   timelineSourceFingerprint,
   storyTimelineFingerprint,
   type FrameRate,
-  type ProductionTimeline,
   type ResolvedPictureCut,
   type TimelineChangeHistoryEntry,
   type Shot,
@@ -29,8 +25,6 @@ import {
   basePictureTrack,
   mediaPlacementCommands,
   newAudioTrack,
-  migrateLegacyCut,
-  buildRenderPlan,
   orderedTrackClips,
   secondsToFrames,
   sourceLengthFramesFor,
@@ -77,9 +71,7 @@ import {
 } from "../lib/selectors.js";
 import { spineSpans } from "../lib/cut-playback.js";
 import { planSpans } from "../lib/plan-playback.js";
-import {
-  snapPointsFor,
-} from "../lib/clip-drag.js";
+import { editorTimeline } from "../lib/editor-timeline.js";
 import {
   PictureTrack,
   pictureClipViews,
@@ -104,13 +96,13 @@ import {
   subscribeTimelineRefusals,
 } from "../lib/store.js";
 import { storyShotCount } from "./production-story.js";
-import { CLIP_DEFAULT_SEC, ClipLanes } from "./editor-legacy-lanes.js";
-import { type PendingImport, type LibraryFilter, ArtifactPanel, AddToLibraryDialog } from "./editor-library.js";
+import { type PendingImport, type LibraryFilter, ArtifactPanel, AddToLibraryDialog, LIBRARY_DRAWER_QUERY } from "./editor-library.js";
 import { seekDrag, CutScrubber, LANE_PRESS_OWNERS, CutPlayhead, useCutTransport } from "./editor-transport.js";
 import { CutPreview } from "./editor-preview.js";
 import { SpineCutTrack, EmptyEditorTrack, NewLaneStrip, SceneBands } from "./editor-tracks.js";
 import { type CutSelection, CutInspector } from "./editor-inspector.js";
 import { ExportSheet, exportViewFor } from "./editor-export.js";
+import { ABSENT_TIMELINE, useRenderPlan } from "./editor-plan.js";
 
 function focusFirstControl(pane: HTMLElement | null): void {
   pane?.querySelector<HTMLElement>("button:not(:disabled), input:not(:disabled), [href], [tabindex='0']")?.focus();
@@ -207,21 +199,40 @@ export function CutScreen() {
   const { connection, state: studio } = useStore();
   const worlds = studio?.worlds ?? [];
   const { world, production } = useProduction(worldId, prodId);
-  const timelineState = production?.timeline ?? { status: "absent" as const };
+  const timelineState = production?.timeline ?? ABSENT_TIMELINE;
   const frameRate: FrameRate = production ? productionFrameRate(production.meta) : 24;
-  let cut: ResolvedPictureCut | null = null;
-  let timelineError: string | null = null;
-  if (production) {
+  /*
+   * The record the editor edits (`lib/editor-timeline.ts`): the saved timeline, or — until the
+   * first write saves one — the fold that write will make, projected in memory so a legacy
+   * placement is already a typed clip with the id the fold reserves for it (issue 1159). Null
+   * for a song not yet opened on the timeline (SPEC-037 A-12) and for an invalid record.
+   *
+   * Memoised on the snapshot and the catalog it is made from, because the plan, the preview's
+   * spans and the monitor mix are keyed on its identity: re-seeding it on the transport's clock
+   * would rebuild all three four times a second (issue 1158). The seed can refuse — a story
+   * order that repeats a shot — and the refusal is the timeline's error, stated below by name.
+   */
+  const worldArtifacts = world?.artifacts;
+  const edited = useMemo((): { timeline: ProductionTimeline | null; dropped: string[]; error: string | null } => {
+    if (!production) return { timeline: null, dropped: [], error: null };
     try {
+      return { ...editorTimeline(production, production.timeline ?? ABSENT_TIMELINE, worldArtifacts ?? []), error: null };
+    } catch (error) {
+      return { timeline: null, dropped: [], error: error instanceof Error ? error.message : String(error) };
+    }
+  }, [production, worldArtifacts]);
+  const editableTimeline = edited.timeline;
+  let cut: ResolvedPictureCut | null = null;
+  let timelineError: string | null = edited.error;
+  if (production && timelineError === null) {
+    try {
+      if (timelineState.status === "invalid") throw new Error(timelineState.message);
       // The song clock derives its picture until its timeline is saved (SPEC-037 §2.3); from then
       // on it reads the saved order like every other production, with the master as a Music clip.
-      if (timelineState.status === "invalid") throw new Error(timelineState.message);
       cut =
-        production.spine && timelineState.status !== "ready"
+        editableTimeline === null
           ? deriveCut(production)
-          : timelineState.status === "absent"
-            ? resolvePictureTimeline(production, { status: "ready", timeline: seedFirstPictureTimeline(production) }, world?.artifacts ?? [])
-            : resolvePictureTimeline(production, timelineState, world?.artifacts ?? []);
+          : resolvePictureTimeline(production, { status: "ready", timeline: editableTimeline }, world?.artifacts ?? []);
     } catch (error) {
       timelineError = error instanceof Error ? error.message : String(error);
     }
@@ -342,7 +353,7 @@ export function CutScreen() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       if (document.querySelector(".fy-clipmenu")) return;
-      if (libraryOpen && editorMediaMatches("(max-width: 1199px)")) {
+      if (libraryOpen && editorMediaMatches(LIBRARY_DRAWER_QUERY)) {
         setLibraryOpen(false);
         queueMicrotask(() => libraryToggleRef.current?.focus());
       } else if (rightOpen && editorMediaMatches("(max-width: 899px)")) {
@@ -356,7 +367,6 @@ export function CutScreen() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [libraryOpen, rightOpen]);
-  const overlays = production?.cut.overlays ?? [];
   /*
    * A production with no story is the clips (issue 453), so they are the clock.
    *
@@ -368,83 +378,27 @@ export function CutScreen() {
    */
   const mediaOnly =
     cut !== null && view.kind === "scene-order" && (production?.scenes ?? []).every((scene) => orderedShots(scene).length === 0);
-  /*
-   * Resolved exactly as the coordinator resolves them, because the screen must not advertise a
-   * film the export will not produce: `exportOverlays` drops a document or a missing artifact and
-   * `exportAudioClips` drops a video not known to carry sound, so measuring raw lane records
-   * would let a document stretched to 60s claim a film that encodes as five seconds.
-   */
   // The production's own view of the world's files (SPEC-020 R-13): another production's scoped media stays out of this Library and picker.
   const artifacts = artifactsForProduction(world?.artifacts ?? [], prodId);
   // A placed file is named the way the Artifacts page names it (issue 1005): by what it is
   // linked to, and by its file only when nothing names it.
   const linkName = useMemo(() => linkNameResolver(world), [world]);
   const nameOf = (artifact: ArtifactSidecar): string => artifactDisplayName(artifact, linkName);
-  const placedPicture = mediaOnly ? exportOverlays(overlays, artifacts) : [];
-  const placedSound = mediaOnly ? exportAudioClips(overlays, artifacts) : [];
   /*
-   * Two lengths. The CANVAS is how much timeline to draw and must extend past the last clip or
-   * there is nowhere to drop the next one; the FILM is how long the thing actually is. Trailing
-   * editing headroom is not part of the film, so it is the film that plays and the film the
-   * header states — presenting the canvas as the runtime would let "Watch from top" run on into
-   * blank editor space the export never emits.
+   * One render plan for the preview and the export (SPEC-038 R-1, issue 680), derived by the
+   * editor's own hook from these inputs and nothing else: the transport's clock is not among
+   * them, so playback reuses the plan and only an authored change rebuilds it (issue 1158).
    */
-  /*
-   * The canvas is measured from the RAW placements, not the resolved ones.
-   *
-   * What the export can use decides how long the film is; what somebody dropped decides how much
-   * timeline they need to reach it. A clip the export drops — a document, or a video not known to
-   * carry sound — is still drawn on a lane, and sizing the canvas without it puts that clip past
-   * 100% where it cannot be selected, moved or deleted. The case is not hypothetical: a cut
-   * becomes media-only the moment its last shot is removed, and any placement inherited from the
-   * old story timeline can sit well beyond the minimum canvas.
-   */
-  /*
-   * One render plan for the preview and the export (SPEC-038 R-1, issue 680). The viewer asks
-   * the plan what is visible; the coordinator hands the same plan to FFmpeg. A production the
-   * plan refuses is a production the export refuses, so the refusal blocks the editor by name.
-   */
-  /*
-   * The preview draws the record the editor edits (decided 2026-09-02): an unsaved story
-   * production previews its empty first state, not the film the story would derive. A production
-   * with no story and legacy placements keeps its legacy preview until the first write folds them.
-   */
-  const previewState: typeof timelineState = useMemo(
-    () =>
-      production && timelineState.status === "absent" && production.spine === null && !mediaOnly
-        ? { status: "ready", timeline: seedFirstPictureTimeline(production) }
-        : timelineState,
-    [production, timelineState.status, mediaOnly],
-  );
-  /*
-   * Memoised, and the identity matters as much as the cost.
-   *
-   * The transport reports four times a second, so this ran four times a second for the whole
-   * length of every film — resolving the picture timeline, building every overlay and merging
-   * the speech regions, none of which had changed. Worse than the work was the churn: the plan
-   * is what the monitor mix, the preview's spans and the cue lookup are keyed on, and a fresh
-   * object each render restarted all three. The sound heard that as four pause/play cycles a
-   * second. The inputs below are the only things the plan is made of, and each of them is either
-   * a snapshot the store replaces or a value the screen chooses.
-   */
-  const planArtifacts = world?.artifacts;
   const subtitleHidden = subtitleTracks.some((track) => track.id === subtitleView && track.muted);
-  const renderPlan = useMemo(
-    () =>
-      production && (!production.spine || timelineState.status === "ready") && timelineError === null
-        ? buildRenderPlan({
-            production,
-            artifacts: planArtifacts ?? [],
-            timeline: previewState,
-            scope: { kind: "production" },
-            preset: "review-cut",
-            // A hidden (muted) track is not asked for: the plan would refuse it and take the whole
-            // preview with it (round nine). Hiding captions leaves the film.
-            ...(subtitleView !== null && !subtitleHidden ? { subtitles: { trackId: subtitleView, mode: "none" as const } } : {}),
-          })
-        : null,
-    [production, planArtifacts, previewState, timelineState.status, timelineError, subtitleView, subtitleHidden],
-  );
+  const { renderPlan } = useRenderPlan({
+    production,
+    artifacts: world?.artifacts,
+    timelineState,
+    timeline: editableTimeline,
+    timelineError,
+    subtitleView,
+    subtitleHidden,
+  });
   /*
    * A plan the projection refuses — a placed artifact the world no longer has, say — blocks the
    * preview and the export by name, and nothing else (SPEC-039 R-39, R-40): the editor stays
@@ -453,15 +407,18 @@ export function CutScreen() {
    */
   const renderError = renderPlan !== null && !renderPlan.ok ? renderPlan.reason : view.kind === "unavailable" && timelineState.status !== "ready" ? view.reason : null;
   const planTotalSec = renderPlan?.ok ? renderPlan.plan.totalSec : null;
-  const timelineOwnsFilm = previewState.status === "ready";
+  /*
+   * Two lengths. The CANVAS is how much timeline to draw and must extend past the last clip or
+   * there is nowhere to drop the next one; the FILM is how long the thing actually is. Trailing
+   * editing headroom is not part of the film, so it is the film that plays and the film the
+   * header states — presenting the canvas as the runtime would let "Watch from top" run on into
+   * blank editor space the export never emits. Both come from the plan, which reads the record
+   * the editor edits; a production with no story keeps room past its last clip for the next one.
+   */
   const canvasSec = spineCut
     ? spineCut.trackDurationSec
-    : mediaOnly && !timelineOwnsFilm
-      ? mediaCanvasSec(overlays)
-      : Math.max(cut?.totalSec ?? 0, planTotalSec ?? 0, mediaOnly ? (planTotalSec ?? 0) + MEDIA_CANVAS_HEADROOM_SEC : 0);
-  // Once the timeline owns the film, the plan's length is the film's; the legacy lanes no
-  // longer say anything about a placement that lives on a typed track.
-  const filmSec = timelineOwnsFilm && planTotalSec !== null ? planTotalSec : mediaOnly ? placedExtentSec([...placedPicture, ...placedSound]) : (planTotalSec ?? canvasSec);
+    : Math.max(cut?.totalSec ?? 0, planTotalSec ?? 0, mediaOnly ? (planTotalSec ?? 0) + MEDIA_CANVAS_HEADROOM_SEC : 0);
+  const filmSec = planTotalSec ?? canvasSec;
   /** Lane layout and scrubbing get the canvas; playback and the readout get the film. */
   const totalSec = canvasSec;
   const transport = useCutTransport(filmSec);
@@ -477,34 +434,11 @@ export function CutScreen() {
     [spineCut, renderPlan],
   );
   /*
-   * What a person placed, which a split does not add to: splitting files a second record over the
-   * same file, and counting both would report two clips for one piece of media still drawn as one
-   * run on the timeline. The sound half is the half that is not counted, because the picture is
-   * the one they dropped.
+   * What a song not yet opened on the timeline still holds in `cut.json`: counted, because the
+   * opening folds it in, and a split is not counted twice — the sound half files a second record
+   * over the same file, which a person dropped once and will see as one clip.
    */
   const legacyClipCount = (production?.cut.overlays ?? []).filter((o) => (o.audio ?? "keep") !== "only").length;
-  const snapPoints = snap
-    ? snapPointsFor(
-        spans.map((s) => s.startSec),
-        totalSec,
-      )
-    : [];
-  /*
-   * The song clock keeps its own screen until it is opened on the timeline (SPEC-037 A-12):
-   * a seeded assembly under controls that draw a different track would edit clips nobody can
-   * see. Opening it is one explicit action below; from then on the saved record is the editor.
-   */
-  let editableTimeline: ProductionTimeline | null = null;
-  if (production && timelineState.status !== "invalid") {
-    try {
-      editableTimeline =
-        timelineState.status === "ready" ? timelineState.timeline : production.spine !== null ? null : seedFirstPictureTimeline(production);
-    } catch (error) {
-      timelineError = error instanceof Error ? error.message : String(error);
-    }
-  }
-  // Allocation must reserve the same legacy ids the first coordinator write migrates.
-  const placementTimeline = editableTimeline && production ? migrateLegacyCut(editableTimeline, production, world?.artifacts ?? []).timeline : null;
   /** The fence for the first materialising command; null while the song is unmeasured. */
   const sourceFingerprint = production ? timelineSourceFingerprint(production, masterDurationSec) : null;
   /*
@@ -514,9 +448,9 @@ export function CutScreen() {
    * the coordinator does not read it there (round six).
    */
   const fence = sourceFingerprint ?? (production && timelineState.status === "ready" ? storyTimelineFingerprint(production) : null);
-  /** What the timeline holds when it is the editor, the legacy placements until then (round ten). */
+  /** What the record holds, legacy placements folded in — or, for a song not yet opened, what the opening will fold (round ten). */
   const clipCount = editableTimeline
-    ? editableTimeline.tracks.reduce((count, track) => count + track.clips.length, 0) + (timelineState.status === "ready" && timelineState.timeline.migratedCut === true ? 0 : legacyClipCount)
+    ? editableTimeline.tracks.reduce((count, track) => count + track.clips.length, 0)
     : legacyClipCount;
   const libraryItems: readonly TimelineLibraryItem[] = editableTimeline?.library ?? [];
   /*
@@ -564,8 +498,6 @@ export function CutScreen() {
   );
   const pictureTrack = editableTimeline ? basePictureTrack(editableTimeline) : null;
   const orderedPictureClips = pictureTrack ? orderedTrackClips(pictureTrack) : [];
-  /** Once the timeline owns every placement, the legacy lanes have no writer and are not drawn. */
-  const placementsOnTimeline = timelineState.status === "ready" && timelineState.timeline.migratedCut === true;
   const allClips = editableTimeline
     ? editableTimeline.tracks.flatMap((track) => track.clips.map((clip) => ({ clip, track })))
     : [];
@@ -576,11 +508,9 @@ export function CutScreen() {
       ? spineCut
         ? spineCut.segments.some((segment) => segment.kind === "clip" && segment.shotId === selected.id)
         : allClips.some(({ clip }) => clip.id === selected.id)
-      : selected?.kind === "overlay"
-        ? overlays.some((clip) => clip.id === selected.id)
-        : selected?.kind === "cue"
-          ? allCues.some(({ cue }) => cue.id === selected.id)
-          : false;
+      : selected?.kind === "cue"
+        ? allCues.some(({ cue }) => cue.id === selected.id)
+        : false;
   // Nothing is selected until someone selects (R-25a): the Inspector opens on the cut, and
   // Escape has something to clear only after a click. A selection that no longer exists reads as none.
   const activeSelection: CutSelection | null = selectedExists ? selected : null;
@@ -589,7 +519,7 @@ export function CutScreen() {
     setRightOpen(true);
     if (
       editorMediaMatches("(max-width: 899px)") ||
-      (libraryOpen && editorMediaMatches("(max-width: 1199px)"))
+      (libraryOpen && editorMediaMatches(LIBRARY_DRAWER_QUERY))
     ) {
       queueMicrotask(() => focusFirstControl(rightPanelRef.current));
     }
@@ -603,20 +533,11 @@ export function CutScreen() {
     revealDetails();
   };
   const selectedCueId = activeSelection?.kind === "cue" ? activeSelection.id : null;
-  const selectOverlay = (id: string) => {
-    setSelected({ kind: "overlay", id });
-    setLibraryOpen(false);
-    setRightOpen(true);
-    if (editorMediaMatches("(max-width: 899px)")) {
-      queueMicrotask(() => focusFirstControl(rightPanelRef.current));
-    }
-  };
-  // What the cut uses is what the timeline holds once it owns placements (round four): a clip
-  // placed on a typed track is in the cut, whatever the legacy lanes say.
-  const usedArtifactIds = new Set([
-    ...(placementsOnTimeline ? [] : overlays.map((clip) => clip.artifactId)),
-    ...(editableTimeline?.tracks.flatMap((track) => track.clips.flatMap((clip) => (clip.source.kind === "artifact" ? [clip.source.artifactId] : []))) ?? []),
-  ]);
+  // What the cut uses is what the record holds (round four): a legacy placement is a typed clip
+  // on it from the moment the production opens.
+  const usedArtifactIds = new Set(
+    editableTimeline?.tracks.flatMap((track) => track.clips.flatMap((clip) => (clip.source.kind === "artifact" ? [clip.source.artifactId] : []))) ?? [],
+  );
   const cutMeta = spineCut
     ? `${runtimeSeconds(spineCut.trackDurationSec)} · ${runtimeSeconds(spineCut.trackDurationSec - spineCut.blackSec)} of ${runtimeSeconds(spineCut.trackDurationSec)} covered · cut to the track`
     : mediaOnly
@@ -708,7 +629,7 @@ export function CutScreen() {
   const stripFrame = (laneWidth: number, x: number): number => Math.max(0, Math.round((x / Math.max(laneWidth, 1)) * Math.max(totalFrames, 1)));
   const appendArtifact = (artifact: ArtifactSidecar) => {
     if (!editableTimeline) return;
-    try { sendCommands(mediaPlacementCommands(placementTimeline ?? editableTimeline, [artifact], "append", mintClipId), "Append media"); }
+    try { sendCommands(mediaPlacementCommands(editableTimeline, [artifact], "append", mintClipId), "Append media"); }
     catch (error) { setTimelineCommandError(error instanceof Error ? error.message : String(error)); }
   };
   const changeLibrary = (added: TimelineLibraryItem[], removed: TimelineLibraryItem[]) => {
@@ -813,7 +734,7 @@ export function CutScreen() {
     }
     let target = track?.id;
     if (!target) {
-      if (sound) { const added = newAudioTrack(placementTimeline ?? editableTimeline); commands.push(added); target = added.trackId; }
+      if (sound) { const added = newAudioTrack(editableTimeline); commands.push(added); target = added.trackId; }
       else {
         let number = 1; while (editableTimeline.tracks.some(candidate => candidate.id === 'tr_overlay-' + number)) number++;
         target = ('tr_overlay-' + number) as TimelineTrackId;
@@ -848,13 +769,13 @@ export function CutScreen() {
     if (!editableTimeline || !production) return;
     const measured = production.takeMediaInfo?.[take.id]?.mediaInfo.durationSec;
     const durationFrames = Math.max(1, secondsToFrames(measured ?? CLIP_DEFAULT_SEC, frameRate));
-    const audioTracks = [...(placementTimeline ?? editableTimeline).tracks].sort((a, b) => a.order - b.order)
+    const audioTracks = [...editableTimeline.tracks].sort((a, b) => a.order - b.order)
       .filter(track => AUDIO_TRACK_KINDS.has(track.kind) && !track.muted);
     const dialogue = audioTracks.find(track => track.kind === "audio" || track.kind === "dialogue") ??
       audioTracks.find(track => !track.clips.some(clip => clip.startFrame < playheadFrame + durationFrames && clip.startFrame + clip.durationFrames > playheadFrame)) ?? null;
     const commands: TimelineCommand[] = [];
     let fresh: TimelineTrackId = "tr_audio-1";
-    if (dialogue === null) { const added = newAudioTrack(placementTimeline ?? editableTimeline); fresh = added.trackId; commands.push(added); }
+    if (dialogue === null) { const added = newAudioTrack(editableTimeline); fresh = added.trackId; commands.push(added); }
     let startFrame = playheadFrame;
     for (const other of orderedTrackClips(dialogue ?? { clips: [] })) {
       if (other.startFrame < startFrame + durationFrames && other.startFrame + other.durationFrames > startFrame) startFrame = other.startFrame + other.durationFrames;
@@ -1019,7 +940,7 @@ export function CutScreen() {
   const deselect = (): boolean => {
     // Panes and dialogs own Escape first; the selection is only cleared when nothing else is open.
     if (keysOpen || document.querySelector(".fy-clipmenu, .fy-editordialog")) return false;
-    if (libraryOpen && editorMediaMatches("(max-width: 1199px)")) return false;
+    if (libraryOpen && editorMediaMatches(LIBRARY_DRAWER_QUERY)) return false;
     if (rightOpen && editorMediaMatches("(max-width: 899px)")) return false;
     if (activeSelection === null) return false;
     setSelected(null);
@@ -1140,7 +1061,7 @@ export function CutScreen() {
         open={libraryOpen}
         onClose={() => {
           setLibraryOpen(false);
-          if (editorMediaMatches("(max-width: 1199px)")) queueMicrotask(() => libraryToggleRef.current?.focus());
+          if (editorMediaMatches(LIBRARY_DRAWER_QUERY)) queueMicrotask(() => libraryToggleRef.current?.focus());
         }}
         panelRef={libraryPanelRef}
       />
@@ -1211,7 +1132,6 @@ export function CutScreen() {
             slug={slug}
             spans={spans}
             totalSec={filmSec}
-            soundSec={mediaOnly ? placedExtentSec(placedSound) : 0}
             restartToken={watchToken}
             transport={transport}
             cueAt={cueAt}
@@ -1262,7 +1182,7 @@ export function CutScreen() {
               in — and the reader had to learn two ways of being told what a control does. Every
               control here is now a glyph of the same size with the word in its tip.
             */}
-            <button type="button" className="fy-tlbtn fy-tip" data-tip="Add audio track" aria-label="Add audio track" disabled={commandsDisabled} onClick={() => editableTimeline && sendCommands([newAudioTrack(placementTimeline ?? editableTimeline)], "Add audio track")}>
+            <button type="button" className="fy-tlbtn fy-tip" data-tip="Add audio track" aria-label="Add audio track" disabled={commandsDisabled} onClick={() => editableTimeline && sendCommands([newAudioTrack(editableTimeline)], "Add audio track")}>
               <AudioPlus size={12} />
             </button>
             <button type="button" className="fy-tlbtn fy-tlbtn--toggle fy-tip" data-tip="Scene labels" aria-label="Scene labels" aria-pressed={showScenes} onClick={() => setShowScenes(value => !value)}>
@@ -1379,7 +1299,7 @@ export function CutScreen() {
                * was reached. Pressing empty lane still clears, because that is the gesture this
                * handler is for; the two surfaces that exist to move the clock are not it.
                */
-              if (target.closest(".fy-cutseg, .fy-ovclip, .fy-typedclip, .fy-clipmenu, .fy-trackbtns, .fy-playhead, .fy-scrub")) return;
+              if (target.closest(".fy-cutseg, .fy-typedclip, .fy-clipmenu, .fy-trackbtns, .fy-playhead, .fy-scrub")) return;
               setSelected(null);
             }}
           >
@@ -1516,19 +1436,6 @@ export function CutScreen() {
                   fileKinds={fileKinds}
                 />
               )}
-              {worldId && prodId && timelineError === null && !placementsOnTimeline && overlays.length > 0 && (
-                <ClipLanes
-                  worldId={worldId}
-                  prodId={prodId}
-                  slug={slug}
-                  totalSec={totalSec}
-                  clips={overlays}
-                  artifacts={artifacts}
-                  snapPoints={snapPoints}
-                  selectedClipId={activeSelection?.kind === "overlay" ? activeSelection.id : null}
-                  onSelectClip={selectOverlay}
-                />
-              )}
             </div>
             </div>
           </div>
@@ -1560,6 +1467,15 @@ export function CutScreen() {
                 ]
                   .filter((part) => part !== null)
                   .join(" · ")}
+              </span>
+            )}
+            {/* What the fold leaves behind (SPEC-037 R-30), by name in the tip: a placement citing a
+                file the world has lost is not on the timeline and never will be, and nothing else
+                says so before the write logs it. */}
+            {edited.dropped.length > 0 && (
+              <span className="fy-warnchip" role="status" data-testid="not-carried" title={edited.dropped.join("\n")}>
+                <span className="fy-dot fy-dot--warn" />
+                {edited.dropped.length} legacy placement{edited.dropped.length === 1 ? "" : "s"} not carried
               </span>
             )}
             {spineCut
