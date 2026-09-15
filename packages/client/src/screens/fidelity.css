@@ -5346,8 +5346,9 @@ select.fy-set__pill { padding-right: 26px; }
 }
 .fy-bench__rowicon:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
 .fy-bench__rowicon:disabled { opacity: 0.5; cursor: default; }
-/* The download in the bar wears the row mark, not the picture's floating disc. */
-.fy-bench__rowicon--bar { width: 26px; height: 26px; position: static; opacity: 1; }
+/* The download in the bar wears the row mark, not the picture's floating disc — and takes the
+   pointer, which the disc only takes while its picture is hovered. */
+.fy-bench__rowicon--bar { width: 26px; height: 26px; position: static; opacity: 1; pointer-events: auto; }
 .fy-bench__media {
   flex: 1; min-height: 0; margin: 0 14px; border: 1px solid var(--border); border-radius: 12px;
   overflow: hidden; background: var(--neutral-950); position: relative;

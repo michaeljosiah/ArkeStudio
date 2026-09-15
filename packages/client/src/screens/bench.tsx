@@ -973,27 +973,38 @@ function BenchWorkspace({
   // join the Bench's own plan as previews, so the list below is one list, and the coordinator
   // freezes the real thing at dispatch.
   const castVoices = world && subject ? castVoiceSummary(world, subject) : [];
-  const characterAudio = world && model && subject && draft.params.kind === "video" ? planSubjectCharacterAudio({
-    world, subject, model, imageCount: session.composer.keyframeTokens.length || carried.filter(ref => ref.kind === "image").length,
-    videoCount: carried.filter(ref => ref.kind === "video").length,
-    taskMode, disabled: draft.params.audioReferencesDisabled,
-    performanceReferences: castVoices.flatMap(v => v.preview ? [v.preview] : []) }) : null;
+  const planAudio = (disabled: boolean) =>
+    world && model && subject && videoParams !== null
+      ? planSubjectCharacterAudio({
+          world, subject, model, imageCount: session.composer.keyframeTokens.length || carried.filter(ref => ref.kind === "image").length,
+          videoCount: carried.filter(ref => ref.kind === "video").length,
+          taskMode, disabled,
+          performanceReferences: castVoices.flatMap(v => v.preview ? [v.preview] : []) })
+      : null;
+  const characterAudio = planAudio(videoParams?.audioReferencesDisabled === true);
+  /**
+   * What would ride with the switch on. A disabled plan comes back empty, and a chip that
+   * derived its existence from that would vanish the moment it was switched off (codex,
+   * PR 1202) — so the offer is always asked for as if on, and only the plan that dispatches
+   * carries the person's choice.
+   */
+  const audioOffer = characterAudio?.disabled ? planAudio(false) : characterAudio;
   /**
    * Whether the chip exists at all: a shot whose cast has no voice — no read chosen on the
    * scene's cast, no sample in a kit — has nothing for the chip to switch (design 142).
    */
   const voicedCast =
-    castVoices.length > 0 || (characterAudio?.references.length ?? 0) > 0 || (characterAudio?.problems.length ?? 0) > 0;
+    castVoices.length > 0 || (audioOffer?.references.length ?? 0) > 0 || (audioOffer?.problems.length ?? 0) > 0;
   /** The chip's hint: the refusal where the route takes no audio, otherwise who rides and who does not. */
   const voiceRefsHint =
-    characterAudio === null
+    audioOffer === null || audioOffer === undefined
       ? undefined
-      : characterAudio.route === null
+      : audioOffer.route === null
         ? "this model takes no audio"
         : [
-            ...characterAudio.references.map((r) => `${r.characterName} · ${r.label}`),
+            ...audioOffer.references.map((r) => `${r.characterName} · ${r.label}`),
             ...castVoices
-              .filter((v) => !characterAudio.references.some((r) => "sheetId" in r && r.sheetId === v.sheetId))
+              .filter((v) => !audioOffer.references.some((r) => "sheetId" in r && r.sheetId === v.sheetId))
               .map((v) => (v.reason !== undefined ? `${v.name} · ${v.line} · not riding · ${v.reason}` : `${v.name} · ${v.line}`)),
           ].join("\n") || undefined;
   // The track's geometry and its states, worked out in one place so the fill, the ends, the
@@ -2363,7 +2374,9 @@ function BenchWorkspace({
               >
                 <FileText size={14} />
               </button>
-              {selected.disposition === "open" && (
+              {/* Only once there is something to judge: a take still out cannot be discarded
+                  into a charge that arrives anyway (codex, PR 1202). */}
+              {selected.disposition === "open" && selected.media !== undefined && (
                 <button
                   type="button"
                   className="fy-bench__rowicon"

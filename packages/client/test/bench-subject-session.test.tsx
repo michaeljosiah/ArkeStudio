@@ -333,6 +333,31 @@ describe("voice references (design 142: an option chip, not a disclosure)", () =
     assert.equal(bench.container.querySelector('[data-testid="bench-voice-refs"]'), null);
     assert.equal(bench.container.querySelector('[data-testid="bench-voice-problem"]'), null);
   });
+
+  it("stays on the row once switched off, reading the off state, so it can be switched back on", async () => {
+    const session = shotSession("video");
+    const off = {
+      ...session,
+      composer: { ...session.composer, params: { ...session.composer.params, audioReferencesDisabled: true } },
+    } as unknown as BenchSession;
+    const bench = await openBench(off, SESSION_ID, state => {
+      state.world!.referenceKits[0]!.designatedVoiceSample = { file: "legacy.wav" } as never;
+      const scene = state.world!.productions.find(p => p.meta.id === "saltlight")!.scenes.find(s => s.id === "sc_04")!;
+      const shot = orderedShots(scene).find(s => s.id === "sh_12")!;
+      shot.covers = undefined;
+      shot.audio = { kind: "dialogue", speaker: "maren-kest", line: "Hello" };
+    });
+    const chip = q(bench, '[data-testid="bench-voice-refs"]');
+    assert.equal(chip.textContent, "voice refs · off");
+    assert.equal(chip.getAttribute("aria-pressed"), "false");
+    await act(async () => chip.click());
+    const sent = bench.sent.findLast((message) => message.kind === "bench-compose") as unknown as { params: { audioReferencesDisabled?: boolean } } | undefined;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+    const composed = bench.sent.findLast((message) => message.kind === "bench-compose") as unknown as { params: { audioReferencesDisabled?: boolean } } | undefined;
+    assert.equal((composed ?? sent)?.params.audioReferencesDisabled, false, "the press switches it back on");
+  });
 });
 
 describe("the generation session's chrome and frame (design 142a)", () => {
@@ -504,6 +529,13 @@ describe("the wall and the strip (R-24; design 142a)", () => {
     const marks = all(bench, ".fy-bench__briefrow .fy-bench__rowicon").map((node) => node.getAttribute("aria-label"));
     assert.deepEqual(marks, ["Run it again", "What was sent", "Not this", "Clear the wall"]);
     assert.ok(q(bench, '.fy-bench__wallbar [aria-label^="Download"]'), "a download in the bar");
+  });
+
+  it("offers no Not this while the take is still out", async () => {
+    const session = shotSession();
+    const bench = await openBench({ ...session, takes: [take("image", "running", false)] } as BenchSession);
+    const marks = all(bench, ".fy-bench__briefrow .fy-bench__rowicon").map((node) => node.getAttribute("aria-label"));
+    assert.deepEqual(marks, ["Run it again", "What was sent", "Clear the wall"]);
   });
 
   it("a clip on the wall wears the design's transport, not the browser's", async () => {
