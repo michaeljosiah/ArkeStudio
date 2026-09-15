@@ -12,9 +12,11 @@ export interface EngineContext {
   subjectId: string;
 }
 
-export type EngineAction = "read" | "propose" | "accept" | "discard" | "generate" | "media";
-export interface EngineResource { worldId: string; proposalId?: string; sheetId?: string; artifactId?: string }
-export interface DeliveryContent { kind: "world" | "proposal" | "job" | "artifact"; id: string; sha256: string }
+export type EngineAction = "read" | "propose" | "accept" | "discard" | "generate" | "media" |
+  "production-create" | "chapter-create" | "chapter-save" | "chapter-draft";
+export interface EngineResource { worldId: string; proposalId?: string; sheetId?: string; artifactId?: string;
+  productionId?: string; chapterId?: string }
+export interface DeliveryContent { kind: "world" | "proposal" | "job" | "artifact" | "production" | "chapter"; id: string; sha256: string }
 
 /** Exact output approved before the durable financial decision. */
 export type EngineDeliveredJob = Job & { deliveredArtifacts: Array<{ id: string; sha256: string }> };
@@ -53,6 +55,9 @@ export interface EngineArtifact { id: string; contentType: string; bytes: Uint8A
 
 /** The semantic surface over a private materialised world; no host absolute paths escape. */
 export interface EngineWorldSession {
+  /** Optional for hosts that have not adopted prose; calls refuse explicitly when absent. */
+  prose?: import("./prose-contracts.js").EngineProseSession;
+  writing?: import("./writing-contracts.js").EngineWritingSession;
   snapshot(): Promise<EngineSnapshot>;
   propose(input: SheetProposalInput, expectedRevision?: string): Promise<SentenceDraft>;
   proposal(id: string): Promise<Proposal>;
@@ -92,6 +97,9 @@ export interface EngineQueue {
 }
 export interface EngineMutation { operationId: string; expectedRevision?: string }
 export interface EngineReceipt<T> { operationKey: string; revision: string; value: T }
+export type { EngineProseSession, ProseProductionInput, ProseChapterInput, ProseSaveInput,
+  ProseProductionResult, ProseChapterResult, ProseSaveResult, ProseChapterRead, ProseManuscript } from "./prose-contracts.js";
+export type { EngineWritingSession, WritingInput, WritingResult, WritingRuntime, WritingRuntimeFactory } from "./writing-contracts.js";
 
 /** Every confirmed admission is retained, even when the remaining batch is uncertain. */
 export interface IllustrationOutcome {

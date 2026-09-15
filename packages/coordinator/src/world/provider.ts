@@ -1,5 +1,5 @@
 import { mkdir, readdir, rm, stat, realpath } from "node:fs/promises";
-import { basename, join, relative, isAbsolute } from "node:path";
+import { basename, join, relative, isAbsolute, sep } from "node:path";
 import {
   BIBLE_PATH,
   DEFAULT_AUDIO_POLICY,
@@ -80,6 +80,37 @@ export class FsWorldProvider implements WorldProvider {
 
   private worldsDir(): string {
     return join(this.appRoot, "worlds");
+  }
+
+  async assertWritingScratch(path: string): Promise<void> {
+    const scratch = await realpath(path);
+    const exclude = (root: string) => {
+      const contained = (rel: string) => !rel || (rel !== ".." && !rel.startsWith(".." + sep) && !isAbsolute(rel));
+      if (contained(relative(root, scratch)) || contained(relative(scratch, root))) {
+        throw new Error("The writing scratch directory must be outside all managed worlds.");
+      }
+    };
+    const rejectNestedAliases = async (dir: string): Promise<void> => {
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
+        if (entry.isSymbolicLink()) throw new Error("Writing requires managed world trees without nested filesystem aliases.");
+        if (entry.isFile() && (await stat(join(dir, entry.name))).nlink > 1) {
+          throw new Error("Writing requires managed world files without hard links.");
+        }
+        if (entry.isDirectory()) await rejectNestedAliases(join(dir, entry.name));
+      }
+    };
+    for (const root of [this.worldsDir(), join(this.appRoot, "archive")]) {
+      let canonical: string;
+      try { canonical = await realpath(root); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; throw error; }
+      exclude(canonical);
+      // A world may be reached through a directory junction outside the library's physical root.
+      for (const entry of await readdir(root)) {
+        const target = await realpath(join(root, entry));
+        exclude(target);
+        if ((await stat(target)).isDirectory()) await rejectNestedAliases(target);
+      }
+    }
   }
 
   /** Create the app root and its skeleton on first run, without prompting (R-1). */

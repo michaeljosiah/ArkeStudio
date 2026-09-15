@@ -9,6 +9,8 @@ import type { WorldProvider } from "../world-provider.js";
 import type { WorldStore } from "../world/store.js";
 import type { EngineWorldRepository, EngineWorldSession } from "./contracts.js";
 import { engineHash } from "./operations.js";
+import { localProse } from "./local-prose.js";
+import { localWriting } from "./local-writing.js";
 
 export interface LocalWorldRepositoryOptions {
   /** The composition, not each service, decides who closes the shared provider. */
@@ -26,6 +28,11 @@ function localSession(store: WorldStore, provider: WorldProvider, options: Local
   const precondition = (expected?: string) => expected === undefined ? undefined :
     () => engineHash(store.getBundle()) === expected ? null : "The world changed before this operation.";
   return {
+    prose: localProse(store),
+    writing: localWriting(store, async path => {
+      if (!provider.assertWritingScratch) throw new Error("This provider cannot validate writing scratch isolation.");
+      await provider.assertWritingScratch(path);
+    }),
     snapshot,
     propose: (input, expected) => createSheetFromSentence(store, gate, input, precondition(expected)),
     proposal: id => gate.readManifest(id),
@@ -52,6 +59,9 @@ function localSession(store: WorldStore, provider: WorldProvider, options: Local
       return { id, contentType: file.contentType, bytes };
     },
     async saved(key) {
+      // Action binding/resolution can append conversation events after the domain writer's scan.
+      // Refresh under ownership before finalisation; the precondition makes scan failures visible.
+      await store.gateOp(async () => {}, () => null);
       if (options.finalise) await options.finalise(store.worldId, key);
       return { revision: (await snapshot()).revision };
     },
