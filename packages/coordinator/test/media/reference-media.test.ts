@@ -133,3 +133,19 @@ test("Seedance probes dimensions before dispatch, retains bytes and refuses out-
   ], { probe }, signal);
   assert.equal(continued.videos.length, 2, "the predecessor is probed separately from the reviewed Bench binding");
 });
+
+test("carried segment preflight refuses lost ownership before materializing", async () => {
+  const dir = await tempDir("arke-seedance-owned-");
+  const store = { dir,
+    getBundle: () => ({ productions: [{ meta: { id: "test" }, takes: [{ id: "segment", segment: { passTakeId: "pass", inSec: 0, outSec: 4 } }] }] }),
+    ownedWrite: async () => { throw new Error("World ownership was lost"); },
+  } as unknown as WorldStore;
+  let encoded = false;
+  const model = { limits: { referenceSyntax: "seedance" } } as ManifestModel;
+  await assert.rejects(validateSeedanceReferences(store, { productionId: "test", params: { continuedFrom: "segment" } }, model, {
+    probe: { durationSec: async () => 4, info: async () => ({ durationSec: 4, hasAudio: false }) },
+    ffmpeg: { slateFont: "", run: async () => { encoded = true; } },
+  }), /ownership was lost/);
+  assert.equal(encoded, false);
+  await assert.rejects(access(join(dir, "productions")));
+});

@@ -37,7 +37,10 @@ export async function readContinuationSource(store: WorldStore, job: Pick<Job, "
   const production = store.getBundle().productions.find(candidate => candidate.meta.id === job.productionId);
   const take = production?.takes.find(candidate => candidate.id === job.params.continuedFrom);
   if (!take) throw new Error("the take this shot was continuing is no longer in this production");
-  const { path } = await materialiseForContinuation(store, production!.meta.id, take, ffmpeg, signal);
+  const materialise = () => materialiseForContinuation(store, production!.meta.id, take, ffmpeg, signal);
+  // Segment extraction writes a cached file, even during preflight. Serialize it and verify
+  // ownership immediately before that write, just as dispatch must.
+  const { path } = take.segment ? await store.ownedWrite(materialise) : await materialise();
   const types: Record<string, "video/mp4" | "video/quicktime" | "video/webm"> = {
     ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
   };
