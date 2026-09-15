@@ -441,12 +441,18 @@ describe("round-64 harness regressions (#1154)", () => {
   it("labels an installed but blocked engine as needing attention", async () => {
     const state = modelState();
     state.app.harness = { engine: "opencode", claudePath: null, codexPath: null, harnesses: [OPENCODE_AVAILABILITY,
-      { ...OPENCODE_AVAILABILITY, id: "codex", label: "Codex", bundled: false, installed: true, blocked: "Codex is installed, but a newer version is needed." }], };
+      { ...OPENCODE_AVAILABILITY, id: "codex", label: "Codex", bundled: false, installed: false, version: "0.144.0", source: null, blocked: "Codex is installed, but a newer version is needed." }], };
     await mount(state, <SettingsHarnessScreen />, "/settings/harness?harness=codex");
     const tab = [...container.querySelectorAll('[role="tab"]')].find(element => element.textContent!.includes("Codex"))!;
     assert.match(tab.textContent!, /needs attention/);
     assert.doesNotMatch(tab.textContent!, /not here/);
     assert.match(container.textContent!, /newer version is needed/);
+    const absent = structuredClone(state);
+    absent.app.harness!.harnesses[1] = { ...absent.app.harness!.harnesses[1]!, version: null, source: null, blocked: "Codex was not found." };
+    await act(async () => __setStateForTest(absent));
+    assert.match(tab.textContent!, /not here/);
+    assert.match(container.textContent!, /Not found on this machine/);
+
   });
 
   it("keeps a replacement for a legacy saved model visible until its save arrives", async () => {

@@ -1970,7 +1970,7 @@ export function SettingsHarnessScreen() {
               <span>{h.label}</span>
               <span style={{ flex: 1 }} />
               <span className="fy-rt__count">
-                {h.id === runningEngine ? activeStatus : h.blocked ? "needs attention" : h.id === engine ? "next restart" : h.installed ? "available" : "not here"}
+                {h.id === runningEngine ? activeStatus : h.blocked ? (h.version !== null || h.source !== null ? "needs attention" : "not here") : h.id === engine ? "next restart" : h.installed ? "available" : "not here"}
               </span>
             </button>
           ))}
@@ -2083,12 +2083,12 @@ function HarnessPane({
         title={harness.label}
         caps={harness.bundled ? "BUNDLED" : "YOUR INSTALLATION"}
         tone={active && !running && health?.status !== "starting" ? "warn" : running ? "ok" : harness.installed ? "idle" : "warn"}
-        state={active ? running ? "running now" : health?.status === "starting" ? "starting" : "unavailable" : harness.blocked ? "needs attention" : selected ? "next restart" : harness.installed ? "available" : "not here"}
+        state={active ? running ? "running now" : health?.status === "starting" ? "starting" : "unavailable" : harness.blocked ? (harness.version !== null || harness.source !== null ? "needs attention" : "not here") : selected ? "next restart" : harness.installed ? "available" : "not here"}
       />
       <RuntimeSection label="ON THIS MACHINE" />
       <div className="fy-set__row">
         <div className="fy-set__name fy-set__name--wide">
-          <div className="fy-set__title">{harness.bundled ? "Ships with Arke Studio" : "Found on this machine"}</div>
+          <div className="fy-set__title">{harness.bundled ? "Ships with Arke Studio" : harness.installed || harness.version !== null || harness.source !== null ? "Found on this machine" : "Not found on this machine"}</div>
           <div className="fy-set__caps">
             {/* The refusal, in the words the coordinator sent — not a re-derived summary. */}
             {harness.blocked ?? (harness.version ? `version ${harness.version}` : "installed")}
