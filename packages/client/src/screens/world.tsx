@@ -1689,8 +1689,14 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
    * are still being made; the player walks on to the next. This screen used to play only the
    * newest event, so a second piece replaced the first mid-sentence. A short section still
    * arrives whole and takes the single-clip path below, unchanged.
+   *
+   * Cloud pieces land in whatever order the reader finishes them, so the effect follows how
+   * many exist rather than how far the array reaches (codex on PR 1210): a second piece landing
+   * first fills the array to its final length, and the first piece filling the gap behind it
+   * would otherwise change nothing the effect watches.
    */
   const parts = useVoiceParts()[read?.requestId ?? ""] ?? [];
+  const landed = parts.filter((file) => file !== undefined).length;
   const queued = useRef(0);
   useEffect(() => {
     if (!read || !world || !sheet) return;
@@ -1706,7 +1712,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
       });
       queued.current = i + 1;
     }
-  }, [read?.requestId, read?.section, parts.length, world?.meta.slug, sheet?.name, narratorLabel]);
+  }, [read?.requestId, read?.section, landed, world?.meta.slug, sheet?.name, narratorLabel]);
   // A read the user asked for plays as soon as it lands, rather than making them click twice.
   useEffect(() => {
     if (parts.length > 0) return; // a streamed read is already sounding

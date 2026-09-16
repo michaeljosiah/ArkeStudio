@@ -153,9 +153,14 @@ export function BibleScreen() {
    * A long section arrives in pieces, because local synthesis runs at about the speed of speech
    * and holding the first word until the last one exists is a ten-minute silence. Each piece is
    * queued as it appears and the first starts immediately; the player walks the rest. A short
-   * section still arrives whole and takes the single-clip path, unchanged.
+   * section still arrives whole and takes the single-clip path, unchanged. Cloud pieces (issue
+   * 1208) land in whatever order the reader finishes them, so the effect follows how many exist
+   * rather than how far the array reaches: a later piece landing first fills the array to its
+   * final length, and the earlier one filling the gap behind it would otherwise change nothing
+   * the effect watches (codex on PR 1210).
    */
   const parts = useVoiceParts()[read?.requestId ?? ""] ?? [];
+  const landed = parts.filter((file) => file !== undefined).length;
   const queued = useRef(0);
   useEffect(() => {
     if (!read || !world) return;
@@ -171,7 +176,7 @@ export function BibleScreen() {
       });
       queued.current = i + 1;
     }
-  }, [read?.requestId, read?.heading, parts.length, world?.meta.slug, narratorLabel]);
+  }, [read?.requestId, read?.heading, landed, world?.meta.slug, narratorLabel]);
 
   useEffect(() => {
     if (parts.length > 0) return; // a streamed read is already sounding

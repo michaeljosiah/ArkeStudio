@@ -117,6 +117,43 @@ it("queues the pieces of a chunked sheet read behind the first rather than repla
   assert.equal(playbackSnapshot().clip?.sub, `read aloud · ${DEFAULT_NARRATOR.label}`);
 });
 
+/*
+ * Cloud pieces land in whatever order the reader finishes them (codex on PR 1210). A second
+ * piece landing first fills the parts array to its final length; the first piece then fills
+ * the gap behind it without changing that length, and an effect keyed on the length would
+ * never queue the paid read.
+ */
+for (const surface of ["sheet", "prose"] as const) {
+  it(`${surface} read: a later piece landing first waits, and the read starts when the gap behind it fills`, async () => {
+    const dock = { playbackRate: 1, src: "", currentTime: 0, duration: NaN, play: async () => {}, pause() {}, load() {}, removeAttribute() {}, addEventListener() {}, removeEventListener() {} };
+    setAudioFactoryForTest(() => dock as never);
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(JSON.parse(json) as ClientMessage); } } as unknown as ArkeBridge);
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container);
+    const root = createRoot(container);
+    open.push(root);
+    const props = { source: { of: "shot", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_12" } as const, title: "Shot script", text: "The sea moves." };
+    await act(async () => root.render(surface === "sheet"
+      ? <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/cast/maren-kest`]}><App /></MemoryRouter>
+      : <ReadAloud {...props} />));
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Read aloud"]')!.click());
+    const asked = sent.find((message): message is Extract<ClientMessage, { kind: "read-sheet-section" | "read-prose" }> => message.kind === "read-sheet-section" || message.kind === "read-prose")!;
+    const piece = (part: number, file: string) => ({
+      type: "voice.audio" as const, at: "2026-09-16T08:00:00.000Z", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, sheetVersion: 4,
+      purpose: surface === "sheet" ? "sheet-section" as const : "prose" as const, ...(asked.kind === "read-sheet-section" ? { sheetId: "maren-kest", sectionHeading: asked.sectionHeading } : {}),
+      provider: "mistral" as const, model: "voxtral-mini-tts", voiceId: "en_paul_neutral", format: "wav" as const,
+      status: "ready" as const, file, cached: false, characterCount: 200, estimatedMicroUsd: 3200, part, parts: 2,
+    });
+    await act(async () => __applyEventForTest(piece(1, ".cache/voice-previews/second.wav")));
+    assert.equal(playbackSnapshot().clip, null, "the second piece alone starts nothing: the read begins at its first words");
+    await act(async () => __applyEventForTest(piece(0, ".cache/voice-previews/first.wav")));
+    assert.match(playbackSnapshot().clip?.url ?? "", /first\.wav$/, "the first piece sounds once the gap fills");
+    await act(async () => emitForTest("ended"));
+    assert.match(playbackSnapshot().clip?.url ?? "", /second\.wav$/, "and the second follows");
+  });
+}
+
 it("says how many pieces a chunked read goes as, on the dialog that prices it", async () => {
   __setStateForTest(FIXTURE_STATE);
   const container = dom.document.createElement("div") as unknown as HTMLElement;
