@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile } from "node:fs/promises";
+import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { ClientMessage, DomainEvent, ManifestModel, VoiceCandidate } from "@arke-studio/contracts";
 import { ProviderRequestRejectedError } from "@arke-studio/providers";
@@ -68,8 +68,10 @@ class Reader extends FakeProvider {
     this.attempts += 1;
     const text = String(request.params["text"]);
     if (text === this.refuse) throw new ProviderRequestRejectedError("mistral: refused this line");
-    this.inlineArtifacts = [{ name: "speech.wav", contentType: "audio/wav", data: wav(this.pieces.indexOf(text) + 1) }];
-    return super.submit(key, request);
+    // Answered per request rather than through the fake's shared `inlineArtifacts`: two pieces
+    // in flight at once would otherwise hand each other's wav back.
+    const result = await super.submit(key, request);
+    return { ...result, artifacts: [{ name: "speech.wav", contentType: "audio/wav", data: wav(this.pieces.indexOf(text) + 1) }] };
   }
 }
 
@@ -110,6 +112,8 @@ async function harness() {
   const audio = (requestId: string) => events.filter((event): event is Audio => event.type === "voice.audio" && event.requestId === requestId);
   const file = (text: string) => speechCacheFile({ provider: VOXTRAL.provider, model: VOXTRAL.id, voiceId: PAUL.voiceId, text, format: "wav" });
   const bytes = async (rel: string) => new Uint8Array(await readFile(toExtendedLength(join(worldDir, rel))));
+  /** The shelf loses a file: what a restart between the last piece and the join, or a cache sweep, leaves behind. */
+  const forget = (rel: string) => unlink(toExtendedLength(join(worldDir, rel)));
   /** Each piece's job as it stands, by the events the queue published for this request. */
   const jobs = (requestId: string) => {
     const seen = new Map<string, string>();
@@ -119,13 +123,15 @@ async function harness() {
     return [...seen.values()];
   };
   const priced = (pieces: readonly string[]) => pieces.reduce((sum, piece) => sum + piece.length * 16, 0);
-  return { coordinator, events, reader, send, narrate, audio, file, bytes, jobs, priced };
+  return { coordinator, events, reader, send, narrate, audio, file, bytes, forget, jobs, priced };
 }
 
 const readSection = (send: (message: ClientMessage) => Promise<void>, requestId: string, confirmationToken?: string) =>
   send({ kind: "read-sheet-section", requestId, worldId: WORLD_ID, sheetId: "maren-kest", sectionHeading: "Essence", ...(confirmationToken !== undefined ? { confirmationToken } : {}) });
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 300));
+/** Five pieces are five dispatches 200ms apart, each landing through the world's gate: a starved shard can take a while. */
+const PATIENCE = 20_000;
 
 describe("a read over the reader's cap (issue 1208)", () => {
   it("splits at sentence ends on the row's cap; a block that fits, a row without one, and a flac reader's go whole", () => {
@@ -153,23 +159,29 @@ describe("a read over the reader's cap (issue 1208)", () => {
       const accepted = h.events.find((event) => event.type === "queue.enqueue-result");
       assert.ok(accepted && accepted.type === "queue.enqueue-result");
       assert.equal(accepted.requestedCount, pieces.length, "a piece is a job of its own");
-      await until(() => h.audio(REQUEST).filter((event) => event.status === "ready").length === pieces.length, "every piece to land");
-      const ready = h.audio(REQUEST).filter((event) => event.status === "ready").sort((a, b) => a.part! - b.part!);
-      assert.deepEqual(ready.map((event) => [event.part, event.parts]), pieces.map((_, index) => [index, pieces.length]), "each piece is a part, numbered in the order of the words");
-      assert.deepEqual(ready.map((event) => event.characterCount), pieces.map((piece) => piece.length));
-      assert.deepEqual(ready.map((event) => event.file), pieces.map(h.file), "each under its own cache key");
+      const whole = h.file(essence);
+      await until(() => h.audio(REQUEST).some((event) => event.status === "ready" && event.file === whole), "every piece to land, and the whole after them", PATIENCE);
+      const ready = h.audio(REQUEST).filter((event) => event.status === "ready");
+      const parts = ready.filter((event) => event.part !== undefined).sort((a, b) => a.part! - b.part!);
+      assert.deepEqual(parts.map((event) => [event.part, event.parts]), pieces.map((_, index) => [index, pieces.length]), "each piece is a part, numbered in the order of the words");
+      assert.deepEqual(parts.map((event) => event.characterCount), pieces.map((piece) => piece.length));
+      assert.deepEqual(parts.map((event) => event.file), pieces.map(h.file), "each under its own cache key");
       const sent = h.events.flatMap((event) => (event.type === "job.updated" ? [event.job.params["text"]] : []));
       for (const piece of pieces) assert.ok(sent.includes(piece), "each piece went to the reader as it was split");
 
-      // The join: the whole block's cache file, from the pieces in the order of the words.
-      const whole = h.file(essence);
-      let joined = new Uint8Array();
-      await untilAsync(async () => { joined = await h.bytes(whole); return true; }, "the joined file to land");
+      // The join: the whole block's cache file, from the pieces in the order of the words, and
+      // announced once after them with no part of its own — a replay's clip, not a piece to queue.
+      const closing = ready.filter((event) => event.file === whole);
+      assert.equal(closing.length, 1, "the whole follows the pieces, once");
+      assert.equal(ready.indexOf(closing[0]!), ready.length - 1, "and last");
+      assert.equal(closing[0]!.part, undefined);
+      assert.equal(closing[0]!.characterCount, essence.length);
+      assert.equal(closing[0]!.estimatedMicroUsd, h.priced(pieces), "at what the read cost");
+      const joined = await h.bytes(whole);
       assert.ok(cachedVoiceAudioLooksRight(joined, "wav"));
       const view = Buffer.from(joined);
       const samples = Array.from({ length: (view.length - 44) / 2 }, (_, i) => view.readInt16LE(44 + i * 2));
       assert.deepEqual([...new Set(samples)], pieces.map((_, index) => index + 1), "the pieces follow one another as split, whatever order they landed in");
-      assert.equal(h.audio(REQUEST).filter((event) => event.file === whole).length, 0, "a streamed read is not announced again once joined");
 
       h.events.length = 0;
       await readSection(h.send, AGAIN);
@@ -179,6 +191,56 @@ describe("a read over the reader's cap (issue 1208)", () => {
       assert.equal(again[0]!.cached, true);
       assert.equal(again[0]!.file, whole, "the same words again are the joined file, and free");
       assert.equal(again[0]!.part, undefined);
+    } finally {
+      await h.coordinator.stop();
+    }
+  });
+
+  it("pieces on the shelf are not paid for again (codex on PR 1210): all of them, joined now and free; some, the rest priced and the ones held announced in their places", async () => {
+    const h = await harness();
+    try {
+      const { essence, pieces } = await h.narrate();
+      const whole = h.file(essence);
+      await readSection(h.send, REQUEST);
+      const asked = h.audio(REQUEST).find((event) => event.status === "confirmation-required")!;
+      await readSection(h.send, REQUEST, asked.confirmationToken);
+      await until(() => h.audio(REQUEST).some((event) => event.status === "ready" && event.file === whole), "the first read to be heard and joined", PATIENCE);
+      const paid = h.reader.attempts;
+
+      // A restart between the last piece landing and the join leaves every piece on the shelf and
+      // no whole: the next read joins them itself, and nothing is asked or sent.
+      await h.forget(whole);
+      h.events.length = 0;
+      await readSection(h.send, AGAIN);
+      const rejoined = h.audio(AGAIN);
+      assert.deepEqual(rejoined.map((event) => [event.status, event.cached, event.file]), [["ready", true, whole]], "joined from the shelf, a hit, free");
+      assert.equal(h.reader.attempts, paid, "nothing was sent");
+      assert.ok(cachedVoiceAudioLooksRight(await h.bytes(whole), "wav"));
+
+      // One piece gone as well: the read owes that piece and no other, says it goes in as many
+      // parts as ever, and once confirmed the held pieces are heard in their places beside it.
+      const gone = 1;
+      await h.forget(whole);
+      await h.forget(h.file(pieces[gone]!));
+      h.events.length = 0;
+      await readSection(h.send, PAGE);
+      const owed = h.audio(PAGE).find((event) => event.status === "confirmation-required");
+      assert.ok(owed, "one piece is a spend, so it is asked about");
+      assert.equal(owed.estimatedMicroUsd, h.priced([pieces[gone]!]), "priced at the missing piece alone");
+      assert.equal(owed.characterCount, essence.length, "the count is still the prose's");
+      assert.equal(owed.parts, pieces.length, "and the read still arrives in every part");
+      await readSection(h.send, PAGE, owed.confirmationToken);
+      await until(() => h.audio(PAGE).some((event) => event.status === "ready" && event.file === whole), "the missing piece to land and the whole to be joined", PATIENCE);
+      assert.equal(h.reader.attempts, paid + 1, "one request, for the one piece");
+      const ready = h.audio(PAGE).filter((event) => event.status === "ready");
+      const held = ready.filter((event) => event.cached && event.part !== undefined).map((event) => event.part).sort((a, b) => a! - b!);
+      assert.deepEqual(held, pieces.map((_, index) => index).filter((index) => index !== gone), "the held pieces, free, in their places");
+      const made = ready.filter((event) => !event.cached && event.part !== undefined);
+      assert.deepEqual(made.map((event) => [event.part, event.parts]), [[gone, pieces.length]], "the one made, as its part");
+      assert.equal(ready.at(-1)!.file, whole, "and the whole, last");
+      const view = Buffer.from(await h.bytes(whole));
+      const samples = Array.from({ length: (view.length - 44) / 2 }, (_, i) => view.readInt16LE(44 + i * 2));
+      assert.deepEqual([...new Set(samples)], pieces.map((_, index) => index + 1), "joined in the order of the words, the held with the made");
     } finally {
       await h.coordinator.stop();
     }
@@ -198,7 +260,7 @@ describe("a read over the reader's cap (issue 1208)", () => {
       const accepted = h.events.find((event) => event.type === "queue.enqueue-result");
       assert.ok(accepted && accepted.type === "queue.enqueue-result");
       assert.equal(accepted.requestedCount, 1 + pieces.length, "the Appearance fits; the Essence goes in pieces");
-      await until(() => h.audio(PAGE).filter((event) => event.status === "ready").length === 2, "both blocks");
+      await until(() => h.audio(PAGE).filter((event) => event.status === "ready").length === 2, "both blocks", PATIENCE);
       const ready = h.audio(PAGE).filter((event) => event.status === "ready").sort((a, b) => a.part! - b.part!);
       assert.deepEqual(ready.map((event) => [event.sectionHeading, event.part, event.parts]), [["Appearance", 0, 2], ["Essence", 1, 2]]);
       const block = ready[1]!;
@@ -229,10 +291,10 @@ describe("a read over the reader's cap (issue 1208)", () => {
       const accepted = h.events.find((event) => event.type === "queue.enqueue-result");
       assert.ok(accepted && accepted.type === "queue.enqueue-result");
       assert.ok(accepted.requestedCount > 1, "the one block still goes in pieces");
-      await until(() => h.audio(PAGE).some((event) => event.status === "ready"), "the block");
+      await until(() => h.audio(PAGE).some((event) => event.status === "ready" || event.status === "failed"), "the block", PATIENCE);
       await settle();
       const ready = h.audio(PAGE).filter((event) => event.status === "ready");
-      assert.equal(ready.length, 1, "announced once, whole");
+      assert.equal(ready.length, 1, `announced once, whole: ${JSON.stringify(h.audio(PAGE).map((event) => [event.status, event.part, event.parts, event.error]))} · jobs ${JSON.stringify(h.jobs(PAGE))}`);
       assert.deepEqual([ready[0]!.sectionHeading, ready[0]!.part, ready[0]!.parts], ["Essence", 0, 1], "as the one part of a one-part page, never `2 of 1`");
       assert.ok(cachedVoiceAudioLooksRight(await h.bytes(ready[0]!.file!), "wav"));
     } finally {
@@ -248,8 +310,8 @@ describe("a read over the reader's cap (issue 1208)", () => {
       await readSection(h.send, REQUEST);
       const asked = h.audio(REQUEST).find((event) => event.status === "confirmation-required")!;
       await readSection(h.send, REQUEST, asked.confirmationToken);
-      await until(() => h.audio(REQUEST).some((event) => event.status === "failed"), "the refused piece to fail the read");
-      await until(() => h.jobs(REQUEST).length === pieces.length && h.jobs(REQUEST).every((status) => status !== "queued" && status !== "running" && status !== "submitting"), "every piece's job to settle");
+      await until(() => h.audio(REQUEST).some((event) => event.status === "failed"), "the refused piece to fail the read", PATIENCE);
+      await until(() => h.jobs(REQUEST).length === pieces.length && h.jobs(REQUEST).every((status) => status !== "queued" && status !== "running" && status !== "submitting"), "every piece's job to settle", PATIENCE);
       await settle();
       const heard = h.audio(REQUEST).filter((event) => event.status === "ready");
       assert.equal(h.audio(REQUEST).filter((event) => event.status === "failed").length, 1, "failed once");
@@ -277,7 +339,7 @@ describe("a read over the reader's cap (issue 1208)", () => {
       await readSection(h.send, REQUEST);
       const asked = h.audio(REQUEST).find((event) => event.status === "confirmation-required")!;
       await readSection(h.send, REQUEST, asked.confirmationToken);
-      await until(() => h.jobs(REQUEST).length === pieces.length && h.jobs(REQUEST).every((status) => status === "failed" || status === "cancelled"), "every piece's job to settle");
+      await until(() => h.jobs(REQUEST).length === pieces.length && h.jobs(REQUEST).every((status) => status === "failed" || status === "cancelled"), "every piece's job to settle", PATIENCE);
       assert.deepEqual(h.jobs(REQUEST).sort(), [...pieces.slice(1).map(() => "cancelled"), "failed"].sort(), "one failed, the rest cancelled unpaid");
       assert.ok(h.reader.attempts < pieces.length, `the siblings still queued never reached the reader: ${h.reader.attempts} of ${pieces.length} were sent`);
       await settle();

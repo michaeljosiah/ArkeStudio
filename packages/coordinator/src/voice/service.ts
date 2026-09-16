@@ -184,12 +184,18 @@ export function concatWav(parts: readonly Uint8Array[]): Uint8Array {
   return new Uint8Array(out);
 }
 
-/** MP3 frames concatenate; a later part's ID3v2 tag would not, so it is dropped (SPEC-047 R-5). */
+/**
+ * MP3 frames concatenate; a later part's ID3v2 tag would not, so it is dropped (SPEC-047 R-5).
+ * The tag's size is four seven-bit bytes and counts neither the ten-byte header nor the
+ * ten-byte footer a v2.4 tag carries when its flags say so (codex on PR 1210): a footer left
+ * in place would sit between two audio streams as bytes no decoder reads as a frame.
+ */
 export function concatMp3(parts: readonly Uint8Array[]): Uint8Array {
   const stripped = parts.map((part, index) => {
     if (index === 0 || part.length < 10 || part[0] !== 0x49 || part[1] !== 0x44 || part[2] !== 0x33) return part;
     const size = ((part[6]! & 0x7f) << 21) | ((part[7]! & 0x7f) << 14) | ((part[8]! & 0x7f) << 7) | (part[9]! & 0x7f);
-    return part.subarray(10 + size);
+    const footer = (part[5]! & 0x10) !== 0 ? 10 : 0;
+    return part.subarray(10 + size + footer);
   });
   return new Uint8Array(Buffer.concat(stripped.map((part) => Buffer.from(part))));
 }

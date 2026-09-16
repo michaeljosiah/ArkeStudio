@@ -4,7 +4,7 @@ import type { Job, ManifestModel, VoiceAudioFormat } from "@arke-studio/contract
 import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
-import { joinSpeech, splitForSpeech } from "./service.js";
+import { cachedVoiceAudioLooksRight, joinSpeech, splitForSpeech } from "./service.js";
 
 /**
  * A read over the reader's cap is made in pieces rather than refused (issue 1208).
@@ -43,6 +43,50 @@ export function pieceOf(job: Pick<Job, "params">): { blockIndex: number; piece: 
   return typeof blockIndex === "number" && typeof piece === "number" && typeof pieces === "number" ? { blockIndex, piece, pieces } : null;
 }
 
+/** Whether a cache file holds audio of the format a player could use — the read path's one cache test. */
+export async function cachedAudio(store: Pick<WorldStore, "dir">, file: string, format: VoiceAudioFormat): Promise<boolean> {
+  try {
+    const bytes = new Uint8Array(await readFile(toExtendedLength(join(store.dir, fromPortable(file)))));
+    return cachedVoiceAudioLooksRight(bytes, format);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Which of a block's pieces the cache already holds, and which a read would have to pay for
+ * (codex on PR 1210). A piece lands under its own key whether or not its block is ever joined,
+ * so a read that lost its join — a restart between the last piece landing and the join, a
+ * piece the reader refused — has paid for pieces on the shelf, and the next read of the same
+ * words owes only the rest.
+ */
+export async function cachedPieces(store: Pick<WorldStore, "dir">, files: readonly string[], format: VoiceAudioFormat): Promise<{ have: Map<number, string>; missing: number[] }> {
+  const have = new Map<number, string>();
+  const missing: number[] = [];
+  for (const [at, file] of files.entries()) {
+    if (await cachedAudio(store, file, format)) have.set(at, file);
+    else missing.push(at);
+  }
+  return { have, missing };
+}
+
+/**
+ * The pieces as one file under the whole block's key — what makes the next read of the same
+ * words a hit. False when they will not join, which the caller treats as pieces to make again.
+ */
+export async function joinPieces(store: WorldStore, files: readonly string[], format: VoiceAudioFormat, whole: string): Promise<boolean> {
+  try {
+    const bytes = await Promise.all(files.map(async (rel) => new Uint8Array(await readFile(toExtendedLength(join(store.dir, fromPortable(rel)))))));
+    const joined = joinSpeech(bytes, format);
+    await store.gateOp(async () => {
+      await atomicWriteFile(join(store.dir, fromPortable(whole)), joined);
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** The jobs the queue gave a batch of inputs, grouped by block and ordered by piece, for `PieceReads.queued`. */
 export function pieceJobs(inputs: readonly Pick<Job, "params">[], jobIds: readonly string[]): Map<number, string[]> {
   const byBlock = new Map<number, string[]>();
@@ -78,7 +122,7 @@ export type PieceSettled =
   | { kind: "orphan" }
   | { kind: "landed"; page: boolean }
   | { kind: "whole"; page: boolean; file: string; characters: number; estimatedMicroUsd: number }
-  | { kind: "unjoined"; page: boolean; error: string };
+  | { kind: "unjoined"; page: boolean };
 
 /**
  * The blocks being made in pieces, by request and block. Held in memory only: a read is asked
@@ -94,9 +138,16 @@ export type PieceSettled =
 export class PieceReads {
   private readonly blocks = new Map<string, Block>();
 
-  register(input: { requestId: string; blockIndex: number; pieces: number; file: string; format: VoiceAudioFormat; page: boolean; characters: number }): void {
-    const { requestId, blockIndex, pieces, ...block } = input;
-    this.blocks.set(key(requestId, blockIndex), { ...block, jobIds: [], failed: false, landed: Array.from({ length: pieces }, () => undefined), estimatedMicroUsd: 0 });
+  /** `have` is the pieces the cache held already (`cachedPieces`): in their places from the start, so the join waits only for the rest. */
+  register(input: { requestId: string; blockIndex: number; pieces: number; file: string; format: VoiceAudioFormat; page: boolean; characters: number; have?: ReadonlyMap<number, string> }): void {
+    const { requestId, blockIndex, pieces, have, ...block } = input;
+    this.blocks.set(key(requestId, blockIndex), {
+      ...block,
+      jobIds: [],
+      failed: false,
+      landed: Array.from({ length: pieces }, (_, at) => have?.get(at)),
+      estimatedMicroUsd: 0,
+    });
   }
 
   /**
@@ -162,18 +213,10 @@ export class PieceReads {
     block.estimatedMicroUsd += job.estimatedMicroUsd;
     if (block.landed.filter((landed) => landed !== undefined).length < piece.pieces) return { kind: "landed", page: block.page };
     this.blocks.delete(id);
-    try {
-      const bytes = await Promise.all(
-        block.landed.map(async (rel) => new Uint8Array(await readFile(toExtendedLength(join(store.dir, fromPortable(rel!)))))),
-      );
-      const joined = joinSpeech(bytes, block.format);
-      await store.gateOp(async () => {
-        await atomicWriteFile(join(store.dir, fromPortable(block.file)), joined);
-      });
+    if (await joinPieces(store, block.landed.map((rel) => rel!), block.format, block.file)) {
       return { kind: "whole", page: block.page, file: block.file, characters: block.characters, estimatedMicroUsd: block.estimatedMicroUsd };
-    } catch (error) {
-      return { kind: "unjoined", page: block.page, error: error instanceof Error ? error.message : String(error) };
     }
+    return { kind: "unjoined", page: block.page };
   }
 }
 

@@ -373,6 +373,16 @@ describe("joining the pieces back into one clip", () => {
     assert.deepEqual([...joined.subarray(0, 3)], [0x49, 0x44, 0x33], "the first tag opens the file");
   });
 
+  it("drops a v2.4 tag's footer with the tag, by the footer flag (codex on PR 1210)", () => {
+    // Flags 0x10: a footer follows the body — ten more bytes the size does not count.
+    const tag = (flags: number) => Buffer.from([0x49, 0x44, 0x33, 4, 0, flags, 0, 0, 0, 0x02, 0xaa, 0xaa, ...(flags & 0x10 ? [0x33, 0x44, 0x49, 4, 0, flags, 0, 0, 0, 0x02] : [])]);
+    const frame = Buffer.from([0xff, 0xfb, 9, 9]);
+    const withFooter = Buffer.from(concatMp3([new Uint8Array(frame), new Uint8Array(Buffer.concat([tag(0x10), frame]))]));
+    assert.deepEqual([...withFooter], [...frame, ...frame], "nothing of the tag, footer included, sits between the frames");
+    const without = Buffer.from(concatMp3([new Uint8Array(frame), new Uint8Array(Buffer.concat([tag(0), frame]))]));
+    assert.deepEqual([...without], [...frame, ...frame]);
+  });
+
   it("joins by the format the reader returned, and has no join for flac", () => {
     assert.deepEqual(joinSpeech([wav([1]), wav([2])], "wav"), concatWav([wav([1]), wav([2])]));
     const frame = new Uint8Array([0xff, 0xfb, 1, 1]);
