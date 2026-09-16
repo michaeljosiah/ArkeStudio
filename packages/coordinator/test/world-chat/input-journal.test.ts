@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
-import { appendFile, open, readFile } from "node:fs/promises";
+import { appendFile, open, readFile, writeFile, unlink } from "node:fs/promises";
 import { describe, it } from "node:test";
 import {
   newId, WorldChatInputRequestSchema, WORLD_CHAT_INPUT_SCHEMA_VERSION, WORLD_CHAT_INPUT_BOUNDS,
   type WorldChatInputAttempt, type WorldChatInputRequest, type WorldChatRun,
 } from "@arke-studio/contracts";
+import { join } from "node:path";
+import { WorldChatAttachmentStore, attachmentDir } from "../../src/world-chat/attachments.js";
+import { recoverWorldChatInputs } from "../../src/world-chat/input-recovery.js";
 import { WorldChatInputJournal } from "../../src/world-chat/input-journal.js";
 import { foldWorldChatInputs } from "../../src/world-chat/input-fold.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
@@ -678,4 +681,52 @@ describe("durable additional conversation inputs (SPEC-045)", () => {
       assert.equal(foldWorldChatInputs((await new WorldChatStore(journal.log.dir).read()).events).problems.length, 0);
     } finally { await world.close(); }
   });
+});
+
+
+it("input and interrupted-run recovery leave corrupt journal bytes untouched", async () => {
+  const state = await active();
+  await state.journal.offer(state.messageId, state.revision, state.attempt, "offer-before-corruption");
+  const last = (await state.journal.log.read()).events.at(-1)!;
+  await appendFile(state.journal.log.eventsPath, JSON.stringify({ ...last, seq: last.seq + 1,
+    eventId: newId("wce"), event: { type: "unreadable-event" } }) + "\n", "utf8");
+  const before = await readFile(state.journal.log.eventsPath, "utf8");
+  assert.equal(await recoverWorldChatInputs(state.journal.log, () => AT), false);
+  const recovery = await recoverConversations(state.world.dir, () => AT);
+  assert.deepEqual(recovery.inputQueues, []);
+  assert.deepEqual(recovery.repaired, []);
+  assert.equal(await readFile(state.journal.log.eventsPath, "utf8"), before);
+});
+
+it("promotion verifies the queued attachment's actual bytes after restart", async () => {
+  for (const missing of [false, true]) {
+    const state = await setup();
+    const files = new WorldChatAttachmentStore(state.world.dir, () => AT);
+    const attachment = await files.ingestText(state.id, "Original content", "notes.txt");
+    const receipt = await state.journal.record(request("Read this", { attachmentIds: [attachment.id] }), CAPTURE);
+    const input = receipt.queue.inputs[0]!.input;
+    const path = join(attachmentDir(state.world.dir, state.id, attachment.id), attachment.fileName);
+    if (missing) await unlink(path); else await writeFile(path, "Modified content", "utf8");
+    const reopened = state.other();
+    const before = await readFile(reopened.log.eventsPath, "utf8");
+    await assert.rejects(reopened.promote(input.messageId, receipt.queue.revision, await preparedRun(reopened), ROUTING, "changed-file"), /changed or is missing/);
+    assert.equal(await readFile(reopened.log.eventsPath, "utf8"), before);
+    assert.equal((await reopened.read()).inputs[0]!.status, "queued");
+    await writeFile(path, "Original content", "utf8");
+    assert.equal((await reopened.promote(input.messageId, receipt.queue.revision, await preparedRun(reopened), ROUTING, "restored-file")).event.type, "input.promoted");
+  }
+});
+
+
+it("rechecks attachment bytes after the compatibility commit yields", async t => {
+  const state = await setup();
+  const files = new WorldChatAttachmentStore(state.world.dir, () => AT);
+  const attachment = await files.ingestText(state.id, "Original", "notes.txt");
+  const receipt = await state.journal.record(request("Read this", { attachmentIds: [attachment.id] }), CAPTURE);
+  const path = join(attachmentDir(state.world.dir, state.id, attachment.id), attachment.fileName);
+  t.mock.method(state.world, "raiseSchemaBoundary", async () => { await writeFile(path, "Changed", "utf8"); });
+  await assert.rejects(state.journal.promote(receipt.queue.inputs[0]!.input.messageId, receipt.queue.revision,
+    await preparedRun(state.journal), ROUTING, "file-changed-during-boundary"), /changed or is missing/);
+  assert.equal((await state.journal.read()).inputs[0]!.status, "queued");
+  assert.equal((await state.journal.log.read()).events.some(one => one.event.type === "input.promoted"), false);
 });

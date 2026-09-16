@@ -12,6 +12,7 @@ import { stableJson } from "../arke-actions/digest.js";
 import { foldConversation } from "./fold.js";
 import { foldWorldChatInputs, isInputEvent, type InputStoredEvent } from "./input-fold.js";
 import { conversationDir, ConversationSequenceError, WorldChatStore } from "./store.js";
+import { WorldChatAttachmentStore } from "./attachments.js";
 import { openIntentOf } from "./wrapup-recovery.js";
 
 export function inputCommandDigest(command: unknown): string {
@@ -28,7 +29,7 @@ export class WorldChatInputError extends Error {
 type InputWorld = Pick<WorldStore, "dir" | "closingSignal" | "ownedWrite" | "raiseSchemaBoundary">;
 type WithoutTransition<T> = T extends InputStoredEvent ? Omit<T, "queueRevision" | "commandDigest"> : never;
 type Change = WithoutTransition<InputStoredEvent>;
-type ChangeBuilder = (state: { queue: WorldChatInputQueue; events: WorldChatEventEnvelope[]; at: string }) => Change;
+type ChangeBuilder = (state: { queue: WorldChatInputQueue; events: WorldChatEventEnvelope[]; at: string }) => Change | Promise<Change>;
 export interface InputJournalReceipt {
   event: InputStoredEvent;
   sequence: number;
@@ -123,7 +124,7 @@ export class WorldChatInputJournal {
     routing: WorldChatInputRouting, operationId: string): Promise<InputJournalReceipt> {
     const capturedRun = WorldChatRunSchema.parse(run);
     const capturedRouting = WorldChatInputRoutingSchema.parse(routing);
-    return this.change(`promote:${operationId}`, { messageId, expectedRevision, run: capturedRun, routing: capturedRouting }, ({ queue, events }) => {
+    return this.change(`promote:${operationId}`, { messageId, expectedRevision, run: capturedRun, routing: capturedRouting }, async ({ queue, events }) => {
       this.expectRevision(queue, expectedRevision);
       const row = queue.inputs.find(one => one.input.messageId === messageId);
       if (!row) throw new WorldChatInputError("stale", "That queued message is no longer here.");
@@ -137,8 +138,14 @@ export class WorldChatInputJournal {
         throw new WorldChatInputError("stale", "The conversation changed. Rebuild the queued reply's context before starting it.");
       }
       for (const captured of row.input.attachments) {
-        if (!view.attachments.some(one => one.id === captured.id && one.contentHash === captured.contentHash)) {
-          throw new WorldChatInputError("stale", "A queued attachment changed. The input was left waiting.");
+        const attachment = view.attachments.find(one => one.id === captured.id && one.contentHash === captured.contentHash);
+        if (!attachment) throw new WorldChatInputError("stale", "A queued attachment changed. The input was left waiting.");
+        try {
+          const bytes = await new WorldChatAttachmentStore(this.world.dir).readBytes(attachment);
+          const actualHash = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+          if (bytes.byteLength !== attachment.byteLength || actualHash !== captured.contentHash) throw new Error("changed");
+        } catch {
+          throw new WorldChatInputError("stale", "A queued attachment changed or is missing. The input was left waiting.");
         }
       }
       return { type: "input.promoted", messageId, turnId: capturedRun.turnId, runId: capturedRun.id, run: capturedRun,
@@ -218,7 +225,7 @@ export class WorldChatInputJournal {
       return { event: original.event, sequence: original.seq, queue: folded.queue, deduplicated: true };
     }
     const at = this.now();
-    const event = WorldChatStoredEventSchema.parse({ ...build({ queue: folded.queue, events, at }),
+    const event = WorldChatStoredEventSchema.parse({ ...await build({ queue: folded.queue, events, at }),
       queueRevision: folded.queue.revision + 1, commandDigest });
     if (!isInputEvent(event)) throw new WorldChatInputError("integrity", "Expected an input transition.");
     const seq = events.reduce((max, envelope) => Math.max(max, envelope.seq), 0);

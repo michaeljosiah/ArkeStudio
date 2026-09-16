@@ -66,8 +66,9 @@ async function repairConversation(dir: string, now: () => string): Promise<{ run
   if (!meta) return { run: false, inputs: false };
 
   const inputsRepaired = await recoverWorldChatInputs(store, now);
-  const { events } = await store.read();
+  const { events, problems } = await store.read();
   const folded = foldConversation(meta.id, meta.createdAt, events);
+  if ([...problems, ...folded.problems].some(one => one.kind !== "torn-tail")) return { run: false, inputs: inputsRepaired };
   if (!folded.needsInterruptedRunRepair) return { run: false, inputs: inputsRepaired };
 
   const run = folded.view.activeRun;

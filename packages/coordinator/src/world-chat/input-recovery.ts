@@ -6,8 +6,15 @@ import type { WorldChatStore } from "./store.js";
 /** Called only during owned-world startup, before admitting any new work. Never calls an engine. */
 export async function recoverWorldChatInputs(log: WorldChatStore, now: () => string): Promise<boolean> {
   let changed = false;
-  let folded = foldWorldChatInputs((await log.read()).events);
-  if (folded.problems.length) return false;
+  const read = async () => {
+    const { events, problems } = await log.read();
+    const folded = foldWorldChatInputs(events);
+    // A repaired torn tail is already flushed. Interior damage still needs human repair;
+    // appending after an unreadable sequence can duplicate its identity and obscure evidence.
+    return problems.some(one => one.kind !== "torn-tail") || folded.problems.length ? null : folded;
+  };
+  let folded = await read();
+  if (!folded) return false;
   for (const row of unresolvedWorldChatInputs(folded.queue)) {
     if ((row.status !== "offering" && row.status !== "accepted") || !row.attempt) continue;
     const command = { kind: "restart", messageId: row.input.messageId, attempt: row.attempt };
@@ -15,7 +22,8 @@ export async function recoverWorldChatInputs(log: WorldChatStore, now: () => str
       commandDigest: inputCommandDigest(command), queueRevision: folded.queue.revision + 1 },
     { at: now(), requestId: `world-chat-input:recovery:${row.input.messageId}:${row.attempt.inputId}` });
     changed = true;
-    folded = foldWorldChatInputs((await log.read()).events);
+    folded = await read();
+    if (!folded) return changed;
   }
   if (unresolvedWorldChatInputs(folded.queue).length > 0 && folded.queue.pauseReason === null) {
     await log.append({ type: "input-queue.paused", reason: "restart", queueRevision: folded.queue.revision + 1,

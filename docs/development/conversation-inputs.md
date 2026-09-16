@@ -65,7 +65,7 @@ Without the variable, the native test skips. A different version requires repeat
 `WorldChatRunner.sendQueued` is the execution boundary for a scheduler-selected queue row.
 It reserves the same conversation slot as ordinary Send before its first read, rebuilds context,
 and asks the input journal to atomically promote the original message, constraints and new run.
-The journal rechecks FIFO order, queue revision, routing, attachment hashes and the full log
+The journal rechecks FIFO order, queue revision, routing, the actual attachment byte hashes and the full log
 position. A failed or uncertain promotion never reaches session preparation or model dispatch.
 Successful promotion retains the admitted message id for evidence; a failed answer uses ordinary
 Retry, including the captured reply-only/subject constraints, rather than promoting the input again.
@@ -112,3 +112,5 @@ $env:ARKE_CODEX_STEERING_COMMAND = "C:\path\to\codex.exe"
 $env:ARKE_CODEX_SMOKE_CATALOG = "C:\path\to\model-catalog.json"
 node --import tsx --test packages/adapter-codex/test/steering-protocol.test.ts
 ```
+
+Recovery refuses both input transitions and interrupted-run writes when the log reports interior corruption. A repaired torn tail can still recover. Queued promotion checks actual private attachment bytes before and after compatibility fencing; missing or changed files leave the input waiting.
