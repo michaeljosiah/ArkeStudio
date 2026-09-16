@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate, useSearchParams } from "react-router";
-import { Button, Callout, Input, Select, Textarea, cx } from "../components/ui.js";
+import { Button, Callout, IconButton, Input, Select, Textarea, cx } from "../components/ui.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
+import { EditorDialog } from "../components/editor-dialog.js";
+import { settingsReturnPath } from "../lib/settings-return.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import { renderInlineMarkdown } from "../components/inline-markdown.js";
-import { Archive, ChartLine, ChevronDown, ChevronRight, Pencil, Plus, RotateCcw, Sparkle } from "../components/icons.js";
+import { Archive, ChartLine, ChevronDown, ChevronRight, Pencil, Plus, RotateCcw, Sparkle, X } from "../components/icons.js";
 import { AgentsPanel } from "./agents.js";
 import {
   ActionButton,
@@ -1510,59 +1512,64 @@ export function NewWorldScreen() {
 
 export function SettingsLayout() {
   const { connection, state } = useStore();
+  const navigate = useNavigate();
+  // Leaving is one act whichever way the sheet closes — Escape, the scrim, the X — and it goes
+  // to the route the gear remembered (SPEC-042 R-6), which is the screen already showing behind
+  // the sheet: a change of address, not of screen.
+  const leave = () => navigate(settingsReturnPath());
   return (
-    <div className="fy-app" data-screen="settings">
-      {/* A page, not a panel (SPEC-042 R-5). It was 90% of the window over a blurred scrim, with a
-          close of its own that went to /worlds from wherever it was opened. At that size the
-          modal framing bought nothing but a narrower pane, and the one thing a modal promises —
-          to put you back where you were — it never did. The chrome's gear is the way out now,
-          and it goes back to where it was pressed (R-6). */}
-      <AppChrome current="settings" divided />
-      <div className="fy-content fy-content--fixed">
-        <div className="fy-settings">
-          <nav className="fy-settings__rail" aria-label="Settings">
-            <div className="fy-settings__title">Settings</div>
-            {(
-              [
-                ["providers", "Providers"],
-                ["models", "AI models"],
-                ["general", "General"],
-                ["harness", "Harness"],
-                ["appearance", "Appearance"],
-                ["notifications", "Notifications"],
-                ["sign-in", "Sign-in"],
-                ["sample-world", "Sample world"],
-                ["diagnostics", "Diagnostics"],
-                ["about", "About"],
-              ] as const
-            ).map(([slug, label]) => (
-              <NavLink
-                key={slug}
-                to={`/settings/${slug}`}
-                className={({ isActive }) => cx("fy-settings__tab", isActive && "fy-settings__tab--active")}
-              >
-                {label}
-              </NavLink>
-            ))}
-            <div style={{ flex: 1 }} />
-            <div className="fy-settings__version">v{state?.app.version ?? (typeof window === "undefined" ? undefined : window.arke?.appVersion) ?? "—"}</div>
-          </nav>
-          <div className="fy-settings__pane">
-            {/* Most panes in here draw from the coordinator's snapshot, and with no snapshot they
-                draw the same thing they draw when a provider has nothing to offer: `—` in the
-                capability rows, `not measured` in the machine header. A dev coordinator that died
-                at import produces exactly that screen, which reads as a data bug in whatever you
-                last changed (issue 599). */}
-            {(connection === "closed" || connection === "auth-refused") && (
-              <div className="fy-settings__waiting">
-                <WaitingForCoordinator />
-              </div>
-            )}
-            <Outlet />
-          </div>
+    /* A sheet, not a page (design turn 150; SPEC-042 R-5 amended). The page of turn 124 answered
+       a panel whose close went to /worlds from wherever it was opened; R-6 fixed that by
+       remembering the route, and with the remembered route rendering behind the sheet the modal
+       keeps the one promise it makes. The editor's sheet (SPEC-039 R-5) at 95% of the window,
+       with no head of its own — the rail says what it is — and the X as its one added control. */
+    <EditorDialog open onClose={leave} width="95vw" height="95vh" labelledBy="fy-settings-title" panelClassName="fy-settings__sheet">
+      <div className="fy-settings" data-screen="settings">
+        <nav className="fy-settings__rail" aria-label="Settings panes">
+          <div className="fy-settings__title" id="fy-settings-title">Settings</div>
+          {(
+            [
+              ["providers", "Providers"],
+              ["models", "AI models"],
+              ["general", "General"],
+              ["harness", "Harness"],
+              ["appearance", "Appearance"],
+              ["notifications", "Notifications"],
+              ["sign-in", "Sign-in"],
+              ["sample-world", "Sample world"],
+              ["diagnostics", "Diagnostics"],
+              ["about", "About"],
+            ] as const
+          ).map(([slug, label]) => (
+            <NavLink
+              key={slug}
+              to={`/settings/${slug}`}
+              className={({ isActive }) => cx("fy-settings__tab", isActive && "fy-settings__tab--active")}
+            >
+              {label}
+            </NavLink>
+          ))}
+          <div style={{ flex: 1 }} />
+          <div className="fy-settings__version">v{state?.app.version ?? (typeof window === "undefined" ? undefined : window.arke?.appVersion) ?? "—"}</div>
+        </nav>
+        <div className="fy-settings__pane">
+          {/* Most panes in here draw from the coordinator's snapshot, and with no snapshot they
+              draw the same thing they draw when a provider has nothing to offer: `—` in the
+              capability rows, `not measured` in the machine header. A dev coordinator that died
+              at import produces exactly that screen, which reads as a data bug in whatever you
+              last changed (issue 599). */}
+          {(connection === "closed" || connection === "auth-refused") && (
+            <div className="fy-settings__waiting">
+              <WaitingForCoordinator />
+            </div>
+          )}
+          <Outlet />
         </div>
+        <IconButton label="Close" className="fy-settings__close" onClick={leave}>
+          <X size={13} />
+        </IconButton>
       </div>
-    </div>
+    </EditorDialog>
   );
 }
 

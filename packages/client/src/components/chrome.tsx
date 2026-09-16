@@ -1,8 +1,7 @@
-import { useLocation, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 import { Bell, ChevronLeft, Cog, Inbox } from "./icons.js";
 import { cx } from "./ui.js";
 import { useStore } from "../lib/store.js";
-import { rememberSettingsReturn, settingsReturnPath } from "../lib/settings-return.js";
 import { closeActivityPanel, openActivityPanel, useActivityPanel, waitingUpdate } from "../lib/activity-panel.js";
 import { bundledReleases } from "../lib/releases.js";
 import { unreadCount } from "../lib/release-notes.js";
@@ -53,11 +52,10 @@ export function AppChrome({
   aside?: React.ReactNode;
   /** Launch is the one screen without them: nothing is set up yet and nothing has happened. */
   controls?: boolean;
-  current?: "proposals" | "activity" | "settings";
+  current?: "proposals" | "activity";
   divided?: boolean;
 }) {
   const navigate = useNavigate();
-  const location = useLocation();
   const { state } = useStore();
   // Same derivation as Activity: rare unattended proposals must light this from every screen,
   // alongside reconciliation, paused providers, external edits and paid work awaiting review.
@@ -149,21 +147,14 @@ export function AppChrome({
             </button>
             <button
               type="button"
-              className={cx("fy-iconbtn", current === "settings" && "fy-iconbtn--current")}
-              title={current === "settings" ? "Leave Settings" : "Settings"}
-              aria-label={current === "settings" ? "Leave Settings" : "Settings"}
-              aria-current={current === "settings" ? "page" : undefined}
-              // On a Settings surface the gear is the way back (SPEC-042 R-6): Settings is a page
-              // with no close of its own, and the route it returns to is the one this control
-              // was pressed from — not /worlds, which is where the old panel's close always went.
-              onClick={() => {
-                if (current === "settings") {
-                  navigate(settingsReturnPath());
-                  return;
-                }
-                rememberSettingsReturn(location.pathname + location.search);
-                navigate("/settings/providers");
-              }}
+              className="fy-iconbtn"
+              title="Settings"
+              aria-label="Settings"
+              // Where it was pressed from is what renders behind the Settings sheet and where the
+              // sheet returns you (SPEC-042 R-6, design turn 150) — remembered by the app on every
+              // change of address, so a remedy's button into Settings counts the same as this one.
+              // The sheet carries its own close; no surface under it ever shows a gear to leave by.
+              onClick={() => navigate("/settings/providers")}
             >
               <Cog size={13} />
             </button>
