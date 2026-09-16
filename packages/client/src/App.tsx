@@ -1,6 +1,6 @@
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { useEffect, useRef } from "react";
-import { isSettingsPath, settingsReturnPath } from "./lib/settings-return.js";
+import { isSettingsPath, rememberSettingsReturn, settingsReturnPath } from "./lib/settings-return.js";
 import { ProductionSetupScreen } from "./screens/production-setup.js";
 import { ProductionNarrativeScreen } from "./screens/production-narrative.js";
 import { ProductionArtifactsScreen } from "./screens/production-artifacts.js";
@@ -226,6 +226,13 @@ export function App() {
   // The dock survives navigation (design 25c). It clears on an explicit dismiss or on leaving
   // this world for another — a clip from the world you just closed has nothing to say here.
   const inSettings = isSettingsPath(location.pathname);
+  // Every way into Settings — the gear, a remedy's button, a chip that opens the narrator's
+  // setting — has the sheet open over the screen the person was on, and returns there: the last
+  // address outside Settings is remembered here, on every change of address, rather than by each
+  // caller remembering to (SPEC-042 R-6; Codex on PR 1214 found three that did not).
+  useEffect(() => {
+    if (!inSettings) rememberSettingsReturn(location.pathname + location.search);
+  }, [inSettings, location.pathname, location.search]);
   const openWorld = /^\/w\/([^/]+)/.exec(location.pathname)?.[1] ?? null;
   const lastWorld = useRef<string | null>(null);
   useEffect(() => {
@@ -248,9 +255,11 @@ export function App() {
       <PermissionBackstops />
       <PlayerDock />
       <UpdateTransition />
-      <RouteErrorBoundary>
       {/* While the address is a Settings route, the screen tree renders the route the gear
-          remembered — the world picker where nothing was — and the sheet renders over it. */}
+          remembered — the world picker where nothing was — and the sheet renders over it. Each
+          tree fails on its own: a screen that throws is replaced by the failure screen behind
+          the sheet, not the sheet with it, so Settings stays reachable from a broken screen. */}
+      <RouteErrorBoundary>
       <Routes location={inSettings ? settingsReturnPath() : location}>
         <Route path="/" element={<LaunchScreen />} />
         <Route path="/starting" element={<StartupScreen />} />
@@ -353,8 +362,12 @@ export function App() {
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-      {inSettings && <SettingsRoutes />}
       </RouteErrorBoundary>
+      {inSettings && (
+        <RouteErrorBoundary>
+          <SettingsRoutes />
+        </RouteErrorBoundary>
+      )}
     </>
   );
 }

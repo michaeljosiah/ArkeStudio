@@ -1,8 +1,7 @@
-import { useLocation, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 import { Bell, ChevronLeft, Cog, Inbox } from "./icons.js";
 import { cx } from "./ui.js";
 import { useStore } from "../lib/store.js";
-import { rememberSettingsReturn } from "../lib/settings-return.js";
 import { closeActivityPanel, openActivityPanel, useActivityPanel, waitingUpdate } from "../lib/activity-panel.js";
 import { bundledReleases } from "../lib/releases.js";
 import { unreadCount } from "../lib/release-notes.js";
@@ -57,7 +56,6 @@ export function AppChrome({
   divided?: boolean;
 }) {
   const navigate = useNavigate();
-  const location = useLocation();
   const { state } = useStore();
   // Same derivation as Activity: rare unattended proposals must light this from every screen,
   // alongside reconciliation, paused providers, external edits and paid work awaiting review.
@@ -152,13 +150,11 @@ export function AppChrome({
               className="fy-iconbtn"
               title="Settings"
               aria-label="Settings"
-              // The gear records where it was pressed (SPEC-042 R-6): that route is what renders
-              // behind the Settings sheet and where the sheet returns you (design turn 150). The
-              // sheet carries its own close; no surface under it ever shows a gear to leave by.
-              onClick={() => {
-                rememberSettingsReturn(location.pathname + location.search);
-                navigate("/settings/providers");
-              }}
+              // Where it was pressed from is what renders behind the Settings sheet and where the
+              // sheet returns you (SPEC-042 R-6, design turn 150) — remembered by the app on every
+              // change of address, so a remedy's button into Settings counts the same as this one.
+              // The sheet carries its own close; no surface under it ever shows a gear to leave by.
+              onClick={() => navigate("/settings/providers")}
             >
               <Cog size={13} />
             </button>
