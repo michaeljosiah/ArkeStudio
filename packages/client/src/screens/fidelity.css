@@ -2698,14 +2698,17 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
    off the edge on a narrow window. */
 .fy-scrim__center--flush { padding: 0; }
 /*
- * A page, not a panel (SPEC-042 R-5).
- *
- * It was 90% of the window over a blurred scrim, with a close of its own. At that size the modal
- * framing bought nothing but a narrower pane — and a three-column surface (.fy-cols) is sized to
- * a pane the panel could not give it. The rail sits flush left at the canvas's 200px; the pane
- * takes the rest and hands its own scrolling to whatever it holds.
+ * A sheet over the screen it was opened from (design turn 150; SPEC-042 R-5 amended): the
+ * editor's dialog at 95% of the window each way, and nothing invented for it. Turn 124 made
+ * Settings a page because the panel before it went to /worlds from wherever it was opened;
+ * with the remembered route rendering behind the sheet, the modal keeps that promise. Inside,
+ * nothing moves: the rail sits flush left at the canvas's 200px; the pane takes the rest and
+ * hands its own scrolling to whatever it holds. The X is the sheet's one added control, in the
+ * corner the rail does not use.
  */
-.fy-settings { height: 100%; display: flex; }
+.fy-settings__sheet { position: relative; }
+.fy-settings { height: 100%; min-height: 0; display: flex; }
+.fy-settings__close { position: absolute; top: 12px; right: 12px; }
 .fy-settings__rail {
   width: 200px;
   flex: none;
