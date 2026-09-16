@@ -4,7 +4,7 @@ import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { ClientMessage, DomainEvent, ManifestModel, VoiceCandidate } from "@arke-studio/contracts";
 import { ProviderRequestRejectedError } from "@arke-studio/providers";
-import { until, untilAsync } from "../wait.js";
+import { until } from "../wait.js";
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { piecesFor } from "../../src/voice/pieces.js";
