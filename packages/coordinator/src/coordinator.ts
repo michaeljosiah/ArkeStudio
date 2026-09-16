@@ -341,7 +341,7 @@ import {
   voiceLineRequest,
   chapterProseSpeech,
 } from "./voice/service.js";
-import { pieceOf, pieceParams, piecesFor, PieceReads } from "./voice/pieces.js";
+import { pieceJobs, pieceOf, pieceParams, piecesFor, PieceReads } from "./voice/pieces.js";
 import {
   AUDIO_EXTENSIONS as CLONEABLE_AUDIO_EXTENSIONS,
   audioBytesLookRight,
@@ -1643,10 +1643,15 @@ export class Coordinator {
       this.stoppedReads.delete(requestId);
       return;
     }
+    // The chunked blocks are registered before the queue takes their jobs (issue 1208): a
+    // piece can land before the batch call returns, and a piece nothing is waiting for is left
+    // in the cache rather than announced.
+    this.registerPieces(requestId, pending.inputs, (index) => ({ file: files[index]!, format, page, characters: blocks[index]!.text.length }));
     const queued = await this.enqueueBatch(requestId, input.frameKind, pending.inputs);
     if (queued.jobIds.length < pending.inputs.length) {
       // A block short of a piece can never be made whole, and a page short of a block has a
       // hole playback would wait on forever (codex on PR 914): none of it stands.
+      this.pieceReads.drop(requestId);
       for (const jobId of queued.jobIds) await this.jobQueue?.cancel(jobId).catch(() => {});
       fail(queued.reason ?? "Voice synthesis could not be queued.", characters);
       return;
@@ -1655,34 +1660,30 @@ export class Coordinator {
     // cancel; the ids come back here and are cancelled rather than kept (codex, PR 879).
     if (this.stoppedReads.has(requestId)) {
       this.stoppedReads.delete(requestId);
+      this.pieceReads.drop(requestId);
       for (const jobId of queued.jobIds) await this.jobQueue?.cancel(jobId).catch(() => {});
       return;
     }
     if (queued.jobIds.length > 0) this.readJobs.set(requestId, queued.jobIds);
-    this.registerPieces(requestId, pending.inputs, queued.jobIds, (index) => ({ file: files[index]!, format, page, characters: blocks[index]!.text.length }));
+    this.pieceReads.queued(requestId, pieceJobs(pending.inputs, queued.jobIds));
   }
 
   /**
-   * The chunked blocks of a read the queue just took (issue 1208): each with its jobs, so the
-   * pieces can be joined when the last lands. Read off the inputs rather than the plan, because
-   * the inputs are what was actually queued, in the order the ids came back.
+   * The chunked blocks of a read about to be queued (issue 1208): each with how many pieces to
+   * wait for, so they can be joined when the last lands. Read off the inputs rather than the
+   * plan, because the inputs are what is actually queued.
    */
   private registerPieces(
     requestId: string,
     inputs: readonly EnqueueInput[],
-    jobIds: readonly string[],
     blockOf: (index: number) => { file: string; format: VoiceAudioFormat; page: boolean; characters: number },
   ): void {
-    const byBlock = new Map<number, string[]>();
-    for (const [at, input] of inputs.entries()) {
+    const counted = new Map<number, number>();
+    for (const input of inputs) {
       const piece = pieceOf(input);
-      const jobId = jobIds[at];
-      if (piece === null || jobId === undefined) continue;
-      const ids = byBlock.get(piece.blockIndex) ?? [];
-      ids[piece.piece] = jobId;
-      byBlock.set(piece.blockIndex, ids);
+      if (piece !== null) counted.set(piece.blockIndex, piece.pieces);
     }
-    for (const [blockIndex, ids] of byBlock) this.pieceReads.register({ requestId, blockIndex, jobIds: ids, ...blockOf(blockIndex) });
+    for (const [blockIndex, pieces] of counted) this.pieceReads.register({ requestId, blockIndex, pieces, ...blockOf(blockIndex) });
   }
 
   /** What the import sheet is told of a read (turn 131): the counts, the levels, and where the chapters would go. */
@@ -1931,21 +1932,24 @@ export class Coordinator {
       return;
     }
     if (queuedInputs.length === 0) return;
+    this.registerPieces(requestId, queuedInputs, (index) => ({ file: cloud[index]!.file, format: cloud[index]!.format, page: true, characters: blocks[index]!.text.length }));
     const queued = await this.enqueueBatch(requestId, input.frameKind, queuedInputs);
     if (queued.jobIds.length < queuedInputs.length) {
       // One block refused is a page with a hole in it (codex on PR 914): playback would wait on
       // a part no event fills, after the rest was queued and perhaps charged. None of it stands.
+      this.pieceReads.drop(requestId);
       for (const jobId of queued.jobIds) await this.jobQueue?.cancel(jobId).catch(() => {});
       fail(queued.reason ?? "Voice synthesis could not be queued.", characters);
       return;
     }
     if (this.stoppedReads.has(requestId)) {
       this.stoppedReads.delete(requestId);
+      this.pieceReads.drop(requestId);
       for (const jobId of queued.jobIds) await this.jobQueue?.cancel(jobId).catch(() => {});
       return;
     }
     if (queued.jobIds.length > 0) this.readJobs.set(requestId, queued.jobIds);
-    this.registerPieces(requestId, queuedInputs, queued.jobIds, (index) => ({ file: cloud[index]!.file, format: cloud[index]!.format, page: true, characters: blocks[index]!.text.length }));
+    this.pieceReads.queued(requestId, pieceJobs(queuedInputs, queued.jobIds));
   }
 
   private readonly sessionInput: SessionInput;

@@ -43,6 +43,20 @@ export function pieceOf(job: Pick<Job, "params">): { blockIndex: number; piece: 
   return typeof blockIndex === "number" && typeof piece === "number" && typeof pieces === "number" ? { blockIndex, piece, pieces } : null;
 }
 
+/** The jobs the queue gave a batch of inputs, grouped by block and ordered by piece, for `PieceReads.queued`. */
+export function pieceJobs(inputs: readonly Pick<Job, "params">[], jobIds: readonly string[]): Map<number, string[]> {
+  const byBlock = new Map<number, string[]>();
+  for (const [at, input] of inputs.entries()) {
+    const piece = pieceOf(input);
+    const jobId = jobIds[at];
+    if (piece === null || jobId === undefined) continue;
+    const ids = byBlock.get(piece.blockIndex) ?? [];
+    ids[piece.piece] = jobId;
+    byBlock.set(piece.blockIndex, ids);
+  }
+  return byBlock;
+}
+
 interface Block {
   /** The whole block's cache file, where the joined read lands so the next read is a hit (SPEC-011 R-10). */
   file: string;
@@ -51,7 +65,7 @@ interface Block {
   page: boolean;
   /** The prose's count, as the block's event states it — never the sum of the vendor's. */
   characters: number;
-  /** Every piece's job, so a block that cannot be made whole stops paying for the rest. */
+  /** Every piece's job once the queue has named them, so a block that cannot be made whole stops paying for the rest. */
   jobIds: readonly string[];
   landed: (string | undefined)[];
   estimatedMicroUsd: number;
@@ -68,13 +82,26 @@ export type PieceSettled =
  * The blocks being made in pieces, by request and block. Held in memory only: a read is asked
  * for by an open screen and answered by events, so a piece that lands after a restart has no
  * screen to reach and is left in the cache it landed in.
+ *
+ * A block is registered before its jobs are queued and told their ids after, because a piece
+ * can land before the batch call returns — a fake reader in a test does, and a piece nothing
+ * is waiting for is an orphan. Between the two a failure has no siblings to name; that window
+ * is the journalling of a batch, and a vendor does not answer inside it.
  */
 export class PieceReads {
   private readonly blocks = new Map<string, Block>();
 
-  register(input: { requestId: string; blockIndex: number; file: string; format: VoiceAudioFormat; page: boolean; characters: number; jobIds: readonly string[] }): void {
-    const { requestId, blockIndex, ...block } = input;
-    this.blocks.set(key(requestId, blockIndex), { ...block, landed: Array.from({ length: input.jobIds.length }, () => undefined), estimatedMicroUsd: 0 });
+  register(input: { requestId: string; blockIndex: number; pieces: number; file: string; format: VoiceAudioFormat; page: boolean; characters: number }): void {
+    const { requestId, blockIndex, pieces, ...block } = input;
+    this.blocks.set(key(requestId, blockIndex), { ...block, jobIds: [], landed: Array.from({ length: pieces }, () => undefined), estimatedMicroUsd: 0 });
+  }
+
+  /** The queue named the jobs: each block learns its pieces' ids, in piece order. */
+  queued(requestId: string, jobs: ReadonlyMap<number, readonly string[]>): void {
+    for (const [blockIndex, jobIds] of jobs) {
+      const block = this.blocks.get(key(requestId, blockIndex));
+      if (block !== undefined) block.jobIds = jobIds;
+    }
   }
 
   /** Stopped: nothing that lands for the request is announced or joined. */
