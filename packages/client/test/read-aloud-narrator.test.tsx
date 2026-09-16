@@ -5,6 +5,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { parseHTML } from "linkedom";
 import type { ClientMessage } from "@arke-studio/contracts";
+import { ReadAloud, ReadAloudButton } from "../src/components/read-aloud.js";
+import { ReadAloudConfirmation } from "../src/components/read-aloud-confirmation.js";
 import { App } from "../src/App.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { dismissPlayback, playbackSnapshot, setAudioFactoryForTest } from "../src/lib/audio.js";
@@ -78,3 +80,68 @@ it("names the narrator on the clip, both when a read lands and when the row repl
   assert.equal(playbackSnapshot().clip?.sub, "read aloud · Emma");
   assert.match(playbackSnapshot().clip?.title ?? "", /^Maren Kest · /);
 });
+
+
+for (const surface of ["sheet", "prose", "button"] as const) {
+  it(`${surface} read confirms the quoted reader and price in a cancelable dialog`, async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(JSON.parse(json)); } } as ArkeBridge);
+    // The quote, not the current narrator preference, decides the disclosure.
+    __setStateForTest({ ...FIXTURE_STATE, app: { ...FIXTURE_STATE.app, narrator: { provider: "elevenlabs", model: "eleven_multilingual_v2", voiceId: "old", label: "Old narrator" } } });
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container);
+    const root = createRoot(container); open.push(root);
+    const props = { source: { of: "shot", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_12" } as const, title: "Shot script", text: "The sea moves." };
+    await act(async () => root.render(surface === "sheet"
+      ? <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/cast/maren-kest`]}><App /></MemoryRouter>
+      : surface === "prose" ? <ReadAloud {...props} /> : <ReadAloudButton {...props} />));
+    const trigger = () => container.querySelector<HTMLButtonElement>(surface === "button" ? 'button[title="Read aloud"]' : 'button[aria-label="Read aloud"]')!;
+    const requests = () => sent.filter(message => message.kind === "read-sheet-section" || message.kind === "read-prose");
+    await act(async () => trigger().click());
+    let asked = requests().at(-1)!;
+    const quote = () => ({ type: "voice.audio" as const, at: "2026-09-16T08:00:00.000Z", requestId: asked.requestId,
+      worldId: FIXTURE_WORLD_ID, sheetVersion: 4, purpose: surface === "sheet" ? "sheet-section" as const : "prose" as const,
+      provider: "mistral" as const, model: "voxtral-mini-tts", voiceId: "voice", format: "wav" as const,
+      status: "confirmation-required" as const, file: null, cached: false, characterCount: 1487, estimatedMicroUsd: 23792, confirmationToken: "quote-1" });
+    await act(async () => __applyEventForTest(quote()));
+    let dialog = dom.document.querySelector('[role="dialog"]')!;
+    assert.ok(dialog);
+    assert.match(dialog.textContent!, /sent to Voxtral/);
+    assert.doesNotMatch(dialog.textContent!, /ElevenLabs|elevenlabs|Old narrator/);
+    assert.match(dialog.textContent!, /Confirm 1487 characters · \$0.02/);
+    assert.equal(requests().length, 1, "quoting does not confirm a charge");
+    await act(async () => [...dialog.querySelectorAll('button')].find(button => button.textContent === "Cancel")!.click());
+    assert.equal(dom.document.querySelector('[role="dialog"]'), null);
+    assert.equal(requests().length, 1, "cancel sends no paid request");
+    await act(async () => trigger().click());
+    asked = requests().at(-1)!;
+    await act(async () => __applyEventForTest(quote()));
+    dialog = dom.document.querySelector('[role="dialog"]')!;
+    const confirm = [...dialog.querySelectorAll('button')].find(button => button.textContent!.startsWith('Confirm'))!;
+    await act(async () => { confirm.click(); confirm.click(); });
+    assert.equal(requests().length, 3, "one confirmation despite repeated clicks");
+    assert.equal(requests().at(-1)!.requestId, asked.requestId);
+    assert.equal(requests().at(-1)!.confirmationToken, "quote-1");
+    assert.equal(dom.document.querySelector('[role="dialog"]'), null);
+    await act(async () => __applyEventForTest({ ...quote(), confirmationToken: "quote-2", estimatedMicroUsd: 50000 }));
+    assert.match(dom.document.querySelector('[role="dialog"]')!.textContent!, /\$0.05/, "a revised quote needs a new decision");
+  });
+}
+
+for (const [provider, model, expected, local] of [["kokoro", "kokoro-82m", "Kokoro", true], ["elevenlabs", "eleven_multilingual_v2", "ElevenLabs", false]] as const) {
+it(`${expected} confirmation identifies its destination accurately`, async () => {
+  __setStateForTest(FIXTURE_STATE);
+  const container = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(container);
+  const root = createRoot(container); open.push(root);
+  await act(async () => root.render(<ReadAloudConfirmation title="Appearance" result={{
+    type: "voice.audio", at: "2026-09-16T08:00:00.000Z", requestId: FIXTURE_WORLD_ID, worldId: FIXTURE_WORLD_ID,
+    sheetVersion: 1, purpose: "prose", provider, model, voiceId: "bf_emma", format: "wav",
+    status: "confirmation-required", file: null, cached: false, characterCount: 20, estimatedMicroUsd: 0, confirmationToken: "local",
+  }} onCancel={() => {}} onConfirm={() => {}} />));
+  const dialog = dom.document.querySelector('[role="dialog"]')!;
+  assert.ok(dialog.textContent!.includes(local ? `Read locally with ${expected}` : `sent to ${expected}`));
+  if (local) assert.doesNotMatch(dialog.textContent!, /sent to|ElevenLabs/);
+});
+
+}
