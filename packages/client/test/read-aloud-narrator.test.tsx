@@ -4,12 +4,12 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { parseHTML } from "linkedom";
-import type { ClientMessage } from "@arke-studio/contracts";
+import { DEFAULT_NARRATOR, type ClientMessage } from "@arke-studio/contracts";
 import { ReadAloud, ReadAloudButton } from "../src/components/read-aloud.js";
 import { ReadAloudConfirmation } from "../src/components/read-aloud-confirmation.js";
 import { App } from "../src/App.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
-import { dismissPlayback, playbackSnapshot, setAudioFactoryForTest } from "../src/lib/audio.js";
+import { dismissPlayback, emitForTest, playbackSnapshot, setAudioFactoryForTest } from "../src/lib/audio.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -81,6 +81,58 @@ it("names the narrator on the clip, both when a read lands and when the row repl
   assert.match(playbackSnapshot().clip?.title ?? "", /^Maren Kest · /);
 });
 
+
+/*
+ * A section over the reader's cap arrives in pieces (issue 1208), the way a long local read
+ * always has. This screen played only the newest event, so the second piece replaced the first
+ * mid-sentence; now each is queued as it lands and the player walks on when one ends.
+ */
+it("queues the pieces of a chunked sheet read behind the first rather than replacing it", async () => {
+  const dock = { playbackRate: 1, src: "", currentTime: 0, duration: NaN, play: async () => {}, pause() {}, load() {}, removeAttribute() {}, addEventListener() {}, removeEventListener() {} };
+  setAudioFactoryForTest(() => dock as never);
+  const sent: ClientMessage[] = [];
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(JSON.parse(json) as ClientMessage); } } as unknown as ArkeBridge);
+  const container = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(container);
+  const root = createRoot(container);
+  open.push(root);
+  await act(async () => root.render(
+    <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/cast/maren-kest`]}>
+      <App />
+    </MemoryRouter>,
+  ));
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Read aloud"]')!.click());
+  const asked = sent.find((message): message is Extract<ClientMessage, { kind: "read-sheet-section" }> => message.kind === "read-sheet-section")!;
+  const piece = (part: number, file: string) => ({
+    type: "voice.audio" as const, at: "2026-09-16T08:00:00.000Z", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, sheetId: "maren-kest", sheetVersion: 4,
+    purpose: "sheet-section" as const, sectionHeading: asked.sectionHeading, provider: "mistral" as const, model: "voxtral-mini-tts", voiceId: "en_paul_neutral", format: "wav" as const,
+    status: "ready" as const, file, cached: false, characterCount: 200, estimatedMicroUsd: 3200, part, parts: 2,
+  });
+  await act(async () => __applyEventForTest(piece(0, ".cache/voice-previews/first.wav")));
+  assert.match(playbackSnapshot().clip?.url ?? "", /first\.wav$/, "the first piece sounds the moment it lands");
+  await act(async () => __applyEventForTest(piece(1, ".cache/voice-previews/second.wav")));
+  assert.match(playbackSnapshot().clip?.url ?? "", /first\.wav$/, "the second piece waits its turn rather than replacing the first");
+  await act(async () => emitForTest("ended"));
+  assert.match(playbackSnapshot().clip?.url ?? "", /second\.wav$/, "and follows when the first ends");
+  assert.equal(playbackSnapshot().clip?.sub, `read aloud · ${DEFAULT_NARRATOR.label}`);
+});
+
+it("says how many pieces a chunked read goes as, on the dialog that prices it", async () => {
+  __setStateForTest(FIXTURE_STATE);
+  const container = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(container);
+  const root = createRoot(container); open.push(root);
+  const quote = (parts?: number) => ({
+    type: "voice.audio" as const, at: "2026-09-16T08:00:00.000Z", requestId: FIXTURE_WORLD_ID, worldId: FIXTURE_WORLD_ID,
+    sheetVersion: 1, purpose: "sheet-section" as const, provider: "breezeblue" as const, model: "breeze-tts-2", voiceId: "voc_1", format: "wav" as const,
+    status: "confirmation-required" as const, file: null, cached: false, characterCount: 1487, estimatedMicroUsd: 59480, confirmationToken: "quote-1", ...(parts !== undefined ? { parts } : {}),
+  });
+  await act(async () => root.render(<ReadAloudConfirmation title="Appearance" result={quote(2)} onCancel={() => {}} onConfirm={() => {}} />));
+  assert.match(dom.document.querySelector('[role="dialog"]')!.textContent!, /Appearance · Breeze · 2 parts/);
+  assert.match(dom.document.querySelector('[role="dialog"]')!.textContent!, /Confirm 1487 characters · \$0.06/, "priced once, for the whole read");
+  await act(async () => root.render(<ReadAloudConfirmation title="Appearance" result={quote()} onCancel={() => {}} onConfirm={() => {}} />));
+  assert.doesNotMatch(dom.document.querySelector('[role="dialog"]')!.textContent!, /parts/, "a read that goes whole says nothing about pieces");
+});
 
 for (const surface of ["sheet", "prose", "button"] as const) {
   it(`${surface} read confirms the quoted reader and price in a cancelable dialog`, async () => {

@@ -128,6 +128,7 @@ import {
   type SingleActUndo,
   ART_DIRECTION_PATH,
   type VoiceCandidate,
+  type VoiceAudioFormat,
   type ArtifactGeneration,
   type CharacterReferenceWorkflow,
   type BenchSession,
@@ -340,6 +341,7 @@ import {
   voiceLineRequest,
   chapterProseSpeech,
 } from "./voice/service.js";
+import { pieceOf, pieceParams, piecesFor, PieceReads } from "./voice/pieces.js";
 import {
   AUDIO_EXTENSIONS as CLONEABLE_AUDIO_EXTENSIONS,
   audioBytesLookRight,
@@ -1522,6 +1524,15 @@ export class Coordinator {
         format,
       }),
     );
+    /*
+     * Each block as the reader takes it (issue 1208): whole within its row's cap, else in pieces
+     * at sentence ends, each piece a job of its own. A single block's pieces are its parts and
+     * are heard as they land, as a local read's are; a page's block stays one part and is
+     * announced once its pieces are joined under the whole block's cache file — which is also
+     * what makes the next read of the same words a hit rather than another spend.
+     */
+    const pieces = blocks.map((block) => piecesFor(block.text, model, format));
+    const pieceFile = (piece: string) => speechCacheFile({ provider: model.provider, model: model.id, voiceId: speaking.voiceId, text: piece, format });
     const cachedReady = (block: { heading: string; text: string }, index: number) =>
       this.emit({
         at: new Date().toISOString(),
@@ -1557,39 +1568,42 @@ export class Coordinator {
       blocks.forEach(cachedReady);
       return;
     }
-    const estimate = misses.reduce(
-      (sum, index) => sum + estimateMicroUsd(model, { characters: billableCharacters(model, blocks[index]!.text) }),
-      0,
-    );
+    // Priced by the piece, as each request will be billed (SPEC-046 R-8), and summed: the read
+    // is quoted once, whole, never per piece or again part-way through.
+    const priceOf = (piece: string) => estimateMicroUsd(model, { characters: billableCharacters(model, piece) });
+    const estimate = misses.reduce((sum, index) => sum + pieces[index]!.reduce((total, piece) => total + priceOf(piece), 0), 0);
     const token = createHash("sha256")
-      .update([subject.id, String(subject.version), ...misses.map((index) => files[index]!)].join("\n"))
+      .update([subject.id, String(subject.version), ...misses.flatMap((index) => pieces[index]!.map(pieceFile))].join("\n"))
       .digest("hex");
-    const enqueued: EnqueueInput[] = misses.map((index) => ({
-      worldId,
-      target: {
-        kind: "voice-preview",
-        // The heading keeps a page's blocks apart. They differ only in their words, and one
-        // target for all of them would be one job for all of them.
-        id: `${blocks[index]!.subjectId ?? subject.id}/${model.provider}/${model.id}/${speaking.voiceId}${page ? `/${blocks[index]!.heading}` : ""}`,
-      },
-      capability: "voice-tts",
-      provider: model.provider,
-      model: model.id,
-      params: {
-        voiceId: speaking.voiceId,
-        text: blocks[index]!.text,
-        audioFormat: format,
-        requestId,
-        purpose,
-        ...(input.sheetId !== undefined ? { sheetId: input.sheetId } : {}),
-        sheetVersion: subject.version,
-        sectionHeading: blocks[index]!.heading,
-        characterCount: blocks[index]!.text.length,
-        ...(page ? { part: index, parts: blocks.length } : {}),
-      },
-      estimatedMicroUsd: estimateMicroUsd(model, { characters: billableCharacters(model, blocks[index]!.text) }),
-      landing: { dir: ".cache/voice-previews", name: files[index]!.split("/").pop()! },
-    }));
+    const enqueued: EnqueueInput[] = misses.flatMap((index) =>
+      pieces[index]!.map((piece, at) => ({
+        worldId,
+        target: {
+          kind: "voice-preview" as const,
+          // The heading keeps a page's blocks apart, and the piece number a block's pieces:
+          // they differ only in their words, and a target names what a job is for.
+          id: `${blocks[index]!.subjectId ?? subject.id}/${model.provider}/${model.id}/${speaking.voiceId}${page ? `/${blocks[index]!.heading}` : ""}${pieces[index]!.length > 1 ? `/${at + 1}` : ""}`,
+        },
+        capability: "voice-tts" as const,
+        provider: model.provider,
+        model: model.id,
+        params: {
+          voiceId: speaking.voiceId,
+          text: piece,
+          audioFormat: format,
+          requestId,
+          purpose,
+          ...(input.sheetId !== undefined ? { sheetId: input.sheetId } : {}),
+          sheetVersion: subject.version,
+          sectionHeading: blocks[index]!.heading,
+          characterCount: piece.length,
+          ...(page ? { part: index, parts: blocks.length } : pieces[index]!.length > 1 ? { part: at, parts: pieces[index]!.length } : {}),
+          ...(pieces[index]!.length > 1 ? pieceParams(index, at, pieces[index]!.length) : {}),
+        },
+        estimatedMicroUsd: priceOf(piece),
+        landing: { dir: ".cache/voice-previews", name: pieceFile(piece).split("/").pop()! },
+      })),
+    );
     if (input.confirmationToken !== token) {
       this.pendingVoiceReads.set(requestId, { token, inputs: enqueued });
       this.emit({
@@ -1609,6 +1623,10 @@ export class Coordinator {
         characterCount: misses.reduce((sum, index) => sum + blocks[index]!.text.length, 0),
         estimatedMicroUsd: estimate,
         confirmationToken: token,
+        // How many pieces a single block's read will arrive in, said with the price (issue 1208):
+        // a seam is audible, and a reader deciding to spend should know the text goes as several
+        // requests. A page's parts are its blocks, and its own dialog counts those.
+        ...(!page && pieces[0]!.length > 1 ? { parts: pieces[0]!.length } : {}),
       } as DomainEvent);
       return;
     }
@@ -1626,7 +1644,13 @@ export class Coordinator {
       return;
     }
     const queued = await this.enqueueBatch(requestId, input.frameKind, pending.inputs);
-    if (!queued.accepted) fail(queued.reason ?? "Voice synthesis could not be queued.", characters);
+    if (queued.jobIds.length < pending.inputs.length) {
+      // A block short of a piece can never be made whole, and a page short of a block has a
+      // hole playback would wait on forever (codex on PR 914): none of it stands.
+      for (const jobId of queued.jobIds) await this.jobQueue?.cancel(jobId).catch(() => {});
+      fail(queued.reason ?? "Voice synthesis could not be queued.", characters);
+      return;
+    }
     // Stop can land while the batch is still being journalled, when there is nothing yet to
     // cancel; the ids come back here and are cancelled rather than kept (codex, PR 879).
     if (this.stoppedReads.has(requestId)) {
@@ -1635,6 +1659,30 @@ export class Coordinator {
       return;
     }
     if (queued.jobIds.length > 0) this.readJobs.set(requestId, queued.jobIds);
+    this.registerPieces(requestId, pending.inputs, queued.jobIds, (index) => ({ file: files[index]!, format, page, characters: blocks[index]!.text.length }));
+  }
+
+  /**
+   * The chunked blocks of a read the queue just took (issue 1208): each with its jobs, so the
+   * pieces can be joined when the last lands. Read off the inputs rather than the plan, because
+   * the inputs are what was actually queued, in the order the ids came back.
+   */
+  private registerPieces(
+    requestId: string,
+    inputs: readonly EnqueueInput[],
+    jobIds: readonly string[],
+    blockOf: (index: number) => { file: string; format: VoiceAudioFormat; page: boolean; characters: number },
+  ): void {
+    const byBlock = new Map<number, string[]>();
+    for (const [at, input] of inputs.entries()) {
+      const piece = pieceOf(input);
+      const jobId = jobIds[at];
+      if (piece === null || jobId === undefined) continue;
+      const ids = byBlock.get(piece.blockIndex) ?? [];
+      ids[piece.piece] = jobId;
+      byBlock.set(piece.blockIndex, ids);
+    }
+    for (const [blockIndex, ids] of byBlock) this.pieceReads.register({ requestId, blockIndex, jobIds: ids, ...blockOf(blockIndex) });
   }
 
   /** What the import sheet is told of a read (turn 131): the counts, the levels, and where the chapters would go. */
@@ -1741,14 +1789,18 @@ export class Coordinator {
         part: index,
         parts: blocks.length,
       } as DomainEvent);
-    // The cloud blocks: their cache files, and what the cache lacks.
+    // The cloud blocks: their cache files, what the cache lacks, and each as its reader takes it
+    // (issue 1208) — whole within the row's cap, else in pieces joined before the block is
+    // announced, because a page's block is one part whatever it took to make.
     const cloud = blocks.map((block, index) => {
       const voice = speaking[index]!;
       if (isLocal(voice)) return null;
       const model = modelOf(voice);
       if (model === null) return null;
       const format = voiceFormatForModel(model);
-      return { index, model, format, file: speechCacheFile({ provider: model.provider, model: model.id, voiceId: voice.voiceId, text: block.text, format }) };
+      const cacheFile = (text: string) => speechCacheFile({ provider: model.provider, model: model.id, voiceId: voice.voiceId, text, format });
+      const pieces = piecesFor(block.text, model, format);
+      return { index, model, format, file: cacheFile(block.text), pieces: pieces.map((text) => ({ text, file: cacheFile(text) })) };
     });
     const misses: number[] = [];
     for (const entry of cloud) {
@@ -1780,39 +1832,42 @@ export class Coordinator {
         )
           return;
       }
-      const estimate = misses.reduce((sum, index) => sum + estimateMicroUsd(cloud[index]!.model, { characters: billableCharacters(cloud[index]!.model, blocks[index]!.text) }), 0);
+      // Priced by the piece, as each request will be billed (SPEC-046 R-8), and summed once.
+      const priceOf = (index: number, text: string) => estimateMicroUsd(cloud[index]!.model, { characters: billableCharacters(cloud[index]!.model, text) });
+      const estimate = misses.reduce((sum, index) => sum + cloud[index]!.pieces.reduce((total, piece) => total + priceOf(index, piece.text), 0), 0);
       const token = createHash("sha256")
-        .update(["voiced", subject.id, String(subject.version), ...misses.map((index) => cloud[index]!.file)].join("\n"))
+        .update(["voiced", subject.id, String(subject.version), ...misses.flatMap((index) => cloud[index]!.pieces.map((piece) => piece.file))].join("\n"))
         .digest("hex");
-      queuedInputs = misses.map((index) => {
+      queuedInputs = misses.flatMap((index) => {
         const entry = cloud[index]!;
         const voice = speaking[index]!;
-        return {
+        return entry.pieces.map((piece, at): EnqueueInput => ({
           worldId,
-          target: { kind: "voice-preview", id: `${blocks[index]!.subjectId}/${entry.model.provider}/${entry.model.id}/${voice.voiceId}` },
+          target: { kind: "voice-preview", id: `${blocks[index]!.subjectId}/${entry.model.provider}/${entry.model.id}/${voice.voiceId}${entry.pieces.length > 1 ? `/${at + 1}` : ""}` },
           capability: "voice-tts",
           provider: entry.model.provider,
           model: entry.model.id,
           params: {
             voiceId: voice.voiceId,
-            text: blocks[index]!.text,
+            text: piece.text,
             audioFormat: entry.format,
             ...(voice.clonedVoice !== undefined ? { language: voice.clonedVoice.language } : {}),
             requestId,
             purpose: "prose",
             sheetVersion: subject.version,
             sectionHeading: blocks[index]!.heading,
-            characterCount: blocks[index]!.text.length,
+            characterCount: piece.text.length,
             part: index,
             parts: blocks.length,
+            ...(entry.pieces.length > 1 ? pieceParams(index, at, entry.pieces.length) : {}),
           },
-          estimatedMicroUsd: estimateMicroUsd(entry.model, { characters: billableCharacters(entry.model, blocks[index]!.text) }),
-          landing: { dir: ".cache/voice-previews", name: entry.file.split("/").pop()! },
+          estimatedMicroUsd: priceOf(index, piece.text),
+          landing: { dir: ".cache/voice-previews", name: piece.file.split("/").pop()! },
           // The marker the dispatcher resolves the recording by, and the engine it was allowed
           // to go to (codex on PR 914): without them every uncached cloned line fails.
           ...(voice.cloned ? { voiceReference: true } : {}),
           ...(voice.cloned && input.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: input.voiceUploadConfirmedFor } : {}),
-        };
+        }));
       });
       // Priced once before anything plays, and asked only when there is a price (R-47): a free
       // voice, and a cached line, say nothing.
@@ -1890,6 +1945,7 @@ export class Coordinator {
       return;
     }
     if (queued.jobIds.length > 0) this.readJobs.set(requestId, queued.jobIds);
+    this.registerPieces(requestId, queuedInputs, queued.jobIds, (index) => ({ file: cloud[index]!.file, format: cloud[index]!.format, page: true, characters: blocks[index]!.text.length }));
   }
 
   private readonly sessionInput: SessionInput;
@@ -2062,6 +2118,8 @@ export class Coordinator {
   private readonly stoppedReads = new Set<string>();
   /** Cloud jobs queued for a page read, by requestId, so Stop can cancel what it already paid for. */
   private readonly readJobs = new Map<string, string[]>();
+  /** The blocks of a read being made in pieces (issue 1208): joined, and for a page announced, once every piece has landed. */
+  private readonly pieceReads = new PieceReads();
   private stopPromise: Promise<void> | null = null;
   /** Request ids whose create-production is still running — redelivery waits, never doubles (#384). */
   private readonly productionCreation = new ProductionCreationService();
@@ -3826,27 +3884,34 @@ export class Coordinator {
     }
     if (job.status !== "succeeded") {
       if (job.target.kind === "voice-preview" && typeof job.params["requestId"] === "string") {
+        // A piece of a chunked block (issue 1208): its block can no longer be made whole, so
+        // the block's other pieces are cancelled rather than paid for. A sibling cancelled that
+        // way comes back through here with its block already gone, and is not news twice.
+        const block = pieceOf(job) === null ? undefined : this.pieceReads.failed(job);
+        for (const jobId of block?.cancel ?? []) await this.jobQueue?.cancel(jobId).catch(() => {});
         const readIdentity = voiceJobReadIdentity(job);
-        this.emit({
-          at: new Date().toISOString(),
-          type: "voice.audio",
-          requestId: job.params["requestId"] as string,
-          worldId: job.worldId,
-          ...readIdentity,
-          sheetVersion: Number(job.params["sheetVersion"]),
-          ...(job.params["sectionHeading"] ? { sectionHeading: String(job.params["sectionHeading"]) } : {}),
-          ...voiceJobPart(job),
-          provider: job.provider as ProviderId,
-          model: job.model,
-          voiceId: String(job.params["voiceId"]),
-          format: voiceJobFormat(job),
-          status: "failed",
-          file: null,
-          cached: false,
-          characterCount: Number(job.params["characterCount"] ?? 0),
-          estimatedMicroUsd: job.estimatedMicroUsd,
-          error: "Voice synthesis failed. Open Activity for details.",
-        });
+        if (block !== null) {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "voice.audio",
+            requestId: job.params["requestId"] as string,
+            worldId: job.worldId,
+            ...readIdentity,
+            sheetVersion: Number(job.params["sheetVersion"]),
+            ...(job.params["sectionHeading"] ? { sectionHeading: String(job.params["sectionHeading"]) } : {}),
+            ...voiceJobPart(job),
+            provider: job.provider as ProviderId,
+            model: job.model,
+            voiceId: String(job.params["voiceId"]),
+            format: voiceJobFormat(job),
+            status: "failed",
+            file: null,
+            cached: false,
+            characterCount: Number(job.params["characterCount"] ?? 0),
+            estimatedMicroUsd: job.estimatedMicroUsd,
+            error: "Voice synthesis failed. Open Activity for details.",
+          });
+        }
       }
       // A bench take's failure reaches its session log, so the strip says so after a restart
       // without waiting for recovery to notice (issue 305 §6).
@@ -4221,25 +4286,53 @@ export class Coordinator {
           });
         }
         if (typeof job.params["requestId"] === "string") {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "voice.audio",
-            requestId: job.params["requestId"] as string,
-            worldId: job.worldId,
-            ...readIdentity,
-            sheetVersion: Number(job.params["sheetVersion"]),
-            ...(job.params["sectionHeading"] ? { sectionHeading: String(job.params["sectionHeading"]) } : {}),
-            ...voiceJobPart(job),
-            provider: job.provider as ProviderId,
-            model: job.model,
-            voiceId,
-            format: voiceJobFormat(job),
-            status: "ready",
-            file: job.landedFiles[0],
-            cached: false,
-            characterCount: Number(job.params["characterCount"] ?? 0),
-            estimatedMicroUsd: job.estimatedMicroUsd,
-          });
+          const requestId = job.params["requestId"];
+          const announce = (outcome: { status: "ready"; file: string; characterCount: number; estimatedMicroUsd: number } | { status: "failed"; error: string }) =>
+            this.emit({
+              at: new Date().toISOString(),
+              type: "voice.audio",
+              requestId,
+              worldId: job.worldId,
+              ...readIdentity,
+              sheetVersion: Number(job.params["sheetVersion"]),
+              ...(job.params["sectionHeading"] ? { sectionHeading: String(job.params["sectionHeading"]) } : {}),
+              ...voiceJobPart(job),
+              provider: job.provider as ProviderId,
+              model: job.model,
+              voiceId,
+              format: voiceJobFormat(job),
+              cached: false,
+              ...(outcome.status === "ready"
+                ? { status: "ready", file: outcome.file, characterCount: outcome.characterCount, estimatedMicroUsd: outcome.estimatedMicroUsd }
+                : { status: "failed", file: null, characterCount: Number(job.params["characterCount"] ?? 0), estimatedMicroUsd: job.estimatedMicroUsd, error: outcome.error }),
+            });
+          const own = { status: "ready" as const, file: job.landedFiles[0], characterCount: Number(job.params["characterCount"] ?? 0), estimatedMicroUsd: job.estimatedMicroUsd };
+          if (pieceOf(job) === null) {
+            announce(own);
+            return;
+          }
+          /*
+           * A piece of a chunked block (issue 1208). A single block's pieces are its parts and
+           * are announced as they land, so listening starts on the first; the last one joins
+           * them under the whole block's cache file, quietly — the read has been heard, and the
+           * join is for the next one. A page's block is announced once, whole, from that file;
+           * pieces of it are not parts anybody could navigate by. A join that fails costs a
+           * single block nothing but the cache and is logged; it costs a page's block its
+           * announcement, so that block fails by name rather than leaving playback waiting.
+           */
+          const settled = await this.pieceReads.landed(job, store);
+          if (settled.kind === "orphan") return;
+          if (settled.kind === "landed") {
+            if (!settled.page) announce(own);
+            return;
+          }
+          if (settled.kind === "whole") {
+            announce(settled.page ? { status: "ready", file: settled.file, characterCount: settled.characters, estimatedMicroUsd: settled.estimatedMicroUsd } : own);
+            return;
+          }
+          void this.appLog?.append({ kind: "voice.read-unjoined", requestId, jobId: job.id, message: settled.error });
+          if (settled.page) announce({ status: "failed", error: "Voice synthesis failed. Open Activity for details." });
+          else announce(own);
         }
       }
     };
@@ -12451,6 +12544,7 @@ export class Coordinator {
         // spend the control exists to prevent (codex, PR 879).
         this.stoppedReads.add(msg.requestId);
         this.pendingVoiceReads.delete(msg.requestId);
+        this.pieceReads.drop(msg.requestId);
         const jobs = this.readJobs.get(msg.requestId) ?? [];
         this.readJobs.delete(msg.requestId);
         for (const jobId of jobs) await this.jobQueue?.cancel(jobId).catch(() => {});

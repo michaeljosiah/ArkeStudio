@@ -25,7 +25,7 @@ import {
 import { fileGeneratedArtifact } from "../artifacts/filing.js";
 import type { MediaProbe } from "../media/probe.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
-import { cachedVoiceAudioLooksRight, concatWav, speechCacheFile, splitForSpeech } from "../voice/service.js";
+import { cachedVoiceAudioLooksRight, joinSpeech, speechCacheFile, splitForSpeech } from "../voice/service.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
@@ -126,16 +126,6 @@ export interface Speaking extends PlannedBlock {
    * for the reading, and the take goes beside the kept one rather than in its place (R-4).
    */
   remake: boolean;
-}
-
-/** MP3 frames concatenate; a later part's ID3v2 tag would not, so it is dropped (R-5). */
-export function concatMp3(parts: readonly Uint8Array[]): Uint8Array {
-  const stripped = parts.map((part, index) => {
-    if (index === 0 || part.length < 10 || part[0] !== 0x49 || part[1] !== 0x44 || part[2] !== 0x33) return part;
-    const size = ((part[6]! & 0x7f) << 21) | ((part[7]! & 0x7f) << 14) | ((part[8]! & 0x7f) << 7) | (part[9]! & 0x7f);
-    return part.subarray(10 + size);
-  });
-  return new Uint8Array(Buffer.concat(stripped.map((part) => Buffer.from(part))));
 }
 
 /** The record could not be written: the world's claim is gone, or it closed under the run. Nothing more can be kept. */
@@ -639,7 +629,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           sourcePath = join(store.dir, fromPortable(landed[0]!));
         } else {
           const bytes = await Promise.all(landed.map(async (rel) => new Uint8Array(await readFile(toExtendedLength(join(store.dir, fromPortable(rel)))))));
-          const joined = block.format === "wav" ? concatWav(bytes) : concatMp3(bytes);
+          const joined = joinSpeech(bytes, block.format);
           sourcePath = join(store.dir, fromPortable(`${landingDir}/${block.block.key.replace(/[^a-z0-9]+/gi, "-")}-joined.${block.format}`));
           await atomicWriteFile(sourcePath, joined);
         }

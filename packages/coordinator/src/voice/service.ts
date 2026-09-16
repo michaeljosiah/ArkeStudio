@@ -184,6 +184,27 @@ export function concatWav(parts: readonly Uint8Array[]): Uint8Array {
   return new Uint8Array(out);
 }
 
+/** MP3 frames concatenate; a later part's ID3v2 tag would not, so it is dropped (SPEC-047 R-5). */
+export function concatMp3(parts: readonly Uint8Array[]): Uint8Array {
+  const stripped = parts.map((part, index) => {
+    if (index === 0 || part.length < 10 || part[0] !== 0x49 || part[1] !== 0x44 || part[2] !== 0x33) return part;
+    const size = ((part[6]! & 0x7f) << 21) | ((part[7]! & 0x7f) << 14) | ((part[8]! & 0x7f) << 7) | (part[9]! & 0x7f);
+    return part.subarray(10 + size);
+  });
+  return new Uint8Array(Buffer.concat(stripped.map((part) => Buffer.from(part))));
+}
+
+/**
+ * The pieces of a read as one file, by the format the reader returned. There is no flac join —
+ * the audiobook flags such a block and the page read sends it whole (`piecesFor`) — so asking
+ * for one is a programming error rather than a case.
+ */
+export function joinSpeech(parts: readonly Uint8Array[], format: VoiceAudioFormat): Uint8Array {
+  if (format === "wav") return concatWav(parts);
+  if (format === "mp3") return concatMp3(parts);
+  throw new Error("flac parts cannot be joined");
+}
+
 /**
  * The words of a readable section — and only the words.
  *

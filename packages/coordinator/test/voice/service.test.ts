@@ -10,7 +10,9 @@ import {
   authoritativeBibleSpeech,
   authoritativeProseSpeech,
   authoritativeSheetSpeech,
+  concatMp3,
   concatWav,
+  joinSpeech,
   normalizeSpeechText,
   previewCacheFile,
   speechCacheFile,
@@ -353,6 +355,29 @@ describe("joining the pieces back into one clip", () => {
 
   it("refuses audio that is not a wav at all", () => {
     assert.throws(() => concatWav([new Uint8Array([1, 2, 3]), wav([1])]), /invalid audio/);
+  });
+
+  /**
+   * MP3 frames simply follow one another, but each vendor response opens with its own ID3v2 tag,
+   * and a tag mid-stream is not a frame a decoder can play through (SPEC-047 R-5). The tag's
+   * size is four seven-bit bytes, which is the one thing worth getting wrong here.
+   */
+  it("drops a later piece's ID3v2 tag and keeps the first one's, by the tag's own size", () => {
+    // 0x01 0x05 as seven-bit bytes is 128 + 5 = 133 bytes of tag body.
+    const tag = () => Buffer.from([0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 0x01, 0x05, ...Array.from({ length: 133 }, () => 0xaa)]);
+    const first = Buffer.concat([tag(), Buffer.from([0xff, 0xfb, 1, 1])]);
+    const second = Buffer.concat([tag(), Buffer.from([0xff, 0xfb, 2, 2])]);
+    const joined = Buffer.from(concatMp3([new Uint8Array(first), new Uint8Array(second)]));
+    assert.equal(joined.length, first.length + 4, "the second tag is gone, its frame kept");
+    assert.deepEqual([...joined.subarray(joined.length - 4)], [0xff, 0xfb, 2, 2]);
+    assert.deepEqual([...joined.subarray(0, 3)], [0x49, 0x44, 0x33], "the first tag opens the file");
+  });
+
+  it("joins by the format the reader returned, and has no join for flac", () => {
+    assert.deepEqual(joinSpeech([wav([1]), wav([2])], "wav"), concatWav([wav([1]), wav([2])]));
+    const frame = new Uint8Array([0xff, 0xfb, 1, 1]);
+    assert.deepEqual(joinSpeech([frame, frame], "mp3"), concatMp3([frame, frame]));
+    assert.throws(() => joinSpeech([frame, frame], "flac"), /flac parts cannot be joined/);
   });
 });
 
