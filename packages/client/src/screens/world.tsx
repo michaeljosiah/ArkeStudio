@@ -1,3 +1,4 @@
+import { ReadAloudConfirmation } from "../components/read-aloud-confirmation.js";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import {
@@ -1671,6 +1672,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   // Look and a faction's Wants are prose of the same kind, on screens that could not be heard.
   const [read, setRead] = useState<{ requestId: string; section: string } | null>(null);
   const readResult = read ? voiceAudio[read.requestId] : undefined;
+  const [submittedRead, setSubmittedRead] = useState<string | null>(null);
   // Reading a section aloud is narration, not dialogue: it uses the app's narrator, so it does
   // not depend on this character having a voice of their own. Gating it on `sheet.voice` was
   // the client half of the same mistake the coordinator made — prose ABOUT somebody read in
@@ -1777,30 +1779,26 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
       pageRead.stop();
       setRead({ requestId: readSheetSection(worldId, sheet.id, heading), section: heading });
     };
-    const note =
-      active?.status === "confirmation-required" ? (
-        <span className="fy-textactions__note">
-          Exact {heading} will be sent to ElevenLabs and retained in Activity.
-          <Button
-            onClick={() => {
-              if (worldId && read && active.confirmationToken)
-                readSheetSection(worldId, sheet.id, heading, read.requestId, active.confirmationToken);
-            }}
-          >
-            Confirm {active.characterCount} characters · {formatMicroUsd(active.estimatedMicroUsd)}
-          </Button>
-        </span>
-      ) : read?.section === heading && !active ? (
-        <span className="fy-textactions__note">Preparing audio…</span>
-      ) : undefined;
-    return { clip, onRead, note };
+    const quote = `${read?.requestId}:${active?.confirmationToken ?? ""}`;
+    const confirmation = active?.status === "confirmation-required" && quote !== submittedRead ? (
+      <ReadAloudConfirmation title={`${sheet.name} · ${heading}`} result={active} onCancel={() => setRead(null)} onConfirm={token => {
+        if (worldId && read) {
+          setSubmittedRead(quote);
+          readSheetSection(worldId, sheet.id, heading, read.requestId, token);
+        }
+      }} />
+    ) : null;
+    const note = read?.section === heading && (!active || (active.status === "confirmation-required" && submittedRead === quote))
+      ? <span className="fy-textactions__note">Preparing audio…</span> : undefined;
+    return { clip, onRead, note, confirmation };
   };
   // Text with the hover read-aloud/copy affordance (design 3a). The prose element differs by
   // section — a lead paragraph, a grid cell — so the caller passes it; the host is the same.
   const readableProse = (heading: string, body: string, prose: ReactNode) => {
-    const { clip, onRead, note } = sectionAudio(heading);
+    const { clip, onRead, note, confirmation } = sectionAudio(heading);
     return (
       <div className="fy-texthost">
+        {confirmation}
         {prose}
         <TextActions clip={clip} onRead={onRead} copyText={body} readLabel="Read aloud" note={note} />
         {read?.section === heading && readResult?.status === "failed" && (
