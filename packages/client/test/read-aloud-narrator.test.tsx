@@ -191,31 +191,44 @@ it("says how many pieces a chunked read goes as, on the dialog that prices it", 
   assert.doesNotMatch(dom.document.querySelector('[role="dialog"]')!.textContent!, /parts/, "a read that goes whole says nothing about pieces");
 });
 
-for (const surface of ["sheet", "prose", "button"] as const) {
+// The bible's column was the third copy of this control, and the one PR 1209 did not reach
+// (issue 1211): it named ElevenLabs whatever the quote said, as an inline ribbon, with no piece
+// count. It shares the dialog now, so it is driven here beside the other three.
+for (const surface of ["sheet", "prose", "button", "bible"] as const) {
   it(`${surface} read confirms the quoted reader and price in a cancelable dialog`, async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(JSON.parse(json)); } } as ArkeBridge);
-    // The quote, not the current narrator preference, decides the disclosure.
-    __setStateForTest({ ...FIXTURE_STATE, app: { ...FIXTURE_STATE.app, narrator: { provider: "elevenlabs", model: "eleven_multilingual_v2", voiceId: "old", label: "Old narrator" } } });
+    // The quote, not the current narrator preference, decides the disclosure. The bible's text
+    // carries a tag so the screen opens its plain editor: the rich one wants a selection API
+    // this DOM does not have, and the column under test is the same either way.
+    const world = FIXTURE_STATE.world!;
+    __setStateForTest({
+      ...FIXTURE_STATE,
+      app: { ...FIXTURE_STATE.app, narrator: { provider: "elevenlabs", model: "eleven_multilingual_v2", voiceId: "old", label: "Old narrator" } },
+      ...(surface === "bible" ? { world: { ...world, bible: { version: 3, updated: "2026-07-30", present: true, text: "## The tides\n\nThe tide is the world's clock <br> and its accountant.\n" } } } : {}),
+    });
     const container = dom.document.createElement("div") as unknown as HTMLElement;
     dom.document.body.append(container);
     const root = createRoot(container); open.push(root);
     const props = { source: { of: "shot", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_12" } as const, title: "Shot script", text: "The sea moves." };
     await act(async () => root.render(surface === "sheet"
       ? <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/cast/maren-kest`]}><App /></MemoryRouter>
+      : surface === "bible" ? <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/bible`]}><App /></MemoryRouter>
       : surface === "prose" ? <ReadAloud {...props} /> : <ReadAloudButton {...props} />));
-    const trigger = () => container.querySelector<HTMLButtonElement>(surface === "button" ? 'button[title="Read aloud"]' : 'button[aria-label="Read aloud"]')!;
-    const requests = () => sent.filter(message => message.kind === "read-sheet-section" || message.kind === "read-prose");
+    const trigger = () => container.querySelector<HTMLButtonElement>(surface === "button" ? 'button[title="Read aloud"]' : surface === "bible" ? 'button[aria-label="Read The tides aloud"]' : 'button[aria-label="Read aloud"]')!;
+    const requests = () => sent.filter(message => message.kind === "read-sheet-section" || message.kind === "read-prose" || message.kind === "read-bible-section");
     await act(async () => trigger().click());
     let asked = requests().at(-1)!;
     const quote = () => ({ type: "voice.audio" as const, at: "2026-09-16T08:00:00.000Z", requestId: asked.requestId,
-      worldId: FIXTURE_WORLD_ID, sheetVersion: 4, purpose: surface === "sheet" ? "sheet-section" as const : "prose" as const,
+      worldId: FIXTURE_WORLD_ID, sheetVersion: 4, purpose: surface === "sheet" ? "sheet-section" as const : surface === "bible" ? "bible-section" as const : "prose" as const,
+      ...(surface === "bible" ? { sectionHeading: "The tides" } : {}),
       provider: "mistral" as const, model: "voxtral-mini-tts", voiceId: "voice", format: "wav" as const,
       status: "confirmation-required" as const, file: null, cached: false, characterCount: 1487, estimatedMicroUsd: 23792, confirmationToken: "quote-1" });
     await act(async () => __applyEventForTest(quote()));
     let dialog = dom.document.querySelector('[role="dialog"]')!;
     assert.ok(dialog);
     assert.match(dialog.textContent!, /sent to Voxtral/);
+    if (surface === "bible") assert.match(dialog.textContent!, /The tides · Voxtral/, "titled by the section, as the sheet's is by the sheet and section");
     assert.doesNotMatch(dialog.textContent!, /ElevenLabs|elevenlabs|Old narrator/);
     assert.match(dialog.textContent!, /Confirm 1487 characters · \$0.02/);
     assert.equal(requests().length, 1, "quoting does not confirm a charge");
@@ -232,6 +245,11 @@ for (const surface of ["sheet", "prose", "button"] as const) {
     assert.equal(requests().at(-1)!.requestId, asked.requestId);
     assert.equal(requests().at(-1)!.confirmationToken, "quote-1");
     assert.equal(dom.document.querySelector('[role="dialog"]'), null);
+    if (surface === "bible") {
+      // Over the buttons rather than a selector that would match nothing: linkedom spins on those.
+      const labels = [...container.querySelectorAll("button")].map((button) => button.getAttribute("aria-label"));
+      assert.ok(labels.includes("Preparing The tides") && !labels.includes("Read The tides aloud"), `confirmed, the speaker is busy until something lands: ${labels.join(", ")}`);
+    }
     await act(async () => __applyEventForTest({ ...quote(), confirmationToken: "quote-2", estimatedMicroUsd: 50000 }));
     assert.match(dom.document.querySelector('[role="dialog"]')!.textContent!, /\$0.05/, "a revised quote needs a new decision");
   });
