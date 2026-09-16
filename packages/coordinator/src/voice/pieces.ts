@@ -67,6 +67,8 @@ interface Block {
   characters: number;
   /** Every piece's job once the queue has named them, so a block that cannot be made whole stops paying for the rest. */
   jobIds: readonly string[];
+  /** Failed before the queue named its jobs: kept only so `queued` can cancel them, and never announced or joined. */
+  failed: boolean;
   landed: (string | undefined)[];
   estimatedMicroUsd: number;
 }
@@ -85,23 +87,36 @@ export type PieceSettled =
  *
  * A block is registered before its jobs are queued and told their ids after, because a piece
  * can land before the batch call returns — a fake reader in a test does, and a piece nothing
- * is waiting for is an orphan. Between the two a failure has no siblings to name; that window
- * is the journalling of a batch, and a vendor does not answer inside it.
+ * is waiting for is an orphan. A piece can fail in that window too (codex on PR 1210), when
+ * its block has no siblings to name: the block is kept, marked failed, and `queued` answers
+ * with its jobs for cancelling once the queue has named them.
  */
 export class PieceReads {
   private readonly blocks = new Map<string, Block>();
 
   register(input: { requestId: string; blockIndex: number; pieces: number; file: string; format: VoiceAudioFormat; page: boolean; characters: number }): void {
     const { requestId, blockIndex, pieces, ...block } = input;
-    this.blocks.set(key(requestId, blockIndex), { ...block, jobIds: [], landed: Array.from({ length: pieces }, () => undefined), estimatedMicroUsd: 0 });
+    this.blocks.set(key(requestId, blockIndex), { ...block, jobIds: [], failed: false, landed: Array.from({ length: pieces }, () => undefined), estimatedMicroUsd: 0 });
   }
 
-  /** The queue named the jobs: each block learns its pieces' ids, in piece order. */
-  queued(requestId: string, jobs: ReadonlyMap<number, readonly string[]>): void {
+  /**
+   * The queue named the jobs: each block learns its pieces' ids, in piece order. A block that
+   * failed before this is let go, and its jobs are the answer — the ones still to be cancelled
+   * rather than paid for (the failed piece's own is among them; cancelling a job that has
+   * ended is nothing).
+   */
+  queued(requestId: string, jobs: ReadonlyMap<number, readonly string[]>): string[] {
+    const cancel: string[] = [];
     for (const [blockIndex, jobIds] of jobs) {
-      const block = this.blocks.get(key(requestId, blockIndex));
-      if (block !== undefined) block.jobIds = jobIds;
+      const id = key(requestId, blockIndex);
+      const block = this.blocks.get(id);
+      if (block === undefined) continue;
+      if (block.failed) {
+        this.blocks.delete(id);
+        cancel.push(...jobIds);
+      } else block.jobIds = jobIds;
     }
+    return cancel;
   }
 
   /** Stopped: nothing that lands for the request is announced or joined. */
@@ -120,7 +135,12 @@ export class PieceReads {
     if (piece === null || typeof requestId !== "string") return null;
     const id = key(requestId, piece.blockIndex);
     const block = this.blocks.get(id);
-    if (block === undefined) return null;
+    if (block === undefined || block.failed) return null;
+    if (block.jobIds.length === 0) {
+      // Before the queue has named the jobs: the failure is news, the siblings are `queued`'s.
+      block.failed = true;
+      return { page: block.page, cancel: [] };
+    }
     this.blocks.delete(id);
     return { page: block.page, cancel: block.jobIds.filter((candidate) => candidate !== job.id) };
   }
@@ -137,7 +157,7 @@ export class PieceReads {
     if (piece === null || typeof requestId !== "string" || file === undefined) return { kind: "orphan" };
     const id = key(requestId, piece.blockIndex);
     const block = this.blocks.get(id);
-    if (block === undefined) return { kind: "orphan" };
+    if (block === undefined || block.failed) return { kind: "orphan" };
     block.landed[piece.piece] = file;
     block.estimatedMicroUsd += job.estimatedMicroUsd;
     if (block.landed.filter((landed) => landed !== undefined).length < piece.pieces) return { kind: "landed", page: block.page };

@@ -1403,12 +1403,19 @@ export class Coordinator {
     confirmationToken?: string;
     /**
      * The passage, already resolved and normalised by the caller — this method never reads a
-     * document. More than one block is a page read (issue 859): they are narrated in the order
-     * the screen declared and each block is one part, so the position the client already keeps
-     * is a position in the page rather than in a synthesis it cannot see. One block is the
-     * per-block read, unchanged in every respect.
+     * document. A page read (issue 859) is narrated in the order the screen declared and each
+     * block is one part, so the position the client already keeps is a position in the page
+     * rather than in a synthesis it cannot see. A per-block read is one block, unchanged in
+     * every respect.
      */
     blocks: readonly { heading: string; text: string; subjectId?: string }[];
+    /**
+     * Whether the screen asked for a page, whatever survived resolution (codex on PR 1210). A
+     * page that resolved to one block — every other section empty — is still a page: its one
+     * part is that block, and a long block's synthesis pieces are joined behind it rather than
+     * announced as parts of a page that has only one.
+     */
+    page: boolean;
     purpose: "sheet-section" | "sheet-page" | "bible-section" | "prose";
     /** What is being read, for the cache key and the queue target. `bible` for the bible. */
     subject: { id: string; version: number };
@@ -1417,8 +1424,7 @@ export class Coordinator {
     fail: (error: string, characters?: number) => void;
   }): Promise<void> {
     if (!this.voiceService) return;
-    const { store, worldId, requestId, blocks, purpose, subject, fail } = input;
-    const page = blocks.length > 1;
+    const { store, worldId, requestId, blocks, page, purpose, subject, fail } = input;
     const characters = blocks.reduce((sum, block) => sum + block.text.length, 0);
     const identity = (heading: string | null) => ({
       worldId,
@@ -1665,7 +1671,9 @@ export class Coordinator {
       return;
     }
     if (queued.jobIds.length > 0) this.readJobs.set(requestId, queued.jobIds);
-    this.pieceReads.queued(requestId, pieceJobs(pending.inputs, queued.jobIds));
+    // A block that failed while the batch was still being journalled had no siblings to name
+    // (codex on PR 1210): now that the queue has named them, they are cancelled unpaid.
+    for (const jobId of this.pieceReads.queued(requestId, pieceJobs(pending.inputs, queued.jobIds))) await this.jobQueue?.cancel(jobId).catch(() => {});
   }
 
   /**
@@ -1949,7 +1957,7 @@ export class Coordinator {
       return;
     }
     if (queued.jobIds.length > 0) this.readJobs.set(requestId, queued.jobIds);
-    this.pieceReads.queued(requestId, pieceJobs(queuedInputs, queued.jobIds));
+    for (const jobId of this.pieceReads.queued(requestId, pieceJobs(queuedInputs, queued.jobIds))) await this.jobQueue?.cancel(jobId).catch(() => {});
   }
 
   private readonly sessionInput: SessionInput;
@@ -12485,6 +12493,7 @@ export class Coordinator {
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
           blocks: [{ heading: msg.sectionHeading, text: bibleText }],
+          page: false,
           purpose: "bible-section",
           subject: { id: "bible", version: bible.version },
           fail: failBible,
@@ -12535,6 +12544,7 @@ export class Coordinator {
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
           blocks: [{ heading: resolved.heading, text: resolved.text }],
+          page: false,
           purpose: "prose",
           subject: { id: resolved.subjectId, version: resolved.version },
           fail: (error, characters) => failProse(error, characters, resolved.heading),
@@ -12651,6 +12661,7 @@ export class Coordinator {
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
           blocks,
+          page: true,
           purpose: "prose",
           /*
            * The page is named by its first block and the newest version any of them carries.
@@ -12712,6 +12723,7 @@ export class Coordinator {
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
           blocks: [{ heading: msg.sectionHeading, text: resolved.text }],
+          page: false,
           purpose: "sheet-section",
           subject: { id: sheet.id, version: sheet.version },
           sheetId: sheet.id,
@@ -12777,6 +12789,7 @@ export class Coordinator {
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
           blocks,
+          page: true,
           purpose: "sheet-page",
           subject: { id: sheet.id, version: sheet.version },
           sheetId: sheet.id,

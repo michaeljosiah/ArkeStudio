@@ -213,6 +213,33 @@ describe("a read over the reader's cap (issue 1208)", () => {
     }
   });
 
+  it("a page that resolved to one block is still a page: its long block is one part, joined, never announced piecewise (codex on PR 1210)", async () => {
+    const h = await harness();
+    try {
+      await h.narrate();
+      // Ines has no Appearance written, so this page is her Essence alone — and her Essence is
+      // well over the cap.
+      const page = (confirmationToken?: string) =>
+        h.send({ kind: "read-sheet-page", requestId: PAGE, worldId: WORLD_ID, sheetId: "ines-half-hitch", sections: ["Essence", "Appearance"], ...(confirmationToken !== undefined ? { confirmationToken } : {}) });
+      await page();
+      const asked = h.audio(PAGE).find((event) => event.status === "confirmation-required");
+      assert.ok(asked);
+      assert.equal(asked.parts, undefined, "a page's confirmation counts no pieces");
+      await page(asked.confirmationToken);
+      const accepted = h.events.find((event) => event.type === "queue.enqueue-result");
+      assert.ok(accepted && accepted.type === "queue.enqueue-result");
+      assert.ok(accepted.requestedCount > 1, "the one block still goes in pieces");
+      await until(() => h.audio(PAGE).some((event) => event.status === "ready"), "the block");
+      await settle();
+      const ready = h.audio(PAGE).filter((event) => event.status === "ready");
+      assert.equal(ready.length, 1, "announced once, whole");
+      assert.deepEqual([ready[0]!.sectionHeading, ready[0]!.part, ready[0]!.parts], ["Essence", 0, 1], "as the one part of a one-part page, never `2 of 1`");
+      assert.ok(cachedVoiceAudioLooksRight(await h.bytes(ready[0]!.file!), "wav"));
+    } finally {
+      await h.coordinator.stop();
+    }
+  });
+
   it("a piece the reader refuses fails the block once; what landed before it was heard, nothing after it is, and the block is never joined", async () => {
     const h = await harness();
     try {
