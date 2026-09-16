@@ -152,13 +152,38 @@ describe("General: both halves in one list (SPEC-034 R-14, R-15, R-16a)", () => 
   });
 
   it("says where a default actually runs, from the resolved engine (R-16a)", () => {
-    const here = plain(render("/settings/general", localVideoReady({ video: LOCAL_VIDEO.id })));
-    assert.match(here, /ComfyUI · this machine/);
+    // The provider is the control's first word and the state beside it says the rest (design
+    // turn 149): `ComfyUI · Draft video` in the select, `this machine` in the state cell, and
+    // never the provider twice.
+    const here = render("/settings/general", localVideoReady({ video: LOCAL_VIDEO.id }));
+    assert.match(here.replace(/<!-- -->/g, ""), /<option value="comfyui-draft-video" selected="">ComfyUI · Draft video</);
+    assert.match(here, /class="fy-fact__state">this machine</);
     // `PROVIDERS.comfyui.local` is `true` either way, so a clause reading the provider flag would
     // tell someone their video drafts here while it renders on a box down the hall.
-    const elsewhere = plain(render("/settings/general", localVideoReady({ video: LOCAL_VIDEO.id }, "remote")));
-    assert.match(elsewhere, /ComfyUI · another machine/);
-    assert.doesNotMatch(elsewhere, /ComfyUI · this machine/);
+    const elsewhere = render("/settings/general", localVideoReady({ video: LOCAL_VIDEO.id }, "remote"));
+    assert.match(elsewhere, /class="fy-fact__state">another machine</);
+    assert.doesNotMatch(elsewhere, /class="fy-fact__state">this machine</);
+  });
+
+  it("draws every row in Providers' grammar, with no caption under a control (turn 149)", () => {
+    const html = render("/settings/general", localVideoReady({ video: LOCAL_VIDEO.id }));
+    const { document } = parseHTML(html);
+    const screen = document.querySelector('[data-screen="settings-general"]')!;
+    // The page title, then rows: a label, its value, its state. No eyebrow says DEFAULTS.
+    assert.equal(screen.querySelector("h1")?.textContent, "General");
+    assert.doesNotMatch(html, /fy-set__eyebrow|NARRATOR|DEFAULTS/);
+    const rows = [...screen.querySelectorAll(".fy-fact")];
+    assert.deepEqual(
+      rows.map((row) => row.querySelector(".fy-fact__what")?.textContent),
+      ["Images", "Video", "Text-to-Speech", "Music", "Language", "Narrator"],
+    );
+    // The select carries the source's mark in front of the value, and the state follows it in
+    // the same cell rather than under it.
+    const video = rows[1]!;
+    assert.ok(video.querySelector(".ui-select--marked .fy-mark"), "the default's mark");
+    assert.equal(video.querySelector(".fy-fact__is > .ui-select + .fy-fact__state")?.textContent, "this machine");
+    // The capability copy — refs, frames, seconds — is the tile's on AI models, not this row's.
+    assert.doesNotMatch(html, /refs ×|frames ·/);
   });
 
   it("draws no Language picker, only the route to the harness that writes (R-17)", () => {
@@ -211,7 +236,9 @@ describe("General: both halves in one list (SPEC-034 R-14, R-15, R-16a)", () => 
         }),
       ),
     );
-    assert.match(text, new RegExp(`${PROVIDERS[CLOUD_VIDEO.provider].displayName} · connected`));
+    // The provider is the control's first word; the connection state is the cell beside it.
+    assert.match(text, new RegExp(`${PROVIDERS[CLOUD_VIDEO.provider].displayName} · ${CLOUD_VIDEO.displayName}`));
+    assert.match(text, /connected/);
     // The remedy is Providers, and it is reached from the rail rather than from a button at the
     // foot: SPEC-034 R-4 removes that button because there is no longer anywhere else to route
     // to, and frame 112d draws none.
@@ -230,9 +257,23 @@ describe("General: both halves in one list (SPEC-034 R-14, R-15, R-16a)", () => 
       providers: [{ id: CLOUD_VIDEO.provider, configured: true, validation: "untested", probes: [], fault: null }],
     });
     const untested = render("/settings/general", state);
-    assert.match(plain(untested), /untested/);
+    assert.match(untested, /class="fy-fact__state">not tested</);
     assert.doesNotMatch(untested, /fy-set__dot--ok|fy-set__dot--warn/);
+    // Refused: the warning colour and its dot, in the state cell, and no callout above the list
+    // saying the same thing (turn 149) — one fault, one place.
     state.app.providers[0]!.configured = false;
-    assert.match(render("/settings/general", state), /fy-set__dot--warn/);
+    const refused = render("/settings/general", state);
+    assert.match(refused, /fy-fact__state--warn"><span class="fy-set__dot fy-set__dot--warn"[^>]*><\/span>no key</);
+    assert.doesNotMatch(refused, /has nowhere to go|fy-callout/);
+  });
+
+  it("states a default whose model left the manifest on its own row (SPEC-008 §2.7)", () => {
+    const html = render(
+      "/settings/general",
+      stateWith({ routing: { defaults: { video: "gone-2.0" }, faults: [{ capability: "video", modelId: "gone-2.0", reason: "gone" }] } }),
+    );
+    // The control shows what is stored rather than the first option it happens to hold.
+    assert.match(html, /<option value="gone-2.0" selected="">gone-2.0</);
+    assert.match(html, /fy-fact__state--warn"><span class="fy-set__dot fy-set__dot--warn"[^>]*><\/span>not in the manifest</);
   });
 });

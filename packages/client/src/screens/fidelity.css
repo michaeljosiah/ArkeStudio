@@ -3273,22 +3273,26 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 }
 .fy-set__pill:hover { background: var(--accent); }
 .fy-set__pill:disabled { opacity: 0.5; cursor: default; }
-/* Turn 124: a pane of rows keeps a 760px reading column. Native selects must shrink
-   independently of their longest option; the state stays readable below the same control. */
-.fy-set--general { grid-template-columns: minmax(0, 760px); }
-.fy-set--general .fy-set__row { min-width: 0; overflow-wrap: anywhere; }
-.fy-set--general .fy-set__row--routing {
-  display: grid;
-  grid-template-columns: 118px minmax(0, 1fr) 6px;
-  gap: 6px 12px;
-}
-/* The pill is a `<select>` inside the house wrapper now (issue 1010, U2), so the grid places the
-   wrapper and the control fills it. The chevron is drawn rather than the platform's, and it is
-   drawn over the control — so the text keeps clear of the last 24px. */
-.fy-set__row--routing > .ui-select { grid-column: 2; grid-row: 1; width: 100%; min-width: 0; }
+/* The agents' and the dock's language pickers are platform selects in the pill: room for the
+   platform's own arrow, so the value never runs under it. */
 select.fy-set__pill { padding-right: 26px; }
-.fy-set__row--routing > .fy-set__state { grid-column: 2; }
-.fy-set__row--routing > .fy-set__dot { grid-column: 3; grid-row: 1; }
+/*
+ * General (design turn 149): the page title, then Providers' fact rows — label, value, state —
+ * banded at 53 with a rule beneath, in turn 124's 760px reading column. The select is 300 wide
+ * whatever its longest option, so the states form a column beside it; the state sits at the
+ * row's gap and never under the control, which is the caption turn 137 forbade. Turn 124 had
+ * the select fill the column with the state wrapping below it, and that is the drawing this
+ * block replaces.
+ */
+.fy-set--general { grid-template-columns: minmax(0, 760px); }
+.fy-set--general > h1 { margin: 0 0 22px; }
+.fy-set--general .fy-fact { min-height: 53px; border-bottom: 1px solid var(--border); }
+.fy-set--general .fy-fact__is { min-width: 0; }
+.fy-default { width: 300px; flex: none; }
+/* 32 tall: the row's band is 53 and the control sits centred in it with 10 either side. The
+   value is a regular weight — the medium `--type-ui` carries reads as a button, and a select is
+   read, not pressed. */
+.fy-default > .ui-select__control { padding-top: 6px; padding-bottom: 6px; font-weight: var(--weight-regular); }
 /*
  * Archiving, on a world card. The button hides until the card is hovered — a world you are
  * looking at should not be advertising the way to put it away — and the confirm covers the
@@ -8005,6 +8009,11 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 }
 .fy-half svg { color: var(--muted-foreground); flex: none; }
 .fy-half:not(:first-child) { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); }
+/* The count at the level's right, where a group says how many it holds. */
+.fy-half__aside { margin-left: auto; font: 400 12.5px var(--font-sans); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+/* On General the level follows a banded row, whose rule is the rule above it; a second would
+   double it. The rows under it are not indented, because there is no rail to indent past. */
+.fy-set--general .fy-half { margin-top: 30px; padding: 0 0 6px; border-top: 0; font-size: 13px; }
 
 /* A kind, with its count. */
 .fy-kind {
@@ -8068,6 +8077,8 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 }
 .fy-mark img { width: 100%; height: 100%; object-fit: contain; padding: 2px; }
 .fy-mark--lg { width: 32px; height: 32px; border-radius: 8px; font-size: 14px; }
+/* Inside a 32px control (turn 149), where 22 would touch both edges. */
+.fy-mark--xs { width: 18px; height: 18px; border-radius: 5px; font-size: 9px; }
 .dark .fy-mark { background: var(--neutral-100); border-color: var(--neutral-700); }
 
 /* The pane's head: the name, where it is, and the count. */
@@ -8082,8 +8093,32 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-facts { margin-top: 22px; display: flex; flex-direction: column; gap: 12px; max-width: 860px; }
 .fy-fact { display: flex; align-items: center; gap: 14px; min-height: 30px; font: 400 13.5px var(--font-sans); }
 .fy-fact__what { width: 140px; flex: none; color: var(--muted-foreground); }
-.fy-fact__is { flex: 1; min-width: 0; display: flex; align-items: center; font-variant-numeric: tabular-nums; }
+.fy-fact__is { flex: 1; min-width: 0; display: flex; align-items: center; gap: 14px; font-variant-numeric: tabular-nums; }
 .fy-fact__mono { font: 400 12px var(--font-mono); color: var(--muted-foreground); }
+/* The state after a value (design turn 149): three words at most, muted, and for a refused
+   default the warning colour with a leading dot as one object — the dot leads so a column of
+   rows scans by colour before it is read. */
+.fy-fact__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  font: 400 12.5px var(--font-sans);
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.fy-fact__state--warn { color: var(--warning); }
+/* A route drawn as the house link, in the value column where a value would be (SPEC-034 R-17). */
+.fy-fact__link {
+  font: 400 13.5px var(--font-sans);
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
 .fy-fact__does { display: flex; align-items: center; gap: 8px; flex: none; }
 .fy-fact__input {
   flex: 1;

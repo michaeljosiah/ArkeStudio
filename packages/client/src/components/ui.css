@@ -154,6 +154,20 @@
   color: var(--muted-foreground);
   cursor: default;
 }
+/* The mark in front of the value (design turn 149) sits over the control's left padding and
+   refuses the pointer, so the select stays the whole hit target; the control makes room for
+   an 18px plate and the same gap the value keeps from the edge. */
+.ui-select__mark {
+  position: absolute;
+  left: var(--space-2);
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  pointer-events: none;
+}
+.ui-select--marked > .ui-select__control {
+  padding-left: calc(var(--space-2) + 18px + var(--space-2));
+}
 
 .ui-check {
   display: inline-flex;

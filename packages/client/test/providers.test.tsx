@@ -409,18 +409,20 @@ describe("General, when a routed model is switched off", () => {
     ],
   };
 
-  it("flags the strand at the top and names the repair", () => {
+  it("flags the strand on its own row, and nowhere above the list (design turn 149)", () => {
     __setStateForTest(stateWith({ disabled: ["seedance-2.0"], faults: STRANDED.faults }));
     const html = cloudAi();
-    assert.ok(html.includes("has nowhere to go"));
-    assert.ok(html.includes("turn it back on"));
+    // One fault, one place: the state cell beside the control, in the warning colour with its
+    // dot. The callout that said the same thing above the rows is gone.
+    assert.match(html, /fy-fact__state--warn"><span class="fy-set__dot fy-set__dot--warn"[^>]*><\/span>turned off</);
+    assert.ok(!html.includes("has nowhere to go"));
   });
 
   it("says turned off, not needs a key — the two strands have different repairs", () => {
     __setStateForTest(stateWith({ disabled: ["seedance-2.0"], faults: STRANDED.faults }));
     const html = cloudAi();
-    assert.ok(html.includes("turned off in AI models"));
-    assert.ok(!html.includes("fal has no key"), "fal has a key; the model is simply off");
+    assert.match(html, /class="fy-fact__state fy-fact__state--warn">.*?turned off</);
+    assert.ok(!html.includes("no key"), "fal has a key; the model is simply off");
   });
 
   it("never re-routes: the switched-off model is still what the row shows", () => {
