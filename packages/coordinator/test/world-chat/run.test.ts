@@ -12,6 +12,7 @@ import { WorldChatRunner, type RunDeps } from "../../src/world-chat/run.js";
 import { SceneEditRefused } from "../../src/productions/scene-edits.js";
 import { describeEntryContext } from "../../src/world-chat/entry-context.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
+import { WorldChatInputJournal } from "../../src/world-chat/input-journal.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { FIXTURE_WORLD } from "../world/helpers.js";
@@ -98,6 +99,7 @@ async function setup(
   const released: RunId[] = [];
   const runner = new WorldChatRunner({
     adapter,
+    describeEntry: context => describeEntryContext(context, bundle),
     ...(options.chapterBrief ? { chapterBrief: options.chapterBrief } : {}),
     ...(options.resolveLanguageModel ? { resolveLanguageModel: options.resolveLanguageModel } : {}),
     ...(options.createdModels
@@ -128,7 +130,9 @@ async function setup(
     return foldConversation(meta!.id, meta!.createdAt, (await store.read()).events).view;
   };
 
-  return { runner, store, conversationId, view, released };
+  const journal = new WorldChatInputJournal({ dir: worldPath, closingSignal: new AbortController().signal,
+    ownedWrite: async fn => fn(), raiseSchemaBoundary: async () => {} }, conversationId, NOW);
+  return { runner, store, conversationId, view, released, journal };
 }
 
 /** A well-formed answer whose evidence quotes the message it was actually sent with. */
@@ -927,4 +931,125 @@ it("durably cancels a turn stopped while its chapter brief is being read", async
   assert.equal(finished.run.status, "cancelled");
   assert.equal(h.released.length, 1);
   assert.equal((await h.runner.send(h.store, h.conversationId, "Continue")).status, "completed");
+});
+
+
+const QUEUE_ROUTING = { adapter: "fake", modelId: null, fingerprint: `sha256:${"a".repeat(64)}` };
+async function queueInput(journal: WorldChatInputJournal, text: string, replyOnly = false) {
+  const receipt = await journal.record({ submissionId: newId("msg"), text, attachmentIds: [],
+    delivery: "next", expectedRunId: null, replyOnly }, { routing: QUEUE_ROUTING, constraints: { replyOnly } });
+  assert.equal(receipt.event.type, "input.recorded");
+  if (receipt.event.type !== "input.recorded") throw new Error("Expected recorded input");
+  return { id: receipt.event.input.messageId, revision: receipt.queue.revision };
+}
+
+describe("running a durable queued input (SPEC-045 R-16)", () => {
+  it("promotes before dispatch, preserving the message identity used by evidence", async () => {
+    const text = "The bells pass sideways.";
+    const prompts: string[] = [];
+    const state = await setup(fakeAdapter([async () => {
+      const events = (await state.store.read()).events;
+      const promotion = events.find(one => one.event.type === "input.promoted")?.event;
+      assert.equal(promotion?.type, "input.promoted", "the start must be durable before model work");
+      return goodAnswer(text, "bells pass sideways", queued.id);
+    }], { prompts }));
+    const queued = await queueInput(state.journal, text);
+    assert.equal((await state.runner.sendQueued(state.journal, queued.id, queued.revision, QUEUE_ROUTING)).status, "completed");
+    const view = await state.view();
+    assert.deepEqual(view.messages.filter(one => one.role === "user").map(one => one.id), [queued.id]);
+    assert.equal(view.candidates.length, 1, "candidate evidence resolves the admitted id");
+    assert.equal(prompts.length, 1);
+    assert.ok(prompts[0]!.includes(queued.id));
+    const events = (await state.store.read()).events;
+    assert.equal(events.filter(one => one.event.type === "turn.started").length, 0);
+    assert.equal((await state.journal.read()).inputs[0]!.status, "promoted");
+    assert.equal((await state.runner.sendQueued(state.journal, queued.id, queued.revision, QUEUE_ROUTING)).status, "unavailable");
+    assert.equal(prompts.length, 1, "duplicate promotion never dispatches twice");
+  });
+
+  it("keeps reply-only constraints on promotion and explicit retry", async () => {
+    const prompts: string[] = [];
+    const state = await setup(fakeAdapter(["invalid", "invalid", JSON.stringify({ reply: "A reply.", candidateOperations: [], groupOperations: [] })], { prompts }));
+    const queued = await queueInput(state.journal, "Just answer, don't change anything.", true);
+    assert.equal((await state.runner.sendQueued(state.journal, queued.id, queued.revision, QUEUE_ROUTING)).status, "failed");
+    const row = (await state.journal.read()).inputs[0]!;
+    assert.equal(row.status, "promoted", "failure does not put a spent primary turn back in the queue");
+    assert.ok(row.turnId);
+    assert.equal((await state.runner.retry(state.store, state.conversationId, row.turnId)).status, "completed");
+    assert.ok(prompts[0]!.includes("Propose no action this turn") && prompts[2]!.includes("Propose no action this turn"));
+    assert.ok(prompts[2]!.includes(queued.id));
+    assert.equal((await state.view()).messages.filter(one => one.role === "user").length, 1);
+    const events = (await state.store.read()).events;
+    const promotion = events.find(one => one.event.type === "input.promoted")!.event;
+    assert.ok(promotion.type === "input.promoted" && promotion.constraints.replyOnly);
+    assert.equal(events.some(one => one.event.type === "turn.constraints"), false, "constraints and primary start are atomic");
+  });
+
+  it("refuses a stale context, releases the slot, and leaves the input waiting", async () => {
+    const prompts: string[] = [];
+    let changeContext = true;
+    const state = await setup(fakeAdapter([JSON.stringify({ reply: "Noted.", candidateOperations: [], groupOperations: [] })], { prompts }), {
+      resolveLanguageModel: async () => {
+        if (changeContext) { changeContext = false; await state.store.append({ type: "conversation.metadata-updated", title: "Changed" }, { at: AT }); }
+        return {};
+      },
+    });
+    const queued = await queueInput(state.journal, "Wait for my context.");
+    assert.equal((await state.runner.sendQueued(state.journal, queued.id, queued.revision, QUEUE_ROUTING)).status, "unavailable");
+    assert.equal(prompts.length, 0);
+    assert.equal(state.runner.isRunning(state.conversationId), false);
+    assert.equal((await state.journal.read()).inputs[0]!.status, "queued");
+    assert.equal((await state.runner.sendQueued(state.journal, queued.id, queued.revision, QUEUE_ROUTING)).status, "completed");
+  });
+
+  it("Stop during context preparation prevents promotion and native work", async () => {
+    const prompts: string[] = [];
+    const state = await setup(fakeAdapter([], { prompts }), {
+      resolveLanguageModel: async () => { state.runner.cancel(state.conversationId); return {}; },
+    });
+    const queued = await queueInput(state.journal, "Stop before it starts.");
+    assert.equal((await state.runner.sendQueued(state.journal, queued.id, queued.revision, QUEUE_ROUTING)).status, "cancelled");
+    assert.equal(prompts.length, 0);
+    assert.equal((await state.journal.read()).inputs[0]!.status, "queued");
+    assert.equal(state.runner.isRunning(state.conversationId), false);
+  });
+
+  it("registers before reading the journal so an immediate Stop and ordinary Send cannot miss it", async () => {
+    const prompts: string[] = [];
+    const state = await setup(fakeAdapter([], { prompts }));
+    const queued = await queueInput(state.journal, "Registered before the first await");
+    const completion = state.runner.sendQueued(state.journal, queued.id, queued.revision, QUEUE_ROUTING);
+    assert.equal(state.runner.isRunning(state.conversationId), true);
+    assert.equal(state.runner.cancel(state.conversationId), true);
+    assert.equal((await state.runner.send(state.store, state.conversationId, "An overlapping message")).status, "unavailable");
+    assert.equal((await completion).status, "cancelled");
+    assert.equal(prompts.length, 0);
+    assert.equal((await state.journal.read()).inputs[0]!.status, "queued");
+  });
+
+  it("a failed promotion write never creates a native session or loses the waiting input", async t => {
+    const prompts: string[] = [];
+    const sessions: Array<string | undefined> = [];
+    const state = await setup(fakeAdapter([], { prompts }), { createdModels: sessions });
+    const queued = await queueInput(state.journal, "Retain me on disk failure");
+    t.mock.method(state.journal, "promote", async () => { throw new Error("simulated sync failure"); });
+    await assert.rejects(state.runner.sendQueued(state.journal, queued.id, queued.revision, QUEUE_ROUTING), /simulated sync failure/);
+    assert.equal(sessions.length, 0);
+    assert.equal(prompts.length, 0);
+    assert.equal(state.runner.isRunning(state.conversationId), false);
+    assert.equal((await state.journal.read()).inputs[0]!.status, "queued");
+  });
+
+  it("refuses FIFO overtaking, paused queues and model substitution before dispatch", async () => {
+    const prompts: string[] = [];
+    const state = await setup(fakeAdapter([], { prompts }));
+    const first = await queueInput(state.journal, "First");
+    const second = await queueInput(state.journal, "Second");
+    assert.equal((await state.runner.sendQueued(state.journal, second.id, second.revision, QUEUE_ROUTING)).status, "unavailable");
+    assert.equal((await state.runner.sendQueued(state.journal, first.id, second.revision, { ...QUEUE_ROUTING, modelId: "another" })).status, "unavailable");
+    const paused = await state.journal.pause("stopped", "stop");
+    assert.equal((await state.runner.sendQueued(state.journal, first.id, paused.queue.revision, QUEUE_ROUTING)).status, "unavailable");
+    assert.equal(prompts.length, 0);
+    assert.ok((await state.journal.read()).inputs.every(row => row.status === "queued"));
+  });
 });

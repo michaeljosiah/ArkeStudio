@@ -58,3 +58,57 @@ node --import tsx --test test/v2-input-protocol.test.ts
 ```
 
 Without the variable, the native test skips. A different version requires repeating and updating the measurement; a passing scripted adapter test is not a substitute.
+
+
+## Running a queued primary turn
+
+`WorldChatRunner.sendQueued` is the execution boundary for a scheduler-selected queue row.
+It reserves the same conversation slot as ordinary Send before its first read, rebuilds context,
+and asks the input journal to atomically promote the original message, constraints and new run.
+The journal rechecks FIFO order, queue revision, routing, attachment hashes and the full log
+position. A failed or uncertain promotion never reaches session preparation or model dispatch.
+Successful promotion retains the admitted message id for evidence; a failed answer uses ordinary
+Retry, including the captured reply-only/subject constraints, rather than promoting the input again.
+
+This is an internal runner entry point. It does not introduce automatic advancement, input wire
+commands or an editable busy composer. The admission scheduler must still serialize Stop and
+Continue, durably pause before interruption, validate the current subject/routing and wait for
+native settlement before selecting the next row. Native steering and approval provenance remain
+separate outstanding parts of #1138.
+
+## Codex native steering investigation (16 September 2026)
+
+The opt-in `adapter-codex/test/steering-protocol.test.ts` runs a real app-server against a
+scripted localhost Responses provider. It creates an isolated profile, copies only model catalog
+metadata and makes no paid generation call. Unlike adapter mocks, it can inspect the actual
+model request after a native steering operation.
+
+Tested executable: `codex-cli 0.154.0-alpha.6.2`, SHA-256
+`081e4de4be8e38fac6ed4d95e3b1a0b9f6d31c090ddc36e1696b349fe406f575`.
+This prerelease does not meet the adapter's stable release floor. The probe is an investigation,
+not a relaxation of discovery or permission to advertise `nativeInput`.
+
+The following passed:
+
+- `turn/steer` targets the original execution using `expectedTurnId`; a wrong id is refused.
+- `clientUserMessageId` is echoed as the correlated completed user item's `clientId`.
+- The correction appears in a subsequent actual model request on that same turn. The initial
+  acceptance response alone is not used as inclusion evidence.
+- Aborting observation of the steering receipt after writing the request still permits one
+  correlated input and one inclusion, without resending. The probe observes the original late
+  receipt to establish admission; it does not claim reconnect recovery.
+- `turn/interrupt` produces an explicitly interrupted terminal event for the target turn.
+- Steering after normal completion or interruption is refused rather than starting a successor.
+
+Still needed before release qualification: repeat on a supported stable binary, establish
+consumption-event ordering during compaction/repair and cancellation races, implement bounded
+reconciliation after transport loss, and connect the verified capability to runner finalization,
+input provenance and approval checks. OpenCode and Claude retain explicit queue fallback.
+
+Run the investigation from the repository root:
+
+```powershell
+$env:ARKE_CODEX_STEERING_COMMAND = "C:\path\to\codex.exe"
+$env:ARKE_CODEX_SMOKE_CATALOG = "C:\path\to\model-catalog.json"
+node --import tsx --test packages/adapter-codex/test/steering-protocol.test.ts
+```

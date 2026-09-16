@@ -163,3 +163,5 @@ commands/bench tests for versioning, restore and reference admission. No paid ge
 of the normal gate.
 
 For the embeddable Node package, run `npm test --workspace @arke-studio/engine`. This builds and installs the packed artifact outside the checkout, runs the initial authoring journey and validates declarations. It requires registry access but no paid provider. Coordinator `test/application/engine.test.ts` covers the shared services; see the [engine guide](engine.md).
+
+The opt-in Codex steering investigation and exact tested binary are described in [conversation inputs](conversation-inputs.md#codex-native-steering-investigation-16-september-2026). It uses a scripted localhost provider and does not enable release capabilities. Queued-turn execution regressions are in coordinator `test/world-chat/run.test.ts`.
