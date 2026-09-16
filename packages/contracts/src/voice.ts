@@ -22,6 +22,8 @@ export const VoiceCandidateSchema = z
     /** Whether the selected execution target is this machine. */
     local: z.boolean(),
     canClone: z.boolean(),
+    /** The library voice this candidate reads, for a hosted reader or the recipe (SPEC-046 R-10). */
+    readsClone: z.string().min(1).optional(),
     /** Why this concrete target cannot execute now. Existing assignments remain visible with it. */
     unavailableReason: z.string().min(1).optional(),
   })
@@ -193,6 +195,50 @@ export const ClonedVoiceSchema = z
     /** Recorded once, at capture. False on an entry written before it was asked for. */
     consent: z.boolean().default(false),
     created: z.string().default(""),
+    /**
+     * The language the recording was spoken in (ISO 639-1), asked at clone time (issue 1163).
+     * A slot-keeping reader saves the voice under it — Breeze's save requires one, and read
+     * every voice as English before this field existed — and a read through a hosted reader
+     * states it, which is what decides the R-23 tag. `en` for an entry written before it was
+     * asked, and for anything hand-edited into a shape that is not a code: the voice is not the
+     * thing to lose over its language.
+     */
+    language: z.string().regex(/^[a-z]{2}$/).catch("en"),
+    /**
+     * What each hosted reader holds of this voice (SPEC-046 R-13, R-16), keyed by provider id.
+     * `confirmedAt` is the once-per-vendor answer to "send this recording?"; a reader that keeps
+     * the clip on the account — Breeze's voice slot — records the id it keeps it under and the
+     * hash of the clip it was made from, so a re-recorded clip is cloned again rather than read
+     * from a stale slot. Mistral holds nothing: the clip rides with every call.
+     *
+     * As lenient as the rest of the entry: a hand-edited or newer-build `remote` reads as absent
+     * — the person is asked again and a slot is made again — rather than dropping the voice.
+     */
+    remote: z
+      .record(
+        z.string().min(1),
+        z
+          .object({
+            confirmedAt: z.string().min(1).optional(),
+            voiceId: z.string().min(1).optional(),
+            clipHash: z.string().min(1).optional(),
+            savedAt: z.string().min(1).optional(),
+            /** Replaced copies the vendor has not yet confirmed removed: tried again at the next read (R-15). */
+            stale: z.array(z.string().min(1)).optional(),
+            /** Titles of saves whose answer never came back: looked up and reconciled at the next read. */
+            pending: z.array(z.string().min(1)).optional(),
+            /**
+             * The language the vendor saved the voice under when it overrode the one stated — its
+             * own analysis of the recording (Breeze, probed 2026-09-15: an English-described clip
+             * heard as Japanese). Reads still state the library's language as the speech language;
+             * this records what the vendor's copy is, so the difference is on the entry rather than lost.
+             */
+            language: z.string().min(1).optional(),
+          })
+          .passthrough(),
+      )
+      .optional()
+      .catch(undefined),
   })
   .passthrough();
 export type ClonedVoice = z.infer<typeof ClonedVoiceSchema>;
@@ -202,13 +248,110 @@ export const CLONED_VOICE_MODEL = "comfyui-cloned-voice" as const;
 export const KOKORO_VOICE_MODEL = "kokoro-82m" as const;
 export const ELEVENLABS_VOICE_MODEL = "eleven_multilingual_v2" as const;
 
-/** Cloned voice narration is intentionally unsupported until long-form queue chunking exists. */
+/**
+ * The hosted readers of the world's cloned voices (SPEC-046 D1): one voice, several readers. A
+ * library voice addressed as `{provider, model, voiceId}` with one of these rows is the same
+ * recording read in the cloud — the recipe row reads it on this machine. Provider id → the one
+ * `voice-tts` manifest row that reads a clip there.
+ */
+export const HOSTED_VOICE_READERS: Readonly<Record<string, string>> = {
+  mistral: "voxtral-mini-tts",
+  breezeblue: "breeze-tts-2",
+  fishaudio: "fish-s2.1-pro",
+};
+
+export function isHostedVoiceReader(provider: string, model?: string): boolean {
+  const row = HOSTED_VOICE_READERS[provider];
+  return row !== undefined && (model === undefined || model === row);
+}
+
+/** The vendor's name as the confirmation and its notice say it (SPEC-046 R-16, R-17). */
+export const HOSTED_READER_LABELS: Readonly<Record<string, string>> = {
+  mistral: "Mistral",
+  breezeblue: "BreezeBlue",
+  fishaudio: "Fish Audio",
+};
+
+/**
+ * The readers that keep the clip on the account — Breeze's voice slot, Fish's voice model —
+ * addressed by an id the library records (SPEC-046 R-13). Mistral takes the bytes with every
+ * call and keeps nothing. Known here rather than only where the slot is made because a screen
+ * states a first read's consequence before the read (R-14, R-34), and the two must agree on
+ * which readers have one.
+ */
+const READERS_KEEPING_SLOT: ReadonlySet<string> = new Set(["breezeblue", "fishaudio"]);
+
+export function hostedReaderKeepsSlot(provider: string): boolean {
+  return READERS_KEEPING_SLOT.has(provider);
+}
+
+/**
+ * What a first read through a slot-keeping reader adds, said before it (SPEC-046 R-14, R-34):
+ * Breeze charges a flat per-clone fee its docs do not quantify, so the amount is the vendor's
+ * to state; Fish makes the model for nothing (probed 2026-09-13), so only the making is said.
+ * Null once the library records the slot — the second read is a read — and for a reader that
+ * keeps nothing.
+ */
+export function firstReadNotice(voice: Pick<ClonedVoice, "remote">, provider: string): string | null {
+  if (!hostedReaderKeepsSlot(provider) || voice.remote?.[provider]?.voiceId !== undefined) return null;
+  return provider === "breezeblue"
+    ? "first read · clone charge, priced by BreezeBlue"
+    : `first read · voice made on ${HOSTED_READER_LABELS[provider] ?? provider}`;
+}
+
+/**
+ * The reader's short name, as the Voice page's `Reads lines` row and a cloned voice's reader
+ * chips say it (SPEC-046 R-30): `IndexTTS · free`, `Voxtral · $0.016 per 1k`. Keyed by model,
+ * because the name is the engine behind the row rather than the vendor's brand — the recipe is
+ * IndexTTS on this machine whoever serves ComfyUI. A model not named here reads as its row's
+ * display name, and with no row as its provider.
+ */
+const READER_NAMES: Readonly<Record<string, string>> = {
+  "comfyui-cloned-voice": "IndexTTS",
+  "kokoro-82m": "Kokoro",
+  "eleven_multilingual_v2": "ElevenLabs",
+  "eleven-v3": "Eleven v3",
+  "voxtral-mini-tts": "Voxtral",
+  "breeze-tts-2": "Breeze",
+  "fish-s2.1-pro": "Fish Audio",
+};
+
+export function readerName(
+  target: { provider: string; model?: string | null },
+  row?: Pick<ManifestModel, "displayName"> | null,
+): string {
+  const named = target.model !== undefined && target.model !== null ? READER_NAMES[target.model] : undefined;
+  return named ?? row?.displayName ?? target.provider;
+}
+
+/**
+ * A reader's price as a label (R-30): `free`, or the row's rate per thousand of the unit it
+ * bills — `$0.016 per 1k`, `$0.015 per 1k bytes` — never a sentence. Three decimals where the
+ * rate has them: $0.016 rounded to a cent is a different price. Null for a row priced some
+ * other way, which no voice row is.
+ */
+export function readerPriceLabel(row: Pick<ManifestModel, "pricing"> | null | undefined): string | null {
+  if (!row) return null;
+  if (row.pricing.kind === "unmetered") return "free";
+  if (row.pricing.kind !== "perCharacter") return null;
+  const perThousand = (row.pricing.microUsdPerCharacter / 1000).toFixed(3).replace(/(\.\d\d)0$/, "$1");
+  const unit = row.pricing.unit === "utf8-byte" ? " bytes" : row.pricing.unit === "cjk-double" ? " · CJK ×2" : "";
+  return `$${perThousand} per 1k${unit}`;
+}
+
+/**
+ * Cloned voice narration is intentionally unsupported until long-form queue chunking exists —
+ * through any reader: a hosted reader's library candidate says so with `readsClone`, and the
+ * narrator path queues without a voice reference, so a clone it accepted would reach the vendor
+ * as a preset id it has never heard of (codex on PR 1153).
+ */
 export function supportsVoiceUse(
-  candidate: { provider: string; model?: string },
+  candidate: { provider: string; model?: string; readsClone?: string },
   use: "preview" | "line" | "bench" | "narration",
 ): boolean {
-  return use !== "narration" ||
-    candidate.provider !== CLONED_VOICE_PROVIDER ||
+  if (use !== "narration") return true;
+  if (candidate.readsClone !== undefined) return false;
+  return candidate.provider !== CLONED_VOICE_PROVIDER ||
     (candidate.model !== undefined && candidate.model !== CLONED_VOICE_MODEL);
 }
 
@@ -224,13 +367,45 @@ export function voiceSourceFor(
   model: string,
   voiceId: string,
 ): VoiceSourceResolution {
-  if (provider !== CLONED_VOICE_PROVIDER || model !== CLONED_VOICE_MODEL) return { kind: "catalogue" };
-  const voice = voices.find((candidate) => candidate.id === voiceId);
-  return voice ? { kind: "cloned", voice } : { kind: "missing-clone" };
+  if (provider === CLONED_VOICE_PROVIDER && model === CLONED_VOICE_MODEL) {
+    const voice = voices.find((candidate) => candidate.id === voiceId);
+    return voice ? { kind: "cloned", voice } : { kind: "missing-clone" };
+  }
+  // A hosted reader speaks its own presets AND the library's voices (SPEC-046 R-10). The library
+  // decides which this id is: a match is the recording read in the cloud, anything else is one of
+  // the vendor's presets, never "missing" — a preset was never in the library to go missing from.
+  if (isHostedVoiceReader(provider, model)) {
+    const voice = voices.find((candidate) => candidate.id === voiceId);
+    return voice ? { kind: "cloned", voice } : { kind: "catalogue" };
+  }
+  return { kind: "catalogue" };
 }
 
-export function isClonedVoice(candidate: Pick<VoiceCandidate, "provider" | "model">): boolean {
-  return candidate.provider === CLONED_VOICE_PROVIDER && candidate.model === CLONED_VOICE_MODEL;
+export function isClonedVoice(candidate: Pick<VoiceCandidate, "provider" | "model" | "readsClone">): boolean {
+  return (candidate.provider === CLONED_VOICE_PROVIDER && candidate.model === CLONED_VOICE_MODEL) || candidate.readsClone !== undefined;
+}
+
+/**
+ * The library's voices as candidates for one hosted reader (SPEC-046 R-10): the same id, the
+ * reader's provider and row. `readsClone` is what tells a picker these three candidates are one
+ * voice with three readers, not three voices.
+ */
+export function cloudReaderCandidates(
+  voices: readonly ClonedVoice[],
+  reader: { provider: string; model: string },
+  availability: { unavailableReason?: string } = {},
+): VoiceCandidate[] {
+  return voices.map((v) => ({
+    provider: reader.provider,
+    model: reader.model,
+    voiceId: v.id,
+    label: v.name,
+    attributes: v.attributes,
+    local: false,
+    canClone: false,
+    readsClone: v.id,
+    ...(availability.unavailableReason !== undefined ? { unavailableReason: availability.unavailableReason } : {}),
+  }));
 }
 
 /**
@@ -280,6 +455,8 @@ export function newClonedVoice(input: {
   description: string;
   clip: string;
   consent: boolean;
+  /** ISO 639-1; English when not said, which is what every reader assumed before it was asked. */
+  language?: string;
   artifactId?: string;
   created: string;
   taken: readonly string[];
@@ -290,6 +467,8 @@ export function newClonedVoice(input: {
   if (!description) {
     return { ok: false, reason: "a cloned voice needs a description — it is what the picker matches on" };
   }
+  const language = (input.language ?? "en").trim().toLowerCase();
+  if (!/^[a-z]{2}$/.test(language)) return { ok: false, reason: "a cloned voice's language is a two-letter code" };
   const parsedClip = ClonedVoiceSchema.shape.clip.safeParse(input.clip.trim());
   if (!parsedClip.success) return { ok: false, reason: "a cloned voice needs a safe world-relative recording" };
   if (!input.consent) {
@@ -303,12 +482,24 @@ export function newClonedVoice(input: {
       clip: parsedClip.data,
       description,
       attributes: extractVoiceAttributes(description),
+      language,
       ...(input.artifactId !== undefined ? { artifactId: input.artifactId } : {}),
       consent: true,
       created: input.created,
     },
   };
 }
+
+/**
+ * The languages the clone dialog offers (issue 1163): the codes Breeze routes by and Fish
+ * detects across, in the order a select shows them. A voice in a language not listed is still
+ * a voice — the schema takes any two-letter code — this is only what the dialog can name.
+ */
+export const CLONE_LANGUAGES: ReadonlyArray<readonly [code: string, name: string]> = [
+  ["en", "English"], ["fr", "French"], ["de", "German"], ["es", "Spanish"], ["it", "Italian"],
+  ["pt", "Portuguese"], ["nl", "Dutch"], ["pl", "Polish"], ["ru", "Russian"], ["tr", "Turkish"],
+  ["ar", "Arabic"], ["hi", "Hindi"], ["ja", "Japanese"], ["ko", "Korean"], ["zh", "Chinese"],
+];
 
 /**
  * The library as picker candidates. Local, and never itself cloneable: cloning a clone would
@@ -329,6 +520,7 @@ export function clonedVoiceCandidates(
     attributes: v.attributes,
     local: availability.local ?? true,
     canClone: false,
+    readsClone: v.id,
     ...(availability.unavailableReason !== undefined
       ? { unavailableReason: availability.unavailableReason }
       : {}),
@@ -391,6 +583,51 @@ const KOKORO_DELIVERY: Partial<Record<Delivery, Record<string, number>>> = {
   urgent: { speed: 1.15 },
 };
 
+/**
+ * Breeze takes direction three ways — a tag in the text, a sentence beside it, and a guidance
+ * scale (SPEC-046 R-20, R-22). The number travels as a voice setting like any other provider's;
+ * the tag and the sentence are the client's to place, read back through `breezeDirection`. A tag
+ * where Breeze documents one for the delivery, a sentence where it does not. The guidance value
+ * is the vendor's own example and every entry here is unprobed: issue 1143's listen tunes them,
+ * and nothing else should.
+ */
+export const BREEZE_DELIVERY: Record<Delivery, { settings: { guidance_scale: number }; tag?: string; instruction?: string }> = {
+  measured: { settings: { guidance_scale: 4 }, instruction: "Read it evenly, at a steady pace." },
+  // The sentence rides beside the tag so a line whose language is not known still carries the
+  // delivery: the tag goes only into a line stated to be English (R-23).
+  whispered: { settings: { guidance_scale: 4 }, tag: "whispers", instruction: "Whisper it — hushed and close, barely voiced." },
+  breaking: { settings: { guidance_scale: 4 }, tag: "sobs", instruction: "The voice is breaking; the words come through tears." },
+  cold: { settings: { guidance_scale: 4 }, instruction: "Say it coldly — flat, distant, without warmth." },
+  warm: { settings: { guidance_scale: 4 }, instruction: "Say it warmly and gently, close and kind." },
+  urgent: { settings: { guidance_scale: 4 }, instruction: "Say it urgently, fast and pressing, as if there is no time." },
+};
+
+/** The parts of a Breeze delivery that are words, not numbers: the tag in the text, the sentence beside it. */
+export function breezeDirection(delivery: Delivery): { tag?: string; instruction?: string } {
+  const { tag, instruction } = BREEZE_DELIVERY[delivery];
+  return { ...(tag !== undefined ? { tag } : {}), ...(instruction !== undefined ? { instruction } : {}) };
+}
+
+/**
+ * Fish Audio's S2.1 takes direction as a `[bracket]` phrase in the text — natural language, not
+ * a fixed set, read by the model like the rest of the line (SPEC-046 §2.9). No settings travel:
+ * `temperature` and `top_p` are sampling knobs, not a delivery, and stay at the vendor's
+ * defaults. Every phrase here is unprobed; the listen tunes them, and nothing else should.
+ */
+export const FISH_DELIVERY: Record<Delivery, { settings: Record<string, number>; tag: string }> = {
+  measured: { settings: {}, tag: "calm and even, at a steady pace" },
+  whispered: { settings: {}, tag: "whispering" },
+  breaking: { settings: {}, tag: "voice breaking, through tears" },
+  cold: { settings: {}, tag: "cold and flat, without warmth" },
+  warm: { settings: {}, tag: "warm and gentle" },
+  urgent: { settings: {}, tag: "urgent, fast and pressing" },
+};
+
+/** The phrase a Fish read carries for a delivery, placed in the text by the client. */
+export function fishDirection(delivery: Delivery): { tag: string } {
+  return { tag: FISH_DELIVERY[delivery].tag };
+}
+
 export type DeliveryMapping =
   | { ok: true; params: Record<string, number> }
   | { ok: false; reason: string };
@@ -409,7 +646,33 @@ export function deliveryParams(provider: string, delivery: Delivery): DeliveryMa
       reason: `Kokoro cannot express "${delivery}" — local presets shape pace only; the read will be neutral`,
     };
   }
+  // Voxtral takes no direction at all — no tags, no settings, no speed. The reference clip is
+  // the read (SPEC-046 R-19), so the one honest delivery is the one the recording already has.
+  if (provider === "mistral") {
+    if (delivery === "measured") return { ok: true, params: {} };
+    return {
+      ok: false,
+      reason: `Voxtral reads a line the way the recording was spoken — "${delivery}" would need a recording spoken that way, not a setting`,
+    };
+  }
+  if (provider === "breezeblue") return { ok: true, params: BREEZE_DELIVERY[delivery].settings };
+  // Fish's direction is words in the text (FISH_DELIVERY); there are no numbers to carry.
+  if (provider === "fishaudio") return { ok: true, params: FISH_DELIVERY[delivery].settings };
   return { ok: false, reason: `${provider} has no declared delivery mapping — the read will use provider defaults` };
+}
+
+/**
+ * The readers the performance path — Generate a line (SPEC-044 R-14) — can generate with. A
+ * hosted reader's row declares a cadence like these do, and since issue 1149 the path carries
+ * what a hosted read of a cloned voice needs — the vendor's confirmation at
+ * `generate-performance`, `voiceReference: true` on the job so the dispatcher's clip read
+ * prepares the slot, the clone's language for the R-23 tag — so the door that opens on a
+ * cadence declaration and the gate that refuses read one list (codex on PR 1156).
+ */
+export const PERFORMANCE_GENERATION_PROVIDERS: readonly string[] = ["kokoro", "elevenlabs", "mistral", "breezeblue", "fishaudio"];
+
+export function supportsPerformanceGeneration(model: Pick<ManifestModel, "provider" | "capability" | "cadence"> | null | undefined): boolean {
+  return model !== null && model !== undefined && model.capability === "voice-tts" && model.cadence !== undefined && PERFORMANCE_GENERATION_PROVIDERS.includes(model.provider);
 }
 
 /** Deliveries a concrete model may offer before enqueue; absent means provider defaults only. */
@@ -426,6 +689,7 @@ export function legacyVoiceModel(provider: string, voiceId: string, clonedVoices
   if (provider === "kokoro") return KOKORO_VOICE_MODEL;
   if (provider === "elevenlabs") return ELEVENLABS_VOICE_MODEL;
   if (provider === CLONED_VOICE_PROVIDER && clonedVoices.some((voice) => voice.id === voiceId)) return CLONED_VOICE_MODEL;
+  if (HOSTED_VOICE_READERS[provider] !== undefined) return HOSTED_VOICE_READERS[provider]!;
   return null;
 }
 

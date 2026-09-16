@@ -873,6 +873,7 @@ describe("the Stage's handoff to the bench", () => {
         { t: 4, p: [0, 1.55, 1.8], l: [0, 1.25, 0], anchor: "maren-kest", track: "maren-kest" },
       ],
       playblast: {
+        evaluatorVersion: 2,
         artifactId: "ar_01J8G0000000000000000000A1",
         openingFrameArtifactId: "ar_01J8G0000000000000000000A2",
         version: 2,
@@ -910,6 +911,17 @@ describe("the Stage's handoff to the bench", () => {
     assert.match(video.prefill.composer.brief, /0\.0s — 3\.0m in front of Maren Kest, 1\.55m high, aimed at Maren Kest/);
     // This test route takes images but no video; the tile remains inactive.
     assert.equal(video.prefill.composer.activeTokens.includes(playblast!.token), false);
+
+    delete shot.staging.playblast!.evaluatorVersion;
+    const legacy = await prepareBenchSubject(world, {
+      productionId: "saltlight", sceneId: "sc_04", subject: { kind: "shot", shotId: "sh_12" },
+      mode: "video", settings: null, manifest: MANIFEST, sources: sourceReader,
+    });
+    assert.ok(legacy.ok);
+    if (!legacy.ok) return;
+    assert.equal(legacy.prefill.references.some(reference => reference.label?.startsWith("Staging")), false,
+      "a playblast from the previous evaluator must be re-exported before Bench admits it (#1128)");
+    shot.staging.playblast!.evaluatorVersion = 2;
 
     const stagedFigure = shot.staging.cast?.[0];
     assert.ok(stagedFigure);

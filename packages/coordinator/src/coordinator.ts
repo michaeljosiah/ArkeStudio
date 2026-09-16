@@ -1,13 +1,21 @@
+import { ProductionCreationService } from "./application/production-creation.js";
+import { ConversationActionService } from "./application/conversation-actions.js";
+import { ProseAuthoringService } from "./application/prose-authoring.js";
+import { ConversationAuthoringService } from "./application/conversation-authoring.js";
+import { conversationRunDependencies } from "./application/conversation-runs.js";
+import { createEngine } from "./application/engine.js";
+import { createLocalWorldRepository } from "./application/local-worlds.js";
+import { createLocalEnginePolicy, LOCAL_ENGINE_CONTEXT } from "./application/local-policy.js";
+import { createStudioStorage, type StudioStorage } from "./application/studio-composition.js";
 import { referenceInputProblem } from "@arke-studio/contracts";
 import { LocalGpu, memoryWait, queueableLocalMemory } from "./local-ai/gpu.js";
 import { withLocalGpu } from "./harness/local-gpu.js";
 import { withModelValidation } from "./harness/model-validation.js";
 import { HarnessModelCatalog, selectHarnessModel, type LanguageModelSelection } from "./harness/model-catalog.js";
-import { prepareReferences } from "./media/prepare-references.js";
+import { prepareReferences, validateSeedanceReferences } from "./media/prepare-references.js";
 import { stageConstructionHandoff } from "./world-chat/actions.js";
 import { handleProductionSetupCommand } from "./productions/setup-command.js";
-import { productionSetups, recoverProductionSetups } from "./productions/setup.js";
-import { productionSetupBrief } from "./productions/setup-brief.js";
+import { recoverProductionSetups } from "./productions/setup.js";
 import { saveProductionNarrative } from "./productions/narrative.js";
 import { guardProductionSetupAuthority } from "./productions/setup-authority.js";
 import { StageConstructor } from "./productions/stage-construction.js";
@@ -28,9 +36,8 @@ import { keepPerformanceRecording, performanceConversionRequest, readPerformance
 import { readCharacterAudioInputs, resolveCastVoices, resolveSubjectCastVoices, resolvePerformanceAudioReferences, preparePerformanceAudioRange, prepareMasterAudioReference, resolveMasterAudioReferences } from "./audio/reference-inputs.js";
 import { resumeCharacterSample, prepareCharacterSample, acceptCharacterSample, clearCharacterSample, withdrawCharacterSample, characterSpeakingRequest } from "./audio/character-sample.js";
 import type { AudioMediaTools } from "./audio/media-tools.js";
-import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
-import { createPreparedSession, type SessionInput } from "./harness/session-files.js";
+import type { SessionInput } from "./harness/session-files.js";
 import { existsSync, mkdirSync } from "node:fs";
 import { copyFile, mkdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
@@ -51,6 +58,7 @@ import {
   type HarnessAvailability,
   type HarnessEngine,
   type ClientState,
+  type ClonedVoice,
   type DomainEvent,
   type HarnessAdapter,
   type PermissionRequest,
@@ -77,6 +85,7 @@ import {
   productionFrameRate,
   designatedCompilation,
   comfyUiRecoveryDecision,
+  billableCharacters,
   estimateMicroUsd,
   modelEligible,
   modelForCapability,
@@ -86,7 +95,6 @@ import {
   planScene,
   previewLineFor,
   type ConversationId,
-  type WorldChatCheckReceipt,
   type WorldChatReferenceImageDiscardAction,
   type WorldChatReferenceImageImportAction,
   type WorldChatReferenceImportAction,
@@ -106,6 +114,7 @@ import {
   voiceJobPart,
   voiceJobIsCandidatePreview,
   CLONED_VOICE_MODEL,
+  CLONED_VOICE_PROVIDER,
   type LedgerEntry,
   type ModelManifest,
   type ProviderId,
@@ -119,21 +128,27 @@ import {
   type SingleActUndo,
   ART_DIRECTION_PATH,
   type VoiceCandidate,
+  type VoiceAudioFormat,
   type ArtifactGeneration,
   type CharacterReferenceWorkflow,
   type BenchSession,
   type SessionId,
   deliveryParams as mapDelivery,
   type Delivery,
+  type ChapterAudiobook,
+  type AudiobookDirection,
+  type AudiobookDirectionInput,
+  type AudiobookReader,
+  audiobookTextHash,
   narratorFor,
   voiceFormatForModel,
+  hostedReaderKeepsSlot,
   legacyVoiceModel,
   voiceSourceFor,
   supportsVoiceUse,
   COMFYUI_WEIGHTS_COMPONENT_PREFIX,
   isComfyUiWeightsComponent,
   orderedShots,
-  applyBibleEdits,
   characterAudioRoute,
 } from "@arke-studio/contracts";
 import { BenchStore, sessionDir as benchSessionDir, sessionMediaDir } from "./bench/store.js";
@@ -156,24 +171,21 @@ import {
   fileBenchSubjectTake,
 } from "./bench/filing.js";
 import { recordBenchOutcome, serialiseSceneConversation } from "./bench/outcome.js";
-import { AppLog } from "./app-log.js";
-import { AppSettingsFile, routingFaults } from "./app-settings.js";
+import type { AppLog } from "./app-log.js";
+import { type AppSettingsFile, routingFaults } from "./app-settings.js";
 import { AskService } from "./canon/ask.js";
-import { CredentialStore, type Cipher } from "./credentials/store.js";
+import type { CredentialStore, Cipher } from "./credentials/store.js";
 import { buildDiagnosticsBundle } from "./diagnostics.js";
 import { DiagnosticsSnapshotHolder } from "./diagnostics-snapshot.js";
 import {
   highestChapterRank,
   compileBoard,
   composeDispatches,
-  createChapter,
   createEpisode,
-  createProduction,
   createScene,
   draftSceneSkeleton,
   exportBoard,
   landBoard,
-  productionCreatedBy,
   proposeEpisode,
   proposeSeason,
   proposeStoryOverview,
@@ -185,13 +197,9 @@ import {
   reorderScenes,
   deleteScene,
   restoreScene,
-  saveChapter,
   setProductionAspect,
   setProductionModel,
   openChapter,
-  restoreChapter,
-  editChapterPlan,
-  setChapterRetired,
 } from "./productions/ops.js";
 import {
   advancePlan,
@@ -254,26 +262,18 @@ import {
 } from "./artifacts/filing.js";
 import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachments.js";
 import { makeAdapterExtractor } from "./artifacts/model.js";
-import { deriveContinuity, makeAdapterContinuityDeriver, readContinuity, type ContinuityDeriver } from "./productions/continuity.js";
+import { deriveContinuity, makeAdapterContinuityDeriver, type ContinuityDeriver } from "./productions/continuity.js";
 import { castLines, makeAdapterVoicesDeriver, readVoices, type VoicesDeriver } from "./productions/voices.js";
+import { acceptDirections, directChapter, directableBlocks, makeAdapterDirectionDeriver, type DirectionDeriver } from "./productions/audiobook-direction.js";
+import { audiobookDoor, conformDirections, runAudiobookBook } from "./productions/audiobook-book.js";
+import { checkDirection, directionPlan, writeAudiobookBook, writeBlockDirection } from "./productions/audiobook.js";
+import { runAudiobookChapter } from "./productions/audiobook-run.js";
 import { exportManuscript, importManuscript, readManuscript } from "./productions/manuscript.js";
 import { manuscriptChapters, productionShape, type StructuredDocument } from "@arke-studio/contracts";
 import { voicedBlocks, type ChapterContinuity, type ChapterVoices } from "@arke-studio/contracts";
 import { recordTakesFromJob } from "./takes/arrival.js";
-import { materialiseForContinuation } from "./productions/continuation.js";
+import { readContinuationSource } from "./productions/continuation.js";
 
-/**
- * The four extensions `isVideoMedia` admits, each as the type a data URI must declare it to be
- * (SPEC-019 R-50). A map rather than a ternary because the wrong label does not fail as "we do
- * not support webm" — the route decodes the bytes as what we said they were and reports a corrupt
- * file, which reads as the model's fault rather than as ours.
- */
-const VIDEO_CONTENT_TYPES: Record<string, "video/mp4" | "video/quicktime" | "video/webm"> = {
-  ".mp4": "video/mp4",
-  ".m4v": "video/mp4",
-  ".mov": "video/quicktime",
-  ".webm": "video/webm",
-};
 import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { IMPORT_POSTER_BUDGET_MS, backfillArtifactPosters, writeArtifactPoster } from "./artifacts/poster.js";
@@ -284,8 +284,7 @@ import { assertStageReferencesCurrent, filePlayblast } from "./productions/stage
 import { assembleTimelineScene, applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
 import { importEditorMedia } from "./productions/editor-import.js";
 import { AUDIO_TRACK_KINDS, effectiveAudioRole } from "@arke-studio/contracts";
-import { decideEditorRequest, EditorRequestRefused, readEditorRequest, stageEditorRequests } from "./productions/editor-requests.js";
-import { applySceneEdits, sceneVersionFor } from "./productions/scene-edits.js";
+import { decideEditorRequest, EditorRequestRefused, readEditorRequest } from "./productions/editor-requests.js";
 import {
   acceptStill,
   fileDrawnFrame,
@@ -342,27 +341,28 @@ import {
   voiceLineRequest,
   chapterProseSpeech,
 } from "./voice/service.js";
+import { cachedAudio, cachedPieces, joinPieces, pieceJobs, pieceOf, pieceParams, piecesFor, PieceReads } from "./voice/pieces.js";
 import {
   AUDIO_EXTENSIONS as CLONEABLE_AUDIO_EXTENSIONS,
   audioBytesLookRight,
   clipFor,
   cloneVoice,
   MIN_CLONE_SECONDS,
+  recordVoiceReader,
   wavSeconds,
 } from "./voice/library.js";
+import { hostedReaderDestination, hostedUploadConfirmed, hostedUploadToken, prepareHostedClip, type HostedVoiceSlots } from "./voice/hosted.js";
+import { deleteVoice } from "./voice/library.js";
 import { atomicWriteFile, serializeFileMutation } from "./world/atomic.js";
-import { BibleStaleError, readBible, restoreBible, saveBible } from "./world/bible.js";
+import { restoreBible, saveBible } from "./world/bible.js";
 import { changesForEntity } from "./world/change-writer.js";
 import { classify, CommitPlanError, MEDIA_HAS_VIDEO_SCHEMA_VERSION } from "./world/commit.js";
 import { describeCoordinatorError } from "./errors/user-message.js";
-import { MarkdownFile } from "./world/text-files.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
 import { WorldOpenError, scanWorld } from "./world/scan.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
-import { chapterDraftingBrief } from "./world-chat/chapter-brief.js";
 import type { ArkeExportReadRecord } from "./world-chat/target-reads.js";
-import { worldChatContextExists, worldChatSubjectExists } from "./world-chat/context-validation.js";
-
+import { worldChatContextExists } from "./world-chat/context-validation.js";
 import { imageFormatOf, verifyArtifact } from "./queue/verify.js";
 import { readContainedImageReferences, readContainedVideoReferences } from "./world/reference-files.js";
 import { sampleWorldAvailable } from "./world/sample-world.js";
@@ -372,7 +372,6 @@ import {
   establishRequests,
   imageModelFor,
   locationViewRequests,
-  mainPhotoRequests,
   missingTileAngles,
   tileRequest,
 } from "./references/generate.js";
@@ -430,9 +429,9 @@ import {
   type MainPhotoAcceptanceStage,
 } from "./references/main-photo.js";
 import { LLM_ENV_PROVIDERS } from "@arke-studio/contracts";
-import { diagnosticsBoundary, scrubAbsolutePaths, SecretRegistry } from "./redact.js";
+import { diagnosticsBoundary, scrubAbsolutePaths, type SecretRegistry } from "./redact.js";
 import { detectDrift, evaluateSpend, type LedgerRead } from "./spend/analytics.js";
-import { LedgerFile } from "./spend/ledger.js";
+import type { LedgerFile } from "./spend/ledger.js";
 import {
   amendCanonContent,
   openThread,
@@ -475,43 +474,30 @@ import { rejectPoint, returnToRail, savePoint, wrapUp, WrapUpError } from "./wor
 import { materialiseDuplicateChoice } from "./world-chat/materialise.js";
 import { recoverConversations } from "./world-chat/recovery.js";
 import { recoverWrapUps } from "./world-chat/wrapup-recovery.js";
-import { cleanTitle, namingBrief, titleFrom } from "./world-chat/title.js";
-import { describeEntryContext } from "./world-chat/entry-context.js";
-import { budgetFor, currentLookContext } from "./world-chat/context.js";
+import { cleanTitle, namingBrief } from "./world-chat/title.js";
 import { discoverConversations } from "./world-chat/discover.js";
 import { recordResolution, sendBack } from "./world-chat/resolution.js";
 import { WorldChatStore, conversationDir } from "./world-chat/store.js";
 import { WorldChatRunner } from "./world-chat/run.js";
 import { WorldChatRunnerCache } from "./world-chat/runner-cache.js";
-import { QueryLeaseRegistry } from "./world-chat/lease.js";
-import { WorldChatRetrieval } from "./world-chat/retrieval.js";
 import {
   AttachmentError,
   CHAT_ATTACHMENT_EXTENSIONS,
   refuseUnreadable,
   WorldChatAttachmentStore,
-  MAX_TEXT_PER_RUN_CHARS,
 } from "./world-chat/attachments.js";
-import { planFor } from "./world-chat/check-plan.js";
-import { createRunScratch, removeRunScratch } from "./world-chat/run-scratch.js";
 import { projectWorkspace } from "./world-chat/project.js";
 import {
   ConversationActionLifecycle,
   conversationActionDigest,
-  recoverConversationActions,
   type ConversationActionAuthorityAdapter,
-  type ConversationActionLifecycleOptions,
 } from "./arke-actions/lifecycle.js";
 import {
-  prepareWorldChatActions,
-  worldChatActionAdapters,
   type WorldChatActionAdapterDeps,
 } from "./world-chat/actions.js";
-import { makeConversationSummariser } from "./world-chat/summarisation.js";
 import { blockingDependencies, explainBlocked, routeFor as mediaRouteFor } from "./world-chat/media.js";
 import { contradictionCandidates, refsForCanon, refsForSheet, ripplesForCanonEntry, searchCanon } from "./index-db/queries.js";
 import {
-  createSheetFromSentence,
   duplicateSheet,
   guestPromotionContent,
   sheetRenameContent,
@@ -523,7 +509,7 @@ import {
 } from "./sheets/authoring.js";
 import { ReadModel } from "./read-model.js";
 import { ChildSupervisor, type SupervisorStatus } from "./supervisor.js";
-import { Transport } from "./transport.js";
+import { StudioServer, type StudioEventSink, type StudioServerApplication } from "./studio-server.js";
 import type { WorldProvider } from "./world-provider.js";
 import type { WorldStatePrecondition, WorldStore } from "./world/store.js";
 
@@ -593,9 +579,8 @@ function validSingleActUndo(operation: SingleActOperation, undo: SingleActUndo):
 }
 
 /**
- * The coordinator: the application's domain layer, embedded in the Electron main process
- * (SPEC-001 D2) — never a separately launched server. Wires the world provider, read model,
- * transport, change log, harness adapter and child supervisors into one lifecycle.
+ * Studio request/state coordination over application services. StudioServer owns the
+ * authenticated transport and host lifecycle for both Electron and standalone Node.
  */
 
 /**
@@ -682,6 +667,8 @@ async function landUploadedImage(
 }
 
 export interface CoordinatorOptions {
+  /** Explicit local infrastructure, normally supplied by desktop/dev composition. */
+  storage?: StudioStorage;
   /** Host-minted session capability. Omission creates a fresh capability, never an open socket. */
   transportAuth?: import("./transport.js").TransportAuth;
   provider: WorldProvider;
@@ -805,6 +792,12 @@ export interface CoordinatorOptions {
     chooseModelsDir?: () => Promise<string | null>;
   };
   /**
+   * Vendor-side voice state for the hosted readers (SPEC-046 R-13): the calls that save a clip
+   * into a Breeze voice slot and remove it, wired by the host from the provider clients. Absent
+   * where no hosted reader is wired; a Breeze read then refuses with the reason.
+   */
+  hostedVoiceSlots?: HostedVoiceSlots;
+  /**
    * Catalogue entries the host derives from data this package must not own — the per-recipe
    * weight entries, built from the provider layer's recipe facts (SPEC-021 §2.4).
    */
@@ -846,6 +839,8 @@ export interface CoordinatorOptions {
   continuityDeriver?: ContinuityDeriver;
   /** Turn 130: the cast-of-lines model seam; every quote is re-verified regardless (SPEC-012 R-45). */
   voicesDeriver?: VoicesDeriver;
+  /** Turn 146: the direction model seam; every control is re-verified against the block's reader regardless (SPEC-047 R-10). */
+  directionDeriver?: DirectionDeriver;
   /** Desktop-owned update commands. Electron APIs remain outside the coordinator. */
   updates?: {
     check: () => Promise<void>;
@@ -882,6 +877,8 @@ export interface CoordinatorOptions {
     dispose?: () => void;
     localPresets: VoiceCandidate[];
     cloudSources: CloudVoiceSource[];
+    /** The hosted readers of the library's voices, offered as candidates when keyed (SPEC-046 R-10). */
+    hostedReaders?: Array<{ provider: string; model: string }>;
   };
 }
 
@@ -973,10 +970,13 @@ function worldOpenFailureKind(err: unknown): string {
 }
 
 export class Coordinator {
+  private readonly engine: ReturnType<typeof createEngine>;
   private readonly readModel: ReadModel;
   private readonly frameRunQuotes = new Map<string, FrameRunQuote>();
-  private readonly transport: Transport;
-  private readonly transportAuth: import("./transport.js").TransportAuth;
+  private transport: StudioEventSink = { broadcast() {}, broadcastSnapshot() {} };
+  private transportAttached = false;
+  private legacyServer: StudioServer | null = null;
+  readonly serverApplication: StudioServerApplication;
   private readonly changeLog: ChangeLog;
   private readonly supervisors = new Map<HealthComponent, ChildSupervisor>();
   private readonly worldQuery: WorldQueryServer;
@@ -1043,6 +1043,36 @@ export class Coordinator {
   private readonly derivingContinuity = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
   /** Chapters whose lines are being cast right now, keyed the same way (turn 130). */
   private readonly castingVoices = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
+  /** `Direct this chapter` runs (turn 146), keyed like the cast's: one per chapter, ended with the world. */
+  private readonly directingChapters = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
+  /**
+   * A proposal not yet answered (SPEC-047 R-10): held by chapter until it is accepted or
+   * discarded and replayed to a window that connects, so a refresh does not lose a card the
+   * model was paid to make. Nothing on disk: a proposal is not a record until it is accepted.
+   */
+  private readonly heldDirections = new Map<string, Extract<DomainEvent, { type: "direction.finished" }>>();
+  /** A chapter being read into kept takes (turn 146, SPEC-047 R-16), keyed and ended as the cast's runs are. */
+  private readonly readingAudiobooks = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string; toMake?: number; blocks?: number; made?: number }>();
+  /** The request each audiobook run is asked under, by run key, so a replayed start names the same one. */
+  private readonly audiobookRequests = new Map<string, string>();
+  /**
+   * An audiobook run awaits each of its jobs in turn (SPEC-047 R-16): the waiter is registered
+   * the moment the job is queued, and a job that reaches its end before anyone waits is held
+   * until someone does, so the race between enqueue returning and the provider finishing can
+   * never lose a block.
+   */
+  /** `Read the book` runs (turn 146, SPEC-047 R-16), one per production, under the chapters' own runs. */
+  private readonly readingBooks = new Map<string, { control: AbortController; worldId: string; productionId: string; requestId: string; chapters?: number; blocks?: number; done?: number }>();
+  private readonly audiobookWaiters = new Map<string, (job: Job) => void>();
+  private readonly audiobookTerminal = new Map<string, Job>();
+  private waitForAudiobookJob(jobId: string): Promise<Job> {
+    const done = this.audiobookTerminal.get(jobId);
+    if (done !== undefined) {
+      this.audiobookTerminal.delete(jobId);
+      return Promise.resolve(done);
+    }
+    return new Promise((resolve) => this.audiobookWaiters.set(jobId, resolve));
+  }
   /**
    * Clips chosen or recorded for a clone, held between 74c and 74d (SPEC-022 T-10).
    *
@@ -1057,6 +1087,150 @@ export class Coordinator {
   private static readonly MAX_STAGED_CLIPS = 8;
 
   /** The same recipe verdict used by Settings and enqueue admission, projected onto voice rows. */
+  /**
+   * The narrator as the audiobook chooses it (turn 146, SPEC-047 R-11, R-12): the app's, when
+   * the catalogue says it can speak now — the manifest still lists a model whose key was
+   * removed or whose engine is down — the local default otherwise; and the catalogue itself,
+   * which the run asks about every other reader. One rule for the run, the block panel's
+   * writes and the derivation, so a fallback is the same voice wherever it is judged.
+   */
+  private async audiobookNarrator(store: WorldStore, voice: VoiceService | null): Promise<{ narrator: AudiobookReader; catalogue: VoiceCandidate[] }> {
+    const narratorSettings = this.appSettings ? await this.appSettings.load() : null;
+    const clonedVoices = store.getBundle().clonedVoices ?? [];
+    const catalogue = voice === null ? [] : ((await voice.catalogue(clonedVoices, await this.comfyUiVoiceAvailability()).catch(() => null)) ?? []);
+    const narrationCatalogue = catalogue.filter((candidate) => supportsVoiceUse(candidate, "narration") && candidate.unavailableReason === undefined);
+    const narrator = narratorFor(narratorSettings?.narrator ?? null, narrationCatalogue);
+    return { narrator: { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId, ...(narrator.label !== undefined ? { label: narrator.label } : {}) }, catalogue };
+  }
+
+  /**
+   * One chapter read into kept takes (turn 146, SPEC-047 R-16..R-18): the harness around
+   * `runAudiobookChapter` — the queue, the consent gate, the voice service and the events —
+   * shared by the chapter's own press and by the book's run, which reads each chapter through
+   * it on the book's answer. Resolves with the run's ending, for the book to count.
+   */
+  private async readAudiobookChapter(
+    store: WorldStore,
+    voice: VoiceService,
+    room: { narrator: AudiobookReader; catalogue: VoiceCandidate[] },
+    ids: { worldId: string; productionId: string; chapterId: string },
+    requestId: string,
+    command: QueueCommand,
+    signal: AbortSignal,
+    options: { confirmationToken?: string; voiceUploadConfirmedFor?: string; only?: readonly string[]; priced?: string },
+  ): Promise<{ outcome: "read" | "stopped" | "unavailable" | "failed" | "refused"; made: number; flagged: number; reason?: string }> {
+    const at = () => new Date().toISOString();
+    let ending: { outcome: "read" | "stopped" | "unavailable" | "failed" | "refused"; made: number; flagged: number; reason?: string } = { outcome: "failed", made: 0, flagged: 0, reason: "the run ended without a word" };
+    await runAudiobookChapter({
+      store,
+      worldId: ids.worldId,
+      productionId: ids.productionId,
+      chapterId: ids.chapterId,
+      models: this.opts.manifest?.models ?? [],
+      narrator: room.narrator,
+      catalogue: room.catalogue,
+      signal,
+      ...(options.confirmationToken !== undefined ? { confirmationToken: options.confirmationToken } : {}),
+      ...(options.only !== undefined ? { only: options.only } : {}),
+      ...(options.priced !== undefined ? { priced: options.priced } : {}),
+      // The voice and the vendor on the question (SPEC-046 R-16): a hosted reader's
+      // consent is per voice, written onto the library entry; without `reader` only the
+      // engine's destination is asked about, and a hosted line is refused at dispatch
+      // without ever being asked (codex on PR 1180).
+      requireUploadConfirmation: (reader) =>
+        this.requireVoiceUploadConfirmation({
+          worldId: ids.worldId,
+          requestId,
+          command,
+          ...(options.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: options.voiceUploadConfirmedFor } : {}),
+          reader: { store, provider: reader.provider, voice: reader.voice },
+        }),
+      // One synthesis at a time on the engine is the voice service's rule, whoever asks
+      // (codex on PR 1180): two chapters read at once take turns there, as a page read does.
+      localSpeech: (voiceId, text, abort) => voice.localSpeech(store, voiceId, text, undefined, { signal: abort }),
+      synthesizeLocal: (voiceId, text, settings, abort) => voice.synthesizeDirected(voiceId, text, settings, abort),
+      enqueue: async (inputs) => {
+        // The engine a cloned voice's recording was allowed to go to rides on the job, as
+        // the voiced read's does (SPEC-022): without it every uncached cloned line fails.
+        const queued = await this.enqueueBatch(
+          requestId,
+          command,
+          inputs.map((input) => ({
+            ...input,
+            ...(input.voiceReference && options.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: options.voiceUploadConfirmedFor } : {}),
+          })),
+        );
+        return { jobIds: queued.jobIds, ...(queued.reason !== undefined ? { reason: queued.reason } : {}) };
+      },
+      waitForJob: (jobId) => this.waitForAudiobookJob(jobId),
+      cancelJob: async (jobId) => {
+        await this.jobQueue?.cancel(jobId).catch(() => {});
+      },
+      findJobs: () => this.jobQueue?.listJobs() ?? [],
+      actualCost: async (jobId) => (this.ledger ? ((await this.ledger.readAll()).find((entry) => entry.jobId === jobId)?.actualMicroUsd ?? null) : null),
+      ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
+      now: () => store.now(),
+      emit: (event) => {
+        // The counts ride on the register too, for the replay a rejoining window is given.
+        const held = [...this.readingAudiobooks.values()].find((run) => run.worldId === ids.worldId && run.productionId === ids.productionId && run.chapterId === ids.chapterId);
+        switch (event.type) {
+          case "started":
+            if (held !== undefined) Object.assign(held, { toMake: event.toMake, blocks: event.blocks, made: 0 });
+            this.emit({ at: at(), type: "audiobook.started", ...ids, requestId, toMake: event.toMake, blocks: event.blocks });
+            return;
+          case "priced":
+            this.emit({ at: at(), type: "audiobook.priced", ...ids, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices });
+            return;
+          case "progress":
+            if (held !== undefined) held.made = event.made;
+            this.emit({ at: at(), type: "audiobook.progress", ...ids, block: event.block, outcome: event.outcome, ...(event.reason !== undefined ? { reason: event.reason } : {}), made: event.made, toMake: event.toMake });
+            return;
+          case "finished":
+            ending = { outcome: event.outcome, made: event.made, flagged: event.flagged, ...(event.reason !== undefined ? { reason: event.reason } : {}) };
+            this.emit({
+              at: at(),
+              type: "audiobook.finished",
+              ...ids,
+              outcome: event.outcome,
+              made: event.made,
+              flagged: event.flagged,
+              ...(event.record !== undefined ? { record: event.record } : {}),
+              ...(event.reason !== undefined ? { reason: event.reason } : {}),
+            });
+            return;
+        }
+      },
+    });
+    return ending;
+  }
+
+  /** Every story production of the open world: what a reader's change reaches (SPEC-047 R-13). */
+  private storyProductionIds(store: WorldStore): string[] {
+    return store.getBundle().productions.filter((production) => productionShape(production.meta).hasChapters).map((production) => production.meta.id);
+  }
+
+  /**
+   * Directions re-checked against changed readers (SPEC-047 R-13), said once per production
+   * when anything was dropped; true when any record was written, so the caller refreshes.
+   */
+  private async conformAudiobookDirections(store: WorldStore, worldId: string, productionIds: readonly string[]): Promise<boolean> {
+    if (productionIds.length === 0) return false;
+    let written = false;
+    const room = { ...(await this.audiobookNarrator(store, this.voiceService)), models: this.opts.manifest?.models ?? [] };
+    for (const productionId of productionIds) {
+      try {
+        const conformed = await conformDirections(store, productionId, room);
+        if (conformed.chapters > 0) written = true;
+        if (conformed.dropped > 0 || conformed.chapters > 0) {
+          this.emit({ at: new Date().toISOString(), type: "audiobook.conformed", worldId, productionId, dropped: conformed.dropped, chapters: conformed.chapters });
+        }
+      } catch (err) {
+        void this.appLog?.append({ kind: "audiobook.conform-failed", production: productionId, message: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    return written;
+  }
+
   private async comfyUiVoiceAvailability(): Promise<{ local: boolean; unavailableReason?: string }> {
     const service = this.opts.comfyui?.service;
     if (!service) {
@@ -1080,13 +1254,48 @@ export class Coordinator {
     return { local };
   }
 
-  /** Stop before readiness, clip reads, reservations or jobs when a cloned clip would leave. */
-  private requireVoiceUploadConfirmation(input: {
+  /**
+   * Stop before readiness, clip reads, reservations or jobs when a cloned clip would leave.
+   *
+   * Two kinds of destination (SPEC-046 R-16). A remote ComfyUI engine is asked per request, as
+   * before. A hosted reader — a vendor — is asked once per voice per vendor: the answer is written
+   * onto the library entry the moment it is given, here, so a read with three cloned voices asks
+   * three times at most and never twice for the same one. The token names the voice as well as
+   * the vendor, so the answer for one voice cannot be replayed for the next on the same page
+   * (codex on PR 1153). `reader` names the voice and the provider it is about to be read
+   * through; without it only the engine destination applies.
+   */
+  private async requireVoiceUploadConfirmation(input: {
     worldId: string;
     requestId: string;
     command: QueueCommand;
     voiceUploadConfirmedFor?: string;
-  }): boolean {
+    reader?: { store: WorldStore; provider: string; voice: ClonedVoice };
+  }): Promise<boolean> {
+    const vendor = input.reader ? hostedReaderDestination(input.reader.provider) : null;
+    if (input.reader && vendor) {
+      if (hostedUploadConfirmed(input.reader.voice, input.reader.provider)) return false;
+      const token = hostedUploadToken(input.reader.provider, input.reader.voice.id);
+      if (input.voiceUploadConfirmedFor === token) {
+        await recordVoiceReader(input.reader.store, input.reader.voice.id, input.reader.provider, { confirmedAt: this.nowIso() });
+        return false;
+      }
+      this.emit({
+        at: this.nowIso(),
+        type: "voice.upload-confirmation-required",
+        requestId: input.requestId,
+        worldId: input.worldId,
+        command: input.command,
+        // The vendor and the voice: a page with two cloned voices asks about each by name. The
+        // name is bounded because the frame's label is (512), and a clone's name is not.
+        destinationLabel: `${vendor.label} · ${input.reader.voice.name.slice(0, 120)}`,
+        confirmationToken: token,
+        destinationNotice: vendor.notice,
+      });
+      return true;
+    }
+    // A hosted reader's clip never goes to the engine; only the recipe's does.
+    if (input.reader && input.reader.provider !== CLONED_VOICE_PROVIDER) return false;
     const destination = this.opts.comfyui?.service.voiceUploadDestination() ?? null;
     if (destination === null) return false;
     if (input.voiceUploadConfirmedFor === destination.token) return false;
@@ -1194,12 +1403,19 @@ export class Coordinator {
     confirmationToken?: string;
     /**
      * The passage, already resolved and normalised by the caller — this method never reads a
-     * document. More than one block is a page read (issue 859): they are narrated in the order
-     * the screen declared and each block is one part, so the position the client already keeps
-     * is a position in the page rather than in a synthesis it cannot see. One block is the
-     * per-block read, unchanged in every respect.
+     * document. A page read (issue 859) is narrated in the order the screen declared and each
+     * block is one part, so the position the client already keeps is a position in the page
+     * rather than in a synthesis it cannot see. A per-block read is one block, unchanged in
+     * every respect.
      */
     blocks: readonly { heading: string; text: string; subjectId?: string }[];
+    /**
+     * Whether the screen asked for a page, whatever survived resolution (codex on PR 1210). A
+     * page that resolved to one block — every other section empty — is still a page: its one
+     * part is that block, and a long block's synthesis pieces are joined behind it rather than
+     * announced as parts of a page that has only one.
+     */
+    page: boolean;
     purpose: "sheet-section" | "sheet-page" | "bible-section" | "prose";
     /** What is being read, for the cache key and the queue target. `bible` for the bible. */
     subject: { id: string; version: number };
@@ -1208,8 +1424,7 @@ export class Coordinator {
     fail: (error: string, characters?: number) => void;
   }): Promise<void> {
     if (!this.voiceService) return;
-    const { store, worldId, requestId, blocks, purpose, subject, fail } = input;
-    const page = blocks.length > 1;
+    const { store, worldId, requestId, blocks, page, purpose, subject, fail } = input;
     const characters = blocks.reduce((sum, block) => sum + block.text.length, 0);
     const identity = (heading: string | null) => ({
       worldId,
@@ -1280,16 +1495,15 @@ export class Coordinator {
          * and starts on the first, which is the same total render with none of the silence.
          */
         const block = blocks[0]!;
-        let streamed = 0;
         const result = await this.voiceService.localSpeech(store, speaking.voiceId, block.text, (piece) => {
           // A single-piece read stays exactly what it was: one event, no part numbers.
           if (piece.total < 2) return;
-          streamed += 1;
           ready(block, piece.file, false, { part: piece.index, parts: piece.total });
         });
-        // The joined clip, for a cache hit next time and for anything that wants one file. A
-        // streamed read has already been heard, so this closes it rather than announcing it.
-        if (streamed === 0) ready(block, result.file, result.cached);
+        // The joined clip follows the pieces, with no part of its own (codex on PR 1210): a
+        // screen already sounding the pieces does not start it, and a replay has the whole
+        // passage rather than whichever piece landed last.
+        ready(block, result.file, result.cached);
       } catch (error) {
         fail(describeCoordinatorError(error), characters);
       }
@@ -1315,6 +1529,15 @@ export class Coordinator {
         format,
       }),
     );
+    /*
+     * Each block as the reader takes it (issue 1208): whole within its row's cap, else in pieces
+     * at sentence ends, each piece a job of its own. A single block's pieces are its parts and
+     * are heard as they land, as a local read's are; a page's block stays one part and is
+     * announced once its pieces are joined under the whole block's cache file — which is also
+     * what makes the next read of the same words a hit rather than another spend.
+     */
+    const pieces = blocks.map((block) => piecesFor(block.text, model, format));
+    const pieceFile = (piece: string) => speechCacheFile({ provider: model.provider, model: model.id, voiceId: speaking.voiceId, text: piece, format });
     const cachedReady = (block: { heading: string; text: string }, index: number) =>
       this.emit({
         at: new Date().toISOString(),
@@ -1338,51 +1561,76 @@ export class Coordinator {
      * whole page when only half of it would be synthesised would overstate the spend.
      */
     const misses: number[] = [];
-    for (const index of blocks.keys()) {
-      try {
-        const bytes = new Uint8Array(await readFile(toExtendedLength(join(store.dir, fromPortable(files[index]!)))));
-        if (!cachedVoiceAudioLooksRight(bytes, format)) throw new Error("invalid cache");
-      } catch {
+    /*
+     * The pieces of a missed block the cache holds already, by block (codex on PR 1210). A piece
+     * lands under its own key whether or not its block was ever joined, so a read that lost its
+     * join — the coordinator restarted between the last piece landing and the join, or the
+     * reader refused one piece of several — has paid for pieces on the shelf. A block whose
+     * pieces are all there is joined now and is a hit; one with some of them there pays only
+     * for the rest, and the ones it has are announced free beside them.
+     */
+    const have = new Map<number, ReadonlyMap<number, string>>();
+    try {
+      for (const index of blocks.keys()) {
+        if (await cachedAudio(store, files[index]!, format)) continue;
+        const pieceFiles = pieces[index]!.map(pieceFile);
+        if (pieceFiles.length > 1) {
+          const cached = await cachedPieces(store, pieceFiles, format);
+          if (cached.missing.length === 0) {
+            // A join the world cannot write fails the read by name: the pieces are paid for.
+            await joinPieces(store, pieceFiles, format, files[index]!);
+            continue;
+          }
+          have.set(index, cached.have);
+        }
         misses.push(index);
       }
+    } catch (error) {
+      fail(describeCoordinatorError(error), characters);
+      return;
     }
     if (misses.length === 0) {
       blocks.forEach(cachedReady);
       return;
     }
-    const estimate = misses.reduce(
-      (sum, index) => sum + estimateMicroUsd(model, { characters: blocks[index]!.text.length }),
-      0,
-    );
+    /** A missed block's pieces still to be made: every piece, less the ones on the shelf. */
+    const toMake = (index: number) => pieces[index]!.map((piece, at) => ({ piece, at })).filter(({ at }) => !have.get(index)?.has(at));
+    // Priced by the piece, as each request will be billed (SPEC-046 R-8), and summed: the read
+    // is quoted once, whole, never per piece or again part-way through.
+    const priceOf = (piece: string) => estimateMicroUsd(model, { characters: billableCharacters(model, piece) });
+    const estimate = misses.reduce((sum, index) => sum + toMake(index).reduce((total, { piece }) => total + priceOf(piece), 0), 0);
     const token = createHash("sha256")
-      .update([subject.id, String(subject.version), ...misses.map((index) => files[index]!)].join("\n"))
+      .update([subject.id, String(subject.version), ...misses.flatMap((index) => toMake(index).map(({ piece }) => pieceFile(piece)))].join("\n"))
       .digest("hex");
-    const enqueued: EnqueueInput[] = misses.map((index) => ({
-      worldId,
-      target: {
-        kind: "voice-preview",
-        // The heading keeps a page's blocks apart. They differ only in their words, and one
-        // target for all of them would be one job for all of them.
-        id: `${blocks[index]!.subjectId ?? subject.id}/${model.provider}/${model.id}/${speaking.voiceId}${page ? `/${blocks[index]!.heading}` : ""}`,
-      },
-      capability: "voice-tts",
-      provider: model.provider,
-      model: model.id,
-      params: {
-        voiceId: speaking.voiceId,
-        text: blocks[index]!.text,
-        audioFormat: format,
-        requestId,
-        purpose,
-        ...(input.sheetId !== undefined ? { sheetId: input.sheetId } : {}),
-        sheetVersion: subject.version,
-        sectionHeading: blocks[index]!.heading,
-        characterCount: blocks[index]!.text.length,
-        ...(page ? { part: index, parts: blocks.length } : {}),
-      },
-      estimatedMicroUsd: estimateMicroUsd(model, { characters: blocks[index]!.text.length }),
-      landing: { dir: ".cache/voice-previews", name: files[index]!.split("/").pop()! },
-    }));
+    const enqueued: EnqueueInput[] = misses.flatMap((index) =>
+      toMake(index).map(({ piece, at }) => ({
+        worldId,
+        target: {
+          kind: "voice-preview" as const,
+          // The heading keeps a page's blocks apart, and the piece number a block's pieces:
+          // they differ only in their words, and a target names what a job is for.
+          id: `${blocks[index]!.subjectId ?? subject.id}/${model.provider}/${model.id}/${speaking.voiceId}${page ? `/${blocks[index]!.heading}` : ""}${pieces[index]!.length > 1 ? `/${at + 1}` : ""}`,
+        },
+        capability: "voice-tts" as const,
+        provider: model.provider,
+        model: model.id,
+        params: {
+          voiceId: speaking.voiceId,
+          text: piece,
+          audioFormat: format,
+          requestId,
+          purpose,
+          ...(input.sheetId !== undefined ? { sheetId: input.sheetId } : {}),
+          sheetVersion: subject.version,
+          sectionHeading: blocks[index]!.heading,
+          characterCount: piece.length,
+          ...(page ? { part: index, parts: blocks.length } : pieces[index]!.length > 1 ? { part: at, parts: pieces[index]!.length } : {}),
+          ...(pieces[index]!.length > 1 ? pieceParams(index, at, pieces[index]!.length) : {}),
+        },
+        estimatedMicroUsd: priceOf(piece),
+        landing: { dir: ".cache/voice-previews", name: pieceFile(piece).split("/").pop()! },
+      })),
+    );
     if (input.confirmationToken !== token) {
       this.pendingVoiceReads.set(requestId, { token, inputs: enqueued });
       this.emit({
@@ -1402,6 +1650,10 @@ export class Coordinator {
         characterCount: misses.reduce((sum, index) => sum + blocks[index]!.text.length, 0),
         estimatedMicroUsd: estimate,
         confirmationToken: token,
+        // How many pieces a single block's read will arrive in, said with the price (issue 1208):
+        // a seam is audible, and a reader deciding to spend should know the text goes as several
+        // requests. A page's parts are its blocks, and its own dialog counts those.
+        ...(!page && pieces[0]!.length > 1 ? { parts: pieces[0]!.length } : {}),
       } as DomainEvent);
       return;
     }
@@ -1413,21 +1665,100 @@ export class Coordinator {
     this.pendingVoiceReads.delete(requestId);
     // A block already in the cache never went to the queue, and is ready the moment the page is.
     for (const [index, block] of blocks.entries()) if (!misses.includes(index)) cachedReady(block, index);
+    // So are the pieces of a single block the cache held, in their places; a page's block waits
+    // to be whole, and its held pieces are the join's.
+    if (!page) {
+      for (const [at, file] of have.get(0) ?? []) {
+        this.emit({
+          at: new Date().toISOString(),
+          type: "voice.audio",
+          requestId,
+          ...identity(blocks[0]!.heading),
+          provider: model.provider,
+          model: model.id,
+          voiceId: speaking.voiceId,
+          format,
+          status: "ready",
+          file,
+          cached: true,
+          characterCount: pieces[0]![at]!.length,
+          estimatedMicroUsd: 0,
+          part: at,
+          parts: pieces[0]!.length,
+        } as DomainEvent);
+      }
+    }
     // Stopped while the price was on the table: nothing is queued.
     if (this.stoppedReads.has(requestId)) {
       this.stoppedReads.delete(requestId);
       return;
     }
+    // The chunked blocks are registered before the queue takes their jobs (issue 1208): a
+    // piece can land before the batch call returns, and a piece nothing is waiting for is left
+    // in the cache rather than announced.
+    this.registerPieces(requestId, pending.inputs, (index) => ({ file: files[index]!, format, page, characters: blocks[index]!.text.length, ...(have.has(index) ? { have: have.get(index)! } : {}) }));
     const queued = await this.enqueueBatch(requestId, input.frameKind, pending.inputs);
-    if (!queued.accepted) fail(queued.reason ?? "Voice synthesis could not be queued.", characters);
+    if (queued.jobIds.length < pending.inputs.length) {
+      // A block short of a piece can never be made whole, and a page short of a block has a
+      // hole playback would wait on forever (codex on PR 914): none of it stands.
+      this.pieceReads.drop(requestId);
+      for (const jobId of queued.jobIds) await this.jobQueue?.cancel(jobId).catch(() => {});
+      fail(queued.reason ?? "Voice synthesis could not be queued.", characters);
+      return;
+    }
+    // Failed as a whole while the batch was still being journalled (codex on PR 1210): the
+    // failure could name no jobs then, so what it queued is cancelled now, unpaid.
+    if (this.failedReads.has(requestId)) {
+      for (const jobId of queued.jobIds) await this.jobQueue?.cancel(jobId).catch(() => {});
+      return;
+    }
     // Stop can land while the batch is still being journalled, when there is nothing yet to
     // cancel; the ids come back here and are cancelled rather than kept (codex, PR 879).
     if (this.stoppedReads.has(requestId)) {
       this.stoppedReads.delete(requestId);
+      this.pieceReads.drop(requestId);
       for (const jobId of queued.jobIds) await this.jobQueue?.cancel(jobId).catch(() => {});
       return;
     }
     if (queued.jobIds.length > 0) this.readJobs.set(requestId, queued.jobIds);
+    // A block that failed while the batch was still being journalled had no siblings to name
+    // (codex on PR 1210): now that the queue has named them, they are cancelled unpaid.
+    for (const jobId of this.pieceReads.queued(requestId, pieceJobs(pending.inputs, queued.jobIds))) await this.jobQueue?.cancel(jobId).catch(() => {});
+  }
+
+  /**
+   * A page fails as a whole (codex on PR 1210), as it is refused as a whole at enqueue (codex on
+   * PR 914): playback would wait on the part no event fills, so the page's other jobs are
+   * cancelled rather than paid for, and nothing they say afterwards — a cancellation, a block
+   * that lands anyway — is news over the failure. A block that had landed is in the cache for
+   * the next read. A page that fails while its batch is still being journalled has no jobs to
+   * name yet; the batch call cancels what it queued when it finds the request here.
+   */
+  private async failPage(requestId: string): Promise<void> {
+    const jobs = this.readJobs.get(requestId) ?? [];
+    this.readJobs.delete(requestId);
+    this.pieceReads.drop(requestId);
+    this.failedReads.add(requestId);
+    if (this.failedReads.size > 200) this.failedReads.delete(this.failedReads.values().next().value!);
+    for (const jobId of jobs) await this.jobQueue?.cancel(jobId).catch(() => {});
+  }
+
+  /**
+   * The chunked blocks of a read about to be queued (issue 1208): each with how many pieces to
+   * wait for, so they can be joined when the last lands. Read off the inputs rather than the
+   * plan, because the inputs are what is actually queued.
+   */
+  private registerPieces(
+    requestId: string,
+    inputs: readonly EnqueueInput[],
+    blockOf: (index: number) => { file: string; format: VoiceAudioFormat; page: boolean; characters: number; have?: ReadonlyMap<number, string> },
+  ): void {
+    const counted = new Map<number, number>();
+    for (const input of inputs) {
+      const piece = pieceOf(input);
+      if (piece !== null) counted.set(piece.blockIndex, piece.pieces);
+    }
+    for (const [blockIndex, pieces] of counted) this.pieceReads.register({ requestId, blockIndex, pieces, ...blockOf(blockIndex) });
   }
 
   /** What the import sheet is told of a read (turn 131): the counts, the levels, and where the chapters would go. */
@@ -1495,7 +1826,8 @@ export class Coordinator {
     const manifest = this.opts.manifest;
     const modelOf = (voice: { provider: string; model: string }) =>
       manifest?.models.find((candidate) => candidate.provider === voice.provider && candidate.id === voice.model && candidate.capability === "voice-tts") ?? null;
-    const narration = { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId, label: narrator.label ?? narrator.voiceId, cloned: false };
+    const narration: { provider: string; model: string; voiceId: string; label: string; cloned: boolean; clonedVoice?: ClonedVoice } =
+      { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId, label: narrator.label ?? narrator.voiceId, cloned: false };
     // Each block's voice: the sheet's assignment when the manifest knows its model, the
     // catalogue says it can speak now and, for a cloned voice, its recording is still there;
     // else the narrator (R-46).
@@ -1510,7 +1842,8 @@ export class Coordinator {
         const source = voiceSourceFor(clonedVoices, assigned.provider, model, assigned.voiceId);
         if (source.kind === "missing-clone") return narration;
         if (source.kind === "cloned" && (await clipFor(store, source.voice)) === null) return narration;
-        return { provider: assigned.provider, model, voiceId: assigned.voiceId, label: assigned.label ?? listed.label, cloned: source.kind === "cloned" };
+        return { provider: assigned.provider, model, voiceId: assigned.voiceId, label: assigned.label ?? listed.label, cloned: source.kind === "cloned",
+          ...(source.kind === "cloned" ? { clonedVoice: source.voice } : {}) };
       }),
     );
     const isLocal = (voice: { provider: string; model: string }) => voice.provider === "kokoro" && voice.model === "kokoro-82m";
@@ -1532,71 +1865,99 @@ export class Coordinator {
         part: index,
         parts: blocks.length,
       } as DomainEvent);
-    // The cloud blocks: their cache files, and what the cache lacks.
+    // The cloud blocks: their cache files, what the cache lacks, and each as its reader takes it
+    // (issue 1208) — whole within the row's cap, else in pieces joined before the block is
+    // announced, because a page's block is one part whatever it took to make.
     const cloud = blocks.map((block, index) => {
       const voice = speaking[index]!;
       if (isLocal(voice)) return null;
       const model = modelOf(voice);
       if (model === null) return null;
       const format = voiceFormatForModel(model);
-      return { index, model, format, file: speechCacheFile({ provider: model.provider, model: model.id, voiceId: voice.voiceId, text: block.text, format }) };
+      const cacheFile = (text: string) => speechCacheFile({ provider: model.provider, model: model.id, voiceId: voice.voiceId, text, format });
+      const pieces = piecesFor(block.text, model, format);
+      return { index, model, format, file: cacheFile(block.text), pieces: pieces.map((text) => ({ text, file: cacheFile(text) })) };
     });
     const misses: number[] = [];
-    for (const entry of cloud) {
-      if (entry === null) continue;
-      try {
-        const bytes = new Uint8Array(await readFile(toExtendedLength(join(store.dir, fromPortable(entry.file)))));
-        if (!cachedVoiceAudioLooksRight(bytes, entry.format)) throw new Error("invalid cache");
-      } catch {
+    // The pieces a missed block has on the shelf (codex on PR 1210), as narrateSection keeps
+    // them: all there, joined now and a hit; some there, the rest paid for.
+    const have = new Map<number, ReadonlyMap<number, string>>();
+    try {
+      for (const entry of cloud) {
+        if (entry === null) continue;
+        if (await cachedAudio(store, entry.file, entry.format)) continue;
+        if (entry.pieces.length > 1) {
+          const pieceFiles = entry.pieces.map((piece) => piece.file);
+          const cached = await cachedPieces(store, pieceFiles, entry.format);
+          if (cached.missing.length === 0) {
+            await joinPieces(store, pieceFiles, entry.format, entry.file);
+            continue;
+          }
+          have.set(entry.index, cached.have);
+        }
         misses.push(entry.index);
       }
+    } catch (error) {
+      fail(describeCoordinatorError(error), characters);
+      return;
     }
+    const toMake = (index: number) => cloud[index]!.pieces.map((piece, at) => ({ ...piece, at })).filter(({ at }) => !have.get(index)?.has(at));
     let queuedInputs: EnqueueInput[] = [];
     if (misses.length > 0) {
       // A cloned voice's recording goes with its job (SPEC-022): a remote engine is confirmed as
       // the table read confirms it, once, before anything is priced or queued (codex on PR 914).
-      if (
-        misses.some((index) => speaking[index]!.cloned) &&
-        this.requireVoiceUploadConfirmation({
-          worldId,
-          requestId,
-          command: input.frameKind,
-          ...(input.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: input.voiceUploadConfirmedFor } : {}),
-        })
-      )
-        return;
-      const estimate = misses.reduce((sum, index) => sum + estimateMicroUsd(cloud[index]!.model, { characters: blocks[index]!.text.length }), 0);
+      // A hosted reader is confirmed per voice and per vendor (SPEC-046 R-16), so each cloned
+      // voice among the misses is asked about in turn; an answer already given is remembered.
+      for (const index of misses) {
+        const voice = speaking[index]!;
+        if (!voice.cloned) continue;
+        if (
+          await this.requireVoiceUploadConfirmation({
+            worldId,
+            requestId,
+            command: input.frameKind,
+            ...(input.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: input.voiceUploadConfirmedFor } : {}),
+            ...(voice.clonedVoice !== undefined ? { reader: { store, provider: voice.provider, voice: voice.clonedVoice } } : {}),
+          })
+        )
+          return;
+      }
+      // Priced by the piece, as each request will be billed (SPEC-046 R-8), and summed once.
+      const priceOf = (index: number, text: string) => estimateMicroUsd(cloud[index]!.model, { characters: billableCharacters(cloud[index]!.model, text) });
+      const estimate = misses.reduce((sum, index) => sum + toMake(index).reduce((total, piece) => total + priceOf(index, piece.text), 0), 0);
       const token = createHash("sha256")
-        .update(["voiced", subject.id, String(subject.version), ...misses.map((index) => cloud[index]!.file)].join("\n"))
+        .update(["voiced", subject.id, String(subject.version), ...misses.flatMap((index) => toMake(index).map((piece) => piece.file))].join("\n"))
         .digest("hex");
-      queuedInputs = misses.map((index) => {
+      queuedInputs = misses.flatMap((index) => {
         const entry = cloud[index]!;
         const voice = speaking[index]!;
-        return {
+        return toMake(index).map((piece): EnqueueInput => ({
           worldId,
-          target: { kind: "voice-preview", id: `${blocks[index]!.subjectId}/${entry.model.provider}/${entry.model.id}/${voice.voiceId}` },
+          target: { kind: "voice-preview", id: `${blocks[index]!.subjectId}/${entry.model.provider}/${entry.model.id}/${voice.voiceId}${entry.pieces.length > 1 ? `/${piece.at + 1}` : ""}` },
           capability: "voice-tts",
           provider: entry.model.provider,
           model: entry.model.id,
           params: {
             voiceId: voice.voiceId,
-            text: blocks[index]!.text,
+            text: piece.text,
             audioFormat: entry.format,
+            ...(voice.clonedVoice !== undefined ? { language: voice.clonedVoice.language } : {}),
             requestId,
             purpose: "prose",
             sheetVersion: subject.version,
             sectionHeading: blocks[index]!.heading,
-            characterCount: blocks[index]!.text.length,
+            characterCount: piece.text.length,
             part: index,
             parts: blocks.length,
+            ...(entry.pieces.length > 1 ? pieceParams(index, piece.at, entry.pieces.length) : {}),
           },
-          estimatedMicroUsd: estimateMicroUsd(entry.model, { characters: blocks[index]!.text.length }),
-          landing: { dir: ".cache/voice-previews", name: entry.file.split("/").pop()! },
+          estimatedMicroUsd: priceOf(index, piece.text),
+          landing: { dir: ".cache/voice-previews", name: piece.file.split("/").pop()! },
           // The marker the dispatcher resolves the recording by, and the engine it was allowed
           // to go to (codex on PR 914): without them every uncached cloned line fails.
           ...(voice.cloned ? { voiceReference: true } : {}),
           ...(voice.cloned && input.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: input.voiceUploadConfirmedFor } : {}),
-        };
+        }));
       });
       // Priced once before anything plays, and asked only when there is a price (R-47): a free
       // voice, and a cached line, say nothing.
@@ -1660,20 +2021,28 @@ export class Coordinator {
       return;
     }
     if (queuedInputs.length === 0) return;
+    this.registerPieces(requestId, queuedInputs, (index) => ({ file: cloud[index]!.file, format: cloud[index]!.format, page: true, characters: blocks[index]!.text.length, ...(have.has(index) ? { have: have.get(index)! } : {}) }));
     const queued = await this.enqueueBatch(requestId, input.frameKind, queuedInputs);
     if (queued.jobIds.length < queuedInputs.length) {
       // One block refused is a page with a hole in it (codex on PR 914): playback would wait on
       // a part no event fills, after the rest was queued and perhaps charged. None of it stands.
+      this.pieceReads.drop(requestId);
       for (const jobId of queued.jobIds) await this.jobQueue?.cancel(jobId).catch(() => {});
       fail(queued.reason ?? "Voice synthesis could not be queued.", characters);
       return;
     }
+    if (this.failedReads.has(requestId)) {
+      for (const jobId of queued.jobIds) await this.jobQueue?.cancel(jobId).catch(() => {});
+      return;
+    }
     if (this.stoppedReads.has(requestId)) {
       this.stoppedReads.delete(requestId);
+      this.pieceReads.drop(requestId);
       for (const jobId of queued.jobIds) await this.jobQueue?.cancel(jobId).catch(() => {});
       return;
     }
     if (queued.jobIds.length > 0) this.readJobs.set(requestId, queued.jobIds);
+    for (const jobId of this.pieceReads.queued(requestId, pieceJobs(queuedInputs, queued.jobIds))) await this.jobQueue?.cancel(jobId).catch(() => {});
   }
 
   private readonly sessionInput: SessionInput;
@@ -1841,13 +2210,18 @@ export class Coordinator {
   private voiceModelsChanged = false;
   private started = false;
   private stopping = false;
+  private engineClosed = false;
   /** Page reads told to stop (codex, PR 879): the narration loop checks between blocks. */
   private readonly stoppedReads = new Set<string>();
   /** Cloud jobs queued for a page read, by requestId, so Stop can cancel what it already paid for. */
   private readonly readJobs = new Map<string, string[]>();
+  /** The blocks of a read being made in pieces (issue 1208): joined, and for a page announced, once every piece has landed. */
+  private readonly pieceReads = new PieceReads();
+  /** Page reads that failed as a whole (codex on PR 1210): what their remaining jobs say afterwards is not news. Bounded; a stop clears its own. */
+  private readonly failedReads = new Set<string>();
   private stopPromise: Promise<void> | null = null;
   /** Request ids whose create-production is still running — redelivery waits, never doubles (#384). */
-  private readonly creatingProductions = new Set<string>();
+  private readonly productionCreation = new ProductionCreationService();
   /** In-flight dispatch-scene-planned requestIds (SPEC-024 R-12): the same redelivery guard. */
   private readonly creatingPlans = new Set<string>();
   private readonly activeMessages = new Set<Promise<void>>();
@@ -1899,6 +2273,7 @@ export class Coordinator {
   /** A conversation card fixes the export identity before the legacy renderer starts. */
   private readonly requestedExportIds = new Map<string, string>();
   /** Route layout and screen guards may ask for the same world before either receives its snapshot. */
+  private openWorldTail: Promise<void> = Promise.resolve();
   private readonly openingWorlds = new Map<string, Promise<void>>();
   /** Cancels the media backfill (issue 283) — optional migration work nothing should wait for. */
   private backfillAbort: AbortController | null = null;
@@ -1917,31 +2292,19 @@ export class Coordinator {
       withLocalGpu(opts.adapter, this.localGpu, () => { void this.refreshLocalResidency(); }),
       (reference, needsImages) => this.validateLanguageModel(reference, needsImages),
     );
-    this.secrets = opts.secretRegistry ?? new SecretRegistry();
+    const storage = opts.storage ?? createStudioStorage(opts);
+    this.secrets = storage.secrets;
     this.readModel = new ReadModel(opts.appVersion);
-    this.changeLog = new ChangeLog(opts.changeLogPath);
-    this.appLog = opts.appRoot
-      ? new AppLog(join(opts.appRoot, "logs", "app.jsonl"), this.secrets, () =>
-          // A landed record can change the fault correlation without any state event carrying
-          // it there (the append is async behind the write queue, so it can land after the
-          // event's own derivation already read the file). Re-read, then re-derive.
-          this.refreshDiagnosticsLogTail(),
-        )
-      : null;
+    this.changeLog = storage.changeLog;
+    this.appLog = storage.appLog;
+    storage.onLogChanged(() => this.refreshDiagnosticsLogTail());
     opts.providerCalls?.setTransportFailureSink((record) => {
       void this.appLog?.append(record);
     });
     opts.provider.onWorldLockError?.((worldId, message, consecutive) => {
       void this.appLog?.append({ kind: "world.lock-heartbeat-failed", worldId, message, consecutive });
     });
-    this.credentials =
-      opts.appRoot && opts.cipher
-        ? new CredentialStore(
-            join(opts.appRoot, opts.credentialsFileName ?? "credentials.dat"),
-            opts.cipher,
-            this.secrets,
-          )
-        : null;
+    this.credentials = storage.credentials;
     this.providerService = new ProviderService(this.credentials, opts.validators ?? {}, this.appLog);
     for (const [id, probe] of Object.entries(opts.toolProbes ?? {})) {
       if (!probe) continue;
@@ -1970,8 +2333,8 @@ export class Coordinator {
       registerSecret: (value) => this.secrets.register(value),
       log: this.appLog,
     });
-    this.ledger = opts.appRoot ? new LedgerFile(join(opts.appRoot, "ledger.jsonl")) : null;
-    this.appSettings = opts.appRoot ? new AppSettingsFile(join(opts.appRoot, "settings.json")) : null;
+    this.ledger = storage.ledger;
+    this.appSettings = storage.appSettings;
     this.jobQueue =
       opts.appRoot && opts.dispatchClients && this.ledger
         ? new JobQueue({
@@ -2055,7 +2418,7 @@ export class Coordinator {
             },
             prepareReferences: async (job, videos, signal) => {
               const model = this.opts.manifest?.models.find(row => row.id === job.model && row.provider === job.provider);
-              if (model?.limits.referenceSyntax !== "minimax-h3" && job.params.referenceMedia === undefined) return { videos, audio: [] };
+              if (model?.limits.referenceSyntax !== "minimax-h3" && model?.limits.referenceSyntax !== "seedance" && job.params.referenceMedia === undefined) return { videos, audio: [] };
               const prepare = (store: WorldStore) => prepareReferences(store, job, model, videos,
                 { ffmpeg: this.opts.ffmpeg, probe: this.opts.mediaProbe }, signal);
               if (this.opts.provider.withWorldStore) return this.opts.provider.withWorldStore(job.worldId, prepare);
@@ -2088,7 +2451,7 @@ export class Coordinator {
               if(!store||store.worldId!==worldId) throw new Error("the owning world is unavailable");
               return read(store);
             },
-            readVoiceReference: async (worldId, provider, model, voiceId) => {
+            readVoiceReference: async (worldId, provider, model, voiceId, signal) => {
               const prepare = async (store: WorldStore) => {
                 const source = voiceSourceFor(store.getBundle().clonedVoices, provider, model, voiceId);
                 if (source.kind !== "cloned") {
@@ -2100,7 +2463,14 @@ export class Coordinator {
                     "That voice's recording is missing or unsafe — re-clone it, or choose another voice.",
                   );
                 }
-                return clip;
+                // A hosted reader (SPEC-046 §2.3, §2.4): refused unless the person confirmed this
+                // vendor for this voice; Breeze reads from the slot the library keeps for it.
+                return prepareHostedClip(store, provider, model, source.voice, clip, {
+                  getKey: async (id) => (this.credentials ? this.credentials.get(id as ProviderId) : null),
+                  ...(this.opts.hostedVoiceSlots !== undefined ? { slots: this.opts.hostedVoiceSlots } : {}),
+                  ...(signal !== undefined ? { signal } : {}),
+                  now: () => this.nowIso(),
+                });
               };
               if (this.opts.provider.withWorldStore) {
                 return this.opts.provider.withWorldStore(worldId, prepare);
@@ -2110,36 +2480,7 @@ export class Coordinator {
               return prepare(store);
             },
             readVideoSource: async (job) => {
-              const prepare = async (store: WorldStore) => {
-                const predecessorId = job.params["continuedFrom"];
-                const production = store
-                  .getBundle()
-                  .productions.find((candidate) => candidate.meta.id === job.productionId);
-                const take = production?.takes.find((candidate) => candidate.id === predecessorId);
-                if (!take) {
-                  throw new Error("the take this shot was continuing is no longer in this production");
-                }
-                // A pass segment is a RANGE into media holding several shots (SPEC-013 R-3), so
-                // sending its backing file would extend whatever sits at that file's end — usually
-                // a different shot, and the result reads as a model failure rather than as the
-                // wrong footage being dispatched. Cut it out first, losslessly (R-50, T-32).
-                const { path } = await materialiseForContinuation(
-                  store,
-                  production!.meta.id,
-                  take,
-                  this.opts.ffmpeg ?? null,
-                  new AbortController().signal,
-                );
-                // Named from the file, not guessed. A data URI IS its declared type as far as the
-                // route is concerned, so labelling a webm as mp4 would not fail as "wrong format"
-                // — it would fail as a corrupt file, which reads as the model's fault.
-                const type = VIDEO_CONTENT_TYPES[extname(path).toLowerCase()];
-                if (type === undefined) {
-                  throw new Error(`${extname(path) || "that file"} is not a video this can send`);
-                }
-                const data = await readFile(toExtendedLength(join(store.dir, fromPortable(path))));
-                return { contentType: type, data };
-              };
+              const prepare = (store: WorldStore) => readContinuationSource(store, job, this.opts.ffmpeg ?? null, new AbortController().signal);
               if (this.opts.provider.withWorldStore) {
                 return this.opts.provider.withWorldStore(job.worldId, prepare);
               }
@@ -2163,6 +2504,23 @@ export class Coordinator {
             // refused with the readiness reason before anything is journalled. `unknown`
             // dispatches (D15) — the floor could not be checked, which is not a refusal.
             admit: async (input) => {
+              const referenceModel = this.opts.manifest?.models.find(row => row.id === input.model && row.provider === input.provider);
+              if (referenceModel?.limits.referenceSyntax === "seedance") {
+                const problem = referenceInputProblem(referenceModel, input.params);
+                if (problem) return { ok: false, reason: problem };
+                if ((Array.isArray(input.params.videoReferences) && input.params.videoReferences.length > 0) ||
+                    (Array.isArray(input.params.referenceMedia) && input.params.referenceMedia.length > 0) || input.params.continuedFrom !== undefined) {
+                  try {
+                    const check = (store: WorldStore) => validateSeedanceReferences(store, input, referenceModel, { probe: this.opts.mediaProbe, ffmpeg: this.opts.ffmpeg });
+                    if (this.opts.provider.withWorldStore) await this.opts.provider.withWorldStore(input.worldId, check);
+                    else {
+                      const store = this.opts.provider.openStore?.();
+                      if (!store || store.worldId !== input.worldId) throw new Error("The owning world is unavailable.");
+                      await check(store);
+                    }
+                  } catch (error) { return { ok: false, reason: error instanceof Error ? error.message : String(error) }; }
+                }
+              }
               if (input.provider !== "comfyui") return { ok: true };
               const service = this.opts.comfyui?.service;
               if (!service) return { ok: false, reason: "local recipes are not configured in this build" };
@@ -2241,15 +2599,32 @@ export class Coordinator {
           sidecar: opts.voice.sidecar,
           localPresets: opts.voice.localPresets,
           cloudSources: opts.voice.cloudSources,
+          ...(opts.voice.hostedReaders !== undefined ? { hostedReaders: opts.voice.hostedReaders } : {}),
+          // A hosted reader whose key the vendor has rejected still lists its candidates, marked
+          // with the probe's reason: an assignment stays visible, and nothing is queued to fail
+          // at dispatch (codex on PR 1153). Untested is not invalid.
+          readerAvailability: (provider) => {
+            const status = this.providerService.list().find((entry) => entry.id === provider);
+            if (status === undefined) return {};
+            if (status.fault !== null) return { unavailableReason: status.fault };
+            if (status.validation !== "invalid") return {};
+            const probe = status.probes.find((entry) => entry.capability === "voice-tts");
+            return { unavailableReason: probe?.reason ?? `${provider} rejected the key — check it on Providers` };
+          },
           getKey: async (provider) =>
             this.credentials ? this.credentials.get(provider as ProviderId) : null,
           emit: (event) => this.emit(event),
         })
       : null;
-    this.transportAuth = opts.transportAuth ?? { token: randomBytes(32).toString("hex"), allowedOrigins: [] };
-    this.secrets.register(this.transportAuth.token);
-    this.transport = new Transport({
-      auth: this.transportAuth,
+    this.serverApplication = {
+      attachTransport: sink => {
+        if (this.transportAttached) throw new Error("The coordinator already belongs to a Studio server.");
+        this.transportAttached = true;
+        this.transport = sink;
+      },
+      registerSecret: token => this.secrets.register(token),
+      start: () => this.startApplication(),
+      stop: connectionsClosed => this.stopApplication(connectionsClosed),
       getSnapshot: () => this.getState(),
       getInitialEvents: () => {
         const replayed: DomainEvent[] = [...this.pendingPermissions].map(([permissionId, permission]) => ({
@@ -2274,13 +2649,35 @@ export class Coordinator {
         for (const run of this.castingVoices.values()) {
           replayed.push({ at: new Date().toISOString(), type: "voices.started", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId });
         }
+        for (const run of this.directingChapters.values()) {
+          replayed.push({ at: new Date().toISOString(), type: "direction.started", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId });
+        }
+        for (const held of this.heldDirections.values()) replayed.push({ ...held, at: new Date().toISOString() });
+        // The counts a run has reached ride on its register (codex on PR 1187), so a window
+        // that rejoins is told how far the book and the chapter are; what a reload must never
+        // hide is that a paid run is going and can be stopped.
+        for (const run of this.readingBooks.values()) {
+          replayed.push({ at: new Date().toISOString(), type: "audiobook.book-started", worldId: run.worldId, productionId: run.productionId, requestId: run.requestId, chapters: run.chapters ?? 0, blocks: run.blocks ?? 0, done: run.done ?? 0, replayed: true });
+        }
+        for (const [key, run] of this.readingAudiobooks) {
+          replayed.push({ at: new Date().toISOString(), type: "audiobook.started", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId, requestId: this.audiobookRequests.get(key) ?? ulid(), toMake: run.toMake ?? 0, blocks: run.blocks ?? 0, made: run.made ?? 0, replayed: true });
+        }
+        // The browser's download controls must survive reload and process restart.
+        const worldId = this.readModel.getState().world?.meta.worldId;
+        for (const record of this.exportReads.values()) {
+          if (record.worldId !== worldId || !record.id.startsWith("ms_") || record.status !== "done" ||
+            !record.productionId || !record.output) continue;
+          replayed.push({ at: new Date().toISOString(), type: "export.progress", worldId: record.worldId,
+            productionId: record.productionId, exportId: record.id, status: "done", percent: 100,
+            output: record.output, error: null });
+        }
         return replayed;
       },
       beforeInitialSnapshot: async () => {
         const store = this.opts.provider.openStore?.();
         if (!store || this.stopping) return;
         await this.durableExportReads(store.worldId);
-        await recoverConversationActions(this.conversationActionLifecycleOptions(store));
+        await this.conversationActions(store).recover();
         if (!this.stillOpen(store)) return;
         // Recovery may find nothing to append while the durable card log is still newer than the
         // process projection (for example, after a crash between binding and broadcast).
@@ -2331,7 +2728,7 @@ export class Coordinator {
         return this.opts.provider.serveMedia(match[1]!, match[2]!);
       },
       log: (line) => void this.appLog?.append({ kind: "transport.dropped", message: line }),
-    });
+    };
     this.worldQuery = new WorldQueryServer(() => this.opts.provider.openStore?.() ?? null);
     this.diagnosticsSnapshot = new DiagnosticsSnapshotHolder({
       sources: () => diagnosticsSources(this.getState().app),
@@ -2519,6 +2916,19 @@ export class Coordinator {
           scratchRoot: opts.appRoot ? `${opts.appRoot}/.ask` : `${opts.changeLogPath}.ask`,
         })
       : null;
+    this.engine = createEngine({
+      worlds: createLocalWorldRepository(opts.provider),
+      operations: storage.operations,
+      policy: createLocalEnginePolicy(),
+      queue: {
+        enqueue: input => {
+          if (!this.jobQueue) throw new Error("The job queue is unavailable. Try again after restarting the studio.");
+          return this.jobQueue.enqueue(this.freezeLocalIdentity(input));
+        },
+        jobs: () => this.jobQueue?.listJobs() ?? [],
+      },
+    });
+
   }
 
   private readonly askService: AskService | null;
@@ -2791,7 +3201,15 @@ export class Coordinator {
     });
   }
 
+  /** Compatibility entry for existing embedders; production shells own an explicit StudioServer. */
   async start(port = 0): Promise<{ port: number; token: string }> {
+    if (this.engineClosed) throw new Error("The coordinator is closed; create a new instance.");
+    this.legacyServer ??= new StudioServer(this.serverApplication, this.opts.transportAuth);
+    return this.legacyServer.start(port);
+  }
+
+  private async startApplication(): Promise<void> {
+    if (this.engineClosed) throw new Error("The coordinator is closed; create a new instance.");
     if (this.started) throw new Error("coordinator already started");
     this.started = true;
 
@@ -2848,7 +3266,6 @@ export class Coordinator {
       this.readModel.setBuilds(this.foundingBuild.states());
     }
 
-    const boundPort = await this.transport.start(port);
     this.readModel.setHealth("coordinator", { status: "healthy" });
 
     // The harness adapter's readiness is reflected once at start; a live adapter's own events
@@ -3070,13 +3487,17 @@ export class Coordinator {
       })();
     }
 
-    return { port: boundPort, token: this.transportAuth.token };
   }
 
   async openWorld(worldId: string): Promise<void> {
     const existing = this.openingWorlds.get(worldId);
     if (existing) return existing;
-    const opening = this.openWorldOnce(worldId);
+    if (this.stopping || this.engineClosed) throw new Error("The coordinator is stopping.");
+    const opening = this.openWorldTail.then(() => {
+      if (this.stopping) throw new Error("The coordinator is stopping.");
+      return this.openWorldOnce(worldId);
+    });
+    this.openWorldTail = opening.catch(() => {});
     this.openingWorlds.set(worldId, opening);
     try {
       await opening;
@@ -3091,7 +3512,7 @@ export class Coordinator {
     // rather than an abandoned one. Held here rather than trusted from the caller — the client
     // does check, but a repair that can destroy live state should not depend on it.
     const wasAlreadyOpen = this.opts.provider.openStore?.()?.worldId === worldId;
-    await this.opts.provider.loadWorld(worldId);
+    const loaded = await this.opts.provider.loadWorld(worldId);
     /*
      * Everything past the load is repair, and repair does not decide whether the world opened
      * (issue 571, Codex round 3).
@@ -3107,11 +3528,14 @@ export class Coordinator {
     await this.repairOnOpen(worldId, "job-finalizations", () =>
       this.jobQueue?.retryFinalizationsForWorld(worldId),
     );
-    const bundle =
-      this.opts.provider.openStore?.()?.getBundle() ?? (await this.opts.provider.loadWorld(worldId));
-    this.readModel.setWorld(bundle);
-    // Before the rows are broadcast, not after: recovery changes what several of them say.
     const store = this.opts.provider.openStore?.();
+    if (store && (store.worldId !== worldId || !this.stillOpen(store))) return;
+    const bundle = store
+      ? (await this.engine.worlds.read(LOCAL_ENGINE_CONTEXT, worldId)).bundle
+      : loaded;
+    if (bundle.meta.worldId !== worldId || (store && !this.stillOpen(store))) return;
+    this.readModel.setWorld(bundle);
+    // Recovery always receives the store that owns this bundle, even across awaited reads.
     if (store) await this.recoverFrameRuns(store, bundle).catch(() => {});
     if (store && !wasAlreadyOpen) {
       await this.repairOnOpen(worldId, "world-chat", () => this.recoverWorldChat(store));
@@ -3124,6 +3548,7 @@ export class Coordinator {
     // (issue 1037): the Library's `Portrait` remembers a failed decode per URL, so a poster drawn
     // a moment after the rows render would sit on disk unseen until the screen was rebuilt.
     if (store && !wasAlreadyOpen) await this.backfillArtifactPosters(store);
+    if (this.stopping || (store && !this.stillOpen(store))) return;
     this.emit({ at: new Date().toISOString(), type: "world.opened", worldId });
     // The bundle itself travels as a fresh snapshot — a world is small enough to re-send (D4).
     this.transport.broadcastSnapshot();
@@ -3294,7 +3719,7 @@ export class Coordinator {
       const gate = this.opts.provider.gate?.();
       const wrapUps = gate ? await recoverWrapUps(store, gate, now) : { repaired: [] };
       await this.durableExportReads(store.worldId);
-      const actions = await recoverConversationActions(this.conversationActionLifecycleOptions(store));
+      const actions = await this.conversationActions(store).recover();
       if (
         outcome.repaired.length > 0 ||
         outcome.inputQueues.length > 0 ||
@@ -3528,8 +3953,8 @@ export class Coordinator {
   }
 
   /** A credential failed mid-session: a provider fault naming the provider, never a work failure (R-4). */
-  reportProviderFault(provider: ProviderId, message: string): void {
-    this.providerService.markFault(provider, message);
+  reportProviderFault(provider: ProviderId, message: string, kind: "credential" | "not-saved" | "not-cleared" = "credential"): void {
+    this.providerService.markFault(provider, message, kind);
     this.emit({
       at: new Date().toISOString(),
       type: "provider.status",
@@ -3547,29 +3972,50 @@ export class Coordinator {
     // was the sandbox, and looking its scope up as a world would scan every world's meta
     // just to throw. The genesis rail reads the job row itself.
     if (!UlidSchema.safeParse(job.worldId).success) return;
+    // An audiobook block's job (turn 146): the run that queued it is waiting, and files the take
+    // itself once it hears; a job that ends before the run waits is held for it.
+    if (job.target.kind === "voice-preview" && job.params["purpose"] === "audiobook") {
+      const waiter = this.audiobookWaiters.get(job.id);
+      if (waiter !== undefined) {
+        this.audiobookWaiters.delete(job.id);
+        waiter(job);
+      } else {
+        this.audiobookTerminal.set(job.id, job);
+      }
+    }
     if (job.status !== "succeeded") {
-      if (job.target.kind === "voice-preview" && typeof job.params["requestId"] === "string") {
+      if (job.target.kind === "voice-preview" && typeof job.params["requestId"] === "string" && !this.failedReads.has(job.params["requestId"])) {
+        const requestId = job.params["requestId"];
+        // A piece of a chunked block (issue 1208): its block can no longer be made whole, so
+        // the block's other pieces are cancelled rather than paid for. A sibling cancelled that
+        // way comes back through here with its block already gone, and is not news twice.
+        const block = pieceOf(job) === null ? undefined : this.pieceReads.failed(job);
+        for (const jobId of block?.cancel ?? []) await this.jobQueue?.cancel(jobId).catch(() => {});
+        const page = block === undefined ? voiceJobPart(job).parts !== undefined : block !== null && block.page;
+        if (page) await this.failPage(requestId);
         const readIdentity = voiceJobReadIdentity(job);
-        this.emit({
-          at: new Date().toISOString(),
-          type: "voice.audio",
-          requestId: job.params["requestId"] as string,
-          worldId: job.worldId,
-          ...readIdentity,
-          sheetVersion: Number(job.params["sheetVersion"]),
-          ...(job.params["sectionHeading"] ? { sectionHeading: String(job.params["sectionHeading"]) } : {}),
-          ...voiceJobPart(job),
-          provider: job.provider as ProviderId,
-          model: job.model,
-          voiceId: String(job.params["voiceId"]),
-          format: voiceJobFormat(job),
-          status: "failed",
-          file: null,
-          cached: false,
-          characterCount: Number(job.params["characterCount"] ?? 0),
-          estimatedMicroUsd: job.estimatedMicroUsd,
-          error: "Voice synthesis failed. Open Activity for details.",
-        });
+        if (block !== null) {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "voice.audio",
+            requestId: job.params["requestId"] as string,
+            worldId: job.worldId,
+            ...readIdentity,
+            sheetVersion: Number(job.params["sheetVersion"]),
+            ...(job.params["sectionHeading"] ? { sectionHeading: String(job.params["sectionHeading"]) } : {}),
+            ...voiceJobPart(job),
+            provider: job.provider as ProviderId,
+            model: job.model,
+            voiceId: String(job.params["voiceId"]),
+            format: voiceJobFormat(job),
+            status: "failed",
+            file: null,
+            cached: false,
+            characterCount: Number(job.params["characterCount"] ?? 0),
+            estimatedMicroUsd: job.estimatedMicroUsd,
+            error: "Voice synthesis failed. Open Activity for details.",
+          });
+        }
       }
       // A bench take's failure reaches its session log, so the strip says so after a restart
       // without waiting for recovery to notice (issue 305 §6).
@@ -3943,26 +4389,63 @@ export class Coordinator {
             error: null,
           });
         }
-        if (typeof job.params["requestId"] === "string") {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "voice.audio",
-            requestId: job.params["requestId"] as string,
-            worldId: job.worldId,
-            ...readIdentity,
-            sheetVersion: Number(job.params["sheetVersion"]),
-            ...(job.params["sectionHeading"] ? { sectionHeading: String(job.params["sectionHeading"]) } : {}),
-            ...voiceJobPart(job),
-            provider: job.provider as ProviderId,
-            model: job.model,
-            voiceId,
-            format: voiceJobFormat(job),
-            status: "ready",
-            file: job.landedFiles[0],
-            cached: false,
-            characterCount: Number(job.params["characterCount"] ?? 0),
-            estimatedMicroUsd: job.estimatedMicroUsd,
-          });
+        if (typeof job.params["requestId"] === "string" && !this.failedReads.has(job.params["requestId"])) {
+          const requestId = job.params["requestId"];
+          const announce = (outcome: { status: "ready"; file: string; characterCount: number; estimatedMicroUsd: number } | { status: "failed"; error: string }, place: { part: boolean } = { part: true }) =>
+            this.emit({
+              at: new Date().toISOString(),
+              type: "voice.audio",
+              requestId,
+              worldId: job.worldId,
+              ...readIdentity,
+              sheetVersion: Number(job.params["sheetVersion"]),
+              ...(job.params["sectionHeading"] ? { sectionHeading: String(job.params["sectionHeading"]) } : {}),
+              ...(place.part ? voiceJobPart(job) : {}),
+              provider: job.provider as ProviderId,
+              model: job.model,
+              voiceId,
+              format: voiceJobFormat(job),
+              cached: false,
+              ...(outcome.status === "ready"
+                ? { status: "ready", file: outcome.file, characterCount: outcome.characterCount, estimatedMicroUsd: outcome.estimatedMicroUsd }
+                : { status: "failed", file: null, characterCount: Number(job.params["characterCount"] ?? 0), estimatedMicroUsd: job.estimatedMicroUsd, error: outcome.error }),
+            });
+          const own = { status: "ready" as const, file: job.landedFiles[0], characterCount: Number(job.params["characterCount"] ?? 0), estimatedMicroUsd: job.estimatedMicroUsd };
+          if (pieceOf(job) === null) {
+            announce(own);
+            return;
+          }
+          /*
+           * A piece of a chunked block (issue 1208). A single block's pieces are its parts and
+           * are announced as they land, so listening starts on the first; the last one joins
+           * them under the whole block's cache file, and the whole follows with no part of its
+           * own (codex on PR 1210) — a screen already sounding the pieces does not start it,
+           * and a replay has the passage rather than whichever piece landed last. A page's
+           * block is announced once, whole, from that file; pieces of it are not parts anybody
+           * could navigate by. A join that fails costs a single block nothing but the cache and
+           * is logged; it costs a page's block its announcement, so that block fails by name
+           * rather than leaving playback waiting.
+           */
+          const settled = await this.pieceReads.landed(job, store);
+          if (settled.kind === "orphan") return;
+          if (settled.kind === "landed") {
+            if (!settled.page) announce(own);
+            return;
+          }
+          const whole = { status: "ready" as const, file: settled.kind === "whole" ? settled.file : "", characterCount: settled.kind === "whole" ? settled.characters : 0, estimatedMicroUsd: settled.kind === "whole" ? settled.estimatedMicroUsd : 0 };
+          if (settled.kind === "whole") {
+            if (settled.page) announce(whole);
+            else {
+              announce(own);
+              announce(whole, { part: false });
+            }
+            return;
+          }
+          void this.appLog?.append({ kind: "voice.read-unjoined", requestId, jobId: job.id });
+          if (settled.page) {
+            await this.failPage(requestId);
+            announce({ status: "failed", error: "Voice synthesis failed. Open Activity for details." });
+          } else announce(own);
         }
       }
     };
@@ -4905,12 +5388,9 @@ export class Coordinator {
         if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
         // Read before accepting: acceptance rewrites the manifest, and the origin is needed to
         // tell the conversation what became of its propositions.
-        const acceptedFrom = await gate.readManifest(msg.proposalId).catch(() => null);
         try {
-          const outcome = await gate.accept(
-            msg.proposalId,
-            msg.confirmRipples === undefined ? {} : { confirmRipples: msg.confirmRipples },
-          );
+          const outcome = (await this.engine.proposals.accept(LOCAL_ENGINE_CONTEXT, msg.worldId,
+            msg.proposalId, { operationId: ulid(), ...(msg.confirmRipples === undefined ? {} : { confirmRipples: msg.confirmRipples }) })).value;
           const at = new Date().toISOString();
           // `no-op` retires the proposal too (gate/proposals.ts): every target already reads as
           // proposed, so there is nothing to decide. It has to settle here for the same reason —
@@ -4919,10 +5399,6 @@ export class Coordinator {
           // accepted because that is what happened to the words: the world says them.
           if (landed(outcome)) {
             this.authoring?.release(msg.proposalId);
-            const store = this.opts.provider.openStore?.();
-            if (store && acceptedFrom) {
-              await recordResolution(store, acceptedFrom, "accepted", () => at);
-            }
             this.emit({
               at,
               type: "proposal.resolved",
@@ -4983,13 +5459,8 @@ export class Coordinator {
         // Discarding mid-run would delete the directory the agent is writing into (issue 239).
         // Cancel is the way to stop a run, and it leaves the proposal to be discarded after.
         if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
-        const discardedFrom = await gate.readManifest(msg.proposalId).catch(() => null);
         try {
-          await gate.discard(msg.proposalId);
-          const store = this.opts.provider.openStore?.();
-          if (store && discardedFrom) {
-            await recordResolution(store, discardedFrom, "discarded", () => new Date().toISOString());
-          }
+          await this.engine.proposals.discard(LOCAL_ENGINE_CONTEXT, msg.worldId, msg.proposalId, { operationId: ulid() });
           this.emit({
             at: new Date().toISOString(),
             type: "proposal.resolved",
@@ -5159,7 +5630,7 @@ export class Coordinator {
           });
           return;
         }
-        const result = await this.conversationActionLifecycle(store).decide(msg);
+        const result = await this.conversationActions(store).decide(msg);
         if (!this.stillOpen(store)) return;
         this.emit({ at: this.nowIso(), type: "conversation-action.decision-result", ...result });
         await this.refreshConversationOutcome(store, msg.conversationId);
@@ -5168,57 +5639,9 @@ export class Coordinator {
       case "world-chat-send": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
-        const service = new WorldChatService(store.dir);
-        const log = new WorldChatStore(conversationDir(store.dir, msg.conversationId));
-        if (!(await log.readMeta())) return;
-        const currentConversation = await service.load(msg.conversationId);
-        const entryContext = currentConversation?.entryContext ?? { kind: "world" as const };
-        const contextExists = entryContext.kind === "attachment"
-          ? currentConversation?.attachments.some((attachment) => attachment.id === entryContext.attachmentId) === true
-          : worldChatContextExists(store.getBundle(), entryContext);
-        if (
-          !currentConversation ||
-          !contextExists ||
-          msg.subject !== undefined &&
-          !worldChatSubjectExists(store.getBundle(), entryContext, msg.subject)
-        ) return;
-
-        /**
-         * A conversation is named by the first thing said in it.
-         *
-         * It is created before anyone knows what it is about, so it starts as "New conversation";
-         * leaving it there would give somebody a list of identical rows. The opening sentence is
-         * what they would have called it anyway, so it goes on the row now — synchronously, before
-         * anything is waited on, so the row is never blank and never the placeholder.
-         *
-         * Then the harness is asked for the name a person would have given the same message, and
-         * that replaces the cut sentence when it arrives (`nameConversation`). Ordered this way
-         * on purpose: the generated title is a promotion on top of something that already works,
-         * so a harness that is down, slow or unhelpful costs nothing at all.
-         */
-        const before = await log.read();
-        const isFirst = !before.events.some((e) => e.event.type === "turn.started");
-        const cutTitle = isFirst ? titleFrom(msg.text) : null;
-        if (cutTitle !== null) {
-          await service.rename(msg.conversationId, cutTitle).catch(() => {});
-        }
-
-        const runner = this.worldChatRunner(store, msg.conversationId);
-        // The screen shows the message and the spinner as soon as the turn starts, so the
-        // snapshot is pushed before the model is waited on rather than after.
-        const inFlight = runner.send(
-          log,
-          msg.conversationId,
-          msg.text,
-          msg.attachmentIds,
-          msg.subject,
-          msg.modelId,
-          msg.replyOnly === true,
-        );
-        // Started after the turn it names, so the person's own turn has first claim on the
-        // harness, and awaited last, so naming a row never delays the reply.
-        const naming =
-          cutTitle === null ? null : this.nameConversation(store, msg.conversationId, msg.text, cutTitle);
+        const started = await this.conversationAuthoring(store).send(msg);
+        if (!started) return;
+        const { completion: inFlight, naming } = started;
         // The title may have just changed, and the screen shows the message immediately.
         await this.refreshConversations(store);
         await this.openWorldChat(store, msg.conversationId);
@@ -5230,17 +5653,14 @@ export class Coordinator {
           await this.refreshConversations(store);
           await this.openWorldChat(store, msg.conversationId);
         }
-        void service;
         return;
       }
       case "world-chat-retry-turn": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
-        const log = new WorldChatStore(conversationDir(store.dir, msg.conversationId));
-        if (!(await log.readMeta())) return;
-
-        const runner = this.worldChatRunner(store, msg.conversationId);
-        const inFlight = runner.retry(log, msg.conversationId, msg.turnId);
+        const started = await this.conversationAuthoring(store).retry(msg.conversationId, msg.turnId);
+        if (!started) return;
+        const inFlight = started.completion;
         // The spinner replaces the failure notice immediately, so pressing it looks like it worked.
         await this.openWorldChat(store, msg.conversationId);
         await inFlight;
@@ -5602,10 +6022,7 @@ export class Coordinator {
       case "world-chat-cancel": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
-        const loaded = await store.ownedWrite(() => new WorldChatService(store.dir).load(msg.conversationId));
-        if (this.worldChatRunner(store, msg.conversationId).cancel(msg.conversationId) && loaded?.entryContext?.kind === "production-setup") {
-          await productionSetups(store).stop(msg.conversationId);
-        }
+        await this.conversationAuthoring(store).cancel(msg.conversationId);
         return;
       }
       case "world-chat-create": {
@@ -6367,7 +6784,8 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!gate || !store) return;
         try {
-          const draft = await createSheetFromSentence(store, gate, {
+          const draft = (await this.engine.proposals.propose(LOCAL_ENGINE_CONTEXT, msg.worldId, {
+            operationId: ulid(),
             sheetType: msg.sheetType,
             name: msg.name,
             sentence: msg.sentence,
@@ -6377,7 +6795,7 @@ export class Coordinator {
               : {
                   attendedSurface: msg.production !== undefined ? "production-cast" : "sheet-list",
                 }),
-          });
+          })).value;
           this.emit({
             at: new Date().toISOString(),
             type: "proposal.staged",
@@ -6661,6 +7079,10 @@ export class Coordinator {
           return;
         }
         result(msg.voice ? "assigned" : "cleared");
+        // A sheet's voice reassigned moves its lines to a new reader under `cast` (SPEC-047
+        // R-13): every story production's standing directions are re-checked against the row
+        // that reads them now, the controls it cannot carry dropped and counted.
+        await this.conformAudiobookDirections(store, msg.worldId, this.storyProductionIds(store));
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -6705,7 +7127,7 @@ export class Coordinator {
             ? "this build has no credential storage, so the key was not saved"
             : "this session has no app root, so there is nowhere to save a key";
           // reportProviderFault logs it too — one line, not two.
-          this.reportProviderFault(msg.provider, reason);
+          this.reportProviderFault(msg.provider, reason, "not-saved");
           return;
         }
         try {
@@ -6729,7 +7151,7 @@ export class Coordinator {
           void this.appLog?.append({ kind: "credential.store-failed", provider: msg.provider, message });
           // The log alone left the same silence on screen: the store threw, the key was not
           // written, and Settings showed exactly what it had shown a moment earlier.
-          this.reportProviderFault(msg.provider, `the key was not saved — ${describeCoordinatorError(err)}`);
+          this.reportProviderFault(msg.provider, `the key was not saved — ${describeCoordinatorError(err)}`, "not-saved");
         }
         return;
       }
@@ -6751,7 +7173,7 @@ export class Coordinator {
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           void this.appLog?.append({ kind: "credential.clear-failed", provider: msg.provider, message });
-          this.reportProviderFault(msg.provider, `the key was not cleared — ${describeCoordinatorError(err)}`);
+          this.reportProviderFault(msg.provider, `the key was not cleared — ${describeCoordinatorError(err)}`, "not-cleared");
         }
         return;
       }
@@ -6985,6 +7407,11 @@ export class Coordinator {
         }
         const saved = await this.appSettings.setNarrator(narrator);
         this.emit({ at: new Date().toISOString(), type: "narrator.changed", voice: saved.narrator });
+        // The narrator reads every block that is not a cast voice's (SPEC-047 R-11): a new one
+        // is a new reader for all of them, and their standing directions are re-checked against
+        // its row as they are on a reading switch (R-13; codex on PR 1187).
+        const store = this.opts.provider.openStore?.();
+        if (store && (await this.conformAudiobookDirections(store, store.worldId, this.storyProductionIds(store)))) this.refreshIfStillOpen(store);
         return;
       }
       case "set-appearance-theme": {
@@ -7172,11 +7599,14 @@ export class Coordinator {
         this.emit({ ...base, status: "testing", detail: "Testing Voxa voice synthesis", audioBase64: null });
         try {
           const sidecar = this.opts.voice?.sidecar;
-          if (!sidecar) throw new Error("Voxa is unavailable");
+          if (!sidecar || !this.voiceService) throw new Error("Voxa is unavailable");
           const voices = await sidecar.listVoices();
           const voice = voices[0];
           if (!voice) throw new Error("Voxa returned no compatible voices");
-          const audio = await sidecar.synthesize({
+          // Through the voice service's lane, not straight to the engine (codex on PR 1183): a
+          // test pressed while a read or a run is synthesising would otherwise be the second
+          // request at once that leaves the engine unavailable for the rest of the process.
+          const audio = await this.voiceService.synthesizeOnce({
             voiceId: voice.id,
             text: "The harbour remembers.",
           });
@@ -7215,53 +7645,23 @@ export class Coordinator {
             ...result,
           });
         };
-        // The frame names a medium or the legacy format (SPEC-023 R-1); one that names neither
-        // is malformed — refused with its correlated answer, never dropped into a dialog that
-        // waits forever.
-        if (msg.medium === undefined && msg.format === undefined) {
-          answer({ disposition: "failed", reason: "the request names neither a medium nor a format" });
-          return;
-        }
-        if (requestId) {
-          // Redelivery of a request that is still running: its result will broadcast once.
-          // Marked BEFORE any await — frames are handled concurrently, and a check-then-add
-          // across the change-log read let two deliveries of one requestId both create.
-          if (this.creatingProductions.has(requestId)) return;
-          this.creatingProductions.add(requestId);
-          // Redelivery of a request whose commit already landed: same slug, no second
-          // production, no title-2 (#384). The whole change log is consulted, not the
-          // bundle's windowed tail, so the answer survives restart and later work.
-          const prior = await productionCreatedBy(store.dir, requestId).catch(() => null);
-          if (prior) {
-            this.creatingProductions.delete(requestId);
-            answer({ disposition: "created", slug: prior });
-            return;
-          }
-        }
-        try {
-          const slug = await createProduction(store, {
-            title: msg.title,
-            ...(msg.format !== undefined ? { format: msg.format } : {}),
-            ...(msg.medium !== undefined ? { medium: msg.medium } : {}),
-            ...(msg.productionKind !== undefined ? { productionKind: msg.productionKind } : {}),
-            ...(msg.seriesTitle !== undefined ? { seriesTitle: msg.seriesTitle } : {}),
-            ...(msg.aspect !== undefined ? { aspect: msg.aspect } : {}),
-            ...(msg.frameRate !== undefined ? { frameRate: msg.frameRate } : {}),
-            ...(msg.defaults !== undefined ? { defaults: msg.defaults } : {}),
-            ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
-            ...(requestId !== undefined ? { requestId } : {}),
-          });
-          await this.refreshWorldSnapshot(msg.worldId);
-          // Acknowledged only after the commit is durable and the snapshot carries it.
-          answer({ disposition: "created", slug });
-        } catch (err) {
+        const result = await this.productionCreation.create(store, {
+          title: msg.title,
+          ...(msg.format !== undefined ? { format: msg.format } : {}),
+          ...(msg.medium !== undefined ? { medium: msg.medium } : {}),
+          ...(msg.productionKind !== undefined ? { productionKind: msg.productionKind } : {}),
+          ...(msg.seriesTitle !== undefined ? { seriesTitle: msg.seriesTitle } : {}),
+          ...(msg.aspect !== undefined ? { aspect: msg.aspect } : {}),
+          ...(msg.frameRate !== undefined ? { frameRate: msg.frameRate } : {}),
+          ...(msg.defaults !== undefined ? { defaults: msg.defaults } : {}),
+          ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
+          ...(requestId !== undefined ? { requestId } : {}),
+        }, () => this.refreshWorldSnapshot(msg.worldId));
+        if (result.status === "created") answer({ disposition: "created", slug: result.slug });
+        else if (result.status === "invalid") answer({ disposition: "failed", reason: result.reason });
+        else if (result.status === "failed") {
           this.transport.broadcastSnapshot();
-          answer({
-            disposition: "failed",
-            reason: describeCoordinatorError(err),
-          });
-        } finally {
-          if (requestId) this.creatingProductions.delete(requestId);
+          answer({ disposition: "failed", reason: describeCoordinatorError(result.error) });
         }
         return;
       }
@@ -7452,7 +7852,7 @@ export class Coordinator {
         }
         let chapterId: string;
         try {
-          chapterId = await createChapter(store, msg.productionId, { title: msg.title, order: msg.order });
+          chapterId = await new ProseAuthoringService(store).create(msg.productionId, { title: msg.title, order: msg.order });
         } catch (err) {
           answer({ disposition: "failed", reason: describeCoordinatorError(err) });
           return;
@@ -7476,6 +7876,9 @@ export class Coordinator {
                 continuityUnreadable?: true;
                 voices?: ChapterVoices;
                 voicesUnreadable?: true;
+                audiobook?: ChapterAudiobook;
+                audiobookUnreadable?: true;
+                audiobookMissing?: string[];
               }
             | { disposition: "failed"; reason: string },
         ) =>
@@ -7493,21 +7896,7 @@ export class Coordinator {
           return;
         }
         try {
-          const chapter = await openChapter(store, msg.productionId, msg.chapterId);
-          // The lines come with the chapter (turn 129, SPEC-012 R-42); the bundle's summary
-          // carries only the record's stamp and placings.
-          const continuity = await readContinuity(store, msg.productionId, chapter.file);
-          // The cast of lines too (turn 130), for the same reason: the bundle has only its stamp.
-          const voices = await readVoices(store, msg.productionId, chapter.file);
-          answer({
-            disposition: "opened",
-            body: chapter.body,
-            version: chapter.version,
-            hash: chapter.hash,
-            versions: chapter.versions,
-            ...(continuity === "unreadable" ? { continuityUnreadable: true as const } : continuity !== null ? { continuity } : {}),
-            ...(voices === "unreadable" ? { voicesUnreadable: true as const } : voices !== null ? { voices } : {}),
-          });
+          answer({ disposition: "opened", ...await new ProseAuthoringService(store).open(msg.productionId, msg.chapterId) });
         } catch (err) {
           answer({ disposition: "failed", reason: describeCoordinatorError(err) });
         }
@@ -7540,8 +7929,7 @@ export class Coordinator {
         // rule, turn 126's second binding): the refusal is answered by name when the sender
         // asked to hear back, and the refreshed snapshot below says what the record is now.
         try {
-          const saving = saveChapter(
-            store,
+          const saving = new ProseAuthoringService(store).save(
             msg.productionId,
             msg.chapterFile,
             msg.body,
@@ -7561,7 +7949,7 @@ export class Coordinator {
       case "restore-chapter-retired": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
-        await setChapterRetired(store, msg.productionId, msg.chapterFile, msg.kind === "retire-chapter");
+        await new ProseAuthoringService(store).retire(msg.productionId, msg.chapterFile, msg.kind === "retire-chapter");
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -7570,14 +7958,14 @@ export class Coordinator {
         // save, world-checked like every other chapter write, and the snapshot says what landed.
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
-        await editChapterPlan(store, msg.productionId, msg.chapterFile, msg.changes).catch(() => {});
+        await new ProseAuthoringService(store).editPlan(msg.productionId, msg.chapterFile, msg.changes).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "restore-chapter": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
-        await restoreChapter(store, msg.productionId, msg.chapterFile, msg.version).catch(() => {});
+        await new ProseAuthoringService(store).restore(msg.productionId, msg.chapterFile, msg.version).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -10075,18 +10463,25 @@ export class Coordinator {
         const hasClonedVoice = plan.inputs.some(
           (input) => input.provider === "comfyui" && input.voiceReference === true,
         );
-        if (
-          hasClonedVoice &&
-          this.requireVoiceUploadConfirmation({
-            worldId: msg.worldId,
-            requestId: msg.requestId,
-            command: msg.kind,
-            ...(msg.voiceUploadConfirmedFor !== undefined
-              ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
-              : {}),
-          })
-        )
-          return;
+        // Every cloned read on the bench asks about its destination — the engine for the recipe,
+        // the vendor for a hosted reader (SPEC-046 R-16) — before anything is priced or queued.
+        for (const planned of plan.inputs) {
+          if (planned.voiceReference !== true) continue;
+          const voiceId = typeof planned.params["voiceId"] === "string" ? planned.params["voiceId"] : "";
+          const source = voiceSourceFor(store.getBundle().clonedVoices, planned.provider, planned.model, voiceId);
+          if (
+            await this.requireVoiceUploadConfirmation({
+              worldId: msg.worldId,
+              requestId: msg.requestId,
+              command: msg.kind,
+              ...(msg.voiceUploadConfirmedFor !== undefined
+                ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
+                : {}),
+              ...(source.kind === "cloned" ? { reader: { store, provider: planned.provider, voice: source.voice } } : {}),
+            })
+          )
+            return;
+        }
         if (hasClonedVoice) {
           const availability = await this.comfyUiVoiceAvailability();
           if (availability.unavailableReason !== undefined) {
@@ -10730,6 +11125,7 @@ export class Coordinator {
           name: msg.name,
           description: msg.description,
           consent: msg.consent,
+          ...(msg.language !== undefined ? { language: msg.language } : {}),
           ...(msg.sheetId !== undefined ? { sheetId: msg.sheetId } : {}),
         });
         this.emit({
@@ -10745,6 +11141,90 @@ export class Coordinator {
         await this.dropStagedClip(msg.clipId);
         // The library is in the bundle, so the picker sees the new voice on the next snapshot.
         if (made.ok) this.refreshIfStillOpen(store);
+        return;
+      }
+      case "delete-voice": {
+        // A cloned voice leaves the world (SPEC-046 R-15, issue 1162): the library's part first,
+        // then every copy a hosted reader kept, best-effort and one line each. Refused while a
+        // sheet still names it — the assignment is the person's to change, on the sheet, not a
+        // side effect of a delete pressed on the catalogue.
+        const store = this.opts.provider.openStore?.();
+        const answer = (
+          status: "deleted" | "refused",
+          rest: { reason?: string; copies?: Array<{ provider: string; removed: boolean; reason?: string }> } = {},
+        ) =>
+          this.emit({
+            at: this.nowIso(),
+            type: "voice.deleted",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            voiceId: msg.voiceId,
+            status,
+            ...(rest.reason !== undefined ? { reason: rest.reason } : {}),
+            copies: rest.copies ?? [],
+          });
+        if (!store || store.worldId !== msg.worldId || store.isClosed()) {
+          answer("refused", { reason: "That world is no longer open." });
+          return;
+        }
+        const bundle = store.getBundle();
+        const voice = bundle.clonedVoices.find((entry) => entry.id === msg.voiceId);
+        if (!voice) {
+          answer("refused", { reason: "That cloned voice is no longer in this world." });
+          return;
+        }
+        // Through any reader: a sheet assigned the voice on Breeze names the same recording.
+        const readers = bundle.sheets.filter((sheet) => {
+          if (sheet.retired || !sheet.voice) return false;
+          const model = sheet.voice.model ?? legacyVoiceModel(sheet.voice.provider, sheet.voice.voiceId, bundle.clonedVoices);
+          const source = model === null ? null : voiceSourceFor(bundle.clonedVoices, sheet.voice.provider, model, sheet.voice.voiceId);
+          return source?.kind === "cloned" && source.voice.id === voice.id;
+        });
+        if (readers.length > 0) {
+          const names = readers.map((sheet) => sheet.name);
+          const list = names.length === 1 ? names[0]! : `${names.slice(0, -1).join(", ")} and ${names.at(-1)!}`;
+          answer("refused", {
+            reason: `${list} still ${names.length === 1 ? "reads" : "read"} with this voice — clear it on the sheet${names.length === 1 ? "" : "s"} first.`,
+          });
+          return;
+        }
+        const removed = await deleteVoice(store, msg.voiceId, { requestId: msg.requestId });
+        if (!removed.ok) {
+          answer("refused", { reason: removed.reason });
+          return;
+        }
+        // The copies, after the record is gone and from the entry it was: the ids on it are the
+        // only handle on them. A vendor that will not give one up, or a key no longer in
+        // Settings, is said on the event and logged — never a block on a delete that has
+        // already happened here.
+        const copies: Array<{ provider: string; removed: boolean; reason?: string }> = [];
+        for (const [provider, held] of Object.entries(removed.voice.remote ?? {})) {
+          if (!hostedReaderKeepsSlot(provider)) continue;
+          const ids = new Set([held.voiceId, ...(held.stale ?? [])].filter((id): id is string => typeof id === "string"));
+          const pending = held.pending ?? [];
+          if (ids.size === 0 && pending.length === 0) continue;
+          const label = hostedReaderDestination(provider)?.label ?? provider;
+          const key = this.credentials ? await this.credentials.get(provider as ProviderId) : null;
+          const slots = this.opts.hostedVoiceSlots;
+          if (key === null || slots === undefined) {
+            copies.push({ provider, removed: false, reason: `${label} has no key in Settings — the copy stays on the account until removed there.` });
+            continue;
+          }
+          try {
+            // A save whose answer never came back may have made a slot under its title.
+            for (const title of pending) {
+              const found = await slots.find(provider, key, title);
+              if (found !== null) ids.add(found);
+            }
+            for (const id of ids) await slots.remove(provider, key, id);
+            copies.push({ provider, removed: true });
+          } catch (error) {
+            copies.push({ provider, removed: false, reason: describeCoordinatorError(error) });
+          }
+        }
+        void this.appLog?.append({ kind: "voice.deleted", worldId: msg.worldId, voiceId: msg.voiceId, copies });
+        answer("deleted", { copies });
+        this.refreshIfStillOpen(store);
         return;
       }
       case "file-artifact": {
@@ -11252,6 +11732,10 @@ export class Coordinator {
             return;
           }
           const cast = await castLines(store, msg.productionId, chapter.id, deriver, control.signal);
+          // A cast made current gives its lines their voices (SPEC-047 R-12): the chapter's
+          // standing directions, left alone while the cast was not current, are re-checked
+          // against the readers that speak them now (R-13; codex on PR 1187).
+          await this.conformAudiobookDirections(store, msg.worldId, [msg.productionId]);
           this.refreshIfStillOpen(store);
           finished("cast", { lines: cast.lines, dropped: cast.dropped, omitted: cast.omitted }, { record: cast.record });
         } catch (err) {
@@ -11265,6 +11749,363 @@ export class Coordinator {
           store.closingSignal.removeEventListener("abort", onClose);
           this.castingVoices.delete(key);
         }
+        return;
+      }
+      case "stop-audiobook": {
+        const store = this.opts.provider.openStore?.();
+        const chapter = store?.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        this.readingAudiobooks.get(`${msg.worldId}/${msg.productionId}/${chapter?.file ?? msg.chapterFile}`)?.control.abort();
+        return;
+      }
+      case "set-audiobook-block": {
+        // One block's direction, set or cleared by hand (turn 146, SPEC-047 R-6, R-9): held to
+        // the block's words and its reader's row before it is written, refused in one clause
+        // otherwise, and the record answered to every window as a run's finished one is.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id };
+        const at = () => new Date().toISOString();
+        try {
+          const { narrator, catalogue } = await this.audiobookNarrator(store, this.voiceService);
+          const { chapter: opened, blocks, planned } = await directableBlocks(store, msg.productionId, chapter.id, { narrator, models: this.opts.manifest?.models ?? [], catalogue });
+          const block = blocks.find((candidate) => candidate.key === msg.block);
+          if (block === undefined) {
+            this.emit({ at: at(), type: "audiobook.record", ...ids, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}), refused: "that block is no longer in the chapter" });
+            return;
+          }
+          let direction: AudiobookDirection | null = null;
+          if (msg.direction !== null) {
+            const plan = directionPlan(block.text, msg.direction);
+            const check = checkDirection(block.text, plan, block.model, block.language);
+            if (!check.ok) {
+              this.emit({ at: at(), type: "audiobook.record", ...ids, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}), refused: check.reason });
+              return;
+            }
+            direction = { textHash: audiobookTextHash(block.text), plan, at: store.now() };
+          }
+          const record = await writeBlockDirection(store, msg.productionId, opened, planned.map((p) => p.block), msg.block, direction);
+          this.refreshIfStillOpen(store);
+          this.emit({ at: at(), type: "audiobook.record", ...ids, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}), record });
+        } catch (err) {
+          void this.appLog?.append({ kind: "audiobook.direction-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+          this.emit({ at: at(), type: "audiobook.record", ...ids, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}), refused: describeCoordinatorError(err) });
+        }
+        return;
+      }
+      case "direct-chapter": {
+        // `Direct this chapter` (turn 146, SPEC-047 R-10): the cast's derivation turned on
+        // performance — one run per chapter at a time, ended with the world, every control
+        // verified against the block's reader — and its result a card the window holds until
+        // it is accepted whole or discarded. Nothing is written here.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const key = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
+        if (this.directingChapters.has(key)) return;
+        const control = new AbortController();
+        this.directingChapters.set(key, { control, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id });
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id };
+        const at = () => new Date().toISOString();
+        const finished = (
+          outcome: "directed" | "stopped" | "unavailable" | "failed",
+          counts: { directed: number; dropped: number },
+          extra: { reason?: string; summary?: string; proposed?: Record<string, AudiobookDirectionInput>; hash?: string; chapterVersion?: number } = {},
+        ) => {
+          const event: Extract<DomainEvent, { type: "direction.finished" }> = { at: at(), type: "direction.finished", ...ids, outcome, ...counts, ...extra };
+          if (outcome === "directed") this.heldDirections.set(key, event);
+          this.emit(event);
+        };
+        this.heldDirections.delete(key);
+        this.emit({ at: at(), type: "direction.started", ...ids });
+        const none = { directed: 0, dropped: 0 };
+        try {
+          let deriver = this.opts.directionDeriver ?? null;
+          if (!deriver && this.opts.adapter?.readiness().ready && this.opts.authoring) {
+            deriver = makeAdapterDirectionDeriver(
+              this.opts.adapter,
+              this.sessionInput,
+              this.opts.appRoot ? join(this.opts.appRoot, ".extract") : `${this.opts.changeLogPath}.extract`,
+            );
+          }
+          if (!deriver) {
+            void this.appLog?.append({ kind: "direction.unavailable", chapter: chapter.file, reason: "directing needs the authoring harness running" });
+            finished("unavailable", none, { reason: "the writing service is not running" });
+            return;
+          }
+          const { narrator, catalogue } = await this.audiobookNarrator(store, this.voiceService);
+          const result = await directChapter(store, msg.productionId, chapter.id, deriver, { narrator, models: this.opts.manifest?.models ?? [], catalogue }, control.signal);
+          finished("directed", { directed: result.directed, dropped: result.dropped }, {
+            proposed: result.proposed,
+            hash: result.hash,
+            chapterVersion: result.chapterVersion,
+            ...(result.summary !== undefined ? { summary: result.summary } : {}),
+          });
+        } catch (err) {
+          if (control.signal.aborted) {
+            finished("stopped", none);
+            return;
+          }
+          void this.appLog?.append({ kind: "direction.failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+          finished("failed", none, { reason: describeCoordinatorError(err) });
+        } finally {
+          store.closingSignal.removeEventListener("abort", onClose);
+          this.directingChapters.delete(key);
+        }
+        return;
+      }
+      case "discard-direction": {
+        const store = this.opts.provider.openStore?.();
+        const chapter = store?.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        this.heldDirections.delete(`${msg.worldId}/${msg.productionId}/${chapter?.file ?? msg.chapterFile}`);
+        return;
+      }
+      case "accept-direction": {
+        // The card accepted whole (turn 146, SPEC-047 R-10): every direction checked once more
+        // against the chapter as it stands, the record written and nothing else.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id };
+        const at = () => new Date().toISOString();
+        try {
+          const { narrator, catalogue } = await this.audiobookNarrator(store, this.voiceService);
+          const accepted = await acceptDirections(store, msg.productionId, chapter.id, { hash: msg.hash, directions: msg.directions }, { narrator, models: this.opts.manifest?.models ?? [], catalogue });
+          if (accepted.outcome === "refused") {
+            this.emit({ at: at(), type: "audiobook.record", ...ids, requestId: msg.requestId, refused: accepted.reason });
+            return;
+          }
+          this.heldDirections.delete(`${msg.worldId}/${msg.productionId}/${chapter.file}`);
+          this.refreshIfStillOpen(store);
+          this.emit({ at: at(), type: "audiobook.record", ...ids, requestId: msg.requestId, record: accepted.record, dropped: accepted.dropped });
+        } catch (err) {
+          void this.appLog?.append({ kind: "audiobook.direction-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+          this.emit({ at: at(), type: "audiobook.record", ...ids, requestId: msg.requestId, refused: describeCoordinatorError(err) });
+        }
+        return;
+      }
+      case "set-audiobook-reading": {
+        // The book's reading (turn 146, SPEC-047 R-11): one choice for the whole book, kept
+        // beside the chapters' records and read by every run; every take stands, and the blocks
+        // whose reader it changes read as stale from the record alone.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
+        // The reading holds while the book or a chapter of it is being read (codex on PR
+        // 1187): switched under a run, every take the run files from then on would be stale
+        // under the new reading — the paid ones too — so the seg is held in the window and
+        // the switch refused here, whichever window asks.
+        const reading = this.readingBooks.has(`${msg.worldId}/${msg.productionId}`) || [...this.readingAudiobooks.values()].some((run) => run.worldId === msg.worldId && run.productionId === msg.productionId);
+        if (reading) {
+          void this.appLog?.append({ kind: "audiobook.reading-refused", production: msg.productionId, message: "the book is being read" });
+          return;
+        }
+        try {
+          await writeAudiobookBook(store, msg.productionId, { schemaVersion: 1, reading: msg.reading });
+          // The reading switched moves blocks between the narrator and the cast's voices (R-13):
+          // every standing direction is re-checked against its new reader's row, the controls
+          // that row cannot carry dropped and counted, so a direction accepted for one voice is
+          // not carried to another to be flagged on every retry.
+          await this.conformAudiobookDirections(store, msg.worldId, [msg.productionId]);
+          this.refreshIfStillOpen(store);
+        } catch (err) {
+          void this.appLog?.append({ kind: "audiobook.reading-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+      case "read-audiobook-chapter": {
+        // The audiobook (turn 146, SPEC-047 R-16..R-18): a chapter read into kept takes — one
+        // run per chapter at a time, keyed by world as continuity's and the cast's runs are,
+        // ended with the world that began it, and every ending short of read leaving the takes
+        // made so far standing. The run itself lives in productions/audiobook-run.ts; this is
+        // the harness around it: the narrator, the catalogue, the queue and the events.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const key = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
+        if (this.readingAudiobooks.has(key)) return;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id };
+        const at = () => new Date().toISOString();
+        // While the book is being read the production is its (SPEC-047 R-16): a chapter read
+        // pressed meanwhile would run beside it, and the book reaching that chapter would find
+        // it taken; refused here instead, in a word (codex on PR 1187).
+        if (this.readingBooks.has(`${msg.worldId}/${msg.productionId}`)) {
+          this.emit({ at: at(), type: "audiobook.finished", ...ids, outcome: "refused", made: 0, flagged: 0, reason: "the book is being read" });
+          return;
+        }
+        // A composition without voice answers rather than falling silent (codex on PR 1180):
+        // the press is offered wherever the view is, and `unavailable` is a run's outcome.
+        const voice = this.voiceService;
+        if (!voice) {
+          this.emit({ at: at(), type: "audiobook.finished", ...ids, outcome: "unavailable", made: 0, flagged: 0, reason: "voice is not available in this build" });
+          return;
+        }
+        const control = new AbortController();
+        const requestId = ulid();
+        this.readingAudiobooks.set(key, { control, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id });
+        this.audiobookRequests.set(key, requestId);
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        let ended = false;
+        try {
+          const room = await this.audiobookNarrator(store, voice);
+          await this.readAudiobookChapter(store, voice, room, ids, requestId, msg.kind, control.signal, {
+            ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
+            ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
+            ...(msg.blocks !== undefined ? { only: msg.blocks } : {}),
+          });
+          ended = true;
+        } catch (err) {
+          const stopped = control.signal.aborted;
+          void this.appLog?.append({ kind: "audiobook.failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+          this.emit({ at: at(), type: "audiobook.finished", ...ids, outcome: stopped ? "stopped" : "failed", made: 0, flagged: 0, ...(stopped ? {} : { reason: describeCoordinatorError(err) }) });
+        } finally {
+          store.closingSignal.removeEventListener("abort", onClose);
+          this.readingAudiobooks.delete(key);
+          this.audiobookRequests.delete(key);
+        }
+        // The refresh replays every run still on the register as started (turn 129), and this
+        // one has ended — or is waiting on its price — so it is struck off first; refreshed
+        // before, the replay told every window a run with no counts was going, and nothing
+        // followed to say otherwise (the door's live check on slice 3).
+        if (ended) this.refreshIfStillOpen(store);
+        return;
+      }
+      case "open-audiobook": {
+        // The door (turn 146, SPEC-047 R-29): every chapter prepared as its press would prepare
+        // it — the counts, who reads, the price — answered to the window that asked.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
+        try {
+          const room = await this.audiobookNarrator(store, this.voiceService);
+          const door = await audiobookDoor(store, msg.productionId, { ...room, models: this.opts.manifest?.models ?? [] }, () => store.now());
+          this.emit({ at: new Date().toISOString(), type: "audiobook.door", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, door });
+        } catch (err) {
+          void this.appLog?.append({ kind: "audiobook.door-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
+          this.emit({ at: new Date().toISOString(), type: "audiobook.door", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, door: null, refused: describeCoordinatorError(err) });
+        }
+        return;
+      }
+      case "read-audiobook-book": {
+        // `Read the book` (turn 146, SPEC-047 R-16..R-18): every chapter with prose, in order,
+        // priced once, a chapter at a time on the book's answer — one run per production, keyed
+        // by world, ended with the world, the chapters' own runs under its signal.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
+        const key = `${msg.worldId}/${msg.productionId}`;
+        if (this.readingBooks.has(key)) return;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId };
+        const at = () => new Date().toISOString();
+        const voice = this.voiceService;
+        if (!voice) {
+          this.emit({ at: at(), type: "audiobook.book-finished", ...ids, outcome: "unavailable", chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0, reason: "voice is not available in this build" });
+          return;
+        }
+        const control = new AbortController();
+        const requestId = ulid();
+        this.readingBooks.set(key, { control, worldId: msg.worldId, productionId: msg.productionId, requestId });
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        let ended = false;
+        try {
+          const room = { ...(await this.audiobookNarrator(store, voice)), models: this.opts.manifest?.models ?? [] };
+          await runAudiobookBook({
+            store,
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            room,
+            signal: control.signal,
+            ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
+            requireUploadConfirmation: (reader) =>
+              this.requireVoiceUploadConfirmation({
+                worldId: msg.worldId,
+                requestId,
+                command: msg.kind,
+                ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
+                reader: { store, provider: reader.provider, voice: reader.voice },
+              }),
+            // Each chapter is its own run under the book's signal and request (R-16): its events
+            // say how far it is on the door's row, and it is never priced or asked again.
+            runChapter: async (chapterId, priced) => {
+              const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.id === chapterId);
+              // A chapter gone, or retired, since the book was priced is left to its row as a
+              // refused one is (codex on PR 1187): the door leaves a retired chapter out, and so
+              // does the book when it reaches one, rather than reading — and paying for — what
+              // the door no longer shows.
+              if (!chapter) return { outcome: "refused", made: 0, flagged: 0, reason: "that chapter is no longer in this production" };
+              if (chapter.retired === true) return { outcome: "refused", made: 0, flagged: 0, reason: "retired since the book was priced" };
+              const chapterKey = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
+              // A chapter its own run was reading when the book began is left to that run and
+              // counted, as a refused chapter is; it does not end the book (codex on PR 1187).
+              if (this.readingAudiobooks.has(chapterKey)) return { outcome: "refused", made: 0, flagged: 0, reason: `${chapter.title} is being read already` };
+              this.readingAudiobooks.set(chapterKey, { control, worldId: msg.worldId, productionId: msg.productionId, chapterId });
+              this.audiobookRequests.set(chapterKey, requestId);
+              try {
+                return await this.readAudiobookChapter(store, voice, room, { ...ids, chapterId }, requestId, msg.kind, control.signal, {
+                  priced,
+                  ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
+                });
+              } catch (err) {
+                // A chapter's run that throws past its own events ends here, in a word on its
+                // row, and the book counts it as its ending rather than losing the totals of
+                // the chapters read before it (codex on PR 1187).
+                const stopped = control.signal.aborted;
+                void this.appLog?.append({ kind: "audiobook.failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+                const reason = stopped ? undefined : describeCoordinatorError(err);
+                this.emit({ at: at(), type: "audiobook.finished", ...ids, chapterId, outcome: stopped ? "stopped" : "failed", made: 0, flagged: 0, ...(reason !== undefined ? { reason } : {}) });
+                return { outcome: stopped ? "stopped" : "failed", made: 0, flagged: 0, ...(reason !== undefined ? { reason } : {}) };
+              } finally {
+                this.readingAudiobooks.delete(chapterKey);
+                this.audiobookRequests.delete(chapterKey);
+              }
+            },
+            now: () => store.now(),
+            emit: (event) => {
+              // The counts ride on the register, so a window that rejoins is told how far the
+              // book is rather than `0 of 0` until the next chapter ends (codex on PR 1187).
+              const held = this.readingBooks.get(key);
+              switch (event.type) {
+                case "started":
+                  if (held !== undefined) Object.assign(held, { chapters: event.chapters, blocks: event.blocks, done: 0 });
+                  this.emit({ at: at(), type: "audiobook.book-started", ...ids, requestId, chapters: event.chapters, blocks: event.blocks });
+                  return;
+                case "priced":
+                  this.emit({ at: at(), type: "audiobook.book-priced", ...ids, chapters: event.chapters, blocks: event.blocks, cloudBlocks: event.cloudBlocks, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices });
+                  return;
+                case "progress":
+                  if (held !== undefined) held.done = event.done;
+                  this.emit({ at: at(), type: "audiobook.book-progress", ...ids, chapterId: event.chapterId, done: event.done, chapters: event.chapters });
+                  return;
+                case "finished":
+                  this.emit({ at: at(), type: "audiobook.book-finished", ...ids, outcome: event.outcome, chaptersRead: event.chaptersRead, chaptersRefused: event.chaptersRefused, made: event.made, flagged: event.flagged, ...(event.reason !== undefined ? { reason: event.reason } : {}) });
+                  return;
+              }
+            },
+          });
+          ended = true;
+        } catch (err) {
+          const stopped = control.signal.aborted;
+          void this.appLog?.append({ kind: "audiobook.book-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
+          this.emit({ at: at(), type: "audiobook.book-finished", ...ids, outcome: stopped ? "stopped" : "failed", chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0, ...(stopped ? {} : { reason: describeCoordinatorError(err) }) });
+        } finally {
+          store.closingSignal.removeEventListener("abort", onClose);
+          this.readingBooks.delete(key);
+        }
+        // Struck off before the refresh, as the chapter's run is: the replay must not say a
+        // book that has ended is still being read.
+        if (ended) this.refreshIfStillOpen(store);
+        return;
+      }
+      case "stop-audiobook-book": {
+        this.readingBooks.get(`${msg.worldId}/${msg.productionId}`)?.control.abort();
         return;
       }
       case "resolve-extraction": {
@@ -11418,14 +12259,15 @@ export class Coordinator {
         const source = voiceSourceFor(bundle.clonedVoices, voice.provider, model.id, voice.voiceId);
         if (
           source.kind === "cloned" &&
-          this.requireVoiceUploadConfirmation({
+          (await this.requireVoiceUploadConfirmation({
             worldId: msg.worldId,
             requestId: msg.requestId,
             command: msg.kind,
             ...(msg.voiceUploadConfirmedFor !== undefined
               ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
               : {}),
-          })
+            reader: { store, provider: voice.provider, voice: source.voice },
+          }))
         )
           return;
         if (model.provider === "comfyui") {
@@ -11476,10 +12318,12 @@ export class Coordinator {
             shotId: msg.shotId,
             sheet,
             text: shot.audio.line,
+            ...(msg.delivery !== undefined ? { delivery: msg.delivery as Delivery } : {}),
             deliveryParams,
             deliveryNotice,
             model,
-            ...(source.kind === "cloned" ? { voiceReference: true } : {}),
+            // The recording's language is the line's (issue 1163): the reader routes and tags by it.
+            ...(source.kind === "cloned" ? { voiceReference: true, language: source.voice.language } : {}),
             ...(msg.voiceUploadConfirmedFor !== undefined
               ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
               : {}),
@@ -11527,14 +12371,15 @@ export class Coordinator {
         const source = voiceSourceFor(bundle.clonedVoices, msg.provider, msg.model, msg.voiceId);
         if (
           source.kind === "cloned" &&
-          this.requireVoiceUploadConfirmation({
+          (await this.requireVoiceUploadConfirmation({
             worldId: msg.worldId,
             requestId: msg.requestId,
             command: msg.kind,
             ...(msg.voiceUploadConfirmedFor !== undefined
               ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
               : {}),
-          })
+            reader: { store, provider: msg.provider, voice: source.voice },
+          }))
         )
           return;
         const candidate = (
@@ -11681,6 +12526,7 @@ export class Coordinator {
           sheetId: sheet.id,
           sheetVersion: sheet.version,
           characterCount: normalizeSpeechText(line.text).length,
+          ...(source.kind === "cloned" ? { language: source.voice.language } : {}),
         };
         const queued = await this.enqueueBatch(msg.requestId, msg.kind, [request.input]);
         if (!queued.accepted) {
@@ -11748,6 +12594,7 @@ export class Coordinator {
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
           blocks: [{ heading: msg.sectionHeading, text: bibleText }],
+          page: false,
           purpose: "bible-section",
           subject: { id: "bible", version: bible.version },
           fail: failBible,
@@ -11798,6 +12645,7 @@ export class Coordinator {
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
           blocks: [{ heading: resolved.heading, text: resolved.text }],
+          page: false,
           purpose: "prose",
           subject: { id: resolved.subjectId, version: resolved.version },
           fail: (error, characters) => failProse(error, characters, resolved.heading),
@@ -11811,6 +12659,8 @@ export class Coordinator {
         // spend the control exists to prevent (codex, PR 879).
         this.stoppedReads.add(msg.requestId);
         this.pendingVoiceReads.delete(msg.requestId);
+        this.pieceReads.drop(msg.requestId);
+        this.failedReads.delete(msg.requestId);
         const jobs = this.readJobs.get(msg.requestId) ?? [];
         this.readJobs.delete(msg.requestId);
         for (const jobId of jobs) await this.jobQueue?.cancel(jobId).catch(() => {});
@@ -11913,6 +12763,7 @@ export class Coordinator {
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
           blocks,
+          page: true,
           purpose: "prose",
           /*
            * The page is named by its first block and the newest version any of them carries.
@@ -11974,6 +12825,7 @@ export class Coordinator {
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
           blocks: [{ heading: msg.sectionHeading, text: resolved.text }],
+          page: false,
           purpose: "sheet-section",
           subject: { id: sheet.id, version: sheet.version },
           sheetId: sheet.id,
@@ -12039,6 +12891,7 @@ export class Coordinator {
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
           blocks,
+          page: true,
           purpose: "sheet-page",
           subject: { id: sheet.id, version: sheet.version },
           sheetId: sheet.id,
@@ -13125,7 +13978,6 @@ export class Coordinator {
         }
         const bundle = store.getBundle();
         const sheet = bundle.sheets.find((candidate) => candidate.id === msg.sheetId);
-        const kit = (await readKit(store, msg.sheetId))?.kit ?? null;
         const model = imageModelFor(
           this.appSettings ? await this.appSettings.load() : null,
           this.opts.manifest,
@@ -13135,30 +13987,16 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, "The character or image model is no longer available.");
           return;
         }
-        let requests;
         try {
-          const stagedMainPhoto = stagedWorldImage(bundle, stagedReferenceKey("main-photo", msg.sheetId));
-          requests = mainPhotoRequests(bundle.meta, bundle.artDirection, sheet, kit, model, {
-            ...(stagedMainPhoto !== undefined ? { staged: stagedMainPhoto } : {}),
-            prompt: msg.prompt,
-            count: msg.count,
-            identityReferences: msg.identityReferences,
-            generationKey: Date.now().toString(36),
+          const outcome = await this.engine.illustrations.generate(LOCAL_ENGINE_CONTEXT, msg.worldId, {
+            operationId: msg.requestId, sheetId: msg.sheetId, model, prompt: msg.prompt,
+            count: msg.count, identityReferences: msg.identityReferences, generationKey: msg.requestId,
             ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
           });
-        } catch {
-          this.rejectEnqueue(
-            msg.requestId,
-            msg.kind,
-            "This image model could not be priced for the selected output size. Nothing was queued.",
-          );
-          return;
+          this.emitEnqueueResult(msg.requestId, msg.kind, msg.count, outcome.jobIds, outcome.failures);
+        } catch (error) {
+          this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error));
         }
-        await this.enqueueBatch(
-          msg.requestId,
-          msg.kind,
-          requests.map((request) => request.input),
-        );
         return;
       }
       case "generate-location-view": {
@@ -13517,7 +14355,24 @@ export class Coordinator {
               productionId: quote.target.productionId, status: "kept", performance, reason: "New local TTS performance ready for review." });
           } else {
             if (controller.signal.aborted) throw new Error("Performance generation cancelled.");
-            await this.enqueueBatch(msg.requestId, msg.kind, [performanceGenerationJob(store, quote, msg.requestId)]);
+            // A cloned voice through a hosted reader (SPEC-046 R-16, issue 1149): the vendor's
+            // question is asked here, where the enqueue is, as the voice-line asks it; the answer
+            // lands on the entry and the dispatcher's clip read checks it before the recording
+            // leaves. The job carries the clip marker so that read happens at all.
+            const source = voiceSourceFor(store.getBundle().clonedVoices, quote.mapping.provider, quote.mapping.model, quote.voiceAssignment.voiceId);
+            if (source.kind === "missing-clone") throw new Error("That cloned voice is no longer in this world.");
+            if (
+              source.kind === "cloned" &&
+              (await this.requireVoiceUploadConfirmation({
+                worldId: msg.worldId,
+                requestId: msg.requestId,
+                command: msg.kind,
+                ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
+                reader: { store, provider: quote.mapping.provider, voice: source.voice },
+              }))
+            )
+              return;
+            await this.enqueueBatch(msg.requestId, msg.kind, [performanceGenerationJob(store, quote, msg.requestId, { voiceReference: source.kind === "cloned" })]);
           }
         } catch { this.rejectEnqueue(msg.requestId, msg.kind, "Performance generation did not complete. Check the quote, current line and voice, engine readiness and cancellation. Existing and paid outputs are retained."); }
         finally { this.performanceGenerations.delete(operationKey); }
@@ -15240,20 +16095,9 @@ export class Coordinator {
     };
   }
 
-  /**
-   * The runner for the open world, built once and kept (#70 §8).
-   *
-   * Kept rather than rebuilt per command because it holds the in-flight runs: a runner made
-   * fresh for a cancel would have no record of the turn it was asked to stop.
-   */
-  private conversationActionAdapters(
-    store: WorldStore,
-    archivedAt?: (path: string) => void,
-  ): readonly ConversationActionAuthorityAdapter[] {
-    const supplied = this.opts.conversationActionAdapters ?? [];
-    const suppliedKinds = new Set(supplied.map((adapter) => adapter.actionKind));
-    const archive = this.opts.provider.archiveWorld?.bind(this.opts.provider);
-    const deps: WorldChatActionAdapterDeps = {
+  /** Platform callbacks stay in the host; the application service composes their authority. */
+  private conversationActionDependencies(store: WorldStore): WorldChatActionAdapterDeps {
+    return {
       activePlans: (productionId) => this.activeScenePlans(store, productionId),
       ...(this.opts.pickFiles ? { pickFiles: this.opts.pickFiles } : {}),
       ...(this.opts.pickFolder ? { pickFolder: this.opts.pickFolder } : {}),
@@ -15273,26 +16117,6 @@ export class Coordinator {
         this.useReferenceCandidateForConversationAction(store, change, mutation),
       discardReferenceImage: (target, mutation) =>
         this.discardReferenceImageForConversationAction(store, target, mutation),
-      ...(archive
-        ? {
-            archiveWorld: async () => {
-              const name = store.getBundle().meta.name;
-              const { folder } = await archive(store.worldId);
-              archivedAt?.(folder);
-              this.readModel.setWorld(null);
-              this.readModel.setWorlds(await this.opts.provider.listWorlds());
-              this.emit({
-                at: this.nowIso(),
-                type: "world.archived",
-                worldId: store.worldId,
-                name,
-                folder: basename(folder),
-              });
-              this.transport.broadcastSnapshot();
-              return { id: store.worldId };
-            },
-          }
-        : {}),
       ...(this.opts.appRoot
         ? {
             exportWorld: async (actionId) => {
@@ -15346,11 +16170,6 @@ export class Coordinator {
         return true;
       },
     };
-    return [
-      ...worldChatActionAdapters(store, this.opts.provider.gate?.() ?? null, () => this.nowIso(), deps)
-        .filter((adapter) => !suppliedKinds.has(adapter.actionKind)),
-      ...supplied,
-    ];
   }
 
   private async startProductionExportForConversationAction(
@@ -15424,21 +16243,39 @@ export class Coordinator {
     return active;
   }
 
-  private conversationActionLifecycleOptions(store: WorldStore): ConversationActionLifecycleOptions {
-    let worldPath = store.dir;
-    return {
-      worldPath: () => worldPath,
-      worldId: store.worldId,
-      adapters: this.conversationActionAdapters(store, (path) => {
-        worldPath = path;
-      }),
+  private conversationActions(store: WorldStore): ConversationActionService {
+    const archive = this.opts.provider.archiveWorld?.bind(this.opts.provider);
+    return new ConversationActionService(store, {
+      gate: this.opts.provider.gate?.() ?? null,
+      actions: this.conversationActionDependencies(store),
+      supplied: this.opts.conversationActionAdapters,
       now: () => this.nowIso(),
       isWorldOpen: () => !this.stopping && this.stillOpen(store),
-    };
+      ...(archive ? {
+        archiveWorld: async () => {
+          const { folder } = await archive(store.worldId);
+          return { id: store.worldId, folder };
+        },
+        archived: async ({ folder }: { folder: string }) => {
+          this.readModel.setWorld(null);
+          this.readModel.setWorlds(await this.opts.provider.listWorlds());
+          this.emit({ at: this.nowIso(), type: "world.archived", worldId: store.worldId,
+            name: store.getBundle().meta.name, folder: basename(folder) });
+          this.transport.broadcastSnapshot();
+        },
+      } : {}),
+    });
   }
 
   private conversationActionLifecycle(store: WorldStore): ConversationActionLifecycle {
-    return new ConversationActionLifecycle(this.conversationActionLifecycleOptions(store));
+    return this.conversationActions(store).lifecycle;
+  }
+
+  private conversationAuthoring(store: WorldStore): ConversationAuthoringService {
+    return new ConversationAuthoringService(store, {
+      runner: (id) => this.worldChatRunner(store, id),
+      name: (id, text, title) => this.nameConversation(store, id, text, title),
+    });
   }
 
   private worldChatRunner(store: WorldStore, conversationId: ConversationId): WorldChatRunner {
@@ -15459,295 +16296,30 @@ export class Coordinator {
     const existing = this.worldChatRunners.runnerFor(store.worldId, store, conversationId);
     if (existing) return existing;
 
-    const leases = new QueryLeaseRegistry(() => this.opts.provider.openStore?.()?.worldId ?? null);
-    const attachments = new WorldChatAttachmentStore(store.dir);
-    const receipts = new Map<string, WorldChatCheckReceipt[]>();
-    /** Which token each run is reading under, so releasing it stops resolving at the server too. */
-    const tokenByRun = new Map<string, string>();
-    const retrieval = new WorldChatRetrieval({
-      leases,
-      // The same window the prompt is budgeted from: a run that may be handed a whole library
-      // should be able to page back through it as well.
-      textBudgetChars: () =>
-        Math.max(MAX_TEXT_PER_RUN_CHARS, budgetFor(this.opts.adapter?.knownInputTokenLimit?.() ?? undefined)),
-      getBundle: () => this.opts.provider.openStore?.()?.getBundle() ?? null,
-      getIndex: () => this.opts.provider.openStore?.()?.getIndex() ?? null,
-      getPlans: (productionId) => listPlans(store, productionId),
-      getJobs: () => this.jobQueue?.listJobs() ?? [],
-      getExports: () => this.durableExportReads(store.worldId),
-      getChapterBody: async (productionId, chapterFile) => {
-        try {
-          const raw = await readFile(
-            toExtendedLength(join(store.dir, "productions", productionId, "chapters", `${chapterFile}.md`)),
-            "utf8",
-          );
-          return MarkdownFile.parse(raw).body;
-        } catch {
-          return null;
-        }
-      },
-      // The record beside a chapter (turn 129), for get_chapter: the bundle has only its stamp.
-      getChapterContinuity: async (productionId, chapterFile) => {
-        const record = await readContinuity(store, productionId, chapterFile);
-        return record === "unreadable" ? null : record;
-      },
-      getChapterVoices: async (productionId, chapterFile) => {
-        const record = await readVoices(store, productionId, chapterFile);
-        return record === "unreadable" ? null : record;
-      },
-      attachments,
-      findAttachment: async (lease, id) => {
-        const loaded = await new WorldChatService(store.dir).load(lease.conversationId);
-        return loaded?.attachments.find((a) => a.id === id) ?? null;
-      },
-      // Off unless the person turned it on. Read at call time, not at construction, so switching
-      // it off takes effect on the next tool call rather than the next restart.
-      /*
-       * Asked at the moment the tool runs, not mirrored from somewhere else (driven 2026-08-22).
-       *
-       * This used to read a field that was only ever assigned inside `skillForPurpose` — a method
-       * the World Chat path never calls — so the answer was `false` for the whole life of the
-       * process no matter what the settings said. Turning research on and asking again changed
-       * nothing, and the refusal named a setting that was already on.
-       */
+    const runner = new WorldChatRunner(conversationRunDependencies(store, {
+      adapter: this.opts.adapter ?? null,
+      sessionInput: this.sessionInput,
+      scratchRoot: this.opts.appRoot ?? tmpdir(),
+      summaryDir: this.opts.appRoot ? join(this.opts.appRoot, ".summary") : `${this.opts.changeLogPath}.summary`,
+      activeStore: () => this.opts.provider.openStore?.() ?? null,
+      query: this.worldQuery,
+      actions: this.conversationActionLifecycle(store),
+      jobs: () => this.jobQueue?.listJobs() ?? [],
+      exports: () => this.durableExportReads(store.worldId),
+      actionExports: () => [...this.exportReads.values()].filter((entry) => entry.worldId === store.worldId),
       researchAllowed: async () => {
         const settings = this.appSettings ? await this.appSettings.load().catch(() => null) : null;
         return settings?.research.web === true;
       },
-    });
-
-    const actionLifecycle = this.conversationActionLifecycle(store);
-    const summarise = this.opts.adapter?.readiness().ready
-      ? makeConversationSummariser(
-          this.opts.adapter,
-          this.sessionInput,
-          this.opts.appRoot ? join(this.opts.appRoot, ".summary") : `${this.opts.changeLogPath}.summary`,
-        )
-      : undefined;
-    const runner = new WorldChatRunner({
-      closingSignal: store.closingSignal,
-      adapter: this.opts.adapter ?? null,
-      /*
-       * A look can only be rewritten by something that can read it — see currentLookContext.
-       *
-       * From this runner's own world, not from whichever store happens to be open: a turn can
-       * still be reading when somebody opens another world, and the provider's selection would
-       * have followed them. That would put world B's look, verbatim, in world A's prompt — one
-       * world's content shown while talking about another, and an invitation to rewrite A's look
-       * into B's words.
-       */
-      worldContext: () => currentLookContext(store.getBundle().artDirection),
-      // A turn held to a passage or to a reply fences this runner's own world first (codex on
-      // PR 903), for the same reason as the look above: never whichever world is open now.
-      raiseSchemaBoundary: (version) => store.raiseSchemaBoundary(version, "world-chat-constraints"),
-      // Read at the same instant as the look above, and from the same world, so what a draft
-      // says it was based on is what the model was actually shown — the words as well as the
-      // number, because a derived look is v1 however often the world's tone is edited under it.
-      artDirectionLook: () => {
-        const look = store.getBundle().artDirection;
-        return { version: look.version, description: look.description };
-      },
-      /*
-       * Straight off the disk, and from this runner's own world for the same reason as above.
-       *
-       * Not from the bundle: `bible.md` is the one authored file the app expects to be edited
-       * outside it, and the Studio's own edits land mid-conversation. The bundle is refreshed by
-       * a rescan, and a turn assembled between an edit and that rescan would show the model a
-       * bible one version behind the one it is about to be checked against — which fails the
-       * write it was meant to enable.
-       */
-      bible: async () => {
-        const current = await readBible(store.dir);
-        return { version: current.version, text: current.text };
-      },
-      validateBibleEdits: async ({ edits, baseVersion }) => {
-        const current = await readBible(store.dir);
-        if (current.version !== baseVersion) throw new BibleStaleError(baseVersion, current.version);
-        applyBibleEdits(current.text, edits);
-      },
-      validateEditorRequests: async ({ conversationId, entryContext, requests }) => {
-        await stageEditorRequests(store, { conversationId, entryContext, requests, now: store.now(), dryRun: true });
-      },
-      sceneVersion: (context) => sceneVersionFor(store, context),
-      validateSceneEdits: ({ entryContext, edits, baseVersion }) =>
-        applySceneEdits(store, { entryContext, edits, baseVersion, dryRun: true }),
-      prepareActions: (turn) => prepareWorldChatActions(store, actionLifecycle, turn, {
-        getExports: () => [...this.exportReads.values()].filter((entry) => entry.worldId === store.worldId),
-      }),
-      bindActions: async (actions) => {
-        // Every binding appends to the same conversation, and proposal staging is also guarded per
-        // conversation. Run them in turn; any failed intent remains durable for startup recovery.
-        for (const action of actions) {
-          await actionLifecycle.bindIntent(action.intent, action.payload).catch(() => {});
-        }
-      },
-      ...(summarise ? { summarise } : {}),
-      prepare: async ({ conversationId, runId, attachmentIds }) => {
-        const lease = leases.mint({
-          worldId: store.worldId,
-          conversationId,
-          runId,
-          allowedAttachmentIds: attachmentIds,
-        });
-        /*
-         * Started, not merely asked for.
-         *
-         * `leasedUrl` answers null until the server is up, and this was the only authoring flow
-         * that never started it — so whether World Chat could look anything up depended on
-         * whether some other flow had happened to start it first. Open a world and go straight to
-         * a conversation and the agent had no arke-world tools at all: it could not find the sheet
-         * behind a name, so it could not target an edit at one, and it said so rather than
-         * guessing an id. Every other caller starts the server before taking a URL from it.
-         */
-        await this.worldQuery.start().catch(() => {
-          /* a turn without retrieval is worse than one with it, and better than no turn at all */
-        });
-        /*
-         * The run's reads, reachable (#70 §8.2).
-         *
-         * Registering the lease with the server is what makes the URL below answer anything: it
-         * routes `/mcp/<token>` to this conversation's retrieval and records every receipt against
-         * the run that earned it. Without it the address was live and every request 404'd.
-         */
-        this.worldQuery.attachLease(lease.token, {
-          retrieval,
-          onReceipt: (receipt) => {
-            const seen = receipts.get(receipt.runId) ?? [];
-            receipts.set(receipt.runId, [...seen, receipt]);
-          },
-        });
-        tokenByRun.set(runId, lease.token);
-        // Without a configured app root — a dev or test coordinator — the OS temp directory
-        // still satisfies what §8.2 actually requires: somewhere outside the world.
-        const cwd = await createRunScratch({ appRoot: this.opts.appRoot ?? tmpdir(), conversationId, runId });
-        return { cwd, leaseToken: lease.token };
-      },
-      release: async ({ conversationId, runId }) => {
-        const token = tokenByRun.get(runId);
-        if (token) {
-          this.worldQuery.detachLease(token);
-          tokenByRun.delete(runId);
-        }
-        leases.revokeRun(runId);
-        retrieval.forgetRun(runId);
-        receipts.delete(runId);
-        await removeRunScratch(this.opts.appRoot ?? tmpdir(), conversationId, runId);
-      },
-      chapterBrief: ({ leaseToken, productionId, chapterId, budgetChars }) => chapterDraftingBrief(
-        store.getBundle(), productionId, chapterId, async (tool, args) => {
-          const outcome = await retrieval.call(leaseToken, tool, args);
-          const seen = receipts.get(outcome.receipt.runId) ?? [];
-          receipts.set(outcome.receipt.runId, [...seen, outcome.receipt]);
-          return outcome;
-        }, budgetChars,
-      ),
-      setupBrief: ({ leaseToken, draft, budgetChars }) => productionSetupBrief(
-        store.getBundle(), draft, async (tool, args) => {
-          const outcome = await retrieval.call(leaseToken, tool, args);
-          const seen = receipts.get(outcome.receipt.runId) ?? [];
-          receipts.set(outcome.receipt.runId, [...seen, outcome.receipt]);
-          return outcome;
-        }, budgetChars,
-      ),
-      receiptsFor: (runId) => receipts.get(runId) ?? [],
       resolveLanguageModel: (input) => this.languageModelFor(input.entryContext, input.modelId),
-      createSession: ({ cwd, runId, model }) => {
-        const token = tokenByRun.get(runId);
-        const url = token ? (this.worldQuery.leasedUrl(token) ?? undefined) : undefined;
-        return createPreparedSession(
-          this.opts.adapter!,
-          cwd,
-          this.sessionInput({
-            ...(url ? { worldQueryUrl: url } : {}),
-            ...(model !== undefined ? { model } : {}),
-          }),
-          { purpose: "world-chat", agent: "world-builder" },
-        );
-      },
-      runCheckPlan: async ({ draft, leaseToken }) => {
-        const plan = planFor(draft);
-        const produced: WorldChatCheckReceipt[] = [];
-        /*
-         * A call that failed is a check that could not run, not a check nobody asked for.
-         *
-         * Swallowing the error dropped its receipt, so the category stayed merely *missing* — and
-         * missing reads as `partial`, which readiness refuses. The receipt the error carries makes
-         * it `unavailable` instead, which deliberately does not block: a broken index is shown to
-         * the person and left to their judgement rather than turned into a broken app (§9.4).
-         */
-        const run = async (tool: string, args: Record<string, unknown>) => {
-          try {
-            produced.push((await retrieval.call(leaseToken, tool, args)).receipt);
-          } catch (err) {
-            const receipt = (err as { receipt?: WorldChatCheckReceipt }).receipt;
-            if (receipt) produced.push(receipt);
-          }
-        };
-
-        for (const [category, query] of Object.entries(plan.queries)) {
-          await run(category === "sheet-search" ? "search_sheets" : "search_canon", { query });
-        }
-        for (const target of plan.targets) {
-          // Only the world's own entities have a tool to read them. The production records a
-          // subject may now name (turn 95's fix) have no `get_entry`/`get_sheet` equivalent, so
-          // they are skipped exactly as `world` is rather than reaching a nonexistent call.
-          if (target.kind !== "canon" && target.kind !== "sheet") continue;
-          const id = target.kind === "canon" ? target.entryId : target.sheetId;
-          await run(target.kind === "canon" ? "get_entry" : "get_sheet", { id });
-          /*
-           * What else touches this entity, when the plan says the answer depends on it.
-           *
-           * `related-read` is required by `relationship.change` and satisfied by exactly one tool,
-           * which nothing here ever called — so every relationship a conversation described stayed
-           * `partial` for ever and could not be written. The classification existed, was proposed,
-           * reached the rail, and refused with "there is not enough behind it to write it down".
-           */
-          if (plan.required.includes("related-read")) await run("related", { id });
-        }
-        // This runner's own world, for the same reason worldContext reads from it: the provider's
-        // selection follows whatever the person opened while the turn was still running.
-        return { receipts: produced, canonRevision: store.getBundle().meta.canonRevision };
-      },
-      describeEntry: (context) => describeEntryContext(context, store.getBundle()),
       onTurnFailed: ({ conversationId, runId, cause }) => {
-        void this.appLog?.append({
-          level: "warn",
-          event: "world-chat.turn-failed",
-          conversationId,
-          runId,
-          cause,
-        });
-        // The same marking the authoring wiring does (SPEC-030 R-13): the recovery screen the
-        // failure message points at must already say which connection needs sign-in.
+        void this.appLog?.append({ level: "warn", event: "world-chat.turn-failed", conversationId, runId, cause });
         if (isAuthShapedFailure(cause)) void this.vendorAuth.noteAuthFailure().catch(() => {});
       },
       onProgress: (conversationId, label) => {
-        this.emit({
-          at: new Date().toISOString(),
-          type: "world-chat.progress",
-          conversationId,
-          label,
-        });
+        this.emit({ at: new Date().toISOString(), type: "world-chat.progress", conversationId, label });
       },
-      evidenceSources: (messages) => ({
-        messages,
-        bundle: store.getBundle(),
-        // The runner supplies these from the fold: it knows which attachments this run was
-        // given, and reading every attachment a conversation ever had would be both wasteful
-        // and wrong.
-        attachments: [],
-        attachmentText: new Map(),
-      }),
-      readAttachmentText: async (attachment) => {
-        // Whole. What reaches the model is the prompt budget's decision, taken against the
-        // window with every other section in view — not a per-document cut made before it.
-        return attachments.readWholeText(attachment).catch(() => null);
-      },
-      // Whatever this run pulled through get_attachment_text, so a passage the model paged to is
-      // quotable even though the prompt only ever inlined the document's opening.
-      attachmentReadsFor: (runId) => retrieval.textReadBy(runId),
-      now: () => new Date().toISOString(),
-    });
+    }));
 
     this.worldChatRunners.remember(store.worldId, store, runner);
     return runner;
@@ -16046,6 +16618,11 @@ export class Coordinator {
   }
 
   async stop(): Promise<void> {
+    if (this.legacyServer) return this.legacyServer.stop();
+    return this.stopApplication(Promise.resolve());
+  }
+
+  private async stopApplication(connectionsClosed: Promise<void>): Promise<void> {
     this.stageConstructor.cancel();
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
@@ -16057,7 +16634,6 @@ export class Coordinator {
     // but none can reserve work and receive an id from a queue shutdown has stopped accepting.
     this.jobQueue?.stopAccepting();
     this.stopPromise = (async () => {
-      const transportStopped = this.transport.stop();
       const setupStopped = this.setup?.dispose();
       for (const dispose of this.lifecycleDisposers) dispose();
       this.lifecycleDisposers.clear();
@@ -16072,14 +16648,18 @@ export class Coordinator {
       // than waiting on every pass (codex on PR 907), and the last record stands.
       for (const run of this.derivingContinuity.values()) run.control.abort();
       for (const run of this.castingVoices.values()) run.control.abort();
+      for (const run of this.directingChapters.values()) run.control.abort();
+      for (const run of this.readingBooks.values()) run.control.abort();
+      for (const run of this.readingAudiobooks.values()) run.control.abort();
       for (const handle of this.exports.values()) handle.cancel();
       // Nothing awaits the backfill, but it should stop trying: its next write would be refused
       // by the store anyway once the world begins closing.
       this.backfillAbort?.abort();
       // The door is already closing, so once it has stopped there can be no additions to this
       // set. Update-install handlers are deliberately excluded: one may be awaiting this stop.
-      await transportStopped;
+      await connectionsClosed;
       await Promise.allSettled(this.activeMessages);
+      await this.openWorldTail;
       await setupStopped;
       await Promise.all([...this.stagedClips.keys()].map((clipId) => this.dropStagedClip(clipId)));
 
@@ -16097,6 +16677,8 @@ export class Coordinator {
       await this.opts.adapter?.dispose?.().catch(() => {});
       await this.worldQuery.stop();
       // Provider close is the critical gate: it saves pending state and releases the world lock.
+      this.engineClosed = true;
+      await this.engine.close();
       await this.opts.provider.close?.();
       await this.opts.providerCalls?.drain();
       await this.ledger?.drain();
@@ -16110,7 +16692,7 @@ export class Coordinator {
       await this.stopPromise;
     } catch (error) {
       this.stopPromise = null;
-      this.stopping = false;
+      this.stopping = this.engineClosed;
       throw error;
     }
   }

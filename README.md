@@ -81,8 +81,9 @@ what it checked and what it would ripple into (*"14 reference images predate thi
 scene 4's brief re-renders its cast block; 3 productions pick it up on their next
 dispatch"*), and then waits.
 
-**Nothing enters the authored record without an accept.** Jobs, reviews and generated takes
-exist as operational records; the gate controls authored facts and what the work cites.
+**AI-authored changes wait for acceptance.** Jobs, reviews and generated takes exist as
+operational records; the gate controls what proposed work becomes committed. Authors can
+also save their own chapter edits directly.
 
 ## From script to screen
 
@@ -178,6 +179,36 @@ only easy path.
 
 ## How this is built
 
+Arke separates the reusable engine, the Studio application and the host that runs it.
+The same Studio server can run inside Electron or as a standalone Node process, with the
+React frontend connecting through authenticated WebSocket and media endpoints.
+
+```mermaid
+flowchart TD
+  Desktop[Electron desktop host] --> Server[StudioServer]
+  Node[Standalone Node host] --> Server
+  Client[React desktop or browser frontend] <-->|Authenticated WebSocket and media| Server
+  Server --> App[Studio application routing and services]
+  App --> Engine[Reusable engine services]
+  App --> Files[Local world folders and journals]
+  Product[Other Node product hosts] --> Engine
+```
+
+The **engine** exposes a supported Node API for world reads, proposals, portrait generation
+and prose authoring, including AI drafting, revision and committed-manuscript output.
+It does not start a server. A product host supplies its permissions, persistence and generation
+integrations. See [engine services and host contracts](docs/development/engine.md).
+
+The **Studio application** adds Studio's workflows and command routing. Responsibilities are
+being extracted into focused services; the Coordinator still orchestrates features that have
+not moved yet. **StudioServer** owns transport authentication, listening and connection
+shutdown. Desktop supplies native integrations; the standalone Node host supplies local
+filesystem persistence. Both use the same application services and lifecycle.
+
+This makes the engine reusable by other products without requiring them to call Studio's
+server. The supplied Studio hosts still store worlds in local folders; cloud persistence and
+Aonik integration are separate work.
+
 For a first code-reading session, start with [AGENTS.md](AGENTS.md) and the
 [developer index](docs/development/README.md): package relationships, workflow traces,
 test selection and generated-file ownership.
@@ -204,14 +235,33 @@ operation creates, replaces, appends, moves or removes.
 | | |
 |---|---|
 | `packages/contracts` | Zod schemas and the pure judgements the client and coordinator share |
-| `packages/coordinator` | The world on disk, the accept gate, canon, jobs and dispatch |
-| `packages/client` | The React app |
+| `packages/engine` | Supported embeddable Node API and optional local adapters |
+| `packages/coordinator` | Application services, Studio routing, local persistence, jobs, spend and server host |
+| `packages/client` | The React desktop and browser frontend |
 | `packages/adapter-opencode` | The writing harness |
 | `packages/adapter-claude` | The bring-your-own harness, over the Claude Agent SDK |
-| `packages/providers` | Provider clients, the model manifest and the ledger |
+| `packages/adapter-codex` | The Codex writing harness |
+| `packages/providers` | Provider clients and the model manifest |
 | `packages/voice` | The Voxa sidecar client |
-| `apps/desktop` | The Electron shell that embeds the coordinator |
+| `apps/desktop` | The Electron shell that embeds the Studio host and supplies native integrations |
 | `design-system` | The prototype, the design template and proposal pages |
+
+## Run from source
+
+Install Node 22.12 or newer, then run `npm ci` from the repository root.
+For the desktop app, run `npm start`.
+
+To run Studio without Electron, start the server in one terminal:
+
+```powershell
+npm run server -- --root C:\ArkeData
+```
+
+In a second terminal, run `npm run dev` and open the private **Arke session** link it prints.
+The server uses the supplied local data root; the frontend runs separately. This initial
+host serves one local session over loopback. Provider-key storage needs a host-supplied
+secure cipher, and native tools need their platform adapters. See the
+[standalone server guide](docs/development/standalone-server.md) for configuration and limits.
 
 ## Status
 
@@ -220,6 +270,10 @@ quotations and typed refusals, proposals staged with ripple computation, referen
 travel into every dispatch, real currency shown before spend with running jobs cancellable
 from the Activity panel, a shot page carrying its frame, its camera and its 3D Stage together,
 and a cut that assembles itself from accepted takes.
+
+**The reusable engine and standalone Node host are available from source.** Desktop and browser
+hosts share Studio's application services; the public engine exposes a bounded set of those
+capabilities for other Node products.
 
 **Cloud experience is named but not yet connected.** The launch screen already offers "Arke Studio
 Cloud — access your worlds anywhere. Sync, collaborate, create" but integration with Aonik

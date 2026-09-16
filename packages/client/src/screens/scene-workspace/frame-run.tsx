@@ -572,7 +572,7 @@ function PackingPreview({
               );
             })}
           </div>
-          <p className="fy-swgen__hint">Boards break at the clip limit and wherever continuity breaks. Frames are sliced back onto the shots; the board is kept as the source for retries.</p>
+
         </>
       )}
     </section>

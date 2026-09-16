@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { useEffect, useRef } from "react";
+import { isSettingsPath, rememberSettingsReturn, settingsReturnPath } from "./lib/settings-return.js";
 import { ProductionSetupScreen } from "./screens/production-setup.js";
 import { ProductionNarrativeScreen } from "./screens/production-narrative.js";
 import { ProductionArtifactsScreen } from "./screens/production-artifacts.js";
@@ -10,6 +11,7 @@ import { SettingsProvidersScreen } from "./screens/settings-providers.js";
 import {
   FirstRunScreen,
   StartupScreen,
+  SessionRefusal,
   NewWorldScreen,
   SettingsAboutScreen,
   SettingsAppearanceScreen,
@@ -58,19 +60,14 @@ import {
   WorldOverviewScreen,
 } from "./screens/world.js";
 import { EpisodeChatScreen, EpisodeDetailScreen } from "./screens/development.js";
-import {
-  ChapterTreeScreen,
-  CutScreen,
-  GenerateScreen,
-  ProductionCastScreen,
-  ProductionHomeScreen,
-  ProductionLayout,
-  SceneDetailScreen,
-  ScenesScreen,
-  ProductionChatScreen,
-  StoryScreen,
-  VoiceLineDialogScreen,
-} from "./screens/production.js";
+import { ChapterTreeScreen, SceneDetailScreen, ScenesScreen, StoryScreen } from "./screens/production-story.js";
+import { AudiobookScreen } from "./screens/audiobook.js";
+import { CutScreen } from "./screens/cut.js";
+import { GenerateScreen } from "./screens/production-generate.js";
+import { VoiceLineDialogScreen } from "./screens/production-voice-line.js";
+import { ProductionCastScreen } from "./screens/production-cast.js";
+import { ProductionHomeScreen } from "./screens/production-dashboard.js";
+import { ProductionLayout, ProductionChatScreen } from "./screens/production-shell.js";
 import { ChapterScreen } from "./screens/chapter-workspace.js";
 import { ShotPage } from "./screens/scene-workspace/shot-page.js";
 import { StoryStructureScreen } from "./screens/development.js";
@@ -170,6 +167,57 @@ function RetiredSceneChatRoute() {
   return <Navigate to={retiredSceneChatPath(worldId, prodId, sceneId, searchParams.get("shot"))} replace />;
 }
 
+/**
+ * Settings, as a sheet over the screen it was opened from (design turn 150; SPEC-042 R-5 amended).
+ *
+ * The routes are the page's, unchanged — every link, remedy and bookmark written against
+ * `/settings/<tab>` still lands — but they render in their own tree, against the real address,
+ * while the screen tree below renders the route the gear remembered (SPEC-042 R-6). That is the
+ * one thing the old panel never did: the screen you left stays mounted behind the scrim, and
+ * Escape, the scrim and the close put you back on it without a remount.
+ */
+function SettingsRoutes() {
+  return (
+    <Routes>
+      <Route path="/settings" element={<SettingsLayout />}>
+        <Route index element={<Navigate to="providers" replace />} />
+        <Route path="providers" element={<SettingsProvidersScreen />} />
+        {/* Every model, cloud and local, under the kind it makes (SPEC-042 R-1). Providers
+            keeps the credential; this is where the switch is. */}
+        <Route path="models" element={<SettingsModelsScreen />} />
+        <Route path="sign-in" element={<SettingsSignInScreen />} />
+        <Route path="appearance" element={<SettingsAppearanceScreen />} />
+        <Route path="notifications" element={<SettingsNotificationsScreen />} />
+        <Route path="downloads" element={<SettingsDownloadsScreen />} />
+        {/* Local runtime became two screens, and then those two became one pane of Providers
+            (SPEC-034 R-5). Every address on the way answers, so a link, a bookmark or a
+            remedy written against any of them lands where its content went. */}
+        <Route path="local-runtime" element={<Navigate to="/settings/providers" replace />} />
+        <Route path="local-ai" element={<Navigate to="/settings/providers" replace />} />
+        <Route path="engines" element={<Navigate to="/settings/providers" replace />} />
+        <Route path="harness" element={<SettingsHarnessScreen />} />
+        {/* Settings › Agents folded into Who does what (design 54b); the old address keeps working. */}
+        <Route path="general" element={<SettingsGeneralScreen />} />
+        {/* Cloud AI became General when a default stopped having to be a cloud model
+            (SPEC-034 R-14). The old address answers. */}
+        <Route path="cloud-ai" element={<Navigate to="/settings/general" replace />} />
+        {/* Two addresses that no longer name a screen, and they do not land in the same
+            place: `agents` named the per-agent overrides, and those are on Harness now, so
+            sending it to Cloud AI would land it on the one screen defined by not having
+            them. Each goes where its content went. */}
+        <Route path="agents" element={<Navigate to="/settings/harness" replace />} />
+        <Route path="who-does-what" element={<Navigate to="/settings/general" replace />} />
+        <Route path="sample-world" element={<SettingsSampleWorldScreen />} />
+        <Route path="diagnostics" element={<SettingsDiagnosticsScreen />} />
+        <Route path="about" element={<SettingsAboutScreen />} />
+      </Route>
+      {/* An address under /settings that names no pane — lands on the first pane rather than
+          falling out to the launch screen with the sheet open over nothing. */}
+      <Route path="/settings/*" element={<Navigate to="/settings/providers" replace />} />
+    </Routes>
+  );
+}
+
 export function App() {
   const location = useLocation();
   useThemePreference();
@@ -177,6 +225,14 @@ export function App() {
   useEffect(() => window.arke?.onActivateActivity?.(() => openActivityPanel("inbox")), []);
   // The dock survives navigation (design 25c). It clears on an explicit dismiss or on leaving
   // this world for another — a clip from the world you just closed has nothing to say here.
+  const inSettings = isSettingsPath(location.pathname);
+  // Every way into Settings — the gear, a remedy's button, a chip that opens the narrator's
+  // setting — has the sheet open over the screen the person was on, and returns there: the last
+  // address outside Settings is remembered here, on every change of address, rather than by each
+  // caller remembering to (SPEC-042 R-6; Codex on PR 1214 found three that did not).
+  useEffect(() => {
+    if (!inSettings) rememberSettingsReturn(location.pathname + location.search);
+  }, [inSettings, location.pathname, location.search]);
   const openWorld = /^\/w\/([^/]+)/.exec(location.pathname)?.[1] ?? null;
   const lastWorld = useRef<string | null>(null);
   useEffect(() => {
@@ -190,6 +246,7 @@ export function App() {
           on every screen — not only the ones that happen to draw a titlebar. Invisible, takes
           no clicks, contributes nothing but geometry. */}
       <div className="fy-dragstrip" aria-hidden="true" />
+      <SessionRefusal />
       <QueueToaster />
       <ActivityPanel />
       {/* Right-click any picture, anywhere, and copy it. One listener rather than a control on
@@ -198,8 +255,12 @@ export function App() {
       <PermissionBackstops />
       <PlayerDock />
       <UpdateTransition />
+      {/* While the address is a Settings route, the screen tree renders the route the gear
+          remembered — the world picker where nothing was — and the sheet renders over it. Each
+          tree fails on its own: a screen that throws is replaced by the failure screen behind
+          the sheet, not the sheet with it, so Settings stays reachable from a broken screen. */}
       <RouteErrorBoundary>
-      <Routes>
+      <Routes location={inSettings ? settingsReturnPath() : location}>
         <Route path="/" element={<LaunchScreen />} />
         <Route path="/starting" element={<StartupScreen />} />
         {/* The founding build's watch surface (SPEC-031 §1.8): full-bleed, no world chrome —
@@ -210,38 +271,6 @@ export function App() {
           <Route path="/first-run" element={<FirstRunScreen />} />
           <Route path="/worlds" element={<WorldPickerScreen />} />
           <Route path="/worlds/new" element={<NewWorldScreen />} />
-          <Route path="/settings" element={<SettingsLayout />}>
-            <Route index element={<Navigate to="providers" replace />} />
-            <Route path="providers" element={<SettingsProvidersScreen />} />
-            {/* Every model, cloud and local, under the kind it makes (SPEC-042 R-1). Providers
-                keeps the credential; this is where the switch is. */}
-            <Route path="models" element={<SettingsModelsScreen />} />
-            <Route path="sign-in" element={<SettingsSignInScreen />} />
-            <Route path="appearance" element={<SettingsAppearanceScreen />} />
-            <Route path="notifications" element={<SettingsNotificationsScreen />} />
-            <Route path="downloads" element={<SettingsDownloadsScreen />} />
-            {/* Local runtime became two screens, and then those two became one pane of Providers
-                (SPEC-034 R-5). Every address on the way answers, so a link, a bookmark or a
-                remedy written against any of them lands where its content went. */}
-            <Route path="local-runtime" element={<Navigate to="/settings/providers" replace />} />
-            <Route path="local-ai" element={<Navigate to="/settings/providers" replace />} />
-            <Route path="engines" element={<Navigate to="/settings/providers" replace />} />
-            <Route path="harness" element={<SettingsHarnessScreen />} />
-            {/* Settings › Agents folded into Who does what (design 54b); the old address keeps working. */}
-            <Route path="general" element={<SettingsGeneralScreen />} />
-            {/* Cloud AI became General when a default stopped having to be a cloud model
-                (SPEC-034 R-14). The old address answers. */}
-            <Route path="cloud-ai" element={<Navigate to="/settings/general" replace />} />
-            {/* Two addresses that no longer name a screen, and they do not land in the same
-                place: `agents` named the per-agent overrides, and those are on Harness now, so
-                sending it to Cloud AI would land it on the one screen defined by not having
-                them. Each goes where its content went. */}
-            <Route path="agents" element={<Navigate to="/settings/harness" replace />} />
-            <Route path="who-does-what" element={<Navigate to="/settings/general" replace />} />
-            <Route path="sample-world" element={<SettingsSampleWorldScreen />} />
-            <Route path="diagnostics" element={<SettingsDiagnosticsScreen />} />
-            <Route path="about" element={<SettingsAboutScreen />} />
-          </Route>
           {/* The page is retired (design turn 136); its route lands on Home with the panel open. */}
           <Route path="/activity" element={<ActivityRoute />} />
         </Route>
@@ -306,6 +335,8 @@ export function App() {
           <Route path="story/chapters" element={<ChapterTreeScreen />} />
           {/* The chapter, opened (turn 126): the scene workspace's sibling, under Chapters. */}
           <Route path="story/chapters/:chapterId" element={<ChapterScreen />} />
+          {/* The audiobook's door (turn 146, SPEC-047 R-29): a row a chapter, its state, one priced batch. */}
+          <Route path="story/audiobook" element={<AudiobookScreen />} />
           {/* Arcs, themes, setups and payoffs — off the season, under one rail item
               (turn 99): a season is its episodes. */}
           <Route path="story-structure" element={<StoryStructureScreen />} />
@@ -332,6 +363,11 @@ export function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       </RouteErrorBoundary>
+      {inSettings && (
+        <RouteErrorBoundary>
+          <SettingsRoutes />
+        </RouteErrorBoundary>
+      )}
     </>
   );
 }

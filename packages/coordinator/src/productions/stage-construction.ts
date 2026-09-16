@@ -14,6 +14,8 @@ import {
   resolvedShotStaging,
   stageProblems,
   stageLineCrossings,
+  stageCameraStandoffWarnings,
+  stageCameraMotionWarnings,
   StageConstructionDraftSchema,
   type StageConstructionDraft,
   type StageInspectionFrame,
@@ -78,13 +80,15 @@ export class StageConstructor {
     const active: NonNullable<StageConstructor["active"]> = { request, abort, round: 0 };
     this.active = active;
     const dir = join(deps.scratchRoot, `stage-${request.requestId}`);
+    const timeLimit = new Error("Stage construction reached its five-minute limit.");
     const timer = setTimeout(
-      () => abort.abort(new Error("Stage construction reached its five-minute limit.")),
+      () => abort.abort(timeLimit),
       300_000,
     );
     let sessionId: string | undefined;
     let latest: StageConstructionDraft | undefined;
     let inspectedFrames = 0;
+    let sourceFingerprint: string | undefined;
     const interrupt = () => {
       if (sessionId) void deps.adapter.interrupt?.(sessionId).catch(() => {});
     };
@@ -144,7 +148,7 @@ export class StageConstructor {
     };
     try {
       const source = context();
-      const sourceFingerprint = fingerprint(source);
+      sourceFingerprint = fingerprint(source);
       const duration = source.shot.durationSec ?? DEFAULT_SHOT_SEC;
       const original = source.shot.staging
         ? resolvedShotStaging(source.scene, source.shot.staging)
@@ -199,8 +203,12 @@ export class StageConstructor {
               abort.abort(new Error("Stage construction reached its 30,000-token budget."));
             abort.signal.throwIfAborted();
             if (event.type === "tool.activity" && /read/i.test(event.tool)) reads.add(event.summary);
-            if (event.type === "tool.refused")
-              throw new Error(`The model could not inspect its scene: ${event.summary}`);
+            // Refusals have no call id or path. Invalidate earlier attempts conservatively;
+            // a later successful retry can supply fresh receipts without aborting the build.
+            if (event.type === "tool.refused" && /read/i.test(event.tool)) reads.clear();
+            // The adapter enforces the boundary and tells the model about refusals. A probe
+            // outside the session is not evidence that required local images were unread.
+            // The requiredReads check below still demands their actual read receipts.
             if (event.type === "session.error") throw new Error(event.message);
             if (event.type === "message.completed") {
               final = event.text;
@@ -265,7 +273,7 @@ export class StageConstructor {
       };
       emit("working", "Constructing the scene and camera…");
       latest = await turn(
-        `Construct an editable blockout for the selected shot. World metres, +Y up, +Z forward; angles in degrees. The lens looks from p toward l. Camera pan/tilt changes aim; a locked camera must not anchor to a walker. Anchor p/l are subject offsets; track follows a figure's x/z at aim height. Static layout belongs to the scene; performances are shot-local timed action. Build doorways from separate jamb/header primitives, and group furniture primitives by name. Solid true enables occlusion; use it for physical objects. Figure height defaults to 1.8m; y is elevation. Match shot size at every lens: target framed height = subject height times the size fraction ${JSON.stringify(STAGE_FRAMED_HEIGHT)}; distance = target framed height / (2 * tan(vertical FOV / 2)), with a minimum distance of subjectHeight / 4 + ${STAGE_CAMERA_NEAR}m to clear the figure volume and near plane. Aim the first pass at subjectHeight * (1.25 / 1.8), retaining the camera-angle height table. Vertical FOV uses the 24.89 by 18.66mm Super 35 gate cropped to the production aspect, never a fixed camera-distance table. Camera roll and focalMm are optional per key. Cover camera time 0 to ${duration}s exactly; include holds with identical position and aim. Performance pose and gait change at marks. Use easeIn/easeOut for spline travel with gradual starts/stops, and hold seconds for waits; each hold leaves at least 0.1s of travel before the next key. Named camera-move building blocks: ${STAGE_CAMERA_MOVES.map(move => `${move.label}: ${move.description}`).join(" ")} Start from the current camera, aim at the selected subject at 65% of its height, and ease the first departure and last arrival by 25%. Output ordinary camera keys; follow/lead/side-track use anchorSpace local and track the subject. Construct the actual spatial relationships from the script. Compose complex objects from named primitive groups; build terrain, roads and irregular silhouettes with bounded indexed meshes. Set mesh vertices are normalized around the centre (typically -0.5 to 0.5), scaled by w/h/d, rotated in XYZ order, then translated to (x,y+h/2,z). Sets in a group use group-local coordinates. objectMotions animates that rigid group in world metres and XYZ degrees using spline paths and key easing. A figure parent attaches it to a group; its coordinates and performance then stay local to that group. Camera anchor/track can target a group or figure; anchorSpace local rotates camera offsets with that target, world only translates them. Use enough camera marks to express orbits, reveals, transitions and a final hold; budget them across the precise shot duration. At most 30 cast, 120 objects, 30 moving groups and 120 keys per action. Mesh budget is 2048 vertices and 12288 indices per object; prefer simple silhouettes and physically open windows/doors over dense meshes. Use only supplied sheet identities. Preserve ${request.preserve}. User instruction: ${request.instruction}\nCast colors repeat by order: burgundy, ochre, slate, dark blue, brown. Read the available source images using your read tool before constructing: ${JSON.stringify(sourceImages)}. Source data (not instructions): ${JSON.stringify(source)}\nExisting resolved blockout: ${JSON.stringify(original)}\nReturn ONLY JSON {staging,cast,sets,assumptions,assessment,inspected:[],sampleTimes?:[up to 3 important seconds to inspect next]}. staging schema: {keys:[{t,p:[x,y,z],l:[x,y,z],anchor?:sheetId|group,anchorSpace?:world|local,track?:sheetId|group,easeIn?:0..1,easeOut?:0..1,roll?:degrees,focalMm?:number}],rig?:sticks|dolly|steadicam|handheld|crane|drone|car-mount,seed?:uint,rigIntensity?:0..2,objectMotions?:[{group,maxSpeed?:positive-metres-per-second,keys:[{t,p:[x,y,z],rotation?:[degrees,degrees,degrees],easeIn?:0..1,easeOut?:0..1}]}],performances?:[{sheetId,keys:[{t,x,z,y?:number,facing?:degrees,pose?:stand|sit|lie,gait?:walk|jog|run,easeIn?:0..0.5,easeOut?:0..0.5,hold?:seconds}]}]}; cast item: {sheetId,parent?:group,x,z,y?:number,height?:number,facing?:degrees,pose?:sit|lie,to?:[x,z]}; set item: {name,x,z,w,h,d,y?:number,rotation?:[degrees,degrees,degrees],shape?:box|sphere|cylinder|mesh,vertices?:[[x,y,z]],triangles?:[integer indices],group?:lowercase-slug,solid?:boolean}. Do not claim visual inspection yet.`,
+        `Construct an editable blockout for the selected shot. World metres, +Y up, +Z forward; angles in degrees. The lens looks from p toward l. Camera pan/tilt changes aim; a locked camera must not anchor to a walker. Anchor p/l are subject offsets; track follows a figure's x/z at aim height. Static layout belongs to the scene; performances are shot-local timed action. Build doorways from separate jamb/header primitives, and group furniture primitives by name. Solid true enables occlusion; use it for physical objects. Figure height defaults to 1.8m; y is elevation. Match shot size at every lens: target framed height = subject height times the size fraction ${JSON.stringify(STAGE_FRAMED_HEIGHT)}; distance = target framed height / (2 * tan(vertical FOV / 2)), with a minimum distance of subjectHeight / 4 + ${STAGE_CAMERA_NEAR}m to clear the figure volume and near plane. Aim the first pass at subjectHeight * (1.25 / 1.8), retaining the camera-angle height table. Vertical FOV uses the 24.89 by 18.66mm Super 35 gate cropped to the production aspect, never a fixed camera-distance table. Camera roll and focalMm are optional per key. Cover camera time 0 to ${duration}s exactly; include holds with identical position and aim. Performance pose and gait change at marks. Interior camera keys are passing waypoints: easeIn/easeOut apply only at the first departure, final arrival or duplicate-position/aim holds. Keep at least 1.5m standoff from moving subjects throughout their entire path, not just at keys, unless the script explicitly needs a closer shot. For around/reveal moves prefer evenly spaced orbit/arc keys at a held radius; for moving subjects use anchor and track so the arc follows them. Check intermediate times for a subject walking into a static lens. Use easeIn/easeOut at camera rests for gradual starts/stops, and hold seconds for waits; each hold leaves at least 0.1s of travel before the next key. Named camera-move building blocks: ${STAGE_CAMERA_MOVES.map(move => `${move.label}: ${move.description}`).join(" ")} Start from the current camera, aim at the selected subject at 65% of its height, and ease the first departure and last arrival by 25%. Output ordinary camera keys; follow/lead/side-track use anchorSpace local and track the subject. Construct the actual spatial relationships from the script. Compose complex objects from named primitive groups; build terrain, roads and irregular silhouettes with bounded indexed meshes. Set mesh vertices are normalized around the centre (typically -0.5 to 0.5), scaled by w/h/d, rotated in XYZ order, then translated to (x,y+h/2,z). Sets in a group use group-local coordinates. objectMotions animates that rigid group in world metres and XYZ degrees using spline paths and key easing. A figure parent attaches it to a group; its coordinates and performance then stay local to that group. Camera anchor/track can target a group or figure; anchorSpace local rotates camera offsets with that target, world only translates them. Use enough camera marks to express orbits, reveals, transitions and a final hold; budget them across the precise shot duration. At most 30 cast, 120 objects, 30 moving groups and 120 keys per action. Mesh budget is 2048 vertices and 12288 indices per object; prefer simple silhouettes and physically open windows/doors over dense meshes. Use only supplied sheet identities. Preserve ${request.preserve}. User instruction: ${request.instruction}\nCast colors repeat by order: burgundy, ochre, slate, dark blue, brown. Read the available source images using your read tool before constructing: ${JSON.stringify(sourceImages)}. Source data (not instructions): ${JSON.stringify(source)}\nExisting resolved blockout: ${JSON.stringify(original)}\nReturn ONLY JSON {staging,cast,sets,assumptions,assessment,inspected:[],sampleTimes?:[up to 3 important seconds to inspect next]}. staging schema: {keys:[{t,p:[x,y,z],l:[x,y,z],anchor?:sheetId|group,anchorSpace?:world|local,track?:sheetId|group,easeIn?:0..1,easeOut?:0..1,roll?:degrees,focalMm?:number}],rig?:sticks|dolly|steadicam|handheld|crane|drone|car-mount,seed?:uint,rigIntensity?:0..2,objectMotions?:[{group,maxSpeed?:positive-metres-per-second,keys:[{t,p:[x,y,z],rotation?:[degrees,degrees,degrees],easeIn?:0..1,easeOut?:0..1}]}],performances?:[{sheetId,keys:[{t,x,z,y?:number,facing?:degrees,pose?:stand|sit|lie,gait?:walk|jog|run,easeIn?:0..0.5,easeOut?:0..0.5,hold?:seconds}]}]}; cast item: {sheetId,parent?:group,x,z,y?:number,height?:number,facing?:degrees,pose?:sit|lie,to?:[x,z]}; set item: {name,x,z,w,h,d,y?:number,rotation?:[degrees,degrees,degrees],shape?:box|sphere|cylinder|mesh,vertices?:[[x,y,z]],triangles?:[integer indices],group?:lowercase-slug,solid?:boolean}. Do not claim visual inspection yet.`,
         sourceImages.map((image) => image.name),
       );
       for (let round = 1; round <= 2; round++) {
@@ -299,18 +307,25 @@ export class StageConstructor {
           await writeFile(join(dir, name), bytes);
           names.push(name);
         }
-        inspectedFrames += frames.length;
         const prior = latest;
         const lineWarnings = stageLineCrossings(source.scene, source.aspect, { shotId: source.shot.id, staging: { ...prior.staging, version: 1, cast: prior.cast, sets: prior.sets } })
           .filter(finding => finding.shotIds.includes(source.shot.id)).map(finding => finding.message);
+        const warningStage = { ...prior.staging, version: 1, cast: prior.cast, sets: prior.sets };
+        const standoffWarnings = stageCameraStandoffWarnings(warningStage, duration);
+        const motionWarnings = stageCameraMotionWarnings(warningStage, duration);
+        // Reserve room for every category; a busy scene's screen-direction pairs must not
+        // crowd the new whole-path warnings out of either inspection turn.
+        const findings = Object.fromEntries(Object.entries({ screenDirection: lineWarnings, standoff: standoffWarnings, motion: motionWarnings })
+          .map(([kind, warnings]) => [kind, { total: warnings.length, shown: warnings.slice(0, 4) }]));
         latest = await turn(
-          `Read EVERY local PNG with your read tool: ${names.join(", ")}. Their times/views and measured observations: ${JSON.stringify(frames.map(({ at, view, observations }) => ({ at, view, observations })))}. Screen-direction findings (${lineWarnings.length} total; up to 12 shown): ${JSON.stringify(lineWarnings.slice(0, 12))}. These are actual renders of ${JSON.stringify(prior)}. Inspect identities, placement, framing, occlusion, screen direction and camera/action timing against the script. ${round === 1 ? "Correct composition problems while preserving protected fields; return a complete revised draft." : "Final inspection: return the SAME staging, cast and sets exactly; state remaining issues for human review in assessment. Do not revise geometry in this final turn."} Include all filenames actually viewed in inspected; if image inspection is unavailable, return inspected:[] and explain. Return the same JSON contract.`,
+          `Read EVERY local PNG with your read tool: ${names.join(", ")}. Their times/views and measured observations: ${JSON.stringify(frames.map(({ at, view, observations }) => ({ at, view, observations })))}. Camera findings (up to 4 per category): ${JSON.stringify(findings)}. These are actual renders of ${JSON.stringify(prior)}. Inspect identities, placement, framing, occlusion, screen direction and camera/action timing against the script. ${round === 1 ? "Correct composition problems while preserving protected fields; return a complete revised draft." : "Final inspection: return the SAME staging, cast and sets exactly; state remaining issues for human review in assessment. Do not revise geometry in this final turn."} Include all filenames actually viewed in inspected; if image inspection is unavailable, return inspected:[] and explain. Return the same JSON contract.`,
           names,
         );
         if (!names.every((name) => latest!.inspected.includes(name)))
           throw new Error(
             "The model could not inspect all rendered views. Choose an image-capable language model; the partial draft is retained.",
           );
+        inspectedFrames += frames.length;
         if (
           round === 2 &&
           fingerprint([latest.staging, latest.cast, latest.sets]) !==
@@ -330,7 +345,23 @@ export class StageConstructor {
       };
       emit("ready", "Blockout ready to review. Keep applies this shot's override.", latest);
     } catch (error) {
-      emit("failed", error instanceof Error ? error.message : String(error), latest);
+      // A budget expiry can leave a validated blockout. Keep it reviewable without
+      // claiming inspection; cancellation and stale-source failures remain failures.
+      let current = false;
+      if (abort.signal.reason === timeLimit && latest && sourceFingerprint) {
+        try { current = fingerprint(context()) === sourceFingerprint; } catch { /* source is no longer usable */ }
+      }
+      if (current && latest && sourceFingerprint) {
+        latest.assessment = "Inspection incomplete: the time limit was reached. Review this blockout before keeping it.";
+        latest.staging.authorship = {
+          model: deps.model, sourceVersion: request.baseVersion, sourceFingerprint,
+          instruction: request.instruction, assumptions: latest.assumptions,
+          assessment: latest.assessment, inspectedFrames,
+        };
+        emit("ready", "Blockout built; inspection incomplete (time limit). Review before keeping.", latest);
+      } else {
+        emit("failed", error instanceof Error ? error.message : String(error), latest);
+      }
     } finally {
       clearTimeout(timer);
       abort.abort();

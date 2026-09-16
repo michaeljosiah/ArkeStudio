@@ -124,6 +124,10 @@ export class Transport {
           return;
         }
         if (req.headers.origin !== undefined) res.setHeader("Access-Control-Allow-Origin", req.headers.origin);
+        if (req.method === "HEAD" && url.pathname === "/session") {
+          res.writeHead(204, { "X-Arke-Session": "authenticated", "Cache-Control": "no-store" }).end();
+          return;
+        }
         if (req.method !== "GET" || !req.url || !this.opts.serveFile) {
           res.writeHead(404).end();
           return;
@@ -173,7 +177,8 @@ export class Transport {
     this.wss = wss;
     wss.on("connection", (socket, request) => this.accept(socket, request.headers.origin));
     server.listen(port, host);
-    await once(server, "listening");
+    // ws forwards HTTP bind failures as its own error event; consume that forwarded event too.
+    await once(wss, "listening");
     const address = server.address();
     if (address === null || typeof address === "string") throw new Error("no bound address");
     return address.port;

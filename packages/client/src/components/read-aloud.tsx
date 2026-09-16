@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { DEFAULT_NARRATOR, formatMicroUsd, supportsVoiceUse, type ProseReadSource } from "@arke-studio/contracts";
+import { DEFAULT_NARRATOR, supportsVoiceUse, type ProseReadSource } from "@arke-studio/contracts";
 import { readProse, useStore, useVoiceAudio, useVoiceParts } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
 import { clearQueue, enqueueClip, playClip, type Clip } from "../lib/audio.js";
 import { TextActions } from "./player.js";
-import { Button } from "./ui.js";
+import { ReadAloudConfirmation } from "./read-aloud-confirmation.js";
 
 /**
  * Read-aloud, for every screen that shows prose (issue 857).
@@ -24,6 +24,7 @@ function useProseRead(source: ProseReadSource, title: string) {
   const world = state?.world ?? null;
   const voiceAudio = useVoiceAudio();
   const partsByRequest = useVoiceParts();
+  const [submitted, setSubmitted] = useState<string | null>(null);
   const [request, setRequest] = useState<string | null>(null);
   const result = request === null ? undefined : voiceAudio[request];
   const slug = world?.meta.slug;
@@ -43,9 +44,14 @@ function useProseRead(source: ProseReadSource, title: string) {
    * A long read arrives in pieces, because local synthesis runs at about the speed of speech and
    * holding the first word until the last one exists is a silence as long as the reading. Each
    * piece is queued as it lands and the first starts immediately; a short read still arrives
-   * whole and takes the single-clip path below, unchanged.
+   * whole and takes the single-clip path below, unchanged. Cloud pieces (issue 1208) land in
+   * whatever order the reader finishes them, so the effect follows how many exist rather than
+   * how far the array reaches: a later piece landing first fills the array to its final length,
+   * and the earlier one filling the gap behind it would otherwise change nothing the effect
+   * watches (codex on PR 1210).
    */
   const parts = partsByRequest[request ?? ""] ?? [];
+  const landed = parts.filter((file) => file !== undefined).length;
   const queued = useRef(0);
   useEffect(() => {
     if (request === null || slug === undefined) return;
@@ -55,7 +61,7 @@ function useProseRead(source: ProseReadSource, title: string) {
       void enqueueClip({ id: request, url: mediaUrl(slug, file), title, sub, part: i });
       queued.current = i + 1;
     }
-  }, [request, parts.length, slug, title, sub]);
+  }, [request, landed, slug, title, sub]);
 
   // What was asked for plays the moment it lands, rather than making somebody press twice.
   useEffect(() => {
@@ -85,29 +91,23 @@ function useProseRead(source: ProseReadSource, title: string) {
    * A cloud narrator is billed per character, so the number is stated before it is spent — the
    * same shape the sheet's read uses. The local default never reaches this branch.
    */
-  const note =
-    result?.status === "confirmation-required" ? (
-      <span className="fy-textactions__note">
-        This text will be sent to {result.provider} and kept in Activity.
-        <Button
-          onClick={() =>
-            request !== null &&
-            result.confirmationToken !== undefined &&
-            ask({ requestId: request, confirmationToken: result.confirmationToken })
-          }
-        >
-          Confirm {result.characterCount} characters · {formatMicroUsd(result.estimatedMicroUsd)}
-        </Button>
-      </span>
-    ) : request !== null && result === undefined ? (
-      <span className="fy-textactions__note">Preparing audio…</span>
-    ) : undefined;
+  const quote = `${request}:${result?.confirmationToken ?? ""}`;
+  const preparing = request !== null && (result === undefined || (result.status === "confirmation-required" && submitted === quote));
+  const note = preparing ? <span className="fy-textactions__note">Preparing audio…</span> : undefined;
+  const confirmation = result?.status === "confirmation-required" && submitted !== quote ? (
+    <ReadAloudConfirmation title={title} result={result} onCancel={() => setRequest(null)} onConfirm={confirmationToken => {
+      if (request === null) return;
+      setSubmitted(quote);
+      ask({ requestId: request, confirmationToken });
+    }} />
+  ) : null;
 
   return {
     clip,
     onRead: () => ask(),
     note,
-    preparing: request !== null && result === undefined,
+    confirmation,
+    preparing,
     error: result?.status === "failed" ? (result.error ?? "Read aloud is unavailable.") : null,
   };
 }
@@ -127,10 +127,11 @@ export function ReadAloud({
   /** The words on screen — copied by the second button, and what makes an empty block silent. */
   text: string;
 }) {
-  const { clip, onRead, note, error } = useProseRead(source, title);
+  const { clip, onRead, note, error, confirmation } = useProseRead(source, title);
   if (text.trim() === "") return null;
   return (
     <>
+      {confirmation}
       <TextActions clip={clip} onRead={onRead} copyText={text} readLabel="Read aloud" note={note} />
       {error !== null && <span className="fy-textactions__note">{error}</span>}
     </>
@@ -155,8 +156,10 @@ export function ReadAloudButton({
   text: string;
   disabled?: boolean;
 }) {
-  const { clip, onRead, preparing } = useProseRead(source, title);
+  const { clip, onRead, preparing, confirmation, error } = useProseRead(source, title);
   return (
+    <>
+    {confirmation}
     <button
       type="button"
       disabled={disabled === true || text.trim() === "" || preparing}
@@ -168,5 +171,7 @@ export function ReadAloudButton({
     >
       {preparing ? "Preparing…" : "Listen"}
     </button>
+    {error && <span className="fy-textactions__note">{error}</span>}
+    </>
   );
 }

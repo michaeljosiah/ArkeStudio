@@ -548,12 +548,7 @@ export function LocationReferenceScreen() {
                 <p>{panelMapPhrase(views.map((view) => view.name))}</p>
               </div>
             </>
-          ) : (
-            <p className="fy-locref__note">
-              Accept a second view — a reverse angle, a day pass — and Arke assembles them into one location sheet.
-              That sheet is what a shot carries, so the model sees the room from more than one side.
-            </p>
-          )}
+          ) : null}
         </section>
       </main>
     </div>

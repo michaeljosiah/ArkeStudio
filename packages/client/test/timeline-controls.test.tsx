@@ -15,7 +15,7 @@ import {
   type ClientState,
 } from "@arke-studio/contracts";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
-import { CutScreen } from "../src/screens/production.js";
+import { CutScreen } from "../src/screens/cut.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -212,7 +212,7 @@ describe("durable Picture controls (#678)", () => {
     const screen = await mountCut(state);
     try {
       assert.match(screen.container.querySelector(".fy-cuttimeline-error")?.textContent ?? "", /history cannot be replayed/);
-      assert.equal(screen.container.querySelector(".fy-clanes"), null);
+      assert.equal(screen.container.querySelector("[data-clip]"), null, "nothing is drawn to edit");
       assert.equal(button(screen, "Export film").disabled, true);
     } finally {
       await close(screen);

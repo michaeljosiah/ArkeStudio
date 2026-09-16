@@ -1,4 +1,4 @@
-import { ModelManifestSchema, type ModelManifest } from "@arke-studio/contracts";
+import { BREEZE_DELIVERY, FISH_DELIVERY, ModelManifestSchema, type ModelManifest } from "@arke-studio/contracts";
 import { COMFYUI_MANIFEST_MODELS } from "./comfyui/recipes.js";
 import { FAL_MODELS, FAL_ENDPOINTS, FAL_EDIT_ENDPOINTS } from "./fal-catalogue.generated.js";
 
@@ -14,9 +14,9 @@ import { FAL_MODELS, FAL_ENDPOINTS, FAL_EDIT_ENDPOINTS } from "./fal-catalogue.g
  * Prices are integer micro-dollars (R-14).
  */
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 24,
+  manifestVersion: 26,
   dialogueGuidance: [],
-  generated: "2026-09-07",
+  generated: "2026-09-13",
   /**
    * Which local model to reach for first, per capability (SPEC-033 R-33). Authored, and about
    * the models rather than about any machine: the gate filters this order by what was measured
@@ -208,11 +208,83 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       id: "eleven-v3", providerModelId: "eleven_v3", provider: "elevenlabs", capability: "voice-tts", displayName: "Eleven v3",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: { audioFormat: "mp3", maxPromptChars: 5000 },
       pricing: { kind: "perCharacter", microUsdPerCharacter: 100 },
+      // A phrase goes in as one more bracket tag (SPEC-047 R-7): v3 reads `[to the water, flat]`
+      // as it reads `[whispers]`, best effort, and the audiobook's block panel offers it.
       cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: { min: 0.7, max: 1.2 },
-        pause: "best-effort-audio-tag", emphasis: "best-effort-capitalization", breath: "best-effort-audio-tag", outputTimestamps: "none",
+        pause: "best-effort-audio-tag", emphasis: "best-effort-capitalization", breath: "best-effort-audio-tag", outputTimestamps: "none", phrase: "best-effort-tag",
         deliveryMappings: { measured: { settings: { stability: 0.5 } }, whispered: { settings: { stability: 0.5 }, tag: "whispers" },
           breaking: { settings: { stability: 0 }, tag: "crying" }, cold: { settings: { stability: 1 }, tag: "coldly" },
           warm: { settings: { stability: 0.5 }, tag: "warmly" }, urgent: { settings: { stability: 0 }, tag: "urgent" } } },
+    },
+    {
+      // Read 2026-09-13: https://mistral.ai/pricing/api/ — $0.016 per 1,000 characters = 16 micro-USD
+      // per character; https://docs.mistral.ai/models/voxtral-tts-26-03 (GA, not Labs). The version
+      // is pinned, not the `-latest` alias: a row is a price and a behaviour, and an alias that moves
+      // under it moves both. WAV at 24 kHz; never `pcm`, which is float32 on this API and 16-bit on the
+      // open server. The 2,000-character cap is OURS: Mistral says "keep prompts under 300 words" and
+      // publishes no hard limit (SPEC-046 R-9). Voxtral takes no direction — no tags, no speed, no
+      // seed — so `measured` is the one honest delivery: the read is however the recording was
+      // spoken (R-19). A retake is not reproducible, because there is no seed field (§2.3).
+      id: "voxtral-mini-tts", providerModelId: "voxtral-mini-tts-2603", provider: "mistral", capability: "voice-tts", displayName: "Voxtral TTS",
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+      limits: { deliveries: ["measured"], audioFormat: "wav", maxPromptChars: 2000 },
+      pricing: { kind: "perCharacter", microUsdPerCharacter: 16 },
+      cadence: { deliveries: ["measured"], speed: null, pause: "unsupported", emphasis: "unsupported", breath: "unsupported", outputTimestamps: "none",
+        deliveryMappings: { measured: { settings: {} } } },
+    },
+    {
+      // Read 2026-09-13: https://breezeblue.ai/pricing — $40 per million characters on the Free plan's
+      // top-ups ($1 = 2,500 credits, 10 billable units a credit), $36/$32/$28 on the paid plans. The
+      // row carries the FREE-plan rate so an estimate never sits below what the person could be
+      // charged; a paid plan's bill then reads under the estimate, which SPEC-008 R-13 reports as
+      // drift rather than hides (SPEC-046 R-7). Breeze counts a CJK character as two billable units,
+      // and `unit: "cjk-double"` makes the estimate count them the same way (R-8; codex on PR 1153
+      // found the half-estimate). `text` is 1,000 characters by default per the TtsRequest schema (an
+      // approved account may send up to 2,000). No providerModelId: Breeze picks `breeze-tts-2` for
+      // en/zh and the multilingual model — `breeze-tts-2-preview` on the live `/v1/models` of
+      // 2026-09-13, `-multilingual` in the docs — from the language code, at one price (§2.4).
+      // Measured 2026-09-13 (issue 1143): exactly 0.1 credit a character, and a delivery's tag is
+      // billed as characters too; the Free plan's pool is three generations, the fourth gets a 429. Direction is the richest in the catalogue — a tag in the text, a sentence
+      // beside it, a guidance scale, speed 0.5–2.0 — declared here in Breeze's parenthesised tag
+      // syntax; the sentences and the guidance value are unprobed and issue 1143 tunes them (R-22).
+      // Emphasis stays unsupported until the probe shows what capitalisation does (R-20).
+      id: "breeze-tts-2", provider: "breezeblue", capability: "voice-tts", displayName: "Breeze TTS 2",
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+      limits: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], audioFormat: "wav", maxPromptChars: 1000 },
+      pricing: { kind: "perCharacter", microUsdPerCharacter: 40, unit: "cjk-double" },
+      cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: { min: 0.7, max: 1.2 },
+        pause: "best-effort-audio-tag", emphasis: "unsupported", breath: "best-effort-audio-tag", outputTimestamps: "none", tagSyntax: "paren",
+        // A phrase is a sentence beside the text, after the delivery's (SPEC-047 R-7): Breeze's
+        // `instructions` field takes prose, so the author's words go there and never into the line.
+        phrase: "best-effort-instruction",
+        // The one table (contracts `BREEZE_DELIVERY`): the bench path reads its numbers and words
+        // through `deliveryParams` and `breezeDirection`, the performance path through this row.
+        deliveryMappings: BREEZE_DELIVERY },
+    },
+    {
+      // Read 2026-09-13: https://docs.fish.audio/developer-guide/models-pricing/pricing-and-rate-limits
+      // — $15 per million UTF-8 bytes on `s2.1-pro`, Fish's recommended production model (83
+      // languages, `[bracket]` natural-language cues, multi-speaker). A byte is a character for
+      // Latin text and up to three for CJK, so `unit: "utf8-byte"` makes the estimate count bytes
+      // as the bill does (SPEC-046 R-8). The 2,000-character
+      // cap is OURS: Fish publishes no text limit and chunks internally (`chunk_length` 100–300).
+      // Direction is a phrase in the text — Fish's S2 reads `[whispering]` as language, not a
+      // control token — declared in the contract's FISH_DELIVERY table in the default bracket
+      // syntax; every phrase is unprobed and the listen tunes them (R-22). Speed is `prosody.speed`
+      // 0.5–2.0, held to the plan's range. Emphasis stays unsupported until the probe shows what
+      // capitalisation, or a `[emphasis]` cue, does (R-20). The free twin `s2.1-pro-free` is the
+      // same model at $0 under fair use with no guarantees; it is not a row until the probe says
+      // what "fair use" is on a scene's worth of lines.
+      id: "fish-s2.1-pro", providerModelId: "s2.1-pro", provider: "fishaudio", capability: "voice-tts", displayName: "Fish Audio S2.1 Pro",
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+      limits: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], audioFormat: "wav", maxPromptChars: 2000 },
+      pricing: { kind: "perCharacter", microUsdPerCharacter: 15, unit: "utf8-byte" },
+      cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: { min: 0.7, max: 1.3 },
+        pause: "best-effort-audio-tag", emphasis: "unsupported", breath: "best-effort-audio-tag", outputTimestamps: "none",
+        // A phrase is one more bracket phrase in the text (SPEC-047 R-7), read as language like
+        // the delivery's; unprobed like every phrase here, and the listen tunes it (SPEC-046 R-22).
+        phrase: "best-effort-tag",
+        deliveryMappings: FISH_DELIVERY },
     },
     {
       cadence: { deliveries: ["measured", "urgent"], speed: null, pause: "unsupported", emphasis: "unsupported", breath: "unsupported", outputTimestamps: "none",

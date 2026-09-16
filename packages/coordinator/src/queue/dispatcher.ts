@@ -25,7 +25,7 @@ import {
 import { toExtendedLength } from "../world/paths.js";
 import { describeCoordinatorError } from "../errors/user-message.js";
 import { backoffMs, classifyError, isRateLimit, type FailureClass } from "./classify.js";
-import { JobJournal } from "./journal.js";
+import { JobJournal, type JobStateStore } from "./journal.js";
 import { imageFormatOf, verifyArtifact } from "./verify.js";
 import { atomicWriteFile } from "../world/atomic.js";
 
@@ -53,6 +53,8 @@ export interface DispatchVoiceReference {
   name: string;
   contentType: "audio/wav" | "audio/mpeg";
   data: Uint8Array;
+  /** For a hosted reader that keeps the clip on its account: the id it keeps it under (SPEC-046 R-13). */
+  remoteVoiceId?: string;
 }
 
 /** The footage a continuation extends (SPEC-019 R-50), resolved immediately before submit. */
@@ -141,9 +143,11 @@ export interface EnqueueInput {
 }
 
 export interface JobQueueOptions {
+  /** The host owns durability; journalPath still locates disposable inline-artifact staging. */
+  journal?: JobStateStore;
   journalPath: string;
   clients: Record<string, DispatchClient>;
-  getKey: (provider: string) => Promise<string | null>;
+  getKey: (provider: string, job: Job) => Promise<string | null>;
   emit: (event: DomainEvent) => void;
   /**
    * The idempotency seam (R-16): startup snapshots once; runtime checks the live ledger.
@@ -171,7 +175,7 @@ export interface JobQueueOptions {
   }>;
   readImageReferences?: (worldId: string, paths: readonly string[]) => Promise<DispatchImageReference[]>;
   /** Resolve a durable voice id into ephemeral confined bytes immediately before provider I/O. */
-  readVoiceReference?: (worldId: string, provider: string, model: string, voiceId: string) => Promise<DispatchVoiceReference>;
+  readVoiceReference?: (worldId: string, provider: string, model: string, voiceId: string, signal?: AbortSignal) => Promise<DispatchVoiceReference>;
   /**
    * Resolve the footage a continuation extends into bytes, cutting a pass segment out of its
    * backing file first where the predecessor is one (SPEC-019 R-50, T-32).
@@ -276,7 +280,7 @@ const FOLLOW_ON_TARGETS = new Set([
   "voice-line",
   "voice-preview",
 ]);
-const COORDINATOR_ONLY_PARAMS = new Set(["frameRun", "frameRunStep", "landing", "request"]);
+const COORDINATOR_ONLY_PARAMS = new Set(["frameRun", "frameRunStep", "landing", "request", "engineOperation"]);
 
 function providerParams(params: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(params).filter(([key]) => !COORDINATOR_ONLY_PARAMS.has(key) && (key !== "audioReferences" || (Array.isArray((params.audioReferences as { references?: unknown })?.references) && ((params.audioReferences as { references: unknown[] }).references.length > 0)))));
@@ -321,7 +325,7 @@ function landedName(job: Job, artifact: DispatchArtifact, index: number): string
 }
 
 export class JobQueue {
-  private readonly journal: JobJournal;
+  private readonly journal: JobStateStore;
   private readonly jobs = new Map<string, Job>();
   private readonly lanes = new Map<string, Lane>();
   private readonly clock: () => string;
@@ -363,7 +367,7 @@ export class JobQueue {
   private readonly retiredEngineRuns = new Set<string>();
 
   constructor(private readonly opts: JobQueueOptions) {
-    this.journal = new JobJournal(opts.journalPath);
+    this.journal = opts.journal ?? new JobJournal(opts.journalPath);
     this.clock = opts.clock ?? (() => new Date().toISOString());
     this.rng = opts.rng ?? Math.random;
     this.maxAttempts = opts.maxAttempts ?? 4;
@@ -633,7 +637,10 @@ export class JobQueue {
         lane.inFlight.delete(runKey);
         this.retiredEngineRuns.delete(this.engineRunKey(job));
         const current = this.jobs.get(job.id);
-        if (current?.status === "queued" && !lane.fifo.includes(job.id)) lane.fifo.push(job.id);
+        // A job whose pre-submit phase was aborted by a cancel is still "queued" for the tick
+        // between the abort and the cancel's terminal write; putting it back would dispatch it
+        // again with nobody left to abort the second run (the clip read found this).
+        if (current?.status === "queued" && !this.cancelling.has(job.id) && !lane.fifo.includes(job.id)) lane.fifo.push(job.id);
         this.pump(provider);
         // Read after the pump, not before: a job the pump just started is in flight, and a retry
         // sitting out its backoff is still in the FIFO. Only a lane with nothing running and
@@ -807,7 +814,7 @@ export class JobQueue {
       await this.terminalize({ ...job, attempt: job.attempt }, "failed", `no client for provider "${job.provider}"`);
       return;
     }
-    const key = await this.keyFor(job.provider);
+    const key = await this.keyFor(job);
     if (key === null) {
       // Not the job's fault: hold the lane, keep the job queued (R-8 posture).
       await this.transition({ ...job, status: "queued", updatedAt: this.clock() });
@@ -896,16 +903,51 @@ export class JobQueue {
         await this.terminalize(job, "failed", "voice reference transport is not configured");
         return;
       }
+      // A hosted reader's clip read can create a slot on the vendor's account (SPEC-046 R-13),
+      // so it takes the job's cancellation like reference preparation does: a cancel or a
+      // shutdown while the save is pending aborts the call rather than letting the recording
+      // leave and a slot bill after the person said stop (codex on PR 1153).
+      const reading = new AbortController();
+      this.submitAborts.set(job.id, reading);
       try {
-        voiceReference = await this.opts.readVoiceReference(job.worldId, job.provider, job.model, voiceId);
+        voiceReference = await this.opts.readVoiceReference(job.worldId, job.provider, job.model, voiceId, reading.signal);
       } catch (error) {
-        await this.terminalize(
-          job,
-          "failed",
-          describeCoordinatorError(error),
-        );
+        if (!this.disposed && !this.cancelling.has(job.id) && this.stillQueued(job)) {
+          const message = describeCoordinatorError(error);
+          // A hosted reader's clip read talks to the vendor before submit, so a revoked key
+          // shows up here first: the job was never wrong, the credential was (R-8). Back to
+          // queued behind a paused lane, as a submit's credential fault is — not a failed job
+          // per queued read (codex on PR 1156).
+          const klass = classifyError(error);
+          if (klass === "provider-fault") {
+            await this.transition({ ...job, status: "queued", failureClass: "provider-fault", error: message, updatedAt: this.clock() });
+            this.lane(job.provider).fifo.unshift(job.id);
+            this.pauseLane(job.provider, "fault", message);
+            return;
+          }
+          // A busy vendor met before submit — a full pool on the listing, the slot save the probe
+          // saw answer 429 — is the same bounded backoff a submit gets. The retry counts as an
+          // attempt so the bound holds; nothing was sent, so nothing is held for reconciliation.
+          if (klass === "transient") {
+            if (isRateLimit(error)) this.noteRateLimit(job.provider);
+            const attempt = job.attempt + 1;
+            if (attempt >= this.maxAttempts) {
+              await this.terminalize(job, "failed", `gave up after ${attempt} attempts: ${message}`, undefined, klass);
+              return;
+            }
+            await this.transition({ ...job, status: "queued", attempt, failureClass: klass, error: message, updatedAt: this.clock() });
+            const lane = this.lane(job.provider);
+            lane.notBefore.set(job.id, Date.now() + backoffMs(attempt, this.backoffBaseMs, this.backoffCapMs, this.rng));
+            lane.fifo.push(job.id);
+            return;
+          }
+          await this.terminalize(job, "failed", message);
+        }
         return;
+      } finally {
+        if (this.submitAborts.get(job.id) === reading) this.submitAborts.delete(job.id);
       }
+      if (this.disposed || !this.stillQueued(job)) return;
     }
     // The footage a continuation extends, resolved last of the three (SPEC-019 R-50). A failure
     // here is terminal rather than a lane pause: the predecessor is named on the job and cannot
@@ -1590,7 +1632,7 @@ export class JobQueue {
     // Attempt the remote cancel where there is remote work to cancel; best-effort.
     if (job.providerJobId) {
       const client = this.opts.clients[job.provider];
-      const key = await this.keyFor(job.provider);
+      const key = await this.keyFor(job);
       // `key !== null`, not a truthiness test: keyFor returns the EMPTY STRING for every
       // provider whose credential is not ours to hold — every local runtime, and Higgsfield,
       // whose credential lives in its own CLI. An empty string is falsy, so the truthiness
@@ -1834,7 +1876,7 @@ export class JobQueue {
   private async resumePolling(job: Job): Promise<void> {
     if (!this.stillPolling(job)) return;
     const client = this.opts.clients[job.provider];
-    const key = await this.keyFor(job.provider);
+    const key = await this.keyFor(job);
     if (!client || key === null) {
       this.pauseLane(job.provider, "credential", "no credential stored for this provider");
       return;
@@ -1867,7 +1909,7 @@ export class JobQueue {
   /** The unwitnessed-submission window (§2.4 rows ②→③ and ④): observe, never guess (D2). */
   private async reconcileSubmitting(job: Job): Promise<ReconcileAction> {
     const client = this.opts.clients[job.provider];
-    const key = client ? await this.keyFor(job.provider) : null;
+    const key = client ? await this.keyFor(job) : null;
     if (!client || key === null) {
       this.pauseLane(job.provider, "credential", "no credential stored for this provider");
       return { jobId: job.id, action: "held-for-user", detail: "no credential to reconcile with" };
@@ -2169,12 +2211,13 @@ export class JobQueue {
 
   // ---- misc -----------------------------------------------------------------
 
-  private async keyFor(provider: string): Promise<string | null> {
+  private async keyFor(job: Job): Promise<string | null> {
+    const provider = job.provider;
     // Only an in-app credential is ours to hand over. A local runtime takes none, and an
     // external one is held by the tool the client drives — both dispatch with an empty key
     // rather than being held for a credential that was never going to be in `credentials.dat`.
     if (credentialKindOf(provider) !== "in-app") return "";
-    return this.opts.getKey(provider);
+    return this.opts.getKey(provider, job);
   }
 
   private concurrencyFor(provider: string): number {

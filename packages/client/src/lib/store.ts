@@ -55,7 +55,7 @@ function emptyGenesis(): StoreState["genesis"][string] {
  * as the coordinator's read model. View state (tabs, panels) stays in components.
  */
 
-export type ConnectionStatus = "connecting" | "open" | "closed";
+export type ConnectionStatus = "connecting" | "open" | "closed" | "auth-refused";
 
 /** The last blocked-accept notice per proposal (SPEC-004): why it did not land, and what to offer. */
 export interface GateNotice {
@@ -235,6 +235,74 @@ interface StoreState {
       reason?: string;
     }
   >;
+  /**
+   * A chapter being read into kept takes (turn 146, SPEC-047), keyed by
+   * `worldId/productionId/chapterId`: the run's progress while it goes, its price while that
+   * is on the table, and how it ended. The record itself lands on the chapter's open result and
+   * on the finished event; this is only what the Audiobook view says about the run.
+   */
+  audiobook: Record<
+    string,
+    {
+      state: "reading" | "priced" | "read" | "stopped" | "unavailable" | "failed" | "refused";
+      requestId?: string;
+      toMake: number;
+      blocks: number;
+      made: number;
+      flagged: number;
+      /** The last block that landed or was flagged, and why, for the foot. */
+      last?: { block: string; outcome: "made" | "adopted" | "flagged"; reason?: string };
+      price?: { characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[] };
+      record?: import("@arke-studio/contracts").ChapterAudiobook;
+      reason?: string;
+    }
+  >;
+  /**
+   * `Direct this chapter` (turn 146, SPEC-047 R-10), keyed like a run: the card the window
+   * holds until it is accepted whole or discarded, then the acceptance's word. The record a
+   * write outside a run answers with — a block's direction set, a card accepted — lands here
+   * too, so the workspace takes the newest record whoever wrote it.
+   */
+  direction: Record<
+    string,
+    {
+      state: "directing" | "directed" | "accepting" | "accepted" | "stopped" | "unavailable" | "failed";
+      /** The acceptance's own name while it is on its way, so only its answer moves the card. */
+      requestId?: string;
+      directed: number;
+      dropped: number;
+      summary?: string;
+      proposed?: Record<string, import("@arke-studio/contracts").AudiobookDirectionInput>;
+      hash?: string;
+      chapterVersion?: number;
+      reason?: string;
+    }
+  >;
+  audiobookRecords: Record<string, { record?: import("@arke-studio/contracts").ChapterAudiobook; refused?: string; seq: number }>;
+  /**
+   * The door (turn 146, SPEC-047 R-29), by production: what every chapter stands at, who
+   * reads, and the price of a press, as the coordinator last answered; and `Read the book`,
+   * the chapter's run over the whole book, keyed by production like the chapters' by chapter.
+   */
+  audiobookDoor: Record<string, { door: import("@arke-studio/contracts").AudiobookDoor | null; requestId: string; refused?: string }>;
+  audiobookBook: Record<
+    string,
+    {
+      state: "reading" | "priced" | "read" | "stopped" | "unavailable" | "failed";
+      requestId?: string;
+      chapters: number;
+      blocks: number;
+      done: number;
+      chaptersRead: number;
+      chaptersRefused: number;
+      made: number;
+      flagged: number;
+      price?: Extract<import("@arke-studio/contracts").DomainEvent, { type: "audiobook.book-priced" }>;
+      reason?: string;
+    }
+  >;
+  /** Directions re-checked against changed readers (R-13): how many controls went, said once on the door. */
+  audiobookNotes: Record<string, { dropped: number; chapters: number; seq: number }>;
   /** The last word on archiving a world — said once, then dismissed. */
   archiveNote: { worldId: string; text: string; refused: boolean } | null;
   permissions: Record<string, PendingPermission>;
@@ -349,6 +417,8 @@ export interface VoiceCandidatesState {
   previewLine: { text: string; source: "own-line" | "drafted" | "stock" };
   cloudPreviewMicroUsd: number | null;
   previewMicroUsdByVoice: Record<string, number>;
+  /** What a first read through a reader adds, by target key (SPEC-046 R-14): said on the row before the preview. */
+  notices: Record<string, string>;
 }
 
 let current: StoreState = {
@@ -365,6 +435,12 @@ let current: StoreState = {
   reading: {},
   deriving: {},
   casting: {},
+  audiobook: {},
+  direction: {},
+  audiobookRecords: {},
+  audiobookDoor: {},
+  audiobookBook: {},
+  audiobookNotes: {},
   manuscripts: {},
   archiveNote: null,
   permissions: {},
@@ -563,6 +639,14 @@ export function subscribeVoiceUploadConfirmations(
 ): () => void {
   voiceUploadConfirmationListeners.add(listener);
   return () => voiceUploadConfirmationListeners.delete(listener);
+}
+
+/** The outcome of deleting a cloned voice (SPEC-046 R-15), by requestId: the library's part and each vendor copy's. */
+export type VoiceDeleteResult = Extract<DomainEvent, { type: "voice.deleted" }>;
+const voiceDeleteListeners = new Set<(result: VoiceDeleteResult) => void>();
+export function subscribeVoiceDeleteResults(listener: (result: VoiceDeleteResult) => void): () => void {
+  voiceDeleteListeners.add(listener);
+  return () => voiceDeleteListeners.delete(listener);
 }
 
 /** The correlated answer to one create-production request (issue 384), by requestId. */
@@ -767,6 +851,12 @@ function queueRequest(command: QueueCommand, characterName?: string): string {
 const listeners = new Set<() => void>();
 let bridge: ArkeBridge | null = null;
 let lastSeq = 0;
+/**
+ * True from a hello until the snapshot that answers it: that snapshot is a window rejoining,
+ * whose runs may have ended while it was away; every other snapshot is a refresh on a
+ * connection that has missed nothing.
+ */
+let rejoining = false;
 let reconnectAttempts = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -970,6 +1060,8 @@ function handleFrame(json: string): void {
       ),
     );
     const changedWorld = current.state?.world?.meta.worldId !== frame.state.world?.meta.worldId;
+    const rejoined = rejoining;
+    rejoining = false;
     const authoring = seedLiveRuns(current.authoring, frame.state.authoringRuns);
     const durableVoiceAudio: StoreState["voiceAudio"] = {};
     for (const job of frame.state.app.jobs) {
@@ -1043,6 +1135,21 @@ function handleFrame(json: string): void {
       // PR 914, round two). The snapshot's records say what stands.
       deriving: {},
       casting: {},
+      // The audiobook's runs (turn 146) carry what the replay cannot: the counts, and a price
+      // waiting on its answer. A refresh follows every take that lands, on a connection that
+      // has missed nothing, so a refresh keeps them — reset, the replayed start put `reading… 0
+      // of 0` over the head and closed the price sheet (the door's live check on slice 3). A
+      // window that rejoined starts from the replay, which says what is still going and nothing
+      // of what ended while it was away.
+      audiobook: changedWorld || rejoined ? {} : current.audiobook,
+      // A card answered — proposed, accepted, failed — is this window's to put away (turn 146):
+      // a snapshot follows every accept, and would otherwise take the ✓ line with it. Only a
+      // derivation still going is dropped, since the replay restores it when it is.
+      direction: changedWorld ? {} : Object.fromEntries(Object.entries(current.direction).filter(([, held]) => held.state !== "directing")),
+      audiobookRecords: changedWorld ? {} : current.audiobookRecords,
+      audiobookDoor: changedWorld ? {} : current.audiobookDoor,
+      audiobookBook: changedWorld || rejoined ? {} : current.audiobookBook,
+      audiobookNotes: changedWorld ? {} : current.audiobookNotes,
       // Both are keyed by sheet slug alone, and slugs recur across worlds: a failure left over
       // from one world would otherwise surface under the same-named character in the next one
       // (PR 241 review). They describe an action just taken here, so they do not outlive it.
@@ -1067,6 +1174,12 @@ function handleFrame(json: string): void {
     let reading = current.reading;
     let deriving = current.deriving;
     let casting = current.casting;
+    let audiobook = current.audiobook;
+    let direction = current.direction;
+    let audiobookRecords = current.audiobookRecords;
+    let audiobookDoor = current.audiobookDoor;
+    let audiobookBook = current.audiobookBook;
+    let audiobookNotes = current.audiobookNotes;
     let manuscripts = current.manuscripts;
     let archiveNote = current.archiveNote;
     let setupStatus = current.setupStatus;
@@ -1103,6 +1216,7 @@ function handleFrame(json: string): void {
     if (event.type === "voice.assignment-result") {
       for (const listener of voiceAssignmentListeners) listener(event);
     }
+    if (event.type === "voice.deleted") for (const listener of voiceDeleteListeners) listener(event);
     if (event.type === "job.ready") {
       for (const listener of jobReadyListeners) listener(event.job);
     }
@@ -1404,6 +1518,150 @@ function handleFrame(json: string): void {
           ...(event.reason !== undefined ? { reason: event.reason } : {}),
         },
       };
+    } else if (event.type === "audiobook.started") {
+      // A replayed start carries no counts and reaches every refresh, not only a reconnect: a
+      // window that already holds the run keeps what it knows — its progress, or that it has
+      // finished — and one that does not learns a run is going and can be stopped.
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      if (event.replayed !== true || audiobook[key] === undefined) {
+        audiobook = {
+          ...audiobook,
+          [key]: { state: "reading", requestId: event.requestId, toMake: event.toMake, blocks: event.blocks, made: event.made ?? 0, flagged: 0 },
+        };
+      }
+      // The run's request is minted by the coordinator, so it is registered here rather than
+      // at send time: a cloned voice's upload consent is routed by request (codex on PR 1180),
+      // and without this entry the consent would be dropped on the floor and the run would
+      // wait for an answer no window could give. A chapter read under the book carries the
+      // book's request, whose command is registered already and stands (codex on PR 1187).
+      if (!pendingQueueRequests.has(event.requestId)) pendingQueueRequests.set(event.requestId, { command: "read-audiobook-chapter" });
+    } else if (event.type === "audiobook.priced") {
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      const held = audiobook[key] ?? { toMake: 0, blocks: 0, made: 0, flagged: 0 };
+      audiobook = {
+        ...audiobook,
+        [key]: { ...held, state: "priced", price: { characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices } },
+      };
+    } else if (event.type === "audiobook.progress") {
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      const held = audiobook[key] ?? { state: "reading" as const, toMake: event.toMake, blocks: 0, made: 0, flagged: 0 };
+      audiobook = {
+        ...audiobook,
+        [key]: {
+          ...held,
+          state: "reading",
+          toMake: event.toMake,
+          made: event.made,
+          flagged: held.flagged + (event.outcome === "flagged" ? 1 : 0),
+          last: { block: event.block, outcome: event.outcome, ...(event.reason !== undefined ? { reason: event.reason } : {}) },
+        },
+      };
+    } else if (event.type === "audiobook.finished") {
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      const held = audiobook[key] ?? { toMake: 0, blocks: 0, made: 0, flagged: 0 };
+      audiobook = {
+        ...audiobook,
+        [key]: {
+          ...held,
+          state: event.outcome,
+          made: event.made,
+          flagged: event.flagged,
+          price: undefined,
+          ...(event.record !== undefined ? { record: event.record } : {}),
+          ...(event.reason !== undefined ? { reason: event.reason } : {}),
+        },
+      };
+    } else if (event.type === "audiobook.record") {
+      // A write outside a run (turn 146): the record, or why nothing was written. A card being
+      // accepted takes the answer as its own — accepted, or refused and held for another try.
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      const seq = (audiobookRecords[key]?.seq ?? 0) + 1;
+      audiobookRecords = { ...audiobookRecords, [key]: { seq, ...(event.record !== undefined ? { record: event.record } : {}), ...(event.refused !== undefined ? { refused: event.refused } : {}) } };
+      // Only its own answer (codex on PR 1186): another window's block write lands as the same
+      // event, and would otherwise mark the card accepted while the acceptance itself is still
+      // on its way to a refusal it could no longer show.
+      const card = direction[key];
+      if (card?.state === "accepting" && event.requestId !== undefined && event.requestId === card.requestId) {
+        direction = {
+          ...direction,
+          [key]: event.record !== undefined
+            ? { ...card, state: "accepted", dropped: card.dropped + (event.dropped ?? 0), proposed: undefined, requestId: undefined }
+            : { ...card, state: "directed", requestId: undefined, ...(event.refused !== undefined ? { reason: event.refused } : {}) },
+        };
+      }
+    } else if (event.type === "audiobook.door") {
+      // The latest ask's answer alone, and only for the world that is open: a superseded
+      // answer is older news, and one for a world since closed would repopulate a same-named
+      // production in the next (codex on PR 1187).
+      if (doorRequests.get(`${event.worldId}/${event.productionId}`) === event.requestId && current.state?.world?.meta.worldId === event.worldId) {
+        audiobookDoor = { ...audiobookDoor, [event.productionId]: { door: event.door, requestId: event.requestId, ...(event.refused !== undefined ? { refused: event.refused } : {}) } };
+      }
+    } else if (event.type === "audiobook.book-started") {
+      // The book's state is keyed by production, and productions recur by name across worlds:
+      // a run's late word from a world since closed is not this world's (codex on PR 1187).
+      if (current.state?.world?.meta.worldId === event.worldId) {
+        // A replayed start carries the counts the book has reached: a window that holds the
+        // run keeps what it knows, and one that rejoined takes them.
+        if (event.replayed !== true || audiobookBook[event.productionId] === undefined) {
+          audiobookBook = {
+            ...audiobookBook,
+            [event.productionId]: { state: "reading", requestId: event.requestId, chapters: event.chapters, blocks: event.blocks, done: event.done ?? 0, chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0 },
+          };
+        }
+        // The book's request is the coordinator's (SPEC-047 R-17): a cloned voice's consent is
+        // routed by it, so it is registered here as the chapter's is.
+        pendingQueueRequests.set(event.requestId, { command: "read-audiobook-book" });
+      }
+    } else if (event.type === "audiobook.book-priced") {
+      if (current.state?.world?.meta.worldId === event.worldId) {
+        const held = audiobookBook[event.productionId] ?? { chapters: event.chapters, blocks: event.blocks, done: 0, chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0 };
+        audiobookBook = { ...audiobookBook, [event.productionId]: { ...held, state: "priced", price: event } };
+      }
+    } else if (event.type === "audiobook.book-progress") {
+      if (current.state?.world?.meta.worldId === event.worldId) {
+        const held = audiobookBook[event.productionId] ?? { chapters: event.chapters, blocks: 0, done: 0, chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0 };
+        audiobookBook = { ...audiobookBook, [event.productionId]: { ...held, state: "reading", done: event.done, chapters: event.chapters } };
+      }
+    } else if (event.type === "audiobook.book-finished") {
+      if (current.state?.world?.meta.worldId === event.worldId) {
+        const held = audiobookBook[event.productionId] ?? { chapters: 0, blocks: 0, done: 0, chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0 };
+        audiobookBook = {
+          ...audiobookBook,
+          [event.productionId]: {
+            ...held,
+            state: event.outcome,
+            price: undefined,
+            chaptersRead: event.chaptersRead,
+            chaptersRefused: event.chaptersRefused,
+            made: event.made,
+            flagged: event.flagged,
+            ...(event.reason !== undefined ? { reason: event.reason } : {}),
+          },
+        };
+      }
+    } else if (event.type === "audiobook.conformed") {
+      if (current.state?.world?.meta.worldId === event.worldId) {
+        audiobookNotes = { ...audiobookNotes, [event.productionId]: { dropped: event.dropped, chapters: event.chapters, seq: (audiobookNotes[event.productionId]?.seq ?? 0) + 1 } };
+      }
+    } else if (event.type === "direction.started") {
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      // A replay reaches every refresh: a window that already holds the run keeps what it knows.
+      if (direction[key]?.state !== "directing") direction = { ...direction, [key]: { state: "directing", directed: 0, dropped: 0 } };
+    } else if (event.type === "direction.finished") {
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      direction = {
+        ...direction,
+        [key]: {
+          state: event.outcome,
+          directed: event.directed,
+          dropped: event.dropped,
+          ...(event.summary !== undefined ? { summary: event.summary } : {}),
+          ...(event.proposed !== undefined ? { proposed: event.proposed } : {}),
+          ...(event.hash !== undefined ? { hash: event.hash } : {}),
+          ...(event.chapterVersion !== undefined ? { chapterVersion: event.chapterVersion } : {}),
+          ...(event.reason !== undefined ? { reason: event.reason } : {}),
+        },
+      };
     } else if (event.type === "authoring.status") {
       const existing = authoring[event.proposalId] ?? { status: event.status, lines: [] };
       authoring = {
@@ -1483,6 +1741,7 @@ function handleFrame(json: string): void {
           previewLine: event.previewLine,
           cloudPreviewMicroUsd: event.cloudPreviewMicroUsd,
           previewMicroUsdByVoice: event.previewMicroUsdByVoice,
+          notices: event.notices,
         },
       };
     } else if (event.type === "voice.preview") {
@@ -1695,6 +1954,12 @@ function handleFrame(json: string): void {
       reading,
       deriving,
       casting,
+      audiobook,
+      direction,
+      audiobookRecords,
+      audiobookDoor,
+      audiobookBook,
+      audiobookNotes,
       manuscripts,
       archiveNote,
       permissions,
@@ -1739,6 +2004,7 @@ function handleStatus(status: ConnectionStatus): void {
   emitChange({ ...current, connection: status });
   if (status === "open") {
     reconnectAttempts = 0;
+    rejoining = true;
     send({ kind: "hello", lastSeq });
   }
   if (status === "closed") {
@@ -1749,7 +2015,7 @@ function handleStatus(status: ConnectionStatus): void {
 }
 
 /** Dev fallback: the same bridge surface over a plain WebSocket to the dev coordinator. */
-function devBridge(url: string): ArkeBridge {
+export function devBridge(url: string): ArkeBridge {
   let socket: WebSocket | null = null;
   let onFrame: ((json: string) => void) | null = null;
   let onStatus: ((s: ConnectionStatus) => void) | null = null;
@@ -1762,9 +2028,9 @@ function devBridge(url: string): ArkeBridge {
       onStatus?.("connecting");
       socket = new WebSocket(url);
       socket.addEventListener("open", () => onStatus?.("open"));
-      socket.addEventListener("close", () => {
+      socket.addEventListener("close", (event) => {
         socket = null;
-        onStatus?.("closed");
+        onStatus?.(event.code === 1008 && event.reason === "session authentication required" ? "auth-refused" : "closed");
       });
       socket.addEventListener("message", (e) => {
         if (typeof e.data === "string") onFrame?.(e.data);
@@ -3218,6 +3484,8 @@ export function cloneVoice(input: {
   clipId: string;
   name: string;
   description: string;
+  /** The recording's language (ISO 639-1); the coordinator takes English when it is not said. */
+  language?: string;
   sheetId?: string;
 }): void {
   send({
@@ -3227,8 +3495,18 @@ export function cloneVoice(input: {
     name: input.name,
     description: input.description,
     consent: true,
+    ...(input.language !== undefined ? { language: input.language } : {}),
     ...(input.sheetId !== undefined ? { sheetId: input.sheetId } : {}),
   });
+}
+
+/**
+ * Delete a cloned voice (SPEC-046 R-15): the clip, the entry, and every vendor copy after. The
+ * answer comes back on `voice.deleted` under this id; null when the studio is disconnected.
+ */
+export function deleteVoice(worldId: string, voiceId: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "delete-voice", requestId, worldId, voiceId }) ? requestId : null;
 }
 
 export function useVoiceClips(): Record<string, StagedClip> {
@@ -3877,62 +4155,6 @@ export function importEditorMedia(
   return { requestId };
 }
 
-/**
- * Overlays (82a): the one stored position on the cut. Placing, moving and removing are one act —
- * where a thing sits — and none of them touch the artifact, which is only ever cited.
- */
-export function placeOverlay(
-  worldId: string,
-  productionId: string,
-  artifactId: string,
-  startSec: number,
-  endSec: number,
-  lane?: number,
-): void {
-  send({
-    kind: "place-overlay",
-    worldId,
-    productionId,
-    artifactId,
-    startSec,
-    endSec,
-    ...(lane !== undefined ? { lane } : {}),
-  });
-}
-
-export function moveOverlay(
-  worldId: string,
-  productionId: string,
-  overlayId: string,
-  startSec: number,
-  endSec: number,
-  lane?: number,
-): void {
-  send({
-    kind: "move-overlay",
-    worldId,
-    productionId,
-    overlayId,
-    startSec,
-    endSec,
-    ...(lane !== undefined ? { lane } : {}),
-  });
-}
-
-/** Two clips over one file: the picture stays put and stops sounding, the sound drops a lane. */
-export function splitOverlayAudio(worldId: string, productionId: string, overlayId: string): void {
-  send({ kind: "split-overlay-audio", worldId, productionId, overlayId });
-}
-
-/** The inverse, so a split is not a one-way door: the picture sounds again and the twin goes. */
-export function rejoinOverlayAudio(worldId: string, productionId: string, overlayId: string): void {
-  send({ kind: "rejoin-overlay-audio", worldId, productionId, overlayId });
-}
-
-export function removeOverlay(worldId: string, productionId: string, overlayId: string): void {
-  send({ kind: "remove-overlay", worldId, productionId, overlayId });
-}
-
 /** A rejection requires the cited sheet and field (R-10). */
 export function rejectTake(
   worldId: string,
@@ -3949,10 +4171,6 @@ export function rejectTake(
     citation,
     ...(shotId !== undefined ? { shotId } : {}),
   });
-}
-
-export function saveAudioTracks(worldId: string, productionId: string, cut: unknown): void {
-  send({ kind: "save-audio-tracks", worldId, productionId, cut });
 }
 
 export function exportCut(
@@ -4058,6 +4276,173 @@ export function castVoices(worldId: string, productionId: string, chapterFile: s
 
 export function stopVoices(worldId: string, productionId: string, chapterFile: string): void {
   send({ kind: "stop-voices", worldId, productionId, chapterFile });
+}
+
+// ---- turn 146: the audiobook ------------------------------------------------
+
+/** Read a chapter into kept takes (SPEC-047 R-16); the token answers a price the run asked. */
+export function readAudiobookChapter(
+  worldId: string,
+  productionId: string,
+  chapterFile: string,
+  options: { confirmationToken?: string; voiceUploadConfirmedFor?: string } = {},
+): boolean {
+  return send({
+    kind: "read-audiobook-chapter",
+    worldId,
+    productionId,
+    chapterFile,
+    ...(options.confirmationToken !== undefined ? { confirmationToken: options.confirmationToken } : {}),
+    ...(options.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: options.voiceUploadConfirmedFor } : {}),
+  });
+}
+
+export function stopAudiobook(worldId: string, productionId: string, chapterFile: string): void {
+  send({ kind: "stop-audiobook", worldId, productionId, chapterFile });
+}
+
+/** The book's reading (SPEC-047 R-11): every block the narrator's, or each line its speaker's. */
+export function setAudiobookReading(worldId: string, productionId: string, reading: "narrator" | "cast"): boolean {
+  return send({ kind: "set-audiobook-reading", worldId, productionId, reading });
+}
+
+/**
+ * A price declined, or an upload consent declined: the run is over on the coordinator's side
+ * either way — it returned without a finished event when it asked — so only this window's word
+ * goes, and a finished run is never cleared (codex on PR 1180).
+ */
+export function dismissAudiobookRun(worldId: string, productionId: string, chapterId: string): void {
+  const key = `${worldId}/${productionId}/${chapterId}`;
+  const held = current.audiobook[key];
+  if (held === undefined || (held.state !== "priced" && held.state !== "reading")) return;
+  const { [key]: _dropped, ...rest } = current.audiobook;
+  emitChange({ ...current, audiobook: rest });
+}
+
+/** How each chapter's audiobook run is going, keyed by `worldId/productionId/chapterId`. */
+export function useAudiobookRuns(): StoreState["audiobook"] {
+  return useStore().audiobook;
+}
+
+/** Read a chapter into kept takes, these blocks alone (SPEC-047 R-30): the panel's `Make again`. */
+export function readAudiobookBlocks(
+  worldId: string,
+  productionId: string,
+  chapterFile: string,
+  blocks: readonly string[],
+  options: { confirmationToken?: string; voiceUploadConfirmedFor?: string } = {},
+): boolean {
+  return send({
+    kind: "read-audiobook-chapter",
+    worldId,
+    productionId,
+    chapterFile,
+    blocks: [...blocks],
+    ...(options.confirmationToken !== undefined ? { confirmationToken: options.confirmationToken } : {}),
+    ...(options.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: options.voiceUploadConfirmedFor } : {}),
+  });
+}
+
+/** One block's direction, set or cleared (SPEC-047 R-6): the coordinator answers with the record, or why not. */
+export function setAudiobookBlock(worldId: string, productionId: string, chapterFile: string, block: string, direction: import("@arke-studio/contracts").AudiobookDirectionInput | null): boolean {
+  return send({ kind: "set-audiobook-block", worldId, productionId, chapterFile, block, direction });
+}
+
+/** `Direct this chapter` (SPEC-047 R-10): the model asked for a direction per block; the card comes back as a run's result. */
+export function directChapter(worldId: string, productionId: string, chapterFile: string): boolean {
+  return send({ kind: "direct-chapter", worldId, productionId, chapterFile });
+}
+
+/** The card accepted whole: the coordinator checks every direction once more and writes the record. */
+export function acceptDirection(worldId: string, productionId: string, chapterId: string, chapterFile: string): boolean {
+  const key = `${worldId}/${productionId}/${chapterId}`;
+  const card = current.direction[key];
+  if (card === undefined || card.state !== "directed" || card.proposed === undefined || card.hash === undefined) return false;
+  const requestId = ulid();
+  const sent = send({ kind: "accept-direction", worldId, productionId, chapterFile, requestId, hash: card.hash, directions: card.proposed });
+  if (sent) emitChange({ ...current, direction: { ...current.direction, [key]: { ...card, state: "accepting", requestId } } });
+  return sent;
+}
+
+/**
+ * The card discarded, or an ended derivation put away: nothing was written, and the coordinator
+ * is told to stop holding a proposal for a window that reconnects. `chapterFile` names the
+ * chapter to the coordinator as every audiobook frame does.
+ */
+export function dismissDirection(worldId: string, productionId: string, chapterId: string, chapterFile: string): void {
+  const key = `${worldId}/${productionId}/${chapterId}`;
+  const held = current.direction[key];
+  if (held === undefined || held.state === "directing") return;
+  if (held.state === "directed") send({ kind: "discard-direction", worldId, productionId, chapterFile });
+  const { [key]: _dropped, ...rest } = current.direction;
+  emitChange({ ...current, direction: rest });
+}
+
+export function useDirectionRuns(): StoreState["direction"] {
+  return useStore().direction;
+}
+
+export function useAudiobookRecords(): StoreState["audiobookRecords"] {
+  return useStore().audiobookRecords;
+}
+
+// ---- turn 146: the door ----------------------------------------------------
+
+/**
+ * The latest ask of each door, by world and production: the shell and the door ask by turns
+ * and every ask prepares the whole book, so a slower older answer would otherwise put older
+ * counts, voices and a price over newer ones (codex on PR 1187). Only the latest ask's answer
+ * is kept.
+ */
+const doorRequests = new Map<string, string>();
+
+/** Ask the door (SPEC-047 R-29): every chapter's state, who reads, the price; answered as `audiobook.door`. */
+export function openAudiobook(worldId: string, productionId: string): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "open-audiobook", worldId, productionId, requestId })) return null;
+  doorRequests.set(`${worldId}/${productionId}`, requestId);
+  return requestId;
+}
+
+/** Read the book (SPEC-047 R-16, R-17): every chapter with prose, priced once; the token answers the price. */
+export function readAudiobookBook(worldId: string, productionId: string, options: { confirmationToken?: string; voiceUploadConfirmedFor?: string } = {}): boolean {
+  return send({
+    kind: "read-audiobook-book",
+    worldId,
+    productionId,
+    ...(options.confirmationToken !== undefined ? { confirmationToken: options.confirmationToken } : {}),
+    ...(options.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: options.voiceUploadConfirmedFor } : {}),
+  });
+}
+
+export function stopAudiobookBook(worldId: string, productionId: string): void {
+  send({ kind: "stop-audiobook-book", worldId, productionId });
+}
+
+/** A price declined, a consent declined, or an ended run put away: this window's word only. */
+export function dismissAudiobookBook(productionId: string): void {
+  const held = current.audiobookBook[productionId];
+  if (held === undefined) return;
+  const { [productionId]: _dropped, ...rest } = current.audiobookBook;
+  emitChange({ ...current, audiobookBook: rest });
+}
+
+export function dismissAudiobookNote(productionId: string): void {
+  if (current.audiobookNotes[productionId] === undefined) return;
+  const { [productionId]: _dropped, ...rest } = current.audiobookNotes;
+  emitChange({ ...current, audiobookNotes: rest });
+}
+
+export function useAudiobookDoors(): StoreState["audiobookDoor"] {
+  return useStore().audiobookDoor;
+}
+
+export function useAudiobookBooks(): StoreState["audiobookBook"] {
+  return useStore().audiobookBook;
+}
+
+export function useAudiobookNotes(): StoreState["audiobookNotes"] {
+  return useStore().audiobookNotes;
 }
 
 // ---- turn 131: a manuscript out and in ------------------------------------
@@ -4283,6 +4668,12 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     reading: {},
   deriving: {},
     casting: {},
+    audiobook: {},
+    direction: {},
+    audiobookRecords: {},
+    audiobookDoor: {},
+    audiobookBook: {},
+    audiobookNotes: {},
   manuscripts: {},
     archiveNote: null,
     permissions: {},

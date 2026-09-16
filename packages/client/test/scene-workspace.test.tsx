@@ -222,6 +222,11 @@ describe("scene detail owns the workspace", () => {
     const request=sent.find((message):message is Extract<ClientMessage,{kind:"stage-construct"}>=>message.kind==="stage-construct");
     assert.ok(request);
     const staging={keys:[{t:0,p:[0,1.5,4] as [number,number,number],l:[0,1,0] as [number,number,number]},{t:4,p:[0,1.5,4] as [number,number,number],l:[0,1,0] as [number,number,number]}],objectMotions:[{group:"vehicle",keys:[{t:0,p:[0,0,0] as [number,number,number]},{t:4,p:[0,0,5] as [number,number,number]}]}],authorship:{model:"test/vision",sourceVersion:request.baseVersion,assumptions:["Vehicle is stationary at opening."],assessment:"Framing inspected.",inspectedFrames:6}};
+    await apply({type:"stage.construction",at:"2026-09-06T12:00:00Z",worldId:request.worldId,requestId:request.requestId,sceneId:request.sceneId,shotId:request.shotId,baseVersion:request.baseVersion,status:"working",round:0,detail:"Inspecting next",draft:{staging,cast:[],sets:[],assumptions:[],assessment:"Draft",inspected:[]}});
+    const inspectingKeep = all(mounted,'[data-testid="stage-moved"] button').find(button=>button.textContent==="Keep")!;
+    assert.equal((inspectingKeep as HTMLButtonElement).disabled, true, "Keep waits for construction to finish (issue 1127)");
+    await click(inspectingKeep);
+    assert.equal(sent.some(message=>message.kind==="scene-command"), false, "an in-flight draft cannot be presented as saved");
     await apply({type:"stage.construction",at:"2026-09-06T12:00:00Z",worldId:request.worldId,requestId:request.requestId,sceneId:request.sceneId,shotId:request.shotId,baseVersion:request.baseVersion,status:"ready",round:2,detail:"Ready",draft:{staging,cast:[{sheetId:"maren-kest",parent:"vehicle",x:0,z:0}],sets:[{name:"Vehicle",group:"vehicle",x:0,z:0,w:2,h:1,d:4,solid:true}],assumptions:[],assessment:"Inspected",inspected:[]}});
     assert.equal(sent.some(message=>message.kind==="scene-command"),false,"AI construction does not file changes");
     assert.match(q(mounted,'[data-testid="workspace-stage"]')?.textContent??"",/Framing inspected/);
@@ -1387,6 +1392,25 @@ describe("New scene makes the scene and opens it (SPEC-036 R-37)", () => {
     assert.equal(q(mounted, ".fy-prodrail__item--press")!.hasAttribute("disabled"), true);
   });
 
+  it("labels duplicate episode orders by position without changing the scene's destination", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const episodes: Episode[] = [
+      { id: "ep_first", version: 1, order: 1, title: "First", scenes: [] },
+      { id: "ep_second", version: 1, order: 1, title: "Second", scenes: ["sc_04"] },
+    ];
+    const state = episodicState(episodes);
+    const mounted = await mountState(state, `/w/${FIXTURE_WORLD_ID}/p/saltlight/episodes/ep_second`);
+    assert.deepEqual(all(mounted, ".fy-prodrail__episode-name").map((node) => node.textContent), ["Episode 1 · First", "Episode 2 · Second"]);
+    assert.equal(all(mounted, '[title="Duplicate number"]').length, 2);
+    const create = q(mounted, '.fy-prodrail__new-scene[aria-label="New scene in Episode 2: Second"]')!;
+    await click(create);
+    const message = sent.findLast((candidate) => candidate.kind === "create-scene");
+    assert.ok(message?.kind === "create-scene");
+    assert.equal(message.episodeId, "ep_second");
+    assert.deepEqual(episodes.map((episode) => episode.order), [1, 1]);
+  });
+
   it("the episodic production-level press uses the episode in view", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
@@ -1549,7 +1573,7 @@ describe("Preview plays the accepted scene on its authored clock (R-28)", () => 
     for (const shot of orderedShots(scene)) {
       shot.staging = { version: 1, cast: [], sets: [], keys: [{ t: 0, p: [0, 1.5, 3], l: [0, 1, 0] }] };
       const sourceFingerprint = createHash("sha256").update(stageSourceFingerprintInput(scene, shot, "16:9")).digest("hex");
-      shot.staging.playblast = { artifactId: `blast-${shot.id}`, openingFrameArtifactId: `opening-${shot.id}`, version: 1, sourceFingerprint, durationSec: shot.durationSec, aspect: "16:9" };
+      shot.staging.playblast = { artifactId: `blast-${shot.id}`, openingFrameArtifactId: `opening-${shot.id}`, evaluatorVersion: 2, version: 1, sourceFingerprint, durationSec: shot.durationSec, aspect: "16:9" };
       for (const kind of ["video", "image"] as const) artifacts.push({ ...artifacts[0]!, kind,
         id: kind === "video" ? `blast-${shot.id}` : `opening-${shot.id}`,
         file: kind === "video" ? `${shot.id}.mp4` : `${shot.id}.png`, production: production.meta.id });
@@ -3306,7 +3330,8 @@ describe("the header's cast row and place chip (SPEC-044 R-1, R-2, R-4; T-1, T-2
     const place = header.querySelector(".fy-sw__place")!;
     assert.equal(place.getAttribute("title"), "The Vigil");
     assert.match(place.textContent ?? "", /The Vigil$/);
-    assert.ok(place.querySelector(".fy-sw__plate img"), "the place chip carries its plate (R-2)");
+    assert.equal(place.querySelector(".fy-sw__plate img"), null, "a kitless place uses initials without requesting a missing plate (#1154)");
+    assert.ok(place.querySelector(".fy-sw__plate")?.textContent?.trim());
     assert.equal(place.getAttribute("aria-haspopup"), "dialog");
   });
 
@@ -3357,4 +3382,33 @@ describe("the header's cast row and place chip (SPEC-044 R-1, R-2, R-4; T-1, T-2
     assert.match(added, /^\d{4}-\d{2}-\d{2}T/, "the member carries the time it was added (R-6)");
     assert.equal(q(mounted, ".fy-castpicker"), null);
   });
+});
+
+it("completed plans collapse to a line and can be reopened", async () => {
+  const mounted = await mountState(FIXTURE_STATE);
+  await apply({ at: "2026-09-15T12:00:00Z", type: "production.plan-state",
+    worldId: FIXTURE_WORLD_ID, productionId: "saltlight", states: [{
+      planId: "dp_finished", productionId: "saltlight", sceneId: "sc_04",
+      mode: "whole-scene", policy: "pre-authorized", capMicroUsd: 120000,
+      status: "completed", passes: [], spentEstimateMicroUsd: 100000, next: { kind: "none" },
+    }] });
+  const summary = q(mounted, ".fy-swplans > button")!;
+  assert.equal(summary.getAttribute("aria-expanded"), "false");
+  assert.ok(!q(mounted, ".fy-swplans .fy-boardcard"));
+  await click(summary);
+  assert.equal(summary.getAttribute("aria-expanded"), "true");
+  assert.ok(q(mounted, ".fy-swplans .fy-boardcard"));
+});
+
+it("completed plans keep failed passes visible", async () => {
+  const mounted = await mountState(FIXTURE_STATE);
+  await apply({ at: "2026-09-15T12:00:00Z", type: "production.plan-state",
+    worldId: FIXTURE_WORLD_ID, productionId: "saltlight", states: [{
+      planId: "dp_failed", productionId: "saltlight", sceneId: "sc_04",
+      mode: "whole-scene", policy: "pre-authorized", capMicroUsd: 120000,
+      status: "completed", passes: [{ passIndex: 0, state: "failed", estimatedMicroUsd: 0, reason: "Provider rejected the clip" }],
+      spentEstimateMicroUsd: 0, next: { kind: "none" },
+    }] });
+  assert.equal(q(mounted, ".fy-swplans > button")!.getAttribute("aria-expanded"), "true");
+  assert.match(q(mounted, ".fy-swplans")!.textContent ?? "", /Provider rejected the clip/);
 });

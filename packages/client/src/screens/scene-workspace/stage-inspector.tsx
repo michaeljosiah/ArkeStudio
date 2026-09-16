@@ -1,6 +1,9 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { Minus, Plus } from "../../components/icons.js";
 import type { StageSelection } from "./stage-viewport.js";
+
+/** Live numeric previews can remove authorship; Escape restores the whole focus-time draft. */
+export const StageEditContext = createContext<(() => () => void) | null>(null);
 
 /**
  * The Stage panel's field grammar (design turn 144): a row is a label in a fixed column and one
@@ -89,6 +92,9 @@ export function Stepper({ label, value, unit, step, min, max, decimals, placehol
   const shown = value === undefined ? "" : value.toFixed(places);
   const [text, setText] = useState(shown);
   const focused = useRef(false);
+  const focusValue = useRef(value);
+  const beginEdit = useContext(StageEditContext);
+  const rollback = useRef<(() => void) | undefined>(undefined);
   // Escape reverts and leaves the box, and the blur that follows must not read the box first: the
   // revert has not rendered when blur() runs synchronously, so the blur would commit what was typed.
   const escaped = useRef(false);
@@ -138,16 +144,16 @@ export function Stepper({ label, value, unit, step, min, max, decimals, placehol
         min={min}
         max={max}
         disabled={disabled}
-        onFocus={() => { focused.current = true; escaped.current = false; }}
+        onFocus={() => { focused.current = true; focusValue.current = value; rollback.current = beginEdit?.(); escaped.current = false; }}
         onChange={(event) => type(event.target.value)}
         onBlur={(event) => {
           focused.current = false;
-          if (escaped.current) { escaped.current = false; setText(shown); return; }
+          if (escaped.current) { escaped.current = false; return; }
           leave(event.currentTarget.value);
         }}
         onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
           if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); }
-          else if (event.key === "Escape") { fieldEscape(event); setText(shown); escaped.current = true; event.currentTarget.blur(); }
+          else if (event.key === "Escape") { fieldEscape(event); escaped.current = true; if (rollback.current) rollback.current(); else if (focusValue.current !== value) onCommit(focusValue.current); setText(focusValue.current === undefined ? "" : focusValue.current.toFixed(places)); event.currentTarget.blur(); }
         }}
       />
       {unit === undefined ? null : <span className="fy-swstage__unit">{unit}</span>}

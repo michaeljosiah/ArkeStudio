@@ -15,7 +15,7 @@ import {
 } from "@arke-studio/contracts";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { ARTIFACT_DRAG_TYPE, LANE_DRAG_SOUND } from "../src/screens/editor-audio.js";
-import { CutScreen } from "../src/screens/production.js";
+import { CutScreen } from "../src/screens/cut.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**

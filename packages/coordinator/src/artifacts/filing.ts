@@ -6,6 +6,7 @@ import {
   audioSourceOf,
   pickableArtifacts,
   ulid,
+  type ArtifactAudiobookGeneration,
   type ArtifactGeneration,
   type ArtifactKind,
   type ArtifactSidecar,
@@ -496,6 +497,35 @@ function generatedIdentity(
       links: [],
     };
   }
+  if (generation.source === "audiobook") {
+    // One take per block per run: the same block read again is a new take with a new job, so
+    // the identity is the job when there is one and the block's words, voice and direction
+    // when a local take was made without the queue — a run that ended after the file landed
+    // and before the record took it finds the take it already made, never a second copy. The
+    // direction is in it (issue 1190): a block directed since its take is another reading of
+    // the same words, and the undirected take is not the one to hand back for it. So is the
+    // take a remake stands beside (SPEC-047 R-4): a block made again while the record holds a
+    // take names that take, which makes it another artifact than the one on the shelf and
+    // still the same one on a retry — and a retired selection, named, cannot be answered by
+    // an older take of the same words (codex on PR 1193).
+    const local = (g: ArtifactAudiobookGeneration) => `${g.textHash}/${g.provider}/${g.model}/${g.voiceId}/${g.directionHash ?? ""}/${g.remakeOf ?? ""}`;
+    const made = generation.jobId ?? local(generation);
+    return {
+      producedBy: "audiobook",
+      isSame: (artifact) =>
+        artifact.generation?.source === "audiobook" &&
+        // The production too (codex on PR 1180): two books in one world can each hold a
+        // `neap` with the same words in the same voice, and neither may own the other's take.
+        artifact.generation.productionId === generation.productionId &&
+        artifact.generation.chapterId === generation.chapterId &&
+        artifact.generation.block === generation.block &&
+        (artifact.generation.jobId ?? local(artifact.generation)) === made,
+      // The chapter and the block, then a short tail so two takes of one block are two files.
+      stem: `${slugify(generation.chapterId).slice(0, 40) || "chapter"}-${generation.block.replace(/[^a-z0-9]+/gi, "-")}-${generation.textHash.slice(-6)}`,
+      // The chapter it belongs to, and the speaker when a sheet's voice read it.
+      links: [generation.chapterId, ...(generation.sheetId !== undefined ? [generation.sheetId] : [])],
+    };
+  }
   return {
     producedBy: "character-reference",
     // The job, not the take: the legacy tile path records no take at all, and one succeeded job
@@ -532,6 +562,12 @@ export async function fileGeneratedArtifact(
     generation: ArtifactGeneration;
     mediaProbe?: MediaProbe | null;
     abandoned?: () => boolean;
+    /**
+     * The production that owns the file (SPEC-020 R-11). An audiobook take is production media
+     * (SPEC-047 R-3): it is that book's, listed under it, and goes with it; a bench take and a
+     * character's reference stay the world's, as they were.
+     */
+    production?: string;
   },
 ): Promise<ArtifactSidecar> {
   const bytes = await readFile(toExtendedLength(input.sourcePath));
@@ -542,8 +578,27 @@ export async function fileGeneratedArtifact(
   const identity = generatedIdentity(input.generation, basename(original, extname(original)));
   const kind = kindForFile(original);
   const filed = await store.gateOp(async () => {
-    const existing = store.getBundle().artifacts.find(identity.isSame);
-    if (existing) return { artifact: existing, created: false };
+    // A retired artifact is off the shelf by the person's word: the same identity made again
+    // is a new artifact beside it, never the retired one handed back.
+    const existing = store.getBundle().artifacts.find((artifact) => identity.isSame(artifact) && artifact.retiredAt === undefined);
+    if (existing) {
+      // The same take filed again is the take already on the shelf — unless its media is gone,
+      // as a world carried by hand can lose it: then the file is restored under the sidecar it
+      // always had, so the id every record names stays true and the block is made rather than
+      // handed its dead take back (codex on PR 1180). The hash and the making are the new
+      // file's; the id, the links and the owner are the old one's. "Gone" is judged as the
+      // audiobook's own presence check judges it — a regular file, not any entry at the path
+      // (codex on PR 1183) — and the old measurement goes with the old bytes, or the probe
+      // would skip the restored file and its duration would be the last file's.
+      const media = join(store.dir, "artifacts", existing.file);
+      if (await stat(toExtendedLength(media)).then((s) => s.isFile(), () => false)) return { artifact: existing, created: false };
+      await atomicWriteFile(media, bytes);
+      const current = await currentSidecar(store, existing);
+      const { mediaInfo: _measured, ...kept } = current?.sidecar ?? existing;
+      const restored: ArtifactSidecar = { ...kept, hash: hash as ArtifactSidecar["hash"], generation: input.generation };
+      await writeSidecar(store, restored, current?.raw ?? null);
+      return { artifact: restored, created: true };
+    }
 
     const taken = new Set(store.getBundle().artifacts.map((artifact) => artifact.file));
     let file = `${identity.stem}${ext}`;
@@ -564,8 +619,9 @@ export async function fileGeneratedArtifact(
       hash: hash as ArtifactSidecar["hash"],
       origin: { by: "system", producedBy: identity.producedBy },
       links: identity.links,
-      // No `production` key: the world owns it (SPEC-020 R-13). Neither the bench nor a
-      // character's reference shelf belongs to one.
+      // No `production` key unless the producer names one (SPEC-020 R-13): the world owns a
+      // bench take and a character's reference; an audiobook take is its production's.
+      ...(input.production !== undefined ? { production: input.production } : {}),
       generation: input.generation,
       created: store.now(),
     };

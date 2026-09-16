@@ -40,6 +40,16 @@ const GPT: ManifestModel = {
   pricing: { kind: "perImage", microUsdPerImage: 40_000 },
 };
 
+const FISH: ManifestModel = {
+  id: "fish-s2.1-pro",
+  provider: "fishaudio",
+  capability: "voice-tts",
+  displayName: "Fish Audio S2.1 Pro",
+  accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+  limits: { maxPromptChars: 5000, audioFormat: "mp3" },
+  pricing: { kind: "perCharacter", microUsdPerCharacter: 15 },
+};
+
 const stateWith = (patch: { disabled?: string[]; faults?: ClientState["app"]["routing"]["faults"] }) => ({
   ...FIXTURE_STATE,
   app: {
@@ -102,6 +112,33 @@ describe("Providers holds the credential (SPEC-042 R-3, R-9, R-18)", () => {
     assert.match(pane, /fingerprint 1C7D9A20/);
     assert.doesNotMatch(pane, /connected/);
   });
+  it("a key that authenticates but cannot pay is connected and says so, never rejected (issue 1167)", () => {
+    // Fish Audio's API credit is its own balance: the key was accepted, the account cannot pay,
+    // and "key rejected" with a Replace key would send the person to fix a key that is fine.
+    const state = stateWith({});
+    const reason = "the key authenticates but the balance is $0.00 — top up on fish.audio";
+    state.app.providers = [{ id: "fishaudio", configured: true, credentialFingerprint: "1C7D9A20", validation: "valid", fault: null, lastValidated: "2026-09-14T03:05:21.000Z", probes: [
+      { capability: "voice-tts", available: false, authenticated: true, reason },
+      { capability: "voice-clone", available: false, authenticated: true, reason },
+    ] }];
+    __setStateForTest(state);
+    const html = providers("/settings/providers?provider=fishaudio");
+    const pane = plain(html.slice(html.indexOf('data-testid="provider-pane"')));
+    assert.match(pane, /can&#x27;t pay/);
+    assert.doesNotMatch(pane, /key rejected/i);
+    assert.match(pane, /top up on fish\.audio/, "the probe's own reason, on the Last tested line");
+    assert.match(html.slice(0, html.indexOf('data-testid="provider-pane"')), /Fish Audio<\/span><span class="fy-src__note">can&#x27;t pay/);
+    // The models page's group note carries the same word (issue 1191), never "Not unlocked by this key".
+    state.app.manifest = { ...state.app.manifest!, models: [...state.app.manifest!.models, FISH] };
+    __setStateForTest(state);
+    const page = models("/settings/models?half=cloud&kind=voice-tts");
+    const at = page.indexOf('class="fy-by__name">Fish Audio<');
+    assert.ok(at >= 0, "the Fish Audio group is on the voice page");
+    const group = page.slice(at, at + 1200);
+    assert.match(group, /Can&#x27;t pay/);
+    assert.doesNotMatch(group, /Not unlocked by this key/);
+  });
+
   it("carries no model, and says one line about them", () => {
     __setStateForTest(stateWith({}));
     const html = providers("/settings/providers?provider=fal");
@@ -154,6 +191,62 @@ describe("Providers holds the credential (SPEC-042 R-3, R-9, R-18)", () => {
     assert.match(html, /THIS MACHINE/);
     assert.match(html, /Downloads/);
     assert.doesNotMatch(html, /role="switch"/);
+  });
+
+  it("an engine's row always says its state, a running one included (issue 1191)", () => {
+    const state = stateWith({});
+    const engine = { state: "ready" as const };
+    state.app.voiceRuntime = {
+      source: "bundled",
+      configured: true,
+      bundledAvailable: true,
+      executableName: "voxa.exe",
+      version: "1.0.0",
+      protocolVersion: 1,
+      architecture: "x64",
+      expectedArchitecture: "x64",
+      processState: "healthy",
+      endpointCompatible: true,
+      failureCategory: null,
+      detail: "running",
+      configurationWarning: null,
+      engines: ["kokoro", "whisper"],
+      engineStatus: { kokoro: engine, phonemizer: engine, whisper: engine },
+    } as ClientState["app"]["voiceRuntime"];
+    state.app.comfyui = null;
+    __setStateForTest(state);
+    const html = providers("/settings/providers?provider=voxa");
+    const column = html.slice(0, html.indexOf('data-testid="provider-pane"'));
+    assert.match(column, /Voxa<\/span><span class="fy-src__note">running/);
+    assert.match(column, /ComfyUI<\/span><span class="fy-src__note">not started/, "an engine nothing has launched says so, on the standalone host too");
+    assert.match(column, /Ollama<\/span><span class="fy-src__note">(untested|not answering|answering)/);
+  });
+
+  it("a key the store could not hold is not saved, never rejected (issue 1191)", () => {
+    const state = stateWith({});
+    state.app.providers = [{ id: "fal", configured: false, validation: "untested", probes: [], fault: "the key was not saved — credential encryption is unavailable on this machine", faultKind: "not-saved" }];
+    __setStateForTest(state);
+    const html = providers("/settings/providers?provider=fal");
+    assert.match(html.slice(0, html.indexOf('data-testid="provider-pane"')), /FAL<\/span><span class="fy-src__note">not saved/);
+    const pane = plain(html.slice(html.indexOf('data-testid="provider-pane"')));
+    assert.match(pane, /not saved/);
+    assert.doesNotMatch(pane, /key rejected/i);
+    assert.match(pane, /credential encryption is unavailable on this machine/, "the store's own reason");
+  });
+
+  it("a key the store could not clear is still the one held: not cleared, and its models stay on (codex on PR 1195)", () => {
+    const state = stateWith({});
+    state.app.providers = [{ id: "fal", configured: true, credentialFingerprint: "1C7D9A20", validation: "valid", lastValidated: "2026-09-15T05:05:21.000Z", probes: [{ capability: "image", available: true }, { capability: "video", available: true }], fault: "the key was not cleared — the file is read-only", faultKind: "not-cleared" }];
+    __setStateForTest(state);
+    const html = providers("/settings/providers?provider=fal");
+    assert.match(html.slice(0, html.indexOf('data-testid="provider-pane"')), /FAL<\/span><span class="fy-src__note">not cleared/);
+    assert.doesNotMatch(plain(html.slice(html.indexOf('data-testid="provider-pane"'))), /not saved|key rejected/i);
+    // On AI models the group is untroubled: the key the provider holds is the one it always had.
+    const page = models("/settings/models?half=cloud&kind=image");
+    const at = page.indexOf('class="fy-by__name">FAL<');
+    assert.ok(at >= 0);
+    assert.match(page.slice(at, at + 400), /1 of 1 on/, "the image kind: on, untroubled");
+    assert.doesNotMatch(page.slice(at, at + 400), /Replace key/);
   });
 });
 
@@ -316,18 +409,20 @@ describe("General, when a routed model is switched off", () => {
     ],
   };
 
-  it("flags the strand at the top and names the repair", () => {
+  it("flags the strand on its own row, and nowhere above the list (design turn 149)", () => {
     __setStateForTest(stateWith({ disabled: ["seedance-2.0"], faults: STRANDED.faults }));
     const html = cloudAi();
-    assert.ok(html.includes("has nowhere to go"));
-    assert.ok(html.includes("turn it back on"));
+    // One fault, one place: the state cell beside the control, in the warning colour with its
+    // dot. The callout that said the same thing above the rows is gone.
+    assert.match(html, /fy-fact__state--warn"><span class="fy-set__dot fy-set__dot--warn"[^>]*><\/span>turned off</);
+    assert.ok(!html.includes("has nowhere to go"));
   });
 
   it("says turned off, not needs a key — the two strands have different repairs", () => {
     __setStateForTest(stateWith({ disabled: ["seedance-2.0"], faults: STRANDED.faults }));
     const html = cloudAi();
-    assert.ok(html.includes("turned off in AI models"));
-    assert.ok(!html.includes("fal has no key"), "fal has a key; the model is simply off");
+    assert.match(html, /class="fy-fact__state fy-fact__state--warn">.*?turned off</);
+    assert.ok(!html.includes("no key"), "fal has a key; the model is simply off");
   });
 
   it("never re-routes: the switched-off model is still what the row shows", () => {

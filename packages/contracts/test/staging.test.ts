@@ -7,7 +7,7 @@ import {
   ShotSchema,
   ShotStagingSchema,
   MAX_STAGE_WALK_SPEED_MPS,
-  STAGE_FRAME_RATE, STAGE_CAMERA_NEAR,
+  STAGE_FRAME_RATE, STAGE_CAMERA_NEAR, STAGE_CAMERA_EVALUATOR_VERSION,
   stageRigOffset,
   stageRigSeed,
   stageShot,
@@ -295,6 +295,7 @@ describe("the Stage's arithmetic", () => {
 
   it("makes inherited playblasts stale when shared blocking moves", () => {
     const pin = {
+      evaluatorVersion: STAGE_CAMERA_EVALUATOR_VERSION,
       artifactId: "ar_01J8G0000000000000000000A1",
       version: 1,
       blocking: { owner: "scene" as const, version: 2 },
@@ -304,7 +305,7 @@ describe("the Stage's arithmetic", () => {
     assert.equal(stagePlayblastIsStale({ blocking: { version: 2, cast: [], sets: [] } }, staging, shown), false);
     assert.equal(stagePlayblastIsStale({ blocking: { version: 3, cast: [], sets: [] } }, staging, shown), true);
     const legacyLocal = { ...staging, cast: [], sets: [], playblast: { artifactId: pin.artifactId, version: 1 } };
-    assert.equal(stagePlayblastIsStale({ blocking: { version: 9, cast: [], sets: [] } }, legacyLocal, shown), false);
+    assert.equal(stagePlayblastIsStale({ blocking: { version: 9, cast: [], sets: [] } }, legacyLocal, shown), true, "legacy renders require re-export under the continuous camera evaluator");
     const rigged = { ...staging, rig: "handheld" as const, seed: 42, rigIntensity: 1, playblast: { ...pin, rig: "handheld" as const, seed: 42, rigIntensity: 1 } };
     assert.equal(stagePlayblastIsStale({ blocking: { version: 2, cast: [], sets: [] } }, rigged, shown), false);
     assert.equal(stagePlayblastIsStale({ blocking: { version: 2, cast: [], sets: [] } }, { ...rigged, seed: 43 }, shown), true);

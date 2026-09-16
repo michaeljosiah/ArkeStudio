@@ -16,7 +16,7 @@ This is the first implementation slice of [issue #1138](https://github.com/micha
 
 ## What the journal guarantees
 
-`WorldChatInputJournal` requires the owning world's write and compatibility operations. It checks admission under ownership before raising world schema 23, so an already invalid command does not upgrade the world. It repeats validation under `ownedWrite` after the boundary and before writing the input event. These operations remain separate because the boundary commit and owned write use the same world queue. A closed or unwritable world cannot admit new input.
+`WorldChatInputJournal` requires the owning world's write and compatibility operations. It checks admission under ownership before raising world schema 27, so an already invalid command does not upgrade the world. It repeats validation under `ownedWrite` after the boundary and before writing the input event. These operations remain separate because the boundary commit and owned write use the same world queue. A closed or unwritable world cannot admit new input.
 
 Admission retains the original submission identity, text, requested delivery/run, resolved constraints, routing and attachment hashes. Explicit model, subject and reply-only selections must match their capture. Inputs start without a turn id. Repeated submission content returns the original durable receipt; changed content under that identity is refused. Each conversation accepts at most ten unresolved inputs, with the existing 16,000-character and twenty-attachment limits.
 

@@ -327,7 +327,6 @@ export interface HarnessAdapter {
   sendMessage(input: SendMessageInput): Promise<SendReceipt>;
   /** Fire-and-watch: must not block while the turn runs. */
   dispatchAsync(input: SendMessageInput): Promise<SendReceipt>;
-  interrupt?(sessionId: string): Promise<void>;
   usageTokens?(sessionId: string): number;
 
   // ---- gated ----

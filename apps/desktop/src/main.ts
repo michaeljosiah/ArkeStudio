@@ -24,6 +24,8 @@ import {
   ChildSupervisor,
   ComfyUiEngineService,
   Coordinator,
+  createStudioHost,
+  type StudioServer,
   AppSettingsFile,
   defaultAppRoot,
   FsWorldProvider,
@@ -53,7 +55,11 @@ import {
   higgsfieldWorkspaces,
   probeRuntime,
   SHIPPED_MANIFEST,
+  BREEZE_MODEL,
+  FISH_MODEL,
+  VOXTRAL_MODEL,
   type VoiceCatalogueClient,
+  type VoiceSlotClient,
 } from "@arke-studio/providers";
 import {
   KOKORO_PRESETS,
@@ -84,6 +90,7 @@ import {
   comfyUiWeightsComponentId,
   ROSTER,
   skillFor,
+  type ProviderId,
   type ThemePreference,
   type VoiceRuntimeFailure,
   type VoiceRuntimeStatus,
@@ -187,6 +194,7 @@ function fetchedHiggsfieldPath(appRoot: string): string | null {
 }
 
 let coordinator: Coordinator | null = null;
+let studioServer: StudioServer | null = null;
 let window: BrowserWindow | null = null;
 let shuttingDown = false;
 let allowQuit = false;
@@ -968,8 +976,11 @@ async function initialize(): Promise<{ port: number }> {
     health: () =>
       voxaSelection.command === null || !voxaRequestsEnabled ? Promise.resolve(null) : voxaClient.health(),
     listVoices: () => voxaClient.listVoices(),
-    synthesize: (input: { voiceId: string; text: string; params?: Record<string, number> }) =>
-      voxaClient.synthesize(input),
+    // The caller's signal travels with the request (codex on PR 1183): a stopped audiobook run
+    // or a cancelled performance ends the Voxa request, and the client's own waiter, rather
+    // than leaving the engine to finish a paragraph nobody is waiting for.
+    synthesize: (input: { voiceId: string; text: string; params?: Record<string, number> }, options?: { signal?: AbortSignal }) =>
+      voxaClient.synthesize(input, options ?? {}),
     transcribe: (audio: Uint8Array, contentType: string) => voxaClient.transcribe(audio, contentType),
   };
 
@@ -1122,7 +1133,7 @@ async function initialize(): Promise<{ port: number }> {
   });
 
   const transportToken = randomBytes(32).toString("hex");
-  coordinator = new Coordinator({
+  const studioHost = createStudioHost({
     transportAuth: { token: transportToken, allowedOrigins: desktopTransportOrigins(process.env.ARKE_DEV_SERVER_URL) },
     provider,
     adapter,
@@ -1292,6 +1303,30 @@ async function initialize(): Promise<{ port: number }> {
       externallyPresent: async (entryId) =>
         entryId === "comfyui-runtime" ? comfyUiEngine.externallySelected() : false,
     },
+    // Breeze and Fish keep a cloned voice on the account — a slot, a model; the library asks for
+    // it here (SPEC-046 R-13). A reader whose client carries no slot calls keeps none.
+    hostedVoiceSlots: {
+      save: (provider, key, input, signal) => {
+        const client = providerClients[provider as ProviderId] as Partial<VoiceSlotClient> | undefined;
+        if (client?.saveVoice === undefined) return Promise.reject(new Error(`${provider} keeps no voice slots`));
+        return client.saveVoice(key, input, signal);
+      },
+      remove: (provider, key, voiceId, signal) => {
+        const client = providerClients[provider as ProviderId] as Partial<VoiceSlotClient> | undefined;
+        if (client?.deleteVoice === undefined) return Promise.resolve();
+        return client.deleteVoice(key, voiceId, signal);
+      },
+      find: (provider, key, name, signal) => {
+        const client = providerClients[provider as ProviderId] as Partial<VoiceSlotClient> | undefined;
+        if (client?.findVoice === undefined) return Promise.resolve(null);
+        return client.findVoice(key, name, signal);
+      },
+      has: (provider, key, voiceId, signal) => {
+        const client = providerClients[provider as ProviderId] as Partial<VoiceSlotClient> | undefined;
+        if (client?.hasVoice === undefined) return Promise.resolve(false);
+        return client.hasVoice(key, voiceId, signal);
+      },
+    },
     comfyui: {
       service: comfyUiEngine,
       choosePath: async () => {
@@ -1386,6 +1421,25 @@ async function initialize(): Promise<{ port: number }> {
           provider: "elevenlabs",
           list: (key: string) => (providerClients.elevenlabs as VoiceCatalogueClient).listVoicesCatalog(key),
         },
+        // The hosted readers' own presets (SPEC-046 R-32): Voxtral's thirty, Breeze's ranked first page.
+        {
+          provider: "mistral",
+          list: (key: string) => (providerClients.mistral as VoiceCatalogueClient).listVoicesCatalog(key),
+        },
+        {
+          provider: "breezeblue",
+          list: (key: string) => (providerClients.breezeblue as VoiceCatalogueClient).listVoicesCatalog(key),
+        },
+        {
+          provider: "fishaudio",
+          list: (key: string) => (providerClients.fishaudio as VoiceCatalogueClient).listVoicesCatalog(key),
+        },
+      ],
+      // And the library's own voices read through them (R-10), when keyed.
+      hostedReaders: [
+        { provider: "mistral", model: VOXTRAL_MODEL },
+        { provider: "breezeblue", model: BREEZE_MODEL },
+        { provider: "fishaudio", model: FISH_MODEL },
       ],
     },
     observeEvent: (event) => {
@@ -1393,6 +1447,8 @@ async function initialize(): Promise<{ port: number }> {
       if (event.type === "appearance.changed") applyHostTheme(event.preference);
     },
   });
+  coordinator = studioHost.coordinator;
+  studioServer = studioHost.server;
   startupProvider = null;
 
   // Both children are allowed to be absent: the app opens, browses and navigates regardless,
@@ -1400,7 +1456,7 @@ async function initialize(): Promise<{ port: number }> {
   if (opencodeSupervisor) coordinator.superviseAs("harness", opencodeSupervisor);
   coordinator.superviseAs("voice", voxaSupervisor);
 
-  const { port } = await coordinator.start(0);
+  const { port } = await studioServer.start(0);
   transportSession = { port, token: transportToken };
   void updateController.initialize();
   backgroundNotifications.arm(coordinator.getState());
@@ -1421,7 +1477,7 @@ async function shutdownConfirmed(): Promise<void> {
   backgroundNotifications.stop();
   const stop = (async () => {
     try {
-      await (coordinator?.stop() ?? startupProvider?.close() ?? Promise.resolve());
+      await (studioServer?.stop() ?? startupProvider?.close() ?? Promise.resolve());
     } finally {
       await closeProviderTransport();
     }
@@ -1457,9 +1513,10 @@ if (!gotLock) {
     startupController = new StartupController({
       initialize,
       cleanup: async () => {
-        const started = coordinator;
+        const started = studioServer;
         const provider = startupProvider;
         coordinator = null;
+        studioServer = null;
         startupProvider = null;
         try {
           if (started) await started.stop();

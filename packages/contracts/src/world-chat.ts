@@ -1,3 +1,4 @@
+import { valueSchema } from "./value-schema.js";
 import { z } from "zod";
 import {
   WorldChatInputBoundarySchema, WorldChatInputConstraintsSchema, WorldChatInputEventSchemas,
@@ -1089,7 +1090,7 @@ export type FrameRunOutcomeReport = z.infer<typeof FrameRunOutcomeReportSchema>;
  * record. Splitting them would let a crash persist a reply that refers to propositions which
  * never landed, and the panel would then describe changes that do not exist.
  */
-export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
+export const WorldChatStoredEventSchema = valueSchema(z.discriminatedUnion("type", [
   ...WorldChatInputEventSchemas,
   WorldChatInputPromotionSchema.extend({
     message: WorldChatMessageSchema,
@@ -1362,11 +1363,11 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
       undo: ConversationActionUndoLinkSchema,
     })
     .strict(),
-]);
+]));
 export type WorldChatStoredEvent = z.infer<typeof WorldChatStoredEventSchema>;
 
 /** One line of `events.jsonl`. The sequence is monotonic per conversation. */
-export const WorldChatEventEnvelopeSchema = z
+export const WorldChatEventEnvelopeSchema = valueSchema(z
   .object({
     schemaVersion: z.literal(1),
     seq: z.number().int().min(1),
@@ -1376,7 +1377,7 @@ export const WorldChatEventEnvelopeSchema = z
     requestId: z.string().min(1).optional(),
     event: WorldChatStoredEventSchema,
   })
-  .strict();
+  .strict());
 export type WorldChatEventEnvelope = z.infer<typeof WorldChatEventEnvelopeSchema>;
 
 // ---------------------------------------------------------------------------
@@ -1513,14 +1514,14 @@ export type WorldChatLoaded = z.infer<typeof WorldChatLoadedSchema>;
  * is distrusted whenever its sequence runs past the complete tail of the log it claims to
  * summarise.
  */
-export const WorldChatCheckpointSchema = z
+export const WorldChatCheckpointSchema = valueSchema(z
   .object({
     // Derived projections from the old fold kept terminal interruptions active (#1030).
     schemaVersion: z.literal(2),
     throughSeq: z.number().int().min(0),
     view: WorldChatLoadedSchema,
   })
-  .strict();
+  .strict());
 export type WorldChatCheckpoint = z.infer<typeof WorldChatCheckpointSchema>;
 
 // ---------------------------------------------------------------------------
@@ -1690,7 +1691,7 @@ export const TURN_RESULT_BOUNDS = {
   actions: 12,
 } as const;
 
-export const WorldChatTurnResultSchema = z
+export const WorldChatTurnResultSchema = valueSchema(z
   .object({
     setupUpdate: ProductionSetupUpdateSchema.optional(),
     reply: z.string().max(TURN_RESULT_BOUNDS.reply),
@@ -1722,7 +1723,7 @@ export const WorldChatTurnResultSchema = z
     /** Exact world-authoring operations prepared as permission cards; none writes during the turn. */
     actions: z.array(ModelWorldChatActionSchema).max(TURN_RESULT_BOUNDS.actions).default([]),
   })
-  .strict();
+  .strict());
 export type WorldChatTurnResult = z.infer<typeof WorldChatTurnResultSchema>;
 
 // ---------------------------------------------------------------------------

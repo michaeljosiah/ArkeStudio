@@ -7,7 +7,7 @@ import { App } from "../src/App.js";
 import { __applyForTest, __handleFrameForTest, __setStateForTest, __stateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
-import { legacySceneView, orderedShots } from "@arke-studio/contracts";
+import { legacySceneView, orderedShots, voiceTargetKey } from "@arke-studio/contracts";
 
 /**
  * The voice-line dialog (built 2026-08-17). Everything around it already existed — the Audio
@@ -296,6 +296,7 @@ describe("a character's voice", () => {
       previewLine: { text: "the verse, under the water", source: "own-line" as const },
       cloudPreviewMicroUsd: 30000,
       previewMicroUsdByVoice: {},
+      notices: {},
     },
   };
   /** The sheet as it is before anything has been chosen for it — the state most characters are in. */
@@ -403,7 +404,8 @@ describe("a character's voice", () => {
   it("states a cloud preview's price on the row whose circle would spend it", () => {
     const html = render(`${page}?choose=1`, FIXTURE_STATE, { voiceCandidates: candidates });
     assert.match(html, /\$0\.03 preview/);
-    assert.match(html, /kokoro · free/);
+    // The reader by its name, as the Reads lines row says it (SPEC-046 R-30), not the provider id.
+    assert.match(html, /Kokoro · free/);
   });
 
   it("keeps the current unready clone visible, and refuses to preview or assign it", () => {
@@ -456,13 +458,134 @@ describe("a character's voice", () => {
   });
 });
 
+describe("a cloned voice's readers on the Voice page (SPEC-046 R-30, R-31, R-34; issue 1149)", () => {
+  const sheetId = FIXTURE_STATE.world!.sheets[0]!.id;
+  const page = `/w/${FIXTURE_WORLD_ID}/cast/${sheetId}/voice`;
+  const row = (id: string, provider: string, displayName: string, pricing: Record<string, unknown>) => ({
+    id, provider, capability: "voice-tts", displayName, accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: { audioFormat: "wav" }, pricing,
+  });
+  const models = [
+    row("comfyui-cloned-voice", "comfyui", "Local · Cloned Voice", { kind: "unmetered" }),
+    row("voxtral-mini-tts", "mistral", "Voxtral TTS", { kind: "perCharacter", microUsdPerCharacter: 16 }),
+    row("breeze-tts-2", "breezeblue", "Breeze TTS 2", { kind: "perCharacter", microUsdPerCharacter: 40, unit: "cjk-double" }),
+    row("eleven_multilingual_v2", "elevenlabs", "Eleven Multilingual v2", { kind: "perCharacter", microUsdPerCharacter: 100 }),
+  ];
+  /** The one library voice, as each reader offers it: the same id, the reader's provider and row. */
+  const reader = (provider: string, model: string, local: boolean) => ({
+    candidate: { provider, model, voiceId: "harbour", label: "Harbour", attributes: ["low"], local, canClone: false, readsClone: "harbour" },
+    matched: ["low"],
+    overlap: 1,
+  });
+  const preset = {
+    candidate: { provider: "mistral", model: "voxtral-mini-tts", voiceId: "en_paul_neutral", label: "Paul · neutral", attributes: ["male", "american"], local: false, canClone: false },
+    matched: [],
+    overlap: 0,
+  };
+  const ranked = [reader("comfyui", "comfyui-cloned-voice", true), reader("mistral", "voxtral-mini-tts", false), reader("breezeblue", "breeze-tts-2", false), preset];
+  const breezeKey = voiceTargetKey({ provider: "breezeblue", model: "breeze-tts-2", voiceId: "harbour" });
+  const candidates = (notices: Record<string, string> = {}) => ({
+    [sheetId]: {
+      extracted: ["low"],
+      ranked,
+      previewLine: { text: "the verse, under the water", source: "own-line" as const },
+      cloudPreviewMicroUsd: null,
+      previewMicroUsdByVoice: { [breezeKey]: 2000 },
+      notices,
+    },
+  });
+  const through = (provider: string, model: string) => ({ provider, model, voiceId: "harbour", label: "Harbour", assignedAtVersion: 4 });
+  const stateWith = (voice: Record<string, unknown> | undefined, remote?: Record<string, unknown>): ClientState => ({
+    ...FIXTURE_STATE,
+    app: { ...FIXTURE_STATE.app, manifest: { ...FIXTURE_STATE.app.manifest!, models: [...FIXTURE_STATE.app.manifest!.models, ...models] } as never },
+    world: {
+      ...FIXTURE_STATE.world!,
+      clonedVoices: [{ id: "harbour", name: "Harbour", clip: "voices/harbour.wav", language: "en", ...(remote ? { remote } : {}) } as never],
+      sheets: FIXTURE_STATE.world!.sheets.map((sheet) => (sheet.id === sheetId ? { ...sheet, voice: voice as never } : sheet)),
+    },
+  });
+
+  it("the entrance counts voices as the picker does and names every provider, or how many (issues 1169, 1191)", () => {
+    // One clone with three readers and one preset: two voices, as the picker's All says, and
+    // three providers named — not "4 voices" with a subset of the providers.
+    const html = render(page, stateWith(undefined), { voiceCandidates: candidates() });
+    assert.match(html, /2 voices/);
+    assert.match(html, /comfyui · mistral · breezeblue/);
+    const wide = {
+      [sheetId]: { ...candidates()[sheetId]!, ranked: [...ranked, reader("elevenlabs", "eleven_multilingual_v2", false), reader("fishaudio", "fish-s2.1-pro", false)] },
+    };
+    const five = render(page, stateWith(undefined), { voiceCandidates: wide });
+    assert.match(five, /2 voices/, "more readers of the same voice are not more voices");
+    assert.match(five, /5 providers/);
+    assert.doesNotMatch(five, /comfyui · mistral · breezeblue/, "never three names of five");
+  });
+
+  it("names the reader and its price on Reads lines, in the row's own figures (R-30)", () => {
+    assert.match(render(page, stateWith(through("mistral", "voxtral-mini-tts")), { voiceCandidates: candidates() }), /Harbour · Voxtral · \$0\.016 per 1k/);
+    assert.match(render(page, stateWith(through("comfyui", "comfyui-cloned-voice")), { voiceCandidates: candidates() }), /Harbour · IndexTTS · free/);
+    // A preset too — the fixture's ElevenLabs voice — priced by its row, not "a line at a time".
+    const preset = render(page, stateWith(FIXTURE_STATE.world!.sheets[0]!.voice as never), { voiceCandidates: candidates() });
+    assert.match(preset, /Low tide · ElevenLabs · \$0\.10 per 1k/);
+    assert.doesNotMatch(preset, /priced a line at a time/);
+  });
+
+  it("draws a cloned voice once, with a chip per reader, and opens on the shelf the address names", () => {
+    const html = render(`${page}?choose=1&tab=mine`, stateWith(through("mistral", "voxtral-mini-tts")), { voiceCandidates: candidates() });
+    const sheet = html.slice(html.indexOf('data-testid="voice-catalogue"'));
+    assert.equal((sheet.match(/class="fy-voicerow[ "]/g) ?? []).length, 1, "one voice with three readers is one row, not three");
+    assert.match(sheet, /class="fy-seg__item fy-seg__item--active" data-testid="voice-tab-mine"/);
+    assert.match(sheet, />Mine 1</);
+    assert.match(sheet, />All 2</, "the voice and the preset");
+    for (const [provider, label] of [["comfyui", "IndexTTS · free"], ["mistral", "Voxtral · \\$0\\.016 per 1k"], ["breezeblue", "Breeze · \\$0\\.04 per 1k · CJK ×2"]]) {
+      assert.match(sheet, new RegExp(`data-testid="voice-reader-${provider}"[^>]*>.*?${label}</button>`), `${provider} chip`);
+    }
+    // The assigned reader is the pressed chip, and the row is the current one.
+    assert.match(sheet, /aria-pressed="true"[^>]*data-testid="voice-reader-mistral"/);
+    assert.match(sheet, />current</);
+  });
+
+  it("a hosted vendor's own voices read presets (R-31)", () => {
+    const html = render(`${page}?choose=1&tab=cloud`, stateWith(undefined), { voiceCandidates: candidates() });
+    const sheet = html.slice(html.indexOf('data-testid="voice-catalogue"'));
+    assert.match(sheet, /Voxtral · presets</);
+    assert.match(sheet, />Cloud 2</, "the voice through its two cloud readers, and the preset");
+  });
+
+  it("says what a first read through a reader adds, on its row, before the circle that would spend it (R-14, R-34)", () => {
+    const notice = "first read · clone charge, priced by BreezeBlue";
+    const first = render(`${page}?choose=1&tab=mine`, stateWith(through("breezeblue", "breeze-tts-2")), { voiceCandidates: candidates({ [breezeKey]: notice }) });
+    assert.match(first, new RegExp(notice));
+    const second = render(`${page}?choose=1&tab=mine`, stateWith(through("breezeblue", "breeze-tts-2"), { breezeblue: { voiceId: "voc_1" } }), { voiceCandidates: candidates() });
+    assert.doesNotMatch(second, /clone charge/);
+    assert.match(second, />current</);
+  });
+
+  it("offers Delete on Mine, and only there (R-15)", () => {
+    assert.match(render(`${page}?choose=1&tab=mine`, stateWith(undefined), { voiceCandidates: candidates() }), /data-testid="voice-delete"[^>]*>Delete</);
+    assert.doesNotMatch(render(`${page}?choose=1`, stateWith(undefined), { voiceCandidates: candidates() }), /data-testid="voice-delete"/);
+  });
+
+  it("states the first read's charge on the voice-line dialog too, until the vendor holds the voice", () => {
+    const prod = production()!;
+    const speakerId = spokenShots()[0]!.audio!.speaker!;
+    const withSpeaker = (remote?: Record<string, unknown>): ClientState => {
+      const state = stateWith(undefined, remote);
+      return { ...state, world: { ...state.world!, sheets: state.world!.sheets.map((sheet) => (sheet.id === speakerId ? { ...sheet, voice: through("breezeblue", "breeze-tts-2") as never } : sheet)) } };
+    };
+    const path = `/w/${FIXTURE_WORLD_ID}/p/${prod.meta.id}/generate/voice-line`;
+    assert.match(render(path, withSpeaker()), /data-testid="voice-line-first-read"[^>]*>first read · clone charge, priced by BreezeBlue</);
+    assert.doesNotMatch(render(path, withSpeaker({ breezeblue: { voiceId: "voc_1" } })), /voice-line-first-read/);
+  });
+});
+
 describe("the narrator in Settings", () => {
   // General owns the reading voice; Appearance holds theme choices (issue 1004).
   it("names the shipped local voice, and says it is free, until one is chosen", () => {
     const html = render("/settings/general");
-    assert.match(html, /data-testid="narrator-name"/);
-    assert.match(html, /George/);
-    assert.match(html, /reads on this machine · free/);
+    assert.match(html, /data-testid="narrator-name">George</);
+    // The reader and its price, as the Voice page's rows say them (SPEC-046 R-30) — and no
+    // sentence about where it reads (design turn 149).
+    assert.match(html, /class="fy-fact__state">Kokoro · free</);
+    assert.doesNotMatch(html, /reads on this machine/);
     assert.doesNotMatch(render("/settings/appearance"), /data-testid="narrator-name"/);
     // Nothing to reset when nothing was chosen.
     assert.doesNotMatch(html, /data-testid="narrator-reset"/);
@@ -481,15 +604,36 @@ describe("the narrator in Settings", () => {
   it("says plainly when the narrator will be billed", () => {
     // The one thing this control must never do quietly: a cloud narrator bills every press of
     // "read aloud", so the row says so rather than leaving it to be discovered on the ledger.
+    // The row carries the reader's price — the manifest row's rate, as the Voice page states it
+    // (SPEC-046 R-30) — in place of a sentence about billing (design turn 149).
     const chosen: ClientState = {
       ...FIXTURE_STATE,
-      app: { ...FIXTURE_STATE.app, narrator: { provider: "elevenlabs", voiceId: "v_roger", label: "Roger" } },
+      app: {
+        ...FIXTURE_STATE.app,
+        manifest: {
+          ...FIXTURE_STATE.app.manifest!,
+          models: [
+            ...FIXTURE_STATE.app.manifest!.models,
+            {
+              id: "eleven_multilingual_v2",
+              provider: "elevenlabs",
+              capability: "voice-tts",
+              displayName: "Eleven Multilingual v2",
+              accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+              limits: {},
+              pricing: { kind: "perCharacter", microUsdPerCharacter: 300 },
+            },
+          ],
+        },
+        narrator: { provider: "elevenlabs", voiceId: "v_roger", label: "Roger" },
+      },
     };
     const html = render("/settings/general", chosen);
-    assert.match(html, /Roger · elevenlabs/);
-    assert.match(html, /billed per character/);
-    // And there is a way back to the free one.
+    assert.match(html, /data-testid="narrator-name">Roger</);
+    assert.match(html, /class="fy-fact__state">ElevenLabs · \$0.30 per 1k</);
+    // And there is a way back to the free one: Reset, saying on its tooltip what it returns to.
     assert.match(html, /data-testid="narrator-reset"/);
+    assert.match(html, /data-tip="George · Kokoro · free"/);
   });
 });
 

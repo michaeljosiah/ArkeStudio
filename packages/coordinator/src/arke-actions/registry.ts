@@ -453,6 +453,7 @@ const CLIENT_COMMAND_METADATA = {
   "clone-voice": action("world", "generation", "voice", "privacy-sensitive", ["voices", "sheets", "artifacts"]),
   "stage-voice-clip": action("world", "host-action", "voice", "privacy-sensitive", ["voices"]),
   "discard-voice-clip": humanOnly("Discarding a temporary clip is part of the person's host recording workflow."),
+  "delete-voice": humanOnly("Deleting a cloned voice removes its recording here and its copies on vendor accounts; that is the person's decision (SPEC-046 R-15)."),
   "import-folder": action("world", "host-action", "artifact-store", "host-file-access", ["artifacts"], { preparation: ARTIFACT_SOURCE }),
   "extract-artifact": action("world", "generation", "extraction", "external-network-action", ["artifacts", "canon", "sheets"]),
   "stop-extraction": action("world", "command", "extraction", "external-network-action", ["artifacts", "jobs"]),
@@ -463,6 +464,23 @@ const CLIENT_COMMAND_METADATA = {
   // The cast of lines (turn 130): the same discipline, turned on speech.
   "cast-voices": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),
   "stop-voices": action("production", "command", "extraction", "external-network-action", ["chapters"]),
+  // The audiobook (design turn 146, SPEC-047): a chapter read into kept takes is a generation
+  // that may leave the machine; stopping it and choosing the reading are commands on the record.
+  "read-audiobook-chapter": action("production", "generation", "voice", "external-network-action", ["chapters", "sheets"]),
+  "stop-audiobook": action("production", "command", "voice", "external-network-action", ["chapters"]),
+  "set-audiobook-reading": action("production", "command", "voice", "external-network-action", ["chapters"]),
+  // Direction beside the prose (SPEC-047 R-6..R-10): a block's plan set by hand and a card
+  // accepted whole are commands on the record; directing a chapter is the cast's derivation
+  // turned on performance — a model run over the prose that writes nothing.
+  "set-audiobook-block": action("production", "command", "voice", "external-network-action", ["chapters"]),
+  "direct-chapter": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),
+  "discard-direction": action("production", "command", "extraction", "external-network-action", ["chapters"]),
+  // The door and the book (SPEC-047 R-29, R-16): a read of every chapter's state, and the
+  // chapter's run over the whole book.
+  "open-audiobook": readOnly(QUERY),
+  "read-audiobook-book": action("production", "generation", "voice", "external-network-action", ["chapters", "sheets"]),
+  "stop-audiobook-book": action("production", "command", "voice", "external-network-action", ["chapters"]),
+  "accept-direction": action("production", "command", "voice", "external-network-action", ["chapters"]),
   // A manuscript out and in (turn 131): a file the host writes, a file the host picks.
   "export-manuscript": action("production", "host-action", "export", "export", ["chapters", "exports"]),
   "open-exports-folder": globalOnly(GLOBAL_OPERATION),

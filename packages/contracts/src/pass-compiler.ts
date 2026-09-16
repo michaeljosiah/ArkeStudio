@@ -247,7 +247,7 @@ export interface CompilePassesInput {
 /** The compiled passes for one dispatch, in enqueue order. Pure, deterministic, inspectable. */
 export function compilePasses(input: CompilePassesInput): CompiledPass[] {
   const { productionId, scene, plan, model, world } = input;
-  if (plan.timingProblems?.length) throw new Error(plan.timingProblems.join(" "));
+  if (model.capability === "video" && plan.timingProblems?.length) throw new Error(plan.timingProblems.join(" "));
   const audioPlans = plan.mode === "per-shot" ? plan.shots.map(s => s.audioReferences) : plan.passReferences.map(p => p.audioReferences);
   const audioProblems = audioPlans.flatMap(a => a?.problems ?? []);
   if (audioProblems.length) throw new Error(audioProblems.join(" "));

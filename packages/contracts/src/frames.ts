@@ -1,5 +1,7 @@
+import { valueSchema } from "./value-schema.js";
 import { StageReferenceFrameSchema } from "./scene.js";
 import { isManuscriptLanguage } from "./manuscript.js";
+import { AudiobookDirectionInputSchema, AudiobookReadingSchema } from "./audiobook.js";
 import { StageInspectionFrameSchema } from "./stage-construction.js";
 import { DialogueFailureTagSchema } from "./take-feedback.js";
 import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
@@ -51,10 +53,10 @@ import { DecideConversationActionSchema } from "./arke-actions.js";
  * receives a fresh snapshot — partial replay is deliberately not offered (D4).
  */
 
-export const FrameSchema = z.discriminatedUnion("kind", [
+export const FrameSchema = valueSchema(z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("snapshot"), seq: z.number().int().min(1), state: ClientStateSchema }).strict(),
   z.object({ kind: z.literal("event"), seq: z.number().int().min(1), event: DomainEventSchema }).strict(),
-]);
+]));
 export type Frame = z.infer<typeof FrameSchema>;
 
 /** What a client may send up. Commands arrive with their owning specs. */
@@ -1502,7 +1504,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     productionId: SlugSchema, sceneId: SceneIdSchema, shotId: ShotIdSchema, blockId: z.string().min(1).optional(),
     expectedSceneVersion: z.number().int().positive(), expectedVoiceId: z.string().min(1), modelId: z.string().min(1), cadencePlan: CadencePlanSchema }).strict(),
   z.object({ kind: z.literal("generate-performance"), requestId: UlidSchema, worldId: UlidSchema,
-    operationId: z.string().uuid(), confirmedMicroUsd: z.number().int().nonnegative() }).strict(),
+    operationId: z.string().uuid(), confirmedMicroUsd: z.number().int().nonnegative(),
+    // A cloned voice through a hosted reader asks the vendor's question here, as the voice-line
+    // does (SPEC-046 R-16, issue 1149): the token the confirmation frame handed back.
+    voiceUploadConfirmedFor: z.string().min(1).optional() }).strict(),
   z.object({ kind: z.literal("cancel-performance-generation"), worldId: UlidSchema, operationId: z.string().uuid() }).strict(),
   z.object({ kind: z.literal("propose-performance-duration"), requestId: UlidSchema, worldId: UlidSchema,
     productionId: SlugSchema, performanceId: PerformanceIdSchema, expectedSceneVersion: z.number().int().positive(),
@@ -2778,6 +2783,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       name: z.string().min(1),
       description: z.string().min(1),
       consent: z.literal(true),
+      /** The recording's language (ISO 639-1), for the reader that saves the voice under one (issue 1163); English when not said. */
+      language: z.string().regex(/^[a-z]{2}$/).optional(),
       /** The sheet this was cloned while casting — a link for provenance, never ownership. */
       sheetId: SlugSchema.optional(),
     })
@@ -2812,6 +2819,13 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** Let a staged clip go: the dialog was cancelled, and the temp file should not outlive it. */
   z.object({ kind: z.literal("discard-voice-clip"), clipId: z.string().min(1) }).strict(),
+  /**
+   * Delete a cloned voice (SPEC-046 R-15, issue 1162): the clip and the library entry go in one
+   * commit, then every copy a hosted reader keeps on its account, best-effort. Refused while a
+   * character's sheet still names the voice — the assignment is cleared on the sheet, never
+   * silently here — and the provenance artifact stays: it records that a recording existed.
+   */
+  z.object({ kind: z.literal("delete-voice"), requestId: UlidSchema, worldId: UlidSchema, voiceId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("import-folder"), worldId: UlidSchema, sourcePath: z.string().min(1) }).strict(),
   /** SPEC-015 R-12..R-14: stage two — grounded extraction into a pending batch. */
   z
@@ -2837,6 +2851,82 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   z
     .object({ kind: z.literal("stop-voices"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
+    .strict(),
+  /**
+   * The audiobook (design turn 146, SPEC-047): read a chapter into kept takes — every block
+   * that is not made, in reading order, priced once and confirmed by token when any of it is a
+   * cloud voice — stop the run, leaving the takes made so far standing, and choose the book's
+   * reading. One run per chapter at a time, keyed like the cast's.
+   */
+  z
+    .object({
+      kind: z.literal("read-audiobook-chapter"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      confirmationToken: z.string().min(1).optional(),
+      /** A cloned voice among the readers: the remote engine its recording may go to (SPEC-022, SPEC-046). */
+      voiceUploadConfirmedFor: z.string().min(1).optional(),
+      /** These blocks alone, made again whatever their state — the panel's `Make again` (SPEC-047 R-30). */
+      blocks: z.array(z.string().min(1)).min(1).max(400).optional(),
+    })
+    .strict(),
+  z
+    .object({ kind: z.literal("stop-audiobook"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
+    .strict(),
+  z
+    .object({ kind: z.literal("set-audiobook-reading"), worldId: UlidSchema, productionId: SlugSchema, reading: AudiobookReadingSchema })
+    .strict(),
+  /**
+   * Direction beside the prose (SPEC-047 R-6..R-10): one block's plan set by hand, or cleared;
+   * a chapter directed by the model — a derivation in the cast's discipline whose result is a
+   * card accepted whole or discarded; and the acceptance, which writes the record and nothing
+   * else. The coordinator supplies every hash from the block's words and refuses a control the
+   * block's reader declares unsupported, so nothing reaches a run that could only flag it.
+   */
+  z
+    .object({
+      kind: z.literal("set-audiobook-block"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      block: z.string().min(1),
+      direction: AudiobookDirectionInputSchema.nullable(),
+      /** Echoed on the record's answer, so a window can tell its own write's answer from another's. */
+      requestId: UlidSchema.optional(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("direct-chapter"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
+  /**
+   * The door (SPEC-047 R-29): a row a chapter with its counts, the voices and the price, answered
+   * as `audiobook.door`; and the book read as one run (R-16, R-17) — every chapter with prose in
+   * order, priced once, stopped and resumed like a chapter's.
+   */
+  z.object({ kind: z.literal("open-audiobook"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("read-audiobook-book"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      confirmationToken: z.string().min(1).optional(),
+      voiceUploadConfirmedFor: z.string().min(1).optional(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("stop-audiobook-book"), worldId: UlidSchema, productionId: SlugSchema }).strict(),
+  /** The card put away: the coordinator holds a proposal until it is accepted or discarded, so a window that reconnects sees it again. */
+  z.object({ kind: z.literal("discard-direction"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
+  z
+    .object({
+      kind: z.literal("accept-direction"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      /** The card's acceptance, named, so its answer — the record, or the refusal — is this one's and no other write's (codex on PR 1186). */
+      requestId: UlidSchema,
+      /** The prose the directions were made for: a chapter that moved since refuses them. */
+      hash: z.string().min(1),
+      directions: z.record(z.string().min(1), AudiobookDirectionInputSchema),
+    })
     .strict(),
   /**
    * A manuscript out and a manuscript in (turn 131, SPEC-012 §2.4.3). The export lands under

@@ -1,3 +1,4 @@
+import { valueSchema } from "./value-schema.js";
 import { BorrowedImageOriginSchema } from "./take.js";
 import { TakeDialogueFeedbackSchema } from "./take-feedback.js";
 import { RehearsalSessionSchema } from "./rehearsal.js";
@@ -6,6 +7,7 @@ import { PerformanceRecordSchema, PerformanceReviewStateSchema, emptyPerformance
 import { z } from "zod";
 import { ModelResidencySchema } from "./local-ai.js";
 import { ProductionNarrativeSchema } from "./production-narrative.js";
+import { AudiobookBookSchema } from "./audiobook.js";
 import { HarnessStatusSchema } from "./harness.js";
 import { ModelInfoSchema } from "./adapter.js";
 import { HarnessModelStatusSchema } from "./harness-models.js";
@@ -157,6 +159,8 @@ export const ProductionBundleSchema = z
      */
     proseStyle: ProseStyleSchema.nullable().optional(),
     progress: z.union([StoryProgressSchema, z.object({ unreadable: z.literal(true) }).strict()]).optional(),
+    /** `.audiobook/book.json` — the book's reading, narrator or cast (turn 146, SPEC-047 R-11); absent means the narrator's. */
+    audiobook: AudiobookBookSchema.optional(),
     /** season.json — the season beside its production, or null when none (SPEC-023 R-10). */
     season: SeasonSchema.nullable().default(null),
     /** routing.json — Interactive video's one graph authority, or null (epic #401, brief §2). */
@@ -272,7 +276,7 @@ export const ExternalEditSchema = z
 export type ExternalEdit = z.infer<typeof ExternalEditSchema>;
 
 /** The open world, in full — a world is small enough to send whole (SPEC-001 D4). */
-export const WorldBundleSchema = z
+export const WorldBundleSchema = valueSchema(z
   .object({
     meta: WorldMetaSchema,
     artDirection: ResolvedArtDirectionSchema,
@@ -373,10 +377,10 @@ export const WorldBundleSchema = z
     /** Closed-world edits awaiting reconciliation (SPEC-002 R-28). */
     externalEdits: z.array(ExternalEditSchema).default([]),
   })
-  .strict();
+  .strict());
 export type WorldBundle = z.infer<typeof WorldBundleSchema>;
 
-export const ClientStateSchema = z
+export const ClientStateSchema = valueSchema(z
   .object({
     app: z
       .object({
@@ -615,7 +619,7 @@ export const ClientStateSchema = z
     /** Active and completed-but-undismissed frame runs survive navigation and reconnects. */
     frameRuns: z.array(FrameRunStateSchema).default([]),
   })
-  .strict();
+  .strict());
 export type ClientState = z.infer<typeof ClientStateSchema>;
 
 // ---------------------------------------------------------------------------

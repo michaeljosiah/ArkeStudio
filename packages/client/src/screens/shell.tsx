@@ -1,18 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate, useSearchParams } from "react-router";
-import { Button, Callout, Input, Select, Textarea, cx } from "../components/ui.js";
+import { Button, Callout, IconButton, Input, Select, Textarea, cx } from "../components/ui.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
+import { EditorDialog } from "../components/editor-dialog.js";
+import { settingsReturnPath } from "../lib/settings-return.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import { renderInlineMarkdown } from "../components/inline-markdown.js";
-import { Archive, ChevronDown, ChevronRight, Plus, Sparkle } from "../components/icons.js";
+import { Archive, ChartLine, ChevronDown, ChevronRight, Pencil, Plus, RotateCcw, Sparkle, X } from "../components/icons.js";
 import { AgentsPanel } from "./agents.js";
 import {
+  ActionButton,
   CAPABILITY_LABEL,
   CAPABILITY_ROWS,
+  HalfHeading,
+  ProviderMark,
   RuntimeHead,
   RuntimeSection,
   TONE_CLASS,
 } from "./settings-parts.js";
+import { FactRow } from "./settings-providers.js";
 // Providers absorbed both surfaces (SPEC-034 R-5), so its pane draws their parts: the engine
 // details unabridged, and one engine's models grouped by the provider that owns them.
 import { eligibilityInputs, strandReason } from "../components/dispatch-bar.js";
@@ -78,8 +84,9 @@ import { ArtStyleGrid, ArtStyleWords } from "../components/art-style-picker.js";
 import { seedFrom } from "../lib/art-styles.js";
 import {
   formatMicroUsd,
-  modelCapabilityCopy,
   PROVIDERS as PROVIDER_TABLE,
+  readerName,
+  readerPriceLabel,
   type Capability,
   type ComponentHealth,
   type HarnessAvailability,
@@ -135,7 +142,7 @@ function setupSteps(
       label: "Studio core",
       ...(connection === "open" && state !== null
         ? { state: "ready", settled: true }
-        : { state: connection === "closed" ? "retrying…" : "starting…", settled: false }),
+        : { state: (connection === "closed" || connection === "auth-refused") ? "retrying…" : "starting…", settled: false }),
     },
     {
       label: "Your data folder",
@@ -169,14 +176,26 @@ function stillPreferred(): boolean {
  * Three screens had reason to say it — the setup reel, the same reel with nothing to download,
  * and the settings pane, whose rows draw `—` from an absent snapshot exactly as they draw `—`
  * from an unconfigured provider (issue 599). Three copies of one sentence drift; one does not.
- * The remedy stays in it because the case that produces this is nearly always a dev browser
- * session, and it self-qualifies for the case that is not.
+ * Browser recovery distinguishes an expired capability from an offline host without assuming
+ * which Studio launcher the author chose.
  */
+export function SessionRefusal() {
+  const { connection } = useStore();
+  if (connection !== "auth-refused") return null;
+  return <div role="alert" className="fy-session-refusal">
+    <Callout tone="warning" title="Session link is out of date">Restart the frontend and open the new Arke session link from its terminal. If it still fails, check that the server allows this browser address.</Callout>
+  </div>;
+}
+
 function WaitingForCoordinator() {
+  const { connection } = useStore();
+  if (typeof window !== "undefined" && window.arke) {
+    return <Callout tone="warning" title="Starting Arke Studio…">Connecting to your workspace. The app keeps retrying on its own.</Callout>;
+  }
+  if (connection === "auth-refused") return null;
   return (
     <Callout tone="warning" title="Waiting for the coordinator">
-      The app keeps retrying on its own. If this is a dev browser session, start it with
-      `npm run dev:coordinator`.
+      The app keeps retrying on its own. Check that your Studio server is running.
     </Callout>
   );
 }
@@ -314,7 +333,7 @@ export function StartupScreen() {
             <span style={{ flex: 1 }} />
             <span className="fy-mono">{remaining !== null ? aboutLeft(remaining) : ""}</span>
           </div>
-          {connection === "closed" && startup?.status !== "initializing" && <WaitingForCoordinator />}
+          {(connection === "closed" || connection === "auth-refused") && startup?.status !== "initializing" && <WaitingForCoordinator />}
           <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 14, justifyContent: "center" }}>
             <span style={{ font: "400 11.5px var(--font-sans)", color: "var(--muted-foreground)" }}>
               One-time setup. After this, Arke runs on your machine. Your worlds never leave it.
@@ -337,7 +356,7 @@ export function StartupScreen() {
               answer is "opening", which a button that says so already gives.
             */
             <>
-              {connection === "closed" && startup?.status !== "initializing" && <WaitingForCoordinator />}
+              {(connection === "closed" || connection === "auth-refused") && startup?.status !== "initializing" && <WaitingForCoordinator />}
               <div className="fy-startup__done">
                 <Button
                   variant="primary"
@@ -403,9 +422,7 @@ export function FirstRunScreen() {
                 <Plus size={22} />
               </div>
               <div className="fy-createcard__title">Your first world</div>
-              <div className="fy-createcard__sub">
-                A name and a sentence are enough. We'll hold everything it becomes.
-              </div>
+
               <div style={{ marginTop: 4 }}>
                 <Button variant="primary">Create a world</Button>
               </div>
@@ -1495,59 +1512,64 @@ export function NewWorldScreen() {
 
 export function SettingsLayout() {
   const { connection, state } = useStore();
+  const navigate = useNavigate();
+  // Leaving is one act whichever way the sheet closes — Escape, the scrim, the X — and it goes
+  // to the route the gear remembered (SPEC-042 R-6), which is the screen already showing behind
+  // the sheet: a change of address, not of screen.
+  const leave = () => navigate(settingsReturnPath());
   return (
-    <div className="fy-app" data-screen="settings">
-      {/* A page, not a panel (SPEC-042 R-5). It was 90% of the window over a blurred scrim, with a
-          close of its own that went to /worlds from wherever it was opened. At that size the
-          modal framing bought nothing but a narrower pane, and the one thing a modal promises —
-          to put you back where you were — it never did. The chrome's gear is the way out now,
-          and it goes back to where it was pressed (R-6). */}
-      <AppChrome current="settings" divided />
-      <div className="fy-content fy-content--fixed">
-        <div className="fy-settings">
-          <nav className="fy-settings__rail" aria-label="Settings">
-            <div className="fy-settings__title">Settings</div>
-            {(
-              [
-                ["providers", "Providers"],
-                ["models", "AI models"],
-                ["general", "General"],
-                ["harness", "Harness"],
-                ["appearance", "Appearance"],
-                ["notifications", "Notifications"],
-                ["sign-in", "Sign-in"],
-                ["sample-world", "Sample world"],
-                ["diagnostics", "Diagnostics"],
-                ["about", "About"],
-              ] as const
-            ).map(([slug, label]) => (
-              <NavLink
-                key={slug}
-                to={`/settings/${slug}`}
-                className={({ isActive }) => cx("fy-settings__tab", isActive && "fy-settings__tab--active")}
-              >
-                {label}
-              </NavLink>
-            ))}
-            <div style={{ flex: 1 }} />
-            <div className="fy-settings__version">v{state?.app.version ?? "0.1.0"}</div>
-          </nav>
-          <div className="fy-settings__pane">
-            {/* Most panes in here draw from the coordinator's snapshot, and with no snapshot they
-                draw the same thing they draw when a provider has nothing to offer: `—` in the
-                capability rows, `not measured` in the machine header. A dev coordinator that died
-                at import produces exactly that screen, which reads as a data bug in whatever you
-                last changed (issue 599). */}
-            {connection === "closed" && (
-              <div className="fy-settings__waiting">
-                <WaitingForCoordinator />
-              </div>
-            )}
-            <Outlet />
-          </div>
+    /* A sheet, not a page (design turn 150; SPEC-042 R-5 amended). The page of turn 124 answered
+       a panel whose close went to /worlds from wherever it was opened; R-6 fixed that by
+       remembering the route, and with the remembered route rendering behind the sheet the modal
+       keeps the one promise it makes. The editor's sheet (SPEC-039 R-5) at 95% of the window,
+       with no head of its own — the rail says what it is — and the X as its one added control. */
+    <EditorDialog open onClose={leave} width="95vw" height="95vh" labelledBy="fy-settings-title" panelClassName="fy-settings__sheet">
+      <div className="fy-settings" data-screen="settings">
+        <nav className="fy-settings__rail" aria-label="Settings panes">
+          <div className="fy-settings__title" id="fy-settings-title">Settings</div>
+          {(
+            [
+              ["providers", "Providers"],
+              ["models", "AI models"],
+              ["general", "General"],
+              ["harness", "Harness"],
+              ["appearance", "Appearance"],
+              ["notifications", "Notifications"],
+              ["sign-in", "Sign-in"],
+              ["sample-world", "Sample world"],
+              ["diagnostics", "Diagnostics"],
+              ["about", "About"],
+            ] as const
+          ).map(([slug, label]) => (
+            <NavLink
+              key={slug}
+              to={`/settings/${slug}`}
+              className={({ isActive }) => cx("fy-settings__tab", isActive && "fy-settings__tab--active")}
+            >
+              {label}
+            </NavLink>
+          ))}
+          <div style={{ flex: 1 }} />
+          <div className="fy-settings__version">v{state?.app.version ?? (typeof window === "undefined" ? undefined : window.arke?.appVersion) ?? "—"}</div>
+        </nav>
+        <div className="fy-settings__pane">
+          {/* Most panes in here draw from the coordinator's snapshot, and with no snapshot they
+              draw the same thing they draw when a provider has nothing to offer: `—` in the
+              capability rows, `not measured` in the machine header. A dev coordinator that died
+              at import produces exactly that screen, which reads as a data bug in whatever you
+              last changed (issue 599). */}
+          {(connection === "closed" || connection === "auth-refused") && (
+            <div className="fy-settings__waiting">
+              <WaitingForCoordinator />
+            </div>
+          )}
+          <Outlet />
         </div>
+        <IconButton label="Close" className="fy-settings__close" onClick={leave}>
+          <X size={13} />
+        </IconButton>
       </div>
-    </div>
+    </EditorDialog>
   );
 }
 
@@ -1877,11 +1899,9 @@ export function SettingsAppearanceScreen() {
       <div className="fy-appearance__theme">
         <div className="fy-appearance__copy">
           <h2 className="fy-appearance__title">Theme</h2>
-          <p id="appearance-theme-description" className="fy-appearance__description">
-            Choose how the Arke Studio window looks.
-          </p>
+
         </div>
-        <fieldset className="fy-theme-options" aria-describedby="appearance-theme-description">
+        <fieldset className="fy-theme-options">
           <legend className="fy-sr-only">Theme</legend>
           {APPEARANCE_OPTIONS.map((option) => (
             <label key={option.preference} className="fy-theme-option">
@@ -1945,11 +1965,16 @@ export function SettingsHarnessScreen() {
   useEffect(() => {
     if (focusAgent !== undefined) setAgentsOpen(true);
   }, [focusAgent]);
+  if (!hasSnapshot) return (
+    <div data-screen="settings-harness" className="fy-set fy-set--runtime">
+      {(connection !== "closed" && connection !== "auth-refused") && <WaitingForCoordinator />}
+    </div>
+  );
   return (
     <div data-screen="settings-harness" className="fy-set fy-set--runtime">
       <div className="fy-rt">
         <div className="fy-rt__rail" role="tablist" aria-label="Harnesses">
-          {harnesses.map((h) => (
+          {harness !== null && harnesses.map((h) => (
             <button
               type="button"
               key={h.id}
@@ -1962,7 +1987,7 @@ export function SettingsHarnessScreen() {
               <span>{h.label}</span>
               <span style={{ flex: 1 }} />
               <span className="fy-rt__count">
-                {h.id === runningEngine ? activeStatus : h.id === engine ? "next restart" : h.installed ? "available" : "not here"}
+                {h.id === runningEngine ? activeStatus : h.blocked ? (h.version !== null || h.source !== null ? "needs attention" : "not here") : h.id === engine ? "next restart" : h.installed ? "available" : "not here"}
               </span>
             </button>
           ))}
@@ -1971,9 +1996,10 @@ export function SettingsHarnessScreen() {
           {harness === null && (
             <div className="fy-set__note" role="status">
               {connection === "open" && hasSnapshot ? "Detecting available harnesses…" : "Connecting to detect available harnesses…"}
+              <Button disabled={connection !== "open"} onClick={() => detectHarnesses()}>Check again</Button>
             </div>
           )}
-          <HarnessPane
+          {harness !== null && <HarnessPane
             harness={chosen}
             engine={engine}
             runningEngine={runningEngine}
@@ -1981,7 +2007,7 @@ export function SettingsHarnessScreen() {
             detected={harness !== null}
             canDetect={connection === "open" && hasSnapshot}
             executablePath={chosen.id === "codex" ? harness?.codexPath ?? null : harness?.claudePath ?? null}
-          />
+          />}
           {harness?.launchOverride && (
             <div className="fy-set__note" role="status">
               ARKE_HARNESS selects {harnesses.find(h => h.id === harness.launchOverride)?.label ?? harness.launchOverride} at launch.
@@ -2074,12 +2100,12 @@ function HarnessPane({
         title={harness.label}
         caps={harness.bundled ? "BUNDLED" : "YOUR INSTALLATION"}
         tone={active && !running && health?.status !== "starting" ? "warn" : running ? "ok" : harness.installed ? "idle" : "warn"}
-        state={active ? running ? "running now" : health?.status === "starting" ? "starting" : "unavailable" : selected ? "next restart" : harness.installed ? "available" : "not here"}
+        state={active ? running ? "running now" : health?.status === "starting" ? "starting" : "unavailable" : harness.blocked ? (harness.version !== null || harness.source !== null ? "needs attention" : "not here") : selected ? "next restart" : harness.installed ? "available" : "not here"}
       />
       <RuntimeSection label="ON THIS MACHINE" />
       <div className="fy-set__row">
         <div className="fy-set__name fy-set__name--wide">
-          <div className="fy-set__title">{harness.bundled ? "Ships with Arke Studio" : "Found on this machine"}</div>
+          <div className="fy-set__title">{harness.bundled ? "Ships with Arke Studio" : harness.installed || harness.version !== null || harness.source !== null ? "Found on this machine" : "Not found on this machine"}</div>
           <div className="fy-set__caps">
             {/* The refusal, in the words the coordinator sent — not a re-derived summary. */}
             {harness.blocked ?? (harness.version ? `version ${harness.version}` : "installed")}
@@ -2156,9 +2182,10 @@ const ROUTED_CAPABILITIES: readonly Capability[] = CAPABILITY_ROWS.flatMap((row)
 );
 
 /**
- * Settings · General (SPEC-034 R-14). Which model runs each capability by default.
+ * Settings · General (SPEC-034 R-14, design turn 149). Which model runs each capability by
+ * default, and who reads the app's prose aloud.
  *
- * It was Cloud AI, and before that *Who does what*. What changes with the rename is the thing the
+ * It was Cloud AI, and before that *Who does what*. What changed with the rename is the thing the
  * rename was blocked on: **a default may name a local model** (R-15). SPEC-033 R-61 filtered them
  * out because the screen it replaced let one be chosen with nothing to run it — `llm →
  * gemma4-12b` put all writing on this machine — but the defect was never *a local model
@@ -2169,8 +2196,17 @@ const ROUTED_CAPABILITIES: readonly Capability[] = CAPABILITY_ROWS.flatMap((row)
  * **A default is not a routing switch** (R-16). Where a piece of work runs stays a production's
  * decision at dispatch (SPEC-033 R-74), and that decision outranks the default it started from.
  *
+ * **One row grammar, borrowed whole from Providers** (turn 149): a label, its value, its state at
+ * the row's gap, and on the narrator's row alone a button at the end. Turn 124 put the state
+ * *under* a select stretched to the column, which is the caption turn 137 forbade everywhere
+ * else, and the page had grown three row shapes under one eyebrow. The state now sits beside a
+ * 300px control, says three words at most, and never repeats the provider — that is the first
+ * word in the control. A default that cannot run is stated on its row, in the warning colour,
+ * and nowhere else: the callout that said the same fault above the list is gone.
+ *
  * Providers keeps its job unchanged. This screen **references** a provider and never configures
- * one: the remedy for an unconnected provider is a route to Providers, never a key field here.
+ * one: the remedy for a missing credential is on AI models' supplier heading (SPEC-042 R-4), and
+ * the rail is the route — nothing on a row navigates.
  */
 export function SettingsGeneralScreen() {
   const { state } = useStore();
@@ -2184,33 +2220,54 @@ export function SettingsGeneralScreen() {
   const drift = state?.app.drift ?? [];
   const statuses = state?.app.providers ?? [];
   const eligibility = eligibilityInputs(state);
-  /** Stored, tested, or neither — the three things Providers actually knows (SPEC-028 R-33). */
+  /**
+   * Stored, tested, or neither — the three things Providers actually knows (SPEC-028 R-33), as
+   * the state cell says them. `not tested` is muted and carries no dot (issue 991): a key nobody
+   * has tried is not an unwell one.
+   */
   const providerState = (id: ProviderId): string => {
     const status = statuses.find((p) => p.id === id);
-    if (status?.configured !== true) return "not connected";
+    if (status?.configured !== true) return PROVIDER_TABLE[id].credential === "external" ? "not signed in" : "no key";
     if (status.validation === "valid") return "connected";
     if (status.validation === "invalid") return "key rejected";
     // `testing` is its own state and reads as one: a key mid-validation is not the same thing as
-    // one nobody has tried, and the four words are the four the provider table actually has.
-    return status.validation === "testing" ? "testing" : "untested";
+    // one nobody has tried, and the words are the ones the provider table actually has.
+    return status.validation === "testing" ? "testing" : "not tested";
+  };
+  /**
+   * Why a stranded default cannot run, in the state cell's three words. `strandReason` keeps the
+   * sentence for the option list, where a row has room to say whose key is missing; here the
+   * control already names the provider, so the state names only what is wrong with it.
+   */
+  const strandState = (model: ManifestModel): string => {
+    if ((state?.app.models.disabled ?? []).includes(model.id)) return "turned off";
+    const fit = (state?.app.runtime?.models ?? []).find((row) => row.modelId === model.id)?.fit;
+    if (fit === "insufficient" || fit === "unsupported") return "cannot run here";
+    if (PROVIDER_TABLE[model.provider].local) return "not ready";
+    const status = statuses.find((p) => p.id === model.provider);
+    if (status?.validation === "invalid") return "key rejected";
+    if (status?.configured !== true) return providerState(model.provider);
+    return "not unlocked";
+  };
+  /**
+   * What to call the thing a default comes from, which is not the same word on both halves.
+   *
+   * A keyed service is its own source and names itself. A local model's is the **engine**, which
+   * is what Providers' rail is keyed on: `Voxa · Kokoro 82M` rather than `Kokoro · Kokoro 82M`,
+   * because the reader who wants to act on it goes to Voxa's pane. The id is what carries the
+   * mark (SPEC-042 R-20), and the engine's mark is the engine's.
+   */
+  const sourceOf = (model: ManifestModel): { id: string; label: string } => {
+    const engine = engineOfProvider(model.provider);
+    return engine === undefined
+      ? { id: model.provider, label: PROVIDER_TABLE[model.provider].displayName }
+      : { id: engine, label: ENGINE_LABEL[engine] };
   };
   /**
    * Where a model actually runs (R-16a), from the resolved engine rather than the provider flag.
    * `PROVIDERS.comfyui.local` is `true` for every recipe, so reading the flag would tell someone
    * their video drafts here while it renders on a box down the hall.
    */
-  /**
-   * What to call the thing a default comes from, which is not the same word on both halves.
-   *
-   * A keyed service is its own source and names itself. A local model's is the **engine**, which
-   * is what frame 112d draws and what Providers' rail is keyed on: `Voxa · this machine` rather
-   * than `Kokoro · this machine`, because the reader who wants to act on it goes to Voxa's pane.
-   */
-  const sourceOf = (model: ManifestModel): string => {
-    const engine = engineOfProvider(model.provider);
-    return engine === undefined ? PROVIDER_TABLE[model.provider].displayName : ENGINE_LABEL[engine];
-  };
-
   const runsOn = (model: ManifestModel): string => {
     if (!PROVIDER_TABLE[model.provider].local) return providerState(model.provider);
     const gated = (state?.app.runtime?.models ?? []).find((m) => m.modelId === model.id);
@@ -2219,16 +2276,32 @@ export function SettingsGeneralScreen() {
       (model.provider === "comfyui" ? (state?.app.comfyui?.engine.locality ?? "local") : "local");
     return locality === "remote" ? "another machine" : "this machine";
   };
+  const warn = (words: string) => (
+    <span className="fy-fact__state fy-fact__state--warn">
+      <span className="fy-set__dot fy-set__dot--warn" aria-hidden="true" />
+      {words}
+    </span>
+  );
+
+  // Who reads the app's prose aloud. A third role: a character's voice lives on their sheet, a
+  // reading voice belongs to one bench take, and this one narrates. It stays on the shipped local
+  // voice unless somebody chooses otherwise, because "read aloud" is a passive press and no other
+  // preference here spends money on one. The row says the reader and its price the way the Voice
+  // page's rows do (SPEC-046 R-30) — `Kokoro · free`, `Voxtral · $0.016 per 1k` — and nothing
+  // more: the price is the whole warning.
+  const reader = narrator === null
+    ? { provider: DEFAULT_NARRATOR.provider as string, model: DEFAULT_NARRATOR.model as string | null }
+    : { provider: narrator.provider, model: narrator.model ?? legacyVoiceModel(narrator.provider, narrator.voiceId) };
+  const readerRow =
+    (manifest?.models ?? []).find((m) => m.provider === reader.provider && m.id === reader.model && m.capability === "voice-tts") ?? null;
+  const readerLocal = (PROVIDER_TABLE as Record<string, { local?: boolean } | undefined>)[reader.provider]?.local === true;
+  const readerChip = [readerName(reader, readerRow), readerPriceLabel(readerRow) ?? (readerLocal ? "free" : null)]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <div data-screen="settings-general" className="fy-set fy-set--general">
-      <div className="fy-set__eyebrow">DEFAULTS</div>
-      {/* A default that cannot run is stated, never repaired (design turn 40d). It gets a callout
-          rather than a footnote because the next dispatch of that capability has nowhere to go. */}
-      {routing.faults.map((f) => (
-        <Callout key={f.capability} tone="warning" title={`${CAPABILITY_LABEL[f.capability]} has nowhere to go.`}>
-          {f.reason}
-        </Callout>
-      ))}
+      <h1 className="fy-pane__name">General</h1>
       {ROUTED_CAPABILITIES.map((capability) => {
         // Both halves, in one list (R-15). The picker is where R-61's filter used to be, and what
         // stands in its place is eligibility — the same answer the routing write consults, so an
@@ -2238,82 +2311,73 @@ export function SettingsGeneralScreen() {
         const selectedModel = options.find((m) => m.id === selected);
         const usable = (m: (typeof options)[number]) => modelEligible(m, eligibility);
         const stranded = selectedModel !== undefined && !usable(selectedModel);
+        // A stored default whose model left the manifest (SPEC-008 §2.7). Listed under its own id
+        // so the control shows what is stored rather than the first option it happens to hold.
+        const missing = selected !== undefined && selectedModel === undefined;
+        const source = selectedModel === undefined ? undefined : sourceOf(selectedModel);
         return (
-          <div key={capability} className="fy-set__row fy-set__row--routing">
-            <span className="fy-set__routelabel">{CAPABILITY_LABEL[capability]}</span>
+          <FactRow key={capability} what={CAPABILITY_LABEL[capability]}>
             <Select
-              className="fy-set__pill"
+              wrapClassName="fy-default"
               label={`Model for ${CAPABILITY_LABEL[capability]}`}
               disabled={options.length === 0}
               value={selected ?? ""}
               onChange={(e) => setRoutingDefault(capability, e.target.value)}
+              {...(source === undefined ? {} : { mark: <ProviderMark id={source.id} label={source.label} size="xs" /> })}
             >
-              {options.length === 0 && <option value="">nothing in the manifest for this</option>}
-              {selected === undefined && options.length > 0 && <option value="">no default set</option>}
+              {options.length === 0 && <option value="">No models</option>}
+              {selected === undefined && options.length > 0 && <option value="">Not set</option>}
+              {missing && <option value={selected}>{selected}</option>}
               {[...options]
                 .sort((a, b) => Number(usable(b)) - Number(usable(a)))
                 .map((m) => (
                   <option key={m.id} value={m.id} disabled={!usable(m)}>
-                    {PROVIDER_TABLE[m.provider].displayName} · {m.displayName}
-                    {/* Not on the selected one: the collapsed select is read beside the state
-                        text, which already says why, and twice on one row reads as two problems. */}
+                    {sourceOf(m).label} · {m.displayName}
+                    {/* Not on the selected one: the collapsed control is read beside the state,
+                        which already says why, and twice on one row reads as two problems. */}
                     {usable(m) || m.id === selected ? "" : ` — ${strandReason(state, m)}`}
                   </option>
                 ))}
             </Select>
-            {/* The capability copy is the manifest speaking (R-10): refs, frames, caps. */}
-            {/* A model names its provider and where that provider's work runs — the connection
-                state SPEC-028 R-33 requires for a keyed one, the resolved engine's locality for a
-                local one (R-16a). Displayed rather than re-derived (R-63). */}
-            {selectedModel && !stranded && (
-              <span className="fy-set__state">
-                {sourceOf(selectedModel)} · {runsOn(selectedModel)} ·{" "}
-                {modelCapabilityCopy(selectedModel)}
-              </span>
-            )}
-            {stranded && selectedModel && (
-              <span className="fy-set__state">
-                {sourceOf(selectedModel)} · {strandReason(state, selectedModel)}
-              </span>
-            )}
-            {stranded && <span className="fy-set__dot fy-set__dot--warn" aria-hidden="true" />}
-          </div>
+            {/* The provider is the control's first word, so the state is what R-16a asks for
+                after it: where the model runs, or what its credential is doing. Displayed rather
+                than re-derived (R-63). */}
+            {selectedModel && !stranded && <span className="fy-fact__state">{runsOn(selectedModel)}</span>}
+            {selectedModel && stranded && warn(strandState(selectedModel))}
+            {missing && warn("not in the manifest")}
+          </FactRow>
         );
       })}
       {/* Its label and the route, with no picker and no sentence (R-17): the absence of a control
           is what says the choice is not made here. */}
-      <div className="fy-set__row">
-        <span className="fy-set__routelabel">{CAPABILITY_LABEL.llm}</span>
-        <button type="button" className="fy-set__link" onClick={() => navigate("/settings/harness")}>
+      <FactRow what={CAPABILITY_LABEL.llm}>
+        <button type="button" className="fy-fact__link" onClick={() => navigate("/settings/harness")}>
           on Harness
         </button>
-        <span style={{ flex: 1 }} />
-      </div>
-
-      {/* Who reads the app's prose aloud. A third role: a character's voice lives on their sheet,
-          a reading voice belongs to one bench take, and this one narrates. It stays on the shipped
-          local voice unless somebody chooses otherwise, because "read aloud" is a passive press and
-          no other preference here spends money on one. */}
-      <div className="fy-rt__keyline">
-        <div className="fy-rt__eyebrow">NARRATOR</div>
-        <div className="fy-set__field">
-          <span className="fy-rt__path" data-testid="narrator-name">
-            {narrator === null ? DEFAULT_NARRATOR.label : `${narrator.label ?? narrator.voiceId} · ${narrator.provider}`}
-            {" · "}
-            {narrator === null || narrator.provider === "kokoro"
-              ? "reads on this machine · free"
-              : "reads in the cloud · billed per character"}
-          </span>
-          <button type="button" className="fy-set__link" onClick={() => setNarratorOpen(true)}>
-            Choose voice
-          </button>
-          {narrator !== null && (
-            <button type="button" className="fy-set__link" data-testid="narrator-reset" onClick={() => setNarrator(null)}>
-              Use the local voice
-            </button>
-          )}
-        </div>
-      </div>
+      </FactRow>
+      <FactRow
+        what="Narrator"
+        does={
+          <>
+            <ActionButton icon={<Pencil size={13} />} onClick={() => setNarratorOpen(true)}>
+              Change
+            </ActionButton>
+            {narrator !== null && (
+              <ActionButton
+                icon={<RotateCcw size={13} />}
+                hint={`${DEFAULT_NARRATOR.label} · Kokoro · free`}
+                testId="narrator-reset"
+                onClick={() => setNarrator(null)}
+              >
+                Reset
+              </ActionButton>
+            )}
+          </>
+        }
+      >
+        <span data-testid="narrator-name">{narrator === null ? DEFAULT_NARRATOR.label : (narrator.label ?? narrator.voiceId)}</span>
+        <span className="fy-fact__state">{readerChip}</span>
+      </FactRow>
       <VoicePickerDialog
         open={narratorOpen}
         use="narration"
@@ -2332,22 +2396,17 @@ export function SettingsGeneralScreen() {
       />
       {drift.length > 0 && (
         <>
-          <div className="fy-set__eyebrow">MANIFEST DRIFT</div>
+          <HalfHeading icon={<ChartLine size={14} />} aside={`${drift.length} model${drift.length === 1 ? "" : "s"}`}>
+            Manifest drift
+          </HalfHeading>
           {drift.map((d) => (
-            <div key={d.modelId} className="fy-set__row">
-              <div className="fy-set__name fy-set__name--wide">
-                <div className="fy-set__title">{d.modelId}</div>
-                <div className="fy-set__caps">
-                  {PROVIDER_TABLE[d.provider].displayName} · {d.samples} reported charges
-                </div>
-              </div>
-              <span className="fy-set__state">
-                estimates off by ~{(d.medianDivergencePerMille / 10).toFixed(0)}%
+            <FactRow key={d.modelId} what={d.modelId}>
+              <span>
+                {PROVIDER_TABLE[d.provider].displayName} · {d.samples} reported charges
               </span>
-              <span className="fy-set__dot fy-set__dot--warn" />
-            </div>
+              {warn(`estimates off by ~${(d.medianDivergencePerMille / 10).toFixed(0)}%`)}
+            </FactRow>
           ))}
-          <div className="fy-set__note">the shipped manifest needs an update — estimates keep missing what was billed</div>
         </>
       )}
     </div>
@@ -2434,9 +2493,6 @@ export function SettingsAboutScreen() {
         <div className="fy-set__name fy-set__name--wide">
           <div className="fy-set__title">Updates</div>
           <div className="fy-set__caps">{updateCopy}</div>
-          {(update?.status === "ready" || update?.status === "install-on-close") && (
-            <div className="fy-set__note">Install when I close will not reopen Arke Studio.</div>
-          )}
         </div>
         {update?.status === "available" && (
           <Button variant="primary" onClick={() => downloadUpdate()}>
@@ -2448,7 +2504,7 @@ export function SettingsAboutScreen() {
             <Button variant="primary" onClick={() => installUpdateAndRestart()}>
               Install and restart
             </Button>
-            <button type="button" className="fy-set__link" onClick={() => installUpdateOnClose()}>
+            <button type="button" className="fy-set__link" title="Install on close without reopening Arke Studio" onClick={() => installUpdateOnClose()}>
               Install when I close
             </button>
           </>

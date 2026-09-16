@@ -11,7 +11,8 @@ import {
   type ClientState,
 } from "@arke-studio/contracts";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
-import { CutScreen, LANE_GUTTER_PX, followPlayhead, rulerTicks } from "../src/screens/production.js";
+import { CutScreen } from "../src/screens/cut.js";
+import { LANE_GUTTER_PX, followPlayhead, rulerTicks } from "../src/screens/editor-transport.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -393,3 +394,22 @@ describe("the ruler prints times where they are true", () => {
     assert.deepEqual(rulerTicks(40, -10), []);
   });
 });
+
+for (const selector of [".fy-playhead__grab", ".fy-scrub"]) {
+  it(`${selector} restores keyboard focus styling after pointer seeking or blur`, async () => {
+    const screen = await mountCut();
+    try {
+      const target = screen.container.querySelector<HTMLElement>(selector)!;
+      measure(target);
+      measure(screen.container.querySelector<HTMLElement>(".fy-tracks")!);
+      await act(async () => { target.dispatchEvent(pointer("pointerdown", GUTTER)); target.dispatchEvent(pointer("pointerup", GUTTER)); });
+      assert.equal(target.dataset.pointerSeeking, "true");
+      const key = new Event("keydown", { bubbles: true });
+      Object.defineProperty(key, "key", { value: "ArrowRight" });
+      await act(async () => { target.dispatchEvent(key); });
+      assert.equal(target.dataset.pointerSeeking, undefined);
+      await act(async () => { target.dispatchEvent(pointer("pointerdown", GUTTER)); target.dispatchEvent(pointer("pointerup", GUTTER)); target.dispatchEvent(new Event("focusout", { bubbles: true })); });
+      assert.equal(target.dataset.pointerSeeking, undefined, "tabbing back can show normal keyboard focus");
+    } finally { await act(async () => screen.root.unmount()); }
+  });
+}

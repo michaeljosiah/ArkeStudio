@@ -262,14 +262,15 @@ export async function createProductionFromPlan(
   );
 }
 
-export async function createProduction(store: WorldStore, input: CreateProductionInput): Promise<string> {
+export async function createProduction(store: WorldStore, input: CreateProductionInput,
+  options: { source?: string; precondition?: WorldStatePrecondition } = {}): Promise<string> {
   // Concurrent creates race between reading the bundle and committing: two requests can pick
   // the same slug, and the loser's `create` refuses as stale. The commit itself is the arbiter
   // (never merged, R-27) — the loser recomputes against the fresh bundle and takes the next
   // slug, so distinct requests always get distinct productions (#384).
   for (let attempt = 0; ; attempt++) {
     try {
-      return await createProductionOnce(store, input);
+      return await createProductionOnce(store, input, options);
     } catch (err) {
       if (err instanceof CommitStaleError && attempt < 3) continue;
       throw err;
@@ -277,7 +278,8 @@ export async function createProduction(store: WorldStore, input: CreateProductio
   }
 }
 
-async function createProductionOnce(store: WorldStore, input: CreateProductionInput): Promise<string> {
+async function createProductionOnce(store: WorldStore, input: CreateProductionInput,
+  options: { source?: string; precondition?: WorldStatePrecondition }): Promise<string> {
   const bundle = store.getBundle();
   const taken = bundle.productions.map((p) => p.meta.id);
   const slug = uniqueSlug(input.title, "production", taken);
@@ -370,7 +372,7 @@ async function createProductionOnce(store: WorldStore, input: CreateProductionIn
   }
   await store.commit({
     kind: "production-create",
-    source: "form",
+    source: options.source ?? "form",
     files,
     // Any new-model write crosses the schema boundary (SPEC-023 R-23) so older builds refuse
     // this world by name instead of silently dropping the production from the bundle.
@@ -380,7 +382,7 @@ async function createProductionOnce(store: WorldStore, input: CreateProductionIn
         ? { raiseSchemaVersion: 2 }
         : {}),
     ...(input.requestId ? { requestId: input.requestId } : {}),
-  });
+  }, undefined, options.precondition);
   return slug;
 }
 
@@ -696,6 +698,7 @@ export async function createChapter(
   store: WorldStore,
   productionId: string,
   input: { title: string; order: number },
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
 ): Promise<string> {
   // `New chapter` makes every chapter `Untitled` (turn 126), so the second press would have
   // collided with the first on the file the create refuses to overwrite. Unique against the
@@ -737,11 +740,12 @@ export async function createChapter(
     // A chapter born with `order` and no legacy `number` is a version-2 shape (SPEC-023 R-23):
     // an older build's scanner silently drops it rather than refusing the world by name.
     raiseSchemaVersion: 2,
-    source: "form",
+    source: options.source ?? "form",
+    ...(options.requestId ? { requestId: options.requestId } : {}),
     files: [
       { path: `productions/${productionId}/chapters/${slug}.md`, action: "create", content: doc.serialize(), baseHash: null },
     ],
-  });
+  }, undefined, options.precondition);
   return slug;
 }
 
@@ -764,7 +768,7 @@ export async function saveChapter(
   productionId: string,
   chapterFile: string,
   body: string,
-  options: { baseHash?: string } = {},
+  options: { baseHash?: string; source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
 ): Promise<{ version: number; hash: string }> {
   return store.gateOp(async () => {
     const path = `productions/${productionId}/chapters/${chapterFile}.md`;
@@ -796,7 +800,8 @@ export async function saveChapter(
     // over an accepted draft the editor never saw. The committer refuses a moved base.
     const result = await store.commitUnserialised({
       kind: "chapter-save",
-      source: "editor",
+      source: options.source ?? "editor",
+      ...(options.requestId ? { requestId: options.requestId } : {}),
       files: [{ path, action: "replace", content: doc.serialize(), baseHash: options.baseHash ?? sha256(live), preserveVersion: true }, ...progressFiles],
     });
     // The base the next save must name is the bytes this commit wrote — the committer stamps
@@ -810,7 +815,7 @@ export async function saveChapter(
     const stamped = MarkdownFile.parse(saved);
     const parsed = typeof stamped.data["version"] === "number" ? (stamped.data["version"] as number) : 1;
     return { version: Math.max(1, version ?? parsed), hash: committed ?? sha256(saved) };
-  });
+  }, options.precondition);
 }
 
 /**
@@ -823,15 +828,20 @@ export async function openChapter(
   store: WorldStore,
   productionId: string,
   chapterId: string,
+  options: { canonicalId?: boolean } = {},
 ): Promise<{ file: string; title: string; order: number; body: string; version: number; hash: string; bodyHash: string; versions: number[] }> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) throw new Error("That production is no longer in this world.");
-  const summary = production.chapters.find((c) => c.id === chapterId || c.file === chapterId);
+  const summary = production.chapters.find((c) => c.id === chapterId || (!options.canonicalId && c.file === chapterId));
   if (!summary) throw new Error("That chapter is no longer in this production.");
   const path = `productions/${productionId}/chapters/${summary.file}.md`;
   const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8").catch(() => null);
   if (live === null) throw new Error("That chapter is no longer in this production.");
+  const hash = sha256(live);
+  // Canonical public reads must not mix a scanned title/order with newly edited file bytes.
+  if (options.canonicalId && summary.hash !== hash) throw new Error("The chapter changed. Refresh the world before reading it again.");
   const doc = MarkdownFile.parse(live);
+  if (options.canonicalId && doc.data["id"] !== chapterId) throw new Error("The chapter identity changed.");
   const version = Math.max(1, typeof doc.data["version"] === "number" ? (doc.data["version"] as number) : summary.version);
   // A chapter born by a press serialises with a bare newline for a body; the editor should open
   // on nothing rather than on one blank line it did not type.
@@ -849,7 +859,7 @@ export async function openChapter(
     .sort((a, b) => a - b);
   // The hash of the prose alone beside the file's (turn 129): what a continuity record is keyed
   // to, normalised exactly as the scanner normalises it for the summary's `bodyHash`.
-  return { file: summary.file, title: summary.title, order: summary.order, body, version, hash: sha256(live), bodyHash: sha256(body), versions };
+  return { file: summary.file, title: summary.title, order: summary.order, body, version, hash, bodyHash: sha256(body), versions };
 }
 
 /**

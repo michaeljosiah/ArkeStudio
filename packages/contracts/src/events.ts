@@ -6,6 +6,7 @@ import { PerformanceGenerationQuoteSchema } from "./performance.js";
 import { PerformanceRecordSchema } from "./performance.js";
 import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
+import { AudiobookDirectionInputSchema, AudiobookDoorSchema, AudiobookPriceLineSchema, ChapterAudiobookSchema } from "./audiobook.js";
 import { z } from "zod";
 import { ModelResidencySchema } from "./local-ai.js";
 import { WorldImageReferenceSchema } from "./world-image-references.js";
@@ -24,6 +25,7 @@ import { HarnessStatusSchema } from "./harness.js";
 import {
   IsoDateTimeSchema,
   CandidateIdSchema,
+  ArtifactIdSchema,
   ConversationIdSchema,
   FrameRunIdSchema,
   JobIdSchema,
@@ -90,6 +92,8 @@ export const QueueCommandSchema = z.enum([
   "read-bible-section",
   "read-prose",
   "read-prose-page",
+  "read-audiobook-chapter",
+  "read-audiobook-book",
   "generate-world-image",
   "upload-world-image",
   "generate-master-look",
@@ -311,6 +315,16 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       /** The cast of lines beside the chapter (turn 130), for the same reason. */
       voices: ChapterVoicesSchema.optional(),
       voicesUnreadable: z.literal(true).optional(),
+      /** The audiobook record beside the chapter (turn 146, SPEC-047 R-1): the takes come with the chapter; the bundle carries the stamp. */
+      audiobook: ChapterAudiobookSchema.optional(),
+      audiobookUnreadable: z.literal(true).optional(),
+      /**
+       * The takes the record names that are not on the shelf — sidecar gone or retired, or the
+       * media gone from a world carried by hand (SPEC-047 R-14). The window cannot look at the
+       * media itself, and without this it would show a block made that cannot play and hide the
+       * press that would make it again (codex on PR 1183).
+       */
+      audiobookMissing: z.array(ArtifactIdSchema).optional(),
       reason: z.string().min(1).optional(),
     })
     .strict(),
@@ -557,6 +571,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       command: QueueCommandSchema,
       destinationLabel: z.string().min(1).max(512),
       confirmationToken: z.string().min(1).max(256),
+      /** For a hosted reader: what the vendor does with the clip, in its own terms (SPEC-046 R-17). */
+      destinationNotice: z.string().min(1).max(1024).optional(),
     })
     .strict(),
 
@@ -666,6 +682,11 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       cloudPreviewMicroUsd: z.number().int().min(0).nullable(),
       /** Exact preflight price by concrete provider/model/voice target. */
       previewMicroUsdByVoice: z.record(z.string(), z.number().int().min(0)).default({}),
+      /**
+       * What a first read through a reader adds, by the same key (SPEC-046 R-14, R-34): a
+       * slot-keeping reader's clone charge, said on the row before the preview that would incur it.
+       */
+      notices: z.record(z.string(), z.string().min(1)).default({}),
     })
     .strict(),
   /** Correlated synthesis result for candidate previews and authoritative sheet reads. */
@@ -684,7 +705,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
        */
       sheetId: SlugSchema.optional(),
       sheetVersion: z.number().int().min(1),
-      purpose: z.enum(["candidate-preview", "sheet-section", "sheet-page", "bible-section", "prose"]),
+      purpose: z.enum(["candidate-preview", "sheet-section", "sheet-page", "bible-section", "prose", "audiobook"]),
       sectionHeading: z.string().min(1).optional(),
       /**
        * Which piece of a long read this is, and how many there are (2026-08-24).
@@ -781,6 +802,26 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       label: z.string().nullable(),
       /** Why not — the same words `newClonedVoice` refuses with, never a generic failure. */
       reason: z.string().nullable(),
+    })
+    .strict(),
+  /**
+   * The outcome of deleting a cloned voice (SPEC-046 R-15): the library's part first, then each
+   * copy a hosted reader kept — removed, or kept with the vendor's reason. A copy the vendor
+   * would not give up never blocks the delete here; it is reported once, on this event.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("voice.deleted"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      voiceId: z.string().min(1),
+      status: z.enum(["deleted", "refused"]),
+      /** Why not — the characters still reading with it, or what the library said. */
+      reason: z.string().min(1).optional(),
+      copies: z
+        .array(z.object({ provider: z.string().min(1), removed: z.boolean(), reason: z.string().min(1).optional() }).strict())
+        .default([]),
     })
     .strict(),
   z
@@ -975,6 +1016,202 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       dropped: z.number().int().min(0),
       omitted: z.number().int().min(0),
       record: ChapterVoicesSchema.optional(),
+      reason: z.string().optional(),
+    })
+    .strict(),
+
+  /**
+   * A chapter read into kept takes (design turn 146, SPEC-047 R-16..R-18): started with what
+   * the run will make; priced once when any of it is a cloud voice, naming each voice, its
+   * provider and its share; a progress event per block as its take lands or is flagged; then
+   * finished with a named ending. Keyed like continuity's and the cast's runs.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.started"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      /** The run's request, which a cloned voice's upload confirmation is asked under (SPEC-022, SPEC-046). */
+      requestId: UlidSchema,
+      /** How many blocks the run will make, of how many the chapter has. */
+      toMake: z.number().int().min(0),
+      blocks: z.number().int().min(0),
+      /**
+       * Replayed to a renderer that connects while the run is going, with the counts the run
+       * has reached (`made`): a window that already holds the run keeps what it knows, and one
+       * that does not learns how far a run is and that it can be stopped. A replay reaches every
+       * refresh, not only a reconnect, so without this mark it would reset a run's progress and
+       * flip a finished run back to going.
+       */
+      replayed: z.literal(true).optional(),
+      made: z.number().int().min(0).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.priced"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      characters: z.number().int().min(0),
+      estimatedMicroUsd: z.number().int().min(0),
+      confirmationToken: z.string().min(1),
+      /** Every cloud voice the words would go to, once each, with its share (R-17). */
+      voices: z.array(
+        z.object({ label: z.string().min(1), provider: z.string().min(1), characters: z.number().int().min(0), estimatedMicroUsd: z.number().int().min(0) }).strict(),
+      ),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.progress"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      block: z.string().min(1),
+      outcome: z.enum(["made", "adopted", "flagged"]),
+      reason: z.string().optional(),
+      made: z.number().int().min(0),
+      toMake: z.number().int().min(0),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.finished"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      outcome: z.enum(["read", "stopped", "unavailable", "failed", "refused"]),
+      made: z.number().int().min(0),
+      flagged: z.number().int().min(0),
+      record: ChapterAudiobookSchema.optional(),
+      reason: z.string().optional(),
+    })
+    .strict(),
+  /**
+   * The record written outside a run (SPEC-047 R-6, R-10): a block's direction set or cleared,
+   * a chapter's directions accepted. The window that asked, and every other, takes the record
+   * as a run's finished one — the newer wins — or hears why nothing was written.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.record"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      /** The write this answers, when it was named: a card's acceptance takes only its own answer. */
+      requestId: UlidSchema.optional(),
+      record: ChapterAudiobookSchema.optional(),
+      /** Why the write was refused — a control the reader cannot express, prose that moved — when it was. */
+      refused: z.string().min(1).optional(),
+      /** How many controls a direction lost to its reader's row, when a whole chapter was accepted (R-10). */
+      dropped: z.number().int().min(0).optional(),
+    })
+    .strict(),
+  /**
+   * `Direct this chapter` (SPEC-047 R-10): the model asked for a direction per block in the
+   * cast's discipline, every control checked against the block's reader; what verifies is
+   * offered as one card, accepted whole through `accept-direction` or discarded in the window.
+   * Nothing is written by the run itself.
+   */
+  /**
+   * The door's answer (SPEC-047 R-29): what every chapter stands at, who reads, and what a
+   * press would spend — or, when the door could not be read, no door and the reason, so the
+   * window is never left opening.
+   */
+  z.object({ ...base, type: z.literal("audiobook.door"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, door: AudiobookDoorSchema.nullable(), refused: z.string().min(1).optional() }).strict(),
+  /**
+   * The book read as one run (SPEC-047 R-16..R-18): started under the run's request (a cloned
+   * voice's consent is asked under it), priced once for every chapter's cloud blocks, a chapter
+   * at a time — each chapter's own events say how far it is — and finished with the counts.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.book-started"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      /** The chapters with something to make, of the chapters with prose. */
+      chapters: z.number().int().min(0),
+      blocks: z.number().int().min(0),
+      /** On a replay, how many chapters the book is past, so a window that rejoins is not told `0 of 0` until the next chapter ends. */
+      done: z.number().int().min(0).optional(),
+      replayed: z.literal(true).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.book-priced"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapters: z.number().int().min(0),
+      blocks: z.number().int().min(0),
+      cloudBlocks: z.number().int().min(0),
+      characters: z.number().int().min(0),
+      estimatedMicroUsd: z.number().int().min(0),
+      confirmationToken: z.string().min(1),
+      voices: z.array(AudiobookPriceLineSchema),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.book-progress"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      /** Chapters finished so far, of the chapters the run set out to read. */
+      done: z.number().int().min(0),
+      chapters: z.number().int().min(0),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.book-finished"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      outcome: z.enum(["read", "stopped", "unavailable", "failed"]),
+      /** Chapters read to the end, and chapters refused under `cast` and left for their rows to say why. */
+      chaptersRead: z.number().int().min(0),
+      chaptersRefused: z.number().int().min(0),
+      made: z.number().int().min(0),
+      flagged: z.number().int().min(0),
+      reason: z.string().optional(),
+    })
+    .strict(),
+  /** Directions re-checked against changed readers (SPEC-047 R-13): how many controls were dropped, across how many chapters. */
+  z
+    .object({ ...base, type: z.literal("audiobook.conformed"), worldId: UlidSchema, productionId: SlugSchema, dropped: z.number().int().min(0), chapters: z.number().int().min(0) })
+    .strict(),
+  z
+    .object({ ...base, type: z.literal("direction.started"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("direction.finished"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      outcome: z.enum(["directed", "stopped", "unavailable", "failed"]),
+      /** The prose the directions were made for, carried back on acceptance. */
+      hash: z.string().min(1).optional(),
+      chapterVersion: z.number().int().min(1).optional(),
+      directed: z.number().int().min(0),
+      /** Blocks the model did not address, and controls its reader could not express, dropped and counted. */
+      dropped: z.number().int().min(0),
+      /** The model's one or two sentences on what it did, said on the card. */
+      summary: z.string().optional(),
+      proposed: z.record(z.string().min(1), AudiobookDirectionInputSchema).optional(),
       reason: z.string().optional(),
     })
     .strict(),

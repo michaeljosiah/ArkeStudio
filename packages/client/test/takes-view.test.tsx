@@ -6,7 +6,10 @@ import { renderToString } from "react-dom/server";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { ClientState } from "@arke-studio/contracts";
-import { episodeThumbnailPath, filterTakeEpisodes, GenerateScreen, takeMediaView } from "../src/screens/production.js";
+import { episodeThumbnailPath } from "../src/screens/production-episode-picker.js";
+import { filterTakeEpisodes } from "../src/screens/production-episode-picker.js";
+import { GenerateScreen } from "../src/screens/production-generate.js";
+import { takeMediaView } from "../src/lib/take-presentation.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -226,14 +229,31 @@ describe("the takes, watched (turn 102c)", () => {
       ...production,
       takes: production.takes.map((take, index) => ({
         ...take,
-        params: index === 0 ? { ...take.params, durationSec: 2 } : take.params,
+        params: index === 0 ? { ...take.params, durationSec: 2.4583333333333335 } : take.params,
       })),
       selections: {},
     }));
     const page = parseHTML(render(state, GENERATE)).document;
     const labels = [...page.querySelectorAll(".fy-take__foot")].map((foot) => foot.textContent?.replace(/\s/g, ""));
 
-    assert.deepEqual(labels, ["Take12s", "Take24s"]);
+    assert.deepEqual(labels, ["Take12.5s", "Take24s"]);
+  });
+
+  it("names contact-sheet frames by their shot and marks an accepted frame as done", () => {
+    const state = withSaltlight((production) => ({
+      ...production,
+      takes: production.takes.map((take) => ({ ...take, kind: "frame", media: "fr_generated-step-0.png" })),
+    }));
+    const page = parseHTML(render(state, `${GENERATE}?view=stills`)).document;
+    const cards = [...page.querySelectorAll(".fy-shotcard")];
+    assert.ok(cards.length > 0);
+    assert.ok(cards.every((card) => !card.querySelector(".fy-shotcard__title")!.textContent!.includes(".png")));
+    const accepted = cards.find((card) => card.textContent?.includes(" · accepted"))!;
+    assert.ok(accepted);
+    const accept = accepted.querySelector(".fy-shotcard__actions button")!;
+    assert.equal(accept.textContent, "Accepted");
+    assert.ok(accept.hasAttribute("disabled"));
+    assert.equal(accepted.querySelector(".fy-shotcard__title")!.getAttribute("title"), "fr_generated-step-0.png");
   });
 
   it("plays video media with real controls while still frames remain pictures (#729)", async () => {

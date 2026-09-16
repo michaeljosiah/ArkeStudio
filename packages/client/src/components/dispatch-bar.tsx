@@ -230,6 +230,9 @@ export function strandReason(state: ReturnType<typeof useStore>["state"], model:
   }
   const status = (state?.app.providers ?? []).find((p) => p.id === model.provider);
   const info = PROVIDERS[model.provider];
+  // The other local providers take no key either: Kokoro is refused when Voxa has not started,
+  // and `the Kokoro key does not unlock this` sent people looking for a field that does not exist.
+  if (info.local) return "the local engine is not ready";
   // Not every provider takes a key, and telling someone to paste one they can never paste
   // sends them to a field that does not exist (issue 137).
   if (info.credential === "external") {

@@ -3,10 +3,10 @@ import { afterEach, describe, it } from "node:test";
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { OPENCODE_AVAILABILITY, type ClientMessage, type ClientState } from "@arke-studio/contracts";
 import { AgentsPanel } from "../src/screens/agents.js";
-import { SettingsHarnessScreen } from "../src/screens/shell.js";
+import { SettingsHarnessScreen, SettingsLayout } from "../src/screens/shell.js";
 import { ProductionConversation } from "../src/components/conversation.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -62,8 +62,8 @@ function modelState(): ClientState {
 let root: Root | undefined;
 let container: HTMLDivElement;
 let sent: ClientMessage[];
-async function mount(state: ClientState, children: ReactNode, path = "/settings/harness", waitingForSnapshot = false) {
-  __setStateForTest(state, waitingForSnapshot ? { state: null, connection: "connecting" } : {});
+async function mount(state: ClientState, children: ReactNode, path = "/settings/harness", waitingForSnapshot: boolean | "closed" = false) {
+  __setStateForTest(state, waitingForSnapshot ? { state: null, connection: waitingForSnapshot === "closed" ? "closed" : "connecting" } : {});
   sent = [];
   __setBridgeForTest({
     appVersion: "test", platform: "test", connect: () => {}, subscribe: () => {},
@@ -425,4 +425,70 @@ describe("live harness model controls (#1123, #1124)", () => {
     assert.match(container.textContent!, /ARKE_HARNESS selects Codex at launch/);
     assert.doesNotMatch(container.textContent!, /Selected for the next restart/);
   });
+});
+
+describe("round-64 harness regressions (#1154)", () => {
+  it("shows a desktop startup state without inventing an engine before the snapshot", async () => {
+    const previous = window.arke;
+    window.arke = { appVersion: "0.5.49" } as typeof window.arke;
+    try {
+      await mount(modelState(), <SettingsHarnessScreen />, "/settings/harness", true);
+      assert.match(container.textContent!, /Starting Arke Studio/);
+      assert.doesNotMatch(container.textContent!, /dev:coordinator|OpenCode|next restart|0\.1\.0/);
+    } finally { window.arke = previous; }
+  });
+
+  it("labels an installed but blocked engine as needing attention", async () => {
+    const state = modelState();
+    state.app.harness = { engine: "opencode", claudePath: null, codexPath: null, harnesses: [OPENCODE_AVAILABILITY,
+      { ...OPENCODE_AVAILABILITY, id: "codex", label: "Codex", bundled: false, installed: false, version: "0.144.0", source: null, blocked: "Codex is installed, but a newer version is needed." }], };
+    await mount(state, <SettingsHarnessScreen />, "/settings/harness?harness=codex");
+    const tab = [...container.querySelectorAll('[role="tab"]')].find(element => element.textContent!.includes("Codex"))!;
+    assert.match(tab.textContent!, /needs attention/);
+    assert.doesNotMatch(tab.textContent!, /not here/);
+    assert.match(container.textContent!, /newer version is needed/);
+    const absent = structuredClone(state);
+    absent.app.harness!.harnesses[1] = { ...absent.app.harness!.harnesses[1]!, version: null, source: null, blocked: "Codex was not found." };
+    await act(async () => __setStateForTest(absent));
+    assert.match(tab.textContent!, /not here/);
+    assert.match(container.textContent!, /Not found on this machine/);
+
+  });
+
+  it("keeps a replacement for a legacy saved model visible until its save arrives", async () => {
+    const state = modelState();
+    state.world!.productions[0]!.meta.models = { llm: "claude-sonnet-5" };
+    await mount(state, conversation());
+    await choose("Language model", OPUS);
+    // Restore linkedom's getter so the assertion reads React's selected option, not our event shim.
+    Reflect.deleteProperty(select("Language model"), "value");
+    await press("Remember for this production");
+    assert.equal(select("Language model").value, OPUS);
+    assert.match(container.textContent!, /THIS TURN/);
+    const saved = structuredClone(state);
+    saved.world!.productions[0]!.meta.models = { llm: OPUS };
+    await act(async () => __setStateForTest(saved));
+    assert.equal(select("Language model").value, OPUS);
+    assert.match(container.textContent!, /THIS PRODUCTION/);
+  });
+
+  it("retains an explicit turn choice equal to the production default ahead of an agent override", async () => {
+    const state = modelState();
+    state.app.agents[0]!.model = OPUS;
+    await mount(state, conversation());
+    await choose("Language model", CLAUDE);
+    Reflect.deleteProperty(select("Language model"), "value");
+    assert.equal(select("Language model").value, CLAUDE);
+    assert.match(container.textContent!, /THIS TURN/);
+  });
+});
+
+it("shows one startup warning and the bundled version on a closed desktop connection", async () => {
+  const previous = window.arke;
+  window.arke = { appVersion: "0.5.49" } as typeof window.arke;
+  try {
+    await mount(modelState(), <Routes><Route path="/settings" element={<SettingsLayout />}><Route path="harness" element={<SettingsHarnessScreen />} /></Route></Routes>, "/settings/harness", "closed");
+    assert.equal(container.textContent!.split("Starting Arke Studio").length - 1, 1);
+    assert.equal(container.querySelector(".fy-settings__version")?.textContent, "v0.5.49");
+  } finally { window.arke = previous; }
 });

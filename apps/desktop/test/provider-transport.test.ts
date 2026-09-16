@@ -41,6 +41,8 @@ describe("desktop cloud provider HTTP policy (issue 95)", () => {
     assert.equal(providerHttpProfile(scope({ operation: "validate" })), "validation");
     assert.equal(providerHttpProfile(scope({ operation: "poll" })), "control");
     assert.equal(providerHttpProfile(scope({ provider: "fal", operation: "submit" })), "enqueue");
+    assert.equal(providerHttpProfile(scope({ provider: "breezeblue", operation: "save-voice" })), "synchronous");
+    assert.equal(providerHttpProfile(scope({ provider: "breezeblue", operation: "delete-voice" })), "control");
     assert.equal(providerHttpProfile(scope()), "synchronous");
     assert.equal(providerHttpProfile(scope({ operation: "fetch-artifacts" })), "artifact");
     assert.ok(PROVIDER_HTTP_DEADLINES.synchronous.headersMs > PROVIDER_HTTP_DEADLINES.validation.headersMs);

@@ -50,6 +50,9 @@ corporate agreement is a different document.
 
 ## Getting set up
 
+To run against your own persistent root without Electron, see
+[the standalone server guide](docs/development/standalone-server.md).
+
 ```bash
 npm ci               # npm workspaces monorepo, Node >= 22.12 (CI uses Node 22)
 npm run typecheck    # every workspace

@@ -756,7 +756,7 @@ describe("fal motion references ride in the field the row names (issue 852)", ()
     // Seedance has a reference route and publishes video seconds, but names no field for the
     // clip — the exact row the budget's field gate exists for.
     await assert.rejects(
-      () => submit({ model: "seedance-2.0", params: { prompt: "x", references: [], durationSec: 5 } }),
+      () => submit({ model: "wan-2.7", params: { prompt: "x", references: [], durationSec: 5 } }),
       /names no field for a video reference/,
     );
     await assert.rejects(

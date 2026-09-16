@@ -9,6 +9,8 @@ import type { WorldStore } from "./world/store.js";
  * or reconcile, and the coordinator degrades accordingly.
  */
 export interface WorldProvider {
+  /** Reject harness scratch paths inside any managed or archived world, including directory aliases. */
+  assertWritingScratch?(path: string): Promise<void>;
   listWorlds(): Promise<WorldSummary[]>;
   /** Read-only image catalogue; opens no second store and acquires no world lock. */
   listReferenceImages?(slug: string): Promise<WorldImageReference[]>;
@@ -43,6 +45,8 @@ export interface WorldProvider {
   /**
    * Run against a world's locked store without changing which world the renderer has open.
    * Used by durable background jobs whose owner may not be the selected world.
+   * Selection changes wait for the callback. Use its supplied store; do not recursively
+   * call provider selection/scoped-store methods from inside the callback.
    */
   withWorldStore?<T>(worldId: string, fn: (store: WorldStore) => Promise<T>): Promise<T>;
   /**

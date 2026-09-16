@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { DEFAULT_SHOT_SEC, stageSourceFingerprintInput, effectiveFraming, productionAspect, MediaInfoSchema, STAGE_FRAME_RATE, stageFrameCount, stageReferenceFrames, type StageReferenceFrame, editShot, effectiveStageBlocking, orderedShots, ulid, stagePlayblastIsStale, type WorldBundle, type ArtifactSidecar, type ShotStaging, type SceneRecord, type Shot } from "@arke-studio/contracts";
+import { STAGE_CAMERA_EVALUATOR_VERSION, DEFAULT_SHOT_SEC, stageSourceFingerprintInput, effectiveFraming, productionAspect, MediaInfoSchema, STAGE_FRAME_RATE, stageFrameCount, stageReferenceFrames, type StageReferenceFrame, editShot, effectiveStageBlocking, orderedShots, ulid, stagePlayblastIsStale, type WorldBundle, type ArtifactSidecar, type ShotStaging, type SceneRecord, type Shot } from "@arke-studio/contracts";
 import type { MediaProbe } from "../media/probe.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { imageFormatOf, verifyArtifact } from "../queue/verify.js";
@@ -127,6 +127,7 @@ export async function filePlayblast(
     const staging: ShotStaging = {
       ...shot.staging,
       playblast: {
+        evaluatorVersion: STAGE_CAMERA_EVALUATOR_VERSION,
         sourceFingerprint: stageSourceFingerprint(record, shot, input.aspect),
         artifactId: artifact.id,
         openingFrameArtifactId: openingFrameArtifact.id,

@@ -7,10 +7,13 @@ import {
   type EngineLocality,
   type ProgressSocket,
 } from "./clients/comfyui.js";
+import { BreezeBlueClient } from "./clients/breezeblue.js";
+import { FishAudioClient } from "./clients/fishaudio.js";
 import { ElevenLabsClient } from "./clients/elevenlabs.js";
 import { FalClient } from "./clients/fal.js";
 import { HiggsfieldClient } from "./clients/higgsfield.js";
 import { KokoroClient, type KokoroSynthesize, type SidecarBaseUrl } from "./clients/kokoro.js";
+import { MistralClient } from "./clients/mistral.js";
 import { OllamaClient } from "./clients/ollama.js";
 import { OpenAiClient } from "./clients/openai.js";
 import { WhisperCppClient, type WhisperTranscribe } from "./clients/whispercpp.js";
@@ -111,6 +114,12 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
       undefined,
       transport,
     ),
+    // The hosted readers of the world's cloned voices (SPEC-046): cloud clients like ElevenLabs,
+    // keyed and captured the same way. Their voice catalogues reach the picker through the host's
+    // `cloudSources`, not through anything here.
+    mistral: captureProviderClient("mistral", (fetch) => new MistralClient(fetch), fetchImpl, capture, undefined, transport),
+    breezeblue: captureProviderClient("breezeblue", (fetch) => new BreezeBlueClient(fetch), fetchImpl, capture, undefined, transport),
+    fishaudio: captureProviderClient("fishaudio", (fetch) => new FishAudioClient(fetch), fetchImpl, capture, undefined, transport),
     ollama: captureProviderClient("ollama", (fetch) => new OllamaClient(fetch), fetchImpl, capture),
     ...(deps.voxa === undefined
       ? {}

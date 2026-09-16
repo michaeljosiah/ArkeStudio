@@ -44,15 +44,15 @@ const SCREENS = [
     controls: ["Arke"],
     notes: ["The episode as a page with Arke docked on it. <code>Add scene</code> creates directly with an inline title (SPEC-036 §1.14)."] },
 
-  { group: "Scene workspace", screen: "Storyboard · List", frame: "145a", route: "#/w/:worldId/p/:prodId/scenes/:sceneId", status: "drifted", checked: "2026-09-12",
+  { group: "Scene workspace", screen: "Storyboard · List", frame: "145a", route: "#/w/:worldId/p/:prodId/scenes/:sceneId", status: "built", checked: "2026-09-15",
     controls: ["Review scene", "Generate frames", "Regenerate", "Generate frame", "List", "Grid"],
-    notes: ["PR 1112 builds 145a: the row is a row again — the script typed on it, the title opening the page and the pencil editing, no <code>Frame prompt</code> toggle, no unfolding, a chevron beside the overflow, 14px above and below the frame — and the view row is <code>Storyboard &middot; Flow &middot; Preview</code>.", "Turn 139's scale (24 / 15 / 13 / 11) is still drawn, not built — issue 1096 A."] },
+    notes: ["PR 1112 builds 145a: the row is a row again — the script typed on it, the title opening the page and the pencil editing, no <code>Frame prompt</code> toggle, no unfolding, a chevron beside the overflow, 14px above and below the frame — and the view row is <code>Storyboard &middot; Flow &middot; Preview</code>.", "Turn 139's scale (24 / 15 / 13 / 11) now applies. Empty slots are compact and completed Plans fold to one line (issue 1096)."] },
   { group: "Scene workspace", screen: "Shot", frame: "145b", route: "#/w/:worldId/p/:prodId/scenes/:sceneId/shots/:shotId", status: "built", checked: "2026-09-12",
     controls: ["Regenerate", "View full prompt", "Rebuild"],
     notes: ["PR 1112 builds the page (<code>shot-page.tsx</code>, <code>shot-fields.tsx</code>) in place of turn 97's sheet: the breadcrumb ending on the scene, the filmstrip that steps and keeps the view, <code>Shot &middot; Stage</code> with the state word, the frame whole at the production's aspect beside Script, Frame prompt, Notes, Camera, Timing, Continuity, Sound and Props (145b, 145c), the no-frame state (145e), and the dock as <code>Arke &middot; Shot N</code>.", "The sheet's recipes (Establishing, Reaction, Insert…) did not come across: the turn does not draw them, and a chip row with nothing drawn behind it is not a control. Intent rides on the Camera card as its first line."] },
-  { group: "Scene workspace", screen: "Storyboard · Grid", frame: "145f", route: "#/w/:worldId/p/:prodId/scenes/:sceneId · Grid", status: "drifted", checked: "2026-09-12",
+  { group: "Scene workspace", screen: "Storyboard · Grid", frame: "145f", route: "#/w/:worldId/p/:prodId/scenes/:sceneId · Grid", status: "built", checked: "2026-09-15",
     controls: ["Grid", "Regenerate", "Needs frame"],
-    notes: ["PR 1112 builds 145f and 145g: the Grid is the storyboard&#8217;s default, <code>Grid &middot; List</code> in the control, the choice remembered per person; the card carries no <code>Frame prompt</code> toggle and a chevron on its foot, a press on the frame, the title or the chevron opens the page; the columns follow the production&#8217;s aspect &#8212; four across at portrait, three at landscape, one fewer under 176 or 280px.", "Same type-scale drift as the List (issue 1096 A)."] },
+    notes: ["PR 1112 builds 145f and 145g: the Grid is the storyboard&#8217;s default, <code>Grid &middot; List</code> in the control, the choice remembered per person; the card carries no <code>Frame prompt</code> toggle and a chevron on its foot, a press on the frame, the title or the chevron opens the page; the columns follow the production&#8217;s aspect &#8212; four across at portrait, three at landscape, one fewer under 176 or 280px.", "Uses the same corrected type scale and compact empty slots as the List (issue 1096)."] },
   { group: "Scene workspace", screen: "Frame run dialog", frame: "141a", route: "frame-run.tsx", status: "drifted", checked: "2026-09-11",
     controls: ["Per shot", "Shot board", "Shots without a frame", "Cancel", "Generate"],
     notes: ["Method, Include, Model with the aspect verdict, References and the props guard ship as drawn.", "A row's <code>Generate frame</code> still hands off to the Cut and assembles the scene, and a still is refused for the Cut's clock (issue 1096 D2, D3). A location mention reaches the provider raw (D1)."] },
@@ -72,13 +72,19 @@ const SCREENS = [
     controls: [],
     notes: ["Built, not drawn: the master says so in turn 140. The view plays the scene's frames and clips in order (preview.tsx)."] },
 
-  { group: "Make", screen: "Bench", frame: "142a", route: "#/w/:worldId/generate", status: "drifted", checked: "2026-09-11",
+  { group: "Make", screen: "Bench", frame: "142a", route: "#/w/:worldId/artifacts/bench/:sessionId", status: "built", checked: "2026-09-15",
     controls: ["Reference", "Keyframe", "End frame", "Image 1", "Presets", "Generate", "voice refs"],
-    notes: ["Keyframe slots (PR 900), voice references (PR 856) and Presets ship; drawn for the first time in 142a.", "On the build the filters stack vertically, the model select is 60px wide under the estimate, and the voice-references label wraps to seven lines; two captions stand above and below the brief (issue 1096 C). Turn 142 binds one row and a chip."] },
+    notes: ["Keyframe slots (PR 900), voice references (PR 856) and Presets ship; drawn for the first time in 142a.", "A shot's generation session is now the Bench 142a draws, not the prototype's second dress: the shot and the session's spend on the chrome's pills, the production's rail, icon tabs, one dispatch row with the name alone in the select and the price as one mono figure, <code>voice refs · on</code> as an option chip (absent without a voiced cast), the route fact on the Keyframe hint, the wall's pills, the clip's own transport, <code>Accept · file onto shot N</code>, and a numbered strip. Not built: the bar's filter and the two lenses, Voice on a shot, the seed and advanced buttons — none has a function behind it yet."] },
   { group: "Make", screen: "Cut", frame: "122a", route: "#/w/:worldId/p/:prodId/cut", status: "built", checked: "2026-09-09",
     controls: ["Library"],
     notes: ["The library beside the cut with one drag engine and posters by artifact id (PR 1054); typed trims in the Inspector and audio import (PR 944); the export sheet at <code>/cut?export=1</code> owns delivery."] },
+  { group: "Make", screen: "Generate · takes", frame: "147a", route: "#/w/:worldId/p/:prodId/generate", status: "built", checked: "2026-09-13",
+    controls: ["EPISODE", "SCENE", "SHOT", "Open in generator", "Accept take", "Reject", "Contact sheet", "Advanced"],
+    notes: ["Turn 147 records the shipped episode/scene/shot scope, selectable playable cards and shared verdict bar for the picked take. The bar acts on the selected card; it is not duplicated on each card (issue 1165).", "Measured durations use one decimal. Accepted contact-sheet frames name their shot and mark acceptance as done."] },
 
+  { group: "Around it", screen: "Settings · Harness", frame: "148a", route: "#/settings/harness", status: "built", checked: "2026-09-15",
+    controls: ["OpenCode", "Claude Code", "Codex", "Check again", "Choose…", "Advanced"],
+    notes: ["Detected engine state is distinct from the saved next-restart choice. Found-but-blocked installations say needs attention. The initial desktop connection displays Starting Arke Studio, with no invented default engine (issue 1154)."] },
   { group: "Around it", screen: "Settings", frame: "124a", route: "#/settings", status: "built", checked: "2026-09-06",
     controls: ["Providers", "General", "Diagnostics"],
     notes: ["SPEC-042 / PR 875: a page, not a modal. Providers holds credentials; AI models holds models by kind then supplier. Sample clips on the card are issue 876."] },
@@ -97,6 +103,18 @@ const SCREENS = [
   { group: "Around it", screen: "Chapter (story)", frame: "126a", route: "#/w/:worldId/p/:prodId/chapters/:id", status: "built", checked: "2026-09-07",
     controls: ["Read the chapter"],
     notes: ["Story mode for novelists, turns 126–131, PRs 877–933: the chapter read, typed into and heard, beside what it draws on."] },
+  { group: "Around it", screen: "Chapter · audiobook view (story)", frame: "146b", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drifted", checked: "2026-09-14",
+    controls: ["Read the chapter", "Direct this chapter"],
+    notes: ["SPEC-047 slice 1 ships the view: the <code>Manuscript · Audiobook</code> row, the blocks with a state each, <code>Read the chapter</code> with its count and price, the price asked once, the player over made takes, the block pressed and its takes beside it.", "Slice 2 ships the block's direction beside it — the delivery seg with what this reader cannot do struck and the reason on the control, the phrase where the reader takes one, the speed seg, cues placed at the words selected, the plan's report line, <code>Make again</code> under the takes — and <code>Direct this chapter</code> as the dock's press, its card accepted whole or discarded, then <code>Direct again</code>.", "Drift: the side column is narrower than drawn, so each label sits over its control rather than beside it, and the delivery seg wraps to two rows."] },
+  { group: "Around it", screen: "Audiobook (story)", frame: "146a", route: "#/w/:worldId/p/:prodId/story/audiobook", status: "drifted", checked: "2026-09-14",
+    controls: ["Read the book", "Export"],
+    notes: ["SPEC-047 slice 3 ships the door: <code>Audiobook</code> on the rail between Chapters and Artifacts with the chapters read of those with prose, the count and running time under the title, <code>Narrator · Cast</code> with the voices beside it — the narrator, each speaker with the voice that reads them, <code>no voice · narrator</code> in warning — the 4px read bar, a row a chapter with its state or its running time, and <code>Read the book · N chapters · $X</code> with <code>reading… n of N chapters</code> and <code>Stop</code> while it goes.", "Drift: <code>Export</code> waits for slice 4, so the head holds one press; a run's ending — <code>stopped · the takes made stand</code>, chapters left to their rows, controls dropped on a reading switch — is a line under the voices row the frame does not draw."] },
+  { group: "Around it", screen: "Read the book dialog (story)", frame: "146c", route: "#/w/:worldId/p/:prodId/story/audiobook?read=1", status: "built", checked: "2026-09-14",
+    controls: ["Confirm 9,400 characters · $0.94", "Cancel"],
+    notes: ["SPEC-047 slice 3: the price asked once for the book — the chapters, characters and cloud lines under the title, a line a voice with what it reads and what it costs, the narrator's share free, a speaker with no voice in warning, where the words go. Confirm carries the figure and the token."] },
+  { group: "Around it", screen: "Export audiobook sheet (story)", frame: "146d", route: "#/w/:worldId/p/:prodId/story/audiobook?export=1", status: "drawn", checked: "2026-09-13",
+    controls: ["Chapter files", "Book", "Retail", "As made", "Read the rest · 9 chapters · $0.94", "Show in folder", "Export 6 chapters"],
+    notes: ["Turn 146: chapter files or a book, the retail profile as data, chapters left out counted with the dashed door, the delivered folder. Not built."] },
 ];
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
@@ -223,14 +241,17 @@ const screensHtml = sections.map((s) => {
     </section>`;
   }
   const width = s.root.match(/width:\s*(\d+)px/)?.[1] ?? "1360";
-  const rules = s.rules.length ? `<div class="rules"><div class="rules__head">Binding · turn <a href="Arke%20Studio.dc.html#t${s.turn}">${s.turn}</a> <span>${s.turnName}</span></div>${s.rules.map((r) => `<p class="dv-rule">${r}</p>`).join("")}</div>` : "";
+  // A rule copied out of the master keeps its `#126a` links; on this page those ids do not
+  // exist, so the anchors are pointed back at the master (codex on PR 1164).
+  const toMaster = (markup) => markup.replace(/href="#/g, 'href="Arke%20Studio.dc.html#');
+  const rules = s.rules.length ? `<div class="rules"><div class="rules__head">Binding · turn <a href="Arke%20Studio.dc.html#t${s.turn}">${s.turn}</a> <span>${toMaster(s.turnName)}</span></div>${s.rules.map((r) => `<p class="dv-rule">${toMaster(r)}</p>`).join("")}</div>` : "";
   return `
     <section class="screen" id="${esc(slug(s.screen))}">
       <div class="screen__head">
         <div><h2>${esc(s.screen)}</h2><div class="screen__meta"><span class="tag tag--${s.status}">${status}</span><code>${esc(s.route)}</code><span>checked ${s.checked}</span></div></div>
         <a class="screen__frame" href="Arke%20Studio.dc.html#${s.frame}">${s.frame} in the master →</a>
       </div>
-      <p class="screen__caption">${s.caption}</p>
+      <p class="screen__caption">${toMaster(s.caption)}</p>
       <div class="stage" data-width="${width}"><div class="stage__scale" style="width:${width}px">${s.root}</div></div>
       <div class="built built--${s.status}"><div class="built__head"><span class="tag tag--${s.status}">${status}</span><span class="built__label">what shipped</span></div>${notes}</div>
       ${rules}

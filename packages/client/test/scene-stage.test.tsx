@@ -484,6 +484,30 @@ it("a group's references follow it: cleared, its track and the camera's anchor g
   assert.equal(stageItem(q, "Cart"), undefined);
 });
 
+it("Escape restores the whole authored draft after valid live numeric edits", async () => {
+  const { q } = await mount(shot => {
+    movingShot(shot);
+    shot.staging!.authorship = { model: "test/vision", sourceVersion: 1, sourceFingerprint: "a".repeat(64),
+      instruction: "Frame the doorway", assumptions: [], assessment: "Reviewed framing", inspectedFrames: 3 };
+  });
+  const input = q('[aria-label="Rig intensity"]') as HTMLInputElement;
+  const props = () => (input as unknown as Record<string, {
+    onFocus: () => void;
+    onKeyDown: (event: { key: string; currentTarget: HTMLInputElement; preventDefault: () => void; stopPropagation: () => void }) => void;
+    onChange: (event: { target: { value: string } }) => void;
+    onBlur: (event: { currentTarget: HTMLInputElement }) => void;
+  }>)[Object.keys(input).find(key => key.startsWith("__reactProps$"))!]!;
+  await act(async () => props().onFocus());
+  await act(async () => props().onChange({ target: { value: "1.75" } }));
+  assert.ok(q('[data-testid="stage-moved"]'), "valid typing previews the change");
+  await act(async () => props().onKeyDown({ key: "Escape", currentTarget: input, preventDefault() {}, stopPropagation() {} }));
+  await act(async () => props().onBlur({ currentTarget: input }));
+  assert.equal(input.value, "1.00");
+  assert.equal(q('[data-testid="stage-moved"]'), null);
+  assert.match(q(".fy-swstage__inspection").textContent ?? "", /Reviewed framing/);
+  assert.match(q(".fy-swstage__inspection").textContent ?? "", /3 views inspected/);
+});
+
 it("Escape in a field is the field's: it drops what was typed without committing, and stops there; other keys pass", async () => {
   const { q, shot } = await mount(movingShot);
   const reached: string[] = [];

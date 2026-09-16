@@ -13,7 +13,7 @@ import {
   type ClientState,
 } from "@arke-studio/contracts";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
-import { CutScreen } from "../src/screens/production.js";
+import { CutScreen } from "../src/screens/cut.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -243,6 +243,9 @@ describe("semantic Picture editing (#679)", () => {
       assert.ok(shot12);
       await act(async () => shot12.click());
       assert.match(screen.container.querySelector(".fy-takepick")?.textContent ?? "", /TAKES · 1/);
+      const candidate = screen.container.querySelector(".fy-takepick__id")!;
+      assert.equal(candidate.textContent, "Take 1");
+      assert.equal(candidate.getAttribute("title"), "tk_01J8F0000000000000000000B2");
       assert.equal(screen.container.querySelector<HTMLInputElement>('input[aria-label="In timecode"]')?.value, "00:00:06:00", "In point in HH:MM:SS:FF");
       await act(async () => button(screen, "Use").click());
       const sent = commandsSent(screen).at(-1)!;

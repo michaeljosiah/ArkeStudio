@@ -125,6 +125,7 @@ const MENU_WIDTH = 196;
 const EMPTY_MOVED: Record<string, { x: number; y: number }> = {};
 
 export function SceneFlow({
+  fullscreen = false,
   scene,
   production,
   sheets,
@@ -147,6 +148,7 @@ export function SceneFlow({
   onShowBoards,
   onOpenCharacter,
 }: {
+  fullscreen?: boolean;
   scene: SceneRecord;
   production: ProductionBundle;
   sheets: readonly Sheet[];
@@ -316,6 +318,9 @@ export function SceneFlow({
     return true;
   }, []);
   useEffect(() => {
+    // Fullscreen fits the existing graph; keep its layout mode so returning does not
+    // trigger a compact/wide rearrangement that overwrites the saved working zoom.
+    if (fullscreen) return;
     const element = canvas.current;
     if (element === null) return;
     const measure = () => {
@@ -333,7 +338,7 @@ export function SceneFlow({
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [fullscreen]);
 
   // Fit once per scene and layout. Crossing the compact boundary changes every default position.
   const fitted = useRef<string | null>(null);
@@ -347,6 +352,18 @@ export function SceneFlow({
     setMoved({});
     if (fitNodes(arrangedGraph.nodes)) fitted.current = layout;
   }, [arrangedGraph.nodes, arrangementKey, canvasSize, compact, fitNodes, hasLiveMoved, scene.id]);
+
+  const fullscreenView = useRef<{ zoom: number; pan: { x: number; y: number } } | null>(null);
+  useEffect(() => {
+    if (fullscreen && fullscreenView.current === null) {
+      fullscreenView.current = { zoom, pan };
+      fitNodes(graph.nodes);
+    } else if (!fullscreen && fullscreenView.current !== null) {
+      setZoom(fullscreenView.current.zoom);
+      setPan(fullscreenView.current.pan);
+      fullscreenView.current = null;
+    }
+  }, [fullscreen, fitNodes, graph.nodes, zoom, pan]);
 
   useEffect(() => {
     if (sequence.kind === "invalid") {
@@ -892,7 +909,6 @@ export function SceneFlow({
         )}
       </div>
 
-      <span className="fy-swcanvas__hint" aria-hidden="true">right-click for actions</span>
 
       {menu === null ? null : (
         <div

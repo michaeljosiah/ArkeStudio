@@ -2,7 +2,7 @@
   "name": "arke-studio",
   "version": "0.5.49",
   "private": true,
-  "description": "Arke Studio — a local-first worldbuilding and production studio. The world lives in a folder; the app is a lens over it.",
+  "description": "Arke Studio \u00e2\u20ac\u201d a local-first worldbuilding and production studio. The world lives in a folder; the app is a lens over it.",
   "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
@@ -18,6 +18,7 @@
   "scripts": {
     "dev": "npm run dev --workspace @arke-studio/client",
     "dev:coordinator": "npm run dev --workspace @arke-studio/coordinator",
+    "server": "npm run server --workspace @arke-studio/coordinator --",
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "node scripts/check-source-text.mjs && node scripts/check-client-policy.mjs && node scripts/check-spec-ids.mjs && node scripts/private-docs.mjs --check && node design-system/check-master.mjs && node design-system/build-review.mjs --check && oxlint packages apps",
@@ -30,6 +31,8 @@
     "start": "npm run start --workspace @arke-studio/desktop"
   },
   "devDependencies": {
+    "dts-bundle-generator": "^9.5.1",
+    "esbuild": "^0.25.12",
     "oxlint": "^0.15.0",
     "prettier": "^3.4.2"
   }

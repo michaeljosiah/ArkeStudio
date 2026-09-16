@@ -6,7 +6,7 @@ import { prepareAudio, acceptPreparedAudio, type PreparedAudioCandidate } from "
 import type { AudioMediaTools } from "./media-tools.js";
 import { castVoiceRequests, sameVoiceAssignment, type CastVoiceNotSent, type FrozenPerformanceAudio, type PerformanceAudioRequest, type ProductionBundle, type SceneRecord } from "@arke-studio/contracts";
 import { readPerformance, currentPerformanceTarget } from "./performances.js";
-import { CharacterAudioPlanSchema, characterAudioRoute, referenceAudioAsset, type Job } from "@arke-studio/contracts";
+import { CharacterAudioPlanSchema, characterAudioRoute, characterAudioReferenceProblem, referenceAudioAsset, type Job } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { audioWorldPath } from "./storage.js";
 import { readAudioBytes } from "./media-tools.js";
@@ -26,7 +26,9 @@ export async function readCharacterAudioInputs(store: WorldStore, job: Pick<Job,
   const route = characterAudioRoute({ id: job.model, provider: job.provider }, typeof job.params.taskMode === "string" ? job.params.taskMode : "generate");
   if (!route || route.endpoint !== plan.route || (job.params.route !== undefined && job.params.route !== route.endpoint)) throw new Error("The selected route cannot carry these audio references.");
   const images = Array.isArray(job.params.references) ? job.params.references.length : 0;
-  if ((route.requiresImages && !images) || images > route.maxImages || images + plan.references.length > route.maxCombinedReferences) throw new Error("The complete reference set exceeds the route budget or lacks imagery.");
+  const videos = (Array.isArray(job.params.videoReferences) ? job.params.videoReferences.length : 0) + (job.params.continuedFrom ? 1 : 0);
+  const visualProblem = characterAudioReferenceProblem(route, images, videos, plan.references.length);
+  if (visualProblem) throw new Error(visualProblem);
   if (!route.supportsPerformanceSync && plan.references.some(ref => ref.intent === "performance-sync")) throw new Error("This route does not support performance synchronization.");
   const rights = await readAudioRights(store);
   let seconds = 0;

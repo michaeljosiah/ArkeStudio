@@ -7,7 +7,9 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { parseHTML } from "linkedom";
 import { legacySceneView, type ClientMessage, type ClientState, type Episode, type ProductionBundle, type StagedProposal } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { ProductionChatScreen, StoryScreen, takeMediaPath } from "../src/screens/production.js";
+import { ProductionChatScreen } from "../src/screens/production-shell.js";
+import { StoryScreen } from "../src/screens/production-story.js";
+import { takeMediaPath } from "../src/lib/take-presentation.js";
 import { EpisodeChatScreen, EpisodeDetailScreen, StoryStructureScreen } from "../src/screens/development.js";
 import { acceptedTakeId, isDayOne, mediaTakeFor, takesForShot } from "../src/lib/selectors.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -626,12 +628,12 @@ describe("an episodic production's front page is its season (design turn 93)", (
       state,
       `/w/${FIXTURE_WORLD_ID}/p/bell-watch-season-1/scenes/sc_04`,
     );
-    assert.match(html, /aria-label="Collapse Episode 2: The vigil"/);
+    assert.match(html, /aria-label="Collapse Episode 1: The vigil"/);
     assert.match(html, /fy-prodrail__scene fy-prodrail__scene--active/);
     assert.match(html, /4 · The verse rises/);
     assert.ok(html.indexOf("4 · The verse rises") < html.indexOf("2 · Before the watch"), "episode order wins");
     // A press, not a link (SPEC-036 R-37): the episode's New scene makes the scene and opens it.
-    assert.match(html, /class="fy-prodrail__new-scene" aria-label="New scene in Episode 2: The vigil"/);
+    assert.match(html, /class="fy-prodrail__new-scene" aria-label="New scene in Episode 1: The vigil"/);
     assert.doesNotMatch(html, /scenes\/new/, "the brief form is retired");
     assert.match(html, /New episode/);
     assert.match(html, /fy-prodrail--folded/);
@@ -657,7 +659,7 @@ describe("an episodic production's front page is its season (design turn 93)", (
       `/w/${FIXTURE_WORLD_ID}/p/bell-watch-season-1/scenes/sc_05`,
     );
 
-    assert.match(html, /aria-label="Expand Episode 2: The vigil"/);
+    assert.match(html, /aria-label="Expand Episode 1: The vigil"/);
     assert.match(html, /aria-label="Collapse Unassigned scenes"/);
     assert.match(html, /href="\/w\/[^/]+\/p\/bell-watch-season-1\/scenes\/sc_05"/);
     assert.match(html, /fy-prodrail__scene fy-prodrail__scene--active/);

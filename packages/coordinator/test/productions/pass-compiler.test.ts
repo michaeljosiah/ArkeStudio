@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   compilePasses,
+  assemblePrompt,
+  orderedShots,
   planScene,
   type ArtifactSidecar,
   type ManifestModel,
@@ -408,4 +410,30 @@ describe("the pass compiler (issue 398)", () => {
     assert.equal(carried.subject, "Maren Kest");
     assert.ok(carried.file.includes("council-coat"), "and it is the look that actually travels");
   });
+});
+
+it("a still ignores Cut timing errors while a video remains fenced", async () => {
+  const { bundle } = await open();
+  const production = bundle.productions[0]!, scene = production.scenes[0]!;
+  const image: ManifestModel = { ...WAN_LIKE, capability: "image", pricing: { kind: "perImage", microUsdPerImage: 100 } };
+  for (const model of [image, WAN_LIKE]) {
+    const plan = planScene({ world: bundle.meta, productionId: production.meta.id, sheets: bundle.sheets,
+      kits: bundle.referenceKits, scene, selections: {}, model }, "per-shot");
+    plan.timingProblems = ["Overlapping Cut slots"];
+    const compile = () => compilePasses({ productionId: production.meta.id, scene, plan, model, world: bundle });
+    if (model.capability === "image") assert.ok(compile().length > 0);
+    else assert.throws(compile, /Overlapping Cut slots/);
+  }
+});
+
+it("prompt assembly resolves complete location mentions and omits placeholder appearance", async () => {
+  const { bundle } = await open();
+  const scene = bundle.productions[0]!.scenes[0]!;
+  const sheets = structuredClone(bundle.sheets);
+  const character = sheets.find(sheet => sheet.id === "maren-kest")!;
+  character.sections = [{ heading: "Appearance", body: "—" }];
+  const source = { ...orderedShots(scene)[0]!, description: "@maren-kest waits at @missing-lobby beside @maren-kest-long." };
+  const prompt = assemblePrompt(bundle.meta, sheets, scene, source, "", undefined, "image");
+  assert.match(prompt, /Maren Kest waits at missing-lobby beside maren-kest-long/);
+  assert.doesNotMatch(prompt, /@missing-lobby|Maren Kest-long|— —/);
 });

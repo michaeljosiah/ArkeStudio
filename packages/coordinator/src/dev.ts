@@ -8,7 +8,7 @@ import { createProviderClients, SHIPPED_MANIFEST } from "@arke-studio/providers"
 import { KOKORO_PRESETS, localCandidates } from "@arke-studio/voice";
 import { AppSettingsFile } from "./app-settings.js";
 import { ChildLedger } from "./child-ledger.js";
-import { Coordinator } from "./coordinator.js";
+import { createStudioHost } from "./application/studio-host.js";
 import { devCipher } from "./credentials/dev-cipher.js";
 import { ProviderCallStore } from "./providers/call-store.js";
 import { SecretRegistry } from "./redact.js";
@@ -131,7 +131,7 @@ const transportToken = randomBytes(32).toString("hex");
 const devOrigins = process.env["ARKE_DEV_ORIGIN"]
   ? [new URL(process.env["ARKE_DEV_ORIGIN"]).origin]
   : ["http://localhost:5173", "http://127.0.0.1:5173"];
-const coordinator = new Coordinator({
+const { coordinator, server } = createStudioHost({
   transportAuth: { token: transportToken, allowedOrigins: devOrigins },
   provider,
   adapter,
@@ -194,7 +194,7 @@ const coordinator = new Coordinator({
 });
 if (opencodeSupervisor) coordinator.superviseAs("harness", opencodeSupervisor);
 
-const { port } = await coordinator.start(DEV_PORT);
+const { port } = await server.start(DEV_PORT);
 // Browser development has no isolated preload. Vite reads this gitignored launch record
 // to print a private sign-in link in the terminal; the packaged renderer never uses this handoff or sees a token.
 const sessionDir = join(repoRoot, ".dev");
@@ -207,6 +207,6 @@ console.log("[arke-studio] provider keys: stored for this run only — the dev c
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
-    void coordinator.stop().then(() => process.exit(0));
+    void server.stop().then(() => process.exit(0));
   });
 }

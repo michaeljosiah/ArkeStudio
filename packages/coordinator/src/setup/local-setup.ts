@@ -591,8 +591,11 @@ export class LocalSetupService {
             pauseSupported: paused.pauseSupported,
             detail: paused.detail,
           });
-          recoveredClosures.push({ pausedId: id, componentIds: paused.closureIds });
-          for (const member of paused.closureIds) this.pendingClosures.set(member, paused.closureIds);
+          // An Install may have widened this closure while the receipt rewrite is still in
+          // flight. Detection must not replace that newer request with the older disk snapshot.
+          const closureIds = this.pendingClosures.get(id) ?? paused.closureIds;
+          recoveredClosures.push({ pausedId: id, componentIds: closureIds });
+          for (const member of closureIds) this.pendingClosures.set(member, closureIds);
         } else if (c.state === "present" || c.state === "paused") {
           this.set(id, {
             state: c.entry.optional === true ? "available" : "queued",

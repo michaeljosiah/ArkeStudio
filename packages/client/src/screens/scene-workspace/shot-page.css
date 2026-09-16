@@ -177,3 +177,10 @@
 
 /* Full screen: the Stage alone, as on the scene page (135, 144). */
 .fy-sw[data-full="true"]:where([data-screen="shot"]) .fy-sw__centre > :not(.fy-swstage):not(.fy-sw__fullpill) { display: none; }
+
+/* Match the scene row's actual hit targets on the page where a shot is edited (issue 1204).
+   Keep the icons small; size the buttons themselves so adjacent targets cannot overlap. */
+:where([data-screen="shot"]) .fy-shot__stepper > button,
+:where([data-screen="shot"]) .fy-shot__step,
+:where([data-screen="shot"]) .fy-shot__pencil,
+:where([data-screen="shot"]) .fy-shot__link { min-width: 44px; min-height: 44px; }

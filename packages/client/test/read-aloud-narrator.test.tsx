@@ -4,10 +4,13 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { parseHTML } from "linkedom";
-import type { ClientMessage } from "@arke-studio/contracts";
+import { DEFAULT_NARRATOR, type ClientMessage } from "@arke-studio/contracts";
+import { ReadAloud, ReadAloudButton } from "../src/components/read-aloud.js";
+import { ReadAloudConfirmation } from "../src/components/read-aloud-confirmation.js";
+import { ClipPlayButton } from "../src/components/player.js";
 import { App } from "../src/App.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
-import { dismissPlayback, playbackSnapshot, setAudioFactoryForTest } from "../src/lib/audio.js";
+import { dismissPlayback, emitForTest, playbackSnapshot, playClip, setAudioFactoryForTest } from "../src/lib/audio.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -78,3 +81,194 @@ it("names the narrator on the clip, both when a read lands and when the row repl
   assert.equal(playbackSnapshot().clip?.sub, "read aloud · Emma");
   assert.match(playbackSnapshot().clip?.title ?? "", /^Maren Kest · /);
 });
+
+
+/*
+ * A section over the reader's cap arrives in pieces (issue 1208), the way a long local read
+ * always has. This screen played only the newest event, so the second piece replaced the first
+ * mid-sentence; now each is queued as it lands and the player walks on when one ends.
+ */
+it("queues the pieces of a chunked sheet read behind the first rather than replacing it", async () => {
+  const dock = { playbackRate: 1, src: "", currentTime: 0, duration: NaN, play: async () => {}, pause() {}, load() {}, removeAttribute() {}, addEventListener() {}, removeEventListener() {} };
+  setAudioFactoryForTest(() => dock as never);
+  const sent: ClientMessage[] = [];
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(JSON.parse(json) as ClientMessage); } } as unknown as ArkeBridge);
+  const container = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(container);
+  const root = createRoot(container);
+  open.push(root);
+  await act(async () => root.render(
+    <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/cast/maren-kest`]}>
+      <App />
+    </MemoryRouter>,
+  ));
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Read aloud"]')!.click());
+  const asked = sent.find((message): message is Extract<ClientMessage, { kind: "read-sheet-section" }> => message.kind === "read-sheet-section")!;
+  const piece = (part: number, file: string) => ({
+    type: "voice.audio" as const, at: "2026-09-16T08:00:00.000Z", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, sheetId: "maren-kest", sheetVersion: 4,
+    purpose: "sheet-section" as const, sectionHeading: asked.sectionHeading, provider: "mistral" as const, model: "voxtral-mini-tts", voiceId: "en_paul_neutral", format: "wav" as const,
+    status: "ready" as const, file, cached: false, characterCount: 200, estimatedMicroUsd: 3200, part, parts: 2,
+  });
+  await act(async () => __applyEventForTest(piece(0, ".cache/voice-previews/first.wav")));
+  assert.match(playbackSnapshot().clip?.url ?? "", /first\.wav$/, "the first piece sounds the moment it lands");
+  await act(async () => __applyEventForTest(piece(1, ".cache/voice-previews/second.wav")));
+  assert.match(playbackSnapshot().clip?.url ?? "", /first\.wav$/, "the second piece waits its turn rather than replacing the first");
+  await act(async () => emitForTest("ended"));
+  assert.match(playbackSnapshot().clip?.url ?? "", /second\.wav$/, "and follows when the first ends");
+  assert.equal(playbackSnapshot().clip?.sub, `read aloud · ${DEFAULT_NARRATOR.label}`);
+});
+
+/*
+ * Cloud pieces land in whatever order the reader finishes them (codex on PR 1210). A second
+ * piece landing first fills the parts array to its final length; the first piece then fills
+ * the gap behind it without changing that length, and an effect keyed on the length would
+ * never queue the paid read.
+ */
+for (const surface of ["sheet", "prose"] as const) {
+  it(`${surface} read: a later piece landing first waits, and the read starts when the gap behind it fills`, async () => {
+    const dock = { playbackRate: 1, src: "", currentTime: 0, duration: NaN, play: async () => {}, pause() {}, load() {}, removeAttribute() {}, addEventListener() {}, removeEventListener() {} };
+    setAudioFactoryForTest(() => dock as never);
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(JSON.parse(json) as ClientMessage); } } as unknown as ArkeBridge);
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container);
+    const root = createRoot(container);
+    open.push(root);
+    const props = { source: { of: "shot", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_12" } as const, title: "Shot script", text: "The sea moves." };
+    await act(async () => root.render(surface === "sheet"
+      ? <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/cast/maren-kest`]}><App /></MemoryRouter>
+      : <ReadAloud {...props} />));
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Read aloud"]')!.click());
+    const asked = sent.find((message): message is Extract<ClientMessage, { kind: "read-sheet-section" | "read-prose" }> => message.kind === "read-sheet-section" || message.kind === "read-prose")!;
+    const piece = (part: number, file: string) => ({
+      type: "voice.audio" as const, at: "2026-09-16T08:00:00.000Z", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, sheetVersion: 4,
+      purpose: surface === "sheet" ? "sheet-section" as const : "prose" as const, ...(asked.kind === "read-sheet-section" ? { sheetId: "maren-kest", sectionHeading: asked.sectionHeading } : {}),
+      provider: "mistral" as const, model: "voxtral-mini-tts", voiceId: "en_paul_neutral", format: "wav" as const,
+      status: "ready" as const, file, cached: false, characterCount: 200, estimatedMicroUsd: 3200, part, parts: 2,
+    });
+    await act(async () => __applyEventForTest(piece(1, ".cache/voice-previews/second.wav")));
+    assert.equal(playbackSnapshot().clip, null, "the second piece alone starts nothing: the read begins at its first words");
+    await act(async () => __applyEventForTest(piece(0, ".cache/voice-previews/first.wav")));
+    assert.match(playbackSnapshot().clip?.url ?? "", /first\.wav$/, "the first piece sounds once the gap fills");
+    await act(async () => emitForTest("ended"));
+    assert.match(playbackSnapshot().clip?.url ?? "", /second\.wav$/, "and the second follows");
+  });
+}
+
+/*
+ * The bible's replay button decides whether its clip is the one sounding, and a chunked read's
+ * joined whole shares the pieces' request id (codex on PR 1210): by id alone a press on the whole
+ * toggled the piece that happened to be loaded rather than loading the passage.
+ */
+it("a clip button loads the joined whole rather than toggling the piece sounding under the same id", async () => {
+  const dock = { playbackRate: 1, src: "", currentTime: 0, duration: NaN, play: async () => {}, pause() {}, load() {}, removeAttribute() {}, addEventListener() {}, removeEventListener() {} };
+  setAudioFactoryForTest(() => dock as never);
+  await playClip({ id: "read", url: "/piece-1.wav", title: "Essence" });
+  const container = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(container);
+  const root = createRoot(container); open.push(root);
+  await act(async () => root.render(<ClipPlayButton clip={{ id: "read", url: "/whole.wav", title: "Essence" }} />));
+  const button = container.querySelector<HTMLButtonElement>("button")!;
+  assert.match(button.getAttribute("aria-label") ?? "", /^Play /, "the whole is not what is sounding");
+  await act(async () => button.click());
+  assert.equal(playbackSnapshot().clip?.url, "/whole.wav", "pressed, it loads the whole");
+});
+
+it("says how many pieces a chunked read goes as, on the dialog that prices it", async () => {
+  __setStateForTest(FIXTURE_STATE);
+  const container = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(container);
+  const root = createRoot(container); open.push(root);
+  const quote = (parts?: number) => ({
+    type: "voice.audio" as const, at: "2026-09-16T08:00:00.000Z", requestId: FIXTURE_WORLD_ID, worldId: FIXTURE_WORLD_ID,
+    sheetVersion: 1, purpose: "sheet-section" as const, provider: "breezeblue" as const, model: "breeze-tts-2", voiceId: "voc_1", format: "wav" as const,
+    status: "confirmation-required" as const, file: null, cached: false, characterCount: 1487, estimatedMicroUsd: 59480, confirmationToken: "quote-1", ...(parts !== undefined ? { parts } : {}),
+  });
+  await act(async () => root.render(<ReadAloudConfirmation title="Appearance" result={quote(2)} onCancel={() => {}} onConfirm={() => {}} />));
+  assert.match(dom.document.querySelector('[role="dialog"]')!.textContent!, /Appearance · Breeze · 2 parts/);
+  assert.match(dom.document.querySelector('[role="dialog"]')!.textContent!, /Confirm 1487 characters · \$0.06/, "priced once, for the whole read");
+  await act(async () => root.render(<ReadAloudConfirmation title="Appearance" result={quote()} onCancel={() => {}} onConfirm={() => {}} />));
+  assert.doesNotMatch(dom.document.querySelector('[role="dialog"]')!.textContent!, /parts/, "a read that goes whole says nothing about pieces");
+});
+
+// The bible's column was the third copy of this control, and the one PR 1209 did not reach
+// (issue 1211): it named ElevenLabs whatever the quote said, as an inline ribbon, with no piece
+// count. It shares the dialog now, so it is driven here beside the other three.
+for (const surface of ["sheet", "prose", "button", "bible"] as const) {
+  it(`${surface} read confirms the quoted reader and price in a cancelable dialog`, async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(JSON.parse(json)); } } as ArkeBridge);
+    // The quote, not the current narrator preference, decides the disclosure. The bible's text
+    // carries a tag so the screen opens its plain editor: the rich one wants a selection API
+    // this DOM does not have, and the column under test is the same either way.
+    const world = FIXTURE_STATE.world!;
+    __setStateForTest({
+      ...FIXTURE_STATE,
+      app: { ...FIXTURE_STATE.app, narrator: { provider: "elevenlabs", model: "eleven_multilingual_v2", voiceId: "old", label: "Old narrator" } },
+      ...(surface === "bible" ? { world: { ...world, bible: { version: 3, updated: "2026-07-30", present: true, text: "## The tides\n\nThe tide is the world's clock <br> and its accountant.\n" } } } : {}),
+    });
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container);
+    const root = createRoot(container); open.push(root);
+    const props = { source: { of: "shot", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_12" } as const, title: "Shot script", text: "The sea moves." };
+    await act(async () => root.render(surface === "sheet"
+      ? <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/cast/maren-kest`]}><App /></MemoryRouter>
+      : surface === "bible" ? <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/bible`]}><App /></MemoryRouter>
+      : surface === "prose" ? <ReadAloud {...props} /> : <ReadAloudButton {...props} />));
+    const trigger = () => container.querySelector<HTMLButtonElement>(surface === "button" ? 'button[title="Read aloud"]' : surface === "bible" ? 'button[aria-label="Read The tides aloud"]' : 'button[aria-label="Read aloud"]')!;
+    const requests = () => sent.filter(message => message.kind === "read-sheet-section" || message.kind === "read-prose" || message.kind === "read-bible-section");
+    await act(async () => trigger().click());
+    let asked = requests().at(-1)!;
+    const quote = () => ({ type: "voice.audio" as const, at: "2026-09-16T08:00:00.000Z", requestId: asked.requestId,
+      worldId: FIXTURE_WORLD_ID, sheetVersion: 4, purpose: surface === "sheet" ? "sheet-section" as const : surface === "bible" ? "bible-section" as const : "prose" as const,
+      ...(surface === "bible" ? { sectionHeading: "The tides" } : {}),
+      provider: "mistral" as const, model: "voxtral-mini-tts", voiceId: "voice", format: "wav" as const,
+      status: "confirmation-required" as const, file: null, cached: false, characterCount: 1487, estimatedMicroUsd: 23792, confirmationToken: "quote-1" });
+    await act(async () => __applyEventForTest(quote()));
+    let dialog = dom.document.querySelector('[role="dialog"]')!;
+    assert.ok(dialog);
+    assert.match(dialog.textContent!, /sent to Voxtral/);
+    if (surface === "bible") assert.match(dialog.textContent!, /The tides · Voxtral/, "titled by the section, as the sheet's is by the sheet and section");
+    assert.doesNotMatch(dialog.textContent!, /ElevenLabs|elevenlabs|Old narrator/);
+    assert.match(dialog.textContent!, /Confirm 1487 characters · \$0.02/);
+    assert.equal(requests().length, 1, "quoting does not confirm a charge");
+    await act(async () => [...dialog.querySelectorAll('button')].find(button => button.textContent === "Cancel")!.click());
+    assert.equal(dom.document.querySelector('[role="dialog"]'), null);
+    assert.equal(requests().length, 1, "cancel sends no paid request");
+    await act(async () => trigger().click());
+    asked = requests().at(-1)!;
+    await act(async () => __applyEventForTest(quote()));
+    dialog = dom.document.querySelector('[role="dialog"]')!;
+    const confirm = [...dialog.querySelectorAll('button')].find(button => button.textContent!.startsWith('Confirm'))!;
+    await act(async () => { confirm.click(); confirm.click(); });
+    assert.equal(requests().length, 3, "one confirmation despite repeated clicks");
+    assert.equal(requests().at(-1)!.requestId, asked.requestId);
+    assert.equal(requests().at(-1)!.confirmationToken, "quote-1");
+    assert.equal(dom.document.querySelector('[role="dialog"]'), null);
+    if (surface === "bible") {
+      // Over the buttons rather than a selector that would match nothing: linkedom spins on those.
+      const labels = [...container.querySelectorAll("button")].map((button) => button.getAttribute("aria-label"));
+      assert.ok(labels.includes("Preparing The tides") && !labels.includes("Read The tides aloud"), `confirmed, the speaker is busy until something lands: ${labels.join(", ")}`);
+    }
+    await act(async () => __applyEventForTest({ ...quote(), confirmationToken: "quote-2", estimatedMicroUsd: 50000 }));
+    assert.match(dom.document.querySelector('[role="dialog"]')!.textContent!, /\$0.05/, "a revised quote needs a new decision");
+  });
+}
+
+for (const [provider, model, expected, local] of [["kokoro", "kokoro-82m", "Kokoro", true], ["elevenlabs", "eleven_multilingual_v2", "ElevenLabs", false]] as const) {
+it(`${expected} confirmation identifies its destination accurately`, async () => {
+  __setStateForTest(FIXTURE_STATE);
+  const container = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(container);
+  const root = createRoot(container); open.push(root);
+  await act(async () => root.render(<ReadAloudConfirmation title="Appearance" result={{
+    type: "voice.audio", at: "2026-09-16T08:00:00.000Z", requestId: FIXTURE_WORLD_ID, worldId: FIXTURE_WORLD_ID,
+    sheetVersion: 1, purpose: "prose", provider, model, voiceId: "bf_emma", format: "wav",
+    status: "confirmation-required", file: null, cached: false, characterCount: 20, estimatedMicroUsd: 0, confirmationToken: "local",
+  }} onCancel={() => {}} onConfirm={() => {}} />));
+  const dialog = dom.document.querySelector('[role="dialog"]')!;
+  assert.ok(dialog.textContent!.includes(local ? `Read locally with ${expected}` : `sent to ${expected}`));
+  if (local) assert.doesNotMatch(dialog.textContent!, /sent to|ElevenLabs/);
+});
+
+}

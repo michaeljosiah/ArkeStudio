@@ -8,6 +8,7 @@ script-relevant openings and props. Review intermediate motion, not only the fir
 
 | Fixture | Measurable expectations | Cinematic review |
 |---|---|---|
+| Walking orbit (#1128) | Nine keys at 0.75s intervals; relative speed jumps below 0.15m/s and angular speed within 20% at interior keys | One flowing orbit around the moving subject, with no waypoint stops |
 | Vertigo (#1048) | Generated dolly increases camera distance and focal length by the same factor over 6s; subject stays the same projected size | Background perspective changes while the subject framing holds |
 | Dialogue two-shot | Both heads remain in frame for 6s; fixed camera; left/right order preserved | Balanced readable faces and eyelines |
 | Over shoulder | Foreground shoulder may crop; listener remains visible throughout 6s | Shoulder establishes relation without hiding listener |
@@ -66,3 +67,9 @@ Reference matching (#1049) is local editor chrome: Camera view can show a filed 
 Preview (#1050) plays fresh filed playblasts on the existing ordered scene clock where no accepted take exists, labelled blockout and using the filed opening frame as poster. It verifies the same source fingerprint as Bench before admission and withdraws clips immediately when their source changes. This adds no separate animatic file or acceptance state.
 
 First-pass edge cases retain clearance of one quarter of subject height plus the Stage camera's 0.1m near plane; very wide lenses may therefore frame more broadly than requested. Aim height scales with the subject while the angle-based camera-height table stays unchanged. If a playblast opening poster is missing or retired, Preview retains the existing authored-frame fallback.
+
+Camera evaluator 2 (#1128) uses continuous time-to-distance interpolation through passing keys. Ease applies at endpoints and holds; position and aim holds remain independent. Roll and lens use monotone interpolation too. Existing camera keys remain readable, but older playblasts become stale. New pins record evaluator version 2 and raise the world's reader boundary to schema 26. Re-export is required before those older references can be admitted again.
+
+`stage-camera-continuity.test.ts` checks orbit velocity, irregular timing, panning through aim keys, exact holds and rest ramps. Whole-path standoff and passing-key motion findings appear in Stage and in construction inspection feedback (#1126). They are advisories; deterministic tests and the local encoder gate do not score a live model's cinematic judgment.
+
+The encoded gate also refreshes a 120-key version of the walking orbit and counts distinct spatial curves. The viewport must reuse them across refresh, path drawing and recording; a pure-evaluator benchmark alone does not catch a caller that copies keys on every sample.

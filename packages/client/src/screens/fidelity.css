@@ -2065,6 +2065,7 @@ select.fy-sheetselect { padding-right: 24px; }
  */
 .fy-playhead__grab { position: absolute; top: 0; bottom: 0; left: -6px; width: 13px; pointer-events: auto; cursor: ew-resize; touch-action: none; }
 .fy-playhead__grab:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; border-radius: 3px; }
+.fy-playhead__grab[data-pointer-seeking="true"]:focus-visible, .fy-scrub[data-pointer-seeking="true"]:focus-visible { outline: none; }
 /* Blade and Hand want the lane the band covers; it stands aside and keeps only its keyboard seat. */
 .fy-playhead__grab--idle { pointer-events: none; }
 .fy-track { display: flex; align-items: stretch; gap: 0; border-top: 1px solid var(--line-soft); }
@@ -2697,14 +2698,20 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
    off the edge on a narrow window. */
 .fy-scrim__center--flush { padding: 0; }
 /*
- * A page, not a panel (SPEC-042 R-5).
- *
- * It was 90% of the window over a blurred scrim, with a close of its own. At that size the modal
- * framing bought nothing but a narrower pane — and a three-column surface (.fy-cols) is sized to
- * a pane the panel could not give it. The rail sits flush left at the canvas's 200px; the pane
- * takes the rest and hands its own scrolling to whatever it holds.
+ * A sheet over the screen it was opened from (design turn 150; SPEC-042 R-5 amended): the
+ * editor's dialog at 95% of the window each way, and nothing invented for it. Turn 124 made
+ * Settings a page because the panel before it went to /worlds from wherever it was opened;
+ * with the remembered route rendering behind the sheet, the modal keeps that promise. Inside,
+ * nothing moves: the rail sits flush left at the canvas's 200px; the pane takes the rest and
+ * hands its own scrolling to whatever it holds. The X is the sheet's one added control, in the
+ * corner the rail does not use — on the titles' line (30 down, where the rail's and the pane's
+ * titles start) rather than tucked into the corner, because the sheet's top edge sits inside the
+ * desktop window's 44px title-bar overlay: at the minimum window height the sheet starts 16px
+ * down, and a control 12px inside it would lie under the native window buttons.
  */
-.fy-settings { height: 100%; display: flex; }
+.fy-settings__sheet { position: relative; }
+.fy-settings { height: 100%; min-height: 0; display: flex; }
+.fy-settings__close { position: absolute; top: 30px; right: 20px; }
 .fy-settings__rail {
   width: 200px;
   flex: none;
@@ -3272,22 +3279,26 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 }
 .fy-set__pill:hover { background: var(--accent); }
 .fy-set__pill:disabled { opacity: 0.5; cursor: default; }
-/* Turn 124: a pane of rows keeps a 760px reading column. Native selects must shrink
-   independently of their longest option; the state stays readable below the same control. */
-.fy-set--general { grid-template-columns: minmax(0, 760px); }
-.fy-set--general .fy-set__row { min-width: 0; overflow-wrap: anywhere; }
-.fy-set--general .fy-set__row--routing {
-  display: grid;
-  grid-template-columns: 118px minmax(0, 1fr) 6px;
-  gap: 6px 12px;
-}
-/* The pill is a `<select>` inside the house wrapper now (issue 1010, U2), so the grid places the
-   wrapper and the control fills it. The chevron is drawn rather than the platform's, and it is
-   drawn over the control — so the text keeps clear of the last 24px. */
-.fy-set__row--routing > .ui-select { grid-column: 2; grid-row: 1; width: 100%; min-width: 0; }
+/* The agents' and the dock's language pickers are platform selects in the pill: room for the
+   platform's own arrow, so the value never runs under it. */
 select.fy-set__pill { padding-right: 26px; }
-.fy-set__row--routing > .fy-set__state { grid-column: 2; }
-.fy-set__row--routing > .fy-set__dot { grid-column: 3; grid-row: 1; }
+/*
+ * General (design turn 149): the page title, then Providers' fact rows — label, value, state —
+ * banded at 53 with a rule beneath, in turn 124's 760px reading column. The select is 300 wide
+ * whatever its longest option, so the states form a column beside it; the state sits at the
+ * row's gap and never under the control, which is the caption turn 137 forbade. Turn 124 had
+ * the select fill the column with the state wrapping below it, and that is the drawing this
+ * block replaces.
+ */
+.fy-set--general { grid-template-columns: minmax(0, 760px); }
+.fy-set--general > h1 { margin: 0 0 22px; }
+.fy-set--general .fy-fact { min-height: 53px; border-bottom: 1px solid var(--border); }
+.fy-set--general .fy-fact__is { min-width: 0; }
+.fy-default { width: 300px; flex: none; }
+/* 32 tall: the row's band is 53 and the control sits centred in it with 10 either side. The
+   value is a regular weight — the medium `--type-ui` carries reads as a button, and a select is
+   read, not pressed. */
+.fy-default > .ui-select__control { padding-top: 6px; padding-bottom: 6px; font-weight: var(--weight-regular); }
 /*
  * Archiving, on a world card. The button hides until the card is hovered — a world you are
  * looking at should not be advertising the way to put it away — and the confirm covers the
@@ -4990,21 +5001,21 @@ select.fy-set__pill { padding-right: 26px; }
    are the spec, so the values are transcribed from the dv-cards rather than
    re-chosen here. */
 
-.fy-bench { display: grid; grid-template-columns: 44px 380px minmax(0, 1fr) 116px; flex: 1; min-height: 0; }
+/* The design's bands (142a): a 46px rail, a 410px composer, the wall, a 104px strip of takes. */
+.fy-bench { display: grid; grid-template-columns: 46px 410px minmax(0, 1fr) 104px; flex: 1; min-height: 0; }
 
 .fy-bench__rail {
   border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center;
-  gap: 4px; padding: 10px 0; overflow: hidden;
+  gap: 12px; padding: 14px 0; overflow: hidden;
 }
-.fy-bench__railnew {
-  appearance: none; width: 26px; height: 26px; border: 0; border-radius: 999px; cursor: pointer;
-  background: var(--primary); color: var(--primary-foreground);
-  display: inline-flex; align-items: center; justify-content: center; margin-bottom: 8px;
-  transition: var(--transition-control);
+/* Whose places these are: the world's or the production's initial, in the rail's square (142a). */
+.fy-bench__railmark {
+  width: 32px; height: 32px; border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow-xs);
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  font: 500 var(--text-sm) var(--font-sans); color: var(--foreground);
 }
-.fy-bench__railnew:hover { opacity: 0.85; }
 .fy-bench__raildest {
-  appearance: none; width: 30px; height: 30px; border: 0; border-radius: 8px; background: transparent;
+  appearance: none; width: 28px; height: 28px; border: 0; border-radius: 8px; background: transparent; flex: none;
   color: var(--neutral-400); cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
   transition: var(--transition-control);
 }
@@ -5014,6 +5025,15 @@ select.fy-set__pill { padding-right: 26px; }
 /* The breadcrumb's session half: " / Harbour night studies ⌄", with the switcher under it. */
 .fy-bench__crumb { display: inline-flex; align-items: center; gap: 7px; }
 .fy-bench__crumbsep { color: var(--neutral-300); font: 400 12px var(--font-sans); }
+/* Where you are, when there is nothing to switch between: the word, the way the design sets it. */
+.fy-bench__here { padding: 3px 8px; border-radius: 7px; font: 500 var(--text-sm) var(--font-sans); color: var(--foreground); }
+/* The subject and the session's spend, as pills before the app's icons (142a). */
+.fy-bench__pill {
+  display: inline-block; padding: 3px 10px; margin-right: 6px;
+  border: 1px solid var(--border); border-radius: 999px; flex: 0 1 auto; min-width: 48px;
+  font: 400 var(--text-2xs)/1.4 var(--font-sans); color: var(--muted-foreground);
+  max-width: 300px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
 .fy-bench__session {
   appearance: none; border: 0; background: transparent; cursor: pointer; padding: 3px 5px; border-radius: 7px;
   display: inline-flex; align-items: center; gap: 5px;
@@ -5044,13 +5064,13 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-bench__sessionrow--new { color: var(--muted-foreground); }
 .fy-bench__sessionrow--new:hover { color: var(--foreground); }
 
-.fy-bench__composer { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; padding: 12px 14px; }
+.fy-bench__composer { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; padding: 12px 14px 14px; }
 .fy-bench__composerbar { display: flex; align-items: center; gap: 8px; flex: none; }
 .fy-bench__mode { display: flex; gap: 2px; background: var(--muted); border-radius: 999px; padding: 3px; }
 .fy-bench__mode button {
   appearance: none; border: 0; background: transparent; cursor: pointer;
   display: inline-flex; align-items: center; gap: 5px;
-  padding: 5px 12px; border-radius: 999px; font: 400 11.5px var(--font-sans); color: var(--muted-foreground);
+  padding: 5px 12px; border-radius: 999px; font: 400 var(--text-sm) var(--font-sans); color: var(--muted-foreground);
   transition: var(--transition-control);
 }
 .fy-bench__mode button:hover { color: var(--foreground); }
@@ -5059,49 +5079,53 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-bench__mode button:disabled:hover { color: var(--muted-foreground); }
 .fy-bench__clear {
   appearance: none; width: 26px; height: 26px; border: 0; border-radius: 7px; background: transparent;
-  color: var(--neutral-400); cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  color: var(--muted-foreground); cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
   transition: var(--transition-control);
 }
-.fy-bench__clear:hover { background: var(--accent); color: var(--foreground); }
-.fy-bench__subjectcontext {
-  display: flex; align-items: center; gap: 5px; margin-top: 10px; flex-wrap: wrap;
-}
-.fy-bench__subjectcontext > span {
-  padding: 3px 7px; border-radius: 999px; background: var(--secondary);
-  color: var(--muted-foreground); font: 400 9.5px var(--font-mono);
-}
-.fy-bench__subjectcontext .fy-bench__subjectnote { background: transparent; color: var(--muted-foreground); }
+.fy-bench__clear:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
+.fy-bench__clear:disabled { opacity: 0.5; cursor: default; }
+/* A one-line note among the chips (the rebuild's, the open's): words, not a chip. */
+.fy-bench__subjectnote { font: 400 var(--text-2xs) var(--font-mono); color: var(--muted-foreground); }
 
 /* The lane tabs (design 68b): a full-width track; the active lane is the white cell. */
 .fy-bench__lanes { display: flex; gap: 3px; background: var(--muted); border-radius: 9px; padding: 3px; margin-top: 11px; flex: none; }
 .fy-bench__lanes button {
   appearance: none; border: 0; background: transparent; cursor: pointer;
   flex: 1; text-align: center; padding: 6px 0; border-radius: 7px;
-  font: 400 12px var(--font-sans); color: var(--muted-foreground); transition: var(--transition-control);
+  font: 400 var(--text-sm) var(--font-sans); color: var(--muted-foreground); transition: var(--transition-control);
 }
 .fy-bench__lanes button:hover { color: var(--foreground); }
 .fy-bench__lanes button[aria-selected="true"] { background: var(--background); box-shadow: var(--shadow-xs); color: var(--foreground); font-weight: 500; }
 /* "A model that takes no keyframes shows no Keyframe tab, and the composer says so in a line." */
 .fy-bench__nolane { margin: 10px 2px 0; font: 400 10.5px var(--font-mono); color: var(--muted-foreground); }
 .fy-bench__slotchip {
-  position: absolute; left: 6px; top: 5px; font: 500 8.5px var(--font-mono); letter-spacing: 0.08em;
-  color: var(--media-overlay-fg); text-shadow: 0 0 4px color-mix(in srgb, var(--media-overlay-bg) 70%, transparent);
-  text-transform: uppercase;
+  position: absolute; right: 5px; top: 5px; padding: 2px 6px; border-radius: 5px;
+  background: var(--background); border: 1px solid var(--border);
+  font: 400 var(--text-2xs)/1.4 var(--font-mono); color: var(--foreground);
 }
 
-.fy-bench__refgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; flex: none; }
+.fy-bench__refgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; flex: none; }
+/* A tile and the mono line under it — where the picture came from — as one column (142a). */
+.fy-bench__ref { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.fy-bench__refname {
+  font: 400 var(--text-2xs)/1.4 var(--font-mono); color: var(--muted-foreground);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.fy-bench__ref[data-riding="false"] .fy-bench__refname { color: var(--neutral-400); }
 .fy-bench__reftile { position: relative; height: 66px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .fy-bench__reftile--add {
-  appearance: none; border: 1.5px dashed var(--neutral-300); border-radius: 8px; background: transparent;
-  display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
-  color: var(--muted-foreground); font: 400 10.5px var(--font-sans); cursor: pointer; transition: var(--transition-control);
+  appearance: none; height: 66px; border: 1.5px dashed var(--neutral-300); border-radius: 8px; background: transparent;
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  color: var(--muted-foreground); font: 400 var(--text-2xs) var(--font-sans); cursor: pointer; transition: var(--transition-control);
 }
 .fy-bench__reftile--add:hover { border-color: var(--neutral-500); background: var(--muted); }
+.dark .fy-bench__reftile--add { border-color: var(--neutral-700); }
+.dark .fy-bench__reftile--add:hover { border-color: var(--neutral-500); }
 /* The token wears the master's pill: rounded-full, solid dark, floated off the corner. */
 .fy-bench__tokenchip {
-  position: absolute; left: 6px; bottom: 6px; padding: 2px 8px; border-radius: 999px;
-  background: color-mix(in srgb, var(--media-overlay-bg) 82%, transparent); color: var(--media-overlay-fg);
-  font: 600 9.5px var(--font-sans);
+  position: absolute; left: 5px; bottom: 5px; padding: 2px 6px; border-radius: 5px;
+  background: color-mix(in srgb, var(--media-overlay-bg) 66%, transparent); color: var(--media-overlay-fg);
+  font: 500 var(--text-2xs)/1.2 var(--font-sans);
 }
 .fy-bench__wave {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 4px;
@@ -5112,15 +5136,14 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-bench__wave > span:nth-of-type(3) { height: 12px; }
 .fy-bench__reftile[data-riding="false"] { background: var(--muted); }
 .fy-bench__reftile[data-riding="false"] .fy-portrait { opacity: 0.55; filter: saturate(0.5); }
-/* Remove appears when asked after — hover or focus — never at rest (design 68b). */
+/* Remove is drawn at rest, a small disc on the tile's corner (142a amends 68b's hover-only mark). */
 .fy-bench__tokenremove {
-  position: absolute; right: 3px; top: 3px; width: 18px; height: 18px; border: 0; border-radius: 5px;
-  background: color-mix(in srgb, var(--media-overlay-bg) 66%, transparent); color: var(--media-overlay-fg);
-  cursor: pointer; font: 400 11px var(--font-sans);
-  opacity: 0; transition: var(--transition-control);
+  position: absolute; right: 5px; bottom: 5px; width: 18px; height: 18px; border-radius: 99px;
+  background: var(--background); border: 1px solid var(--border); color: var(--muted-foreground);
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0;
+  transition: var(--transition-control);
 }
-.fy-bench__reftile:hover .fy-bench__tokenremove,
-.fy-bench__reftile:focus-within .fy-bench__tokenremove { opacity: 1; }
+.fy-bench__tokenremove:hover { color: var(--foreground); border-color: var(--neutral-400); }
 
 .fy-bench__brief {
   flex: 1; min-height: 0; display: flex; flex-direction: column; margin-top: 11px;
@@ -5135,7 +5158,7 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-bench__briefmirror,
 .fy-bench__brieftext {
   position: absolute; inset: 0; width: 100%; height: 100%; padding: 11px 12px;
-  font: 400 12px/1.65 var(--font-sans); white-space: pre-wrap; overflow-wrap: break-word; word-break: normal;
+  font: 400 var(--text-sm)/1.65 var(--font-sans); white-space: pre-wrap; overflow-wrap: break-word; word-break: normal;
   scrollbar-gutter: stable;
 }
 .fy-bench__briefunder { overflow-y: hidden; color: var(--foreground); pointer-events: none; }
@@ -5188,10 +5211,10 @@ select.fy-set__pill { padding-right: 26px; }
   font: 400 10px var(--font-mono); color: var(--muted-foreground);
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
-.fy-bench__brieffoot { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-top: 1px solid var(--border); flex: none; }
+.fy-bench__brieffoot { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-top: 1px solid var(--border); flex: none; }
 .fy-bench__footicon {
-  appearance: none; width: 24px; height: 24px; border: 0; border-radius: 7px; background: transparent;
-  color: var(--neutral-400); cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  appearance: none; width: 22px; height: 22px; border: 0; border-radius: 7px; background: transparent;
+  color: var(--muted-foreground); cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
   transition: var(--transition-control);
 }
 .fy-bench__footicon:hover { background: var(--accent); color: var(--foreground); }
@@ -5282,57 +5305,91 @@ select.fy-set__pill { padding-right: 26px; }
 /* A select drawn as the master's setting chip, so the control and the design are one thing. */
 .fy-bench__chip {
   appearance: none; border: 1px solid var(--border); border-radius: 8px; background: var(--background);
-  color: var(--muted-foreground); font: 400 10.5px var(--font-mono); padding: 5px 8px; cursor: pointer;
+  color: var(--muted-foreground); font: 400 var(--text-2xs)/1.4 var(--font-mono); padding: 5px 8px; cursor: pointer;
   transition: var(--transition-control);
 }
 .fy-bench__chip:hover { background: var(--accent); color: var(--foreground); }
+/* A chip that states the shot's own fact — its length, the production's aspect — is not a control. */
+.fy-bench__chip--fact { cursor: default; }
+.fy-bench__chip--fact:hover { background: var(--background); color: var(--muted-foreground); }
+/* The switch that is on wears the foreground (142a's `voice refs · on`). */
+.fy-bench__chip--on { color: var(--foreground); border-color: var(--foreground); }
 .fy-bench__chip--refs { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-sans); font-weight: 500; }
 
-.fy-bench__dispatch { display: flex; align-items: center; gap: 6px; margin-top: 11px; flex: none; min-width: 0; }
-.fy-bench__modelwrap { position: relative; display: inline-flex; flex: 0 1 auto; min-width: 0; }
+.fy-bench__dispatch { display: flex; align-items: center; gap: 8px; margin-top: 11px; flex: none; min-width: 0; }
+.fy-bench__modelwrap { position: relative; display: inline-flex; flex: 1 1 120px; min-width: 0; }
 .fy-bench__modelwrap > svg {
   position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
   color: var(--neutral-400); pointer-events: none;
 }
 .fy-bench__model {
   appearance: none; border: 1px solid var(--border); border-radius: 9px; background: var(--background);
-  color: var(--foreground); font: 500 12px var(--font-sans); padding: 7px 24px 7px 9px; cursor: pointer;
-  width: 100%; max-width: 190px; min-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--foreground); font: 400 var(--text-sm) var(--font-sans); height: 32px; padding: 0 24px 0 8px; cursor: pointer;
+  width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   transition: var(--transition-control);
 }
 .fy-bench__model:hover { background: var(--accent); }
-.fy-bench__estimate { font: 400 11px var(--font-mono); color: var(--muted-foreground); flex: none; }
+.fy-bench__estimate { font: 400 var(--text-2xs) var(--font-mono); color: var(--muted-foreground); flex: none; white-space: nowrap; }
 .fy-bench__refusal { margin: 8px 0 0; font: 400 11.5px var(--font-sans); color: var(--destructive); }
 
 .fy-bench__wall { display: flex; flex-direction: column; min-height: 0; background: var(--muted); position: relative; }
-.fy-bench__wallbar { display: flex; align-items: center; gap: 4px; padding: 10px 14px 2px; flex: none; }
+.fy-bench__wallbar { display: flex; align-items: center; gap: 6px; padding: 10px 14px 8px; flex: none; }
 /* The wall's own tabs (68b): the active one is the primary pill, not the door's gray chip. */
 .fy-bench__tab {
   appearance: none; border: 0; background: transparent; cursor: pointer;
-  padding: 5px 12px; border-radius: 999px; font: 400 11.5px var(--font-sans); color: var(--muted-foreground);
+  padding: 4px 12px; border-radius: 999px; font: 400 var(--text-sm)/1.4 var(--font-sans); color: var(--muted-foreground);
   transition: var(--transition-control);
 }
 .fy-bench__tab:hover { color: var(--foreground); }
 .fy-bench__tab--active { background: var(--primary); color: var(--primary-foreground); font-weight: 500; }
 .fy-bench__tab--active:hover { color: var(--primary-foreground); }
 /* The selected take's request said back, with its actions as quiet marks (68b). */
-.fy-bench__briefrow { display: flex; align-items: center; gap: 3px; padding: 4px 14px 8px; flex: none; }
+.fy-bench__briefrow { display: flex; align-items: center; gap: 8px; padding: 0 14px 8px; flex: none; }
 .fy-bench__briefline {
   flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
-  font: 400 11.5px var(--font-sans); color: var(--muted-foreground);
+  font: 400 var(--text-sm)/1.4 var(--font-sans); color: var(--muted-foreground);
 }
 .fy-bench__rowicon {
   appearance: none; width: 24px; height: 24px; border: 0; border-radius: 7px; background: transparent; flex: none;
-  color: var(--neutral-400); cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
-  font: 400 12px var(--font-sans); transition: var(--transition-control);
+  color: var(--muted-foreground); cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  font: 400 12px var(--font-sans); transition: var(--transition-control); padding: 0;
 }
-.fy-bench__rowicon:hover { background: var(--accent); color: var(--foreground); }
+.fy-bench__rowicon:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
+.fy-bench__rowicon:disabled { opacity: 0.5; cursor: default; }
+/* The download in the bar wears the row mark, not the picture's floating disc — and takes the
+   pointer, which the disc only takes while its picture is hovered. */
+.fy-bench__rowicon--bar { width: 26px; height: 26px; position: static; opacity: 1; pointer-events: auto; }
 .fy-bench__media {
   flex: 1; min-height: 0; margin: 0 14px; border: 1px solid var(--border); border-radius: 12px;
   overflow: hidden; background: var(--neutral-950); position: relative;
   display: flex; align-items: center; justify-content: center;
 }
-.fy-bench__media video { width: 100%; height: 100%; object-fit: contain; }
+.fy-bench__media video { width: 100%; height: 100%; object-fit: contain; cursor: pointer; }
+/* The clip's own transport (142a): a resting play disc, and a bar over a fade at the foot. */
+.fy-bench__playdisc {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: 58px; height: 58px; border: 0; border-radius: 99px; cursor: pointer;
+  background: var(--media-control-bg); color: var(--media-control-fg); box-shadow: var(--shadow-lg);
+  display: inline-flex; align-items: center; justify-content: center; padding: 0 0 0 3px;
+}
+.fy-bench__transport {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 12px;
+  display: flex; align-items: center; gap: 10px;
+  background: linear-gradient(to top, color-mix(in srgb, var(--media-overlay-bg) 60%, transparent), transparent);
+  color: var(--media-overlay-fg);
+}
+.fy-bench__transportplay {
+  appearance: none; border: 0; background: transparent; color: var(--media-overlay-fg); cursor: pointer;
+  width: 18px; height: 18px; padding: 0; display: inline-flex; align-items: center; justify-content: center; flex: none;
+}
+.fy-bench__transporttime { font: 400 var(--text-2xs)/1.4 var(--font-mono); color: var(--media-overlay-fg); flex: none; font-variant-numeric: tabular-nums; }
+.fy-bench__transporttime--end { color: color-mix(in srgb, var(--media-overlay-fg) 70%, transparent); }
+.fy-bench__transporttrack {
+  flex: 1; height: 3px; border-radius: 99px; position: relative; cursor: pointer;
+  background: color-mix(in srgb, var(--media-overlay-fg) 28%, transparent);
+}
+.fy-bench__transporttrack > span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 99px; background: var(--media-overlay-fg); }
+.fy-bench__transporttrack:focus-visible { outline: 2px solid var(--media-overlay-fg); outline-offset: 4px; }
 .fy-bench__empty {
   flex: 1; min-height: 0; margin: 0 14px; border: 1px dashed var(--border); border-radius: 12px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
@@ -5360,15 +5417,12 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-bench__overlaychip {
   padding: 3px 9px; border-radius: 999px;
   background: color-mix(in srgb, var(--media-overlay-fg) 13%, var(--media-overlay-bg));
-  color: var(--media-overlay-fg); font: 400 9.5px var(--font-mono);
+  color: var(--media-overlay-fg); font: 400 var(--text-2xs)/1.4 var(--font-mono);
 }
 .fy-bench__overlaychip--name { font-weight: 500; letter-spacing: 0.1em; }
 .fy-bench__wallactions { display: flex; align-items: center; gap: 8px; padding: 10px 14px 12px; flex: none; }
-/* Only a subject session has an outcome to state; it is the design's quiet mono line (2742). */
-.fy-bench__acceptoutcome {
-  flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
-  font: 400 10.5px var(--font-mono); color: var(--neutral-400);
-}
+/* Discard and the primary at the design's 30px (142: "the wall's Discard and Keep 30px"). */
+.fy-bench__wallactions .ui-btn { height: 30px; min-height: 30px; }
 .fy-bench__acceptnote { font: 400 10.5px var(--font-sans); color: var(--destructive); }
 .fy-bench__viewlatest {
   position: absolute; left: 50%; transform: translateX(-50%); bottom: 56px;
@@ -5379,70 +5433,40 @@ select.fy-set__pill { padding-right: 26px; }
 
 .fy-bench__strip { border-left: 1px solid var(--border); padding: 8px; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; }
 .fy-bench__take { display: flex; align-items: center; gap: 6px; background: transparent; border: 0; padding: 0; cursor: pointer; }
-.fy-bench__taken { width: 16px; text-align: right; font: 400 10px var(--font-mono); color: var(--neutral-400); flex: none; }
+.fy-bench__taken { width: 14px; text-align: right; font: 400 var(--text-2xs) var(--font-mono); color: var(--neutral-400); flex: none; }
 .fy-bench__take[aria-current="true"] .fy-bench__taken { color: var(--foreground); font-weight: 500; }
 .fy-bench__takeframe {
   position: relative; flex: 1; height: 34px; border-radius: 5px; overflow: hidden;
   border: 1px solid var(--border); background: var(--muted);
 }
-.fy-bench__take[aria-current="true"] .fy-bench__takeframe { border: 2px solid var(--foreground); }
-.fy-bench__takestate {
-  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  font: 400 8.5px var(--font-mono); color: var(--neutral-400);
+.fy-bench__takeframe { opacity: 0.7; }
+.fy-bench__take[aria-current="true"] .fy-bench__takeframe { border-color: var(--foreground); opacity: 1; }
+/* A clip says it plays; a take still out is a hatched box with a spinner (R-24). */
+.fy-bench__takeplay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.fy-bench__takeplay > span {
+  width: 16px; height: 16px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--background) 90%, transparent); color: var(--foreground);
 }
-.fy-bench__takestate--failed { color: var(--destructive); }
-
-/* ---- a subject session (SPEC-036 R-23..R-25; design 2605-2778) --------------
-   The same bench under a production subject, in the scene workspace's dress: no
-   rail, a 392px column, a 152px rail of thumbnails. Everything below hangs off
-   `.fy-bench--subject` or a class only a subject session renders, because R-23
-   binds the world bench to change by nothing when it is opened with no subject.
-   The numbers are the design's own. */
-.fy-bench--subject { grid-template-columns: 392px minmax(0, 1fr) 152px; }
-/* The chrome's slot: crumb · subject · its line, and what this screen is at the far right. */
-.fy-bench__crumb--subject { flex: 1; min-width: 0; gap: 10px; }
-.fy-bench__provenance { font: 400 10.5px var(--font-mono); color: var(--neutral-400); white-space: nowrap; }
-.fy-bench__subjectname { font: 600 13px var(--font-sans); letter-spacing: -0.01em; white-space: nowrap; }
-.fy-bench__subjectsub {
-  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font: 400 11px var(--font-sans); color: var(--muted-foreground);
+.fy-bench__takeframe[data-inflight="true"] {
+  background: repeating-linear-gradient(45deg, var(--neutral-100) 0 9px, var(--neutral-50) 9px 18px);
 }
-.fy-bench__sessionkind { font: 400 10px var(--font-mono); color: var(--neutral-400); white-space: nowrap; }
-
-/* The column is spaced by one gap. The world bench spaces its blocks with margins instead,
-   and both together would double every distance. */
-.fy-bench--subject .fy-bench__composer { padding: 16px 18px; gap: 12px; overflow-y: auto; }
-.fy-bench--subject .fy-bench__composer > * { margin-top: 0; }
-.fy-bench__group { display: flex; flex-direction: column; gap: 7px; flex: none; }
-.fy-bench__group--prompt { flex: 1; min-height: 0; gap: 6px; }
-.fy-bench__group .fy-bench__eyebrow, .fy-bench__group .fy-bench__brief, .fy-bench__group .fy-bench__refgrid { margin: 0; }
-/* Image / Video: two text tabs on the design's 9px track, the on one lifted (2616-2621). */
-.fy-bench__mode--subject { align-self: flex-start; background: var(--secondary); border-radius: 9px; }
-.fy-bench__mode--subject button { padding: 5px 14px; border-radius: 7px; font: 500 11.5px var(--font-sans); }
-.fy-bench__mode--subject button[aria-pressed="true"] { font-weight: 600; cursor: default; }
-/* The eyebrows (2624, 2666): small caps with the count or the link pushed to the right. */
-.fy-bench__eyebrow--refs { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
-.fy-bench__refcount, .fy-bench__eyebrow--refs .fy-sblink { margin-left: auto; letter-spacing: 0; text-transform: none; }
-.fy-bench__refcount { font: 400 10px var(--font-mono); color: var(--neutral-400); }
-/* Reference tiles: 108px columns that wrap, the box then its name (2627-2661). */
-.fy-bench--subject .fy-bench__refgrid { display: flex; flex-wrap: wrap; gap: 7px; }
-.fy-bench__ref { width: 108px; flex: none; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.fy-bench--subject .fy-bench__reftile { background: var(--muted); }
-.fy-bench--subject .fy-bench__reftile--add {
-  width: 108px; border: 1px dashed var(--border); color: var(--neutral-400); font: 400 9.5px var(--font-mono);
+.dark .fy-bench__takeframe[data-inflight="true"] {
+  background: repeating-linear-gradient(45deg, var(--neutral-800) 0 9px, var(--neutral-900) 9px 18px);
 }
-.fy-bench--subject .fy-bench__reftile--add:hover { border-color: var(--border); background: var(--accent); color: var(--foreground); }
-/* The corner index chip: a light square on the picture, not the world bench's dark pill (2653). */
-.fy-bench--subject .fy-bench__tokenchip {
-  left: 5px; bottom: 5px; padding: 1px 5px; border-radius: 4px;
-  background: color-mix(in srgb, var(--background) 92%, transparent); color: var(--foreground);
-  font: 500 9px var(--font-mono);
+.fy-bench__takespin { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.fy-bench__takespin::after {
+  content: ""; width: 14px; height: 14px; border-radius: 999px;
+  border: 2px solid var(--neutral-300); border-top-color: var(--foreground);
+  animation: fy-bench-spin 0.8s linear infinite;
 }
-.fy-bench__refname { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.fy-bench__reflabel, .fy-bench__refmeta { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.fy-bench__reflabel { font: 400 10px var(--font-sans); color: var(--muted-foreground); }
-.fy-bench__refmeta { font: 400 9px var(--font-mono); color: var(--neutral-400); }
-.fy-bench__ref[data-riding="false"] .fy-bench__reflabel { color: var(--neutral-400); }
+@keyframes fy-bench-spin { to { transform: rotate(360deg); } }
+/* The wall's two mono states while a take is out: rendering, and which one. */
+.fy-bench__emptyline { font: 400 var(--text-2xs) var(--font-mono); }
+.fy-bench__emptysub { font: 400 var(--text-2xs) var(--font-mono); color: var(--neutral-400); }
+.fy-bench__rendering {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  color: var(--muted-foreground); animation: fy-pulse 1.6s ease-in-out infinite;
+}
 /* A playblast has no poster: the design's three greybox figures on a floor grid stand in
    (2635-2639). The colours are the illustration's, not the theme's — it is a picture. */
 .fy-bench__blockstand {
@@ -5456,71 +5480,11 @@ select.fy-set__pill { padding-right: 26px; }
   content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 11px;
   background-image: linear-gradient(90deg, color-mix(in srgb, var(--neutral-950) 12%, transparent) 1px, transparent 1px); background-size: 14px 11px;
 }
-/* The prompt: mono on neutral-50, 150px tall, lit on focus (2669). Only the composer's own
-   box — the large editor keeps its sans. The three stacked layers must stay one metric. */
-.fy-bench--subject .fy-bench__brief { background: var(--muted); box-shadow: none; }
-.fy-bench--subject .fy-bench__brief:focus-within { border-color: var(--foreground); background: var(--card); }
-.fy-bench--subject .fy-bench__brief .fy-bench__briefstack { min-height: 150px; }
-.fy-bench--subject .fy-bench__brief .fy-bench__briefunder,
-.fy-bench--subject .fy-bench__brief .fy-bench__briefmirror,
-.fy-bench--subject .fy-bench__brief .fy-bench__brieftext { font: 400 11px/1.7 var(--font-mono); }
-.fy-bench__athint { font: 400 9.5px var(--font-mono); color: var(--neutral-400); }
-/* Context chips: outlined, transparent, after the prompt (2673-2675). */
-.fy-bench--subject .fy-bench__subjectcontext { gap: 6px; }
-.fy-bench--subject .fy-bench__subjectcontext > span {
-  padding: 3px 9px; border: 1px solid var(--border); background: transparent; font-size: 10px;
+.fy-bench__takestate {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font: 400 8.5px var(--font-mono); color: var(--neutral-400);
 }
-.fy-bench--subject .fy-bench__subjectcontext .fy-bench__subjectnote { border-color: transparent; }
-.fy-bench--subject .fy-bench__dispatch { border-top: 1px solid var(--border); padding-top: 12px; }
-
-/* The wall: filters on a track, a light plate, mono states (2690-2715). */
-.fy-bench__filters { display: inline-flex; align-items: center; gap: 2px; background: var(--secondary); border-radius: 9px; padding: 3px; }
-.fy-bench__filters .fy-bench__tab { padding: 4px 12px; border-radius: 7px; font-size: 11px; }
-.fy-bench__filters .fy-bench__tab--active { background: var(--background); box-shadow: var(--shadow-xs); color: var(--foreground); }
-.fy-bench__filters .fy-bench__tab--active:hover { color: var(--foreground); }
-.fy-bench--subject .fy-bench__media { background: var(--muted); }
-.fy-bench--subject .fy-bench__empty { border-style: solid; background: var(--muted); color: var(--neutral-400); }
-.fy-bench__emptyline { font: 400 11px var(--font-mono); }
-.fy-bench__emptysub { font: 400 10px var(--font-mono); color: var(--neutral-400); }
-.fy-bench__rendering {
-  display: flex; flex-direction: column; align-items: center; gap: 8px;
-  color: var(--muted-foreground); animation: fy-pulse 1.6s ease-in-out infinite;
-}
-
-/* The take rail: 152px, full-width 16:9 boxes, the number and state beneath (2748-2770). */
-.fy-bench--subject .fy-bench__strip { border-left: 0; padding: 10px 14px 14px 0; gap: 9px; }
-.fy-bench--subject .fy-bench__take { flex-direction: column; align-items: stretch; gap: 4px; }
-.fy-bench--subject .fy-bench__takeframe {
-  flex: none; height: auto; aspect-ratio: 16 / 9; border-radius: 9px; background: var(--muted);
-  transition: var(--transition-control);
-}
-.fy-bench--subject .fy-bench__take:hover .fy-bench__takeframe { box-shadow: var(--shadow-md); }
-/* Selected is an inset ring rather than a thicker border, so the box does not change size. */
-.fy-bench--subject .fy-bench__take[aria-current="true"] .fy-bench__takeframe {
-  border: 1px solid var(--border); box-shadow: inset 0 0 0 1.5px var(--foreground);
-}
-.fy-bench__takeplay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
-.fy-bench__takeplay > span {
-  width: 26px; height: 26px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center;
-  background: color-mix(in srgb, var(--background) 90%, transparent); color: var(--foreground);
-}
-/* R-24: a generating take is a hatched placeholder with a spinner. */
-.fy-bench--subject .fy-bench__takeframe[data-inflight="true"] {
-  background: repeating-linear-gradient(45deg, var(--neutral-100) 0 9px, var(--neutral-50) 9px 18px);
-}
-.fy-bench__takespin { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
-.fy-bench__takespin::after {
-  content: ""; width: 18px; height: 18px; border-radius: 999px;
-  border: 2px solid var(--neutral-300); border-top-color: var(--foreground);
-  animation: fy-bench-spin 0.8s linear infinite;
-}
-@keyframes fy-bench-spin { to { transform: rotate(360deg); } }
-.fy-bench__takeline { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
-.fy-bench--subject .fy-bench__taken { width: auto; text-align: left; font: 500 9.5px var(--font-mono); color: var(--foreground); }
-.fy-bench__takestatus {
-  flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
-  font: 400 9.5px var(--font-mono); color: var(--neutral-400);
-}
+.fy-bench__takestate--failed { color: var(--destructive); }
 
 /* ---- the reference picker (design 69a) ------------------------------------ */
 .fy-refpicker__grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
@@ -5775,8 +5739,8 @@ select.fy-set__pill { padding-right: 26px; }
 /* Presets (issue 305 §3): the ghost trigger left of the model select, menu opening upward. */
 .fy-bench__presets {
   appearance: none; border: 0; background: transparent; cursor: pointer;
-  display: inline-flex; align-items: center; gap: 4px; padding: 7px 6px; border-radius: 8px;
-  font: 400 12px var(--font-sans); color: var(--muted-foreground); transition: var(--transition-control);
+  display: inline-flex; align-items: center; gap: 4px; padding: 7px 6px; border-radius: 9px;
+  font: 400 var(--text-sm) var(--font-sans); color: var(--muted-foreground); transition: var(--transition-control);
 }
 .fy-bench__presets:hover { color: var(--foreground); }
 .fy-bench__presets svg { color: var(--neutral-400); }
@@ -6224,16 +6188,6 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-tip--end::after { left: auto; right: 0; transform: none; }
 .fy-timeline__toolbar button:disabled { cursor: default; }
 .fy-timeline__refusal { padding: 6px 10px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--destructive) 7%, var(--background)); color: var(--destructive); font: 500 9px/1.4 var(--font-mono); }
-/* The OV lane is shorter than V on purpose: it is not the film, it is what is laid over it. */
-.fy-ovlane { position: relative; height: 44px; border: 1px dashed transparent; border-radius: 5px; }
-.fy-ovlane--over { border-color: var(--foreground); background: color-mix(in srgb, var(--accent) 60%, transparent); }
-.fy-ovlane__empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 400 9px var(--font-mono); color: var(--neutral-400); pointer-events: none; }
-.fy-ovclip { position: absolute; top: 0; height: 44px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; background: var(--muted); display: flex; align-items: center; gap: 6px; padding: 0 6px 0 8px; overflow: hidden; }
-.fy-ovclip__name { flex: 1; min-width: 0; font: 400 8.5px var(--font-mono); color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fy-ovclip__x { border: 0; background: none; color: var(--neutral-400); font: 400 13px var(--font-sans); line-height: 1; padding: 2px 4px; cursor: pointer; flex: none; transition: var(--transition-control); }
-.fy-ovclip__x:hover { color: var(--destructive); }
-
-/* Lanes: a stack of rows that hold clips, plus the gestures on a clip and its menu. */
 /* ---- The Picture track as an editable sequence (SPEC-037 R-19..R-23, issue 679) ------------
    Clips are laid by frame, so a hole is empty lane rather than a missing cell, and a drag is a
    preview of the algebra's answer rather than a hand-drawn approximation of it. */
@@ -6307,21 +6261,7 @@ select.fy-set__pill { padding-right: 26px; }
 /* Over the black stage, so the neutral ramp rather than the theme: white words in either mode. */
 .fy-cutviewer__cue { position: absolute; left: 8%; right: 8%; bottom: 46px; text-align: center; color: var(--neutral-50); font: 500 15px/1.35 var(--font-sans); text-shadow: 0 0 3px var(--neutral-950), 0 0 6px var(--neutral-950); white-space: pre-line; pointer-events: none; }
 .fy-cutviewer__cue--box { background: color-mix(in srgb, var(--neutral-950) 60%, transparent); border-radius: 4px; padding: 4px 8px; margin: 0 auto; display: table; text-shadow: none; }
-.fy-clanes { position: relative; }
-.fy-clanes__foot { display: flex; align-items: center; gap: 10px; padding: 8px 0 0 28px; }
-.fy-ovclip { cursor: grab; user-select: none; touch-action: none; }
-.fy-ovclip:active { cursor: grabbing; }
-.fy-ovclip--dragging { border-color: var(--foreground); box-shadow: var(--shadow-sm); z-index: 3; }
-.fy-ovclip--selected { border-color: var(--foreground); box-shadow: inset 0 0 0 1px var(--foreground); z-index: 2; }
-.fy-ovclip--sound { background: color-mix(in srgb, var(--accent) 70%, var(--muted)); }
-.fy-ovclip__swatch { width: 34px; height: 22px; border-radius: 3px; overflow: hidden; flex: none; display: inline-flex; align-items: center; justify-content: center; }
-.fy-ovclip__swatch--wave { background: none; color: var(--neutral-400); }
-.fy-ovclip__badge { font: 500 7.5px var(--font-mono); letter-spacing: 0.06em; color: var(--neutral-400); border: 1px solid var(--border); border-radius: 3px; padding: 1px 3px; flex: none; }
-/* Wide enough to grab, narrow enough that the body is still the move gesture. */
-.fy-ovclip__grip { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; touch-action: none; }
-.fy-ovclip__grip--start { left: 0; }
-.fy-ovclip__grip--end { right: 0; }
-.fy-ovclip__grip:hover { background: color-mix(in srgb, var(--foreground) 22%, transparent); }
+/* A clip's menu, opened on the clip and kept inside the viewport (`editor-clip-menu.tsx`). */
 .fy-clipmenu { position: fixed; z-index: 40; min-width: 216px; background: var(--popover); border: 1px solid var(--border); border-radius: 9px; box-shadow: var(--shadow-md); padding: 5px; display: flex; flex-direction: column; }
 .fy-clipmenu__item { text-align: left; border: 0; background: none; border-radius: 6px; padding: 7px 9px; font: 400 12px var(--font-sans); color: var(--foreground); cursor: pointer; transition: var(--transition-control); }
 .fy-clipmenu__item:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--accent); }
@@ -6736,6 +6676,8 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
    The manuscript sits at a reading measure of 640, the side is 250 — the numbers the turn pins. */
 .fy-ch__body { flex: 1; min-height: 0; display: flex; gap: 28px; }
 .fy-ch__manuscript { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+/* The editor stays mounted under the Audiobook view (turn 146); the class's flex would otherwise beat the attribute. */
+.fy-ch__manuscript[hidden] { display: none; }
 .fy-ch__prose { flex: 1; min-height: 0; overflow: auto; padding: 6px 2px 0; max-width: 640px; font: 400 15px/1.75 var(--font-sans); }
 .fy-ch__prose .rich-markdown-editor { min-height: 100%; }
 .fy-ch__source { flex: 1; min-height: 0; max-width: 640px; resize: none; padding: 6px 2px 0; border: 0; background: transparent; color: var(--foreground); font: 400 15px/1.75 var(--font-sans); }
@@ -6747,6 +6689,46 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ch__band-push { flex: 1; }
 .fy-ch__draft { border-left: 2px solid var(--border); padding-left: 14px; }
 .fy-ch__side { width: 250px; flex: none; display: flex; flex-direction: column; gap: 20px; padding-top: 6px; overflow: auto; }
+/* The Audiobook view (design turn 146): a row a block, the reader in a 70px mark column, an 8px dot for its state. */
+.fy-ab__blocks { flex: 1; min-height: 0; overflow: auto; padding: 6px 2px 0; max-width: 640px; }
+.fy-ab__block { display: grid; grid-template-columns: 70px minmax(0, 1fr) 14px; gap: 10px; align-items: start; padding: 4px 6px; margin: 0 -6px 6px; border-radius: 6px; cursor: pointer; }
+.fy-ab__block--selected { background: var(--muted); }
+.fy-ab__block--sounding { background: var(--secondary); box-shadow: inset 2px 0 0 var(--foreground); }
+.fy-ab__mark { padding-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--foreground); }
+.fy-ab__mark--faint { color: var(--neutral-400); }
+.fy-ab__mark--warn { color: var(--warning); }
+.fy-ab__text { font: 400 15px/1.75 var(--font-sans); }
+.fy-ab__dot { width: 8px; height: 8px; margin-top: 9px; padding: 0; border-radius: 50%; border: 1px solid var(--neutral-400); background: transparent; cursor: pointer; flex: none; box-sizing: border-box; }
+.fy-ab__dot:disabled { cursor: default; }
+.fy-ab__dot--made { background: var(--success); border-color: var(--success); }
+.fy-ab__dot--stale { background: var(--warning); border-color: var(--warning); }
+.fy-ab__dot--flagged { background: var(--destructive); border-color: var(--destructive); }
+.fy-ab__control { display: inline-flex; align-items: center; gap: 8px; }
+.fy-ab__play { width: 18px; height: 18px; padding: 0; border: 0; background: transparent; color: var(--muted-foreground); cursor: pointer; font-size: 10px; }
+.fy-ab__foot { display: flex; align-items: center; gap: 14px; padding: 10px 0 16px; border-top: 1px solid var(--border); font: 400 10.5px var(--font-mono); color: var(--neutral-400); }
+.fy-ab__foot-push { flex: 1; }
+/* The block's direction (turn 146, SPEC-047 R-6, R-9): a label, then the control; a delivery
+   the reader lacks is struck with its reason on the control, never explained under it. */
+.fy-ab__direction { display: flex; flex-direction: column; gap: 8px; }
+.fy-ab__row { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.fy-ab__label { font: 500 10.5px var(--font-sans); color: var(--muted-foreground); }
+.fy-ab__seg { flex-wrap: wrap; row-gap: 2px; }
+.fy-ab__seg .fy-seg__item { padding: 2px 6px; font-size: 10.5px; }
+.fy-ab__seg-item--off { text-decoration: line-through; color: var(--neutral-400); cursor: default; }
+.fy-ab__seg-item--off:hover { color: var(--neutral-400); }
+.fy-ab__phrase { flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; font-size: 11px; background: var(--background); color: var(--foreground); }
+.fy-ab__off { font-size: 10.5px; color: var(--neutral-400); }
+.fy-ab__cues { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.fy-ab__cue { display: inline-flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--foreground); }
+.fy-ab__cue-x { border: 0; background: transparent; padding: 0 2px; color: var(--muted-foreground); cursor: pointer; font-size: 12px; line-height: 1; }
+.fy-ab__cue-add { display: flex; gap: 10px; padding-top: 2px; }
+.fy-ab__again { padding-top: 8px; }
+/* The card `Direct this chapter` leaves in the dock (R-10): the model's sentence, the counts as data. */
+.fy-ab__card { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+.fy-ab__card-title { margin: 0; font: 500 12.5px var(--font-sans); color: var(--foreground); }
+.fy-ab__card-text { margin: 0; font: 400 12.5px/1.6 var(--font-sans); color: var(--foreground); }
+.fy-ab__card-line { margin: 0; font-size: 10.5px; color: var(--muted-foreground); }
+.fy-ch__viewrow { margin-top: 10px; align-self: flex-start; }
 .fy-ch__target { height: 4px; border-radius: 99px; background: var(--secondary); margin-top: 7px; overflow: hidden; }
 .fy-ch__target > span { display: block; height: 100%; background: var(--foreground); }
 .fy-ch__target--page { margin: 18px 0 14px; flex: none; }
@@ -7562,8 +7544,6 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-swstage__eyebrow > span:first-child { flex: 1; color: var(--muted-foreground); font: 500 10px var(--font-sans); letter-spacing: .08em; text-transform: uppercase; }
 .fy-swstage__eyebrow > span:last-child:not(:first-child) { color: var(--neutral-400); font: 400 9.5px var(--font-mono); }
 .fy-swstage__row { display: flex; align-items: center; gap: 8px; min-height: 22px; }
-.fy-swstage__row > span:first-child { width: 48px; flex: none; color: var(--neutral-400); font: 400 10px var(--font-mono); }
-.fy-swstage__row > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11.5px var(--font-sans); }
 .fy-swstage__nudge { display: inline-flex; align-items: center; gap: 1px; flex: none; }
 .fy-swstage__nudge button { width: 19px; height: 19px; display: inline-grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--muted-foreground); cursor: pointer; transition: var(--transition-control); }
 .fy-swstage__nudge button:hover { background: var(--accent); color: var(--foreground); }
@@ -7617,7 +7597,7 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-swpreview__larger { position: absolute; z-index: 3; right: 12px; top: 12px; border: 1px solid color-mix(in srgb, var(--media-overlay-fg) 28%, transparent); border-radius: 7px; background: color-mix(in srgb, var(--media-overlay-bg) 72%, transparent); color: var(--media-overlay-fg); padding: 4px 9px; cursor: pointer; font: 500 10px var(--font-sans); transition: var(--transition-control); }
 .fy-swpreview__larger:hover { background: color-mix(in srgb, var(--media-overlay-bg) 88%, transparent); }
 /* The stage ground is the theme-invariant neutral-900, so its badges are literal white-on-dark and dark-on-white in both themes. */
-.fy-swpreview__badges { position: absolute; z-index: 2; top: 12px; left: 14px; display: inline-flex; align-items: center; gap: 8px; }
+.fy-swpreview__badges { right: 80px; flex-wrap: wrap; position: absolute; z-index: 2; top: 12px; left: 14px; display: inline-flex; align-items: center; gap: 8px; }
 .fy-swpreview__shot { padding: 2px 7px; border-radius: 5px; background: color-mix(in srgb, var(--neutral-50) 92%, transparent); color: var(--neutral-900); font: 500 10px var(--font-mono); }
 .fy-swpreview__kind { padding: 2px 7px; border-radius: 5px; background: color-mix(in srgb, var(--neutral-950) 60%, transparent); color: var(--neutral-50); font: 400 9.5px var(--font-mono); }
 .fy-swpreview__caption { position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 12px 16px 14px; background: linear-gradient(transparent, color-mix(in srgb, var(--neutral-950) 78%, transparent)); }
@@ -8035,6 +8015,11 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 }
 .fy-half svg { color: var(--muted-foreground); flex: none; }
 .fy-half:not(:first-child) { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); }
+/* The count at the level's right, where a group says how many it holds. */
+.fy-half__aside { margin-left: auto; font: 400 12.5px var(--font-sans); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+/* On General the level follows a banded row, whose rule is the rule above it; a second would
+   double it. The rows under it are not indented, because there is no rail to indent past. */
+.fy-set--general .fy-half { margin-top: 30px; padding: 0 0 6px; border-top: 0; font-size: 13px; }
 
 /* A kind, with its count. */
 .fy-kind {
@@ -8098,6 +8083,8 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 }
 .fy-mark img { width: 100%; height: 100%; object-fit: contain; padding: 2px; }
 .fy-mark--lg { width: 32px; height: 32px; border-radius: 8px; font-size: 14px; }
+/* Inside a 32px control (turn 149), where 22 would touch both edges. */
+.fy-mark--xs { width: 18px; height: 18px; border-radius: 5px; font-size: 9px; }
 .dark .fy-mark { background: var(--neutral-100); border-color: var(--neutral-700); }
 
 /* The pane's head: the name, where it is, and the count. */
@@ -8112,8 +8099,32 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-facts { margin-top: 22px; display: flex; flex-direction: column; gap: 12px; max-width: 860px; }
 .fy-fact { display: flex; align-items: center; gap: 14px; min-height: 30px; font: 400 13.5px var(--font-sans); }
 .fy-fact__what { width: 140px; flex: none; color: var(--muted-foreground); }
-.fy-fact__is { flex: 1; min-width: 0; display: flex; align-items: center; font-variant-numeric: tabular-nums; }
+.fy-fact__is { flex: 1; min-width: 0; display: flex; align-items: center; gap: 14px; font-variant-numeric: tabular-nums; }
 .fy-fact__mono { font: 400 12px var(--font-mono); color: var(--muted-foreground); }
+/* The state after a value (design turn 149): three words at most, muted, and for a refused
+   default the warning colour with a leading dot as one object — the dot leads so a column of
+   rows scans by colour before it is read. */
+.fy-fact__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  font: 400 12.5px var(--font-sans);
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.fy-fact__state--warn { color: var(--warning); }
+/* A route drawn as the house link, in the value column where a value would be (SPEC-034 R-17). */
+.fy-fact__link {
+  font: 400 13.5px var(--font-sans);
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
 .fy-fact__does { display: flex; align-items: center; gap: 8px; flex: none; }
 .fy-fact__input {
   flex: 1;
@@ -8390,6 +8401,16 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-voicerow__where svg { color: var(--neutral-400); }
 .fy-voicerow__where .fy-mono { color: var(--muted-foreground); }
 .fy-voicerow__note { width: 132px; flex: none; text-align: right; color: var(--neutral-400); overflow: hidden; text-overflow: ellipsis; }
+/* A cloned voice's readers on its one row (SPEC-046 R-30): a chip each, the picked one filled,
+   on a line of their own under the name — beside it they squeezed the name to a word a line. */
+.fy-voicerow--readers { flex-wrap: wrap; row-gap: 8px; }
+.fy-readerchips { flex: 1 0 100%; display: inline-flex; flex-wrap: wrap; gap: 4px; padding-left: 42px; }
+.fy-readerchip { display: inline-flex; align-items: center; gap: 5px; font: 500 11px var(--font-mono); padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: none; color: var(--muted-foreground); cursor: pointer; white-space: nowrap; }
+.fy-readerchip svg { color: var(--neutral-400); }
+.fy-readerchip:hover { color: var(--foreground); border-color: var(--neutral-400); }
+.fy-readerchip[aria-pressed="true"] { border-color: var(--foreground); color: var(--foreground); background: var(--muted); }
+.fy-readerchip:disabled { cursor: default; opacity: 0.5; }
+.fy-readerchip:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 
 /* The sample sheet and its review. */
 .fy-vsbody { padding: 0 22px 4px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
@@ -8534,3 +8555,25 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-swstage__plate > img, .fy-swstage__plate > video { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 .fy-swstage__plate[data-layout="corner"] > img, .fy-swstage__plate[data-layout="corner"] > video { position: absolute; right: 2%; bottom: 2%; width: 30%; height: 30%; }
 [data-stage-capture] .fy-swstage__plate { visibility: hidden; }
+/* The Audiobook door (turn 146, SPEC-047 R-29): the Chapters door's shape, the voices beside the
+   reading's seg, a row's state as data, a 4px read bar. */
+.fy-abdoor__voices { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 14px; }
+.fy-abdoor__voice { display: inline-flex; flex-direction: column; gap: 1px; padding: 5px 10px; border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
+/* A chip that goes somewhere — the narrator to Settings, a speaker to their voice page — presses; one that names nothing to set is plain (issue 1191). */
+button.fy-abdoor__voice { background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: var(--transition-control); }
+button.fy-abdoor__voice:hover { background: var(--accent); border-color: var(--neutral-400); }
+.fy-abdoor__voice--warn { border-color: var(--warning); }
+.fy-abdoor__voice--warn .fy-abdoor__voice-what { color: var(--warning); }
+.fy-abdoor__voice-name { font: 500 12px var(--font-sans); color: var(--foreground); }
+.fy-abdoor__voice-what { font-size: 10.5px; color: var(--muted-foreground); }
+.fy-abdoor__note { display: flex; gap: 16px; align-items: center; margin-top: 10px; font-size: 10.5px; color: var(--muted-foreground); }
+.fy-abdoor__planned { color: var(--neutral-400); }
+.fy-abdoor__lines { display: flex; flex-direction: column; gap: 6px; }
+.fy-abdoor__line { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: baseline; font: 400 12.5px var(--font-sans); }
+.fy-abdoor__line--warn .fy-abdoor__line-how { color: var(--warning); }
+.fy-abdoor__line-how, .fy-abdoor__line-cost { font-size: 10.5px; color: var(--muted-foreground); white-space: nowrap; }
+
+.fy-bench__modelwrap > select { width: 100%; min-width: 0; }
+
+/* Session recovery stays visible on any route without unmounting an unsaved editor. */
+.fy-session-refusal { position: fixed; top: 48px; right: 24px; max-width: min(480px, calc(100vw - 48px)); z-index: 1000; }

@@ -307,8 +307,7 @@ describe("the location reference tab (#243)", () => {
     const html = render([]);
     assert.ok(html.includes("Start with the establishing view"));
     assert.ok(html.includes("0 of 6"));
-    // The empty right-hand pane earns its space by naming what will fill it.
-    assert.ok(html.includes("so the model sees the room from more than one side"));
+    assert.ok(!html.includes("so the model sees the room from more than one side"), "instruction captions stay off the surface (#1093)");
     assert.ok(!html.includes("WHAT A SHOT CARRIES"), "nothing is carried yet, so nothing is promised");
   });
 });

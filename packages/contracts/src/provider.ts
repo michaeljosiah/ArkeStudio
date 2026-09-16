@@ -37,6 +37,9 @@ export const ProviderIdSchema = z.enum([
   "openai",
   "anthropic",
   "elevenlabs",
+  "mistral",
+  "breezeblue",
+  "fishaudio",
   "ollama",
   "kokoro",
   "whispercpp",
@@ -88,7 +91,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     // Motion rides where a row names the field for it (issue 852): the client puts a clip into
     // `limits.referenceVideoField`, and the budget refuses video on any row that names none, so
     // mapping the kind here admits nothing a row has not declared.
-    mapsReferenceKinds: ["image", "video"],
+    mapsReferenceKinds: ["image", "video", "audio"],
   },
   higgsfield: { displayName: "Higgsfield", capabilities: ["image", "video"], local: false, credential: "external" },
   openai: {
@@ -108,6 +111,31 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
   elevenlabs: {
     displayName: "ElevenLabs",
     capabilities: ["voice-tts", "voice-clone", "voice-conversion"],
+    local: false,
+    credential: "in-app",
+  },
+  /*
+   * The two hosted readers of the world's cloned voices (SPEC-046 R-1). `voice-clone` here means
+   * a cloned voice can be READ through the service — the clip goes with the request, or into a
+   * slot on the account — never that a voice is made there; the library is where a voice is made
+   * (SPEC-022 §2.3). Neither has a `keyHint`: neither vendor's keys carry a recognisable prefix.
+   * Neither joins `LLM_ENV_PROVIDERS`: a voice key has no business in a harness environment.
+   */
+  mistral: {
+    displayName: "Mistral",
+    capabilities: ["voice-tts", "voice-clone"],
+    local: false,
+    credential: "in-app",
+  },
+  breezeblue: {
+    displayName: "BreezeBlue",
+    capabilities: ["voice-tts", "voice-clone"],
+    local: false,
+    credential: "in-app",
+  },
+  fishaudio: {
+    displayName: "Fish Audio",
+    capabilities: ["voice-tts", "voice-clone"],
     local: false,
     credential: "in-app",
   },
@@ -163,6 +191,12 @@ export const CapabilityProbeSchema = z
     zeroRetention: z.boolean().optional(),
     /** Why not, in provider terms: "no video access on this plan", "out of credit" … */
     reason: z.string().optional(),
+    /**
+     * The vendor accepted the key even though this capability is not unlocked — no credit, no
+     * plan access (issue 1167). The two halves of R-3 kept apart, so the remedy offered is the
+     * right one: a key that authenticates is not a key to replace.
+     */
+    authenticated: z.boolean().optional(),
   })
   .strict();
 export type CapabilityProbe = z.infer<typeof CapabilityProbeSchema>;
@@ -183,9 +217,22 @@ export const ProviderStatusSchema = z
     lastValidated: IsoDateTimeSchema.optional(),
     /** A mid-session credential failure — a provider fault, never a work failure (R-4). */
     fault: z.string().nullable(),
+    /**
+     * What the fault is about: the credential in use, or the store that could not save a key,
+     * or could not clear one (issue 1191) — a key that never reached the provider is not a
+     * rejected key, and the settings say so rather than sending the person to replace it. A
+     * store fault leaves the credential the provider holds as it was, so it never disables what
+     * that credential unlocks (codex on PR 1195).
+     */
+    faultKind: z.enum(["credential", "not-saved", "not-cleared"]).optional(),
   })
   .strict();
 export type ProviderStatus = z.infer<typeof ProviderStatusSchema>;
+
+/** A fault about the credential in use, which disables what it unlocked; a store's fault is not one. */
+export function credentialFaulted(status: Pick<ProviderStatus, "fault" | "faultKind"> | undefined): boolean {
+  return status !== undefined && status.fault !== null && (status.faultKind === undefined || status.faultKind === "credential");
+}
 
 /**
  * Capability availability, derived from configured and validated providers (R-2). A capability
@@ -303,7 +350,7 @@ export function deriveCapabilityAvailability(statuses: ProviderStatus[]): Capabi
       const probe = status.probes.find((p) => p.capability === capability);
       const unlocked =
         status.configured &&
-        status.fault === null &&
+        !credentialFaulted(status) &&
         (status.validation === "valid" ? (probe?.available ?? false) : status.validation === "untested");
       if (unlocked) via.push(status.id);
     }

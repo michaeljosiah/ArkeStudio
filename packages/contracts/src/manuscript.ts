@@ -92,6 +92,11 @@ export type ManuscriptRead =
 /** A line of three or more stars, spaced or not, is a scene break and nothing else is. */
 const SCENE_BREAK = /^\s*(?:\*\s*){3,}$/;
 
+/** A paragraph that is a scene break — a line of three or more stars — and so a separator, not words (SPEC-047 R-2). */
+export function isSceneBreak(paragraph: string): boolean {
+  return SCENE_BREAK.test(paragraph);
+}
+
 /**
  * The manuscript a production would export (R-49): the chapters with prose in order, each
  * paragraph split into runs by the little Markdown a novelist types, and the rest counted.

@@ -13,6 +13,9 @@ import {
   stageObjectAt,
   stageCameraKeyAt,
   sampleStageCamera,
+  stageCameraRest,
+  stageCameraStandoffWarnings,
+  stageCameraMotionWarnings,
   stageKeyOffset,
   type StageObjectMotion,
   type StagePerformanceKey,
@@ -37,7 +40,7 @@ import {
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { StageUnderlay } from "./stage-underlay.js";
-import { Eyebrow, Link, Row, Stepper, Triad, Value, fieldEscape, sameLine } from "./stage-inspector.js";
+import { Eyebrow, Link, Row, Stepper, Triad, Value, StageEditContext, fieldEscape, sameLine } from "./stage-inspector.js";
 import { selectedShotId, useWorkspaceSelection } from "./selection.js";
 import { figureColour, StageViewport, type StageData, type StageSelection } from "./stage-viewport.js";
 import { send, subscribeStageConstruction, beginStageExport, cancelStageExport, failStagePlayblastAction, stagePlayblast, writeStageExportFrame } from "../../lib/store.js";
@@ -227,6 +230,7 @@ export function SceneStage({
   // left expanded over an empty body while its dress says it cannot open.
   const inspected = working?.authorship !== undefined;
   useEffect(() => { if (!inspected) inspection.current?.removeAttribute("open"); }, [inspected]);
+  const cameraWarnings = useMemo(() => working ? [...stageCameraStandoffWarnings(working, durationSec), ...stageCameraMotionWarnings(working, durationSec)] : [], [working, durationSec]);
   const motionSpeeds = useMemo(() => working ? stageMotionSpeeds(working, durationSec) : [], [working, durationSec]);
   const cameraChanged = draft !== null && cameraOf(draft) !== cameraOf(resolvedPersisted);
   const motionChanged = draft !== null && (
@@ -666,7 +670,7 @@ export function SceneStage({
     })) setStaging(true);
   };
   const keep = () => {
-    if (draft === null || working === null) return;
+    if (frozen || draft === null || working === null) return;
     if (aiDraftVersion.current !== null && aiDraftVersion.current !== scene.version) { setNote("The source scene changed. Rebuild before Keep."); return; }
     const command: Extract<Command, { kind: "edit-stage" }> = { kind: "edit-stage", shotId: shot.id };
     if (cameraChanged || overrideChanged) {
@@ -983,6 +987,10 @@ export function SceneStage({
   const ghostable = previous?.staging !== undefined;
   const busy = staging && persisted === null;
   return (
+    <StageEditContext.Provider value={() => {
+      const original = draft, cameraWasDirty = cameraDirty.current, blockingWasDirty = blockingDirty.current;
+      return () => { cameraDirty.current = cameraWasDirty; blockingDirty.current = blockingWasDirty; setDraft(original); };
+    }}>
     <section ref={stageRoot} className="fy-swstage" data-testid="workspace-stage" aria-label="Stage" tabIndex={0} onKeyDown={timelineKey}>
       {head || fullscreen !== null ? (
         <div className="fy-swstage__head" data-stepper={head ? "true" : undefined}>
@@ -1024,6 +1032,7 @@ export function SceneStage({
       ) : null}
 
       <div className="fy-swstage__construction">
+        {cameraWarnings.map(warning => <p key={warning} className="fy-swstage__quiet">{warning}</p>)}
         <input aria-label="Blockout instruction" placeholder="Describe the blockout or changes…" value={instruction} onChange={e => setInstruction(e.target.value)} disabled={constructing} maxLength={4000} />
         {persisted ? <select aria-label="Preserve Stage work" value={preserve} onChange={e => setPreserve(e.target.value as typeof preserve)} disabled={constructing}>
           <option value="blocking">Keep blocking</option><option value="camera">Keep camera</option><option value="none">Revise both</option>
@@ -1101,7 +1110,7 @@ export function SceneStage({
 
         <aside className="fy-swstage__panel" aria-label="Stage inspector">
           {working === null ? (
-            <p className="fy-swstage__note">Stage the shot to place the cast, put down the set and start a camera move.</p>
+            <p className="fy-swstage__note">Nothing staged yet.</p>
           ) : (
             <>
               {/* The stage list (turn 144): what is on the stage, one line each with its state. A press
@@ -1212,10 +1221,10 @@ export function SceneStage({
                     <Stepper label="Camera lens" value={activeKey.focalMm} unit="mm" step={5} min={8} max={400} decimals={0} placeholder={shotLensMm} disabled={frozen} clearable onCommit={(value) => patchKey(active, { focalMm: value })} />
                   </Row>
                   <Row label="ease in">
-                    <Stepper label="Ease in" value={activeKey.easeIn ?? 0} step={0.05} min={0} max={0.5} disabled={frozen} onCommit={(value) => patchKey(active, { easeIn: value })} />
+                    <Stepper label="Ease in" value={activeKey.easeIn ?? 0} step={0.05} min={0} max={0.5} disabled={frozen || !stageCameraRest(working!.keys, active)} onCommit={(value) => patchKey(active, { easeIn: value })} />
                   </Row>
                   <Row label="ease out">
-                    <Stepper label="Ease out" value={activeKey.easeOut ?? 0} step={0.05} min={0} max={0.5} disabled={frozen} onCommit={(value) => patchKey(active, { easeOut: value })} />
+                    <Stepper label="Ease out" value={activeKey.easeOut ?? 0} step={0.05} min={0} max={0.5} disabled={frozen || !stageCameraRest(working!.keys, active)} onCommit={(value) => patchKey(active, { easeOut: value })} />
                   </Row>
                 </div>
               ) : null}
@@ -1630,5 +1639,6 @@ export function SceneStage({
         </div>
       )}
     </section>
+    </StageEditContext.Provider>
   );
 }

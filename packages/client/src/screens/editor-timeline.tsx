@@ -20,6 +20,7 @@ import { Portrait } from "../components/portrait.js";
 import { cx } from "../components/ui.js";
 import { posterize } from "../lib/poster.js";
 import { mediaUrl } from "../lib/media.js";
+import { reviewableTakesForShot } from "../lib/selectors.js";
 import { FILMSTRIP_HEIGHT_PX, useFilmstrip } from "../lib/filmstrip.js";
 import {
   clipAtFrame,
@@ -691,6 +692,7 @@ export function TakePicker({
   onSwitch: (takeId: string) => void;
 }) {
   const current = production.selections[shotId]?.acceptedTakeId ?? null;
+  const reviewable = reviewableTakesForShot(production, shotId);
   const candidates = production.takes.filter(
     (take) =>
       take.kind === "clip" &&
@@ -709,9 +711,10 @@ export function TakePicker({
       {candidates.map((take) => {
         const inUse = take.id === current;
         const decision = decisionFor(take.id);
+        const takeIndex = reviewable.findIndex((candidate) => candidate.id === take.id);
         return (
           <div key={take.id} className={cx("fy-takepick__row", inUse && "fy-takepick__row--current")}>
-            <span className="fy-takepick__id">{take.id.slice(-6)}</span>
+            <span className="fy-takepick__id" title={take.id}>{takeIndex >= 0 ? `Take ${takeIndex + 1}` : "Take unavailable"}</span>
             <span className="fy-mono">
               {take.model}
               {decision === null ? "" : ` · ${decision}`}

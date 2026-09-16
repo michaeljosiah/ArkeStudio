@@ -216,7 +216,7 @@ export interface MultimediaCapacity {
   videoUsedSec: number;
 }
 
-export function multimediaCapacity(carried: readonly MultimediaReference[], model: Pick<ManifestModel, "accepts" | "limits" | "unverified">): MultimediaCapacity {
+export function multimediaCapacity(carried: readonly MultimediaReference[], model: Pick<ManifestModel, "accepts" | "limits" | "unverified"> & Partial<Pick<ManifestModel, "provider">>): MultimediaCapacity {
   let images = 0;
   let audio = 0;
   let video = 0;
@@ -228,7 +228,8 @@ export function multimediaCapacity(carried: readonly MultimediaReference[], mode
   return {
     imageCeiling: model.unverified === true ? 0 : model.accepts.referenceImages,
     imagesUsed: images,
-    audioCeilingSec: model.unverified === true ? 0 : (model.limits.maxReferenceAudioSec ?? 0),
+    audioCeilingSec: model.unverified === true || (model.provider === "fal" && !model.limits.referenceAudioField)
+      ? 0 : (model.limits.maxReferenceAudioSec ?? 0),
     audioUsedSec: audio,
     // Seconds the route publishes count only where the row names the field the clip goes in
     // (issue 852): an allowance with nowhere to put the bytes would admit a clip at the tile
@@ -308,7 +309,7 @@ export function admitReference(
   if (typeof item.durationSec !== "number" || !Number.isFinite(item.durationSec) || item.durationSec <= 0) {
     return { ok: false, binding: "unknown-duration", reason: "duration could not be read" };
   }
-  const minimum = item.kind === "video" ? model.limits.minReferenceVideoFileSec : undefined;
+  const minimum = item.kind === "video" ? model.limits.minReferenceVideoFileSec : model.limits.minReferenceAudioFileSec;
   const maximum = item.kind === "video" ? model.limits.maxReferenceVideoFileSec : model.limits.maxReferenceAudioFileSec;
   if ((minimum !== undefined && item.durationSec < minimum) || (maximum !== undefined && item.durationSec > maximum)) {
     return { ok: false, binding: item.kind === "video" ? "video-seconds" : "audio-seconds", reason: `${item.kind} reference must be ${minimum ?? 0}–${maximum ?? "unlimited"} seconds` };

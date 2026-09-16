@@ -13,6 +13,7 @@ import {
   briefForProvider,
   dispatchDuration,
   durationLimitsFor,
+  billableCharacters,
   estimateMicroUsd,
   imageOutputFor,
   keyframeAddable,
@@ -400,6 +401,10 @@ export async function addBenchReference(
   // offer capacity it cannot state.
   if (model === null) return { outcome: "refused", reason: "choose a model first" };
 
+  if (resolved.kind === "video" && model.limits.referenceSyntax === "seedance" && !/\.(mp4|m4v|mov)$/i.test(resolved.path)) {
+    return { outcome: "refused", reason: "Seedance video references must be MP4 or MOV." };
+  }
+
   if (lane === "keyframe") {
     // Frames are not budgeted references — the lane's ceiling is the frame task modes' own,
     // and the plan that admits the pick is the plan dispatch will re-run (issue 305 §3).
@@ -749,7 +754,7 @@ export function planBenchDispatch(
   // be refused at dispatch as a picture that is not one.
   const referencePaths = resolvedRefs.filter(({ resolved }) => resolved.kind === "image").map(({ resolved }) => resolved.path);
   const videoPaths = resolvedRefs.filter(({ resolved }) => resolved.kind === "video").map(({ resolved }) => resolved.path);
-  const mediaReferences = model.limits.referenceSyntax === "minimax-h3" ? resolvedRefs.filter(({ resolved }) => resolved.kind !== "image").map(({ resolved }) => ({
+  const mediaReferences = (model.limits.referenceSyntax === "minimax-h3" || model.limits.referenceSyntax === "seedance") ? resolvedRefs.filter(({ resolved }) => resolved.kind !== "image").map(({ resolved }) => ({
     kind: resolved.kind, file: resolved.path, hash: resolved.source.hash, durationSec: resolved.durationSec,
   })) : [];
   const standaloneAudioCount = mediaReferences.filter(ref => ref.kind === "audio").length;
@@ -838,14 +843,16 @@ export function planBenchDispatch(
   }
   const preamble = session.subject === undefined || frame !== null ? null : bindingPreamble(bound);
   const resolvedAudio = params.kind === "video" && session.subject ? (options.fromTake ? options.fromTake.request.audioReferences : planSubjectCharacterAudio({
-    world: bundle, subject: session.subject, model, imageCount: frame?.paths.length ?? referencePaths.length,
+    world: bundle, subject: session.subject, model, imageCount: frame?.paths.length ?? referencePaths.length, videoCount: videoPaths.length,
     taskMode, disabled: params.audioReferencesDisabled,
     ...(options.performanceReferences?.length ? { performanceReferences: options.performanceReferences } : {}) })) : undefined;
   const audioReferences = resolvedAudio && (resolvedAudio.disabled || resolvedAudio.references.length || resolvedAudio.problems.length) ? resolvedAudio : undefined;
   if (audioReferences?.problems.length) return { ok: false, reason: audioReferences.problems.join(" ") };
   const referenceProblem = referenceInputProblem(model, { references: referencePaths, videoReferences: videoPaths, referenceMedia: mediaReferences, audioReferences });
   if (referenceProblem) return { ok: false, reason: referenceProblem };
-  const wirePrompt = [preamble ? referencePrompt(preamble, model, videoPaths.length, 0, true) : null,
+  const motionBindings = model.limits.referenceSyntax === "seedance"
+    ? videoPaths.map((_, index) => `Use @Video${index + 1} as a motion reference.`).join("\n") : "";
+  const wirePrompt = [motionBindings || null, preamble ? referencePrompt(preamble, model, videoPaths.length, 0, true) : null,
     referencePrompt(body, model, videoPaths.length),
     audioReferences ? referencePrompt(characterAudioInstructions(audioReferences), model, videoPaths.length, standaloneAudioCount) : null].filter(Boolean).join("\n\n");
   // The cap was held against the brief, which is what the author can shorten; the words that
@@ -1102,12 +1109,16 @@ export function planBenchDispatch(
           audioFormat: voiceFormatForModel(model),
           ...(params.voiceId !== undefined ? { voiceId: params.voiceId } : {}),
           // The delivery is sent in the provider's own vocabulary, or not at all — a row that
-          // cannot express one says so rather than having a neighbour's settings guessed at.
-          ...(voiceSettings !== null ? { voiceSettings } : {}),
+          // cannot express one says so rather than having a neighbour's settings guessed at. Its
+          // name rides too, for a reader whose vocabulary is words (SPEC-046 R-22).
+          ...(voiceSettings !== null ? { voiceSettings, delivery: params.delivery } : {}),
+          // A cloned voice's recording language is the line's (issue 1163): the reader routes and
+          // tags by it, and the estimate counts the tag it would put in.
+          ...(voiceSource.kind === "cloned" ? { language: voiceSource.voice.language } : {}),
           // No container control: the concrete model declares its format and every downstream
           // layer consumes that same value.
         },
-        estimatedMicroUsd: estimateMicroUsd(model, { characters: composer.brief.length }),
+        estimatedMicroUsd: estimateMicroUsd(model, { characters: billableCharacters(model, composer.brief, voiceSettings !== null ? params.delivery : undefined, voiceSource.kind === "cloned" ? voiceSource.voice.language : undefined) }),
         landing: { dir: sessionMediaDir(session.id, takeId) },
         ...(voiceSource.kind === "cloned" ? { voiceReference: true } : {}),
       });

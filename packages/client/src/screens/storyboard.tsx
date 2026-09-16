@@ -11,7 +11,8 @@ import { Textarea, cx } from "../components/ui.js";
 import { X } from "../components/icons.js";
 import { useProduction } from "../lib/selectors.js";
 import { deleteScene, restoreScene } from "../lib/store.js";
-import { Mentions, sceneFileOf } from "./production.js";
+import { Mentions } from "../components/mentions.js";
+import { sceneFileOf } from "./production-story.js";
 
 
 /**

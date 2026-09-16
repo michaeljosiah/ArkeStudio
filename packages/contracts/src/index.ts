@@ -19,6 +19,7 @@ export * from "./reference.js";
 export * from "./prop.js";
 export * from "./prose.js";
 export * from "./manuscript.js";
+export * from "./audiobook.js";
 export * from "./proposal.js";
 export * from "./job.js";
 export * from "./frame-run.js";

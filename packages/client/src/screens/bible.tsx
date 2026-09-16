@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
-import { bibleSize, DEFAULT_NARRATOR, formatMicroUsd, splitBible, supportsVoiceUse } from "@arke-studio/contracts";
+import { bibleSize, DEFAULT_NARRATOR, splitBible, supportsVoiceUse } from "@arke-studio/contracts";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
 import { Button, Callout, IconButton } from "../components/ui.js";
@@ -11,6 +11,7 @@ import { useOpenWorldGuard } from "../lib/selectors.js";
 import { mediaUrl } from "../lib/media.js";
 import { clearQueue, enqueueClip, playClip } from "../lib/audio.js";
 import { ClipPlayButton } from "../components/player.js";
+import { ReadAloudConfirmation } from "../components/read-aloud-confirmation.js";
 
 /**
  * The world Bible (master §4.5) — one page, one document, no approval step.
@@ -143,6 +144,13 @@ export function BibleScreen() {
   const voiceAudio = useVoiceAudio();
   const [read, setRead] = useState<{ requestId: string; heading: string } | null>(null);
   const readResult = read ? voiceAudio[read.requestId] : undefined;
+  /*
+   * The quote whose Confirm has been pressed (issue 1211, as the sheet does it): the newest
+   * event for a request stays `confirmation-required` until the first piece lands, so without
+   * this the dialog would come back after its own Confirm — and a second press on a charged
+   * read is a second charge. A revised quote is a new key, and asks again.
+   */
+  const [submittedRead, setSubmittedRead] = useState<string | null>(null);
   const narrator = state?.app.narrator ?? null;
   const narratorLabel = narrator && !supportsVoiceUse(narrator, "narration")
     ? DEFAULT_NARRATOR.label
@@ -153,9 +161,14 @@ export function BibleScreen() {
    * A long section arrives in pieces, because local synthesis runs at about the speed of speech
    * and holding the first word until the last one exists is a ten-minute silence. Each piece is
    * queued as it appears and the first starts immediately; the player walks the rest. A short
-   * section still arrives whole and takes the single-clip path, unchanged.
+   * section still arrives whole and takes the single-clip path, unchanged. Cloud pieces (issue
+   * 1208) land in whatever order the reader finishes them, so the effect follows how many exist
+   * rather than how far the array reaches: a later piece landing first fills the array to its
+   * final length, and the earlier one filling the gap behind it would otherwise change nothing
+   * the effect watches (codex on PR 1210).
    */
   const parts = useVoiceParts()[read?.requestId ?? ""] ?? [];
+  const landed = parts.filter((file) => file !== undefined).length;
   const queued = useRef(0);
   useEffect(() => {
     if (!read || !world) return;
@@ -171,7 +184,7 @@ export function BibleScreen() {
       });
       queued.current = i + 1;
     }
-  }, [read?.requestId, read?.heading, parts.length, world?.meta.slug, narratorLabel]);
+  }, [read?.requestId, read?.heading, landed, world?.meta.slug, narratorLabel]);
 
   useEffect(() => {
     if (parts.length > 0) return; // a streamed read is already sounding
@@ -262,6 +275,10 @@ export function BibleScreen() {
               <ol className="fy-bible__toc">
                 {outline.sections.map((section) => {
                   const mine = read?.heading === section.heading ? readResult : undefined;
+                  const quote = `${read?.requestId}:${mine?.confirmationToken ?? ""}`;
+                  // Busy from the press until something lands: nothing yet, or a price answered
+                  // and not yet made good.
+                  const preparing = read?.heading === section.heading && (!mine || (mine.status === "confirmation-required" && submittedRead === quote));
                   return (
                     <li key={section.heading}>
                       <span className="fy-bible__tocrow">
@@ -280,12 +297,8 @@ export function BibleScreen() {
                              speaker is the word; only the wait still needs one, because a
                              glyph cannot say it is busy. */
                           <IconButton
-                            label={
-                              read?.heading === section.heading && !mine
-                                ? `Preparing ${section.heading}`
-                                : `Read ${section.heading} aloud`
-                            }
-                            disabled={section.body.trim() === "" || (read?.heading === section.heading && !mine)}
+                            label={preparing ? `Preparing ${section.heading}` : `Read ${section.heading} aloud`}
+                            disabled={section.body.trim() === "" || preparing}
                             onClick={() => {
                               if (!worldId) return;
                               queued.current = 0;
@@ -293,22 +306,24 @@ export function BibleScreen() {
                               setRead({ requestId: readBibleSection(worldId, section.heading), heading: section.heading });
                             }}
                           >
-                            {read?.heading === section.heading && !mine ? <Loading inline size={13} /> : <Speaker />}
+                            {preparing ? <Loading inline size={13} /> : <Speaker />}
                           </IconButton>
                         )}
                       </span>
-                      {mine?.status === "confirmation-required" && (
-                        <span className="fy-bible__tocnote">
-                          This section goes to ElevenLabs and is kept in Activity.
-                          <Button
-                            onClick={() => {
-                              if (worldId && read && mine.confirmationToken)
-                                readBibleSection(worldId, section.heading, read.requestId, mine.confirmationToken);
-                            }}
-                          >
-                            Confirm {mine.characterCount} characters · {formatMicroUsd(mine.estimatedMicroUsd)}
-                          </Button>
-                        </span>
+                      {/* The one confirmation every read shares (issue 1211): the reader the
+                          quote names, the price, the pieces — this column had the third copy
+                          of a sentence that named ElevenLabs whatever read. */}
+                      {mine?.status === "confirmation-required" && quote !== submittedRead && (
+                        <ReadAloudConfirmation
+                          title={section.heading}
+                          result={mine}
+                          onCancel={() => setRead(null)}
+                          onConfirm={(token) => {
+                            if (!worldId || !read) return;
+                            setSubmittedRead(quote);
+                            readBibleSection(worldId, section.heading, read.requestId, token);
+                          }}
+                        />
                       )}
                       {mine?.status === "failed" && (
                         <span className="fy-bible__tocnote">{mine.error ?? "Read aloud failed."}</span>

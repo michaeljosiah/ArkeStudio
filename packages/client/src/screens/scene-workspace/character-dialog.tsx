@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import {
+  billableCharacters,
   deriveRehearsalLines,
   estimateMicroUsd,
   formatMicroUsd,
@@ -11,6 +12,7 @@ import {
   resolveCast,
   sameVoiceAssignment,
   shotSpeakers,
+  supportsPerformanceGeneration,
   ulid,
   type ClientMessage,
   type PerformanceRecord,
@@ -180,10 +182,10 @@ export function CharacterDialog({ world, production, scene, sheetId, locked = fa
   const assignedModel = sheet?.voice === undefined ? undefined
     : sheet.voice.model ?? legacyVoiceModel(sheet.voice.provider, sheet.voice.voiceId, world.clonedVoices ?? []);
   const voiceModel = sheet?.voice === undefined ? undefined
-    : state?.app.manifest?.models.find((model) => model.id === assignedModel && model.capability === "voice-tts" && model.provider === sheet.voice?.provider && model.cadence);
+    : state?.app.manifest?.models.find((model) => model.id === assignedModel && model.provider === sheet.voice?.provider && supportsPerformanceGeneration(model));
   const firstLine = lines[0];
   const price = voiceModel !== undefined && firstLine !== undefined
-    ? formatMicroUsd(estimateMicroUsd(voiceModel, { characters: normalizeSpeechText(firstLine.text).length }))
+    ? formatMicroUsd(estimateMicroUsd(voiceModel, { characters: billableCharacters(voiceModel, normalizeSpeechText(firstLine.text)) }))
     : null;
   const voicePage = () => { onClose(); navigate(`/w/${worldId}/cast/${sheetId}/voice`); };
 

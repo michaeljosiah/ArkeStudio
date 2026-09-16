@@ -424,7 +424,7 @@ export function SceneWorkspace({
                 <b>Flow</b>
               </div>
               <button type="button" className="fy-sw__fullexit" title="Leave full screen" aria-label="Leave full screen" onClick={() => setFull(false)}>
-                <Minimize2 size={14} /><span>Esc</span>
+                <Minimize2 size={14} />
               </button>
             </>
           ) : null}
@@ -502,7 +502,6 @@ export function SceneWorkspace({
               }}>
                 <summary aria-label="Scene details" title="Scene details"><More size={18} /></summary>
                 <div className="fy-sw__detailspanel">
-                  <span className="fy-sw__context-label">What happens</span>
                   <SceneSynopsis scene={legacySceneView(scene)} onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })} />
                   {scene.inherits?.timeOfDay === undefined ? null : <span>{scene.inherits.timeOfDay}</span>}
                   {scene.inherits?.tone === undefined ? null : <span>{scene.inherits.tone}</span>}
@@ -642,6 +641,7 @@ export function SceneWorkspace({
             />
           ) : view === "flow" ? (
             <SceneFlow
+              fullscreen={fullscreen}
               scene={workingScene}
               production={production}
               sheets={world.sheets}
@@ -772,7 +772,7 @@ export function SceneWorkspace({
           {...(generateTarget?.shotId === undefined ? {} : { shotId: generateTarget.shotId })}
           returnFocus={generateReturnFocus}
           onClose={() => setGenerateTarget(null)}
-          onStarted={() => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/cut?assemble=${scene.id}`)}
+          onStarted={() => { if (generateTarget?.shotId === undefined) navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/cut?assemble=${scene.id}`); }}
         />
         {openMember === null ? null : (
           <CharacterDialog

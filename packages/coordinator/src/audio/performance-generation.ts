@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { PerformanceGenerationQuoteSchema, PerformanceRecordSchema, PerformanceIdSchema, AudioAssetProvenanceSchema,
-  estimateMicroUsd, legacyVoiceModel, mapCadence, normalizeSpeechText, voiceSourceFor, type AudioAssetProvenance, type ClientMessage, type ManifestModel, type PerformanceGenerationQuote, type Job, type TakeCost } from "@arke-studio/contracts";
+  billableCharacters, estimateMicroUsd, legacyVoiceModel, mapCadence, normalizeSpeechText, supportsPerformanceGeneration, voiceFormatForModel, voiceSourceFor,
+  type AudioAssetProvenance, type ClientMessage, type ManifestModel, type PerformanceGenerationQuote, type Job, type TakeCost, type VoiceAudioFormat } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { audioWorldPath, prepareAudio, acceptPreparedAudio } from "./storage.js";
@@ -23,13 +24,18 @@ export async function preparePerformanceGeneration(store: WorldStore, model: Man
   const assignedModel = sheet.voice === undefined ? undefined
     : sheet.voice.model ?? legacyVoiceModel(sheet.voice.provider, sheet.voice.voiceId, store.getBundle().clonedVoices ?? []);
   if (target.sceneVersion !== request.expectedSceneVersion || !sheet.voice || sheet.voice.voiceId !== request.expectedVoiceId ||
-    model.id !== request.modelId || assignedModel !== model.id || model.provider !== sheet.voice.provider || model.capability !== "voice-tts" || !["kokoro", "elevenlabs"].includes(model.provider)) throw new Error("The authored line, voice or model changed.");
-  const mapped = mapCadence(text, audioHash(Buffer.from(normalizeSpeechText(text))), request.cadencePlan, model);
+    model.id !== request.modelId || assignedModel !== model.id || model.provider !== sheet.voice.provider || !supportsPerformanceGeneration(model)) throw new Error("The authored line, voice or model changed.");
+  // A cloned voice's language is the line's (issue 1163): it decides a paren reader's tag at the
+  // mapping and rides the job for the vendor's routing. A preset states none.
+  const source = voiceSourceFor(store.getBundle().clonedVoices ?? [], model.provider, model.id, sheet.voice.voiceId);
+  const language = source.kind === "cloned" ? source.voice.language : undefined;
+  const mapped = mapCadence(text, audioHash(Buffer.from(normalizeSpeechText(text))), request.cadencePlan, model, language);
   if (mapped.controls.some(c => c.status === "unsupported")) throw new Error("Remove unsupported cadence controls or choose a compatible model.");
   if (model.limits.maxPromptChars !== undefined && mapped.providerText.length > model.limits.maxPromptChars) throw new Error("The decorated line exceeds this model's character limit.");
   const quote = PerformanceGenerationQuoteSchema.parse({ operationId: randomUUID(), target, authoredText: text, voiceAssignment: sheet.voice,
     cadencePlan: request.cadencePlan, cadencePlanHash: digest(request.cadencePlan), mapping: { ...mapped, providerTextHash: audioHash(Buffer.from(mapped.providerText)) },
-    modelHash: digest(model), estimatedMicroUsd: estimateMicroUsd(model, { characters: mapped.providerText.length }), local: model.provider === "kokoro", createdAt: store.now() });
+    modelHash: digest(model), estimatedMicroUsd: estimateMicroUsd(model, { characters: billableCharacters(model, mapped.providerText) }), local: model.provider === "kokoro",
+    audioFormat: voiceFormatForModel(model), ...(language !== undefined ? { language } : {}), createdAt: store.now() });
   await store.ownedWrite(async () => atomicWriteFile(await audioWorldPath(store.dir, `.staging/performances/${quote.operationId}/quote.json`, true), JSON.stringify(quote)));
   return quote;
 }
@@ -43,18 +49,29 @@ export function validatePerformanceGeneration(store: WorldStore, model: Manifest
   const voice = store.getBundle().sheets.find(s => s.id === quote.target.speakerSheetId)?.voice;
   if (!currentPerformanceTarget(store, quote.target) || JSON.stringify(voice) !== JSON.stringify(quote.voiceAssignment) || digest(model) !== quote.modelHash || confirmedMicroUsd !== quote.estimatedMicroUsd) throw new Error("Generation confirmation is stale. Prepare a fresh estimate.");
 }
-export function performanceGenerationJob(store: WorldStore, quote: PerformanceGenerationQuote, requestId: string): EnqueueInput {
+/**
+ * The queued read. `voiceReference` is the caller's finding that the voice is a library clone
+ * (SPEC-046 R-12): the dispatcher's clip read then resolves the recording — the bytes for
+ * Mistral, the slot for Breeze and Fish — and the durable row carries the marker, never a path.
+ * The delivery's sentence rides as `instructions`, already lifted out of the text by the
+ * mapping, and the job names no delivery: a vendor that would re-derive a tag from one would
+ * put it in twice.
+ */
+export function performanceGenerationJob(store: WorldStore, quote: PerformanceGenerationQuote, requestId: string, options: { voiceReference?: boolean } = {}): EnqueueInput {
   const id = PerformanceIdSchema.parse(`pf_${requestId}`);
   return { worldId: store.worldId, productionId: quote.target.productionId, idempotencyKey: requestId,
     target: { kind: "performance-generation", id }, capability: "voice-tts", provider: quote.mapping.provider, model: quote.mapping.model,
     params: { performanceGeneration: quote, voiceId: quote.voiceAssignment.voiceId, text: quote.mapping.providerText,
-      voiceSettings: quote.mapping.voiceSettings }, estimatedMicroUsd: quote.estimatedMicroUsd,
-    landing: { dir: `productions/${quote.target.productionId}/performances/${id}/incoming`, name: "speech.mp3" } };
+      voiceSettings: quote.mapping.voiceSettings, audioFormat: quote.audioFormat,
+      ...(quote.mapping.instructions !== undefined ? { instructions: quote.mapping.instructions } : {}),
+      ...(quote.language !== undefined ? { language: quote.language } : {}) }, estimatedMicroUsd: quote.estimatedMicroUsd,
+    landing: { dir: `productions/${quote.target.productionId}/performances/${id}/incoming`, name: `speech.${quote.audioFormat}` },
+    ...(options.voiceReference === true ? { voiceReference: true } : {}) };
 }
 
 /** Keeps paid output even without a decoder; the unavailable QC report blocks later reference upload. */
 export async function finalizeGeneratedPerformance(store: WorldStore, tools: AudioMediaTools | undefined, quote: PerformanceGenerationQuote,
-  id: string, bytes: Uint8Array, format: "wav" | "mp3", cost: TakeCost, jobId?: string, signal = store.closingSignal) {
+  id: string, bytes: Uint8Array, format: VoiceAudioFormat, cost: TakeCost, jobId?: string, signal = store.closingSignal) {
   PerformanceIdSchema.parse(id);
   await requireUnpurgedPerformance(store, quote.target.productionId, id);
   const existing = await readPerformance(store, quote.target.productionId, id).catch(() => null);
@@ -63,7 +80,7 @@ export async function finalizeGeneratedPerformance(store: WorldStore, tools: Aud
     return existing;
   }
   if (signal.aborted) throw new Error("Performance generation cancelled.");
-  const contentType = format === "wav" ? "audio/wav" : "audio/mpeg";
+  const contentType = format === "wav" ? "audio/wav" : format === "flac" ? "audio/flac" : "audio/mpeg";
   const problem = verifyArtifact({ name: `speech.${format}`, contentType, data: bytes });
   if (problem) throw new Error("Generation returned invalid audio.");
   const prefix = `productions/${quote.target.productionId}/performances/${id}`;
@@ -138,5 +155,6 @@ export async function finalizePerformanceGenerationJob(store: WorldStore, tools:
   if (job.target.id !== `pf_${job.id.slice(3)}` || job.provider !== quote.mapping.provider || job.model !== quote.mapping.model) throw new Error("Performance job identity changed.");
   const landed = job.landedFiles?.[0]; if (!landed) throw new Error("Performance output has not landed.");
   const bytes = await readAudioBytes(await audioWorldPath(store.dir, landed), store.closingSignal);
-  await finalizeGeneratedPerformance(store, tools, quote, job.target.id, bytes, "mp3", cost, job.id);
+  // The container the quote's row delivers, not MP3 by assumption: the hosted readers answer WAV.
+  await finalizeGeneratedPerformance(store, tools, quote, job.target.id, bytes, quote.audioFormat, cost, job.id);
 }

@@ -4,7 +4,7 @@ import { ChatAttachmentIdSchema, IsoDateTimeSchema, MessageIdSchema, RunIdSchema
 
 /** SPEC-045: inputs exist before they belong to a turn. Never invent a turn to store a queue row. */
 export const WORLD_CHAT_INPUT_BOUNDS = { text: 16_000, attachments: 20, unresolved: 10, settled: 10 } as const;
-export const WORLD_CHAT_INPUT_SCHEMA_VERSION = 23;
+export const WORLD_CHAT_INPUT_SCHEMA_VERSION = 27;
 
 export const WorldChatInputRequestSchema = z.object({
   submissionId: z.string().min(1).max(200),

@@ -64,7 +64,9 @@ export class ProviderService {
       probes: [],
       fault: null,
     };
-    const next = { ...current, ...changes } as ProviderStatus;
+    // A fault cleared takes its kind with it: the kind describes the fault, never the provider.
+    const { faultKind: _kind, ...kept } = current;
+    const next = { ...(changes.fault === null ? kept : current), ...changes } as ProviderStatus;
     this.statuses.set(id, next);
     return next;
   }
@@ -122,9 +124,14 @@ export class ProviderService {
       const probes = await validator.validateKey(key);
       if (!current()) return this.statuses.get(id)!;
       const anyAvailable = probes.some((p) => p.available);
+      // A key the vendor accepted is a valid key, whatever the account can pay for (issue 1167):
+      // "invalid" here is what Settings renders as "key rejected" and remedies with a
+      // replacement, which an unfunded account does not need. The capability stays locked —
+      // `deriveCapabilityAvailability` reads the probe — and the probe's reason says why.
+      const authenticated = anyAvailable || probes.some((p) => p.authenticated === true);
       void this.log?.append({ kind: "provider.validated", provider: id, probes });
       return this.patch(id, {
-        validation: anyAvailable ? "valid" : "invalid",
+        validation: authenticated ? "valid" : "invalid",
         probes,
         lastValidated: this.clock(),
         fault: null,
@@ -146,8 +153,17 @@ export class ProviderService {
   }
 
   /** A credential failed mid-session — a provider fault naming the provider, never a work failure (R-4). */
-  markFault(id: ProviderId, message: string): ProviderStatus {
-    this.validationGenerations.set(id, (this.validationGenerations.get(id) ?? 0) + 1);
+  /**
+   * A fault about the credential in use marks the key invalid; one about the store that could
+   * not save a key, or clear one (issue 1191), leaves the validation as it was — nothing
+   * rejected the key the provider holds, and the new one never left — and says which it is,
+   * so the settings say "not saved" or "not cleared" rather than "rejected". A store fault
+   * changes no credential, so it neither turns a validation's generation (a probe in flight
+   * still lands, and "Test again" is not left testing) nor disables what the held credential
+   * unlocks (codex on PR 1195).
+   */
+  markFault(id: ProviderId, message: string, kind: "credential" | "not-saved" | "not-cleared" = "credential"): ProviderStatus {
+    if (kind === "credential") this.validationGenerations.set(id, (this.validationGenerations.get(id) ?? 0) + 1);
     // The category rides the record (SPEC-032 R-20.9): the fault correlation must not offer a
     // key row for a quota that a replaced key would not refill, and stamping at the producer is
     // what keeps that a fact of the record rather than a re-reading of its sentence.
@@ -157,6 +173,6 @@ export class ProviderService {
       message,
       category: providerFaultCategory(message),
     });
-    return this.patch(id, { fault: message, validation: "invalid" });
+    return kind === "credential" ? this.patch(id, { fault: message, faultKind: "credential", validation: "invalid" }) : this.patch(id, { fault: message, faultKind: kind });
   }
 }
