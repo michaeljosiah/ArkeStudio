@@ -4,15 +4,19 @@ import { Button, Callout, Input, Select, Textarea, cx } from "../components/ui.j
 import { VoicePickerDialog } from "../components/voice-picker.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import { renderInlineMarkdown } from "../components/inline-markdown.js";
-import { Archive, ChevronDown, ChevronRight, Plus, Sparkle } from "../components/icons.js";
+import { Archive, ChartLine, ChevronDown, ChevronRight, Pencil, Plus, RotateCcw, Sparkle } from "../components/icons.js";
 import { AgentsPanel } from "./agents.js";
 import {
+  ActionButton,
   CAPABILITY_LABEL,
   CAPABILITY_ROWS,
+  HalfHeading,
+  ProviderMark,
   RuntimeHead,
   RuntimeSection,
   TONE_CLASS,
 } from "./settings-parts.js";
+import { FactRow } from "./settings-providers.js";
 // Providers absorbed both surfaces (SPEC-034 R-5), so its pane draws their parts: the engine
 // details unabridged, and one engine's models grouped by the provider that owns them.
 import { eligibilityInputs, strandReason } from "../components/dispatch-bar.js";
@@ -78,8 +82,9 @@ import { ArtStyleGrid, ArtStyleWords } from "../components/art-style-picker.js";
 import { seedFrom } from "../lib/art-styles.js";
 import {
   formatMicroUsd,
-  modelCapabilityCopy,
   PROVIDERS as PROVIDER_TABLE,
+  readerName,
+  readerPriceLabel,
   type Capability,
   type ComponentHealth,
   type HarnessAvailability,
@@ -2170,9 +2175,10 @@ const ROUTED_CAPABILITIES: readonly Capability[] = CAPABILITY_ROWS.flatMap((row)
 );
 
 /**
- * Settings · General (SPEC-034 R-14). Which model runs each capability by default.
+ * Settings · General (SPEC-034 R-14, design turn 149). Which model runs each capability by
+ * default, and who reads the app's prose aloud.
  *
- * It was Cloud AI, and before that *Who does what*. What changes with the rename is the thing the
+ * It was Cloud AI, and before that *Who does what*. What changed with the rename is the thing the
  * rename was blocked on: **a default may name a local model** (R-15). SPEC-033 R-61 filtered them
  * out because the screen it replaced let one be chosen with nothing to run it — `llm →
  * gemma4-12b` put all writing on this machine — but the defect was never *a local model
@@ -2183,8 +2189,17 @@ const ROUTED_CAPABILITIES: readonly Capability[] = CAPABILITY_ROWS.flatMap((row)
  * **A default is not a routing switch** (R-16). Where a piece of work runs stays a production's
  * decision at dispatch (SPEC-033 R-74), and that decision outranks the default it started from.
  *
+ * **One row grammar, borrowed whole from Providers** (turn 149): a label, its value, its state at
+ * the row's gap, and on the narrator's row alone a button at the end. Turn 124 put the state
+ * *under* a select stretched to the column, which is the caption turn 137 forbade everywhere
+ * else, and the page had grown three row shapes under one eyebrow. The state now sits beside a
+ * 300px control, says three words at most, and never repeats the provider — that is the first
+ * word in the control. A default that cannot run is stated on its row, in the warning colour,
+ * and nowhere else: the callout that said the same fault above the list is gone.
+ *
  * Providers keeps its job unchanged. This screen **references** a provider and never configures
- * one: the remedy for an unconnected provider is a route to Providers, never a key field here.
+ * one: the remedy for a missing credential is on AI models' supplier heading (SPEC-042 R-4), and
+ * the rail is the route — nothing on a row navigates.
  */
 export function SettingsGeneralScreen() {
   const { state } = useStore();
@@ -2198,33 +2213,54 @@ export function SettingsGeneralScreen() {
   const drift = state?.app.drift ?? [];
   const statuses = state?.app.providers ?? [];
   const eligibility = eligibilityInputs(state);
-  /** Stored, tested, or neither — the three things Providers actually knows (SPEC-028 R-33). */
+  /**
+   * Stored, tested, or neither — the three things Providers actually knows (SPEC-028 R-33), as
+   * the state cell says them. `not tested` is muted and carries no dot (issue 991): a key nobody
+   * has tried is not an unwell one.
+   */
   const providerState = (id: ProviderId): string => {
     const status = statuses.find((p) => p.id === id);
-    if (status?.configured !== true) return "not connected";
+    if (status?.configured !== true) return PROVIDER_TABLE[id].credential === "external" ? "not signed in" : "no key";
     if (status.validation === "valid") return "connected";
     if (status.validation === "invalid") return "key rejected";
     // `testing` is its own state and reads as one: a key mid-validation is not the same thing as
-    // one nobody has tried, and the four words are the four the provider table actually has.
-    return status.validation === "testing" ? "testing" : "untested";
+    // one nobody has tried, and the words are the ones the provider table actually has.
+    return status.validation === "testing" ? "testing" : "not tested";
+  };
+  /**
+   * Why a stranded default cannot run, in the state cell's three words. `strandReason` keeps the
+   * sentence for the option list, where a row has room to say whose key is missing; here the
+   * control already names the provider, so the state names only what is wrong with it.
+   */
+  const strandState = (model: ManifestModel): string => {
+    if ((state?.app.models.disabled ?? []).includes(model.id)) return "turned off";
+    const fit = (state?.app.runtime?.models ?? []).find((row) => row.modelId === model.id)?.fit;
+    if (fit === "insufficient" || fit === "unsupported") return "cannot run here";
+    if (PROVIDER_TABLE[model.provider].local) return "not ready";
+    const status = statuses.find((p) => p.id === model.provider);
+    if (status?.validation === "invalid") return "key rejected";
+    if (status?.configured !== true) return providerState(model.provider);
+    return "not unlocked";
+  };
+  /**
+   * What to call the thing a default comes from, which is not the same word on both halves.
+   *
+   * A keyed service is its own source and names itself. A local model's is the **engine**, which
+   * is what Providers' rail is keyed on: `Voxa · Kokoro 82M` rather than `Kokoro · Kokoro 82M`,
+   * because the reader who wants to act on it goes to Voxa's pane. The id is what carries the
+   * mark (SPEC-042 R-20), and the engine's mark is the engine's.
+   */
+  const sourceOf = (model: ManifestModel): { id: string; label: string } => {
+    const engine = engineOfProvider(model.provider);
+    return engine === undefined
+      ? { id: model.provider, label: PROVIDER_TABLE[model.provider].displayName }
+      : { id: engine, label: ENGINE_LABEL[engine] };
   };
   /**
    * Where a model actually runs (R-16a), from the resolved engine rather than the provider flag.
    * `PROVIDERS.comfyui.local` is `true` for every recipe, so reading the flag would tell someone
    * their video drafts here while it renders on a box down the hall.
    */
-  /**
-   * What to call the thing a default comes from, which is not the same word on both halves.
-   *
-   * A keyed service is its own source and names itself. A local model's is the **engine**, which
-   * is what frame 112d draws and what Providers' rail is keyed on: `Voxa · this machine` rather
-   * than `Kokoro · this machine`, because the reader who wants to act on it goes to Voxa's pane.
-   */
-  const sourceOf = (model: ManifestModel): string => {
-    const engine = engineOfProvider(model.provider);
-    return engine === undefined ? PROVIDER_TABLE[model.provider].displayName : ENGINE_LABEL[engine];
-  };
-
   const runsOn = (model: ManifestModel): string => {
     if (!PROVIDER_TABLE[model.provider].local) return providerState(model.provider);
     const gated = (state?.app.runtime?.models ?? []).find((m) => m.modelId === model.id);
@@ -2233,16 +2269,32 @@ export function SettingsGeneralScreen() {
       (model.provider === "comfyui" ? (state?.app.comfyui?.engine.locality ?? "local") : "local");
     return locality === "remote" ? "another machine" : "this machine";
   };
+  const warn = (words: string) => (
+    <span className="fy-fact__state fy-fact__state--warn">
+      <span className="fy-set__dot fy-set__dot--warn" aria-hidden="true" />
+      {words}
+    </span>
+  );
+
+  // Who reads the app's prose aloud. A third role: a character's voice lives on their sheet, a
+  // reading voice belongs to one bench take, and this one narrates. It stays on the shipped local
+  // voice unless somebody chooses otherwise, because "read aloud" is a passive press and no other
+  // preference here spends money on one. The row says the reader and its price the way the Voice
+  // page's rows do (SPEC-046 R-30) — `Kokoro · free`, `Voxtral · $0.016 per 1k` — and nothing
+  // more: the price is the whole warning.
+  const reader = narrator === null
+    ? { provider: DEFAULT_NARRATOR.provider as string, model: DEFAULT_NARRATOR.model as string | null }
+    : { provider: narrator.provider, model: narrator.model ?? legacyVoiceModel(narrator.provider, narrator.voiceId) };
+  const readerRow =
+    (manifest?.models ?? []).find((m) => m.provider === reader.provider && m.id === reader.model && m.capability === "voice-tts") ?? null;
+  const readerLocal = (PROVIDER_TABLE as Record<string, { local?: boolean } | undefined>)[reader.provider]?.local === true;
+  const readerChip = [readerName(reader, readerRow), readerPriceLabel(readerRow) ?? (readerLocal ? "free" : null)]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <div data-screen="settings-general" className="fy-set fy-set--general">
-      <div className="fy-set__eyebrow">DEFAULTS</div>
-      {/* A default that cannot run is stated, never repaired (design turn 40d). It gets a callout
-          rather than a footnote because the next dispatch of that capability has nowhere to go. */}
-      {routing.faults.map((f) => (
-        <Callout key={f.capability} tone="warning" title={`${CAPABILITY_LABEL[f.capability]} has nowhere to go.`}>
-          {f.reason}
-        </Callout>
-      ))}
+      <h1 className="fy-pane__name">General</h1>
       {ROUTED_CAPABILITIES.map((capability) => {
         // Both halves, in one list (R-15). The picker is where R-61's filter used to be, and what
         // stands in its place is eligibility — the same answer the routing write consults, so an
@@ -2252,82 +2304,73 @@ export function SettingsGeneralScreen() {
         const selectedModel = options.find((m) => m.id === selected);
         const usable = (m: (typeof options)[number]) => modelEligible(m, eligibility);
         const stranded = selectedModel !== undefined && !usable(selectedModel);
+        // A stored default whose model left the manifest (SPEC-008 §2.7). Listed under its own id
+        // so the control shows what is stored rather than the first option it happens to hold.
+        const missing = selected !== undefined && selectedModel === undefined;
+        const source = selectedModel === undefined ? undefined : sourceOf(selectedModel);
         return (
-          <div key={capability} className="fy-set__row fy-set__row--routing">
-            <span className="fy-set__routelabel">{CAPABILITY_LABEL[capability]}</span>
+          <FactRow key={capability} what={CAPABILITY_LABEL[capability]}>
             <Select
-              className="fy-set__pill"
+              wrapClassName="fy-default"
               label={`Model for ${CAPABILITY_LABEL[capability]}`}
               disabled={options.length === 0}
               value={selected ?? ""}
               onChange={(e) => setRoutingDefault(capability, e.target.value)}
+              {...(source === undefined ? {} : { mark: <ProviderMark id={source.id} label={source.label} size="xs" /> })}
             >
-              {options.length === 0 && <option value="">nothing in the manifest for this</option>}
-              {selected === undefined && options.length > 0 && <option value="">no default set</option>}
+              {options.length === 0 && <option value="">No models</option>}
+              {selected === undefined && options.length > 0 && <option value="">Not set</option>}
+              {missing && <option value={selected}>{selected}</option>}
               {[...options]
                 .sort((a, b) => Number(usable(b)) - Number(usable(a)))
                 .map((m) => (
                   <option key={m.id} value={m.id} disabled={!usable(m)}>
-                    {PROVIDER_TABLE[m.provider].displayName} · {m.displayName}
-                    {/* Not on the selected one: the collapsed select is read beside the state
-                        text, which already says why, and twice on one row reads as two problems. */}
+                    {sourceOf(m).label} · {m.displayName}
+                    {/* Not on the selected one: the collapsed control is read beside the state,
+                        which already says why, and twice on one row reads as two problems. */}
                     {usable(m) || m.id === selected ? "" : ` — ${strandReason(state, m)}`}
                   </option>
                 ))}
             </Select>
-            {/* The capability copy is the manifest speaking (R-10): refs, frames, caps. */}
-            {/* A model names its provider and where that provider's work runs — the connection
-                state SPEC-028 R-33 requires for a keyed one, the resolved engine's locality for a
-                local one (R-16a). Displayed rather than re-derived (R-63). */}
-            {selectedModel && !stranded && (
-              <span className="fy-set__state">
-                {sourceOf(selectedModel)} · {runsOn(selectedModel)} ·{" "}
-                {modelCapabilityCopy(selectedModel)}
-              </span>
-            )}
-            {stranded && selectedModel && (
-              <span className="fy-set__state">
-                {sourceOf(selectedModel)} · {strandReason(state, selectedModel)}
-              </span>
-            )}
-            {stranded && <span className="fy-set__dot fy-set__dot--warn" aria-hidden="true" />}
-          </div>
+            {/* The provider is the control's first word, so the state is what R-16a asks for
+                after it: where the model runs, or what its credential is doing. Displayed rather
+                than re-derived (R-63). */}
+            {selectedModel && !stranded && <span className="fy-fact__state">{runsOn(selectedModel)}</span>}
+            {selectedModel && stranded && warn(strandState(selectedModel))}
+            {missing && warn("not in the manifest")}
+          </FactRow>
         );
       })}
       {/* Its label and the route, with no picker and no sentence (R-17): the absence of a control
           is what says the choice is not made here. */}
-      <div className="fy-set__row">
-        <span className="fy-set__routelabel">{CAPABILITY_LABEL.llm}</span>
-        <button type="button" className="fy-set__link" onClick={() => navigate("/settings/harness")}>
+      <FactRow what={CAPABILITY_LABEL.llm}>
+        <button type="button" className="fy-fact__link" onClick={() => navigate("/settings/harness")}>
           on Harness
         </button>
-        <span style={{ flex: 1 }} />
-      </div>
-
-      {/* Who reads the app's prose aloud. A third role: a character's voice lives on their sheet,
-          a reading voice belongs to one bench take, and this one narrates. It stays on the shipped
-          local voice unless somebody chooses otherwise, because "read aloud" is a passive press and
-          no other preference here spends money on one. */}
-      <div className="fy-rt__keyline">
-        <div className="fy-rt__eyebrow">NARRATOR</div>
-        <div className="fy-set__field">
-          <span className="fy-rt__path" data-testid="narrator-name">
-            {narrator === null ? DEFAULT_NARRATOR.label : `${narrator.label ?? narrator.voiceId} · ${narrator.provider}`}
-            {" · "}
-            {narrator === null || narrator.provider === "kokoro"
-              ? "reads on this machine · free"
-              : "reads in the cloud · billed per character"}
-          </span>
-          <button type="button" className="fy-set__link" onClick={() => setNarratorOpen(true)}>
-            Choose voice
-          </button>
-          {narrator !== null && (
-            <button type="button" className="fy-set__link" data-testid="narrator-reset" onClick={() => setNarrator(null)}>
-              Use the local voice
-            </button>
-          )}
-        </div>
-      </div>
+      </FactRow>
+      <FactRow
+        what="Narrator"
+        does={
+          <>
+            <ActionButton icon={<Pencil size={13} />} onClick={() => setNarratorOpen(true)}>
+              Change
+            </ActionButton>
+            {narrator !== null && (
+              <ActionButton
+                icon={<RotateCcw size={13} />}
+                hint={`${DEFAULT_NARRATOR.label} · Kokoro · free`}
+                testId="narrator-reset"
+                onClick={() => setNarrator(null)}
+              >
+                Reset
+              </ActionButton>
+            )}
+          </>
+        }
+      >
+        <span data-testid="narrator-name">{narrator === null ? DEFAULT_NARRATOR.label : (narrator.label ?? narrator.voiceId)}</span>
+        <span className="fy-fact__state">{readerChip}</span>
+      </FactRow>
       <VoicePickerDialog
         open={narratorOpen}
         use="narration"
@@ -2346,22 +2389,17 @@ export function SettingsGeneralScreen() {
       />
       {drift.length > 0 && (
         <>
-          <div className="fy-set__eyebrow">MANIFEST DRIFT</div>
+          <HalfHeading icon={<ChartLine size={14} />} aside={`${drift.length} model${drift.length === 1 ? "" : "s"}`}>
+            Manifest drift
+          </HalfHeading>
           {drift.map((d) => (
-            <div key={d.modelId} className="fy-set__row">
-              <div className="fy-set__name fy-set__name--wide">
-                <div className="fy-set__title">{d.modelId}</div>
-                <div className="fy-set__caps">
-                  {PROVIDER_TABLE[d.provider].displayName} · {d.samples} reported charges
-                </div>
-              </div>
-              <span className="fy-set__state">
-                estimates off by ~{(d.medianDivergencePerMille / 10).toFixed(0)}%
+            <FactRow key={d.modelId} what={d.modelId}>
+              <span>
+                {PROVIDER_TABLE[d.provider].displayName} · {d.samples} reported charges
               </span>
-              <span className="fy-set__dot fy-set__dot--warn" />
-            </div>
+              {warn(`estimates off by ~${(d.medianDivergencePerMille / 10).toFixed(0)}%`)}
+            </FactRow>
           ))}
-          <div className="fy-set__note">the shipped manifest needs an update — estimates keep missing what was billed</div>
         </>
       )}
     </div>

@@ -98,16 +98,23 @@ export function Textarea({ className, ...rest }: TextareaHTMLAttributes<HTMLText
  * chevron beside it is the same one every other disclosure in the app draws.
  *
  * `label` is the accessible name, because these sit beside a caption rather than a `<label for>`.
+ *
+ * `mark` draws in front of the value (design turn 149): a provider's plate on General's
+ * defaults, so a row scans by colour before it is read. It sits over the control's own left
+ * padding, inert to the pointer, because the `<select>` has to stay the whole hit target — a
+ * click on the mark still opens the list, and the platform's list cannot carry a picture anyway.
  */
 export function Select({
   label,
   className,
   wrapClassName,
+  mark,
   children,
   ...rest
-}: SelectHTMLAttributes<HTMLSelectElement> & { label: string; wrapClassName?: string }) {
+}: SelectHTMLAttributes<HTMLSelectElement> & { label: string; wrapClassName?: string; mark?: ReactNode }) {
   return (
-    <span className={cx("ui-select", wrapClassName)}>
+    <span className={cx("ui-select", mark !== undefined && "ui-select--marked", wrapClassName)}>
+      {mark !== undefined && <span className="ui-select__mark">{mark}</span>}
       <select className={cx("ui-select__control", className)} aria-label={label} {...rest}>
         {children}
       </select>

@@ -581,9 +581,11 @@ describe("the narrator in Settings", () => {
   // General owns the reading voice; Appearance holds theme choices (issue 1004).
   it("names the shipped local voice, and says it is free, until one is chosen", () => {
     const html = render("/settings/general");
-    assert.match(html, /data-testid="narrator-name"/);
-    assert.match(html, /George/);
-    assert.match(html, /reads on this machine · free/);
+    assert.match(html, /data-testid="narrator-name">George</);
+    // The reader and its price, as the Voice page's rows say them (SPEC-046 R-30) — and no
+    // sentence about where it reads (design turn 149).
+    assert.match(html, /class="fy-fact__state">Kokoro · free</);
+    assert.doesNotMatch(html, /reads on this machine/);
     assert.doesNotMatch(render("/settings/appearance"), /data-testid="narrator-name"/);
     // Nothing to reset when nothing was chosen.
     assert.doesNotMatch(html, /data-testid="narrator-reset"/);
@@ -602,15 +604,36 @@ describe("the narrator in Settings", () => {
   it("says plainly when the narrator will be billed", () => {
     // The one thing this control must never do quietly: a cloud narrator bills every press of
     // "read aloud", so the row says so rather than leaving it to be discovered on the ledger.
+    // The row carries the reader's price — the manifest row's rate, as the Voice page states it
+    // (SPEC-046 R-30) — in place of a sentence about billing (design turn 149).
     const chosen: ClientState = {
       ...FIXTURE_STATE,
-      app: { ...FIXTURE_STATE.app, narrator: { provider: "elevenlabs", voiceId: "v_roger", label: "Roger" } },
+      app: {
+        ...FIXTURE_STATE.app,
+        manifest: {
+          ...FIXTURE_STATE.app.manifest!,
+          models: [
+            ...FIXTURE_STATE.app.manifest!.models,
+            {
+              id: "eleven_multilingual_v2",
+              provider: "elevenlabs",
+              capability: "voice-tts",
+              displayName: "Eleven Multilingual v2",
+              accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+              limits: {},
+              pricing: { kind: "perCharacter", microUsdPerCharacter: 300 },
+            },
+          ],
+        },
+        narrator: { provider: "elevenlabs", voiceId: "v_roger", label: "Roger" },
+      },
     };
     const html = render("/settings/general", chosen);
-    assert.match(html, /Roger · elevenlabs/);
-    assert.match(html, /billed per character/);
-    // And there is a way back to the free one.
+    assert.match(html, /data-testid="narrator-name">Roger</);
+    assert.match(html, /class="fy-fact__state">ElevenLabs · \$0.30 per 1k</);
+    // And there is a way back to the free one: Reset, saying on its tooltip what it returns to.
     assert.match(html, /data-testid="narrator-reset"/);
+    assert.match(html, /data-tip="George · Kokoro · free"/);
   });
 });
 
