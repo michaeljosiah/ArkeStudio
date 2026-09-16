@@ -1570,15 +1570,24 @@ export class Coordinator {
      * for the rest, and the ones it has are announced free beside them.
      */
     const have = new Map<number, ReadonlyMap<number, string>>();
-    for (const index of blocks.keys()) {
-      if (await cachedAudio(store, files[index]!, format)) continue;
-      const pieceFiles = pieces[index]!.map(pieceFile);
-      if (pieceFiles.length > 1) {
-        const cached = await cachedPieces(store, pieceFiles, format);
-        if (cached.missing.length === 0 && (await joinPieces(store, pieceFiles, format, files[index]!))) continue;
-        if (cached.missing.length > 0) have.set(index, cached.have);
+    try {
+      for (const index of blocks.keys()) {
+        if (await cachedAudio(store, files[index]!, format)) continue;
+        const pieceFiles = pieces[index]!.map(pieceFile);
+        if (pieceFiles.length > 1) {
+          const cached = await cachedPieces(store, pieceFiles, format);
+          if (cached.missing.length === 0) {
+            // A join the world cannot write fails the read by name: the pieces are paid for.
+            await joinPieces(store, pieceFiles, format, files[index]!);
+            continue;
+          }
+          have.set(index, cached.have);
+        }
+        misses.push(index);
       }
-      misses.push(index);
+    } catch (error) {
+      fail(describeCoordinatorError(error), characters);
+      return;
     }
     if (misses.length === 0) {
       blocks.forEach(cachedReady);
@@ -1850,16 +1859,24 @@ export class Coordinator {
     // The pieces a missed block has on the shelf (codex on PR 1210), as narrateSection keeps
     // them: all there, joined now and a hit; some there, the rest paid for.
     const have = new Map<number, ReadonlyMap<number, string>>();
-    for (const entry of cloud) {
-      if (entry === null) continue;
-      if (await cachedAudio(store, entry.file, entry.format)) continue;
-      if (entry.pieces.length > 1) {
-        const pieceFiles = entry.pieces.map((piece) => piece.file);
-        const cached = await cachedPieces(store, pieceFiles, entry.format);
-        if (cached.missing.length === 0 && (await joinPieces(store, pieceFiles, entry.format, entry.file))) continue;
-        if (cached.missing.length > 0) have.set(entry.index, cached.have);
+    try {
+      for (const entry of cloud) {
+        if (entry === null) continue;
+        if (await cachedAudio(store, entry.file, entry.format)) continue;
+        if (entry.pieces.length > 1) {
+          const pieceFiles = entry.pieces.map((piece) => piece.file);
+          const cached = await cachedPieces(store, pieceFiles, entry.format);
+          if (cached.missing.length === 0) {
+            await joinPieces(store, pieceFiles, entry.format, entry.file);
+            continue;
+          }
+          have.set(entry.index, cached.have);
+        }
+        misses.push(entry.index);
       }
-      misses.push(entry.index);
+    } catch (error) {
+      fail(describeCoordinatorError(error), characters);
+      return;
     }
     const toMake = (index: number) => cloud[index]!.pieces.map((piece, at) => ({ ...piece, at })).filter(({ at }) => !have.get(index)?.has(at));
     let queuedInputs: EnqueueInput[] = [];
@@ -2173,6 +2190,8 @@ export class Coordinator {
   private readonly readJobs = new Map<string, string[]>();
   /** The blocks of a read being made in pieces (issue 1208): joined, and for a page announced, once every piece has landed. */
   private readonly pieceReads = new PieceReads();
+  /** Page reads that failed as a whole (codex on PR 1210): what their remaining jobs say afterwards is not news. Bounded; a stop clears its own. */
+  private readonly failedReads = new Set<string>();
   private stopPromise: Promise<void> | null = null;
   /** Request ids whose create-production is still running — redelivery waits, never doubles (#384). */
   private readonly productionCreation = new ProductionCreationService();
@@ -3936,12 +3955,29 @@ export class Coordinator {
       }
     }
     if (job.status !== "succeeded") {
-      if (job.target.kind === "voice-preview" && typeof job.params["requestId"] === "string") {
+      if (job.target.kind === "voice-preview" && typeof job.params["requestId"] === "string" && !this.failedReads.has(job.params["requestId"])) {
+        const requestId = job.params["requestId"];
         // A piece of a chunked block (issue 1208): its block can no longer be made whole, so
         // the block's other pieces are cancelled rather than paid for. A sibling cancelled that
         // way comes back through here with its block already gone, and is not news twice.
         const block = pieceOf(job) === null ? undefined : this.pieceReads.failed(job);
-        for (const jobId of block?.cancel ?? []) await this.jobQueue?.cancel(jobId).catch(() => {});
+        const cancel = block?.cancel ?? [];
+        /*
+         * A page fails as a whole (codex on PR 1210), as it is refused as a whole at enqueue
+         * (codex on PR 914): playback would wait on the part no event fills, so the page's
+         * other jobs are cancelled rather than paid for, and nothing they say afterwards — a
+         * cancellation, a block that lands anyway — is news over the failure. A block that
+         * had landed is in the cache for the next read.
+         */
+        const page = block === undefined ? voiceJobPart(job).parts !== undefined : block !== null && block.page;
+        if (page) {
+          cancel.push(...(this.readJobs.get(requestId) ?? []));
+          this.readJobs.delete(requestId);
+          this.pieceReads.drop(requestId);
+          this.failedReads.add(requestId);
+          if (this.failedReads.size > 200) this.failedReads.delete(this.failedReads.values().next().value!);
+        }
+        for (const jobId of cancel) await this.jobQueue?.cancel(jobId).catch(() => {});
         const readIdentity = voiceJobReadIdentity(job);
         if (block !== null) {
           this.emit({
@@ -4338,7 +4374,7 @@ export class Coordinator {
             error: null,
           });
         }
-        if (typeof job.params["requestId"] === "string") {
+        if (typeof job.params["requestId"] === "string" && !this.failedReads.has(job.params["requestId"])) {
           const requestId = job.params["requestId"];
           const announce = (outcome: { status: "ready"; file: string; characterCount: number; estimatedMicroUsd: number } | { status: "failed"; error: string }, place: { part: boolean } = { part: true }) =>
             this.emit({
@@ -12607,6 +12643,7 @@ export class Coordinator {
         this.stoppedReads.add(msg.requestId);
         this.pendingVoiceReads.delete(msg.requestId);
         this.pieceReads.drop(msg.requestId);
+        this.failedReads.delete(msg.requestId);
         const jobs = this.readJobs.get(msg.requestId) ?? [];
         this.readJobs.delete(msg.requestId);
         for (const jobId of jobs) await this.jobQueue?.cancel(jobId).catch(() => {});

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile, unlink } from "node:fs/promises";
+import { mkdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { ClientMessage, DomainEvent, ManifestModel, VoiceCandidate } from "@arke-studio/contracts";
 import { ProviderRequestRejectedError } from "@arke-studio/providers";
@@ -114,6 +114,8 @@ async function harness() {
   const bytes = async (rel: string) => new Uint8Array(await readFile(toExtendedLength(join(worldDir, rel))));
   /** The shelf loses a file: what a restart between the last piece and the join, or a cache sweep, leaves behind. */
   const forget = (rel: string) => unlink(toExtendedLength(join(worldDir, rel)));
+  /** Something the cache file cannot be written over: a directory where the whole would go. */
+  const block = (rel: string) => mkdir(toExtendedLength(join(worldDir, rel)), { recursive: true });
   /** Each piece's job as it stands, by the events the queue published for this request. */
   const jobs = (requestId: string) => {
     const seen = new Map<string, string>();
@@ -123,7 +125,7 @@ async function harness() {
     return [...seen.values()];
   };
   const priced = (pieces: readonly string[]) => pieces.reduce((sum, piece) => sum + piece.length * 16, 0);
-  return { coordinator, events, reader, send, narrate, audio, file, bytes, forget, jobs, priced };
+  return { coordinator, events, reader, send, narrate, audio, file, bytes, forget, block, jobs, priced };
 }
 
 const readSection = (send: (message: ClientMessage) => Promise<void>, requestId: string, confirmationToken?: string) =>
@@ -297,6 +299,54 @@ describe("a read over the reader's cap (issue 1208)", () => {
       assert.equal(ready.length, 1, `announced once, whole: ${JSON.stringify(h.audio(PAGE).map((event) => [event.status, event.part, event.parts, event.error]))} · jobs ${JSON.stringify(h.jobs(PAGE))}`);
       assert.deepEqual([ready[0]!.sectionHeading, ready[0]!.part, ready[0]!.parts], ["Essence", 0, 1], "as the one part of a one-part page, never `2 of 1`");
       assert.ok(cachedVoiceAudioLooksRight(await h.bytes(ready[0]!.file!), "wav"));
+    } finally {
+      await h.coordinator.stop();
+    }
+  });
+
+  it("a join the world cannot write fails the read by name, and the pieces on the shelf are not bought again (codex on PR 1210)", async () => {
+    const h = await harness();
+    try {
+      const { essence } = await h.narrate();
+      const whole = h.file(essence);
+      await readSection(h.send, REQUEST);
+      const asked = h.audio(REQUEST).find((event) => event.status === "confirmation-required")!;
+      await readSection(h.send, REQUEST, asked.confirmationToken);
+      await until(() => h.audio(REQUEST).some((event) => event.status === "ready" && event.file === whole), "the first read to be heard and joined", PATIENCE);
+      const paid = h.reader.attempts;
+      // Every piece on the shelf, and the whole's place taken by something a file cannot be
+      // written over: the read says so, and asks for nothing.
+      await h.forget(whole);
+      await h.block(whole);
+      h.events.length = 0;
+      await readSection(h.send, AGAIN);
+      const answer = h.audio(AGAIN);
+      assert.equal(answer.length, 1);
+      assert.equal(answer[0]!.status, "failed", `failed by name rather than priced: ${JSON.stringify(answer)}`);
+      assert.equal(h.reader.attempts, paid, "nothing was sent");
+    } finally {
+      await h.coordinator.stop();
+    }
+  });
+
+  it("a page fails as a whole: the block's failure cancels the page's other jobs unpaid, and nothing they say afterwards is news (codex on PR 1210)", async () => {
+    const h = await harness();
+    try {
+      const { pieces } = await h.narrate();
+      // The Essence's pieces go first, so the Appearance is still queued when the first fails.
+      h.reader.refuse = pieces[0]!;
+      h.reader.submitDelayMs = 500;
+      const page = (confirmationToken?: string) =>
+        h.send({ kind: "read-sheet-page", requestId: PAGE, worldId: WORLD_ID, sheetId: "maren-kest", sections: ["Essence", "Appearance"], ...(confirmationToken !== undefined ? { confirmationToken } : {}) });
+      await page();
+      const asked = h.audio(PAGE).find((event) => event.status === "confirmation-required")!;
+      await page(asked.confirmationToken);
+      await until(() => h.jobs(PAGE).length === pieces.length + 1 && h.jobs(PAGE).every((status) => status === "failed" || status === "cancelled"), "every job of the page to settle", PATIENCE);
+      await settle();
+      assert.deepEqual(h.jobs(PAGE).sort(), [...pieces.slice(1).map(() => "cancelled"), "cancelled", "failed"].sort(), "the Appearance's job cancelled with the Essence's other pieces");
+      assert.ok(h.reader.attempts < pieces.length + 1, `the Appearance never reached the reader: ${h.reader.attempts} sent`);
+      assert.equal(h.audio(PAGE).filter((event) => event.status === "failed").length, 1, "the page failed once");
+      assert.equal(h.audio(PAGE).filter((event) => event.status === "ready").length, 0, "and nothing was announced over it");
     } finally {
       await h.coordinator.stop();
     }

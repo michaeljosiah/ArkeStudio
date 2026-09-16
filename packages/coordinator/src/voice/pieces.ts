@@ -72,19 +72,16 @@ export async function cachedPieces(store: Pick<WorldStore, "dir">, files: readon
 
 /**
  * The pieces as one file under the whole block's key — what makes the next read of the same
- * words a hit. False when they will not join, which the caller treats as pieces to make again.
+ * words a hit. Throws when they cannot be read, joined or written: the pieces on the shelf are
+ * paid-for provider outcomes, and a join the world cannot write is a reason to fail the read by
+ * name, never a reason to buy them again (codex on PR 1210).
  */
-export async function joinPieces(store: WorldStore, files: readonly string[], format: VoiceAudioFormat, whole: string): Promise<boolean> {
-  try {
-    const bytes = await Promise.all(files.map(async (rel) => new Uint8Array(await readFile(toExtendedLength(join(store.dir, fromPortable(rel)))))));
-    const joined = joinSpeech(bytes, format);
-    await store.gateOp(async () => {
-      await atomicWriteFile(join(store.dir, fromPortable(whole)), joined);
-    });
-    return true;
-  } catch {
-    return false;
-  }
+export async function joinPieces(store: WorldStore, files: readonly string[], format: VoiceAudioFormat, whole: string): Promise<void> {
+  const bytes = await Promise.all(files.map(async (rel) => new Uint8Array(await readFile(toExtendedLength(join(store.dir, fromPortable(rel)))))));
+  const joined = joinSpeech(bytes, format);
+  await store.gateOp(async () => {
+    await atomicWriteFile(join(store.dir, fromPortable(whole)), joined);
+  });
 }
 
 /** The jobs the queue gave a batch of inputs, grouped by block and ordered by piece, for `PieceReads.queued`. */
@@ -213,10 +210,12 @@ export class PieceReads {
     block.estimatedMicroUsd += job.estimatedMicroUsd;
     if (block.landed.filter((landed) => landed !== undefined).length < piece.pieces) return { kind: "landed", page: block.page };
     this.blocks.delete(id);
-    if (await joinPieces(store, block.landed.map((rel) => rel!), block.format, block.file)) {
-      return { kind: "whole", page: block.page, file: block.file, characters: block.characters, estimatedMicroUsd: block.estimatedMicroUsd };
+    try {
+      await joinPieces(store, block.landed.map((rel) => rel!), block.format, block.file);
+    } catch {
+      return { kind: "unjoined", page: block.page };
     }
-    return { kind: "unjoined", page: block.page };
+    return { kind: "whole", page: block.page, file: block.file, characters: block.characters, estimatedMicroUsd: block.estimatedMicroUsd };
   }
 }
 

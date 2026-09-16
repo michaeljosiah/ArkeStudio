@@ -33,7 +33,7 @@ import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
-import { flacProblem, verifyArtifact } from "../queue/verify.js";
+import { flacProblem, mp3AudioStart, verifyArtifact } from "../queue/verify.js";
 
 /**
  * The voice service (SPEC-011): a unified catalogue over local presets and cloud voices
@@ -185,19 +185,22 @@ export function concatWav(parts: readonly Uint8Array[]): Uint8Array {
 }
 
 /**
- * MP3 frames concatenate; a later part's ID3v2 tag would not, so it is dropped (SPEC-047 R-5).
- * The tag's size is four seven-bit bytes and counts neither the ten-byte header nor the
- * ten-byte footer a v2.4 tag carries when its flags say so (codex on PR 1210): a footer left
- * in place would sit between two audio streams as bytes no decoder reads as a frame.
+ * MP3 frames concatenate; what each part carries around them does not (SPEC-047 R-5). A later
+ * part's ID3v2 tag — footer included, when its flags say it has one — is dropped, and so is
+ * every part's Xing/Info/VBRI frame (codex on PR 1210): that frame is silence describing the
+ * stream behind it, and the first part's would declare the joined file's length as the first
+ * piece's, which this package's own verifier rightly reads as a truncation and the cache
+ * would then never hit. Without a declaration a player reads the stream as the constant rate
+ * it is, which is what a reader returns.
  */
 export function concatMp3(parts: readonly Uint8Array[]): Uint8Array {
-  const stripped = parts.map((part, index) => {
-    if (index === 0 || part.length < 10 || part[0] !== 0x49 || part[1] !== 0x44 || part[2] !== 0x33) return part;
-    const size = ((part[6]! & 0x7f) << 21) | ((part[7]! & 0x7f) << 14) | ((part[8]! & 0x7f) << 7) | (part[9]! & 0x7f);
-    const footer = (part[5]! & 0x10) !== 0 ? 10 : 0;
-    return part.subarray(10 + size + footer);
+  const kept = parts.map((part, index) => {
+    const { tagEnd, audioStart } = mp3AudioStart(part);
+    return index === 0
+      ? Buffer.concat([Buffer.from(part.subarray(0, tagEnd)), Buffer.from(part.subarray(audioStart))])
+      : Buffer.from(part.subarray(audioStart));
   });
-  return new Uint8Array(Buffer.concat(stripped.map((part) => Buffer.from(part))));
+  return new Uint8Array(Buffer.concat(kept));
 }
 
 /**

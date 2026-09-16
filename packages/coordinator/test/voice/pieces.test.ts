@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Job } from "@arke-studio/contracts";
 import type { WorldStore } from "../../src/world/store.js";
-import { pieceJobs, pieceOf, pieceParams, PieceReads } from "../../src/voice/pieces.js";
+import { joinPieces, pieceJobs, pieceOf, pieceParams, PieceReads } from "../../src/voice/pieces.js";
 
 /**
  * The bookkeeping of a read made in pieces (issue 1208), on its own: the window between a block
@@ -56,6 +56,14 @@ describe("a read's pieces, between registration and the queue naming their jobs 
     assert.deepEqual(reads.queued(REQUEST, pieceJobs(inputs, ["jb_1", "jb_2", "jb_3"])), []);
     assert.deepEqual(reads.failed(job("jb_2", 1, 3)), { page: true, cancel: ["jb_1", "jb_3"] });
     assert.equal(reads.failed(job("jb_1", 0, 3, "cancelled")), null);
+  });
+
+  it("a join the world cannot write is a failure by name, never a reason to buy the pieces again (codex on PR 1210)", async () => {
+    const closed = { dir: "C:/nowhere", gateOp: async () => { throw new Error("The world is no longer this process's to write."); } } as unknown as WorldStore;
+    await assert.rejects(joinPieces(closed, [".cache/voice-previews/a.wav"], "wav", ".cache/voice-previews/whole.wav"), /no longer|ENOENT/);
+    const reads = new PieceReads();
+    reads.register({ requestId: REQUEST, blockIndex: 0, pieces: 1, file: ".cache/voice-previews/whole.wav", format: "wav", page: true, characters: 10 });
+    assert.deepEqual(await reads.landed(job("jb_1", 0, 1, "succeeded"), closed), { kind: "unjoined", page: true });
   });
 
   it("a job that was never a piece is nobody's business here", () => {

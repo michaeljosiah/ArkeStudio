@@ -10,6 +10,7 @@ import {
   authoritativeBibleSpeech,
   authoritativeProseSpeech,
   authoritativeSheetSpeech,
+  cachedVoiceAudioLooksRight,
   concatMp3,
   concatWav,
   joinSpeech,
@@ -381,6 +382,34 @@ describe("joining the pieces back into one clip", () => {
     assert.deepEqual([...withFooter], [...frame, ...frame], "nothing of the tag, footer included, sits between the frames");
     const without = Buffer.from(concatMp3([new Uint8Array(frame), new Uint8Array(Buffer.concat([tag(0), frame]))]));
     assert.deepEqual([...without], [...frame, ...frame]);
+  });
+
+  /**
+   * A reader's mp3 opens with a Xing/Info frame describing that piece alone; joined raw, the
+   * first piece's byte total would name the whole file's length, which the verifier reads as a
+   * truncation — and the cache would never hit (codex on PR 1210). Every part's declaration
+   * frame goes, and the joined stream is one the verifier accepts.
+   */
+  it("drops every part's Xing/Info frame, keeps the first tag, and joins to a stream the verifier accepts", () => {
+    // MPEG-1 Layer III, 128 kb/s, 44.1 kHz, stereo: a 417-byte frame.
+    const frame = (fill: number) => Buffer.concat([Buffer.from([0xff, 0xfb, 0x90, 0x00]), Buffer.alloc(413, fill)]);
+    const info = (frames: number, bytes: number) => {
+      const out = frame(0);
+      out.write("Info", 36, "ascii");
+      out.writeUInt32BE(3, 40);
+      out.writeUInt32BE(frames, 44);
+      out.writeUInt32BE(bytes, 48);
+      return out;
+    };
+    const tag = Buffer.from([0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 0, 0x02, 0xaa, 0xaa]);
+    const first = Buffer.concat([tag, info(3, 417 * 3), frame(1), frame(2)]);
+    const second = Buffer.concat([tag, info(2, 417 * 2), frame(3)]);
+    assert.match(verifyArtifact({ name: "raw.mp3", contentType: "audio/mpeg", data: new Uint8Array(Buffer.concat([first, second.subarray(tag.length)])) }) ?? "", /Info/, "joined raw, the first declaration lies about the length");
+    const joined = Buffer.from(concatMp3([new Uint8Array(first), new Uint8Array(second)]));
+    assert.equal(joined.length, tag.length + 417 * 3, "the tag, then three audio frames and nothing else");
+    assert.deepEqual([joined[tag.length + 4], joined[tag.length + 417 + 4], joined[tag.length + 417 * 2 + 4]], [1, 2, 3], "in order");
+    assert.equal(verifyArtifact({ name: "joined.mp3", contentType: "audio/mpeg", data: new Uint8Array(joined) }), null);
+    assert.ok(cachedVoiceAudioLooksRight(new Uint8Array(joined), "mp3"), "a hit next time");
   });
 
   it("joins by the format the reader returned, and has no join for flac", () => {

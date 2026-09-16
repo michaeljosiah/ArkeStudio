@@ -346,6 +346,27 @@ function mp3Declaration(d: Uint8Array, frameStart: number, frameLength: number):
   };
 }
 
+/**
+ * Where an MP3's audio frames begin once its ID3v2 tag and a leading Xing/Info/VBRI frame are
+ * set aside (issue 1208): what a join keeps of a later part, and of the first part after its
+ * tag. A declaration frame is a silent frame describing the stream that follows it, and a
+ * joined stream is not that stream — its byte total names the first piece alone, which `mp3Ok`
+ * below reads as a truncation, and a later part's would sit mid-stream as a beat of silence.
+ */
+export function mp3AudioStart(d: Uint8Array): { tagEnd: number; audioStart: number } {
+  let offset = 0;
+  if (d.length >= 10 && at(d, 0) === 0x49 && at(d, 1) === 0x44 && at(d, 2) === 0x33 && !d.slice(6, 10).some((byte) => (byte & 0x80) !== 0)) {
+    const tagSize = (at(d, 6) << 21) | (at(d, 7) << 14) | (at(d, 8) << 7) | at(d, 9);
+    // A v2.4 tag's footer is ten bytes the size does not count.
+    const footer = (at(d, 5) & 0x10) !== 0 ? 10 : 0;
+    offset = Math.min(d.length, 10 + tagSize + footer);
+  }
+  const tagEnd = offset;
+  const frameLength = mp3FrameLength(d, offset);
+  if (frameLength > 0 && offset + frameLength <= d.length && mp3Declaration(d, offset, frameLength) !== null) offset += frameLength;
+  return { tagEnd, audioStart: offset };
+}
+
 function mp3Ok(d: Uint8Array): string | null {
   let offset = 0;
   const id3 = new TextDecoder("latin1").decode(d.slice(0, 3));
