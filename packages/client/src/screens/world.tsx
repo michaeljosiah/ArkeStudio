@@ -56,7 +56,7 @@ import { Wave } from "../components/wave.js";
 import { generatedOriginLabel, shortDateTime } from "../lib/format.js";
 import { artifactDisplayName, artifactOpenLabel, artifactUses, linkNameResolver } from "../lib/artifact-view.js";
 import { mediaUrl } from "../lib/media.js";
-import { playClip, type Clip } from "../lib/audio.js";
+import { clearQueue, enqueueClip, playClip, type Clip } from "../lib/audio.js";
 import { ClipPlayButton, TextActions } from "../components/player.js";
 import { ReadAloud } from "../components/read-aloud.js";
 import { foundingNote } from "../components/queue-note.js";
@@ -121,6 +121,7 @@ import {
   useTranscripts,
   useVoiceCandidates,
   useVoiceAudio,
+  useVoiceParts,
   useWorld,
   type AuthoringActivity,
   renameWorld,
@@ -1682,8 +1683,39 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
     narrator && !supportsVoiceUse(narrator, "narration")
       ? DEFAULT_NARRATOR.label
       : (narrator?.label ?? narrator?.voiceId ?? DEFAULT_NARRATOR.label);
+  /*
+   * A long section arrives in pieces — a local read's synthesis chunks, and a cloud read over
+   * its reader's cap (issue 1208) — each queued as it lands so the first sounds while the rest
+   * are still being made; the player walks on to the next. This screen used to play only the
+   * newest event, so a second piece replaced the first mid-sentence. A short section still
+   * arrives whole and takes the single-clip path below, unchanged.
+   *
+   * Cloud pieces land in whatever order the reader finishes them, so the effect follows how
+   * many exist rather than how far the array reaches (codex on PR 1210): a second piece landing
+   * first fills the array to its final length, and the first piece filling the gap behind it
+   * would otherwise change nothing the effect watches.
+   */
+  const parts = useVoiceParts()[read?.requestId ?? ""] ?? [];
+  const landed = parts.filter((file) => file !== undefined).length;
+  const queued = useRef(0);
+  useEffect(() => {
+    if (!read || !world || !sheet) return;
+    for (let i = queued.current; i < parts.length; i += 1) {
+      const file = parts[i];
+      if (file === undefined) return; // a gap means the piece is still being made; wait for it
+      void enqueueClip({
+        id: read.requestId,
+        url: mediaUrl(world.meta.slug, file),
+        title: `${sheet.name} · ${read.section}`,
+        sub: `read aloud · ${narratorLabel}`,
+        part: i,
+      });
+      queued.current = i + 1;
+    }
+  }, [read?.requestId, read?.section, landed, world?.meta.slug, sheet?.name, narratorLabel]);
   // A read the user asked for plays as soon as it lands, rather than making them click twice.
   useEffect(() => {
+    if (parts.length > 0) return; // a streamed read is already sounding
     if (read && readResult?.status === "ready" && readResult.file && world && sheet) {
       void playClip({
         id: readResult.requestId,
@@ -1697,6 +1729,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
     readResult?.requestId,
     readResult?.status,
     readResult?.file,
+    parts.length,
     world?.meta.slug,
     sheet?.name,
     narratorLabel,
@@ -1777,6 +1810,8 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
       if (!worldId) return;
       // A second read replaces the first: two voices over one another is never what was meant.
       pageRead.stop();
+      queued.current = 0;
+      clearQueue();
       setRead({ requestId: readSheetSection(worldId, sheet.id, heading), section: heading });
     };
     const quote = `${read?.requestId}:${active?.confirmationToken ?? ""}`;

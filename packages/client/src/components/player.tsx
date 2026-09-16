@@ -142,7 +142,10 @@ export function ClipPlayButton({
 }) {
   const playback = usePlayback();
   if (!clip && !busy && !onStart) return null;
-  const current = clip !== null && playback.clip?.id === clip.id;
+  // By url as well as id (codex on PR 1210): a chunked read's joined whole arrives under the
+  // same id as the pieces it follows, and a press on it must load it rather than toggle the
+  // piece that happens to be sounding.
+  const current = clip !== null && playback.clip?.id === clip.id && playback.clip?.url === clip.url;
   const playing = current && playback.status === "playing";
   const name = clip ? (playing ? `Pause ${clip.title}` : `Play ${clip.title}`) : busy ? "Preparing audio" : (label ?? "Play");
   return (

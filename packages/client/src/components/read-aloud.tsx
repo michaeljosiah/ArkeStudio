@@ -44,9 +44,14 @@ function useProseRead(source: ProseReadSource, title: string) {
    * A long read arrives in pieces, because local synthesis runs at about the speed of speech and
    * holding the first word until the last one exists is a silence as long as the reading. Each
    * piece is queued as it lands and the first starts immediately; a short read still arrives
-   * whole and takes the single-clip path below, unchanged.
+   * whole and takes the single-clip path below, unchanged. Cloud pieces (issue 1208) land in
+   * whatever order the reader finishes them, so the effect follows how many exist rather than
+   * how far the array reaches: a later piece landing first fills the array to its final length,
+   * and the earlier one filling the gap behind it would otherwise change nothing the effect
+   * watches (codex on PR 1210).
    */
   const parts = partsByRequest[request ?? ""] ?? [];
+  const landed = parts.filter((file) => file !== undefined).length;
   const queued = useRef(0);
   useEffect(() => {
     if (request === null || slug === undefined) return;
@@ -56,7 +61,7 @@ function useProseRead(source: ProseReadSource, title: string) {
       void enqueueClip({ id: request, url: mediaUrl(slug, file), title, sub, part: i });
       queued.current = i + 1;
     }
-  }, [request, parts.length, slug, title, sub]);
+  }, [request, landed, slug, title, sub]);
 
   // What was asked for plays the moment it lands, rather than making somebody press twice.
   useEffect(() => {

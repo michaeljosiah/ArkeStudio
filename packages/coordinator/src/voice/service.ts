@@ -33,7 +33,7 @@ import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
-import { flacProblem, verifyArtifact } from "../queue/verify.js";
+import { flacProblem, mp3AudioSpan, verifyArtifact } from "../queue/verify.js";
 
 /**
  * The voice service (SPEC-011): a unified catalogue over local presets and cloud voices
@@ -182,6 +182,38 @@ export function concatWav(parts: readonly Uint8Array[]): Uint8Array {
   out.writeUInt32LE(out.length - 8, 4);
   out.writeUInt32LE(total, first.header.length - 4);
   return new Uint8Array(out);
+}
+
+/**
+ * MP3 frames concatenate; what each part carries around them does not (SPEC-047 R-5). A later
+ * part's ID3v2 tag — footer included, when its flags say it has one — is dropped, and so is
+ * every part's Xing/Info/VBRI frame (codex on PR 1210): that frame is silence describing the
+ * stream behind it, and the first part's would declare the joined file's length as the first
+ * piece's, which this package's own verifier rightly reads as a truncation and the cache
+ * would then never hit. An ID3v1 trailer is kept only on the last part, where the verifier
+ * allows the one there is. Without a declaration a player reads the stream as the constant
+ * rate it is, which is what a reader returns.
+ */
+export function concatMp3(parts: readonly Uint8Array[]): Uint8Array {
+  const kept = parts.map((part, index) => {
+    const { tagEnd, audioStart, audioEnd } = mp3AudioSpan(part);
+    const end = index === parts.length - 1 ? part.length : audioEnd;
+    return index === 0
+      ? Buffer.concat([Buffer.from(part.subarray(0, tagEnd)), Buffer.from(part.subarray(audioStart, end))])
+      : Buffer.from(part.subarray(audioStart, end));
+  });
+  return new Uint8Array(Buffer.concat(kept));
+}
+
+/**
+ * The pieces of a read as one file, by the format the reader returned. There is no flac join —
+ * the audiobook flags such a block and the page read sends it whole (`piecesFor`) — so asking
+ * for one is a programming error rather than a case.
+ */
+export function joinSpeech(parts: readonly Uint8Array[], format: VoiceAudioFormat): Uint8Array {
+  if (format === "wav") return concatWav(parts);
+  if (format === "mp3") return concatMp3(parts);
+  throw new Error("flac parts cannot be joined");
 }
 
 /**

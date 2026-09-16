@@ -22,10 +22,13 @@ export function ReadAloudConfirmation({ title, result, onConfirm, onCancel }: {
   const row = state?.app.manifest?.models.find(model => model.provider === result.provider && model.id === result.model);
   const reader = readerName(result, row);
   const local = result.provider === "kokoro" && result.model === "kokoro-82m";
+  // A read over the reader's cap goes as several requests and arrives in as many pieces (issue
+  // 1208): said with the price, since each seam is audible and each piece is a call.
+  const pieces = result.parts !== undefined && result.parts > 1 ? ` · ${result.parts} parts` : "";
   if (result.status !== "confirmation-required" || settled === quote) return null;
   const cancel = () => { setSettled(quote); onCancel(); };
   return createPortal(
-    <EditorDialog open title="Read aloud" subtitle={`${title} · ${reader}`} labelledBy={heading} onClose={cancel}>
+    <EditorDialog open title="Read aloud" subtitle={`${title} · ${reader}${pieces}`} labelledBy={heading} onClose={cancel}>
       <div className="fy-exsheet">
         <p>{local ? `Read locally with ${reader}.` : `This text will be sent to ${reader}.`} Text is retained in Activity.</p>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
