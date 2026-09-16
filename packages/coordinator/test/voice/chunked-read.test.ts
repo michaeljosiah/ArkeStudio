@@ -352,6 +352,30 @@ describe("a read over the reader's cap (issue 1208)", () => {
     }
   });
 
+  it("a page block whose join cannot be written fails the page the same way: nothing its other blocks say afterwards is news (codex on PR 1210)", async () => {
+    const h = await harness();
+    try {
+      const { essence } = await h.narrate();
+      // The Essence's pieces go first and its whole cannot be written; the Appearance follows.
+      await h.block(h.file(essence));
+      h.reader.submitDelayMs = 200;
+      const page = (confirmationToken?: string) =>
+        h.send({ kind: "read-sheet-page", requestId: PAGE, worldId: WORLD_ID, sheetId: "maren-kest", sections: ["Essence", "Appearance"], ...(confirmationToken !== undefined ? { confirmationToken } : {}) });
+      await page();
+      const asked = h.audio(PAGE).find((event) => event.status === "confirmation-required")!;
+      await page(asked.confirmationToken);
+      await until(() => h.audio(PAGE).some((event) => event.status === "failed"), "the Essence to fail at its join", PATIENCE);
+      await until(() => h.jobs(PAGE).every((status) => status !== "queued" && status !== "running" && status !== "submitting"), "every job of the page to settle", PATIENCE);
+      await settle();
+      const failed = h.audio(PAGE).filter((event) => event.status === "failed");
+      assert.equal(failed.length, 1, "the page failed once");
+      assert.equal(failed[0]!.sectionHeading, "Essence");
+      assert.equal(h.audio(PAGE).filter((event) => event.status === "ready").length, 0, "the Appearance, made or cancelled, is not announced over it");
+    } finally {
+      await h.coordinator.stop();
+    }
+  });
+
   it("a piece the reader refuses fails the block once; what landed before it was heard, nothing after it is, and the block is never joined", async () => {
     const h = await harness();
     try {

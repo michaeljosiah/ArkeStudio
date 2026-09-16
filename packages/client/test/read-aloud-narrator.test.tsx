@@ -7,9 +7,10 @@ import { parseHTML } from "linkedom";
 import { DEFAULT_NARRATOR, type ClientMessage } from "@arke-studio/contracts";
 import { ReadAloud, ReadAloudButton } from "../src/components/read-aloud.js";
 import { ReadAloudConfirmation } from "../src/components/read-aloud-confirmation.js";
+import { ClipPlayButton } from "../src/components/player.js";
 import { App } from "../src/App.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
-import { dismissPlayback, emitForTest, playbackSnapshot, setAudioFactoryForTest } from "../src/lib/audio.js";
+import { dismissPlayback, emitForTest, playbackSnapshot, playClip, setAudioFactoryForTest } from "../src/lib/audio.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -153,6 +154,25 @@ for (const surface of ["sheet", "prose"] as const) {
     assert.match(playbackSnapshot().clip?.url ?? "", /second\.wav$/, "and the second follows");
   });
 }
+
+/*
+ * The bible's replay button decides whether its clip is the one sounding, and a chunked read's
+ * joined whole shares the pieces' request id (codex on PR 1210): by id alone a press on the whole
+ * toggled the piece that happened to be loaded rather than loading the passage.
+ */
+it("a clip button loads the joined whole rather than toggling the piece sounding under the same id", async () => {
+  const dock = { playbackRate: 1, src: "", currentTime: 0, duration: NaN, play: async () => {}, pause() {}, load() {}, removeAttribute() {}, addEventListener() {}, removeEventListener() {} };
+  setAudioFactoryForTest(() => dock as never);
+  await playClip({ id: "read", url: "/piece-1.wav", title: "Essence" });
+  const container = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(container);
+  const root = createRoot(container); open.push(root);
+  await act(async () => root.render(<ClipPlayButton clip={{ id: "read", url: "/whole.wav", title: "Essence" }} />));
+  const button = container.querySelector<HTMLButtonElement>("button")!;
+  assert.match(button.getAttribute("aria-label") ?? "", /^Play /, "the whole is not what is sounding");
+  await act(async () => button.click());
+  assert.equal(playbackSnapshot().clip?.url, "/whole.wav", "pressed, it loads the whole");
+});
 
 it("says how many pieces a chunked read goes as, on the dialog that prices it", async () => {
   __setStateForTest(FIXTURE_STATE);

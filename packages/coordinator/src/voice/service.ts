@@ -33,7 +33,7 @@ import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
-import { flacProblem, mp3AudioStart, verifyArtifact } from "../queue/verify.js";
+import { flacProblem, mp3AudioSpan, verifyArtifact } from "../queue/verify.js";
 
 /**
  * The voice service (SPEC-011): a unified catalogue over local presets and cloud voices
@@ -190,15 +190,17 @@ export function concatWav(parts: readonly Uint8Array[]): Uint8Array {
  * every part's Xing/Info/VBRI frame (codex on PR 1210): that frame is silence describing the
  * stream behind it, and the first part's would declare the joined file's length as the first
  * piece's, which this package's own verifier rightly reads as a truncation and the cache
- * would then never hit. Without a declaration a player reads the stream as the constant rate
- * it is, which is what a reader returns.
+ * would then never hit. An ID3v1 trailer is kept only on the last part, where the verifier
+ * allows the one there is. Without a declaration a player reads the stream as the constant
+ * rate it is, which is what a reader returns.
  */
 export function concatMp3(parts: readonly Uint8Array[]): Uint8Array {
   const kept = parts.map((part, index) => {
-    const { tagEnd, audioStart } = mp3AudioStart(part);
+    const { tagEnd, audioStart, audioEnd } = mp3AudioSpan(part);
+    const end = index === parts.length - 1 ? part.length : audioEnd;
     return index === 0
-      ? Buffer.concat([Buffer.from(part.subarray(0, tagEnd)), Buffer.from(part.subarray(audioStart))])
-      : Buffer.from(part.subarray(audioStart));
+      ? Buffer.concat([Buffer.from(part.subarray(0, tagEnd)), Buffer.from(part.subarray(audioStart, end))])
+      : Buffer.from(part.subarray(audioStart, end));
   });
   return new Uint8Array(Buffer.concat(kept));
 }

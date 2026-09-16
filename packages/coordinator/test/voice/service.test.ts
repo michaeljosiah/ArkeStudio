@@ -412,6 +412,18 @@ describe("joining the pieces back into one clip", () => {
     assert.ok(cachedVoiceAudioLooksRight(new Uint8Array(joined), "mp3"), "a hit next time");
   });
 
+  it("drops an ID3v1 trailer from every part but the last, where the verifier allows the one there is (codex on PR 1210)", () => {
+    const frame = (fill: number) => Buffer.concat([Buffer.from([0xff, 0xfb, 0x90, 0x00]), Buffer.alloc(413, fill)]);
+    const trailer = Buffer.concat([Buffer.from("TAG", "ascii"), Buffer.alloc(125, 0)]);
+    const first = Buffer.concat([frame(1), trailer]);
+    const second = Buffer.concat([frame(2), trailer]);
+    assert.match(verifyArtifact({ name: "raw.mp3", contentType: "audio/mpeg", data: new Uint8Array(Buffer.concat([first, second])) }) ?? "", /invalid data/, "joined raw, the first trailer is bytes between frames");
+    const joined = Buffer.from(concatMp3([new Uint8Array(first), new Uint8Array(second)]));
+    assert.equal(joined.length, 417 * 2 + 128, "two frames and the one trailer at the end");
+    assert.equal(joined.toString("ascii", 417 * 2, 417 * 2 + 3), "TAG");
+    assert.equal(verifyArtifact({ name: "joined.mp3", contentType: "audio/mpeg", data: new Uint8Array(joined) }), null);
+  });
+
   it("joins by the format the reader returned, and has no join for flac", () => {
     assert.deepEqual(joinSpeech([wav([1]), wav([2])], "wav"), concatWav([wav([1]), wav([2])]));
     const frame = new Uint8Array([0xff, 0xfb, 1, 1]);

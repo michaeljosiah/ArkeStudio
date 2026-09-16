@@ -1706,6 +1706,12 @@ export class Coordinator {
       fail(queued.reason ?? "Voice synthesis could not be queued.", characters);
       return;
     }
+    // Failed as a whole while the batch was still being journalled (codex on PR 1210): the
+    // failure could name no jobs then, so what it queued is cancelled now, unpaid.
+    if (this.failedReads.has(requestId)) {
+      for (const jobId of queued.jobIds) await this.jobQueue?.cancel(jobId).catch(() => {});
+      return;
+    }
     // Stop can land while the batch is still being journalled, when there is nothing yet to
     // cancel; the ids come back here and are cancelled rather than kept (codex, PR 879).
     if (this.stoppedReads.has(requestId)) {
@@ -1718,6 +1724,23 @@ export class Coordinator {
     // A block that failed while the batch was still being journalled had no siblings to name
     // (codex on PR 1210): now that the queue has named them, they are cancelled unpaid.
     for (const jobId of this.pieceReads.queued(requestId, pieceJobs(pending.inputs, queued.jobIds))) await this.jobQueue?.cancel(jobId).catch(() => {});
+  }
+
+  /**
+   * A page fails as a whole (codex on PR 1210), as it is refused as a whole at enqueue (codex on
+   * PR 914): playback would wait on the part no event fills, so the page's other jobs are
+   * cancelled rather than paid for, and nothing they say afterwards — a cancellation, a block
+   * that lands anyway — is news over the failure. A block that had landed is in the cache for
+   * the next read. A page that fails while its batch is still being journalled has no jobs to
+   * name yet; the batch call cancels what it queued when it finds the request here.
+   */
+  private async failPage(requestId: string): Promise<void> {
+    const jobs = this.readJobs.get(requestId) ?? [];
+    this.readJobs.delete(requestId);
+    this.pieceReads.drop(requestId);
+    this.failedReads.add(requestId);
+    if (this.failedReads.size > 200) this.failedReads.delete(this.failedReads.values().next().value!);
+    for (const jobId of jobs) await this.jobQueue?.cancel(jobId).catch(() => {});
   }
 
   /**
@@ -2006,6 +2029,10 @@ export class Coordinator {
       this.pieceReads.drop(requestId);
       for (const jobId of queued.jobIds) await this.jobQueue?.cancel(jobId).catch(() => {});
       fail(queued.reason ?? "Voice synthesis could not be queued.", characters);
+      return;
+    }
+    if (this.failedReads.has(requestId)) {
+      for (const jobId of queued.jobIds) await this.jobQueue?.cancel(jobId).catch(() => {});
       return;
     }
     if (this.stoppedReads.has(requestId)) {
@@ -3961,23 +3988,9 @@ export class Coordinator {
         // the block's other pieces are cancelled rather than paid for. A sibling cancelled that
         // way comes back through here with its block already gone, and is not news twice.
         const block = pieceOf(job) === null ? undefined : this.pieceReads.failed(job);
-        const cancel = block?.cancel ?? [];
-        /*
-         * A page fails as a whole (codex on PR 1210), as it is refused as a whole at enqueue
-         * (codex on PR 914): playback would wait on the part no event fills, so the page's
-         * other jobs are cancelled rather than paid for, and nothing they say afterwards — a
-         * cancellation, a block that lands anyway — is news over the failure. A block that
-         * had landed is in the cache for the next read.
-         */
+        for (const jobId of block?.cancel ?? []) await this.jobQueue?.cancel(jobId).catch(() => {});
         const page = block === undefined ? voiceJobPart(job).parts !== undefined : block !== null && block.page;
-        if (page) {
-          cancel.push(...(this.readJobs.get(requestId) ?? []));
-          this.readJobs.delete(requestId);
-          this.pieceReads.drop(requestId);
-          this.failedReads.add(requestId);
-          if (this.failedReads.size > 200) this.failedReads.delete(this.failedReads.values().next().value!);
-        }
-        for (const jobId of cancel) await this.jobQueue?.cancel(jobId).catch(() => {});
+        if (page) await this.failPage(requestId);
         const readIdentity = voiceJobReadIdentity(job);
         if (block !== null) {
           this.emit({
@@ -4427,8 +4440,10 @@ export class Coordinator {
             return;
           }
           void this.appLog?.append({ kind: "voice.read-unjoined", requestId, jobId: job.id });
-          if (settled.page) announce({ status: "failed", error: "Voice synthesis failed. Open Activity for details." });
-          else announce(own);
+          if (settled.page) {
+            await this.failPage(requestId);
+            announce({ status: "failed", error: "Voice synthesis failed. Open Activity for details." });
+          } else announce(own);
         }
       }
     };
