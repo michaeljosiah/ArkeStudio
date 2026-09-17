@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router";
 import { Bell, ChevronLeft, Cog, Inbox } from "./icons.js";
+import { AccountControl } from "./account-menu.js";
 import { cx } from "./ui.js";
 import { useStore } from "../lib/store.js";
 import { closeActivityPanel, openActivityPanel, useActivityPanel, waitingUpdate } from "../lib/activity-panel.js";
@@ -26,6 +27,10 @@ import { arrivedSince, computeNeedsYou, unattendedProposalsOf } from "@arke-stud
  * Proposals joined them later and went *before* activity rather than between the two, because
  * that pair's order is the settlement above and splitting it would reopen it. It is the only one
  * of the three that is world-scoped, so it is also the only one that can be absent.
+ *
+ * The Arke account (design turn 151) went *after* settings, last of all: it is the one thing in
+ * the bar about the person rather than the screen, and every product puts that at the end. The
+ * pair stays a pair. Pressed, it opens a menu over this screen, as the bell does, never a page.
  *
  * This disagrees with the prototype on home, which drew the lockup left. Consistency across
  * forty-one screens is worth more than the one composition it came from.
@@ -158,6 +163,7 @@ export function AppChrome({
             >
               <Cog size={13} />
             </button>
+            <AccountControl />
           </>
         )}
       </div>

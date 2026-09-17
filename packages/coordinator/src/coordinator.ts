@@ -451,6 +451,7 @@ import {
 import { GenesisService } from "./harness/genesis.js";
 import { FoundingBuildService } from "./world/founding-build.js";
 import { isAuthShapedFailure, VendorAuthService } from "./harness/vendor-auth.js";
+import { NoArkeCloud, type AccountService } from "./account.js";
 import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import {
   SETUP_CATALOGUE,
@@ -689,6 +690,11 @@ export interface CoordinatorOptions {
   sampleWorldPath?: string | null;
   /** App root for remembered grants (SPEC-005 R-16). Absent → grants are session-only. */
   appRoot?: string;
+  /**
+   * The Arke account behind the chrome's control (design turn 151). Absent, Studio has no cloud
+   * — `NoArkeCloud`, the local default — and the control says so when pressed.
+   */
+  account?: AccountService;
   /** Host-supplied authoring policy. Coordinator consumes contracts; the shared launcher
    * in harness/v2-launch.ts owns concrete adapter assembly for desktop and dev. */
   authoring?: {
@@ -2237,6 +2243,7 @@ export class Coordinator {
   private readonly providerTools = new Map<ProviderId, ProviderToolService>();
   /** SPEC-030: vendor sign-in through the harness. Always constructed; states its own absence. */
   private readonly vendorAuth: VendorAuthService;
+  private readonly account: AccountService;
   private readonly ledger: LedgerFile | null;
   private readonly appSettings: AppSettingsFile | null;
   /** SPEC-009: the dispatch engine. Null without an app root, clients and a ledger. */
@@ -2318,6 +2325,8 @@ export class Coordinator {
         ),
       );
     }
+    this.account = opts.account ?? new NoArkeCloud();
+    this.account.onChange((account) => this.emit({ at: new Date().toISOString(), type: "account.changed", account }));
     this.vendorAuth = new VendorAuthService({
       adapter: () => this.opts.adapter,
       openExternal: (url) => {
@@ -3916,6 +3925,7 @@ export class Coordinator {
       ...(seededSpend ? { spend: seededSpend } : {}),
       ...(settings ? { backgroundNotifications: settings.backgroundNotifications } : {}),
       ...(settings ? { activitySeen: settings.activity } : {}),
+      account: this.account.current(),
       ...(settings ? { research: settings.research } : {}),
       ...(settings ? { appearance: settings.appearance } : {}),
       // Without this the narrator was correct on disk and absent from every snapshot, so a
@@ -7376,6 +7386,26 @@ export class Coordinator {
             : { whatsNewSeenVersion: msg.version },
         );
         this.emit({ at: new Date().toISOString(), type: "activity.seen", seen: settings.activity });
+        return;
+      }
+      case "account-sign-in": {
+        await this.account.signIn();
+        return;
+      }
+      case "account-create": {
+        await this.account.createAccount();
+        return;
+      }
+      case "account-cancel-sign-in": {
+        await this.account.cancelSignIn();
+        return;
+      }
+      case "account-sign-out": {
+        await this.account.signOut();
+        return;
+      }
+      case "account-open": {
+        await this.account.open(msg.page);
         return;
       }
       case "set-narrator": {
