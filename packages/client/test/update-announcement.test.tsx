@@ -46,6 +46,26 @@ function Probe() {
   return null;
 }
 
+/** linkedom tracks no focus, so the test that cares records every call itself. */
+function trackFocus(): { focused: () => HTMLElement | null; restore: () => void } {
+  const proto = dom.HTMLElement.prototype as unknown as { focus: () => void };
+  const originalFocus = proto.focus;
+  const active = Object.getOwnPropertyDescriptor(dom.document, "activeElement");
+  let focused: HTMLElement | null = null;
+  proto.focus = function focus() {
+    focused = this as unknown as HTMLElement;
+  };
+  Object.defineProperty(dom.document, "activeElement", { configurable: true, get: () => focused });
+  return {
+    focused: () => focused,
+    restore: () => {
+      proto.focus = originalFocus;
+      if (active === undefined) Reflect.deleteProperty(dom.document, "activeElement");
+      else Object.defineProperty(dom.document, "activeElement", active);
+    },
+  };
+}
+
 const NOTES = "The Cut plays its own audio back.\n\nA second paragraph, about the lanes.";
 
 function update(overrides: Partial<UpdateState>): UpdateState {
@@ -336,16 +356,48 @@ describe("the update announced at launch (design turn 152)", () => {
   it("remembers the announcement across a renderer reload, in session storage", async () => {
     const first = await mount("/worlds", update({}));
     assert.ok(dialog(first));
-    assert.equal(stored.get(ANNOUNCED_KEY), "0.5.50", "the run's memory of it outlives the module");
+    assert.deepEqual(JSON.parse(stored.get(ANNOUNCED_KEY) ?? "[]"), ["0.5.50"], "the run's memory of it outlives the module");
     // A reload: fresh module state, the same window's storage, the same snapshot.
     await unmountAll();
     __resetUpdateAnnouncementForTest();
-    stored.set(ANNOUNCED_KEY, "0.5.50");
+    stored.set(ANNOUNCED_KEY, JSON.stringify(["0.5.50"]));
     const again = await mount("/worlds", update({}));
     assert.equal(dialog(again), null, "not announced twice for one run");
     await unmountAll();
     const newer = await mount("/worlds", update({ targetVersion: "0.5.51" }));
     assert.ok(dialog(newer), "a newer version still is");
+    assert.deepEqual(JSON.parse(stored.get(ANNOUNCED_KEY) ?? "[]"), ["0.5.50", "0.5.51"], "every version the run announced");
+  });
+
+  it("remembers every version it announced: a withdrawn release does not bring the one before it back", async () => {
+    const container = await mount("/worlds", update({}));
+    await press(container, "Close");
+    await becomes(update({ targetVersion: "0.5.51" }));
+    assert.ok(dialog(container), "the newer one is announced");
+    await press(container, "Close");
+    await becomes(update({ targetVersion: "0.5.50" }));
+    assert.equal(dialog(container), null, "the earlier one was seen already");
+  });
+
+  it("hands focus to the panel that wins, not back to its own opener", async () => {
+    const focus = trackFocus();
+    // Something had focus before the sheet took it — the bell, say — as it always does in the app.
+    const bell = document.createElement("button");
+    document.body.append(bell);
+    bell.focus();
+    try {
+      const container = await mount("/worlds", update({}), true);
+      assert.equal(focus.focused()?.textContent?.trim(), "Update now", "the sheet focused its first control");
+      // A notification's click: the panel opens over the dialog and focuses itself. The dialog
+      // has to be gone in that same render — a render later, its cleanup would hand focus back
+      // to whatever it had taken it from, over the panel's head.
+      await act(async () => openActivityPanel("inbox"));
+      assert.equal(dialog(container), null);
+      assert.ok(focus.focused()?.classList.contains("fy-ap"), `focus is on the panel, not ${focus.focused()?.outerHTML.slice(0, 60)}`);
+    } finally {
+      focus.restore();
+      bell.remove();
+    }
   });
 
   it("the Next start hint rides above the button, clear of the sheet's clipping edge", async () => {

@@ -29,29 +29,35 @@ import { downloadUpdate, installUpdateAndRestart, installUpdateOnClose, useStore
  */
 
 /**
- * Where the run remembers what it announced. Module state alone resets with the renderer, and the
- * desktop process — the run — outlives a reload: the snapshot after one still carries the same
- * `available` update, which would read as unseen. Session storage lives exactly as long as the
- * window does. Read and written behind a guard, because storage can be absent or refuse.
+ * Where the run remembers what it announced: every version, not the last one — a withdrawn
+ * release can put the one before it back in front of a later check, and it was seen already.
+ * Module state alone resets with the renderer, and the desktop process — the run — outlives a
+ * reload: the snapshot after one still carries the same `available` update, which would read as
+ * unseen. Session storage lives exactly as long as the window does. Read and written behind a
+ * guard, because storage can be absent or refuse.
  */
 export const ANNOUNCED_KEY = "arke.update-announced";
-let announced: string | null | undefined;
+let announced: Set<string> | undefined;
 
-function announcedVersion(): string | null {
+function announcedVersions(): Set<string> {
   if (announced === undefined) {
+    announced = new Set();
     try {
-      announced = typeof sessionStorage === "undefined" ? null : sessionStorage.getItem(ANNOUNCED_KEY);
+      const raw = typeof sessionStorage === "undefined" ? null : sessionStorage.getItem(ANNOUNCED_KEY);
+      const parsed: unknown = raw === null ? [] : JSON.parse(raw);
+      if (Array.isArray(parsed)) for (const version of parsed) if (typeof version === "string") announced.add(version);
     } catch {
-      announced = null;
+      // Unreadable or absent: this renderer starts with what it has seen itself.
     }
   }
   return announced;
 }
 
 function markAnnounced(version: string): void {
-  announced = version;
+  const versions = announcedVersions();
+  versions.add(version);
   try {
-    if (typeof sessionStorage !== "undefined") sessionStorage.setItem(ANNOUNCED_KEY, version);
+    if (typeof sessionStorage !== "undefined") sessionStorage.setItem(ANNOUNCED_KEY, JSON.stringify([...versions]));
   } catch {
     // The module keeps it for this renderer; a reload will ask again, which is the lesser wrong.
   }
@@ -99,7 +105,7 @@ export function UpdateAnnouncement() {
   useEffect(() => {
     // The panel is read again at effect time: the retired /activity route opens it from the
     // panel's own effect, earlier in this same commit, and this render still saw it closed.
-    if (!arrived || version === announcedVersion() || activityPanelOpen()) return;
+    if (!arrived || announcedVersions().has(version) || activityPanelOpen()) return;
     markAnnounced(version);
     installing.current = false;
     setIntent(null);
@@ -107,8 +113,10 @@ export function UpdateAnnouncement() {
   }, [arrived, version]);
 
   // The dialog leaves with the update: armed for the close, being installed, gone, or up to date.
-  // And it leaves for the other sheet, which wins whatever opened it.
-  const visible = open && showable(update);
+  // And it leaves for the other sheet, which wins whatever opened it — in the same render, not
+  // the one after: the sheet's own cleanup hands focus back to whatever opened it, and a render
+  // later that would take it from the panel that had just taken it.
+  const visible = open && showable(update) && !covered;
   useEffect(() => {
     if (open && (!showable(update) || covered)) {
       setIntent(null);
