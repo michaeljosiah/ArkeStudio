@@ -3,6 +3,7 @@ import { devSession } from "./dev-session.js";
 import { useSyncExternalStore } from "react";
 import {
   FrameSchema,
+  type AccountPage,
   type AskCandidate,
   type AskResult,
   type BenchParams,
@@ -967,6 +968,8 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, update: event.update } };
     case "activity.seen":
       return { ...state, app: { ...state.app, activitySeen: event.seen } };
+    case "account.changed":
+      return { ...state, app: { ...state.app, account: event.account } };
     case "entity.changed":
       if (!state.world || state.world.meta.worldId !== event.worldId) return state;
       return { ...state, world: { ...state.world, changes: [...state.world.changes, event.change] } };
@@ -2788,6 +2791,31 @@ export function submitVendorKey(vendor: string, key: string, answers?: Record<st
 
 export function cancelVendorSignIn(): void {
   send({ kind: "cancel-vendor-sign-in" });
+}
+
+// ---- The Arke account (design turn 151) ------------------------------------
+
+/** A browser handoff, like vendor sign-in: nothing here waits on the browser or sees a password. */
+export function signInAccount(): void {
+  send({ kind: "account-sign-in" });
+}
+
+export function createAccount(): void {
+  send({ kind: "account-create" });
+}
+
+/** Takes back a handoff still waiting on the browser, or clears the refusal a rejected one left. */
+export function cancelAccountSignIn(): void {
+  send({ kind: "account-cancel-sign-in" });
+}
+
+export function signOutAccount(): void {
+  send({ kind: "account-sign-out" });
+}
+
+/** The doors that leave the app: the account's own pages, in the system browser. */
+export function openAccountPage(page: AccountPage): void {
+  send({ kind: "account-open", page });
 }
 
 export function removeVendorConnection(vendor: string, credential: string): void {

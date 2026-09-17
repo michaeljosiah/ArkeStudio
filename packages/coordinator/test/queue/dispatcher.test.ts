@@ -1946,7 +1946,11 @@ describe("retry classification (R-7, R-9, D5)", () => {
     // 34415278836, 34416898303), so the backoff is widened to dwarf the latency while the
     // 150 ms interval the siblings ride stays where it was; the gap they must fit inside is
     // widened with it, still a third of the backoff, so what is asserted does not change.
-    const h = await makeHarness({ fake }, { baseConcurrency: 1, baseIntervalMs: 150, backoffBaseMs: 6000, backoffCapMs: 6000, rng: () => 1 });
+    // At 6000/2000 a Windows runner took 2228 ms between the two siblings' submits — the
+    // retry still waited, so the claim held and only the gap's tolerance did not (CI run
+    // 35210484083, after a new test file moved this one to another shard); widened again at
+    // the same ratio, still well inside FOLD_MS.
+    const h = await makeHarness({ fake }, { baseConcurrency: 1, baseIntervalMs: 150, backoffBaseMs: 9000, backoffCapMs: 9000, rng: () => 1 });
     await h.queue.start();
     const first = await h.queue.enqueue(INPUT);
     await until(
@@ -1962,7 +1966,7 @@ describe("retry classification (R-7, R-9, D5)", () => {
     const [a, b, c] = fake.submittedKeys;
     assert.ok(b !== a && c !== a && c !== b, "the two siblings went out while the first job waited");
     const gap = fake.submitStartedAt[2]! - fake.submitStartedAt[1]!;
-    assert.ok(gap < 2000, `the third job went out ${gap} ms after the second; it rides the 150 ms interval, not the 6000 ms backoff`);
+    assert.ok(gap < 3000, `the third job went out ${gap} ms after the second; it rides the 150 ms interval, not the 9000 ms backoff`);
     await until(() => foldedJob(h, first.id)?.status === "succeeded", "the retry to succeed", FOLD_MS);
     h.queue.dispose();
   });

@@ -1,5 +1,6 @@
 import {
   IDLE_UPDATE_STATE,
+  SIGNED_OUT,
   vendorAuthUnavailable,
   type AppHealth,
   type ClientState,
@@ -41,6 +42,7 @@ export class ReadModel {
         spend: null,
         backgroundNotifications: "issues-only",
         activitySeen: { inboxSeenAt: null, whatsNewSeenVersion: null },
+        account: SIGNED_OUT,
         research: { web: false },
         narrator: null,
         appearance: { theme: "system" },
@@ -85,6 +87,7 @@ export class ReadModel {
         | "spend"
         | "backgroundNotifications"
         | "activitySeen"
+        | "account"
         | "research"
         | "appearance"
         | "narrator"
@@ -330,6 +333,10 @@ export class ReadModel {
       }
       case "activity.seen": {
         this.state = { ...this.state, app: { ...this.state.app, activitySeen: event.seen } };
+        return;
+      }
+      case "account.changed": {
+        this.state = { ...this.state, app: { ...this.state.app, account: event.account } };
         return;
       }
       case "narrator.changed": {

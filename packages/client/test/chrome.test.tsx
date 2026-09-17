@@ -82,7 +82,7 @@ describe("app chrome", () => {
       );
     });
 
-    it(`${screen.id} puts activity and settings on the right, in that order`, () => {
+    it(`${screen.id} puts activity, settings and the account on the right, in that order`, () => {
       const html = renderAt(screen.samplePath);
       if (WITHOUT_CHROME.has(screen.id)) {
         assert.ok(!html.includes("fy-titlebar__side--right"), `${screen.id} is a full-frame gate`);
@@ -90,7 +90,7 @@ describe("app chrome", () => {
       }
       if (WITHOUT_CONTROLS.has(screen.id)) {
         assert.ok(
-          !html.includes('aria-label="Settings"'),
+          !html.includes('aria-label="Settings"') && !html.includes('aria-label="Arke account"'),
           `${screen.id} is the exception and has no controls`,
         );
         return;
@@ -98,10 +98,13 @@ describe("app chrome", () => {
       const right = html.indexOf("fy-titlebar__side--right");
       const activity = html.indexOf('aria-label="Activity"');
       const settings = html.indexOf('aria-label="Settings"');
+      const account = html.indexOf('aria-label="Arke account"');
       assert.ok(right >= 0, "the right-hand side of the bar exists");
       assert.ok(activity > right, "activity sits inside it, not on the left as the world screens had it");
       assert.ok(settings > activity, "and settings follows activity — same order everywhere");
+      assert.ok(account > settings, "and the account comes last (design turn 151): the person, after the screen's controls");
       assert.equal(count(html, 'aria-label="Settings"'), 1, "one way to settings, not two");
+      assert.equal(count(html, 'aria-label="Arke account"'), 1, "one account control, and it never opens a page");
     });
 
     it(`${screen.id} puts proposals before activity, never between it and settings`, () => {

@@ -132,8 +132,14 @@ const readSection = (send: (message: ClientMessage) => Promise<void>, requestId:
   send({ kind: "read-sheet-section", requestId, worldId: WORLD_ID, sheetId: "maren-kest", sectionHeading: "Essence", ...(confirmationToken !== undefined ? { confirmationToken } : {}) });
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 300));
-/** Five pieces are five dispatches 200ms apart, each landing through the world's gate: a starved shard can take a while. */
-const PATIENCE = 20_000;
+/**
+ * Five pieces are five dispatches 200ms apart, each landing through the world's gate: a starved
+ * shard can take a while. At 20 s a windows-latest runner ran a page's six jobs to their end in
+ * 22 s while its siblings here took three times their usual (CI run 35212027965, after a new test
+ * file moved this suite to another shard); the wait is a ceiling on a hang, not a measure of
+ * speed, so it is tripled and stays far inside the job's own silence guard.
+ */
+const PATIENCE = 60_000;
 
 describe("a read over the reader's cap (issue 1208)", () => {
   it("splits at sentence ends on the row's cap; a block that fits, a row without one, and a flac reader's go whole", () => {

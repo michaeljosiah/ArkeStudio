@@ -270,7 +270,8 @@ export function Callout({
   );
 }
 
-export function Avatar({ name, image }: { name: string; image?: string }) {
+/** `onImageError` lets a caller fall back to the initials when the picture cannot be fetched. */
+export function Avatar({ name, image, onImageError }: { name: string; image?: string; onImageError?: () => void }) {
   const short = name
     .split(/\s+/)
     .filter(Boolean)
@@ -278,7 +279,7 @@ export function Avatar({ name, image }: { name: string; image?: string }) {
     .map((w) => w[0]!.toUpperCase())
     .join("");
   return image ? (
-    <img className="ui-avatar" src={image} alt={name} />
+    <img className="ui-avatar" src={image} alt={name} onError={onImageError} />
   ) : (
     <span className="ui-avatar ui-avatar--initials" aria-hidden>
       {short}
