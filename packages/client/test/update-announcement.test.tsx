@@ -1,0 +1,264 @@
+import assert from "node:assert/strict";
+import { afterEach, describe, it } from "node:test";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { MemoryRouter } from "react-router";
+import { parseHTML } from "linkedom";
+import type { ClientMessage, ClientState, UpdateState } from "@arke-studio/contracts";
+import { UpdateAnnouncement, __resetUpdateAnnouncementForTest } from "../src/components/update-announcement.js";
+import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { FIXTURE_STATE } from "./fixture-state.js";
+
+/**
+ * The update announced at launch (design turn 151; SPEC-016 R-20): a dialog over the first
+ * screen with chrome, once per version per run, with the release's notes and two ways to take
+ * it. What this file holds to: where it opens and where it does not, that it opens once, what
+ * each press sends, that closing it drops the intent and keeps the download, and that it leaves
+ * with the update.
+ */
+
+const dom = parseHTML("<!doctype html><html><body></body></html>");
+Object.assign(globalThis, {
+  window: dom.window,
+  document: dom.document,
+  HTMLElement: dom.HTMLElement,
+  Node: dom.Node,
+  Element: dom.Element,
+  Event: dom.Event,
+  IS_REACT_ACT_ENVIRONMENT: true,
+});
+
+const NOTES = "The Cut plays its own audio back.\n\nA second paragraph, about the lanes.";
+
+function update(overrides: Partial<UpdateState>): UpdateState {
+  return {
+    status: "available",
+    targetVersion: "0.5.50",
+    progressPercent: null,
+    flow: null,
+    detail: null,
+    releaseName: "v0.5.50 — the cut hears itself",
+    releaseNotes: NOTES,
+    ...overrides,
+  };
+}
+
+function withUpdate(value: UpdateState): ClientState {
+  const state = structuredClone(FIXTURE_STATE);
+  state.app.update = value;
+  return state;
+}
+
+const open: Array<{ root: Root; container: HTMLElement }> = [];
+async function unmountAll(): Promise<void> {
+  for (const mounted of open.splice(0)) {
+    await act(async () => mounted.root.unmount());
+    mounted.container.remove();
+  }
+}
+afterEach(async () => {
+  await unmountAll();
+  __setBridgeForTest(null);
+  __setStateForTest(FIXTURE_STATE);
+  __resetUpdateAnnouncementForTest();
+});
+
+function capture(): ClientMessage[] {
+  const sent: ClientMessage[] = [];
+  __setBridgeForTest({
+    appVersion: "test",
+    platform: "test",
+    connect() {},
+    subscribe() {},
+    send(json: string) {
+      sent.push(JSON.parse(json));
+    },
+  });
+  return sent;
+}
+
+async function mount(path: string, value: UpdateState): Promise<HTMLElement> {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  open.push({ root, container });
+  await act(async () => {
+    __setStateForTest(withUpdate(value));
+    root.render(
+      <MemoryRouter initialEntries={[path]}>
+        <UpdateAnnouncement />
+      </MemoryRouter>,
+    );
+  });
+  return container;
+}
+
+/** The update state moves on under the mounted dialog, as a frame from the desktop would move it. */
+async function becomes(value: UpdateState): Promise<void> {
+  await act(async () => __setStateForTest(withUpdate(value)));
+}
+
+const dialog = (container: HTMLElement): HTMLElement | null => container.querySelector('[role="dialog"]');
+const text = (container: HTMLElement): string => (container.textContent ?? "").replace(/\s+/g, " ");
+function button(container: HTMLElement, label: string): HTMLButtonElement {
+  const found = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+    (el) => el.textContent?.trim() === label || el.getAttribute("aria-label") === label,
+  );
+  assert.ok(found, `a button reading ${label}`);
+  return found;
+}
+async function press(container: HTMLElement, label: string): Promise<void> {
+  await act(async () => button(container, label).click());
+}
+
+describe("the update announced at launch (design turn 151)", () => {
+  it("opens over the world picker with the mark, the version and name, the notes and two ways to take it", async () => {
+    const container = await mount("/worlds", update({}));
+    const sheet = dialog(container);
+    assert.ok(sheet, "the dialog is up");
+    assert.equal(sheet.getAttribute("aria-labelledby"), "fy-upd-title");
+    const shown = text(container);
+    assert.ok(shown.includes("Update available"));
+    assert.ok(shown.includes("v0.5.50 · the cut hears itself"), "the version and the release's name as one line, the version not said twice");
+    assert.ok(shown.includes("What's new"), "the eyebrow over the notes");
+    assert.equal(container.querySelectorAll(".fy-upd__pane p").length, 2, "the notes as paragraphs");
+    assert.ok(container.querySelector('img[src="./marks/arke.ico"]'), "the app's own mark");
+    button(container, "Update now");
+    button(container, "Next start");
+    button(container, "Close");
+    assert.ok(shown.indexOf("Update now") < shown.indexOf("Next start"), "Update now leads");
+  });
+
+  it("does not open over the launch plate, the starting screen or the founding build", async () => {
+    for (const path of ["/", "/starting", "/building/w_01"]) {
+      const container = await mount(path, update({}));
+      assert.equal(dialog(container), null, `nothing over ${path}`);
+      await unmountAll();
+    }
+    // The same version, once the app is on a screen with chrome, is still unannounced.
+    const container = await mount("/worlds", update({}));
+    assert.ok(dialog(container), "announced on arrival");
+  });
+
+  it("announces a version once per run: closed, it stays closed; a newer version opens again", async () => {
+    const first = await mount("/worlds", update({}));
+    await press(first, "Close");
+    assert.equal(dialog(first), null);
+    // The app mounts one announcement; a second window would be a second run of this module.
+    await unmountAll();
+    const again = await mount("/worlds", update({}));
+    assert.equal(dialog(again), null, "the same version is not announced twice");
+    await unmountAll();
+    const newer = await mount("/worlds", update({ targetVersion: "0.5.51" }));
+    assert.ok(dialog(newer), "a version this run has not seen is announced");
+  });
+
+  it("keeps the pane out with the eyebrow when the release carries no notes", async () => {
+    const container = await mount("/worlds", update({ releaseNotes: null, releaseName: null }));
+    const shown = text(container);
+    assert.ok(shown.includes("v0.5.50"));
+    assert.ok(!shown.includes("What's new"));
+    assert.equal(container.querySelector(".fy-upd__pane"), null);
+  });
+
+  it("Update now downloads, shows the download in the primary's place, and installs when it lands", async () => {
+    const sent = capture();
+    const container = await mount("/worlds", update({}));
+    await press(container, "Update now");
+    assert.deepEqual(sent.map((m) => m.kind), ["download-update"]);
+
+    await becomes(update({ status: "downloading", progressPercent: 42.4 }));
+    assert.ok(text(container).includes("Downloading · 42%"), "the figure over the bar");
+    assert.equal(container.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow"), "42");
+    assert.equal([...container.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Update now"), false, "the primary gave its place to the download");
+    button(container, "Next start");
+
+    await becomes(update({ status: "ready", progressPercent: 100 }));
+    assert.deepEqual(sent.map((m) => m.kind), ["download-update", "install-update-and-restart"], "the dialog held the intent and pressed Install and restart itself");
+    // The same frame again, as a re-render would deliver it: no second press.
+    await becomes(update({ status: "ready", progressPercent: 100 }));
+    assert.equal(sent.filter((m) => m.kind === "install-update-and-restart").length, 1);
+
+    await becomes(update({ status: "shutting-down", flow: "restart", progressPercent: 100 }));
+    assert.equal(dialog(container), null, "the finishing-local-work surface takes over");
+  });
+
+  it("closing during the download drops the intent and keeps the download", async () => {
+    const sent = capture();
+    const container = await mount("/worlds", update({}));
+    await press(container, "Update now");
+    await becomes(update({ status: "downloading", progressPercent: 10 }));
+    await press(container, "Close");
+    assert.equal(dialog(container), null);
+    await becomes(update({ status: "ready", progressPercent: 100 }));
+    assert.deepEqual(sent.map((m) => m.kind), ["download-update"], "nothing installs and nothing restarts once the dialog is gone");
+    assert.equal(dialog(container), null, "and the dialog does not come back for the download it started");
+  });
+
+  it("Escape closes it the same way", async () => {
+    const sent = capture();
+    const container = await mount("/worlds", update({}));
+    await press(container, "Update now");
+    const escape = new dom.window.Event("keydown", { bubbles: true, cancelable: true });
+    Object.defineProperty(escape, "key", { value: "Escape" });
+    await act(async () => { dom.window.dispatchEvent(escape); });
+    assert.equal(dialog(container), null);
+    await becomes(update({ status: "ready", progressPercent: 100 }));
+    assert.deepEqual(sent.map((m) => m.kind), ["download-update"]);
+  });
+
+  it("Next start hands the update to the on-close flow and closes", async () => {
+    const sent = capture();
+    const container = await mount("/worlds", update({}));
+    await press(container, "Next start");
+    assert.deepEqual(sent.map((m) => m.kind), ["install-update-on-close"]);
+    assert.equal(dialog(container), null);
+  });
+
+  it("Next start while Update now's download runs takes over the intent", async () => {
+    const sent = capture();
+    const container = await mount("/worlds", update({}));
+    await press(container, "Update now");
+    await becomes(update({ status: "downloading", progressPercent: 30 }));
+    await press(container, "Next start");
+    assert.deepEqual(sent.map((m) => m.kind), ["download-update", "install-update-on-close"]);
+    assert.equal(dialog(container), null);
+    await becomes(update({ status: "ready", progressPercent: 100 }));
+    assert.equal(sent.some((m) => m.kind === "install-update-and-restart"), false, "the intent to restart went with the press");
+  });
+
+  it("Update now on an update already downloaded installs and restarts at once", async () => {
+    const sent = capture();
+    const container = await mount("/worlds", update({}));
+    await becomes(update({ status: "ready", progressPercent: 100 }));
+    await press(container, "Update now");
+    assert.deepEqual(sent.map((m) => m.kind), ["install-update-and-restart"]);
+  });
+
+  it("a failed download keeps the dialog: one clause, Try again, Next start", async () => {
+    const sent = capture();
+    const container = await mount("/worlds", update({}));
+    await press(container, "Update now");
+    await becomes(update({ status: "error", detail: "The update download failed. Check your connection and try again." }));
+    assert.ok(dialog(container), "the dialog stays");
+    const shown = text(container);
+    assert.ok(shown.includes("The download failed."), "one clause");
+    assert.ok(!shown.includes("Check your connection"), "and not the controller's sentence");
+    button(container, "Next start");
+    await press(container, "Try again");
+    assert.deepEqual(sent.map((m) => m.kind), ["download-update", "download-update"]);
+    await becomes(update({ status: "ready", progressPercent: 100 }));
+    assert.deepEqual(sent.map((m) => m.kind), ["download-update", "download-update", "install-update-and-restart"], "Try again is Update now");
+  });
+
+  it("leaves with the update: armed for the close, or gone", async () => {
+    const container = await mount("/worlds", update({}));
+    await becomes(update({ status: "install-on-close", flow: "on-close" }));
+    assert.equal(dialog(container), null);
+    await unmountAll();
+    const other = await mount("/worlds", update({ targetVersion: "0.5.51" }));
+    assert.ok(dialog(other));
+    await becomes(update({ status: "none", targetVersion: null, releaseName: null, releaseNotes: null }));
+    assert.equal(dialog(other), null);
+  });
+});

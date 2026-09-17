@@ -19,6 +19,11 @@ export const UpdateStateSchema = z
     ]),
     targetVersion: z.string().min(1).nullable(),
     progressPercent: z.number().min(0).max(100).nullable(),
+    /**
+     * How the install will happen. `on-close` is published from the press on when "Next start"
+     * is taken before the download exists (design turn 151), so a download can say what it is
+     * for; `restart` is set only once the install-and-restart is under way.
+     */
     flow: z.enum(["restart", "on-close"]).nullable(),
     detail: z.string().nullable(),
     /**

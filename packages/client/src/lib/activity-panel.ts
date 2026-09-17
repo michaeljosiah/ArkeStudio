@@ -34,6 +34,20 @@ export function waitingUpdate(update: UpdateState | null | undefined): UpdateSta
   return update && update.targetVersion && WAITING_UPDATE.has(update.status) ? update : null;
 }
 
+/** A release name often repeats the version it names; the card and the announcement already say the version. */
+export function releaseNameOf(update: UpdateState): string | null {
+  const name = update.releaseName?.replace(/^v?\d+(?:\.\d+)*(?:-[0-9A-Za-z.-]+)?\s*[—–\-·:]*\s*/, "").trim() ?? "";
+  return name.length > 0 ? name : null;
+}
+
+/** The waiting update's notes as paragraphs — the plain text the updater carries (SPEC-016 R-19), split as a release card is. */
+export function updateParagraphs(update: UpdateState): string[] {
+  return (update.releaseNotes ?? "")
+    .split(/\n\s*\n/)
+    .map((paragraph) => paragraph.replace(/\s*\n\s*/g, " ").trim())
+    .filter((paragraph) => paragraph.length > 0);
+}
+
 const CLOSED: ActivityPanelState = { open: false, tab: "inbox", calls: undefined };
 let state: ActivityPanelState = CLOSED;
 const listeners = new Set<() => void>();

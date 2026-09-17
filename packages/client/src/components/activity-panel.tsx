@@ -29,8 +29,10 @@ import {
   inspectProviderCalls,
   leaveProviderCalls,
   openActivityPanel,
+  releaseNameOf,
   showActivityTab,
   takeArrival,
+  updateParagraphs,
   useActivityPanel,
   waitingUpdate,
   type ActivityPanelState,
@@ -626,19 +628,10 @@ function WhatsNew({ releases, update }: { releases: ReleaseCard[]; update: Updat
   );
 }
 
-/** A release name often repeats the version it names; the card already says the version. */
-function releaseNameOf(update: UpdateState): string | null {
-  const name = update.releaseName?.replace(/^v?\d+(?:\.\d+)*(?:-[0-9A-Za-z.-]+)?\s*[—–\-·:]*\s*/, "").trim() ?? "";
-  return name.length > 0 ? name : null;
-}
-
 function UpdateCard({ update }: { update: UpdateState }) {
   const [all, setAll] = useState(false);
   const name = releaseNameOf(update);
-  const paragraphs = (update.releaseNotes ?? "")
-    .split(/\n\s*\n/)
-    .map((paragraph) => paragraph.replace(/\s*\n\s*/g, " ").trim())
-    .filter((paragraph) => paragraph.length > 0);
+  const paragraphs = updateParagraphs(update);
   const line =
     update.status === "downloading"
       ? `downloading${update.progressPercent !== null ? ` · ${Math.round(update.progressPercent)}%` : ""}`

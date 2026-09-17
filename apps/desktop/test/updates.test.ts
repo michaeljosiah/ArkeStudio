@@ -173,6 +173,73 @@ describe("desktop update controller", () => {
     assert.deepEqual(marker.value, { targetVersion: "1.1.0", flow: "on-close" });
   });
 
+  it("takes Next start before the download exists: downloads, then arms when it lands (design turn 151)", async () => {
+    const { controller, updater, marker, states } = setup();
+    updater.checkResult = { isUpdateAvailable: true, updateInfo: { version: "1.1.0" } };
+    await controller.check();
+    assert.equal(states.at(-1)?.status, "available");
+
+    await controller.installOnClose();
+    const seen = states.map((state) => `${state.status}/${state.flow}`);
+    // The download is announced as the on-close flow from the press on, so What's new can say
+    // what it is for; the install is armed only once the download has landed.
+    assert.ok(seen.includes("downloading/on-close"), seen.join(" "));
+    assert.equal(states.at(-1)?.status, "install-on-close");
+    assert.equal(controller.isInstallOnCloseArmed(), true);
+    assert.equal(updater.autoInstallOnAppQuit, false);
+
+    assert.equal(await controller.prepareInstallOnClose(), true);
+    assert.deepEqual(updater.quitCalls, [[true, false]]);
+    assert.deepEqual(marker.value, { targetVersion: "1.1.0", flow: "on-close" });
+  });
+
+  it("takes Next start while a download already runs, and arms when that download lands", async () => {
+    let finishDownload!: () => void;
+    const { controller, updater, states } = setup();
+    updater.downloadUpdate = () => new Promise<void>((resolve) => { finishDownload = resolve; });
+    updater.emit("update-available", { version: "1.1.0" });
+    const download = controller.download();
+    assert.equal(states.at(-1)?.status, "downloading");
+
+    const armed = controller.installOnClose();
+    assert.equal(states.at(-1)?.flow, "on-close");
+    assert.equal(controller.isInstallOnCloseArmed(), false, "nothing is armed before the download lands");
+    finishDownload();
+    await Promise.all([download, armed]);
+    assert.equal(states.at(-1)?.status, "install-on-close");
+    assert.equal(controller.isInstallOnCloseArmed(), true);
+  });
+
+  it("drops the Next start intent when the download fails, and a later download is only ready", async () => {
+    const { controller, updater, states } = setup();
+    updater.downloadUpdate = () => Promise.reject(new Error("offline"));
+    updater.emit("update-available", { version: "1.1.0" });
+    await controller.installOnClose();
+    assert.equal(states.at(-1)?.status, "error");
+    assert.equal(states.at(-1)?.flow, null);
+    assert.equal(controller.isInstallOnCloseArmed(), false);
+
+    updater.downloadUpdate = async () => {};
+    await controller.download();
+    assert.equal(states.at(-1)?.status, "ready", "the intent died with the failure; nothing arms on its own");
+    assert.equal(controller.isInstallOnCloseArmed(), false);
+  });
+
+  it("drops the Next start intent on a fresh check", async () => {
+    let finishDownload!: () => void;
+    const { controller, updater, states } = setup();
+    updater.downloadUpdate = () => new Promise<void>((resolve) => { finishDownload = resolve; });
+    updater.checkResult = { isUpdateAvailable: true, updateInfo: { version: "1.1.0" } };
+    await controller.check();
+    const armed = controller.installOnClose();
+    await controller.check();
+    finishDownload();
+    updater.emit("update-downloaded", { version: "1.1.0" });
+    await armed;
+    assert.equal(states.at(-1)?.status, "ready");
+    assert.equal(controller.isInstallOnCloseArmed(), false);
+  });
+
   it("confirms only a matching installed version and clears the marker", async () => {
     const matching = setup({ marker: memoryMarker({ targetVersion: "1.0.0", flow: "restart" }) });
     await matching.controller.initialize();
