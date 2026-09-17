@@ -66,6 +66,32 @@ export interface SendReceipt {
   correlationId: string;
 }
 
+/** SPEC-045: an adapter may expose these only after its native protocol has been verified. */
+export interface NativeInputTarget {
+  sessionId: string;
+  executionId: string;
+}
+
+export type NativeInputStatus =
+  | { status: "accepted" }
+  | { status: "included"; boundary: string }
+  | { status: "not-delivered" }
+  | { status: "unknown" };
+
+export interface NativeInputControls {
+  /** No active target during repair, compaction, finalization or an unconfirmed interruption. */
+  activeTarget(sessionId: string, signal: AbortSignal): Promise<NativeInputTarget | null>;
+  /**
+   * Atomically compare the expected execution at admission. Success must not start an idle
+   * successor. `accepted` means transport admission only, never model-input inclusion.
+   */
+  steer(input: { target: NativeInputTarget; inputId: string; parts: MessagePart[]; signal: AbortSignal }): Promise<NativeInputStatus>;
+  /** Read-only, bounded reconciliation under the original identity; must never resend. */
+  inputStatus(input: { target: NativeInputTarget; inputId: string; signal: AbortSignal }): Promise<NativeInputStatus>;
+  /** Confirm the exact execution is settled, not merely that an interrupt endpoint answered. */
+  interrupt(input: { target: NativeInputTarget; signal: AbortSignal }): Promise<"confirmed" | "unconfirmed">;
+}
+
 /** Whether the adapter is ready to serve, with a stated reason when it is not. */
 export interface Readiness {
   ready: boolean;
@@ -247,6 +273,8 @@ export type VendorOAuthAttemptState =
 export interface HarnessAdapter {
   /** Stable identifier, e.g. "opencode" | "mock". */
   readonly id: string;
+  /** Absent means coordinator queue fallback. Ordinary dispatch is never a steering substitute. */
+  readonly nativeInput?: NativeInputControls;
   /** What this adapter supports; determined by probing the live server at init, not hard-coded. */
   capabilities(): ReadonlySet<HarnessCapability>;
 
@@ -299,7 +327,6 @@ export interface HarnessAdapter {
   sendMessage(input: SendMessageInput): Promise<SendReceipt>;
   /** Fire-and-watch: must not block while the turn runs. */
   dispatchAsync(input: SendMessageInput): Promise<SendReceipt>;
-  interrupt?(sessionId: string): Promise<void>;
   usageTokens?(sessionId: string): number;
 
   // ---- gated ----

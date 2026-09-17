@@ -18,6 +18,8 @@ import {
   type WorldChatMessage,
   type WorldChatLoaded,
   type WorldChatRun,
+  type WorldChatInputRecord,
+  type WorldChatInputRouting,
 } from "@arke-studio/contracts";
 import type { ModelEditorRequest, ModelSceneEdit, WorldChatContext, WorldChatSubject } from "@arke-studio/contracts";
 import { mergeAttachmentRanges, type AttachmentRange } from "./attachments.js";
@@ -33,6 +35,7 @@ import { correctiveMessage, validateTurnResult, type TurnProblem } from "./turn-
 import type { EvidenceSources } from "./evidence.js";
 import { foldConversation } from "./fold.js";
 import { WorldChatStore } from "./store.js";
+import { WorldChatInputJournal, WorldChatInputError } from "./input-journal.js";
 import type { PreparedWorldChatAction, WorldChatActionTurn } from "./actions.js";
 import { refreshConversationSummary, type ConversationSummariser } from "./summarisation.js";
 import { describeCoordinatorError } from "../errors/user-message.js";
@@ -310,6 +313,13 @@ async function askOnce(
   return finalText;
 }
 
+interface QueuedTurn {
+  journal: WorldChatInputJournal;
+  input: WorldChatInputRecord;
+  revision: number;
+  routing: WorldChatInputRouting;
+}
+
 export class WorldChatRunner {
   private readonly cancelling = new Map<string, AbortController>();
 
@@ -371,6 +381,24 @@ export class WorldChatRunner {
     return this.runTurn(store, conversationId, text, attachmentIds, undefined, subject, modelId, replyOnly);
   }
 
+  /** A queued primary turn keeps its admitted identity; promotion is its only start event. */
+  async sendQueued(journal: WorldChatInputJournal, messageId: MessageId,
+    expectedRevision: number, routing: WorldChatInputRouting): Promise<TurnOutcome> {
+    const capturedRouting = structuredClone(routing);
+    return this.runExclusive(journal.conversationId, async controller => {
+      const queue = await journal.read();
+      const row = queue.inputs.find(one => one.input.messageId === messageId);
+      if (!row || queue.revision !== expectedRevision) {
+        return { status: "unavailable", reason: "The queued messages changed. Look again before continuing." };
+      }
+      if (controller.signal.aborted) return { status: "cancelled" };
+      const queued: QueuedTurn = { journal, input: row.input, revision: expectedRevision, routing: capturedRouting };
+      return this.runRegisteredTurn(controller, journal.log, journal.conversationId, row.input.request.text,
+        row.input.request.attachmentIds, undefined, row.input.constraints.subject,
+        capturedRouting.modelId ?? undefined, row.input.constraints.replyOnly, queued);
+    });
+  }
+
   /**
    * Run a turn that already exists again, after it failed (§10.1.1).
    *
@@ -379,9 +407,15 @@ export class WorldChatRunner {
    * are read back out of the log and asked again under a fresh run on the same turn.
    */
   async retry(store: WorldChatStore, conversationId: ConversationId, turnId: TurnId): Promise<TurnOutcome> {
-    const { events } = await store.read();
+    const { events, problems } = await store.read();
     const meta = await store.readMeta();
-    const view = foldConversation(conversationId, meta?.createdAt ?? this.deps.now(), events).view;
+    const folded = foldConversation(conversationId, meta?.createdAt ?? this.deps.now(), events);
+    // A rejected promotion may still contain plausible run/constraint metadata. Never recover
+    // authority from damaged history, even when the original message remains readable.
+    if ([...problems, ...folded.problems].some(one => one.kind !== "torn-tail")) {
+      return { status: "failed", reason: "This conversation's history needs repair before retrying." };
+    }
+    const view = folded.view;
     const original = view.messages.find((m) => m.turnId === turnId && m.role === "user");
     if (!original) return { status: "failed", reason: "that turn is not in this conversation" };
     if (view.messages.some((m) => m.turnId === turnId && m.role === "studio")) {
@@ -397,7 +431,8 @@ export class WorldChatRunner {
     // first carried them.
     const constraints = [...events]
       .reverse()
-      .map(({ event }) => (event.type === "turn.constraints" ? event.constraints : undefined))
+      .map(({ event }) => (event.type === "turn.constraints" ? event.constraints :
+        event.type === "input.promoted" ? { turnId: event.turnId, ...event.constraints } : undefined))
       .find((held) => held?.turnId === turnId);
     return this.runTurn(store, conversationId, original.text, original.attachmentIds, turnId, constraints?.subject, previousModel, constraints?.replyOnly === true);
   }
@@ -416,6 +451,12 @@ export class WorldChatRunner {
     modelId?: string,
     replyOnly = false,
   ): Promise<TurnOutcome> {
+    return this.runExclusive(conversationId, controller => this.runRegisteredTurn(controller, store,
+      conversationId, text, attachmentIds, existingTurnId, subject, modelId, replyOnly));
+  }
+
+  private async runExclusive(conversationId: ConversationId,
+    work: (controller: AbortController) => Promise<TurnOutcome>): Promise<TurnOutcome> {
     const adapter = this.deps.adapter;
     if (this.deps.closingSignal?.aborted) {
       return { status: "unavailable", reason: "This world closed. Reopen the conversation to continue." };
@@ -433,7 +474,7 @@ export class WorldChatRunner {
     const controller = new AbortController();
     this.cancelling.set(conversationId, controller);
     try {
-      return await this.runRegisteredTurn(controller, store, conversationId, text, attachmentIds, existingTurnId, subject, modelId, replyOnly);
+      return await work(controller);
     } finally {
       // Include preflight reads and model selection: their failures must release the same slot
       // as a model failure, or the overlap guard would lock this conversation indefinitely.
@@ -451,18 +492,19 @@ export class WorldChatRunner {
     subject: WorldChatSubject | undefined,
     modelId: string | undefined,
     replyOnly: boolean,
+    queued?: QueuedTurn,
   ): Promise<TurnOutcome> {
     const adapter = this.deps.adapter!;
     const at = this.deps.now();
     const turnId = existingTurnId ?? (newId("turn") as TurnId);
     const runId = newId("run") as RunId;
     const message: WorldChatMessage = {
-      id: newId("msg") as MessageId,
+      id: queued?.input.messageId ?? newId("msg") as MessageId,
       turnId,
       role: "user",
       text,
       attachmentIds: [...attachmentIds] as WorldChatMessage["attachmentIds"],
-      createdAt: at,
+      createdAt: queued?.input.createdAt ?? at,
     };
 
     /**
@@ -578,7 +620,7 @@ export class WorldChatRunner {
     // before them, the worst a crash leaves is a constraint with no turn, which nothing reads.
     // A chapter subject also survives retry: its drafting brief must name the same chapter.
     // Other selections only colour the narration and are not written.
-    const constrained = !existingTurnId && (replyOnly || subject?.kind === "passage" || subject?.kind === "chapter");
+    const constrained = !queued && !existingTurnId && (replyOnly || subject?.kind === "passage" || subject?.kind === "chapter");
     if (constrained) {
       await this.deps.raiseSchemaBoundary?.(subject?.kind === "chapter" ? 17 : TURN_CONSTRAINTS_SCHEMA_VERSION);
       await store.append(
@@ -591,10 +633,24 @@ export class WorldChatRunner {
     if (this.deps.closingSignal?.aborted) {
       return { status: "unavailable", reason: "The world closed before this message could be sent. Reopen the conversation to continue." };
     }
-    await store.append(
-      existingTurnId ? { type: "run.retry-started", run } : { type: "turn.started", message, run },
-      { at },
-    );
+    if (queued) {
+      // Admission may have changed while context was assembled. The journal compares both
+      // queue revision and full log position before atomically recording message/constraints/run.
+      // A refused or uncertain append must never reach preparation or createSession.
+      if (controller.signal.aborted) return { status: "cancelled" };
+      if (modelChoice.reason !== undefined) return { status: "unavailable", reason: modelChoice.reason };
+      try {
+        await queued.journal.promote(queued.input.messageId, queued.revision, run, queued.routing, runId);
+      } catch (error) {
+        if (error instanceof WorldChatInputError) return { status: "unavailable", reason: error.message };
+        throw error;
+      }
+    } else {
+      await store.append(
+        existingTurnId ? { type: "run.retry-started", run } : { type: "turn.started", message, run },
+        { at },
+      );
+    }
     if (controller.signal.aborted) {
       await this.finish(store, run, controller.signal.reason === "world-closed" ? "interrupted" : "cancelled", "cancelled before the studio was asked");
       return { status: "cancelled" };
