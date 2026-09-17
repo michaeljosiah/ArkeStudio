@@ -1,4 +1,5 @@
 import { valueSchema } from "./value-schema.js";
+import { AccountPageSchema } from "./account.js";
 import { StageReferenceFrameSchema } from "./scene.js";
 import { isManuscriptLanguage } from "./manuscript.js";
 import { AudiobookDirectionInputSchema, AudiobookReadingSchema } from "./audiobook.js";
@@ -1275,6 +1276,17 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("mark-inbox-seen") }).strict(),
   /** What's new was read up to this bundled release (SPEC-014 R-25). */
   z.object({ kind: z.literal("mark-whats-new-seen"), version: z.string().min(1) }).strict(),
+  /**
+   * The Arke account (design turn 151). Sign-in and creation are a browser handoff, as vendor
+   * sign-in is; the app never carries a password. Cancel takes back a handoff still waiting on
+   * the browser, or clears the refusal a rejected one left. Open puts one of the account's own
+   * pages in the system browser — the app draws no billing and no profile form.
+   */
+  z.object({ kind: z.literal("account-sign-in") }).strict(),
+  z.object({ kind: z.literal("account-create") }).strict(),
+  z.object({ kind: z.literal("account-cancel-sign-in") }).strict(),
+  z.object({ kind: z.literal("account-sign-out") }).strict(),
+  z.object({ kind: z.literal("account-open"), page: AccountPageSchema }).strict(),
   z
     .object({
       kind: z.literal("set-appearance-theme"),

@@ -124,6 +124,7 @@ const state: ClientState = {
     },
     backgroundNotifications: "issues-only",
     activitySeen: { inboxSeenAt: null, whatsNewSeenVersion: null },
+    account: { kind: "signed-out", refusal: null },
     research: { web: false },
 
     narrator: null,

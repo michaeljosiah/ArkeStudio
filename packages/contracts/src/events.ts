@@ -1,4 +1,5 @@
 import { StageConstructionDraftSchema } from "./stage-construction.js";
+import { AccountStateSchema } from "./account.js";
 import { MasterAudioReviewSchema, PreparedPerformanceAudioReviewSchema } from "./audio-reference.js";
 import { PromptReviewSchema } from "./prompt-review.js";
 import { TableReadPlanSchema } from "./rehearsal.js";
@@ -1570,6 +1571,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .strict(),
   /** What Activity's panel remembers, after either mark (SPEC-014 R-25). */
   z.object({ ...base, type: z.literal("activity.seen"), seen: ActivitySeenSchema }).strict(),
+  /** The Arke account moved: a handoff begun, come back or refused, a sign-out (design turn 151). */
+  z.object({ ...base, type: z.literal("account.changed"), account: AccountStateSchema }).strict(),
   z
     .object({
       ...base,

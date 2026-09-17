@@ -27,6 +27,7 @@ import { ComfyUiStatusSchema } from "./comfyui.js";
 import { FoundingBuildStateSchema } from "./founding-build.js";
 import { FrameRunStateSchema } from "./frame-run.js";
 import { HealthStatusSchema } from "./events.js";
+import { AccountStateSchema, SIGNED_OUT } from "./account.js";
 import { GenesisIdSchema, IsoDateTimeSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { JobSchema, LedgerEntrySchema, QueueStatusSchema } from "./job.js";
 import { ModelManifestSchema } from "./manifest.js";
@@ -486,6 +487,11 @@ export const ClientStateSchema = valueSchema(z
         backgroundNotifications: BackgroundNotificationPreferenceSchema.default("issues-only"),
         /** What Activity's panel remembers (SPEC-014 R-25); the bell's foreground dot reads it. */
         activitySeen: ActivitySeenSchema.default(NOTHING_SEEN),
+        /**
+         * The Arke account (design turn 151). Signed out until there is a cloud to sign in to;
+         * defaulted so payloads from before the field parse, and read as signed out.
+         */
+        account: AccountStateSchema.default(SIGNED_OUT),
         /** Whether the Studio may read a page online when a conversation asks it to (SPEC-005 R-10). */
         research: z.object({ web: z.boolean() }).strict().default({ web: false }),
         appearance: AppearanceSettingsSchema.default({ theme: "system" }),
