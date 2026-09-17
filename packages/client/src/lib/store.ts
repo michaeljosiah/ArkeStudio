@@ -4536,20 +4536,25 @@ export function useArtifactNotices(): Array<{
 
 // ---- SPEC-016: first run, updates, diagnostics -----------------------------
 
-export function checkUpdates(): void {
-  send({ kind: "check-updates" });
+export function checkUpdates(): boolean {
+  return send({ kind: "check-updates" });
 }
 
-export function downloadUpdate(): void {
-  send({ kind: "download-update" });
+/**
+ * The update commands say whether they left: `send` drops a frame while the connection is not
+ * open, and the launch announcement (design turn 152) must not close on a press that went
+ * nowhere — the version would be marked announced and the download never asked for.
+ */
+export function downloadUpdate(): boolean {
+  return send({ kind: "download-update" });
 }
 
-export function installUpdateAndRestart(): void {
-  send({ kind: "install-update-and-restart" });
+export function installUpdateAndRestart(): boolean {
+  return send({ kind: "install-update-and-restart" });
 }
 
-export function installUpdateOnClose(): void {
-  send({ kind: "install-update-on-close" });
+export function installUpdateOnClose(): boolean {
+  return send({ kind: "install-update-on-close" });
 }
 
 export function acknowledgeUpdate(): void {

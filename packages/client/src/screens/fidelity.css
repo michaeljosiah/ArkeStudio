@@ -6215,6 +6215,9 @@ select.fy-set__pill { padding-right: 26px; }
 /* A control at a row's right edge hangs its tip from its own end: centred, the tip's box would
    run past the column and give it a scrollbar for a tip nobody is hovering. */
 .fy-tip--end::after { left: auto; right: 0; transform: none; }
+/* A control at the foot of a sheet hangs its tip above itself: the panel clips at its own edge,
+   and a bubble below the last button would be cut mid-sentence (design turn 152's Next start). */
+.fy-tip--up::after { top: auto; bottom: calc(100% + 6px); }
 .fy-timeline__toolbar button:disabled { cursor: default; }
 .fy-timeline__refusal { padding: 6px 10px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--destructive) 7%, var(--background)); color: var(--destructive); font: 500 9px/1.4 var(--font-mono); }
 /* ---- The Picture track as an editable sequence (SPEC-037 R-19..R-23, issue 679) ------------

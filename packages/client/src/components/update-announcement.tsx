@@ -5,7 +5,8 @@ import { EditorDialog } from "./editor-dialog.js";
 import { ChevronDown, X } from "./icons.js";
 import { Button, IconButton } from "./ui.js";
 import { activityPanelOpen, releaseNameOf, updateParagraphs, useActivityPanel } from "../lib/activity-panel.js";
-import { downloadUpdate, installUpdateAndRestart, installUpdateOnClose, useUpdateStatus } from "../lib/store.js";
+import { isSettingsPath } from "../lib/settings-return.js";
+import { downloadUpdate, installUpdateAndRestart, installUpdateOnClose, useStore, useUpdateStatus } from "../lib/store.js";
 
 /**
  * The update announced at launch (design turn 152; SPEC-016 R-20).
@@ -20,17 +21,49 @@ import { downloadUpdate, installUpdateAndRestart, installUpdateOnClose, useUpdat
  * it stays closed for that version until the next launch; What's new carries the same update
  * meanwhile.
  *
- * It never stacks with the Activity panel (the turn's rule; Codex on PR 1218): the panel sits
- * above the sheet and would swallow its Escape. An update that arrives while the panel is open
- * waits for the panel to close; a panel opened over the dialog — a notification's click, a
- * receipt's action — wins, and the dialog closes as the X would.
+ * It never stacks with the Activity panel or the Settings sheet (the turn's rule; Codex on PR
+ * 1218): the panel sits above the sheet, Settings is the same sheet rendered later, and either
+ * would swallow its Escape. An update that arrives while one of them is open waits for it to
+ * close; one opened over the dialog — a notification's click, a receipt's action — wins, and the
+ * dialog closes as the X would.
  */
 
-/** The version this run has already announced. Module state: the announcement is a fact about the run, not a render. */
-let announced: string | null = null;
+/**
+ * Where the run remembers what it announced. Module state alone resets with the renderer, and the
+ * desktop process — the run — outlives a reload: the snapshot after one still carries the same
+ * `available` update, which would read as unseen. Session storage lives exactly as long as the
+ * window does. Read and written behind a guard, because storage can be absent or refuse.
+ */
+export const ANNOUNCED_KEY = "arke.update-announced";
+let announced: string | null | undefined;
+
+function announcedVersion(): string | null {
+  if (announced === undefined) {
+    try {
+      announced = typeof sessionStorage === "undefined" ? null : sessionStorage.getItem(ANNOUNCED_KEY);
+    } catch {
+      announced = null;
+    }
+  }
+  return announced;
+}
+
+function markAnnounced(version: string): void {
+  announced = version;
+  try {
+    if (typeof sessionStorage !== "undefined") sessionStorage.setItem(ANNOUNCED_KEY, version);
+  } catch {
+    // The module keeps it for this renderer; a reload will ask again, which is the lesser wrong.
+  }
+}
 
 export function __resetUpdateAnnouncementForTest(): void {
-  announced = null;
+  announced = undefined;
+  try {
+    if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(ANNOUNCED_KEY);
+  } catch {
+    // nothing stored
+  }
 }
 
 /** Screens before the studio is up: the launch plate, the starting screen, the founding build's watch surface. */
@@ -49,7 +82,9 @@ function showable(update: UpdateState | null): update is UpdateState & { targetV
 
 export function UpdateAnnouncement() {
   const update = useUpdateStatus();
+  const { connection } = useStore();
   const { pathname } = useLocation();
+  const activity = useActivityPanel();
   const [open, setOpen] = useState(false);
   // "Update now" pressed: the dialog holds the intent, and presses Install and restart itself when
   // the download lands — while it is still open. Closing the dialog drops the intent and keeps the
@@ -57,54 +92,57 @@ export function UpdateAnnouncement() {
   const [intent, setIntent] = useState<"now" | null>(null);
   const installing = useRef(false);
 
-  const activity = useActivityPanel();
+  // Another sheet up: the announcement waits for it, and leaves for it.
+  const covered = activity.open || isSettingsPath(pathname);
   const version = update?.status === "available" ? update.targetVersion : null;
-  const arrived = version !== null && !beforeTheStudio(pathname) && !activity.open;
+  const arrived = version !== null && !beforeTheStudio(pathname) && !covered;
   useEffect(() => {
     // The panel is read again at effect time: the retired /activity route opens it from the
     // panel's own effect, earlier in this same commit, and this render still saw it closed.
-    if (!arrived || version === announced || activityPanelOpen()) return;
-    announced = version;
+    if (!arrived || version === announcedVersion() || activityPanelOpen()) return;
+    markAnnounced(version);
     installing.current = false;
     setIntent(null);
     setOpen(true);
   }, [arrived, version]);
 
   // The dialog leaves with the update: armed for the close, being installed, gone, or up to date.
-  // And it leaves for the Activity panel, which wins whatever opened it.
+  // And it leaves for the other sheet, which wins whatever opened it.
   const visible = open && showable(update);
   useEffect(() => {
-    if (open && (!showable(update) || activity.open)) {
+    if (open && (!showable(update) || covered)) {
       setIntent(null);
       setOpen(false);
     }
-  }, [open, update, activity.open]);
+  }, [open, update, covered]);
 
   useEffect(() => {
     if (!visible || intent !== "now" || update.status !== "ready" || installing.current) return;
-    installing.current = true;
-    installUpdateAndRestart();
+    // A press that did not leave — the coordinator away — is tried again on the next frame.
+    installing.current = installUpdateAndRestart();
   }, [visible, intent, update]);
 
   if (!visible) return null;
 
+  // A press that the store cannot send leaves the dialog where it is; closing on it would mark
+  // the version announced with nothing asked for. The buttons say so while the coordinator is away.
+  const connected = connection === "open";
   const close = () => {
     setIntent(null);
     setOpen(false);
   };
   const now = () => {
-    setIntent("now");
     if (update.status === "ready") {
       if (installing.current) return;
-      installing.current = true;
-      installUpdateAndRestart();
-    } else {
-      downloadUpdate();
+      installing.current = installUpdateAndRestart();
+      if (installing.current) setIntent("now");
+      return;
     }
+    if (downloadUpdate()) setIntent("now");
   };
   const nextStart = () => {
+    if (!installUpdateOnClose()) return;
     setIntent(null);
-    installUpdateOnClose();
     setOpen(false);
   };
 
@@ -141,11 +179,13 @@ export function UpdateAnnouncement() {
             </span>
           </div>
         ) : (
-          <Button variant="primary" size="lg" className="fy-upd__btn" onClick={now}>
+          <Button variant="primary" size="lg" className="fy-upd__btn" onClick={now} disabled={!connected}>
             {update.status === "error" ? "Try again" : "Update now"}
           </Button>
         )}
-        <Button size="lg" className="fy-upd__btn" onClick={nextStart} hint="Downloads now, installs after you close">
+        {/* The hint rides above the button: it is the sheet's last control, and a bubble below it
+            would be cut by the panel's own clipping edge. */}
+        <Button size="lg" className="fy-upd__btn fy-tip--up" onClick={nextStart} disabled={!connected} hint="Downloads now, installs after you close">
           Next start
         </Button>
       </div>

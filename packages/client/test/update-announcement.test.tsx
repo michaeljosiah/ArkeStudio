@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useNavigate } from "react-router";
 import { parseHTML } from "linkedom";
 import type { ClientMessage, ClientState, UpdateState } from "@arke-studio/contracts";
+import type { ConnectionStatus } from "../src/lib/store.js";
 import { ActivityPanel } from "../src/components/activity-panel.js";
-import { UpdateAnnouncement, __resetUpdateAnnouncementForTest } from "../src/components/update-announcement.js";
+import { ANNOUNCED_KEY, UpdateAnnouncement, __resetUpdateAnnouncementForTest } from "../src/components/update-announcement.js";
 import { __resetActivityPanelForTest, closeActivityPanel, openActivityPanel, openActivityPanelOnArrival } from "../src/lib/activity-panel.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -16,10 +17,13 @@ import { FIXTURE_STATE } from "./fixture-state.js";
  * screen with chrome, once per version per run, with the release's notes and two ways to take
  * it. What this file holds to: where it opens and where it does not, that it opens once, what
  * each press sends, that closing it drops the intent and keeps the download, that it leaves with
- * the update, and that it never stacks with the Activity panel (Codex on PR 1218).
+ * the update, and that it never stacks with the Activity panel or Settings, survives a renderer
+ * reload, and keeps its place when a press cannot be sent (Codex on PR 1218).
  */
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
+/** Session storage as the window has it: a map that outlives a reload of the renderer, not the run. */
+const stored = new Map<string, string>();
 Object.assign(globalThis, {
   window: dom.window,
   document: dom.document,
@@ -28,7 +32,19 @@ Object.assign(globalThis, {
   Element: dom.Element,
   Event: dom.Event,
   IS_REACT_ACT_ENVIRONMENT: true,
+  sessionStorage: {
+    getItem: (key: string) => stored.get(key) ?? null,
+    setItem: (key: string, value: string) => void stored.set(key, value),
+    removeItem: (key: string) => void stored.delete(key),
+  },
 });
+
+let go: (to: string) => void = () => {};
+/** A way to change the address the way a remedy's button or the gear would. */
+function Probe() {
+  go = useNavigate();
+  return null;
+}
 
 const NOTES = "The Cut plays its own audio back.\n\nA second paragraph, about the lanes.";
 
@@ -81,15 +97,16 @@ function capture(): ClientMessage[] {
 }
 
 /** `withPanel` mounts the Activity panel before the announcement, in the order App has them. */
-async function mount(path: string, value: UpdateState, withPanel = false): Promise<HTMLElement> {
+async function mount(path: string, value: UpdateState, withPanel = false, connection: ConnectionStatus = "open"): Promise<HTMLElement> {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
   open.push({ root, container });
   await act(async () => {
-    __setStateForTest(withUpdate(value));
+    __setStateForTest(withUpdate(value), { connection });
     root.render(
       <MemoryRouter initialEntries={[path]}>
+        <Probe />
         {withPanel && <ActivityPanel />}
         <UpdateAnnouncement />
       </MemoryRouter>,
@@ -99,8 +116,8 @@ async function mount(path: string, value: UpdateState, withPanel = false): Promi
 }
 
 /** The update state moves on under the mounted dialog, as a frame from the desktop would move it. */
-async function becomes(value: UpdateState): Promise<void> {
-  await act(async () => __setStateForTest(withUpdate(value)));
+async function becomes(value: UpdateState, connection: ConnectionStatus = "open"): Promise<void> {
+  await act(async () => __setStateForTest(withUpdate(value), { connection }));
 }
 
 const dialog = (container: HTMLElement): HTMLElement | null => container.querySelector('.fy-upd[role="dialog"]');
@@ -287,6 +304,55 @@ describe("the update announced at launch (design turn 152)", () => {
     assert.equal(dialog(container), null, "closed, not hidden: the version was announced");
     await becomes(update({ status: "ready", progressPercent: 100 }));
     assert.deepEqual(sent.map((m) => m.kind), ["download-update"], "the intent went with the dialog");
+  });
+
+  it("waits while Settings is open, and leaves for Settings opened over it", async () => {
+    const container = await mount("/settings/general", update({}));
+    assert.equal(dialog(container), null, "nothing under the Settings sheet");
+    await act(async () => go("/worlds"));
+    assert.ok(dialog(container), "announced once the sheet is closed");
+    await act(async () => go("/settings/about"));
+    assert.equal(dialog(container), null, "Settings over it wins");
+    await act(async () => go("/worlds"));
+    assert.equal(dialog(container), null, "and the version stays announced");
+  });
+
+  it("keeps its place while the coordinator is away: the buttons wait, a press sends nothing and closes nothing", async () => {
+    const sent = capture();
+    const container = await mount("/worlds", update({}), false, "connecting");
+    assert.ok(dialog(container), "the dialog is up on the snapshot it has");
+    assert.equal(button(container, "Next start").disabled, true);
+    assert.equal(button(container, "Update now").disabled, true);
+    await press(container, "Next start");
+    assert.equal(sent.length, 0, "nothing left");
+    assert.ok(dialog(container), "and the dialog did not close on a press that went nowhere");
+    await becomes(update({}));
+    assert.equal(button(container, "Next start").disabled, false, "back with the connection");
+    await press(container, "Next start");
+    assert.deepEqual(sent.map((m) => m.kind), ["install-update-on-close"]);
+    assert.equal(dialog(container), null);
+  });
+
+  it("remembers the announcement across a renderer reload, in session storage", async () => {
+    const first = await mount("/worlds", update({}));
+    assert.ok(dialog(first));
+    assert.equal(stored.get(ANNOUNCED_KEY), "0.5.50", "the run's memory of it outlives the module");
+    // A reload: fresh module state, the same window's storage, the same snapshot.
+    await unmountAll();
+    __resetUpdateAnnouncementForTest();
+    stored.set(ANNOUNCED_KEY, "0.5.50");
+    const again = await mount("/worlds", update({}));
+    assert.equal(dialog(again), null, "not announced twice for one run");
+    await unmountAll();
+    const newer = await mount("/worlds", update({ targetVersion: "0.5.51" }));
+    assert.ok(dialog(newer), "a newer version still is");
+  });
+
+  it("the Next start hint rides above the button, clear of the sheet's clipping edge", async () => {
+    const container = await mount("/worlds", update({}));
+    const next = button(container, "Next start");
+    assert.ok(next.className.includes("fy-tip--up"), next.className);
+    assert.equal(next.getAttribute("data-tip"), "Downloads now, installs after you close");
   });
 
   it("leaves with the update: armed for the close, or gone", async () => {
