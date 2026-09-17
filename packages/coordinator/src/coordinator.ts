@@ -2326,7 +2326,11 @@ export class Coordinator {
       );
     }
     this.account = opts.account ?? new NoArkeCloud();
-    this.account.onChange((account) => this.emit({ at: new Date().toISOString(), type: "account.changed", account }));
+    // A host's service can answer a handoff long after stop(); detached with the other
+    // subscriptions so a late answer never reaches a drained transport.
+    this.lifecycleDisposers.add(
+      this.account.onChange((account) => this.emit({ at: new Date().toISOString(), type: "account.changed", account })),
+    );
     this.vendorAuth = new VendorAuthService({
       adapter: () => this.opts.adapter,
       openExternal: (url) => {
@@ -3079,6 +3083,9 @@ export class Coordinator {
       // Transient too — and a device flow's instructions carry the one-time code, which an
       // append-only audit file must never hold (SPEC-030 R-1).
       parsed.type !== "vendor-auth.status" &&
+      // Who is signed in is UI state with a person's name and address in it; the log would keep
+      // them past the sign-out (SPEC-025 R-26).
+      parsed.type !== "account.changed" &&
       // The bundle is a state dump made for a support thread, and since SPEC-032 R-38 it also
       // carries the findings — whose firstSeen bookkeeping R-35 says is never written to disk.
       // Journalling the event would have durably recorded both on every generate.

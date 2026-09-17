@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import WebSocket from "ws";
 import { FrameSchema, SIGNED_OUT, type AccountState, type Frame } from "@arke-studio/contracts";
@@ -71,7 +72,7 @@ class TestClient {
 class Recording implements AccountService {
   readonly calls: string[] = [];
   private state: AccountState = SIGNED_OUT;
-  private listeners = new Set<(state: AccountState) => void>();
+  readonly listeners = new Set<(state: AccountState) => void>();
   current(): AccountState { return this.state; }
   async signIn(): Promise<void> { this.calls.push("signIn"); this.move({ kind: "signing-in" }); }
   async createAccount(): Promise<void> { this.calls.push("createAccount"); this.move({ kind: "signing-in" }); }
@@ -93,9 +94,10 @@ describe("the frames reach the service and its moves reach every client", () => 
     const { root } = await makeTempRoot();
     const provider = new FsWorldProvider(root);
     const account = new Recording();
+    const changeLogPath = join(root, "logs", "changes.jsonl");
     const coordinator = new Coordinator({
       provider, adapter: null, appRoot: root, cipher: devCipher(), manifest: SHIPPED_MANIFEST,
-      changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test", account,
+      changeLogPath, appVersion: "test", account,
     });
     const { port, token } = await coordinator.start(0);
     const client = new TestClient(port);
@@ -149,10 +151,20 @@ describe("the frames reach the service and its moves reach every client", () => 
         ["signIn", "cancelSignIn", "open:plan", "open:account", "createAccount", "signOut"],
         "each frame reaches its own door, once, in order",
       );
+      assert.equal(account.listeners.size, 1, "the coordinator listens while it runs");
     } finally {
       client.close();
       await coordinator.stop();
       await provider.close();
     }
+    // A host's service can answer a handoff long after stop(); the coordinator has let go by then.
+    assert.equal(account.listeners.size, 0, "stop() detaches the subscription with the rest");
+    // Who is signed in is UI state with a name and an address in it: the append-only log would
+    // keep them past the sign-out, so the event never reaches it (SPEC-025 R-26). Read after
+    // stop, which drains the writes; the boot's own events prove the file is the one written.
+    assert.ok(existsSync(changeLogPath), "the change log was written");
+    const log = readFileSync(changeLogPath, "utf8");
+    assert.ok(log.includes('"env.check"'), "and holds the boot's events");
+    assert.ok(!log.includes("account.changed") && !log.includes("helen@marsh.studio"), "but no account state");
   });
 });

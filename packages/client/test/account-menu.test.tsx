@@ -142,6 +142,20 @@ describe("the control (design turn 151)", () => {
     __setStateForTest(FIXTURE_STATE);
   });
 
+  it("falls back to initials when the picture does not load", async () => {
+    // The desktop's CSP admits only its own origin, data URLs and loopback: a remote address
+    // draws as a broken image, and the chrome must never show the browser's torn page.
+    withAccount(signedIn());
+    await mounted(async (container) => {
+      const img = container.querySelector<HTMLImageElement>('button[aria-label="Arke account"] img');
+      assert.ok(img, "the picture is tried first");
+      await act(async () => img.dispatchEvent(new dom.window.Event("error")));
+      const button = container.querySelector('button[aria-label="Arke account"]')!;
+      assert.equal(button.querySelector("img"), null, "the broken picture is gone");
+      assert.equal(button.querySelector(".ui-avatar--initials")?.textContent, "HM", "and the initials stand in");
+    });
+  });
+
   it("wears the warning dot for an expired session only", () => {
     withAccount(signedIn("expired"));
     const expired = control(chrome());

@@ -14,7 +14,12 @@ export const AccountPersonSchema = z
   .object({
     name: z.string().min(1),
     email: z.string().min(1),
-    /** An address the client may load for the picture, or null for initials. */
+    /**
+     * An address the renderer may load for the picture, or null for initials. The desktop's
+     * CSP admits only the page's own origin, data URLs and loopback, so this is the
+     * coordinator's own media route or a data URL — a service fetches the cloud's picture and
+     * serves it itself; a remote address here would draw as a broken image (SPEC-025 R-27).
+     */
     picture: z.string().nullable(),
   })
   .strict();

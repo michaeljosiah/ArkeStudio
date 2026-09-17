@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AccountState } from "@arke-studio/contracts";
+import type { AccountPerson, AccountState } from "@arke-studio/contracts";
 import { ArrowUpRight, LoaderCircle, LogOut, User } from "./icons.js";
 import { Avatar, Button, cx } from "./ui.js";
 import {
@@ -49,7 +49,7 @@ export function AccountControl() {
       >
         {account.kind === "signed-in" ? (
           <span className="fy-account__mark">
-            <Avatar name={account.person.name} image={account.person.picture ?? undefined} />
+            <Picture person={account.person} />
           </span>
         ) : (
           <User size={13} />
@@ -59,6 +59,18 @@ export function AccountControl() {
       {open && <AccountMenu account={account} control={control} close={close} />}
     </span>
   );
+}
+
+/**
+ * The person's picture, or their initials when there is none — or when the address does not
+ * load. The desktop's CSP admits only the page's own origin, data URLs and loopback, so a service
+ * that hands the renderer a remote address gets a broken image; initials are what that shows as,
+ * rather than the browser's torn-page glyph in the chrome (SPEC-025 R-27).
+ */
+function Picture({ person }: { person: AccountPerson }) {
+  const [broken, setBroken] = useState<string | null>(null);
+  const image = person.picture !== null && person.picture !== broken ? person.picture : undefined;
+  return <Avatar name={person.name} image={image} onImageError={() => setBroken(person.picture)} />;
 }
 
 function AccountMenu({
@@ -176,7 +188,7 @@ function SignedIn({ account }: { account: Extract<AccountState, { kind: "signed-
     <>
       <div className="fy-account__who">
         <span className="fy-account__mark fy-account__mark--large">
-          <Avatar name={person.name} image={person.picture ?? undefined} />
+          <Picture person={person} />
         </span>
         <div className="fy-account__lines">
           <div className="fy-account__name">{person.name}</div>
