@@ -4,7 +4,7 @@ import type { UpdateState } from "@arke-studio/contracts";
 import { EditorDialog } from "./editor-dialog.js";
 import { ChevronDown, X } from "./icons.js";
 import { Button, IconButton } from "./ui.js";
-import { releaseNameOf, updateParagraphs } from "../lib/activity-panel.js";
+import { activityPanelOpen, releaseNameOf, updateParagraphs, useActivityPanel } from "../lib/activity-panel.js";
 import { downloadUpdate, installUpdateAndRestart, installUpdateOnClose, useUpdateStatus } from "../lib/store.js";
 
 /**
@@ -19,6 +19,11 @@ import { downloadUpdate, installUpdateAndRestart, installUpdateOnClose, useUpdat
  * never over the launch plate or the starting screen, which are before the studio is up. Closed,
  * it stays closed for that version until the next launch; What's new carries the same update
  * meanwhile.
+ *
+ * It never stacks with the Activity panel (the turn's rule; Codex on PR 1218): the panel sits
+ * above the sheet and would swallow its Escape. An update that arrives while the panel is open
+ * waits for the panel to close; a panel opened over the dialog — a notification's click, a
+ * receipt's action — wins, and the dialog closes as the X would.
  */
 
 /** The version this run has already announced. Module state: the announcement is a fact about the run, not a render. */
@@ -52,10 +57,13 @@ export function UpdateAnnouncement() {
   const [intent, setIntent] = useState<"now" | null>(null);
   const installing = useRef(false);
 
+  const activity = useActivityPanel();
   const version = update?.status === "available" ? update.targetVersion : null;
-  const arrived = version !== null && !beforeTheStudio(pathname);
+  const arrived = version !== null && !beforeTheStudio(pathname) && !activity.open;
   useEffect(() => {
-    if (!arrived || version === announced) return;
+    // The panel is read again at effect time: the retired /activity route opens it from the
+    // panel's own effect, earlier in this same commit, and this render still saw it closed.
+    if (!arrived || version === announced || activityPanelOpen()) return;
     announced = version;
     installing.current = false;
     setIntent(null);
@@ -63,10 +71,14 @@ export function UpdateAnnouncement() {
   }, [arrived, version]);
 
   // The dialog leaves with the update: armed for the close, being installed, gone, or up to date.
+  // And it leaves for the Activity panel, which wins whatever opened it.
   const visible = open && showable(update);
   useEffect(() => {
-    if (open && !showable(update)) setOpen(false);
-  }, [open, update]);
+    if (open && (!showable(update) || activity.open)) {
+      setIntent(null);
+      setOpen(false);
+    }
+  }, [open, update, activity.open]);
 
   useEffect(() => {
     if (!visible || intent !== "now" || update.status !== "ready" || installing.current) return;

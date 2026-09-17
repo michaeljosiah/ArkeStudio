@@ -114,6 +114,15 @@ function subscribe(listener: () => void): () => void {
 
 const read = () => state;
 
+/**
+ * The panel's state as it is now, for an effect that runs in the same commit as the one that
+ * opened it: the retired route's arrival opens the panel from the panel's own effect, and a
+ * sibling's effect in that commit was rendered against the closed panel (design turn 152).
+ */
+export function activityPanelOpen(): boolean {
+  return state.open;
+}
+
 export function useActivityPanel(): ActivityPanelState {
   return useSyncExternalStore(subscribe, read, read);
 }

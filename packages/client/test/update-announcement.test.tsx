@@ -5,7 +5,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { parseHTML } from "linkedom";
 import type { ClientMessage, ClientState, UpdateState } from "@arke-studio/contracts";
+import { ActivityPanel } from "../src/components/activity-panel.js";
 import { UpdateAnnouncement, __resetUpdateAnnouncementForTest } from "../src/components/update-announcement.js";
+import { __resetActivityPanelForTest, closeActivityPanel, openActivityPanel, openActivityPanelOnArrival } from "../src/lib/activity-panel.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -13,8 +15,8 @@ import { FIXTURE_STATE } from "./fixture-state.js";
  * The update announced at launch (design turn 152; SPEC-016 R-20): a dialog over the first
  * screen with chrome, once per version per run, with the release's notes and two ways to take
  * it. What this file holds to: where it opens and where it does not, that it opens once, what
- * each press sends, that closing it drops the intent and keeps the download, and that it leaves
- * with the update.
+ * each press sends, that closing it drops the intent and keeps the download, that it leaves with
+ * the update, and that it never stacks with the Activity panel (Codex on PR 1218).
  */
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -61,6 +63,7 @@ afterEach(async () => {
   __setBridgeForTest(null);
   __setStateForTest(FIXTURE_STATE);
   __resetUpdateAnnouncementForTest();
+  __resetActivityPanelForTest();
 });
 
 function capture(): ClientMessage[] {
@@ -77,7 +80,8 @@ function capture(): ClientMessage[] {
   return sent;
 }
 
-async function mount(path: string, value: UpdateState): Promise<HTMLElement> {
+/** `withPanel` mounts the Activity panel before the announcement, in the order App has them. */
+async function mount(path: string, value: UpdateState, withPanel = false): Promise<HTMLElement> {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
@@ -86,6 +90,7 @@ async function mount(path: string, value: UpdateState): Promise<HTMLElement> {
     __setStateForTest(withUpdate(value));
     root.render(
       <MemoryRouter initialEntries={[path]}>
+        {withPanel && <ActivityPanel />}
         <UpdateAnnouncement />
       </MemoryRouter>,
     );
@@ -98,7 +103,7 @@ async function becomes(value: UpdateState): Promise<void> {
   await act(async () => __setStateForTest(withUpdate(value)));
 }
 
-const dialog = (container: HTMLElement): HTMLElement | null => container.querySelector('[role="dialog"]');
+const dialog = (container: HTMLElement): HTMLElement | null => container.querySelector('.fy-upd[role="dialog"]');
 const text = (container: HTMLElement): string => (container.textContent ?? "").replace(/\s+/g, " ");
 function button(container: HTMLElement, label: string): HTMLButtonElement {
   const found = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
@@ -249,6 +254,39 @@ describe("the update announced at launch (design turn 152)", () => {
     assert.deepEqual(sent.map((m) => m.kind), ["download-update", "download-update"]);
     await becomes(update({ status: "ready", progressPercent: 100 }));
     assert.deepEqual(sent.map((m) => m.kind), ["download-update", "download-update", "install-update-and-restart"], "Try again is Update now");
+  });
+
+  it("waits while the Activity panel is open, and opens when the panel closes", async () => {
+    openActivityPanel("inbox");
+    const container = await mount("/worlds", update({}));
+    assert.equal(dialog(container), null, "nothing under the panel");
+    await act(async () => closeActivityPanel());
+    assert.ok(dialog(container), "announced once the panel is gone");
+  });
+
+  it("the retired route's arrival opens the panel in the same commit; the announcement waits for it", async () => {
+    // /activity redirects to /worlds and the panel opens itself on arrival, from its own effect,
+    // in the commit the announcement's effect also runs in — rendered against a closed panel.
+    openActivityPanelOnArrival("inbox");
+    const container = await mount("/worlds", update({}), true);
+    assert.ok(container.querySelector(".fy-ap"), "the panel is up");
+    assert.equal(dialog(container), null, "the announcement did not open under it");
+    await act(async () => closeActivityPanel());
+    assert.ok(dialog(container), "and it opens once the panel closes, still unannounced");
+  });
+
+  it("the Activity panel opening over it wins: the dialog closes and drops the intent", async () => {
+    const sent = capture();
+    const container = await mount("/worlds", update({}));
+    await press(container, "Update now");
+    await becomes(update({ status: "downloading", progressPercent: 20 }));
+    // A notification's click, a receipt's action: the panel over the dialog.
+    await act(async () => openActivityPanel("inbox"));
+    assert.equal(dialog(container), null);
+    await act(async () => closeActivityPanel());
+    assert.equal(dialog(container), null, "closed, not hidden: the version was announced");
+    await becomes(update({ status: "ready", progressPercent: 100 }));
+    assert.deepEqual(sent.map((m) => m.kind), ["download-update"], "the intent went with the dialog");
   });
 
   it("leaves with the update: armed for the close, or gone", async () => {
