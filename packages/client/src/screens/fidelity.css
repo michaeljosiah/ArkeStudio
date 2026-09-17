@@ -3366,6 +3366,35 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-update-transition__pulse { width: 10px; height: 10px; margin: auto; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); animation: fy-update-pulse 1.4s ease-out infinite; }
 @keyframes fy-update-pulse { 70% { box-shadow: 0 0 0 16px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
 
+/*
+ * The update announced at launch (design turn 152): the editor's sheet at 440, the mark, the
+ * title, one data line, the notes in a recessed pane that scrolls, and the two ways to take it
+ * stacked in a foot over a full-width rule. The bands are the turn's: 30 to the mark, 18 to the
+ * title, 6 to the line, 24 to the eyebrow, 8 to the pane (236 at most), 20 to the rule. On a
+ * short window the pane is what gives, never the buttons. The X is the house icon button in the
+ * corner: the dialog is centred, so unlike the Settings sheet it is nowhere near the title bar.
+ */
+.fy-upd { position: relative; }
+.fy-upd__top { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; align-items: center; padding: 30px 32px 0; }
+.fy-upd__mark { display: block; width: 64px; height: 64px; flex: none; }
+.fy-upd__title { margin: 18px 0 0; font: var(--type-title); letter-spacing: var(--tracking-tighter); text-align: center; }
+.fy-upd__version { margin-top: 6px; font: var(--type-body); font-size: var(--text-sm); line-height: 1.4; color: var(--muted-foreground); text-align: center; }
+.fy-upd__eyebrow { align-self: stretch; margin-top: 24px; font: var(--type-label); font-size: var(--text-2xs); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--muted-foreground); }
+.fy-upd__notes { position: relative; align-self: stretch; flex: 0 1 auto; min-height: 0; margin-top: 8px; display: flex; flex-direction: column; border-radius: var(--radius-lg); background: var(--muted); overflow: hidden; }
+.fy-upd__pane { flex: 0 1 auto; min-height: 0; max-height: 236px; overflow: auto; padding: 14px 16px; }
+.fy-upd__pane p { font: var(--type-body); font-size: var(--text-sm); line-height: 1.55; color: var(--muted-foreground); }
+.fy-upd__pane p + p { margin-top: 10px; }
+.fy-upd__more { position: absolute; left: 0; right: 0; bottom: 0; height: 44px; border: 0; padding: 0 0 6px; display: flex; align-items: flex-end; justify-content: center; color: var(--muted-foreground); background: linear-gradient(to bottom, transparent, var(--muted) 60%); cursor: pointer; }
+.fy-upd__foot { flex: none; margin-top: 20px; padding: 20px 32px 24px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+.fy-upd__btn { width: 100%; }
+.fy-upd__progress { height: 40px; display: flex; flex-direction: column; justify-content: center; gap: 8px; padding: 0 2px; }
+.fy-upd__progress > span:first-child { font: var(--type-ui); text-align: center; }
+.fy-upd__bar { display: block; height: 4px; border-radius: 99px; background: var(--muted); overflow: hidden; }
+.fy-upd__bar > span { display: block; height: 100%; border-radius: 99px; background: var(--foreground); transition: width .3s var(--ease-out); }
+.fy-upd__why { margin: -6px 0 2px; font: var(--type-body); font-size: var(--text-sm); line-height: 1.4; color: var(--destructive); text-align: center; }
+/* Scoped, because `.fy-tip` sets `position: relative` on every icon button further down the file. */
+.fy-upd .fy-upd__close { position: absolute; top: 12px; right: 12px; }
+
 /* activity (26a) */
 .fy-provider-calls { margin-top: 24px; padding: 18px; border: 1px solid var(--border); background: var(--background); }
 .fy-provider-calls__head, .fy-provider-call > summary, .fy-provider-call__payloads { display: flex; gap: 12px; }
@@ -6186,6 +6215,9 @@ select.fy-set__pill { padding-right: 26px; }
 /* A control at a row's right edge hangs its tip from its own end: centred, the tip's box would
    run past the column and give it a scrollbar for a tip nobody is hovering. */
 .fy-tip--end::after { left: auto; right: 0; transform: none; }
+/* A control at the foot of a sheet hangs its tip above itself: the panel clips at its own edge,
+   and a bubble below the last button would be cut mid-sentence (design turn 152's Next start). */
+.fy-tip--up::after { top: auto; bottom: calc(100% + 6px); }
 .fy-timeline__toolbar button:disabled { cursor: default; }
 .fy-timeline__refusal { padding: 6px 10px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--destructive) 7%, var(--background)); color: var(--destructive); font: 500 9px/1.4 var(--font-mono); }
 /* ---- The Picture track as an editable sequence (SPEC-037 R-19..R-23, issue 679) ------------

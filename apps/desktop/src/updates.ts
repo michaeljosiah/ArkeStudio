@@ -126,6 +126,12 @@ export class UpdateController {
   private downloadPromise: Promise<void> | null = null;
   private installPromise: Promise<void> | null = null;
   private installOnCloseArmed = false;
+  /**
+   * "Next start" pressed on the launch announcement (design turn 152) before the download exists:
+   * the download runs, and the install is armed the moment it lands. Cleared by a failed download
+   * and by a fresh check, so no stale intent arms an install nobody asked for.
+   */
+  private armOnReady = false;
   private shuttingDown = false;
   private undoHandoff: (() => void) | null = null;
 
@@ -150,8 +156,7 @@ export class UpdateController {
     options.updater.on("update-downloaded", (info: UpdateReleaseInfo) => {
       // The download's info may carry the notes again or not at all; what the check found stays.
       const found = releaseOf(info);
-      this.set({
-        status: "ready",
+      this.becomeReady({
         targetVersion: info.version ?? this.state.targetVersion,
         progressPercent: 100,
         detail: null,
@@ -160,6 +165,7 @@ export class UpdateController {
       });
     });
     options.updater.on("error", () => {
+      this.armOnReady = false;
       if (this.undoHandoff) {
         this.undoHandoff();
         this.undoHandoff = null;
@@ -228,6 +234,7 @@ export class UpdateController {
     }
     if (this.checkPromise) return this.checkPromise;
     if (this.installOnCloseArmed) return Promise.resolve();
+    this.armOnReady = false;
     this.set({
       status: "checking",
       targetVersion: null,
@@ -266,12 +273,14 @@ export class UpdateController {
       .downloadUpdate()
       .then(() => {
         if (this.state.status === "downloading") {
-          this.set({ status: "ready", progressPercent: 100 });
+          this.becomeReady({ progressPercent: 100 });
         }
       })
       .catch(() => {
+        this.armOnReady = false;
         this.set({
           status: "error",
+          flow: null,
           detail: "The update download failed. Check your connection and try again.",
         });
       })
@@ -316,14 +325,37 @@ export class UpdateController {
   }
 
   installOnClose(): Promise<void> {
-    if (this.state.status !== "ready" || !this.state.targetVersion) return Promise.resolve();
+    if (!this.state.targetVersion) return Promise.resolve();
+    if (this.state.status === "ready") {
+      this.arm();
+      return Promise.resolve();
+    }
+    // Before the download exists (design turn 152's "Next start"): the download runs in the
+    // background and the install is armed when it lands. The flow is published now so What's new
+    // can say what the download is for; a close before it lands is an ordinary close.
+    if (this.state.status === "available" || this.state.status === "error" || this.state.status === "downloading") {
+      this.armOnReady = true;
+      this.set({ flow: "on-close" });
+      return this.state.status === "downloading" ? (this.downloadPromise ?? Promise.resolve()) : this.download();
+    }
+    return Promise.resolve();
+  }
+
+  /** The download landed: `ready`, unless "Next start" is waiting on it, in which case armed. */
+  private becomeReady(change: Partial<UpdateState>): void {
+    this.set({ status: "ready", ...change });
+    if (!this.armOnReady) return;
+    this.armOnReady = false;
+    this.arm();
+  }
+
+  private arm(): void {
     this.installOnCloseArmed = true;
     this.set({
       status: "install-on-close",
       flow: "on-close",
       detail: "The update will install after a clean close. Arke will remain closed.",
     });
-    return Promise.resolve();
   }
 
   isInstallOnCloseArmed(): boolean {
