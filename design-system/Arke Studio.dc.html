@@ -76,145 +76,145 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
     <div style="font:400 13px/1.65 var(--font-sans);color:var(--dv-ink-body)">Design decisions are recorded below in numbered turns, newest first; earlier explorations remain as history. The original sample world is <strong>The Undersong</strong>, a coastal fantasy where a drowned god still sings beneath the harbour. Its image placeholders accept dropped artwork. Approved image references keep their supplied artwork intact. Chrome stays neutral monochrome so the creator's imagery carries the colour.</div>
   </div>
 </section>
-<section class="dv-turn" id="t151">
-<div class="dv-thd"><a class="dv-tid" href="#t151">151</a><span class="dv-tname">An update is announced at launch &#8212; a dialog over the first screen, the release&#8217;s notes inside it, <i>Update now</i> or <i>Next start</i> (extends 136b; amends SPEC-016 &sect;2.8)</span></div>
+<section class="dv-turn" id="t152">
+<div class="dv-thd"><a class="dv-tid" href="#t152">152</a><span class="dv-tname">An update is announced at launch &#8212; a dialog over the first screen, the release&#8217;s notes inside it, <i>Update now</i> or <i>Next start</i> (extends 136b; amends SPEC-016 &sect;2.8)</span></div>
 <p class="dv-next">The updater has checked at every start since 0.2 (SPEC-016 R-12), and what it found had nowhere to be said: a row on About three clicks down, and since turn <a class="dv-oid" href="#t136">136</a> a card at the top of What&#8217;s new behind a dot on the bell. Both wait to be found. Asked on 17 September: an update screen when the app opens and an update exists, after the ordinary one every desktop tool now shows &#8212; a mark, <i>Update available</i>, the version, what&#8217;s new in a scrolling pane, and two buttons stacked: take it now, or at the next start. Below: that dialog in the house&#8217;s sheet over the world picker, then the same dialog while the download runs, and when it fails.</p>
 <div class="dv-opts" style="margin-top:22px">
-<div class="dv-opt" id="151a">
-<div class="dv-olabel"><a class="dv-oid" href="#151a">151a</a><span><b>At launch.</b> The app&#8217;s mark, the title, the version and the release&#8217;s name, the notes in a pane that scrolls, and two ways to take it: <code>Update now</code> and <code>Next start</code>. The close in the corner is the third: not now.</span></div>
-<div class="dv-card" style="width:1360px"><div id="update151a" data-screen-label="151a Update available &#8212; the dialog at launch, over the world picker"><style>
-#update151a{width:1360px;height:850px;position:relative;background:var(--background);color:var(--foreground);font:var(--type-body);overflow:hidden}
-#update151a *{box-sizing:border-box}
-#update151a .behind{position:absolute;inset:0;display:flex;flex-direction:column}
-#update151a .head{height:44px;flex:none;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--border);position:relative}
-#update151a .head>.where{flex:1;min-width:0;font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground);padding:0 6px}
-#update151a .head>.brand{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px}
-#update151a .brand>b{font:var(--type-ui);font-size:var(--text-md);font-weight:var(--weight-semibold);letter-spacing:var(--tracking-tighter)}
-#update151a .brand>span{font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground)}
-#update151a .head>.tools{flex:1;display:flex;justify-content:flex-end;gap:3px}
-#update151a .tools>span{width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted-foreground);position:relative}
-#update151a .tools>span.bell::after{content:"";position:absolute;top:2px;right:3px;width:5px;height:5px;border-radius:99px;background:var(--foreground)}
-#update151a .worlds{flex:1;padding:34px 40px}
-#update151a .worlds>h2{font:var(--type-title);letter-spacing:var(--tracking-tighter);margin:0 0 6px}
-#update151a .worlds>.count{font:var(--type-meta);font-size:var(--text-sm);color:var(--muted-foreground);margin-bottom:26px}
-#update151a .cards{display:flex;gap:18px}
-#update151a .card{width:300px;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--card)}
-#update151a .card>img{display:block;width:100%;height:168px;object-fit:cover}
-#update151a .card>.name{padding:12px 14px 4px;font:var(--type-ui)}
-#update151a .card>.line{padding:0 14px 14px;font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground)}
-#update151a .newcard{width:300px;border:1px dashed var(--border);border-radius:12px;display:flex;align-items:center;justify-content:center;gap:8px;color:var(--muted-foreground);font:var(--type-ui)}
-#update151a .scrim{position:absolute;inset:0;background:color-mix(in srgb, var(--neutral-950) 34%, transparent)}
-#update151a .dialog{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:440px;display:flex;flex-direction:column;align-items:stretch;background:var(--background);border:1px solid var(--border);border-radius:13px;box-shadow:var(--shadow-xl);overflow:hidden}
-#update151a .close{position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer}
-#update151a .top{display:flex;flex-direction:column;align-items:center;padding:30px 32px 0}
-#update151a .mark{display:block;width:64px;height:64px}
-#update151a h1{margin:18px 0 0;font:var(--type-title);letter-spacing:var(--tracking-tighter);text-align:center}
-#update151a .version{margin-top:6px;font:var(--type-body);font-size:var(--text-sm);line-height:1.4;color:var(--muted-foreground);text-align:center}
-#update151a .eyebrow{align-self:stretch;margin-top:24px;font:var(--type-label);font-size:var(--text-2xs);letter-spacing:var(--tracking-label);text-transform:uppercase;color:var(--muted-foreground)}
-#update151a .notes{position:relative;align-self:stretch;margin-top:8px;max-height:236px;overflow:hidden;padding:14px 16px;border-radius:10px;background:var(--muted)}
-#update151a .notes>p{margin:0;font:var(--type-body);font-size:var(--text-sm);line-height:1.55;color:var(--muted-foreground)}
-#update151a .notes>p+p{margin-top:10px}
-#update151a .notes>.more{position:absolute;left:0;right:0;bottom:0;height:44px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:6px;color:var(--muted-foreground);background:linear-gradient(to bottom, transparent, var(--muted) 60%)}
-#update151a .foot{margin-top:20px;padding:20px 32px 24px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
-#update151a .btn{height:40px;display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:8px;border:1px solid var(--border);background:var(--secondary);color:var(--secondary-foreground);font:var(--type-ui);box-shadow:var(--shadow-xs);cursor:pointer}
-#update151a .btn.primary{background:var(--primary);color:var(--primary-foreground);border-color:transparent}
-#update151a .progress{height:40px;display:flex;flex-direction:column;align-items:stretch;justify-content:center;gap:8px;padding:0 2px}
-#update151a .progress>span{font:var(--type-ui);text-align:center}
-#update151a .progress>.bar{height:4px;border-radius:99px;background:var(--muted);overflow:hidden}
-#update151a .progress>.bar>span{display:block;height:100%;width:42%;border-radius:99px;background:var(--foreground)}
-#update151a .why{margin:-6px 0 2px;font:var(--type-body);font-size:var(--text-sm);line-height:1.4;color:var(--destructive);text-align:center}
+<div class="dv-opt" id="152a">
+<div class="dv-olabel"><a class="dv-oid" href="#152a">152a</a><span><b>At launch.</b> The app&#8217;s mark, the title, the version and the release&#8217;s name, the notes in a pane that scrolls, and two ways to take it: <code>Update now</code> and <code>Next start</code>. The close in the corner is the third: not now.</span></div>
+<div class="dv-card" style="width:1360px"><div id="update152a" data-screen-label="152a Update available &#8212; the dialog at launch, over the world picker"><style>
+#update152a{width:1360px;height:850px;position:relative;background:var(--background);color:var(--foreground);font:var(--type-body);overflow:hidden}
+#update152a *{box-sizing:border-box}
+#update152a .behind{position:absolute;inset:0;display:flex;flex-direction:column}
+#update152a .head{height:44px;flex:none;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--border);position:relative}
+#update152a .head>.where{flex:1;min-width:0;font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground);padding:0 6px}
+#update152a .head>.brand{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px}
+#update152a .brand>b{font:var(--type-ui);font-size:var(--text-md);font-weight:var(--weight-semibold);letter-spacing:var(--tracking-tighter)}
+#update152a .brand>span{font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground)}
+#update152a .head>.tools{flex:1;display:flex;justify-content:flex-end;gap:3px}
+#update152a .tools>span{width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted-foreground);position:relative}
+#update152a .tools>span.bell::after{content:"";position:absolute;top:2px;right:3px;width:5px;height:5px;border-radius:99px;background:var(--foreground)}
+#update152a .worlds{flex:1;padding:34px 40px}
+#update152a .worlds>h2{font:var(--type-title);letter-spacing:var(--tracking-tighter);margin:0 0 6px}
+#update152a .worlds>.count{font:var(--type-meta);font-size:var(--text-sm);color:var(--muted-foreground);margin-bottom:26px}
+#update152a .cards{display:flex;gap:18px}
+#update152a .card{width:300px;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--card)}
+#update152a .card>img{display:block;width:100%;height:168px;object-fit:cover}
+#update152a .card>.name{padding:12px 14px 4px;font:var(--type-ui)}
+#update152a .card>.line{padding:0 14px 14px;font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground)}
+#update152a .newcard{width:300px;border:1px dashed var(--border);border-radius:12px;display:flex;align-items:center;justify-content:center;gap:8px;color:var(--muted-foreground);font:var(--type-ui)}
+#update152a .scrim{position:absolute;inset:0;background:color-mix(in srgb, var(--neutral-950) 34%, transparent)}
+#update152a .dialog{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:440px;display:flex;flex-direction:column;align-items:stretch;background:var(--background);border:1px solid var(--border);border-radius:13px;box-shadow:var(--shadow-xl);overflow:hidden}
+#update152a .close{position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer}
+#update152a .top{display:flex;flex-direction:column;align-items:center;padding:30px 32px 0}
+#update152a .mark{display:block;width:64px;height:64px}
+#update152a h1{margin:18px 0 0;font:var(--type-title);letter-spacing:var(--tracking-tighter);text-align:center}
+#update152a .version{margin-top:6px;font:var(--type-body);font-size:var(--text-sm);line-height:1.4;color:var(--muted-foreground);text-align:center}
+#update152a .eyebrow{align-self:stretch;margin-top:24px;font:var(--type-label);font-size:var(--text-2xs);letter-spacing:var(--tracking-label);text-transform:uppercase;color:var(--muted-foreground)}
+#update152a .notes{position:relative;align-self:stretch;margin-top:8px;max-height:236px;overflow:hidden;padding:14px 16px;border-radius:10px;background:var(--muted)}
+#update152a .notes>p{margin:0;font:var(--type-body);font-size:var(--text-sm);line-height:1.55;color:var(--muted-foreground)}
+#update152a .notes>p+p{margin-top:10px}
+#update152a .notes>.more{position:absolute;left:0;right:0;bottom:0;height:44px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:6px;color:var(--muted-foreground);background:linear-gradient(to bottom, transparent, var(--muted) 60%)}
+#update152a .foot{margin-top:20px;padding:20px 32px 24px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
+#update152a .btn{height:40px;display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:8px;border:1px solid var(--border);background:var(--secondary);color:var(--secondary-foreground);font:var(--type-ui);box-shadow:var(--shadow-xs);cursor:pointer}
+#update152a .btn.primary{background:var(--primary);color:var(--primary-foreground);border-color:transparent}
+#update152a .progress{height:40px;display:flex;flex-direction:column;align-items:stretch;justify-content:center;gap:8px;padding:0 2px}
+#update152a .progress>span{font:var(--type-ui);text-align:center}
+#update152a .progress>.bar{height:4px;border-radius:99px;background:var(--muted);overflow:hidden}
+#update152a .progress>.bar>span{display:block;height:100%;width:42%;border-radius:99px;background:var(--foreground)}
+#update152a .why{margin:-6px 0 2px;font:var(--type-body);font-size:var(--text-sm);line-height:1.4;color:var(--destructive);text-align:center}
 </style><div class="behind"><div class="head"><span class="where"></span><span class="brand"><b>Arke</b><span>Studio</span></span><span class="tools"><span class="bell"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"></path><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"></path></svg></span><span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path></svg></span></span></div><div class="worlds"><h2>Worlds</h2><div class="count">3 worlds</div><div class="cards"><div class="card"><img src="assets/world-undersong.png" alt=""><div class="name">The Undersong</div><div class="line">2 productions &middot; opened today</div></div><div class="card"><img src="assets/world-copper-saints.png" alt=""><div class="name">Copper Saints</div><div class="line">1 production &middot; 3 days ago</div></div><div class="card"><img src="assets/world-meridian-dust.png" alt=""><div class="name">Meridian Dust</div><div class="line">no productions &middot; 12 August</div></div><div class="newcard"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg><span>New world</span></div></div></div></div><div class="scrim"></div><div class="dialog" role="dialog" aria-label="Update available"><span class="close" title="Close"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></span><div class="top"><img class="mark" src="assets/logos/arke.ico" alt=""><h1>Update available</h1><div class="version">v0.5.50 &middot; Settings is a sheet</div><div class="eyebrow">What&#8217;s new</div><div class="notes"><p>Settings opens over the screen you were on, at 95% of the window, and closes back to it. Escape, the scrim and the close all return you there; the ten panes and their addresses are unchanged.</p><p>General is one row per default: the label, the model with its provider&#8217;s mark, and its state &#8212; connected, this machine, or needs a key. The narrator&#8217;s row shows the voice and what it costs.</p><p>An update is announced when the app opens, in a dialog like this one. Update now downloads it and restarts; Next start downloads in the background and installs when you close.</p><p>A chapter is read in pieces and each piece is kept, so a change to one paragraph re-reads one piece rather than the chapter.</p><p>Harness settings show what is running, what starts next and what needs attention. A found-but-blocked installation says so on its row.</p><span class="more"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span></div></div><div class="foot"><span class="btn primary">Update now</span><span class="btn">Next start</span></div></div></div>
 </div>
 </div>
-<div class="dv-opt" id="151b">
-<div class="dv-olabel"><a class="dv-oid" href="#151b">151b</a><span><b>Update now, pressed.</b> The dialog stays; the primary&#8217;s place holds the download &#8212; the figure over the 4px bar &#8212; and <code>Next start</code> is still there, taking over the intent if pressed. When the download lands the finishing-local-work surface takes over and Arke restarts.</span></div>
-<div class="dv-card" style="width:1360px"><div id="update151b" data-screen-label="151b Update available &#8212; Update now pressed, the download on the primary&#8217;s line"><style>
-#update151b{width:1360px;height:850px;position:relative;background:var(--background);color:var(--foreground);font:var(--type-body);overflow:hidden}
-#update151b *{box-sizing:border-box}
-#update151b .behind{position:absolute;inset:0;display:flex;flex-direction:column}
-#update151b .head{height:44px;flex:none;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--border);position:relative}
-#update151b .head>.where{flex:1;min-width:0;font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground);padding:0 6px}
-#update151b .head>.brand{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px}
-#update151b .brand>b{font:var(--type-ui);font-size:var(--text-md);font-weight:var(--weight-semibold);letter-spacing:var(--tracking-tighter)}
-#update151b .brand>span{font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground)}
-#update151b .head>.tools{flex:1;display:flex;justify-content:flex-end;gap:3px}
-#update151b .tools>span{width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted-foreground);position:relative}
-#update151b .tools>span.bell::after{content:"";position:absolute;top:2px;right:3px;width:5px;height:5px;border-radius:99px;background:var(--foreground)}
-#update151b .worlds{flex:1;padding:34px 40px}
-#update151b .worlds>h2{font:var(--type-title);letter-spacing:var(--tracking-tighter);margin:0 0 6px}
-#update151b .worlds>.count{font:var(--type-meta);font-size:var(--text-sm);color:var(--muted-foreground);margin-bottom:26px}
-#update151b .cards{display:flex;gap:18px}
-#update151b .card{width:300px;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--card)}
-#update151b .card>img{display:block;width:100%;height:168px;object-fit:cover}
-#update151b .card>.name{padding:12px 14px 4px;font:var(--type-ui)}
-#update151b .card>.line{padding:0 14px 14px;font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground)}
-#update151b .newcard{width:300px;border:1px dashed var(--border);border-radius:12px;display:flex;align-items:center;justify-content:center;gap:8px;color:var(--muted-foreground);font:var(--type-ui)}
-#update151b .scrim{position:absolute;inset:0;background:color-mix(in srgb, var(--neutral-950) 34%, transparent)}
-#update151b .dialog{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:440px;display:flex;flex-direction:column;align-items:stretch;background:var(--background);border:1px solid var(--border);border-radius:13px;box-shadow:var(--shadow-xl);overflow:hidden}
-#update151b .close{position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer}
-#update151b .top{display:flex;flex-direction:column;align-items:center;padding:30px 32px 0}
-#update151b .mark{display:block;width:64px;height:64px}
-#update151b h1{margin:18px 0 0;font:var(--type-title);letter-spacing:var(--tracking-tighter);text-align:center}
-#update151b .version{margin-top:6px;font:var(--type-body);font-size:var(--text-sm);line-height:1.4;color:var(--muted-foreground);text-align:center}
-#update151b .eyebrow{align-self:stretch;margin-top:24px;font:var(--type-label);font-size:var(--text-2xs);letter-spacing:var(--tracking-label);text-transform:uppercase;color:var(--muted-foreground)}
-#update151b .notes{position:relative;align-self:stretch;margin-top:8px;max-height:236px;overflow:hidden;padding:14px 16px;border-radius:10px;background:var(--muted)}
-#update151b .notes>p{margin:0;font:var(--type-body);font-size:var(--text-sm);line-height:1.55;color:var(--muted-foreground)}
-#update151b .notes>p+p{margin-top:10px}
-#update151b .notes>.more{position:absolute;left:0;right:0;bottom:0;height:44px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:6px;color:var(--muted-foreground);background:linear-gradient(to bottom, transparent, var(--muted) 60%)}
-#update151b .foot{margin-top:20px;padding:20px 32px 24px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
-#update151b .btn{height:40px;display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:8px;border:1px solid var(--border);background:var(--secondary);color:var(--secondary-foreground);font:var(--type-ui);box-shadow:var(--shadow-xs);cursor:pointer}
-#update151b .btn.primary{background:var(--primary);color:var(--primary-foreground);border-color:transparent}
-#update151b .progress{height:40px;display:flex;flex-direction:column;align-items:stretch;justify-content:center;gap:8px;padding:0 2px}
-#update151b .progress>span{font:var(--type-ui);text-align:center}
-#update151b .progress>.bar{height:4px;border-radius:99px;background:var(--muted);overflow:hidden}
-#update151b .progress>.bar>span{display:block;height:100%;width:42%;border-radius:99px;background:var(--foreground)}
-#update151b .why{margin:-6px 0 2px;font:var(--type-body);font-size:var(--text-sm);line-height:1.4;color:var(--destructive);text-align:center}
+<div class="dv-opt" id="152b">
+<div class="dv-olabel"><a class="dv-oid" href="#152b">152b</a><span><b>Update now, pressed.</b> The dialog stays; the primary&#8217;s place holds the download &#8212; the figure over the 4px bar &#8212; and <code>Next start</code> is still there, taking over the intent if pressed. When the download lands the finishing-local-work surface takes over and Arke restarts.</span></div>
+<div class="dv-card" style="width:1360px"><div id="update152b" data-screen-label="152b Update available &#8212; Update now pressed, the download on the primary&#8217;s line"><style>
+#update152b{width:1360px;height:850px;position:relative;background:var(--background);color:var(--foreground);font:var(--type-body);overflow:hidden}
+#update152b *{box-sizing:border-box}
+#update152b .behind{position:absolute;inset:0;display:flex;flex-direction:column}
+#update152b .head{height:44px;flex:none;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--border);position:relative}
+#update152b .head>.where{flex:1;min-width:0;font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground);padding:0 6px}
+#update152b .head>.brand{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px}
+#update152b .brand>b{font:var(--type-ui);font-size:var(--text-md);font-weight:var(--weight-semibold);letter-spacing:var(--tracking-tighter)}
+#update152b .brand>span{font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground)}
+#update152b .head>.tools{flex:1;display:flex;justify-content:flex-end;gap:3px}
+#update152b .tools>span{width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted-foreground);position:relative}
+#update152b .tools>span.bell::after{content:"";position:absolute;top:2px;right:3px;width:5px;height:5px;border-radius:99px;background:var(--foreground)}
+#update152b .worlds{flex:1;padding:34px 40px}
+#update152b .worlds>h2{font:var(--type-title);letter-spacing:var(--tracking-tighter);margin:0 0 6px}
+#update152b .worlds>.count{font:var(--type-meta);font-size:var(--text-sm);color:var(--muted-foreground);margin-bottom:26px}
+#update152b .cards{display:flex;gap:18px}
+#update152b .card{width:300px;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--card)}
+#update152b .card>img{display:block;width:100%;height:168px;object-fit:cover}
+#update152b .card>.name{padding:12px 14px 4px;font:var(--type-ui)}
+#update152b .card>.line{padding:0 14px 14px;font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground)}
+#update152b .newcard{width:300px;border:1px dashed var(--border);border-radius:12px;display:flex;align-items:center;justify-content:center;gap:8px;color:var(--muted-foreground);font:var(--type-ui)}
+#update152b .scrim{position:absolute;inset:0;background:color-mix(in srgb, var(--neutral-950) 34%, transparent)}
+#update152b .dialog{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:440px;display:flex;flex-direction:column;align-items:stretch;background:var(--background);border:1px solid var(--border);border-radius:13px;box-shadow:var(--shadow-xl);overflow:hidden}
+#update152b .close{position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer}
+#update152b .top{display:flex;flex-direction:column;align-items:center;padding:30px 32px 0}
+#update152b .mark{display:block;width:64px;height:64px}
+#update152b h1{margin:18px 0 0;font:var(--type-title);letter-spacing:var(--tracking-tighter);text-align:center}
+#update152b .version{margin-top:6px;font:var(--type-body);font-size:var(--text-sm);line-height:1.4;color:var(--muted-foreground);text-align:center}
+#update152b .eyebrow{align-self:stretch;margin-top:24px;font:var(--type-label);font-size:var(--text-2xs);letter-spacing:var(--tracking-label);text-transform:uppercase;color:var(--muted-foreground)}
+#update152b .notes{position:relative;align-self:stretch;margin-top:8px;max-height:236px;overflow:hidden;padding:14px 16px;border-radius:10px;background:var(--muted)}
+#update152b .notes>p{margin:0;font:var(--type-body);font-size:var(--text-sm);line-height:1.55;color:var(--muted-foreground)}
+#update152b .notes>p+p{margin-top:10px}
+#update152b .notes>.more{position:absolute;left:0;right:0;bottom:0;height:44px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:6px;color:var(--muted-foreground);background:linear-gradient(to bottom, transparent, var(--muted) 60%)}
+#update152b .foot{margin-top:20px;padding:20px 32px 24px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
+#update152b .btn{height:40px;display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:8px;border:1px solid var(--border);background:var(--secondary);color:var(--secondary-foreground);font:var(--type-ui);box-shadow:var(--shadow-xs);cursor:pointer}
+#update152b .btn.primary{background:var(--primary);color:var(--primary-foreground);border-color:transparent}
+#update152b .progress{height:40px;display:flex;flex-direction:column;align-items:stretch;justify-content:center;gap:8px;padding:0 2px}
+#update152b .progress>span{font:var(--type-ui);text-align:center}
+#update152b .progress>.bar{height:4px;border-radius:99px;background:var(--muted);overflow:hidden}
+#update152b .progress>.bar>span{display:block;height:100%;width:42%;border-radius:99px;background:var(--foreground)}
+#update152b .why{margin:-6px 0 2px;font:var(--type-body);font-size:var(--text-sm);line-height:1.4;color:var(--destructive);text-align:center}
 </style><div class="behind"><div class="head"><span class="where"></span><span class="brand"><b>Arke</b><span>Studio</span></span><span class="tools"><span class="bell"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"></path><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"></path></svg></span><span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path></svg></span></span></div><div class="worlds"><h2>Worlds</h2><div class="count">3 worlds</div><div class="cards"><div class="card"><img src="assets/world-undersong.png" alt=""><div class="name">The Undersong</div><div class="line">2 productions &middot; opened today</div></div><div class="card"><img src="assets/world-copper-saints.png" alt=""><div class="name">Copper Saints</div><div class="line">1 production &middot; 3 days ago</div></div><div class="card"><img src="assets/world-meridian-dust.png" alt=""><div class="name">Meridian Dust</div><div class="line">no productions &middot; 12 August</div></div><div class="newcard"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg><span>New world</span></div></div></div></div><div class="scrim"></div><div class="dialog" role="dialog" aria-label="Update available"><span class="close" title="Close"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></span><div class="top"><img class="mark" src="assets/logos/arke.ico" alt=""><h1>Update available</h1><div class="version">v0.5.50 &middot; Settings is a sheet</div><div class="eyebrow">What&#8217;s new</div><div class="notes"><p>Settings opens over the screen you were on, at 95% of the window, and closes back to it. Escape, the scrim and the close all return you there; the ten panes and their addresses are unchanged.</p><p>General is one row per default: the label, the model with its provider&#8217;s mark, and its state &#8212; connected, this machine, or needs a key. The narrator&#8217;s row shows the voice and what it costs.</p><p>An update is announced when the app opens, in a dialog like this one. Update now downloads it and restarts; Next start downloads in the background and installs when you close.</p><p>A chapter is read in pieces and each piece is kept, so a change to one paragraph re-reads one piece rather than the chapter.</p><p>Harness settings show what is running, what starts next and what needs attention. A found-but-blocked installation says so on its row.</p><span class="more"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span></div></div><div class="foot"><div class="progress"><span>Downloading &middot; 42%</span><span class="bar"><span></span></span></div><span class="btn">Next start</span></div></div></div>
 </div>
 </div>
-<div class="dv-opt" id="151c">
-<div class="dv-olabel"><a class="dv-oid" href="#151c">151c</a><span><b>The download failed.</b> The notes stay, the reason is one clause above the foot, the primary reads <code>Try again</code>.</span></div>
-<div class="dv-card" style="width:1360px"><div id="update151c" data-screen-label="151c Update available &#8212; the download failed, one clause and Try again"><style>
-#update151c{width:1360px;height:850px;position:relative;background:var(--background);color:var(--foreground);font:var(--type-body);overflow:hidden}
-#update151c *{box-sizing:border-box}
-#update151c .behind{position:absolute;inset:0;display:flex;flex-direction:column}
-#update151c .head{height:44px;flex:none;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--border);position:relative}
-#update151c .head>.where{flex:1;min-width:0;font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground);padding:0 6px}
-#update151c .head>.brand{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px}
-#update151c .brand>b{font:var(--type-ui);font-size:var(--text-md);font-weight:var(--weight-semibold);letter-spacing:var(--tracking-tighter)}
-#update151c .brand>span{font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground)}
-#update151c .head>.tools{flex:1;display:flex;justify-content:flex-end;gap:3px}
-#update151c .tools>span{width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted-foreground);position:relative}
-#update151c .tools>span.bell::after{content:"";position:absolute;top:2px;right:3px;width:5px;height:5px;border-radius:99px;background:var(--foreground)}
-#update151c .worlds{flex:1;padding:34px 40px}
-#update151c .worlds>h2{font:var(--type-title);letter-spacing:var(--tracking-tighter);margin:0 0 6px}
-#update151c .worlds>.count{font:var(--type-meta);font-size:var(--text-sm);color:var(--muted-foreground);margin-bottom:26px}
-#update151c .cards{display:flex;gap:18px}
-#update151c .card{width:300px;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--card)}
-#update151c .card>img{display:block;width:100%;height:168px;object-fit:cover}
-#update151c .card>.name{padding:12px 14px 4px;font:var(--type-ui)}
-#update151c .card>.line{padding:0 14px 14px;font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground)}
-#update151c .newcard{width:300px;border:1px dashed var(--border);border-radius:12px;display:flex;align-items:center;justify-content:center;gap:8px;color:var(--muted-foreground);font:var(--type-ui)}
-#update151c .scrim{position:absolute;inset:0;background:color-mix(in srgb, var(--neutral-950) 34%, transparent)}
-#update151c .dialog{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:440px;display:flex;flex-direction:column;align-items:stretch;background:var(--background);border:1px solid var(--border);border-radius:13px;box-shadow:var(--shadow-xl);overflow:hidden}
-#update151c .close{position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer}
-#update151c .top{display:flex;flex-direction:column;align-items:center;padding:30px 32px 0}
-#update151c .mark{display:block;width:64px;height:64px}
-#update151c h1{margin:18px 0 0;font:var(--type-title);letter-spacing:var(--tracking-tighter);text-align:center}
-#update151c .version{margin-top:6px;font:var(--type-body);font-size:var(--text-sm);line-height:1.4;color:var(--muted-foreground);text-align:center}
-#update151c .eyebrow{align-self:stretch;margin-top:24px;font:var(--type-label);font-size:var(--text-2xs);letter-spacing:var(--tracking-label);text-transform:uppercase;color:var(--muted-foreground)}
-#update151c .notes{position:relative;align-self:stretch;margin-top:8px;max-height:236px;overflow:hidden;padding:14px 16px;border-radius:10px;background:var(--muted)}
-#update151c .notes>p{margin:0;font:var(--type-body);font-size:var(--text-sm);line-height:1.55;color:var(--muted-foreground)}
-#update151c .notes>p+p{margin-top:10px}
-#update151c .notes>.more{position:absolute;left:0;right:0;bottom:0;height:44px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:6px;color:var(--muted-foreground);background:linear-gradient(to bottom, transparent, var(--muted) 60%)}
-#update151c .foot{margin-top:20px;padding:20px 32px 24px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
-#update151c .btn{height:40px;display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:8px;border:1px solid var(--border);background:var(--secondary);color:var(--secondary-foreground);font:var(--type-ui);box-shadow:var(--shadow-xs);cursor:pointer}
-#update151c .btn.primary{background:var(--primary);color:var(--primary-foreground);border-color:transparent}
-#update151c .progress{height:40px;display:flex;flex-direction:column;align-items:stretch;justify-content:center;gap:8px;padding:0 2px}
-#update151c .progress>span{font:var(--type-ui);text-align:center}
-#update151c .progress>.bar{height:4px;border-radius:99px;background:var(--muted);overflow:hidden}
-#update151c .progress>.bar>span{display:block;height:100%;width:42%;border-radius:99px;background:var(--foreground)}
-#update151c .why{margin:-6px 0 2px;font:var(--type-body);font-size:var(--text-sm);line-height:1.4;color:var(--destructive);text-align:center}
+<div class="dv-opt" id="152c">
+<div class="dv-olabel"><a class="dv-oid" href="#152c">152c</a><span><b>The download failed.</b> The notes stay, the reason is one clause above the foot, the primary reads <code>Try again</code>.</span></div>
+<div class="dv-card" style="width:1360px"><div id="update152c" data-screen-label="152c Update available &#8212; the download failed, one clause and Try again"><style>
+#update152c{width:1360px;height:850px;position:relative;background:var(--background);color:var(--foreground);font:var(--type-body);overflow:hidden}
+#update152c *{box-sizing:border-box}
+#update152c .behind{position:absolute;inset:0;display:flex;flex-direction:column}
+#update152c .head{height:44px;flex:none;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--border);position:relative}
+#update152c .head>.where{flex:1;min-width:0;font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground);padding:0 6px}
+#update152c .head>.brand{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px}
+#update152c .brand>b{font:var(--type-ui);font-size:var(--text-md);font-weight:var(--weight-semibold);letter-spacing:var(--tracking-tighter)}
+#update152c .brand>span{font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground)}
+#update152c .head>.tools{flex:1;display:flex;justify-content:flex-end;gap:3px}
+#update152c .tools>span{width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted-foreground);position:relative}
+#update152c .tools>span.bell::after{content:"";position:absolute;top:2px;right:3px;width:5px;height:5px;border-radius:99px;background:var(--foreground)}
+#update152c .worlds{flex:1;padding:34px 40px}
+#update152c .worlds>h2{font:var(--type-title);letter-spacing:var(--tracking-tighter);margin:0 0 6px}
+#update152c .worlds>.count{font:var(--type-meta);font-size:var(--text-sm);color:var(--muted-foreground);margin-bottom:26px}
+#update152c .cards{display:flex;gap:18px}
+#update152c .card{width:300px;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--card)}
+#update152c .card>img{display:block;width:100%;height:168px;object-fit:cover}
+#update152c .card>.name{padding:12px 14px 4px;font:var(--type-ui)}
+#update152c .card>.line{padding:0 14px 14px;font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground)}
+#update152c .newcard{width:300px;border:1px dashed var(--border);border-radius:12px;display:flex;align-items:center;justify-content:center;gap:8px;color:var(--muted-foreground);font:var(--type-ui)}
+#update152c .scrim{position:absolute;inset:0;background:color-mix(in srgb, var(--neutral-950) 34%, transparent)}
+#update152c .dialog{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:440px;display:flex;flex-direction:column;align-items:stretch;background:var(--background);border:1px solid var(--border);border-radius:13px;box-shadow:var(--shadow-xl);overflow:hidden}
+#update152c .close{position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer}
+#update152c .top{display:flex;flex-direction:column;align-items:center;padding:30px 32px 0}
+#update152c .mark{display:block;width:64px;height:64px}
+#update152c h1{margin:18px 0 0;font:var(--type-title);letter-spacing:var(--tracking-tighter);text-align:center}
+#update152c .version{margin-top:6px;font:var(--type-body);font-size:var(--text-sm);line-height:1.4;color:var(--muted-foreground);text-align:center}
+#update152c .eyebrow{align-self:stretch;margin-top:24px;font:var(--type-label);font-size:var(--text-2xs);letter-spacing:var(--tracking-label);text-transform:uppercase;color:var(--muted-foreground)}
+#update152c .notes{position:relative;align-self:stretch;margin-top:8px;max-height:236px;overflow:hidden;padding:14px 16px;border-radius:10px;background:var(--muted)}
+#update152c .notes>p{margin:0;font:var(--type-body);font-size:var(--text-sm);line-height:1.55;color:var(--muted-foreground)}
+#update152c .notes>p+p{margin-top:10px}
+#update152c .notes>.more{position:absolute;left:0;right:0;bottom:0;height:44px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:6px;color:var(--muted-foreground);background:linear-gradient(to bottom, transparent, var(--muted) 60%)}
+#update152c .foot{margin-top:20px;padding:20px 32px 24px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
+#update152c .btn{height:40px;display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:8px;border:1px solid var(--border);background:var(--secondary);color:var(--secondary-foreground);font:var(--type-ui);box-shadow:var(--shadow-xs);cursor:pointer}
+#update152c .btn.primary{background:var(--primary);color:var(--primary-foreground);border-color:transparent}
+#update152c .progress{height:40px;display:flex;flex-direction:column;align-items:stretch;justify-content:center;gap:8px;padding:0 2px}
+#update152c .progress>span{font:var(--type-ui);text-align:center}
+#update152c .progress>.bar{height:4px;border-radius:99px;background:var(--muted);overflow:hidden}
+#update152c .progress>.bar>span{display:block;height:100%;width:42%;border-radius:99px;background:var(--foreground)}
+#update152c .why{margin:-6px 0 2px;font:var(--type-body);font-size:var(--text-sm);line-height:1.4;color:var(--destructive);text-align:center}
 </style><div class="behind"><div class="head"><span class="where"></span><span class="brand"><b>Arke</b><span>Studio</span></span><span class="tools"><span class="bell"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"></path><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"></path></svg></span><span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path></svg></span></span></div><div class="worlds"><h2>Worlds</h2><div class="count">3 worlds</div><div class="cards"><div class="card"><img src="assets/world-undersong.png" alt=""><div class="name">The Undersong</div><div class="line">2 productions &middot; opened today</div></div><div class="card"><img src="assets/world-copper-saints.png" alt=""><div class="name">Copper Saints</div><div class="line">1 production &middot; 3 days ago</div></div><div class="card"><img src="assets/world-meridian-dust.png" alt=""><div class="name">Meridian Dust</div><div class="line">no productions &middot; 12 August</div></div><div class="newcard"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg><span>New world</span></div></div></div></div><div class="scrim"></div><div class="dialog" role="dialog" aria-label="Update available"><span class="close" title="Close"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></span><div class="top"><img class="mark" src="assets/logos/arke.ico" alt=""><h1>Update available</h1><div class="version">v0.5.50 &middot; Settings is a sheet</div><div class="eyebrow">What&#8217;s new</div><div class="notes"><p>Settings opens over the screen you were on, at 95% of the window, and closes back to it. Escape, the scrim and the close all return you there; the ten panes and their addresses are unchanged.</p><p>General is one row per default: the label, the model with its provider&#8217;s mark, and its state &#8212; connected, this machine, or needs a key. The narrator&#8217;s row shows the voice and what it costs.</p><p>An update is announced when the app opens, in a dialog like this one. Update now downloads it and restarts; Next start downloads in the background and installs when you close.</p><p>A chapter is read in pieces and each piece is kept, so a change to one paragraph re-reads one piece rather than the chapter.</p><p>Harness settings show what is running, what starts next and what needs attention. A found-but-blocked installation says so on its row.</p><span class="more"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span></div></div><div class="foot"><div class="why">The download failed.</div><span class="btn primary">Try again</span><span class="btn">Next start</span></div></div></div>
 </div>
 </div>
@@ -224,6 +224,209 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
 <p class="dv-rule"><b>Binding.</b> <b>What the two presses do.</b> <code>Update now</code> downloads and, when the download lands, installs and restarts (SPEC-016 R-13): the dialog stays, the primary&#8217;s place shows <code>Downloading &middot; 42%</code> over the <code>4px</code> bar, and the finishing-local-work surface takes over from there. <code>Next start</code> is the on-close flow: the download runs in the background, the install is armed when it lands, Arke installs after a clean close and stays closed, so the next start is the new version; the dialog closes on the press, and What&#8217;s new says <code>downloading &middot; 42%</code>, then <code>installs when you close</code>. A close before the download lands is an ordinary close, and the next launch asks again. While <code>Update now</code>&#8217;s download runs, <code>Next start</code> stays and takes over the intent. Closing the dialog &#8212; the <code>X</code>, Escape, the scrim &#8212; keeps whatever is running and drops what was intended: a download started by <code>Update now</code> finishes and waits in What&#8217;s new as <code>ready to install</code> with <code>Install and restart</code> and <code>Install when I close</code>; nothing installs and nothing restarts on its own once the dialog is gone.</p>
 <p class="dv-rule"><b>Binding.</b> <b>A failed download keeps the dialog.</b> The notes stay, the reason is one clause in <code>--destructive</code> above the foot (<code>The download failed.</code>), the primary reads <code>Try again</code> and does what <code>Update now</code> did, and <code>Next start</code> stays. The Activity panel is not opened over the dialog and the dialog is not opened over the finishing-local-work surface; the two never stack.</p>
 <p class="dv-next">Implementation: the client announces from the update state it already holds &#8212; the first <code>available</code> it sees for a version, once the address is past <code>/</code> and <code>/starting</code> &#8212; and holds the <i>now</i> intent itself, pressing <i>Install and restart</i> when <code>ready</code> arrives while it is open; the desktop controller learns to take <i>install on close</i> before the download exists, downloading first and arming when it lands. SPEC-016 &sect;2.8 is amended in the private set with the code. Try next: &ldquo;the dialog on a 1024-wide window&rdquo; &middot; &ldquo;a release with no notes&rdquo;.</p>
+</section>
+<section class="dv-turn" id="t151">
+<div class="dv-thd"><a class="dv-tid" href="#t151">151</a><span class="dv-tname">An Arke account in the chrome &#8212; the person&#8217;s picture at the end of the bar, a menu under it, and a door in when no one is signed in (Arke cloud, ahead of its spec)</span></div>
+<p class="dv-next">Arke cloud is coming, and a desktop app that can sign in to it needs one place that says who is signed in &#8212; and, for most people at first, that nobody is. Asked on 17 September with a reference from another studio tool: a picture at the end of the bar, a menu under it holding the person, their plan and the doors, and a way in when there is no picture. Below: the control at the end of the chrome&#8217;s right group, after the gear; the menu it opens; the same menu with no one signed in; and the states the reference does not show. What the reference draws and this turn does not is Settings, Theme, Language and Help as rows of the menu. Each of those has a place already, the gear sits beside the picture, and one thing has one place. The menu holds account things only.</p>
+<div class="dv-opts" style="margin-top:22px">
+<div class="dv-opt" id="151a">
+<div class="dv-olabel"><a class="dv-oid" href="#151a">151a</a><span>Signed in &#8212; the picture after the gear, the menu under it: the person, the plan with its one action, the account, sign out</span></div>
+<div class="dv-card" style="width:1360px"><div id="account151a" data-screen-label="151a Arke account &middot; signed in, the menu open" style="width:1360px;height:850px"><style>
+#account151a{position:relative;background:var(--background);color:var(--foreground);font:var(--type-body);overflow:hidden}
+#account151a *{box-sizing:border-box}
+#account151a .screen{position:absolute;inset:0;display:flex;flex-direction:column}
+#account151a .head{height:44px;flex:none;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--border);position:relative}
+#account151a .head>.where{flex:1;min-width:0;font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground);padding:0 6px}
+#account151a .head>.brand{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px}
+#account151a .brand>b{font:var(--type-ui);font-size:var(--text-md);font-weight:var(--weight-semibold);letter-spacing:var(--tracking-tighter)}
+#account151a .brand>span{font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground)}
+#account151a .head>.tools,#account151a .strip>.tools{flex:1;display:flex;justify-content:flex-end;gap:3px}
+#account151a .tools>span{width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted-foreground);position:relative;flex:none}
+#account151a .tools>span.on{background:var(--secondary);color:var(--foreground)}
+#account151a .pic{width:18px;height:18px;border-radius:99px;background:url(assets/char-odile.png) 62% 21%/250% auto no-repeat;flex:none}
+#account151a .initials{width:18px;height:18px;border-radius:99px;background:var(--secondary);color:var(--secondary-foreground);display:inline-flex;align-items:center;justify-content:center;font:var(--type-label);font-size:var(--text-2xs);flex:none}
+#account151a .tools>span.on>.initials{background:var(--background)}
+#account151a .dot{position:absolute;top:2px;right:3px;width:5px;height:5px;border-radius:99px;background:var(--warning)}
+#account151a .worlds{flex:1;padding:34px 40px}
+#account151a .worlds>h2{font:var(--type-title);letter-spacing:var(--tracking-tighter);margin:0 0 6px}
+#account151a .worlds>.count{font:var(--type-meta);font-size:var(--text-sm);color:var(--muted-foreground);margin-bottom:26px}
+#account151a .cards{display:flex;gap:18px}
+#account151a .card{width:300px;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--card)}
+#account151a .card>img{display:block;width:100%;height:168px;object-fit:cover}
+#account151a .card>.name{padding:12px 14px 4px;font:var(--type-ui)}
+#account151a .card>.line{padding:0 14px 14px;font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground)}
+#account151a .newcard{width:300px;border:1px dashed var(--border);border-radius:12px;display:flex;align-items:center;justify-content:center;gap:8px;color:var(--muted-foreground);font:var(--type-ui)}
+#account151a .menu{position:absolute;top:50px;right:16px;width:300px;background:var(--card);border:1px solid var(--border);border-radius:11px;box-shadow:var(--shadow-lg);overflow:hidden}
+#account151a .who{display:flex;align-items:center;gap:12px;padding:14px 16px}
+#account151a .who>.pic,#account151a .who>.initials{width:36px;height:36px}
+#account151a .who>.initials{font:var(--type-ui)}
+#account151a .who>div{min-width:0}
+#account151a .who .name{font:var(--type-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#account151a .who .mail{font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#account151a .band{border-top:1px solid var(--border);padding:6px 8px}
+#account151a .row{display:flex;align-items:center;gap:10px;height:36px;padding:0 8px;border-radius:7px;font:var(--type-body);font-size:var(--text-sm);line-height:1.4}
+#account151a .row.item{cursor:pointer}
+#account151a .row>label{color:var(--muted-foreground);width:64px;flex:none}
+#account151a .row>.value{flex:1;min-width:0}
+#account151a .row>.end{margin-left:auto;display:inline-flex;align-items:center;gap:8px;flex:none;color:var(--muted-foreground)}
+#account151a .row>svg{color:var(--muted-foreground);flex:none}
+#account151a .badge{display:inline-flex;align-items:center;padding:1px 8px;border-radius:99px;border:1px solid var(--border);font:var(--type-label);letter-spacing:var(--tracking-wide);color:var(--muted-foreground)}
+#account151a .btn{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border:1px solid var(--border);border-radius:7px;background:var(--card);font:var(--type-ui);font-weight:var(--weight-regular);font-size:var(--text-xs);color:var(--foreground);cursor:pointer;white-space:nowrap}
+#account151a .btn>svg{color:var(--muted-foreground)}
+#account151a .state{display:inline-flex;align-items:center;gap:6px;font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground);white-space:nowrap}
+#account151a .state.warn{color:var(--warning)}
+#account151a .state.warn>i{width:6px;height:6px;border-radius:99px;background:var(--warning);flex:none}
+#account151a .state>svg{flex:none}
+#account151a .link{font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+#account151a .title{padding:14px 16px 0;font:var(--type-ui)}
+#account151a .buttons{display:flex;flex-direction:column;gap:8px;padding:12px 16px 16px}
+#account151a .primary,#account151a .outline{height:36px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:8px;font:var(--type-ui);cursor:pointer}
+#account151a .outline>svg{color:var(--muted-foreground)}
+#account151a .primary{background:var(--primary);color:var(--primary-foreground);box-shadow:var(--shadow-xs)}
+#account151a .outline{background:var(--background);color:var(--foreground);border:1px solid var(--border);box-shadow:var(--shadow-xs)}
+#account151a .waiting{display:flex;align-items:center;gap:8px;padding:14px 16px 16px}
+#account151a .waiting>.link{margin-left:auto}
+#account151a .states{display:flex;gap:28px;align-items:flex-start;padding:24px 28px 28px}
+#account151a .col{width:300px;flex:none;display:flex;flex-direction:column;gap:10px}
+#account151a .col>.cap{color:var(--muted-foreground);font:var(--type-meta);font-family:var(--font-mono)}
+#account151a .strip{height:44px;display:flex;align-items:center;border-bottom:1px solid var(--border);padding:0 0 0 16px}
+#account151a .col>.menu{position:relative;top:auto;right:auto;margin-top:-4px}
+</style><div class="screen"><div class="head"><span class="where"></span><span class="brand"><b>Arke</b><span>Studio</span></span><span class="tools"><span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"></path><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"></path></svg></span><span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path></svg></span><span class="on"><span class="pic"></span></span></span></div><div class="worlds"><h2>Worlds</h2><div class="count">3 worlds</div><div class="cards"><div class="card"><img src="assets/world-undersong.png" alt=""><div class="name">The Undersong</div><div class="line">2 productions &middot; opened today</div></div><div class="card"><img src="assets/world-copper-saints.png" alt=""><div class="name">Copper Saints</div><div class="line">1 production &middot; 3 days ago</div></div><div class="card"><img src="assets/world-meridian-dust.png" alt=""><div class="name">Meridian Dust</div><div class="line">no productions &middot; 12 August</div></div><div class="newcard"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg><span>New world</span></div></div></div></div><div class="menu" role="menu" aria-label="Arke account"><div class="who"><span class="pic"></span><div><div class="name">Helen Marsh</div><div class="mail">helen@marsh.studio</div></div></div><div class="band"><div class="row"><label>Plan</label><span class="value"><span class="badge">Free</span></span><span class="end"><span class="btn"><span>Upgrade</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"></path><path d="M7 17 17 7"></path></svg></span></span></div><div class="row item"><span class="value">Account</span><span class="end"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"></path><path d="M7 17 17 7"></path></svg></span></div></div><div class="band"><div class="row item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" x2="9" y1="12" y2="12"></line></svg><span class="value">Sign out</span></div></div></div></div></div>
+</div>
+<div class="dv-opt" id="151b">
+<div class="dv-olabel"><a class="dv-oid" href="#151b">151b</a><span>No one signed in &#8212; the person glyph in the same slot, quiet; pressed, one title and two buttons</span></div>
+<div class="dv-card" style="width:1360px"><div id="account151b" data-screen-label="151b Arke account &middot; no one signed in" style="width:1360px;height:850px"><style>
+#account151b{position:relative;background:var(--background);color:var(--foreground);font:var(--type-body);overflow:hidden}
+#account151b *{box-sizing:border-box}
+#account151b .screen{position:absolute;inset:0;display:flex;flex-direction:column}
+#account151b .head{height:44px;flex:none;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--border);position:relative}
+#account151b .head>.where{flex:1;min-width:0;font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground);padding:0 6px}
+#account151b .head>.brand{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px}
+#account151b .brand>b{font:var(--type-ui);font-size:var(--text-md);font-weight:var(--weight-semibold);letter-spacing:var(--tracking-tighter)}
+#account151b .brand>span{font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground)}
+#account151b .head>.tools,#account151b .strip>.tools{flex:1;display:flex;justify-content:flex-end;gap:3px}
+#account151b .tools>span{width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted-foreground);position:relative;flex:none}
+#account151b .tools>span.on{background:var(--secondary);color:var(--foreground)}
+#account151b .pic{width:18px;height:18px;border-radius:99px;background:url(assets/char-odile.png) 62% 21%/250% auto no-repeat;flex:none}
+#account151b .initials{width:18px;height:18px;border-radius:99px;background:var(--secondary);color:var(--secondary-foreground);display:inline-flex;align-items:center;justify-content:center;font:var(--type-label);font-size:var(--text-2xs);flex:none}
+#account151b .tools>span.on>.initials{background:var(--background)}
+#account151b .dot{position:absolute;top:2px;right:3px;width:5px;height:5px;border-radius:99px;background:var(--warning)}
+#account151b .worlds{flex:1;padding:34px 40px}
+#account151b .worlds>h2{font:var(--type-title);letter-spacing:var(--tracking-tighter);margin:0 0 6px}
+#account151b .worlds>.count{font:var(--type-meta);font-size:var(--text-sm);color:var(--muted-foreground);margin-bottom:26px}
+#account151b .cards{display:flex;gap:18px}
+#account151b .card{width:300px;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--card)}
+#account151b .card>img{display:block;width:100%;height:168px;object-fit:cover}
+#account151b .card>.name{padding:12px 14px 4px;font:var(--type-ui)}
+#account151b .card>.line{padding:0 14px 14px;font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground)}
+#account151b .newcard{width:300px;border:1px dashed var(--border);border-radius:12px;display:flex;align-items:center;justify-content:center;gap:8px;color:var(--muted-foreground);font:var(--type-ui)}
+#account151b .menu{position:absolute;top:50px;right:16px;width:300px;background:var(--card);border:1px solid var(--border);border-radius:11px;box-shadow:var(--shadow-lg);overflow:hidden}
+#account151b .who{display:flex;align-items:center;gap:12px;padding:14px 16px}
+#account151b .who>.pic,#account151b .who>.initials{width:36px;height:36px}
+#account151b .who>.initials{font:var(--type-ui)}
+#account151b .who>div{min-width:0}
+#account151b .who .name{font:var(--type-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#account151b .who .mail{font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#account151b .band{border-top:1px solid var(--border);padding:6px 8px}
+#account151b .row{display:flex;align-items:center;gap:10px;height:36px;padding:0 8px;border-radius:7px;font:var(--type-body);font-size:var(--text-sm);line-height:1.4}
+#account151b .row.item{cursor:pointer}
+#account151b .row>label{color:var(--muted-foreground);width:64px;flex:none}
+#account151b .row>.value{flex:1;min-width:0}
+#account151b .row>.end{margin-left:auto;display:inline-flex;align-items:center;gap:8px;flex:none;color:var(--muted-foreground)}
+#account151b .row>svg{color:var(--muted-foreground);flex:none}
+#account151b .badge{display:inline-flex;align-items:center;padding:1px 8px;border-radius:99px;border:1px solid var(--border);font:var(--type-label);letter-spacing:var(--tracking-wide);color:var(--muted-foreground)}
+#account151b .btn{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border:1px solid var(--border);border-radius:7px;background:var(--card);font:var(--type-ui);font-weight:var(--weight-regular);font-size:var(--text-xs);color:var(--foreground);cursor:pointer;white-space:nowrap}
+#account151b .btn>svg{color:var(--muted-foreground)}
+#account151b .state{display:inline-flex;align-items:center;gap:6px;font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground);white-space:nowrap}
+#account151b .state.warn{color:var(--warning)}
+#account151b .state.warn>i{width:6px;height:6px;border-radius:99px;background:var(--warning);flex:none}
+#account151b .state>svg{flex:none}
+#account151b .link{font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+#account151b .title{padding:14px 16px 0;font:var(--type-ui)}
+#account151b .buttons{display:flex;flex-direction:column;gap:8px;padding:12px 16px 16px}
+#account151b .primary,#account151b .outline{height:36px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:8px;font:var(--type-ui);cursor:pointer}
+#account151b .outline>svg{color:var(--muted-foreground)}
+#account151b .primary{background:var(--primary);color:var(--primary-foreground);box-shadow:var(--shadow-xs)}
+#account151b .outline{background:var(--background);color:var(--foreground);border:1px solid var(--border);box-shadow:var(--shadow-xs)}
+#account151b .waiting{display:flex;align-items:center;gap:8px;padding:14px 16px 16px}
+#account151b .waiting>.link{margin-left:auto}
+#account151b .states{display:flex;gap:28px;align-items:flex-start;padding:24px 28px 28px}
+#account151b .col{width:300px;flex:none;display:flex;flex-direction:column;gap:10px}
+#account151b .col>.cap{color:var(--muted-foreground);font:var(--type-meta);font-family:var(--font-mono)}
+#account151b .strip{height:44px;display:flex;align-items:center;border-bottom:1px solid var(--border);padding:0 0 0 16px}
+#account151b .col>.menu{position:relative;top:auto;right:auto;margin-top:-4px}
+</style><div class="screen"><div class="head"><span class="where"></span><span class="brand"><b>Arke</b><span>Studio</span></span><span class="tools"><span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"></path><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"></path></svg></span><span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path></svg></span><span class="on"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></span></span></div><div class="worlds"><h2>Worlds</h2><div class="count">3 worlds</div><div class="cards"><div class="card"><img src="assets/world-undersong.png" alt=""><div class="name">The Undersong</div><div class="line">2 productions &middot; opened today</div></div><div class="card"><img src="assets/world-copper-saints.png" alt=""><div class="name">Copper Saints</div><div class="line">1 production &middot; 3 days ago</div></div><div class="card"><img src="assets/world-meridian-dust.png" alt=""><div class="name">Meridian Dust</div><div class="line">no productions &middot; 12 August</div></div><div class="newcard"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg><span>New world</span></div></div></div></div><div class="menu" role="menu" aria-label="Arke account"><div class="title">Arke account</div><div class="buttons"><span class="primary">Sign in<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"></path><path d="M7 17 17 7"></path></svg></span><span class="outline">Create account<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"></path><path d="M7 17 17 7"></path></svg></span></div></div></div></div>
+</div>
+<div class="dv-opt" id="151c">
+<div class="dv-olabel"><a class="dv-oid" href="#151c">151c</a><span>The states &#8212; waiting for the browser, a session that expired, offline, and a paid plan for someone with no picture</span></div>
+<div class="dv-card" style="width:1360px"><div id="account151c" data-screen-label="151c Arke account &middot; the states" style="width:1360px"><style>
+#account151c{position:relative;background:var(--background);color:var(--foreground);font:var(--type-body);overflow:hidden}
+#account151c *{box-sizing:border-box}
+#account151c .screen{position:absolute;inset:0;display:flex;flex-direction:column}
+#account151c .head{height:44px;flex:none;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--border);position:relative}
+#account151c .head>.where{flex:1;min-width:0;font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground);padding:0 6px}
+#account151c .head>.brand{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px}
+#account151c .brand>b{font:var(--type-ui);font-size:var(--text-md);font-weight:var(--weight-semibold);letter-spacing:var(--tracking-tighter)}
+#account151c .brand>span{font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground)}
+#account151c .head>.tools,#account151c .strip>.tools{flex:1;display:flex;justify-content:flex-end;gap:3px}
+#account151c .tools>span{width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted-foreground);position:relative;flex:none}
+#account151c .tools>span.on{background:var(--secondary);color:var(--foreground)}
+#account151c .pic{width:18px;height:18px;border-radius:99px;background:url(assets/char-odile.png) 62% 21%/250% auto no-repeat;flex:none}
+#account151c .initials{width:18px;height:18px;border-radius:99px;background:var(--secondary);color:var(--secondary-foreground);display:inline-flex;align-items:center;justify-content:center;font:var(--type-label);font-size:var(--text-2xs);flex:none}
+#account151c .tools>span.on>.initials{background:var(--background)}
+#account151c .dot{position:absolute;top:2px;right:3px;width:5px;height:5px;border-radius:99px;background:var(--warning)}
+#account151c .worlds{flex:1;padding:34px 40px}
+#account151c .worlds>h2{font:var(--type-title);letter-spacing:var(--tracking-tighter);margin:0 0 6px}
+#account151c .worlds>.count{font:var(--type-meta);font-size:var(--text-sm);color:var(--muted-foreground);margin-bottom:26px}
+#account151c .cards{display:flex;gap:18px}
+#account151c .card{width:300px;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--card)}
+#account151c .card>img{display:block;width:100%;height:168px;object-fit:cover}
+#account151c .card>.name{padding:12px 14px 4px;font:var(--type-ui)}
+#account151c .card>.line{padding:0 14px 14px;font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground)}
+#account151c .newcard{width:300px;border:1px dashed var(--border);border-radius:12px;display:flex;align-items:center;justify-content:center;gap:8px;color:var(--muted-foreground);font:var(--type-ui)}
+#account151c .menu{position:absolute;top:50px;right:16px;width:300px;background:var(--card);border:1px solid var(--border);border-radius:11px;box-shadow:var(--shadow-lg);overflow:hidden}
+#account151c .who{display:flex;align-items:center;gap:12px;padding:14px 16px}
+#account151c .who>.pic,#account151c .who>.initials{width:36px;height:36px}
+#account151c .who>.initials{font:var(--type-ui)}
+#account151c .who>div{min-width:0}
+#account151c .who .name{font:var(--type-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#account151c .who .mail{font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#account151c .band{border-top:1px solid var(--border);padding:6px 8px}
+#account151c .row{display:flex;align-items:center;gap:10px;height:36px;padding:0 8px;border-radius:7px;font:var(--type-body);font-size:var(--text-sm);line-height:1.4}
+#account151c .row.item{cursor:pointer}
+#account151c .row>label{color:var(--muted-foreground);width:64px;flex:none}
+#account151c .row>.value{flex:1;min-width:0}
+#account151c .row>.end{margin-left:auto;display:inline-flex;align-items:center;gap:8px;flex:none;color:var(--muted-foreground)}
+#account151c .row>svg{color:var(--muted-foreground);flex:none}
+#account151c .badge{display:inline-flex;align-items:center;padding:1px 8px;border-radius:99px;border:1px solid var(--border);font:var(--type-label);letter-spacing:var(--tracking-wide);color:var(--muted-foreground)}
+#account151c .btn{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border:1px solid var(--border);border-radius:7px;background:var(--card);font:var(--type-ui);font-weight:var(--weight-regular);font-size:var(--text-xs);color:var(--foreground);cursor:pointer;white-space:nowrap}
+#account151c .btn>svg{color:var(--muted-foreground)}
+#account151c .state{display:inline-flex;align-items:center;gap:6px;font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground);white-space:nowrap}
+#account151c .state.warn{color:var(--warning)}
+#account151c .state.warn>i{width:6px;height:6px;border-radius:99px;background:var(--warning);flex:none}
+#account151c .state>svg{flex:none}
+#account151c .link{font:var(--type-meta);font-size:var(--text-xs);color:var(--muted-foreground);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+#account151c .title{padding:14px 16px 0;font:var(--type-ui)}
+#account151c .buttons{display:flex;flex-direction:column;gap:8px;padding:12px 16px 16px}
+#account151c .primary,#account151c .outline{height:36px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:8px;font:var(--type-ui);cursor:pointer}
+#account151c .outline>svg{color:var(--muted-foreground)}
+#account151c .primary{background:var(--primary);color:var(--primary-foreground);box-shadow:var(--shadow-xs)}
+#account151c .outline{background:var(--background);color:var(--foreground);border:1px solid var(--border);box-shadow:var(--shadow-xs)}
+#account151c .waiting{display:flex;align-items:center;gap:8px;padding:14px 16px 16px}
+#account151c .waiting>.link{margin-left:auto}
+#account151c .states{display:flex;gap:28px;align-items:flex-start;padding:24px 28px 28px}
+#account151c .col{width:300px;flex:none;display:flex;flex-direction:column;gap:10px}
+#account151c .col>.cap{color:var(--muted-foreground);font:var(--type-meta);font-family:var(--font-mono)}
+#account151c .strip{height:44px;display:flex;align-items:center;border-bottom:1px solid var(--border);padding:0 0 0 16px}
+#account151c .col>.menu{position:relative;top:auto;right:auto;margin-top:-4px}
+</style><div class="states"><div class="col"><span class="cap">signing in</span><div class="strip"><span class="tools"><span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"></path><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"></path></svg></span><span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path></svg></span><span class="on"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></span></span></div><div class="menu" role="menu" aria-label="Arke account"><div class="title">Arke account</div><div class="waiting"><span class="state"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg><span>waiting for the browser</span></span><span class="link">Cancel</span></div></div></div><div class="col"><span class="cap">session expired</span><div class="strip"><span class="tools"><span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"></path><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"></path></svg></span><span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path></svg></span><span class="on"><span class="pic"></span><span class="dot"></span></span></span></div><div class="menu" role="menu" aria-label="Arke account"><div class="who"><span class="pic"></span><div><div class="name">Helen Marsh</div><div class="mail">helen@marsh.studio</div></div></div><div class="band"><div class="row"><span class="state warn"><i></i><span>session expired</span></span><span class="end"><span class="btn"><span>Sign in</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"></path><path d="M7 17 17 7"></path></svg></span></span></div></div><div class="band"><div class="row item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" x2="9" y1="12" y2="12"></line></svg><span class="value">Sign out</span></div></div></div></div><div class="col"><span class="cap">offline</span><div class="strip"><span class="tools"><span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"></path><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"></path></svg></span><span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path></svg></span><span class="on"><span class="pic"></span></span></span></div><div class="menu" role="menu" aria-label="Arke account"><div class="who"><span class="pic"></span><div><div class="name">Helen Marsh</div><div class="mail">helen@marsh.studio</div></div></div><div class="band"><div class="row"><label>Plan</label><span class="value"><span class="badge">Free</span></span><span class="end"><span class="state">offline</span></span></div><div class="row item"><span class="value">Account</span><span class="end"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"></path><path d="M7 17 17 7"></path></svg></span></div></div><div class="band"><div class="row item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" x2="9" y1="12" y2="12"></line></svg><span class="value">Sign out</span></div></div></div></div><div class="col"><span class="cap">a paid plan, no picture</span><div class="strip"><span class="tools"><span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"></path><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"></path></svg></span><span><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path></svg></span><span class="on"><span class="initials">HM</span></span></span></div><div class="menu" role="menu" aria-label="Arke account"><div class="who"><span class="initials">HM</span><div><div class="name">Helen Marsh</div><div class="mail">helen@marsh.studio</div></div></div><div class="band"><div class="row"><label>Plan</label><span class="value"><span class="badge">Pro</span></span><span class="end"><span class="btn"><span>Manage</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"></path><path d="M7 17 17 7"></path></svg></span></span></div><div class="row item"><span class="value">Account</span><span class="end"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"></path><path d="M7 17 17 7"></path></svg></span></div></div><div class="band"><div class="row item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" x2="9" y1="12" y2="12"></line></svg><span class="value">Sign out</span></div></div></div></div></div></div></div>
+</div>
+</div>
+<p class="dv-rule"><b>Binding.</b> <b>The account is the last control in the chrome&#8217;s right group</b> &#8212; after the gear, before the desktop&#8217;s native window controls, whose <code>138</code> stays clear as it does for the rest. It is the one thing in the bar about the person rather than the screen, and every product puts it at the end. Signed in it is the person&#8217;s picture, <code>18</code> round in the <code>26&times;22</code> slot, or their initials on the secondary tint when there is no picture &#8212; the <code>Avatar</code> component&#8217;s two forms at a smaller size. Signed out it is the person glyph, drawn like the bell and the gear. <b>Signed out it carries nothing</b>: no dot, no badge, no pulse, no tooltip that sells. The app is whole without an account (SPEC-025: it runs on a machine with no network and no account), so the control is a door, not a notice. The one dot it ever wears is warning, for a session that has expired, and it means what the bell&#8217;s means: something wants you.</p>
+<p class="dv-rule"><b>Binding.</b> <b>Pressed, it opens a menu, never a page.</b> <code>300</code> wide, right-aligned to the control, <code>6</code> under the bar; the card colour, the border, <code>11</code> radius, <code>shadow-lg</code> &#8212; the bench&#8217;s session menu (<a class="dv-oid" href="#68b">68b</a>), not the Activity panel. <code>role="menu"</code>, and the role is honoured: the arrows move, Escape and an outside press close it, focus goes back to the control. Three bands, rules between them. The person: picture <code>36</code>, name, address. The facts and the doors, rows of <code>36</code> in turn <a class="dv-oid" href="#t149">149</a>&#8217;s grammar &#8212; label, value, the action at the end: <code>Plan</code> with the plan&#8217;s name and <code>Upgrade</code> (or <code>Manage</code>, once there is a plan to manage), then <code>Account</code>. <code>Sign out</code> on a band of its own. <b>Anything that leaves the app wears the &#8599; glyph and opens the system browser</b>; the app draws no billing, no profile form, no card field. <b>Nothing that lives in Settings is repeated here.</b></p>
+<p class="dv-rule"><b>Binding.</b> <b>Signed out, the same menu holds one title and two buttons</b>: <code>Arke account</code>, <code>Sign in</code> as the primary, <code>Create account</code> as the outline, both full width and both wearing the &#8599; glyph, because both leave the app. <b>Sign-in is a browser handoff</b>, as vendor sign-in already is (SPEC-030): the app opens Arke cloud in the system browser and waits, and never draws a password field. While it waits the buttons give way to one line, <code>waiting for the browser</code> with the spinner, and <code>Cancel</code>. No pitch above the buttons and no sentence under the title: a screen labels, it does not explain (turn <a class="dv-oid" href="#t137">137</a>).</p>
+<p class="dv-rule"><b>Binding.</b> <b>The words.</b> The thing is the <code>Arke account</code> &#8212; never <code>Sign-in</code>, which Settings already uses for vendor sign-in, and never <code>login</code>. The states are three, in the state-word voice of turn <a class="dv-oid" href="#t149">149</a>: <code>waiting for the browser</code> &middot; <code>session expired</code> (warning, with the dot on the picture and <code>Sign in &#8599;</code> as the row&#8217;s action) &middot; <code>offline</code> (in the plan row, in place of the action; the picture stays, because offline is not the person&#8217;s to fix). The plan&#8217;s name is a badge of the outline kind: <code>Free</code> today, and whatever the paid tier is called. <b>Nothing local is gated by the account</b>: every screen, provider and world works signed out exactly as it does today, and the account adds Arke cloud on top.</p>
+<p class="dv-next">Implementation, when it comes: <code>AppChrome</code> gains the control after the gear, with a module store like Activity&#8217;s for open and close; the chrome&#8217;s glyph sweep across the design-system files and the Prototype waits for that build, as it did for the bell. The spec is owed with the build, not with this drawing: SPEC-025 keeps accounts out of Studio and master &sect;0.3 with it, and an optional Arke cloud adapter shipped inside the desktop app is a decision for that spec to make. Try next: &ldquo;what Arke cloud puts on the world picker &#8212; a world that lives in the cloud beside one on this disk&rdquo;.</p>
 </section>
 <section class="dv-turn" id="t150">
 <div class="dv-thd"><a class="dv-tid" href="#t150">150</a><span class="dv-tname">Settings is a dialog again &#8212; 95% of the window, over the screen it was opened from (supersedes turn 124&#8217;s page; amends SPEC-042 R-5)</span></div>

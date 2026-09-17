@@ -8,7 +8,7 @@ import { releaseNameOf, updateParagraphs } from "../lib/activity-panel.js";
 import { downloadUpdate, installUpdateAndRestart, installUpdateOnClose, useUpdateStatus } from "../lib/store.js";
 
 /**
- * The update announced at launch (design turn 151; SPEC-016 R-20).
+ * The update announced at launch (design turn 152; SPEC-016 R-20).
  *
  * The updater has checked at every start since 0.2, and what it found had nowhere to be said but
  * a row on About and a card in What's new behind a dot on the bell. This is the ordinary dialog

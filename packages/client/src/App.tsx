@@ -256,7 +256,7 @@ export function App() {
       <PermissionBackstops />
       <PlayerDock />
       {/* An update the start-up check found, said once, over the first screen with chrome
-          (design turn 151). The transition below takes over from it when the install begins. */}
+          (design turn 152). The transition below takes over from it when the install begins. */}
       <UpdateAnnouncement />
       <UpdateTransition />
       {/* While the address is a Settings route, the screen tree renders the route the gear

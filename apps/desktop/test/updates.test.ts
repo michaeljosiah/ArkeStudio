@@ -173,7 +173,7 @@ describe("desktop update controller", () => {
     assert.deepEqual(marker.value, { targetVersion: "1.1.0", flow: "on-close" });
   });
 
-  it("takes Next start before the download exists: downloads, then arms when it lands (design turn 151)", async () => {
+  it("takes Next start before the download exists: downloads, then arms when it lands (design turn 152)", async () => {
     const { controller, updater, marker, states } = setup();
     updater.checkResult = { isUpdateAvailable: true, updateInfo: { version: "1.1.0" } };
     await controller.check();

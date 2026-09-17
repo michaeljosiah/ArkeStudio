@@ -10,7 +10,7 @@ import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
- * The update announced at launch (design turn 151; SPEC-016 R-20): a dialog over the first
+ * The update announced at launch (design turn 152; SPEC-016 R-20): a dialog over the first
  * screen with chrome, once per version per run, with the release's notes and two ways to take
  * it. What this file holds to: where it opens and where it does not, that it opens once, what
  * each press sends, that closing it drops the intent and keeps the download, and that it leaves
@@ -111,7 +111,7 @@ async function press(container: HTMLElement, label: string): Promise<void> {
   await act(async () => button(container, label).click());
 }
 
-describe("the update announced at launch (design turn 151)", () => {
+describe("the update announced at launch (design turn 152)", () => {
   it("opens over the world picker with the mark, the version and name, the notes and two ways to take it", async () => {
     const container = await mount("/worlds", update({}));
     const sheet = dialog(container);

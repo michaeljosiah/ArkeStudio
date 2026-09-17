@@ -3367,7 +3367,7 @@ select.fy-set__pill { padding-right: 26px; }
 @keyframes fy-update-pulse { 70% { box-shadow: 0 0 0 16px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
 
 /*
- * The update announced at launch (design turn 151): the editor's sheet at 440, the mark, the
+ * The update announced at launch (design turn 152): the editor's sheet at 440, the mark, the
  * title, one data line, the notes in a recessed pane that scrolls, and the two ways to take it
  * stacked in a foot over a full-width rule. The bands are the turn's: 30 to the mark, 18 to the
  * title, 6 to the line, 24 to the eyebrow, 8 to the pane (236 at most), 20 to the rule. On a

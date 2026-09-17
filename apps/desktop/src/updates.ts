@@ -127,7 +127,7 @@ export class UpdateController {
   private installPromise: Promise<void> | null = null;
   private installOnCloseArmed = false;
   /**
-   * "Next start" pressed on the launch announcement (design turn 151) before the download exists:
+   * "Next start" pressed on the launch announcement (design turn 152) before the download exists:
    * the download runs, and the install is armed the moment it lands. Cleared by a failed download
    * and by a fresh check, so no stale intent arms an install nobody asked for.
    */
@@ -330,7 +330,7 @@ export class UpdateController {
       this.arm();
       return Promise.resolve();
     }
-    // Before the download exists (design turn 151's "Next start"): the download runs in the
+    // Before the download exists (design turn 152's "Next start"): the download runs in the
     // background and the install is armed when it lands. The flow is published now so What's new
     // can say what the download is for; a close before it lands is an ordinary close.
     if (this.state.status === "available" || this.state.status === "error" || this.state.status === "downloading") {
