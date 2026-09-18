@@ -11,6 +11,11 @@ import { User, Waveform, X } from "./icons.js";
  * written voice and ends in an assignment; this one ranks nothing and assigns nothing. A row
  * whose voice a character already uses says so — as data on the row, not as a warning — and
  * picking it still only reads, which is why the action is worded the way it is.
+ *
+ * The verb is the caller's (issue 1216). On the bench the press reads, and the button says so;
+ * on Settings the same dialog only sets the narrator — no request, no job, no charge — while the
+ * row beside it states a per-character price, so `Read with this voice` under that price read as
+ * a spend that was not one. The default keeps the bench's word.
  */
 export function VoicePickerDialog({
   open,
@@ -19,6 +24,7 @@ export function VoicePickerDialog({
   chosenProvider,
   chosenModel,
   use = "bench",
+  confirmLabel = "Read with this voice",
   onClose,
   onPick,
 }: {
@@ -29,6 +35,8 @@ export function VoicePickerDialog({
   chosenProvider?: string;
   chosenModel?: string;
   use?: "bench" | "narration";
+  /** What the primary button says the press does — a read on the bench, a setting elsewhere. */
+  confirmLabel?: string;
   onClose: () => void;
   onPick: (voice: ReadingVoice) => void;
 }) {
@@ -153,7 +161,7 @@ export function VoicePickerDialog({
               if (chosen !== undefined && chosen.unavailableReason === undefined) onPick(chosen);
             }}
           >
-            Read with this voice
+            {confirmLabel}
           </button>
         </div>
       </div>

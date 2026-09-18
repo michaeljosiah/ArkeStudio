@@ -173,6 +173,20 @@ describe("voice picker identity", () => {
     assert.match(markup, /fy-voices__picked">Cloud v3/);
   });
 
+  it("says what the press does in the caller's word: a read on the bench, a setting elsewhere (issue 1216)", () => {
+    // The Narrator row states a per-character price beside the value; a button under that price
+    // saying it would read looked like a spend, and it was not one — picking only sets. The bench
+    // keeps its verb (design 70's rule: a voice that reads is not a voice that belongs to anyone).
+    __setStateForTest(FIXTURE_STATE, {
+      voiceCatalogue: [{ provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george", label: "George", attributes: [], local: true, canClone: false, usedBy: [] }],
+    });
+    const bench = renderToString(<VoicePickerDialog open chosenId={undefined} onClose={noop} onPick={noop} />);
+    assert.match(bench, /data-testid="voice-use"[^>]*>Read with this voice</);
+    const narrator = renderToString(<VoicePickerDialog open use="narration" confirmLabel="Use this voice" chosenId={undefined} onClose={noop} onPick={noop} />);
+    assert.match(narrator, /data-testid="voice-use"[^>]*>Use this voice</);
+    assert.doesNotMatch(narrator, /Read with this voice/);
+  });
+
   it("filters cloned voices out of narration until that use is implemented", () => {
     __setStateForTest(FIXTURE_STATE, {
       voiceCatalogue: [
