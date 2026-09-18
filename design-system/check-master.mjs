@@ -9,6 +9,7 @@
 // or `font: 500 12px …` inside a turn fails. Earlier turns are dated record and keep what they
 // drew, but their count may not grow. A turn from 139 on is approved from HTML, never from a
 // bitmap, so a card whose only content is an <img> fails there too. Every `#anchor` resolves.
+// Every frame that draws the chrome's gear draws the account control after it (issue 1220).
 //
 // Render: the master painted in Segoe UI for months because nothing resolved to the loaded face
 // (Google served "Geist", the tokens named "Geist Sans"). The fonts are vendored now; this proves
@@ -107,6 +108,38 @@ for (const { turn, body } of sections) {
   if (turn < FOOTER_RULE_FROM_TURN) continue;
   const claims = body.match(/All changes saved/g) ?? [];
   if (claims.length) fail(`turn ${turn}: ${claims.length} footer(s) claim "All changes saved" — 138 binds the resting label to "Connected · v<version>", never a claim that local drafts are saved`);
+}
+
+// 6. The chrome's right group is spelled out per frame rather than shared, so a control added
+//    to it is a sweep over every frame, and a sweep cannot see a frame drawn on a branch it has
+//    not met: turn 152's three frames were authored before turn 151's account control was swept
+//    into 190 others and merged after, and shipped without it (issue 1220). A gear in a frame is
+//    the chrome's unless the sweep named it otherwise, and the control after it is the account's:
+//    the `user` glyph, a picture or initials (`.pic`, `.initials`, turn 151's signed-in dress)
+//    or a span titled `Arke account` (the inline frames the sweep dressed). Nothing here checks
+//    turns by date — a redrawn old frame is a new drawing, and it draws the chrome as it is now.
+const GEAR = 'M12.22 2h-.44a2 2 0 0 0-2 2v.18';
+const ACCOUNT = /M19 21v-2a4 4 0 0 0-4-4H9|class="pic"|class="initials"|title="Arke account"/;
+// Gears that are not the chrome: the launch plate's Settings link (76a, 76b) and a shot row's
+// gear (143a), which the sweep skipped on purpose. A new exception is a new line here, said.
+const GEARS_NOT_IN_THE_CHROME = new Map([["76a", 1], ["76b", 1], ["143a", 1]]);
+{
+  const frames = [...html.matchAll(/data-screen-label="([^"]*)"/g)];
+  for (const [i, m] of frames.entries()) {
+    const label = m[1];
+    const id = label.match(/^\d+[a-z]/)?.[0] ?? label;
+    const body = html.slice(m.index, i + 1 < frames.length ? frames[i + 1].index : undefined);
+    let bare = 0;
+    for (let at = body.indexOf(GEAR); at !== -1; at = body.indexOf(GEAR, at + GEAR.length)) {
+      // The gear's own span closes at its svg's end; the control is the sibling that follows.
+      const close = body.indexOf("</svg></span>", at);
+      if (close === -1) { bare += 1; continue; }
+      const next = body.slice(close + "</svg></span>".length).replace(/^\s+/, "");
+      if (!next.startsWith("<span") || !ACCOUNT.test(next.slice(0, 700))) bare += 1;
+    }
+    const allowed = GEARS_NOT_IN_THE_CHROME.get(id) ?? 0;
+    if (bare > allowed) fail(`${id}: the chrome's gear is not followed by the account control — draw the sibling turn 151 put after every gear, or name the gear here if it is not the chrome`);
+  }
 }
 
 // ---- render check ---------------------------------------------------------------------------
