@@ -340,17 +340,23 @@ export function readerPriceLabel(row: Pick<ManifestModel, "pricing"> | null | un
 }
 
 /**
- * Cloned voice narration is intentionally unsupported until long-form queue chunking exists —
- * through any reader: a hosted reader's library candidate says so with `readsClone`, and the
- * narrator path queues without a voice reference, so a clone it accepted would reach the vendor
- * as a preset id it has never heard of (codex on PR 1153).
+ * Whether a voice can take a use — and every use but narration takes every voice.
+ *
+ * A cloned voice narrates through a hosted reader (issue 1215; SPEC-046 §1.12). It was held out
+ * of narration for two reasons: a long read went to the reader whole, and the narrator path
+ * queued without the recording, so a clone it accepted would have reached the vendor as a preset
+ * id it had never heard of (codex on PR 1153). PR 1210 made a read over the row's cap pieces,
+ * and the narrator path now runs the voiced page's cloned-voice flow — the vendor's question
+ * before the price, the recording with the job. The local recipe stays out: IndexTTS answers in
+ * flac at a 400-character line (SPEC-022), and flac has no join, so a bible section through it
+ * would go as the one request the cap exists to prevent. A stored narrator carries no `model`
+ * from before models were durable; the recipe's provider with no model is still the recipe.
  */
 export function supportsVoiceUse(
-  candidate: { provider: string; model?: string; readsClone?: string },
+  candidate: { provider: string; model?: string },
   use: "preview" | "line" | "bench" | "narration",
 ): boolean {
   if (use !== "narration") return true;
-  if (candidate.readsClone !== undefined) return false;
   return candidate.provider !== CLONED_VOICE_PROVIDER ||
     (candidate.model !== undefined && candidate.model !== CLONED_VOICE_MODEL);
 }

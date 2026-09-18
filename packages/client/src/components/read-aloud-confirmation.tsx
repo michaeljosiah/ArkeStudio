@@ -30,7 +30,10 @@ export function ReadAloudConfirmation({ title, result, onConfirm, onCancel }: {
   return createPortal(
     <EditorDialog open title="Read aloud" subtitle={`${title} · ${reader}${pieces}`} labelledBy={heading} onClose={cancel}>
       <div className="fy-exsheet">
-        <p>{local ? `Read locally with ${reader}.` : `This text will be sent to ${reader}.`} Text is retained in Activity.</p>
+        {/* What leaves the machine, said before it does: the words, and for a cloned narrator the
+            recording with them (issue 1215), as the audiobook's door says it. */}
+        <p>{local ? `Read locally with ${reader}.` : result.voiceReference === true ? `This text and the voice recording will be sent to ${reader}.` : `This text will be sent to ${reader}.`} Text is retained in Activity.</p>
+        {result.notice !== undefined && <p className="fy-mono" data-testid="read-aloud-notice">{result.notice}</p>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <Button variant="ghost" onClick={cancel}>Cancel</Button>
           <Button variant="primary" disabled={!result.confirmationToken} onClick={() => {

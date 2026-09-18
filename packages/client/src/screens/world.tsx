@@ -61,7 +61,7 @@ import { ClipPlayButton, TextActions } from "../components/player.js";
 import { ReadAloud } from "../components/read-aloud.js";
 import { foundingNote } from "../components/queue-note.js";
 import { followLink } from "../lib/activity-panel.js";
-import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
+import { RemoteVoiceUploadConfirmation, useVoiceUploadAsk } from "../components/remote-voice-upload-confirmation.js";
 import { SingleActFeedback, useSingleAct } from "../components/single-act.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
 import { useTalkItThrough } from "../lib/talk-it-through.js";
@@ -1674,6 +1674,11 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const [read, setRead] = useState<{ requestId: string; section: string } | null>(null);
   const readResult = read ? voiceAudio[read.requestId] : undefined;
   const [submittedRead, setSubmittedRead] = useState<string | null>(null);
+  // A cloned narrator's recording is asked about before the price (issue 1215); the answer rides
+  // on every later frame of the section's read. The page read keeps its own in `usePageRead`.
+  const liveRead = useRef<string | null>(null);
+  liveRead.current = read?.requestId ?? null;
+  const upload = useVoiceUploadAsk(() => liveRead.current);
   // Reading a section aloud is narration, not dialogue: it uses the app's narrator, so it does
   // not depend on this character having a voice of their own. Gating it on `sheet.voice` was
   // the client half of the same mistake the coordinator made — prose ABOUT somebody read in
@@ -1756,13 +1761,14 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
     narratorLabel,
     worldSlug: world?.meta.slug,
     blocks: pageBlocks,
-    start: (requestId, confirmationToken) =>
+    start: (requestId, confirmationToken, voiceUploadConfirmedFor) =>
       readSheetPage(
         worldId ?? "",
         sheet?.id ?? "",
         pageBlocks.map((block) => block.heading),
         requestId,
         confirmationToken,
+        voiceUploadConfirmedFor,
       ),
   });
   const sheetRefsMap = useSheetRefs();
@@ -1812,14 +1818,28 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
       pageRead.stop();
       queued.current = 0;
       clearQueue();
+      upload.drop();
       setRead({ requestId: readSheetSection(worldId, sheet.id, heading), section: heading });
     };
     const quote = `${read?.requestId}:${active?.confirmationToken ?? ""}`;
-    const confirmation = active?.status === "confirmation-required" && quote !== submittedRead ? (
-      <ReadAloudConfirmation title={`${sheet.name} · ${heading}`} result={active} onCancel={() => setRead(null)} onConfirm={token => {
+    const cancel = () => { upload.drop(); setRead(null); };
+    // The vendor's question comes before the price (issue 1215), and both are this section's
+    // only while its read is the live one.
+    const confirmation = read?.section === heading && upload.asked !== null ? (
+      <RemoteVoiceUploadConfirmation
+        destinationLabel={upload.asked.destination}
+        destinationNotice={upload.asked.notice}
+        onCancel={cancel}
+        onConfirm={() => {
+          const token = upload.answer();
+          if (worldId && read && token !== null) readSheetSection(worldId, sheet.id, heading, read.requestId, undefined, token);
+        }}
+      />
+    ) : active?.status === "confirmation-required" && quote !== submittedRead ? (
+      <ReadAloudConfirmation title={`${sheet.name} · ${heading}`} result={active} onCancel={cancel} onConfirm={token => {
         if (worldId && read) {
           setSubmittedRead(quote);
-          readSheetSection(worldId, sheet.id, heading, read.requestId, token);
+          readSheetSection(worldId, sheet.id, heading, read.requestId, token, upload.allowed());
         }
       }} />
     ) : null;

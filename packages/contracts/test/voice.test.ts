@@ -548,12 +548,26 @@ describe("one voice, several readers (SPEC-046 D1, R-10, R-13)", () => {
     assert.equal(isHostedVoiceReader("mistral", "some-other-model"), false);
   });
 
-  it("a library voice through a hosted reader is not a narrator, any more than through the recipe", () => {
+  it("a library voice narrates through a hosted reader, and still not through the recipe (issue 1215)", () => {
+    // Held out of narration while a long read went whole and the narrator path queued without
+    // the recording; PR 1210 made pieces of the first and the narrator path now carries the
+    // second. The recipe stays out: flac at a 400-character line, and flac has no join.
     const [mistral] = cloudReaderCandidates([harbour], { provider: "mistral", model: "voxtral-mini-tts" });
-    assert.equal(supportsVoiceUse(mistral!, "narration"), false);
+    assert.equal(supportsVoiceUse(mistral!, "narration"), true);
     assert.equal(supportsVoiceUse(mistral!, "line"), true);
     assert.equal(supportsVoiceUse({ provider: "mistral", model: "voxtral-mini-tts", voiceId: "gb_jane_neutral" } as never, "narration"), true, "a preset narrates");
+    assert.equal(supportsVoiceUse(clonedVoiceCandidates([harbour])[0]!, "narration"), false, "the recipe's row does not");
     assert.equal(supportsVoiceUse({ provider: "comfyui", model: "comfyui-cloned-voice" }, "narration"), false);
+    assert.equal(supportsVoiceUse({ provider: "comfyui" }, "narration"), false, "a stored narrator from before models were durable is still the recipe");
+  });
+
+  it("a stored cloned narrator resolves through the live catalogue like any other (issue 1215)", () => {
+    const readers = cloudReaderCandidates([harbour], { provider: "mistral", model: "voxtral-mini-tts" });
+    const stored = { provider: "mistral", model: "voxtral-mini-tts", voiceId: "harbour-glass", label: "Harbour glass" };
+    const live = narratorFor(stored, readers.filter((voice) => supportsVoiceUse(voice, "narration")));
+    assert.deepEqual([live.provider, live.model, live.voiceId, live.fallback], ["mistral", "voxtral-mini-tts", "harbour-glass", false]);
+    // The key withdrawn: the reader's candidates are gone from the catalogue, and the reading quietens.
+    assert.equal(narratorFor(stored, []).fallback, true);
   });
 
   it("a legacy assignment through a hosted reader migrates to the reader's row", () => {

@@ -3352,12 +3352,18 @@ export function requestVoicePreview(
   return requestId;
 }
 
+/**
+ * Every read of the app's prose carries the same two answers back (issue 1215): the price's
+ * token, and — for a cloned narrator — the vendor its recording may go to, which the coordinator
+ * asks about first and remembers per voice and vendor.
+ */
 export function readSheetSection(
   worldId: string,
   sheetId: string,
   sectionHeading: string,
   requestId = queueRequest("read-sheet-section"),
   confirmationToken?: string,
+  voiceUploadConfirmedFor?: string,
 ): string {
   send({
     kind: "read-sheet-section",
@@ -3366,6 +3372,7 @@ export function readSheetSection(
     sectionHeading,
     requestId,
     ...(confirmationToken ? { confirmationToken } : {}),
+    ...(voiceUploadConfirmedFor ? { voiceUploadConfirmedFor } : {}),
   });
   return requestId;
 }
@@ -3383,6 +3390,7 @@ export function readSheetPage(
   sections: readonly string[],
   requestId = queueRequest("read-sheet-page"),
   confirmationToken?: string,
+  voiceUploadConfirmedFor?: string,
 ): string {
   send({
     kind: "read-sheet-page",
@@ -3391,6 +3399,7 @@ export function readSheetPage(
     sections: [...sections],
     requestId,
     ...(confirmationToken ? { confirmationToken } : {}),
+    ...(voiceUploadConfirmedFor ? { voiceUploadConfirmedFor } : {}),
   });
   return requestId;
 }
@@ -3404,6 +3413,7 @@ export function readBibleSection(
   sectionHeading: string,
   requestId = queueRequest("read-bible-section"),
   confirmationToken?: string,
+  voiceUploadConfirmedFor?: string,
 ): string {
   send({
     kind: "read-bible-section",
@@ -3411,6 +3421,7 @@ export function readBibleSection(
     sectionHeading,
     requestId,
     ...(confirmationToken ? { confirmationToken } : {}),
+    ...(voiceUploadConfirmedFor ? { voiceUploadConfirmedFor } : {}),
   });
   return requestId;
 }
@@ -3427,6 +3438,7 @@ export function readProse(
   source: ProseReadSource,
   requestId = queueRequest("read-prose"),
   confirmationToken?: string,
+  voiceUploadConfirmedFor?: string,
 ): string {
   send({
     kind: "read-prose",
@@ -3434,6 +3446,7 @@ export function readProse(
     source,
     requestId,
     ...(confirmationToken ? { confirmationToken } : {}),
+    ...(voiceUploadConfirmedFor ? { voiceUploadConfirmedFor } : {}),
   });
   return requestId;
 }

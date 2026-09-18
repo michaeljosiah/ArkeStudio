@@ -577,6 +577,41 @@ describe("the audiobook run (turn 146)", () => {
       },
     ));
 
+  it("a cloned voice as the narrator is asked for its consent before the price, once, and every block is its (issue 1215)", () =>
+    withHarness(
+      {
+        before: async (worldDir) => {
+          await mkdir(join(worldDir, "voices"), { recursive: true });
+          await writeFile(join(worldDir, "voices", "harbour-glass.wav"), wav());
+          await writeFile(
+            join(worldDir, "voices", "voices.json"),
+            JSON.stringify({ voices: [{ id: "harbour-glass", name: "Harbour glass", clip: "voices/harbour-glass.wav", description: "", attributes: [], consent: true, created: CLOCK }] }),
+          );
+        },
+      },
+      async ({ worldDir, events, send }) => {
+        await send({ kind: "set-credential", provider: "fishaudio", key: "k-test" });
+        // The library's voice through Fish, chosen as the app's narrator: the same resolution
+        // every other read uses, so the run finds the recording per block as it finds a speaker's.
+        await send({ kind: "set-narrator", voice: { provider: "fishaudio", model: FISH.id, voiceId: "harbour-glass", label: "Harbour glass" } });
+        assert.ok(events.some((e) => e.type === "narrator.changed"), "a hosted reader's clone is a narrator now");
+        await read(send);
+        type Asked = Extract<DomainEvent, { type: "voice.upload-confirmation-required" }>;
+        const asked = events.find((e): e is Asked => e.type === "voice.upload-confirmation-required");
+        assert.ok(asked, `the recording is asked about before anything is priced: ${events.map((e) => e.type).join(" | ")}`);
+        assert.equal(asked.confirmationToken, "vendor:fishaudio:harbour-glass");
+        assert.equal(events.filter((e) => e.type === "audiobook.priced").length, 0);
+
+        await read(send, { voiceUploadConfirmedFor: asked.confirmationToken });
+        const priced = events.find((e): e is Priced => e.type === "audiobook.priced");
+        assert.ok(priced, `answered, the run goes on to its price: ${events.map((e) => e.type).join(" | ")}`);
+        assert.deepEqual(priced.voices.map((v) => [v.label, v.provider]), [["Harbour glass", "fishaudio"]], "every block is the narrator's, and the narrator is the clone");
+        const library = JSON.parse(await readFile(join(worldDir, "voices", "voices.json"), "utf8")) as { voices: { remote?: Record<string, { confirmedAt?: string }> }[] };
+        assert.equal(typeof library.voices[0]!.remote?.["fishaudio"]?.confirmedAt, "string", "the answer is written onto the voice");
+        assert.equal(events.filter((e) => e.type === "voice.upload-confirmation-required").length, 1, "asked once");
+      },
+    ));
+
   it("without voice in the build, the press is answered as unavailable rather than with nothing (codex on PR 1180)", () =>
     withHarness({ voiceless: true }, async ({ events, send }) => {
       await read(send);

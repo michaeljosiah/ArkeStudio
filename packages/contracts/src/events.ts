@@ -730,6 +730,17 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       confirmationToken: z.string().min(1).optional(),
       /** The cloud voices a priced page would send its words to, by label and provider (R-47). */
       voices: z.array(z.object({ label: z.string().min(1), provider: z.string().min(1) }).strict()).optional(),
+      /**
+       * A cloned voice reads what is priced (issue 1215): its recording goes to the reader with
+       * the words, and the confirmation says so before the price is answered. On a quote only —
+       * a read the cache holds sends nothing.
+       */
+      voiceReference: z.boolean().optional(),
+      /**
+       * What a first read through a slot-keeping reader adds (SPEC-046 R-14, R-34), said on the
+       * read that incurs it rather than only on the candidate row that named it.
+       */
+      notice: z.string().min(1).max(512).optional(),
       error: z.string().optional(),
     })
     .strict(),
