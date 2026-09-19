@@ -40,8 +40,12 @@ export class IllustrationApplicationService {
         } catch (error) {
           // No enqueue has run when the first request loses its source or authority. Release
           // that known-unused hold; a partial batch still needs its original reservation.
-          if (jobs.length === 0) await this.operations.policy.release(context, key, reservation);
-          throw error;
+          if (jobs.length === 0) {
+            await this.operations.policy.release(context, key, reservation);
+            throw error;
+          }
+          return {operationKey: key, reservation, jobIds: jobs.map(job => job.id), needsReconciliation: true,
+            failures: inputs.slice(index).map((_, offset) => ({index: index + offset, reason: describeError(error)}))};
         }
         try {
           jobs.push(await this.queue.enqueue({ ...request, idempotencyKey: ulid(),
@@ -83,9 +87,6 @@ export class IllustrationApplicationService {
       const owner = job.params.engineOperation as { key?: string } | undefined;
       return job.worldId === worldId && owner?.key === key;
     });
-    // Failed/cancelled work has no content to deliver: source edits must not strand its hold.
-    if (operation.resource.mediaKind && jobs.some(job => job.status === "succeeded"))
-      await readStoryMediaSource(this.worlds, this.operations.policy, context, operation.resource);
     // Missing evidence is not running work. Interrupted admissions and removed queue rows
     // need a host recovery decision before any reservation can be settled or released.
     if (operation.status !== "completed") return { status: "needs-reconciliation" as const, operationKey: key };
@@ -93,6 +94,10 @@ export class IllustrationApplicationService {
     if (result.needsReconciliation) return { status: "needs-reconciliation" as const, operationKey: key };
     const settlementKey = engineHash([key, "settlement"]);
     const previousSettlement = await this.operations.store.read(settlementKey);
+    // A recorded financial decision survives source edits. Current content checks below
+    // still withhold stale bytes, but must not prevent resuming its idempotent settlement.
+    if (!previousSettlement && operation.resource.mediaKind && jobs.some(job => job.status === "succeeded"))
+      await readStoryMediaSource(this.worlds, this.operations.policy, context, operation.resource);
     if (!previousSettlement && (jobs.length === 0 || jobs.length !== result.jobIds.length ||
       jobs.some(job => !result.jobIds.includes(job.id)))) {
       return { status: "needs-reconciliation" as const, operationKey: key };

@@ -1426,8 +1426,12 @@ export class JobQueue {
       // Verify everything before anything lands (R-13): all-or-nothing.
       for (const artifact of artifacts) {
         const verified = verifyArtifact(artifact);
+        const narrationType = job.params.audioFormat === "mp3" ? "audio/mpeg" : `audio/${job.params.audioFormat}`;
         const problem =
           verified ??
+          (job.target.kind === "story-chapter-narration" && artifact.contentType !== narrationType
+            ? "narration format differs from the requested audio format"
+            : null) ??
           (job.capability === "image" && imageFormatOf(artifact.data) === null
             ? "not a supported PNG, JPEG, or WebP image"
             : null);

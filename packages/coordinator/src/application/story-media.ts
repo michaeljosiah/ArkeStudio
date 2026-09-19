@@ -82,7 +82,7 @@ export class StoryMediaApplicationService {
         params: {prompt, output},
         estimatedMicroUsd: estimateMicroUsd(input.model, {images: 1, megapixels: output.width * output.height / 1_000_000,
           ...(output.resolution ? {resolution: output.resolution} : {})}),
-        landing: {dir: `productions/${productionId}/media/${chapterId}`, name: `page-${key}.png`}}];
+        landing: {dir: `productions/${productionId}/media/${chapterId}/${key}`, name: `page-${key}.png`}}];
     });
   }
 
@@ -103,7 +103,7 @@ export class StoryMediaApplicationService {
         capability: "voice-tts", provider: input.model.provider, model: input.model.id,
         params: {voiceId: input.voiceId, text, audioFormat: format, purpose: "story-chapter", productionId, chapterId},
         estimatedMicroUsd: estimateMicroUsd(input.model, {characters: billableCharacters(input.model, text)}),
-        landing: {dir: `productions/${productionId}/media/${chapterId}`, name: `narration-${key}.${format}`}}];
+        landing: {dir: `productions/${productionId}/media/${chapterId}/${key}`, name: `narration-${key}.${format}`}}];
     });
   }
 

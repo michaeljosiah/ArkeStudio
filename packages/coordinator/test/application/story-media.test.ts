@@ -24,7 +24,8 @@ async function harness(t: TestContext) {
   const provider = new FsWorldProvider(root); await provider.loadWorld(WORLD_ID);
   const fake = new FakeProvider({supportsIdempotencyKey: true});
   const state = {revoked: false, held: false, charges: 0, releases: 0, hidden: false, loseAdmissionReply: false,
-    imageFormat: "png", extraImage: false, onReserve: async () => {}};
+    imageFormat: "png", extraImage: false, failSettlement: false, onReserve: async () => {}};
+  const settled = new Set<string>();
   const submit = fake.submit.bind(fake);
   fake.submit = async (key, request) => {
     assert.equal("engineOperation" in request.params, false);
@@ -38,7 +39,10 @@ async function harness(t: TestContext) {
     async authorise(ctx) {if (state.revoked || ctx.scopeId !== "family" || ctx.subjectId !== "child") throw new Error("Forbidden");},
     async project(_ctx, bundle) {if (state.hidden) bundle.productions = []; return bundle;},
     async deliver(_ctx, _resource, content) {if (state.held && content.kind === "artifact") throw new Error("Held");},
-    async reserve(_ctx, key) {await state.onReserve(); return key;}, async settle() {state.charges++;}, async release() {state.releases++;},
+    async reserve(_ctx, key) {await state.onReserve(); return key;}, async settle(_ctx, key) {
+      if (!settled.has(key)) {state.charges++; settled.add(key);}
+      if (state.failSettlement) throw new Error("Settlement reply lost");
+    }, async release() {state.releases++;},
   };
   const ledger = new Set<string>();
   const queue = new JobQueue({journal: new JobJournal(join(root, "jobs.jsonl")), journalPath: join(root, "unused.jsonl"),
@@ -78,7 +82,7 @@ it("page artwork is durable, replayed once, review-gated and invalidated by a ch
   await assert.rejects(restarted.worlds.media(context, WORLD_ID, artifact), /chapter changed/);
   await assert.rejects(restarted.worlds.media(context, WORLD_ID, artifact.replaceAll("/", "\\")), /chapter changed/);
   await assert.rejects(restarted.worlds.media(context, WORLD_ID, artifact.toUpperCase()), /unavailable or ambiguous/);
-  await assert.rejects(restarted.illustrations.reconcile(context, WORLD_ID, "page"), /chapter changed/);
+  assert.deepEqual((await restarted.illustrations.reconcile(context, WORLD_ID, "page")).deliverableJobIds, []);
 });
 
 it("an uncertain admission retains the original job across restart without a second submission", async t => {
@@ -151,10 +155,39 @@ it("secondary provider artifacts keep the same chapter source binding", async t 
   await h.finished();
   const secondary = h.queue.listJobs()[0]!.landedFiles![1]!;
   assert.ok(secondary.endsWith("output-2.png"));
+  await h.engine.storyMedia.illustratePage(context, WORLD_ID, production, chapterId,
+    {operationId: "another-multiple", model: image, instruction: "Another harbour", baseHash: h.chapter.hash});
+  await h.finished();
+  assert.notEqual(h.queue.listJobs()[1]!.landedFiles![1], secondary);
   await h.engine.worlds.media(context, WORLD_ID, secondary);
   await h.engine.prose.saveChapter(context, WORLD_ID, production, chapterId,
     {operationId: "edit-secondary", baseHash: h.chapter.hash, body: "Changed story."});
   await assert.rejects(h.engine.worlds.media(context, WORLD_ID, secondary), /chapter changed/);
+});
+
+it("resumes a recorded settlement after a source edit without delivering stale output", async t => {
+  const h = await harness(t);
+  await h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId,
+    {operationId: "settle-retry", model: speech, voiceId: "stock", baseHash: h.chapter.hash});
+  await h.finished(); h.state.failSettlement = true;
+  await assert.rejects(h.engine.storyMedia.reconcile(context, WORLD_ID, "settle-retry"), /Settlement reply lost/);
+  await h.engine.prose.saveChapter(context, WORLD_ID, production, chapterId,
+    {operationId: "edit-settlement", baseHash: h.chapter.hash, body: "Changed after the financial decision."});
+  const engine = await h.restart(); h.state.failSettlement = false;
+  const result = await engine.storyMedia.reconcile(context, WORLD_ID, "settle-retry");
+  assert.equal(result.status, "settled");
+  assert.deepEqual(result.deliverableJobIds, []);
+  assert.equal(h.state.charges, 1);
+});
+
+it("refuses narration that returns a different format before landing it", async t => {
+  const h = await harness(t);
+  await h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId,
+    {operationId: "wrong-format", model: {...speech, limits: {...speech.limits, audioFormat: "mp3"}}, voiceId: "stock", baseHash: h.chapter.hash});
+  await until(() => h.queue.listJobs().every(job => job.status === "failed"), "mismatched narration rejection");
+  assert.equal(h.queue.listJobs()[0]!.landedFiles?.length ?? 0, 0);
+  assert.equal((await h.engine.storyMedia.reconcile(context, WORLD_ID, "wrong-format")).status, "settled");
+  assert.equal(h.state.releases, 1);
 });
 
 it("narration lands complete audio through the same queue and survives a restart", async t => {
