@@ -84,19 +84,34 @@ export class IllustrationApplicationService {
   async reconcile(context: EngineContext, worldId: string, operationId: string) {
     context = structuredClone(context);
     const key = this.operations.key(context, { worldId }, operationId);
-    await this.operations.policy.authorise(context, "generate", { worldId });
     const operation = await this.operations.store.read(key);
     if (!operation || operation.action !== "generate") throw new Error("Generation operation not found.");
     if (operation.context.subjectId !== context.subjectId || operation.context.actorId !== context.actorId ||
       operation.context.scopeId !== context.scopeId) throw new Error("The operation belongs to a different caller or subject.");
-    // A world-level permission is insufficient for a request originally limited to one sheet.
-    await this.operations.policy.authorise(context, "generate", operation.resource);
     const jobs = this.queue.jobs().filter(job => {
       const owner = job.params.engineOperation as { key?: string } | undefined;
       return job.worldId === worldId && owner?.key === key;
     });
     const settlementKey = engineHash([key, "settlement"]);
     const previousSettlement = await this.operations.store.read(settlementKey);
+    // Completing a saved financial decision is recovery, not new generation permission.
+    // Validate its ownership before resuming it; delivery still needs current authority below.
+    if (previousSettlement) {
+      const saved = previousSettlement.result as {reservation: string; jobs: EngineDeliveredJob[]};
+      if (previousSettlement.action !== "generate" ||
+        previousSettlement.context.scopeId !== context.scopeId || previousSettlement.context.actorId !== context.actorId ||
+        previousSettlement.context.subjectId !== context.subjectId ||
+        engineHash(previousSettlement.resource) !== engineHash(operation.resource) ||
+        previousSettlement.fingerprint !== engineHash([key, saved.reservation])) throw new Error("Settlement identity changed.");
+      if (operation.status !== "completed" && (saved.jobs.length !== 0 || jobs.length !== 0))
+        return {status: "needs-reconciliation" as const, operationKey: key};
+      if (previousSettlement.status !== "completed") {
+        if (saved.jobs.length === 0) await this.operations.policy.release(context, key, saved.reservation);
+        else await this.operations.policy.settle(context, key, saved.reservation, saved.jobs);
+        await this.operations.store.complete(settlementKey, previousSettlement.fingerprint, saved);
+        previousSettlement.status = "completed";
+      }
+    }
     // A pre-admission release can lose its response before the admission record completes.
     // Its saved zero-job decision is sufficient to finish the idempotent release after restart.
     if (operation.status !== "completed" && previousSettlement) {
@@ -110,6 +125,13 @@ export class IllustrationApplicationService {
       await this.operations.store.complete(key, operation.fingerprint, {operationKey: key, reservation: decision.reservation,
         jobIds: [], failures: [{index: 0, reason: "No provider work was admitted; the reservation was released."}], needsReconciliation: false});
       return {status: "settled" as const, operationKey: key, jobIds: [], deliverableJobIds: []};
+    }
+    try {
+      await this.operations.policy.authorise(context, "generate", operation.resource);
+    } catch (error) {
+      if (!previousSettlement) throw error;
+      const saved = previousSettlement.result as {jobs: EngineDeliveredJob[]};
+      return {status: "settled" as const, operationKey: key, jobIds: saved.jobs.map(job => job.id), deliverableJobIds: []};
     }
     // Missing evidence is not running work. Interrupted admissions and removed queue rows
     // need a host recovery decision before any reservation can be settled or released.

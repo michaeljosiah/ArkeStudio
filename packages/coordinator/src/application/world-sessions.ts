@@ -22,7 +22,6 @@ export class WorldSessionService {
     requireContext(context);
     artifactId = artifactId.replace(/\\/g, "/");
     let resource: EngineResource = { worldId, artifactId, ...(sheetId ? { sheetId } : {}) };
-    await this.policy.authorise(context, "media", resource);
     const matches = this.queue?.jobs().filter(job => job.worldId === worldId && job.landedFiles?.includes(artifactId)) ?? [];
     if (/^productions\/[^/]+\/media\/[^/]+\//i.test(artifactId) ||
       matches.some(job => (job.params.engineOperation as {resource?: EngineResource} | undefined)?.resource?.mediaKind)) {
@@ -35,6 +34,8 @@ export class WorldSessionService {
       resource = {...owner.resource, artifactId};
       await this.policy.authorise(context, "media", resource);
       await readStoryMediaSource(this.repository, this.policy, context, resource);
+    } else {
+      await this.policy.authorise(context, "media", resource);
     }
     const artifact = await this.repository.use(worldId, session => session.artifact(artifactId));
     if (artifact.id !== artifactId) throw new Error("Artifact identity does not match the request.");

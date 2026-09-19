@@ -23,7 +23,7 @@ async function harness(t: TestContext) {
   const {root, worldDir} = await makeTempRoot();
   const provider = new FsWorldProvider(root); await provider.loadWorld(WORLD_ID);
   const fake = new FakeProvider({supportsIdempotencyKey: true});
-  const state = {revoked: false, held: false, charges: 0, releases: 0, hidden: false, loseAdmissionReply: false,
+  const state = {boundMediaOnly: false, revoked: false, held: false, charges: 0, releases: 0, hidden: false, loseAdmissionReply: false,
     hideJobs: false, failRelease: false, imageFormat: "png", extraImage: false, failSettlement: false, onReserve: async () => {}};
   const settled = new Set<string>();
   const released = new Set<string>();
@@ -37,7 +37,7 @@ async function harness(t: TestContext) {
     return submit(key, request);
   };
   const policy: EnginePolicy = {
-    async authorise(ctx) {if (state.revoked || ctx.scopeId !== "family" || ctx.subjectId !== "child") throw new Error("Forbidden");},
+    async authorise(ctx, action, resource) {if (state.boundMediaOnly && action === "media" && (!resource.productionId || !resource.chapterId || !resource.sourceHash)) throw new Error("Chapter identity required"); if (state.revoked || ctx.scopeId !== "family" || ctx.subjectId !== "child") throw new Error("Forbidden");},
     async project(_ctx, bundle) {if (state.hidden) bundle.productions = []; return bundle;},
     async deliver(_ctx, _resource, content) {if (state.held && content.kind === "artifact") throw new Error("Held");},
     async reserve(_ctx, key) {await state.onReserve(); return key;}, async settle(_ctx, key) {
@@ -301,4 +301,40 @@ it("resumes a zero-job release after its response is lost and the engine restart
   assert.equal((await engine.storyMedia.reconcile(context, WORLD_ID, "lost-release")).status, "settled");
   assert.equal(h.state.releases, 1);
   assert.equal(h.queue.listJobs().length, 0);
+});
+
+for (const kind of ["settle", "release"] as const) it(`resumes a saved ${kind} after revocation without delivering media`, async t => {
+  const h = await harness(t);
+  if (kind === "release") {
+    h.state.failRelease = true;
+    h.state.onReserve = async () => {h.state.revoked = true;};
+    await assert.rejects(h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId,
+      {operationId: "revoked-recovery", model: speech, voiceId: "stock", baseHash: h.chapter.hash}), /Release reply lost/);
+    h.state.failRelease = false;
+  } else {
+    await h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId,
+      {operationId: "revoked-recovery", model: speech, voiceId: "stock", baseHash: h.chapter.hash});
+    await h.finished(); h.state.failSettlement = true;
+    await assert.rejects(h.engine.storyMedia.reconcile(context, WORLD_ID, "revoked-recovery"), /Settlement reply lost/);
+    h.state.failSettlement = false; h.state.revoked = true;
+  }
+  const engine = await h.restart();
+  await assert.rejects(engine.storyMedia.reconcile({...context, subjectId: "other-child"}, WORLD_ID, "revoked-recovery"));
+  for (let i = 0; i < 2; i++) {
+    const result = await engine.storyMedia.reconcile(context, WORLD_ID, "revoked-recovery");
+    assert.equal(result.status, "settled"); assert.deepEqual(result.deliverableJobIds, []);
+  }
+  assert.equal(h.state.charges, kind === "settle" ? 1 : 0);
+  assert.equal(h.state.releases, kind === "release" ? 1 : 0);
+});
+
+it("authorises story media with its chapter identity before reading bytes", async t => {
+  const h = await harness(t);
+  await h.engine.storyMedia.illustratePage(context, WORLD_ID, production, chapterId,
+    {operationId: "bound-media", model: image, instruction: "A harbour", baseHash: h.chapter.hash});
+  await h.finished(); h.state.boundMediaOnly = true;
+  const artifact = h.queue.listJobs()[0]!.landedFiles![0]!;
+  assert.equal((await h.engine.worlds.media(context, WORLD_ID, artifact)).contentType, "image/png");
+  assert.equal((await h.engine.storyMedia.reconcile(context, WORLD_ID, "bound-media")).status, "settled");
+  assert.equal(h.state.charges, 1);
 });
