@@ -32,7 +32,8 @@ it("Vite prints a fragment sign-in link but never serves the capability in HTML 
   const lines: string[] = [];
   const warnings: string[] = [];
   const logger = createLogger("silent");
-  logger.info = line => { lines.push(line); };
+  // Vite also reports occupied development ports here; those are not capability links.
+  logger.info = line => { if (line.includes("arke-session=")) lines.push(line); };
   logger.warn = line => { warnings.push(line); };
   const server = await createServer({ configFile: false, root: resolve(root, "packages/client"), plugins: [devSessionPlugin()], customLogger: logger, server: { host: "127.0.0.1", port: 0, open: false, preTransformRequests: false } });
   try {

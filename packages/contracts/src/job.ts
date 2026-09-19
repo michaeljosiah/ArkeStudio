@@ -156,6 +156,8 @@ export const JobSchema = z
     attempt: z.number().int().min(0).default(0),
     /** The last submit response proved that attempt was rejected, so cancellation cannot imply a charge. */
     submissionRejected: z.boolean().optional(),
+    /** Cancellation ended local work but a provider outcome/charge may remain unresolved. */
+    cancellationUncertain: z.boolean().optional(),
     /** Where artifacts land, world-relative — the caller's meaning, not this spec's (§1.2). */
     landing: z
       .object({

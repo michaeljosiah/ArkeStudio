@@ -196,6 +196,8 @@ operations and story dashboard tests named above.
 
 The [engine guide](engine.md) maps the initial extracted services and remaining Coordinator responsibilities. Public entry points are `packages/engine/src/index.ts` and `src/local.ts`; implementation lives in coordinator `src/application/`. Desktop/dev construct through `createStudioCoordinator`. World ownership and acceptance still belong to the existing store and gate; the dispatcher accepts a supplied durable job journal.
 
+`application/story-media.ts` prepares chapter-bound page images and stock-voice narration through the shared generation queue. `world-sessions.ts` validates their durable source binding before direct delivery. See the [story media API](story-media-engine.md) and `test/application/story-media.test.ts`; the packed consumer covers both operations without monorepo imports.
+
 ### Internal authoring services (epic #1182)
 
 Coordinator's `world-chat-send`, `world-chat-retry-turn` and `world-chat-cancel` handlers call

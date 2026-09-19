@@ -1,5 +1,7 @@
-import { MAX_IMAGE_PREVIEWS, describeError, ulid, type Job } from "@arke-studio/contracts";
-import type { EngineContext, EngineDeliveredJob, EngineMutation, EngineQueue, EngineWorldRepository, IllustrationInput, IllustrationOutcome } from "./contracts.js";
+import { MAX_IMAGE_PREVIEWS, describeError, ulid, PROVIDERS, type Job } from "@arke-studio/contracts";
+import type { EngineContext, EngineDeliveredJob, EngineMutation, EngineQueue, EngineResource, EngineWorldRepository, IllustrationInput, IllustrationOutcome } from "./contracts.js";
+import type { EnqueueInput } from "../queue/dispatcher.js";
+import { readStoryMediaSource } from "./story-media.js";
 import { WorldSessionService } from "./world-sessions.js";
 import { engineHash, EngineOperations } from "./operations.js";
 
@@ -11,12 +13,22 @@ export class IllustrationApplicationService {
     context = structuredClone(context);
     input = structuredClone(input);
     const resource = { worldId, sheetId: input.sheetId };
-    return this.operations.run(context, "generate", resource, input.operationId, input, async key => {
+    return this.generateFor(context, resource, input, async key => {
       if (!Number.isInteger(input.count) || input.count < 1 || input.count > MAX_IMAGE_PREVIEWS) {
         throw new Error(`Request between one and ${MAX_IMAGE_PREVIEWS} illustrations.`);
       }
-      const inputs = await this.worlds.use(worldId, session =>
+      return this.worlds.use(worldId, session =>
         session.illustrations({ ...input, generationKey: key }, input.expectedRevision));
+    });
+  }
+
+  /** Shared admission/recovery path; preparation owns the canonical source and frozen provider input. */
+  async generateFor(context: EngineContext, resource: EngineResource, input: EngineMutation,
+    prepare: (key: string) => Promise<EnqueueInput[]>): Promise<IllustrationOutcome> {
+    const worldId = resource.worldId;
+    return this.operations.run(context, "generate", resource, input.operationId, input, async key => {
+      const inputs = await prepare(key);
+      if (!inputs.length) throw new Error("No media requests were prepared.");
       const reservation = await this.operations.policy.reserve(context, key, inputs);
       const jobs: Job[] = [];
       // A partial/uncertain enqueue retains the reservation and operation for reconciliation.
@@ -24,8 +36,20 @@ export class IllustrationApplicationService {
       for (const [index, request] of inputs.entries()) {
         try {
           await this.operations.policy.authorise(context, "generate", resource);
+          if (resource.mediaKind) await readStoryMediaSource(this.worlds, this.operations.policy, context, resource);
+        } catch (error) {
+          // No enqueue has run when the first request loses its source or authority. Release
+          // that known-unused hold; a partial batch still needs its original reservation.
+          if (jobs.length === 0) {
+            await this.operations.policy.release(context, key, reservation);
+            throw error;
+          }
+          return {operationKey: key, reservation, jobIds: jobs.map(job => job.id), needsReconciliation: true,
+            failures: inputs.slice(index).map((_, offset) => ({index: index + offset, reason: describeError(error)}))};
+        }
+        try {
           jobs.push(await this.queue.enqueue({ ...request, idempotencyKey: ulid(),
-            params: { ...request.params, engineOperation: { key, requestIndex: index, reservation, context } } }));
+            params: { ...request.params, engineOperation: { key, requestIndex: index, reservation, context, resource } } }));
         } catch (error) {
           // The queue may have journalled the failing call before its acknowledgement was lost.
           // Preserve all known admissions; an incomplete batch is never a wholly rejected one.
@@ -70,6 +94,12 @@ export class IllustrationApplicationService {
     if (result.needsReconciliation) return { status: "needs-reconciliation" as const, operationKey: key };
     const settlementKey = engineHash([key, "settlement"]);
     const previousSettlement = await this.operations.store.read(settlementKey);
+    // A cancelled cloud request may still charge. Missing legacy certainty is not zero spend.
+    if (!previousSettlement && operation.resource.mediaKind && jobs.some(job => job.status === "cancelled" &&
+      (job.cancellationUncertain === true || (job.cancellationUncertain === undefined &&
+        (PROVIDERS as Record<string, {local: boolean}>)[job.provider]?.local !== true &&
+        (job.providerJobId != null || (job.attempt > 0 && job.submissionRejected !== true))))))
+      return {status: "needs-reconciliation" as const, operationKey: key};
     if (!previousSettlement && (jobs.length === 0 || jobs.length !== result.jobIds.length ||
       jobs.some(job => !result.jobIds.includes(job.id)))) {
       return { status: "needs-reconciliation" as const, operationKey: key };
@@ -78,7 +108,7 @@ export class IllustrationApplicationService {
       return { status: "pending" as const, operationKey: key };
     }
     const permitted: EngineDeliveredJob[] = [];
-    const media = new WorldSessionService(this.worlds, this.operations.policy);
+    const media = new WorldSessionService(this.worlds, this.operations.policy, this.queue);
     for (const job of jobs) {
       if (job.status !== "succeeded" || !result.jobIds.includes(job.id)) continue;
       try {

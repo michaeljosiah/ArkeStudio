@@ -267,6 +267,7 @@ const FORMAT_PRESERVING_IMAGE_TARGETS = new Set([
   "character-sheet",
   "character-look",
   "reference-tile",
+  "story-page-illustration",
   // The look preview may be promoted to the master look (SPEC-031 R-54); a JPEG under a
   // .png name would then be carried under a name its bytes contradict.
   "look-preview",
@@ -1425,8 +1426,12 @@ export class JobQueue {
       // Verify everything before anything lands (R-13): all-or-nothing.
       for (const artifact of artifacts) {
         const verified = verifyArtifact(artifact);
+        const narrationType = job.params.audioFormat === "mp3" ? "audio/mpeg" : `audio/${job.params.audioFormat}`;
         const problem =
           verified ??
+          (job.target.kind === "story-chapter-narration" && artifact.contentType !== narrationType
+            ? "narration format differs from the requested audio format"
+            : null) ??
           (job.capability === "image" && imageFormatOf(artifact.data) === null
             ? "not a supported PNG, JPEG, or WebP image"
             : null);
@@ -1665,7 +1670,7 @@ export class JobQueue {
       ? "Cancelled in Arke. The provider may still complete or charge for this request."
       : null;
     // A cancelled job still writes a ledger entry (R-15, D10).
-    await this.terminalize(job, "cancelled", reason);
+    await this.terminalize({...job, cancellationUncertain: outcomeMayBeRemote}, "cancelled", reason);
     this.emitQueueStatus(job.provider);
   }
 

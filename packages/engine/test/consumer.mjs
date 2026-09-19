@@ -34,9 +34,14 @@ const writing = async ({ modelId }) => {
   };
 };
 const bytes = Uint8Array.from([137,80,78,71,13,10,26,10,...Array(64).fill(0),0,0,0,0,73,69,78,68,174,66,96,130]);
+const audio = Buffer.alloc(48);
+audio.write("RIFF"); audio.writeUInt32LE(40, 4); audio.write("WAVEfmt ", 8); audio.writeUInt32LE(16, 16);
+audio.writeUInt16LE(1, 20); audio.writeUInt16LE(1, 22); audio.writeUInt32LE(48000, 24); audio.writeUInt32LE(96000, 28);
+audio.writeUInt16LE(2, 32); audio.writeUInt16LE(16, 34); audio.write("data", 36); audio.writeUInt32LE(4, 40);
 const client = {
   declarations: { supportsIdempotencyKey: true, supportsLookupByKey: false, supportsListRecent: false, reportsCost: false },
-  async submit() { submissions++; return { remoteId: "remote-1" }; },
+  async submit(_key, request) { submissions++; return { remoteId: `remote-${submissions}`,
+    ...(request.capability === "voice-tts" ? {artifacts: [{name: "narration.wav", contentType: "audio/wav", data: audio}]} : {}) }; },
   async poll() { return { state: "succeeded" }; },
   async fetchArtifacts() { return [{ name: "portrait.png", contentType: "image/png", data: bytes }]; },
   async cancel() {},
@@ -125,6 +130,23 @@ try {
   assert.deepEqual(await engine.proposals.accept(context, worldId, proposal.value.proposal.id, { operationId: "accept" }), accepted);
   assert.equal((await engine.operation(context, worldId, "image")).status, "completed");
   assert.equal(submissions, 1); assert.equal(generated.jobIds.length, 1);
+  const source = await engine.prose.readChapter(context, worldId, proseId, chapterId);
+  const pageInput = {operationId: "story-page", baseHash: source.hash, model, instruction: "The moonlit bridge"};
+  const pageMedia = await engine.storyMedia.illustratePage(context, worldId, proseId, chapterId, pageInput);
+  const narrationInput = {operationId: "story-narration", baseHash: source.hash, voiceId: "stock",
+    model: {...model, capability: "voice-tts", limits: {maxPromptChars: 4000, audioFormat: "wav"}, pricing: {kind: "perCharacter", microUsdPerCharacter: 1}}};
+  const narration = await engine.storyMedia.narrateChapter(context, worldId, proseId, chapterId, narrationInput);
+  const mediaDeadline = Date.now() + 10000;
+  while (queue.listJobs().some(job => job.status !== "succeeded")) {
+    if (Date.now() > mediaDeadline) throw new Error("Story media did not complete.");
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  await engine.close(); await provider.close(); await provider.loadWorld(worldId); engine = make();
+  assert.deepEqual(await engine.storyMedia.illustratePage(context, worldId, proseId, chapterId, pageInput), pageMedia);
+  assert.deepEqual(await engine.storyMedia.narrateChapter(context, worldId, proseId, chapterId, narrationInput), narration);
+  assert.equal((await engine.storyMedia.reconcile(context, worldId, "story-page")).status, "settled");
+  assert.equal((await engine.storyMedia.reconcile(context, worldId, "story-narration")).status, "settled");
+  assert.equal(submissions, 3);
   await assert.rejects(engine.worlds.read({ ...context, scopeId: "unrelated" }, worldId), /Forbidden/);
   console.log("external journey complete");
 } finally { queue.stopAccepting(); queue.dispose(); await queue.drain(); await engine.close(); await provider.close(); }
