@@ -158,8 +158,9 @@ export function BibleScreen() {
   liveRead.current = read?.requestId ?? null;
   const upload = useVoiceUploadAsk(() => liveRead.current);
   // Named as this world will hear it (issue 1215): a clone is its own world's, and a choice
-  // that cannot narrate here is named as the shipped local voice it falls to.
-  const narratorLabel = narratorLabelFor(state?.app.narrator ?? null, worldId);
+  // that cannot narrate here is named as the shipped local voice it falls to; once the section
+  // lands, the voice that read it (codex on PR 1221).
+  const narratorLabel = narratorLabelFor(state?.app.narrator ?? null, worldId, readResult?.status === "ready" ? readResult : undefined);
   /*
    * Plays the moment it lands, rather than making somebody press twice for the same thing.
    *

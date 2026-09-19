@@ -36,8 +36,9 @@ function useProseRead(source: ProseReadSource, title: string) {
   const upload = useVoiceUploadAsk(() => live.current);
   // The app's narrator as this world will hear it (issue 1215): a cloned voice through a hosted
   // reader may be one, the local recipe's may not, and a clone is its own world's; a choice that
-  // fails either rule is named as the shipped local voice it falls to, never as itself.
-  const narratorLabel = narratorLabelFor(state?.app.narrator ?? null, world?.meta.worldId);
+  // fails either rule is named as the shipped local voice it falls to, never as itself — and once
+  // the read lands, the voice that read it is what is named (codex on PR 1221).
+  const narratorLabel = narratorLabelFor(state?.app.narrator ?? null, world?.meta.worldId, result?.status === "ready" ? result : undefined);
   const sub = `read aloud · ${narratorLabel}`;
 
   /*

@@ -740,16 +740,26 @@ export function narratorAppliesTo(stored: { voiceId: string; worldId?: string } 
 }
 
 /**
- * What a screen calls the narrator before any read lands: the stored choice's name where the
- * choice can narrate and applies to this world, the shipped voice's otherwise — the same two
- * fallbacks `narratorFor` takes, so a screen and the coordinator name the same reader.
+ * What a screen calls the narrator: before a read lands, the stored choice's name where the
+ * choice can narrate and applies to this world, the shipped voice's otherwise — the two
+ * fallbacks a screen can judge; and once it has landed, the name of the voice that spoke
+ * (codex on PR 1221), because the coordinator falls back for reasons a screen cannot see — a
+ * recording gone, a key withdrawn — and the player must never say the stored name over another
+ * voice. `spoke` is the landed event's voice: the choice's name when it is the choice, the
+ * shipped voice's when it is that, its id otherwise.
  */
 export function narratorLabelFor(
   stored: { provider: string; model?: string; voiceId: string; label?: string; worldId?: string } | null,
   worldId: string | undefined,
+  spoke?: { provider: string; voiceId: string },
 ): string {
-  if (stored === null || !supportsVoiceUse(stored, "narration") || !narratorAppliesTo(stored, worldId)) return DEFAULT_NARRATOR.label;
-  return stored.label ?? stored.voiceId;
+  const chosen = stored !== null && supportsVoiceUse(stored, "narration") && narratorAppliesTo(stored, worldId) ? stored : null;
+  if (spoke !== undefined) {
+    if (chosen !== null && spoke.provider === chosen.provider && spoke.voiceId === chosen.voiceId) return chosen.label ?? chosen.voiceId;
+    if (spoke.provider === DEFAULT_NARRATOR.provider && spoke.voiceId === DEFAULT_NARRATOR.voiceId) return DEFAULT_NARRATOR.label;
+    return spoke.voiceId;
+  }
+  return chosen === null ? DEFAULT_NARRATOR.label : (chosen.label ?? chosen.voiceId);
 }
 
 /**

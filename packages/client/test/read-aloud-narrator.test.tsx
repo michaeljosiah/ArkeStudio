@@ -93,6 +93,9 @@ it("queues the pieces of a chunked sheet read behind the first rather than repla
   setAudioFactoryForTest(() => dock as never);
   const sent: ClientMessage[] = [];
   __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(JSON.parse(json) as ClientMessage); } } as unknown as ArkeBridge);
+  // The narrator is Paul on Mistral, which is who the pieces below say read them: the player
+  // names the voice that read (codex on PR 1221), so the fixture says who that is.
+  __setStateForTest({ ...FIXTURE_STATE, app: { ...FIXTURE_STATE.app, narrator: { provider: "mistral", model: "voxtral-mini-tts", voiceId: "en_paul_neutral", label: "Paul · neutral" } } });
   const container = dom.document.createElement("div") as unknown as HTMLElement;
   dom.document.body.append(container);
   const root = createRoot(container);
@@ -115,7 +118,7 @@ it("queues the pieces of a chunked sheet read behind the first rather than repla
   assert.match(playbackSnapshot().clip?.url ?? "", /first\.wav$/, "the second piece waits its turn rather than replacing the first");
   await act(async () => emitForTest("ended"));
   assert.match(playbackSnapshot().clip?.url ?? "", /second\.wav$/, "and follows when the first ends");
-  assert.equal(playbackSnapshot().clip?.sub, `read aloud · ${DEFAULT_NARRATOR.label}`);
+  assert.equal(playbackSnapshot().clip?.sub, "read aloud · Paul · neutral");
 });
 
 /*
@@ -328,6 +331,64 @@ for (const surface of ["sheet", "prose", "button", "bible"] as const) {
     assert.equal(requests().at(-1)!.voiceUploadConfirmedFor, "vendor:mistral:harbour-glass", "the answer rides on the price's frame too");
   });
 }
+
+it("names the voice that read once a read lands, not the stored narrator it fell from (codex on PR 1221)", async () => {
+  const dock = { playbackRate: 1, src: "", currentTime: 0, duration: NaN, play: async () => {}, pause() {}, load() {}, removeAttribute() {}, addEventListener() {}, removeEventListener() {} };
+  setAudioFactoryForTest(() => dock as never);
+  const sent: ClientMessage[] = [];
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(JSON.parse(json) as ClientMessage); } } as unknown as ArkeBridge);
+  // The narrator is this world's cloned Harbour glass; its recording is gone, which only the
+  // coordinator can see, and it falls to the shipped local voice.
+  __setStateForTest({ ...FIXTURE_STATE, app: { ...FIXTURE_STATE.app, narrator: { provider: "mistral", model: "voxtral-mini-tts", voiceId: "harbour-glass", label: "Harbour glass", worldId: FIXTURE_WORLD_ID } } });
+  const container = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(container);
+  const root = createRoot(container);
+  open.push(root);
+  await act(async () => root.render(
+    <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/cast/maren-kest`]}>
+      <App />
+    </MemoryRouter>,
+  ));
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Read aloud"]')!.click());
+  const asked = sent.find((message): message is Extract<ClientMessage, { kind: "read-sheet-section" }> => message.kind === "read-sheet-section")!;
+  await act(async () => __applyEventForTest({
+    type: "voice.audio", at: "2026-09-19T08:00:00.000Z", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, sheetId: "maren-kest", sheetVersion: 4,
+    purpose: "sheet-section", sectionHeading: asked.sectionHeading, provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george", format: "wav",
+    status: "ready", file: ".cache/voice/maren-essence.wav", cached: false, characterCount: 120, estimatedMicroUsd: 0,
+  }));
+  assert.equal(playbackSnapshot().clip?.sub, `read aloud · ${DEFAULT_NARRATOR.label}`, "George read it, and the player says so");
+  assert.doesNotMatch(playbackSnapshot().clip?.sub ?? "", /Harbour glass/);
+});
+
+it("a page asked about two cloned voices is asked twice under one request, and answers both (codex on PR 1221)", async () => {
+  const sent: ClientMessage[] = [];
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(JSON.parse(json)); } } as ArkeBridge);
+  __setStateForTest({ ...FIXTURE_STATE, app: { ...FIXTURE_STATE.app, narrator: { provider: "mistral", model: "voxtral-mini-tts", voiceId: "harbour-glass", label: "Harbour glass", worldId: FIXTURE_WORLD_ID } } });
+  const container = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(container);
+  const root = createRoot(container); open.push(root);
+  await act(async () => root.render(<MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/cast/maren-kest`]}><App /></MemoryRouter>));
+  await act(async () => [...container.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Read the sheet")!.click());
+  const pages = () => sent.filter((message): message is Extract<ClientMessage, { kind: "read-sheet-page" }> => message.kind === "read-sheet-page");
+  const requestId = pages().at(-1)!.requestId;
+  const question = (provider: string, voice: string) => ({
+    type: "voice.upload-confirmation-required" as const, at: "2026-09-19T08:00:00.000Z", requestId, worldId: FIXTURE_WORLD_ID, command: "read-sheet-page" as const,
+    destinationLabel: `${provider} · ${voice}`, confirmationToken: `vendor:${provider}:${voice}`,
+  });
+  const asks = () => dom.document.querySelector('[data-testid="remote-voice-upload-confirmation"]');
+  await act(async () => __applyEventForTest(question("mistral", "harbour-glass")));
+  assert.ok(asks(), "the narrator's vendor first");
+  await act(async () => [...asks()!.querySelectorAll("button")].find((button) => button.textContent === "Send recording")!.click());
+  assert.equal(pages().at(-1)!.voiceUploadConfirmedFor, "vendor:mistral:harbour-glass");
+  // The same request, asked again for the speaker's voice: the request is still the screen's.
+  await act(async () => __applyEventForTest(question("breezeblue", "low-tide")));
+  assert.ok(asks(), "the second question reaches the page under the same request");
+  assert.match(asks()!.textContent!, /breezeblue · low-tide/);
+  await act(async () => [...asks()!.querySelectorAll("button")].find((button) => button.textContent === "Send recording")!.click());
+  assert.equal(pages().length, 3, "answered twice, re-asked twice");
+  assert.equal(pages().at(-1)!.requestId, requestId);
+  assert.equal(pages().at(-1)!.voiceUploadConfirmedFor, "vendor:breezeblue:low-tide");
+});
 
 it("the confirmation says what a first read through a slot-keeping reader adds, on the read that incurs it (SPEC-046 R-14)", async () => {
   __setStateForTest(FIXTURE_STATE);

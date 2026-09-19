@@ -1683,8 +1683,10 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   // the client half of the same mistake the coordinator made — prose ABOUT somebody read in
   // their voice, and unreadable for the many characters who have none.
   // Named as this world will hear it (issue 1215): a clone is its own world's, and a choice
-  // that cannot narrate here is named as the shipped local voice it falls to.
-  const narratorLabel = narratorLabelFor(useStore().state?.app.narrator ?? null, worldId);
+  // that cannot narrate here is named as the shipped local voice it falls to; once the section
+  // lands, the voice that read it (codex on PR 1221).
+  const storedNarrator = useStore().state?.app.narrator ?? null;
+  const narratorLabel = narratorLabelFor(storedNarrator, worldId, readResult?.status === "ready" ? readResult : undefined);
   /*
    * A long section arrives in pieces — a local read's synthesis chunks, and a cloud read over
    * its reader's cap (issue 1208) — each queued as it lands so the first sounds while the rest
@@ -1755,7 +1757,8 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const pageRead = usePageRead({
     pageId: sheet?.id,
     title: sheet?.name ?? "",
-    narratorLabel,
+    narrator: storedNarrator,
+    worldId,
     worldSlug: world?.meta.slug,
     blocks: pageBlocks,
     start: (requestId, confirmationToken, voiceUploadConfirmedFor) =>

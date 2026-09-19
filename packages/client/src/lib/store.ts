@@ -1207,8 +1207,11 @@ function handleFrame(json: string): void {
     }
     if (event.type === "voice.upload-confirmation-required") {
       const expected = pendingQueueRequests.get(event.requestId);
+      // The question is a pause in the request, not its end (codex on PR 1221): a page with a
+      // cloned narrator and a cloned speaker is asked twice under one id, and the answer re-sends
+      // the same id without registering it again. The entry goes with the enqueue result, or
+      // with the connection.
       if (expected?.command === event.command) {
-        pendingQueueRequests.delete(event.requestId);
         for (const listener of voiceUploadConfirmationListeners) listener(event);
       }
     }

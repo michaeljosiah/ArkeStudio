@@ -740,9 +740,10 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
        * What a first read through a slot-keeping reader adds (SPEC-046 R-14, R-34), said on the
        * read that incurs it rather than only on the candidate row that named it — one entry a
        * voice, never joined and cut (codex on PR 1221): a vendor's clone charge is not in the
-       * estimate, so this is the whole of its disclosure.
+       * estimate, so this is the whole of its disclosure. Bounded by a page's blocks, since a
+       * voice needs a block to be on the page (`read-prose-page` takes a thousand sources).
        */
-      notices: z.array(z.string().min(1).max(512)).max(64).optional(),
+      notices: z.array(z.string().min(1).max(512)).max(1000).optional(),
       error: z.string().optional(),
     })
     .strict(),

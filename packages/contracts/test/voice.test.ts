@@ -578,6 +578,14 @@ describe("one voice, several readers (SPEC-046 D1, R-10, R-13)", () => {
     assert.equal(narratorLabelFor(preset, undefined), "Paul");
     assert.equal(narratorLabelFor({ provider: "kokoro", model: "kokoro-82m", voiceId: "bf_emma" }, undefined), "bf_emma", "the id when no label was stored");
     assert.equal(narratorLabelFor(null, undefined), DEFAULT_NARRATOR.label);
+    // Once a read has landed, the voice that read it is what is named (codex on PR 1221): the
+    // coordinator falls back for reasons a screen cannot see, and the player must never say the
+    // stored name over another voice.
+    const here = "01J8F3K2QW9VZX4N7M0RTYB6A1";
+    assert.equal(narratorLabelFor(clone, here, { provider: "mistral", voiceId: "harbour-glass" }), "Harbour glass", "the choice, when it is what spoke");
+    assert.equal(narratorLabelFor(clone, here, { provider: "kokoro", voiceId: "bm_george" }), DEFAULT_NARRATOR.label, "the shipped voice, when the read fell to it — a recording gone, a key withdrawn");
+    assert.equal(narratorLabelFor(clone, here, { provider: "kokoro", voiceId: "bf_emma" }), "bf_emma", "any other voice by its id");
+    assert.equal(narratorLabelFor(null, here, { provider: "kokoro", voiceId: "bm_george" }), DEFAULT_NARRATOR.label);
   });
 
   it("a stored cloned narrator resolves through the live catalogue like any other (issue 1215)", () => {
