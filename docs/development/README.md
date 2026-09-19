@@ -7,6 +7,7 @@ Start with the root [AGENTS.md](../../AGENTS.md) and shared [operational rules](
 | Where does this feature live, and what else changes with it? | [Code map and workflow traces](code-map.md) |
 | Should the remaining large production screens be split? | [Module boundary decisions](production-module-boundaries.md) |
 | How can another Node host use the engine? | [Engine services and host contracts](engine.md) |
+| How does a host generate page artwork and narration? | [Story media API](story-media-engine.md) |
 | How do I run Studio without Electron? | [Standalone Node server](standalone-server.md) |
 | How do I run and validate it? | [Contributor setup](../../CONTRIBUTING.md#getting-set-up), [testing](testing.md) |
 | What generates this file or ships this asset? | [Maintenance map](maintenance.md) |

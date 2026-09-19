@@ -1,5 +1,7 @@
 # Embeddable engine services
 
+Version 0.3 adds [chapter-bound page illustration and narration APIs](story-media-engine.md). Existing prose and portrait APIs remain available; upgrade durable journal readers before admitting the new source-bound operations.
+
 The engine supports world reads, character proposals and portraits, plus a prose journey: create a Story and chapters, edit text, draft or revise with AI, accept a proposal, and read the committed manuscript. Studio and an external Node host share the existing domain writers, model runner and proposal gate.
 
 The sentence-to-character service still stages a sketch; its harness continuation belongs to Studio. The separate chapter-writing API below runs through an explicit host-provided model runtime.
@@ -37,7 +39,7 @@ flowchart LR
 
 ## Public package
 
-`@arke-studio/engine` is an ESM Node package, version 0.2.0, requiring Node 22.12 or later. The root exports application services and host contracts. `@arke-studio/engine/local` exports optional folder adapters, filesystem provider, operation journal and existing dispatcher. Neither entry constructs Electron or starts a server.
+`@arke-studio/engine` is an ESM Node package, version 0.3.0, requiring Node 22.12 or later. The root exports application services and host contracts. `@arke-studio/engine/local` exports optional folder adapters, filesystem provider, operation journal and existing dispatcher. Neither entry constructs Electron or starts a server.
 
 Build with `npm run build --workspace @arke-studio/engine`; pack with `npm pack --workspace @arke-studio/engine`. Install that tarball into the backend. Do not import coordinator source paths. Registry publication is a separate release action.
 

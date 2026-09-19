@@ -1,5 +1,7 @@
 import { MAX_IMAGE_PREVIEWS, describeError, ulid, type Job } from "@arke-studio/contracts";
-import type { EngineContext, EngineDeliveredJob, EngineMutation, EngineQueue, EngineWorldRepository, IllustrationInput, IllustrationOutcome } from "./contracts.js";
+import type { EngineContext, EngineDeliveredJob, EngineMutation, EngineQueue, EngineResource, EngineWorldRepository, IllustrationInput, IllustrationOutcome } from "./contracts.js";
+import type { EnqueueInput } from "../queue/dispatcher.js";
+import { readStoryMediaSource } from "./story-media.js";
 import { WorldSessionService } from "./world-sessions.js";
 import { engineHash, EngineOperations } from "./operations.js";
 
@@ -11,12 +13,22 @@ export class IllustrationApplicationService {
     context = structuredClone(context);
     input = structuredClone(input);
     const resource = { worldId, sheetId: input.sheetId };
-    return this.operations.run(context, "generate", resource, input.operationId, input, async key => {
+    return this.generateFor(context, resource, input, async key => {
       if (!Number.isInteger(input.count) || input.count < 1 || input.count > MAX_IMAGE_PREVIEWS) {
         throw new Error(`Request between one and ${MAX_IMAGE_PREVIEWS} illustrations.`);
       }
-      const inputs = await this.worlds.use(worldId, session =>
+      return this.worlds.use(worldId, session =>
         session.illustrations({ ...input, generationKey: key }, input.expectedRevision));
+    });
+  }
+
+  /** Shared admission/recovery path; preparation owns the canonical source and frozen provider input. */
+  async generateFor(context: EngineContext, resource: EngineResource, input: EngineMutation,
+    prepare: (key: string) => Promise<EnqueueInput[]>): Promise<IllustrationOutcome> {
+    const worldId = resource.worldId;
+    return this.operations.run(context, "generate", resource, input.operationId, input, async key => {
+      const inputs = await prepare(key);
+      if (!inputs.length) throw new Error("No media requests were prepared.");
       const reservation = await this.operations.policy.reserve(context, key, inputs);
       const jobs: Job[] = [];
       // A partial/uncertain enqueue retains the reservation and operation for reconciliation.
@@ -24,8 +36,9 @@ export class IllustrationApplicationService {
       for (const [index, request] of inputs.entries()) {
         try {
           await this.operations.policy.authorise(context, "generate", resource);
+          if (resource.mediaKind) await readStoryMediaSource(this.worlds, this.operations.policy, context, resource);
           jobs.push(await this.queue.enqueue({ ...request, idempotencyKey: ulid(),
-            params: { ...request.params, engineOperation: { key, requestIndex: index, reservation, context } } }));
+            params: { ...request.params, engineOperation: { key, requestIndex: index, reservation, context, resource } } }));
         } catch (error) {
           // The queue may have journalled the failing call before its acknowledgement was lost.
           // Preserve all known admissions; an incomplete batch is never a wholly rejected one.
@@ -59,6 +72,7 @@ export class IllustrationApplicationService {
       operation.context.scopeId !== context.scopeId) throw new Error("The operation belongs to a different caller or subject.");
     // A world-level permission is insufficient for a request originally limited to one sheet.
     await this.operations.policy.authorise(context, "generate", operation.resource);
+    if (operation.resource.mediaKind) await readStoryMediaSource(this.worlds, this.operations.policy, context, operation.resource);
     const jobs = this.queue.jobs().filter(job => {
       const owner = job.params.engineOperation as { key?: string } | undefined;
       return job.worldId === worldId && owner?.key === key;
@@ -78,7 +92,7 @@ export class IllustrationApplicationService {
       return { status: "pending" as const, operationKey: key };
     }
     const permitted: EngineDeliveredJob[] = [];
-    const media = new WorldSessionService(this.worlds, this.operations.policy);
+    const media = new WorldSessionService(this.worlds, this.operations.policy, this.queue);
     for (const job of jobs) {
       if (job.status !== "succeeded" || !result.jobIds.includes(job.id)) continue;
       try {

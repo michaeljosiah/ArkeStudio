@@ -9,7 +9,8 @@ const text = z.string().min(1).refine(value => value.trim().length > 0);
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const context = z.object({ actorId: text, scopeId: text, executorId: text, subjectId: text }).strict();
 const resource = z.object({ worldId: text, proposalId: text.optional(), sheetId: text.optional(), artifactId: text.optional(),
-  productionId: proseId.optional(), chapterId: proseId.optional() }).strict();
+  productionId: proseId.optional(), chapterId: proseId.optional(), mediaKind: z.enum(["image", "speech"]).optional(),
+  sourceHash: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional() }).strict();
 const envelope = z.object({ key: hash, fingerprint: hash, context, resource,
   action: z.enum(["propose", "accept", "discard", "generate", "production-create", "chapter-create", "chapter-save", "chapter-draft"]), status: z.enum(["started", "completed"]), result: z.unknown().optional() }).strict();
 const commit = z.object({ commitId: text, canonRevision: z.number().int().nonnegative(), allocatedCanonIds: z.array(text),
@@ -37,7 +38,9 @@ const settlement = z.object({ operationKey: hash, reservation: text, jobs: z.arr
 export function parseOperationRecord(value: unknown): EngineOperation {
   const row = envelope.parse(value);
   if ((["accept", "discard"].includes(row.action) && !row.resource.proposalId) ||
-    (row.action === "generate" && !row.resource.sheetId)) throw new Error("Invalid engine operation resource.");
+    (row.action === "generate" && !row.resource.sheetId && !row.resource.mediaKind)) throw new Error("Invalid engine operation resource.");
+  if (row.resource.mediaKind && (row.action !== "generate" || row.resource.sheetId || !row.resource.productionId ||
+    !row.resource.chapterId || !row.resource.sourceHash)) throw new Error("Invalid engine story media source.");
   if ((["chapter-create", "chapter-save", "chapter-draft"].includes(row.action) && !row.resource.productionId) ||
     (["chapter-save", "chapter-draft"].includes(row.action) && !row.resource.chapterId)) throw new Error("Invalid engine prose resource.");
   if (row.status === "started" && row.result === undefined) return row;

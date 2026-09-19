@@ -6,6 +6,7 @@ import { IllustrationApplicationService } from "./generation.js";
 import { ProseApplicationService } from "./prose.js";
 import { WritingApplicationService } from "./writing.js";
 import type { WritingRuntimeFactory } from "./writing-contracts.js";
+import { StoryMediaApplicationService } from "./story-media.js";
 
 export interface EngineOptions {
   worlds: EngineWorldRepository;
@@ -29,12 +30,16 @@ export function createEngine(options: EngineOptions) {
       try { return await promise; } finally { active.delete(promise); }
     };
   }
-  const worlds = new WorldSessionService(options.worlds, options.policy);
+  const worlds = new WorldSessionService(options.worlds, options.policy, options.queue);
   const proposals = new ProposalApplicationService(options.worlds, operations);
   const illustrations = new IllustrationApplicationService(options.worlds, operations, options.queue);
   const prose = new ProseApplicationService(options.worlds, operations);
+  const storyMedia = new StoryMediaApplicationService(options.worlds, operations, illustrations, options.queue);
   const writing = new WritingApplicationService(options.worlds, operations, options.writing);
   return {
+    storyMedia: { illustratePage: tracked(storyMedia.illustratePage.bind(storyMedia)),
+      narrateChapter: tracked(storyMedia.narrateChapter.bind(storyMedia)), reconcile: tracked(storyMedia.reconcile.bind(storyMedia)),
+      cancel: tracked(storyMedia.cancel.bind(storyMedia)) },
     writing: { draft: tracked(writing.draft.bind(writing)), revise: tracked(writing.revise.bind(writing)),
       cancel: tracked(writing.cancel.bind(writing)) },
     prose: { createProduction: tracked(prose.createProduction.bind(prose)), createChapter: tracked(prose.createChapter.bind(prose)),
@@ -72,4 +77,5 @@ export function createEngine(options: EngineOptions) {
 
 export type { EngineContext };
 export * from "./contracts.js";
+export type { StoryMediaInput, PageIllustrationInput, ChapterNarrationInput } from "./story-media.js";
 export { EngineOperationUncertainError, engineHash } from "./operations.js";
