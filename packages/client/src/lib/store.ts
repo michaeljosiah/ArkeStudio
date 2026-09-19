@@ -253,7 +253,7 @@ interface StoreState {
       flagged: number;
       /** The last block that landed or was flagged, and why, for the foot. */
       last?: { block: string; outcome: "made" | "adopted" | "flagged"; reason?: string };
-      price?: { characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[] };
+      price?: { characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[]; notices: string[] };
       record?: import("@arke-studio/contracts").ChapterAudiobook;
       reason?: string;
     }
@@ -1546,7 +1546,7 @@ function handleFrame(json: string): void {
       const held = audiobook[key] ?? { toMake: 0, blocks: 0, made: 0, flagged: 0 };
       audiobook = {
         ...audiobook,
-        [key]: { ...held, state: "priced", price: { characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices } },
+        [key]: { ...held, state: "priced", price: { characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, notices: event.notices ?? [] } },
       };
     } else if (event.type === "audiobook.progress") {
       const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;

@@ -383,6 +383,7 @@ function BookPriceSheet({ price, onClose, onConfirm }: {
           })}
         </div>
         {vendors.length > 0 && <div className="fy-ms__line">words and the voice to {vendors.join(", ")} · text in Activity</div>}
+        {(price.notices ?? []).map((notice) => <div key={notice} className="fy-ms__line" data-testid="read-book-notice">{notice}</div>)}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <Button variant="ghost" onClick={onClose}>
             Cancel

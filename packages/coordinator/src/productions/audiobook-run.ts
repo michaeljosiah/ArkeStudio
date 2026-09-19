@@ -8,6 +8,7 @@ import {
   audiobookTextHash,
   billableCharacters,
   estimateMicroUsd,
+  firstReadNotice,
   normalizeSpeechText,
   voiceFormatForModel,
   voiceSourceFor,
@@ -45,7 +46,7 @@ import { audiobookLanding, castRefusal, checkDirection, effectiveReader, emptyAu
 
 export type AudiobookRunEvent =
   | { type: "started"; toMake: number; blocks: number }
-  | { type: "priced"; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[] }
+  | { type: "priced"; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[]; notices: string[] }
   | { type: "progress"; block: string; outcome: "made" | "adopted" | "flagged"; reason?: string; made: number; toMake: number }
   | { type: "finished"; outcome: "read" | "stopped" | "unavailable" | "failed" | "refused"; made: number; flagged: number; record?: ChapterAudiobook; reason?: string };
 
@@ -355,6 +356,21 @@ export function missIdentity(block: Speaking): string {
   return `${block.block.key}:${audiobookTextHash(block.text)}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.direction?.hash ?? ""}`;
 }
 
+/**
+ * What a first read through a slot-keeping reader adds (SPEC-046 R-14), said on the read that
+ * incurs it (codex on PR 1221): a line a voice and vendor, keyed by id so two clones named alike
+ * are two charges said twice, and nothing once the library records the slot. A vendor's clone
+ * charge is not in the estimate, so this is the whole of its disclosure.
+ */
+export function firstReadNotices(clones: readonly { provider: string; voice: ClonedVoice }[]): string[] {
+  const lines = new Map<string, string>();
+  for (const { provider, voice } of clones) {
+    const notice = firstReadNotice(voice, provider);
+    if (notice !== null) lines.set(`${provider}\n${voice.id}`, `${voice.name} · ${notice}`);
+  }
+  return [...lines.values()];
+}
+
 /** The price's lines (R-17): every cloud voice the words would go to, once each, with its share. */
 export function priceLines(misses: readonly Speaking[], priceOf: (block: Speaking) => number): { label: string; provider: string; characters: number; estimatedMicroUsd: number }[] {
   const voices = new Map<string, { label: string; provider: string; characters: number; estimatedMicroUsd: number }>();
@@ -405,7 +421,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     if (await deps.requireUploadConfirmation(reader)) return;
   }
   if (estimate > 0 && deps.priced === undefined && deps.confirmationToken !== token) {
-    emit({ type: "priced", characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: token, voices: priceLines(misses, priceOf) });
+    emit({ type: "priced", characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: token, voices: priceLines(misses, priceOf), notices: firstReadNotices(clones) });
     return;
   }
 

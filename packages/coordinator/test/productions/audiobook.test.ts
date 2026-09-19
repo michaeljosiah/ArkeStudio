@@ -606,6 +606,7 @@ describe("the audiobook run (turn 146)", () => {
         const priced = events.find((e): e is Priced => e.type === "audiobook.priced");
         assert.ok(priced, `answered, the run goes on to its price: ${events.map((e) => e.type).join(" | ")}`);
         assert.deepEqual(priced.voices.map((v) => [v.label, v.provider]), [["Harbour glass", "fishaudio"]], "every block is the narrator's, and the narrator is the clone");
+        assert.deepEqual(priced.notices, ["Harbour glass · first read · voice made on Fish Audio"], "what the first read through a slot-keeping reader adds, on the read that incurs it (codex on PR 1221)");
         const library = JSON.parse(await readFile(join(worldDir, "voices", "voices.json"), "utf8")) as { voices: { remote?: Record<string, { confirmedAt?: string }> }[] };
         assert.equal(typeof library.voices[0]!.remote?.["fishaudio"]?.confirmedAt, "string", "the answer is written onto the voice");
         assert.equal(events.filter((e) => e.type === "voice.upload-confirmation-required").length, 1, "asked once");

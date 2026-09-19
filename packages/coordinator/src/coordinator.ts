@@ -1229,7 +1229,7 @@ export class Coordinator {
             this.emit({ at: at(), type: "audiobook.started", ...ids, requestId, toMake: event.toMake, blocks: event.blocks });
             return;
           case "priced":
-            this.emit({ at: at(), type: "audiobook.priced", ...ids, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices });
+            this.emit({ at: at(), type: "audiobook.priced", ...ids, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, ...(event.notices.length > 0 ? { notices: event.notices } : {}) });
             return;
           case "progress":
             if (held !== undefined) held.made = event.made;
@@ -11318,6 +11318,19 @@ export class Coordinator {
           });
           return;
         }
+        // The narrator is a live reference too (codex on PR 1221): deleted under it, Settings
+        // would go on naming a voice that reads as the default, and the next clone with the
+        // same name would take the freed id and narrate without ever being chosen. Refused for
+        // the sheet's reason — the choice is the person's to change, on Settings.
+        const stored = this.appSettings ? (await this.appSettings.load()).narrator : null;
+        if (stored !== null && narratorAppliesTo(stored, store.worldId)) {
+          const model = stored.model ?? legacyVoiceModel(stored.provider, stored.voiceId, bundle.clonedVoices);
+          const source = model === null ? null : voiceSourceFor(bundle.clonedVoices, stored.provider, model, stored.voiceId);
+          if (source?.kind === "cloned" && source.voice.id === voice.id) {
+            answer("refused", { reason: "The narrator still reads with this voice — choose another on Settings first." });
+            return;
+          }
+        }
         const removed = await deleteVoice(store, msg.voiceId, { requestId: msg.requestId });
         if (!removed.ok) {
           answer("refused", { reason: removed.reason });
@@ -12208,7 +12221,7 @@ export class Coordinator {
                   this.emit({ at: at(), type: "audiobook.book-started", ...ids, requestId, chapters: event.chapters, blocks: event.blocks });
                   return;
                 case "priced":
-                  this.emit({ at: at(), type: "audiobook.book-priced", ...ids, chapters: event.chapters, blocks: event.blocks, cloudBlocks: event.cloudBlocks, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices });
+                  this.emit({ at: at(), type: "audiobook.book-priced", ...ids, chapters: event.chapters, blocks: event.blocks, cloudBlocks: event.cloudBlocks, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, ...(event.notices.length > 0 ? { notices: event.notices } : {}) });
                   return;
                 case "progress":
                   if (held !== undefined) held.done = event.done;

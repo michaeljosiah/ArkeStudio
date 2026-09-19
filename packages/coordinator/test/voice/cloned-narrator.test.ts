@@ -298,6 +298,26 @@ describe("a cloned voice as the narrator (issue 1215)", () => {
     }
   });
 
+  it("cannot be deleted from the library while it narrates (codex on PR 1221), as a voice a sheet reads with cannot", async () => {
+    const h = await harness();
+    try {
+      await h.send({ kind: "set-narrator", voice: HARBOUR });
+      await h.send({ kind: "delete-voice", requestId: REQUEST, worldId: WORLD_ID, voiceId: "harbour-glass" });
+      const answer = h.events.find((event) => event.type === "voice.deleted");
+      assert.ok(answer && answer.type === "voice.deleted");
+      assert.equal(answer.status, "refused");
+      assert.match(answer.reason ?? "", /narrator still reads with this voice/);
+      assert.ok((await h.library()) !== undefined, "the entry stays");
+      // Chosen elsewhere, the voice is not this world's narrator and goes.
+      await h.settings.setNarrator({ ...HARBOUR, worldId: "01J8F3K2QW9VZX4N7M0RTYB6B2" });
+      await h.send({ kind: "delete-voice", requestId: AGAIN, worldId: WORLD_ID, voiceId: "harbour-glass" });
+      const gone = h.events.filter((event) => event.type === "voice.deleted").at(-1);
+      assert.equal(gone && gone.type === "voice.deleted" ? gone.status : null, "deleted");
+    } finally {
+      await h.close();
+    }
+  });
+
   it("is not the recipe's row: set-narrator still refuses the clone on this machine, and takes it through the reader only while its recording is there", async () => {
     const h = await harness();
     try {

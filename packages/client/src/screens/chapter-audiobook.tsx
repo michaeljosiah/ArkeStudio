@@ -233,12 +233,14 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const sounding = playing && at !== null ? (playable[at] ?? null) : null;
 
   // A cloned voice's recording leaving the machine (SPEC-022, SPEC-046): asked once, by the run's request.
-  const [upload, setUpload] = useState<{ destination: string; token: string } | null>(null);
+  const [upload, setUpload] = useState<{ destination: string; token: string; notice?: string } | null>(null);
   useEffect(
     () =>
       subscribeVoiceUploadConfirmations((confirmation) => {
         if (confirmation.requestId !== run?.requestId) return;
-        setUpload({ destination: confirmation.destinationLabel, token: confirmation.confirmationToken });
+        // With what the vendor does with the clip (SPEC-046 R-17), as the door and every other
+        // read show it (codex on PR 1221).
+        setUpload({ destination: confirmation.destinationLabel, token: confirmation.confirmationToken, ...(confirmation.destinationNotice !== undefined ? { notice: confirmation.destinationNotice } : {}) });
       }),
     [run?.requestId],
   );
@@ -345,6 +347,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       return (
         <RemoteVoiceUploadConfirmation
           destinationLabel={upload.destination}
+          destinationNotice={upload.notice}
           onCancel={() => {
             setUpload(null);
             uploadAllowed.current = null;
@@ -369,6 +372,9 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
             Confirm {price.characters.toLocaleString()} characters · {formatMicroUsd(price.estimatedMicroUsd)}
             {price.voices.map((voice) => ` · ${voice.label} · ${voice.provider}`).join("")}
           </Button>
+          {/* What a first read through a slot-keeping reader adds (SPEC-046 R-14), on the read
+              that incurs it: not in the estimate, so said beside it. */}
+          {price.notices.map((notice) => <span key={notice} className="fy-mono" data-testid="audiobook-notice">{notice}</span>)}
           <Button variant="ghost" onClick={() => dismissAudiobookRun(worldId, prodId, chapter.id)}>
             Cancel
           </Button>
