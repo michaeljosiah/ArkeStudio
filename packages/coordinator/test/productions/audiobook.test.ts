@@ -250,7 +250,7 @@ const recordPath = (worldDir: string, chapterFile = "01-neap") => join(worldDir,
 const readRecord = async (worldDir: string, chapterFile = "01-neap") => ChapterAudiobookSchema.parse(JSON.parse(await readFile(recordPath(worldDir, chapterFile), "utf8")));
 
 describe("a part already in the queue (codex on PR 1180)", () => {
-  const identity: PartIdentity = { productionId: LEDGER, chapterId: "neap", block: "p0.0", textHash: "text-v1:abc", provider: "elevenlabs", model: ELEVEN.id, voiceId: "v_8Kq2", parts: 1, directionHash: null };
+  const identity: PartIdentity = { productionId: LEDGER, chapterId: "neap", block: "p0.0", textHash: "text-v1:abc", provider: "elevenlabs", model: ELEVEN.id, voiceId: "v_8Kq2", parts: 1, directionHash: null, reference: null };
   const job = (id: string, status: string, extra: Record<string, unknown> = {}, params: Record<string, unknown> = {}) =>
     ({
       id,

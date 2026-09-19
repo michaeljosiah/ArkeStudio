@@ -15,6 +15,7 @@ import {
   normalizeSpeechText,
   formatMicroUsd,
   legacyVoiceModel,
+  narratorAppliesTo,
   narratorFor,
   supportsVoiceUse,
   voiceSourceFor,
@@ -123,12 +124,15 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
 
   // The narrator as the coordinator chooses it (codex on PR 1180): a stored narrator whose
   // voice cannot speak now falls back the same way on both sides, or the client would judge
-  // every take of the local fallback stale against a voice the run never used.
+  // every take of the local fallback stale against a voice the run never used. A cloned choice
+  // is its own world's (codex on PR 1221), and the catalogue marks a clone whose recording is
+  // gone, so both fall back here as they do there.
   const narrator = useMemo<AudiobookReader>(() => {
     const speakable = (catalogue ?? []).filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined);
-    const chosen = narratorFor(state?.app.narrator ?? null, speakable);
+    const stored = state?.app.narrator ?? null;
+    const chosen = narratorFor(narratorAppliesTo(stored, worldId) ? stored : null, speakable);
     return { provider: chosen.provider, model: chosen.model, voiceId: chosen.voiceId, label: chosen.label ?? DEFAULT_NARRATOR.label };
-  }, [state?.app.narrator, catalogue]);
+  }, [state?.app.narrator, catalogue, worldId]);
   const models = state?.app.manifest?.models ?? [];
   const modelOf = useCallback(
     (reader: AudiobookReader): ManifestModel | null => models.find((m) => m.provider === reader.provider && m.id === reader.model && m.capability === "voice-tts") ?? null,

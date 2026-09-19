@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { DEFAULT_NARRATOR, formatMicroUsd, supportsVoiceUse, type ProseReadSource } from "@arke-studio/contracts";
+import { formatMicroUsd, narratorLabelFor, type ProseReadSource } from "@arke-studio/contracts";
 import {
   clearQueue,
   dismissPlayback,
@@ -34,8 +34,8 @@ export interface PageRead {
   at: number | null;
   count: number;
   failure: string | null;
-  /** Present only while a charged read is waiting to be answered; `voices` names each cloud voice the words would go to, `notice` what a first read through a slot-keeping reader adds (SPEC-046 R-14). */
-  cost: { characters: number; priced: string; voices: string[]; notice?: string; confirm: () => void } | null;
+  /** Present only while a charged read is waiting to be answered; `voices` names each cloud voice the words would go to, `notices` what a first read through a slot-keeping reader adds, a line a voice (SPEC-046 R-14). */
+  cost: { characters: number; priced: string; voices: string[]; notices: string[]; confirm: () => void } | null;
   /** Present while a cloned voice's recording waits for leave to go to a remote engine (turn 130). */
   upload: { destination: string; notice?: string; confirm: () => void } | null;
   begin: () => void;
@@ -169,7 +169,7 @@ export function usePageRead(input: {
             characters: result?.characterCount ?? 0,
             priced: formatMicroUsd(result?.estimatedMicroUsd ?? 0),
             voices: (result?.voices ?? []).map((voice) => `${voice.label} · ${voice.provider}`),
-            ...(result?.notice !== undefined ? { notice: result.notice } : {}),
+            notices: result?.notices ?? [],
             confirm: () => {
               setConfirmed(run);
               start(run, token, uploadAllowed.current ?? undefined);
@@ -219,14 +219,10 @@ export function useProsePageRead(input: {
 }): PageRead {
   const { state } = useStore();
   const world = state?.world ?? null;
-  // The app's narrator — a cloned voice through a hosted reader may be one (issue 1215), the
-  // local recipe's may not — and a narrator that fails that rule falls back to the shipped
-  // local one rather than being named.
-  const narrator = state?.app.narrator ?? null;
-  const narratorLabel =
-    narrator && !supportsVoiceUse(narrator, "narration")
-      ? DEFAULT_NARRATOR.label
-      : (narrator?.label ?? narrator?.voiceId ?? DEFAULT_NARRATOR.label);
+  // The app's narrator as this world will hear it (issue 1215): a clone through a hosted reader
+  // may be one, the recipe's may not, and a clone is its own world's; a choice that fails either
+  // rule is named as the shipped local voice it falls to.
+  const narratorLabel = narratorLabelFor(state?.app.narrator ?? null, world?.meta.worldId);
   return usePageRead({
     pageId: input.pageId,
     title: input.title,
@@ -264,7 +260,7 @@ export function PageReadControl({ read, label }: { read: PageRead; label: string
         {/* What leaves the machine is said before it does (codex on turn 130): the words and the
             voice go to the provider, and the text stays in Activity, as a table read's does. */}
         <span className="fy-mono">the words and the voice go to the provider · the text stays in Activity</span>
-        {read.cost.notice !== undefined && <span className="fy-mono" data-testid="page-read-notice">{read.cost.notice}</span>}
+        {read.cost.notices.map((notice) => <span key={notice} className="fy-mono" data-testid="page-read-notice">{notice}</span>)}
         <Button variant="ghost" onClick={read.stop}>
           Cancel
         </Button>

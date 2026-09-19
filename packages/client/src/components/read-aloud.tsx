@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { DEFAULT_NARRATOR, supportsVoiceUse, type ProseReadSource } from "@arke-studio/contracts";
+import { narratorLabelFor, type ProseReadSource } from "@arke-studio/contracts";
 import { readProse, useStore, useVoiceAudio, useVoiceParts } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
 import { clearQueue, enqueueClip, playClip, type Clip } from "../lib/audio.js";
@@ -34,16 +34,10 @@ function useProseRead(source: ProseReadSource, title: string) {
   const live = useRef<string | null>(null);
   live.current = request;
   const upload = useVoiceUploadAsk(() => live.current);
-  /*
-   * The app's narrator: a cloned voice through a hosted reader may be one (issue 1215), the
-   * local recipe's may not, and `supportsVoiceUse` is that rule; a narrator that fails it falls
-   * back to the shipped local one rather than naming a voice that will not be used.
-   */
-  const narrator = state?.app.narrator ?? null;
-  const narratorLabel =
-    narrator && !supportsVoiceUse(narrator, "narration")
-      ? DEFAULT_NARRATOR.label
-      : (narrator?.label ?? narrator?.voiceId ?? DEFAULT_NARRATOR.label);
+  // The app's narrator as this world will hear it (issue 1215): a cloned voice through a hosted
+  // reader may be one, the local recipe's may not, and a clone is its own world's; a choice that
+  // fails either rule is named as the shipped local voice it falls to, never as itself.
+  const narratorLabel = narratorLabelFor(state?.app.narrator ?? null, world?.meta.worldId);
   const sub = `read aloud · ${narratorLabel}`;
 
   /*

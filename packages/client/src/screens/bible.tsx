@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
-import { bibleSize, DEFAULT_NARRATOR, splitBible, supportsVoiceUse } from "@arke-studio/contracts";
+import { bibleSize, narratorLabelFor, splitBible } from "@arke-studio/contracts";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
 import { Button, Callout, IconButton } from "../components/ui.js";
@@ -157,10 +157,9 @@ export function BibleScreen() {
   const liveRead = useRef<string | null>(null);
   liveRead.current = read?.requestId ?? null;
   const upload = useVoiceUploadAsk(() => liveRead.current);
-  const narrator = state?.app.narrator ?? null;
-  const narratorLabel = narrator && !supportsVoiceUse(narrator, "narration")
-    ? DEFAULT_NARRATOR.label
-    : narrator?.label ?? narrator?.voiceId ?? DEFAULT_NARRATOR.label;
+  // Named as this world will hear it (issue 1215): a clone is its own world's, and a choice
+  // that cannot narrate here is named as the shipped local voice it falls to.
+  const narratorLabel = narratorLabelFor(state?.app.narrator ?? null, worldId);
   /*
    * Plays the moment it lands, rather than making somebody press twice for the same thing.
    *

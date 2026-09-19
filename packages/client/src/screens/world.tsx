@@ -22,10 +22,9 @@ import {
   type RippleItem,
   type Sheet,
   type WorldBundle,
-  DEFAULT_NARRATOR,
   legacyVoiceModel,
+  narratorLabelFor,
   voiceTargetKey,
-  supportsVoiceUse,
   isGeneratedArtifact,
   orderedShots,
   sortScenes,
@@ -1683,11 +1682,9 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   // not depend on this character having a voice of their own. Gating it on `sheet.voice` was
   // the client half of the same mistake the coordinator made — prose ABOUT somebody read in
   // their voice, and unreadable for the many characters who have none.
-  const narrator = useStore().state?.app.narrator ?? null;
-  const narratorLabel =
-    narrator && !supportsVoiceUse(narrator, "narration")
-      ? DEFAULT_NARRATOR.label
-      : (narrator?.label ?? narrator?.voiceId ?? DEFAULT_NARRATOR.label);
+  // Named as this world will hear it (issue 1215): a clone is its own world's, and a choice
+  // that cannot narrate here is named as the shipped local voice it falls to.
+  const narratorLabel = narratorLabelFor(useStore().state?.app.narrator ?? null, worldId);
   /*
    * A long section arrives in pieces — a local read's synthesis chunks, and a cloud read over
    * its reader's cap (issue 1208) — each queued as it lands so the first sounds while the rest

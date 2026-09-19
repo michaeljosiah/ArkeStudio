@@ -727,6 +727,32 @@ export interface NarratorChoice {
 }
 
 /**
+ * Whether a stored narrator is this world's to read with (issue 1215; codex on PR 1221). A
+ * cloned voice is the world's — `mintVoiceId` is unique within one world only — so a clone
+ * chosen as the narrator in one world is not the voice of the same id in another: that is
+ * somebody else's recording, and it must not leave the machine under a choice made elsewhere.
+ * `set-narrator` records the world on a cloned choice; a choice with no world is a preset and
+ * reads wherever its reader does. Isomorphic: the coordinator applies it before resolving, the
+ * screens before naming the narrator.
+ */
+export function narratorAppliesTo(stored: { voiceId: string; worldId?: string } | null, worldId: string | undefined): boolean {
+  return stored === null || stored.worldId === undefined || stored.worldId === worldId;
+}
+
+/**
+ * What a screen calls the narrator before any read lands: the stored choice's name where the
+ * choice can narrate and applies to this world, the shipped voice's otherwise — the same two
+ * fallbacks `narratorFor` takes, so a screen and the coordinator name the same reader.
+ */
+export function narratorLabelFor(
+  stored: { provider: string; model?: string; voiceId: string; label?: string; worldId?: string } | null,
+  worldId: string | undefined,
+): string {
+  if (stored === null || !supportsVoiceUse(stored, "narration") || !narratorAppliesTo(stored, worldId)) return DEFAULT_NARRATOR.label;
+  return stored.label ?? stored.voiceId;
+}
+
+/**
  * Who narrates, decided in one place.
  *
  * A stored narrator whose voice is no longer in the catalogue falls back rather than failing:

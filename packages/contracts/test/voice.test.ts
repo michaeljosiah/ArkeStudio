@@ -18,7 +18,9 @@ import {
   isClonedVoice,
   isHostedVoiceReader,
   mintVoiceId,
+  narratorAppliesTo,
   narratorFor,
+  narratorLabelFor,
   legacyVoiceModel,
   newClonedVoice,
   parseVoiceLibrary,
@@ -559,6 +561,23 @@ describe("one voice, several readers (SPEC-046 D1, R-10, R-13)", () => {
     assert.equal(supportsVoiceUse(clonedVoiceCandidates([harbour])[0]!, "narration"), false, "the recipe's row does not");
     assert.equal(supportsVoiceUse({ provider: "comfyui", model: "comfyui-cloned-voice" }, "narration"), false);
     assert.equal(supportsVoiceUse({ provider: "comfyui" }, "narration"), false, "a stored narrator from before models were durable is still the recipe");
+  });
+
+  it("a cloned narrator is its own world's (codex on PR 1221): elsewhere the choice does not apply, and the screens name the fallback", () => {
+    const clone = { provider: "mistral", model: "voxtral-mini-tts", voiceId: "harbour-glass", label: "Harbour glass", worldId: "01J8F3K2QW9VZX4N7M0RTYB6A1" };
+    assert.equal(narratorAppliesTo(clone, "01J8F3K2QW9VZX4N7M0RTYB6A1"), true);
+    // The same id in another world is somebody else's recording.
+    assert.equal(narratorAppliesTo(clone, "01J8F3K2QW9VZX4N7M0RTYB6B2"), false);
+    assert.equal(narratorAppliesTo(clone, undefined), false, "and no world is not its world");
+    const preset = { provider: "mistral", model: "voxtral-mini-tts", voiceId: "en_paul_neutral", label: "Paul" };
+    assert.equal(narratorAppliesTo(preset, "01J8F3K2QW9VZX4N7M0RTYB6B2"), true, "a preset reads wherever its reader does");
+    assert.equal(narratorAppliesTo(null, undefined), true);
+    assert.equal(narratorLabelFor(clone, "01J8F3K2QW9VZX4N7M0RTYB6A1"), "Harbour glass");
+    assert.equal(narratorLabelFor(clone, "01J8F3K2QW9VZX4N7M0RTYB6B2"), DEFAULT_NARRATOR.label, "named as the voice it falls to, never as itself");
+    assert.equal(narratorLabelFor({ provider: "comfyui", model: "comfyui-cloned-voice", voiceId: "harbour-glass", label: "Harbour glass" }, undefined), DEFAULT_NARRATOR.label, "the recipe's row does not narrate");
+    assert.equal(narratorLabelFor(preset, undefined), "Paul");
+    assert.equal(narratorLabelFor({ provider: "kokoro", model: "kokoro-82m", voiceId: "bf_emma" }, undefined), "bf_emma", "the id when no label was stored");
+    assert.equal(narratorLabelFor(null, undefined), DEFAULT_NARRATOR.label);
   });
 
   it("a stored cloned narrator resolves through the live catalogue like any other (issue 1215)", () => {

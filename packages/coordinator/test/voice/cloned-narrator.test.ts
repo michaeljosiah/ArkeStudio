@@ -129,8 +129,11 @@ async function harness() {
   const asked = (requestId: string) => events.filter((event): event is Asked => event.type === "voice.upload-confirmation-required" && event.requestId === requestId);
   const library = async () => (JSON.parse(await readFile(join(worldDir, "voices", "voices.json"), "utf8")) as { voices: Array<{ remote?: Record<string, { confirmedAt?: string }> }> }).voices[0]!;
   const forgetClip = () => unlink(toExtendedLength(join(worldDir, "voices", "harbour-glass.wav")));
+  const reRecord = (bytes: Uint8Array) => writeFile(toExtendedLength(join(worldDir, "voices", "harbour-glass.wav")), bytes);
+  // The settings file the coordinator reads, for a choice made as if in another world.
+  const settings = (coordinator as unknown as { appSettings: { setNarrator(voice: unknown): Promise<unknown> } }).appSettings;
   const close = () => coordinator.stop();
-  return { events, reader, spoken, send, essence, audio, asked, library, forgetClip, close };
+  return { events, reader, spoken, send, essence, audio, asked, library, forgetClip, reRecord, settings, close };
 }
 
 const readSection = (send: (message: ClientMessage) => Promise<void>, requestId: string, answers: { confirmationToken?: string; voiceUploadConfirmedFor?: string } = {}) =>
@@ -145,7 +148,7 @@ describe("a cloned voice as the narrator (issue 1215)", () => {
       await h.send({ kind: "set-narrator", voice: HARBOUR });
       const changed = h.events.find((event) => event.type === "narrator.changed");
       assert.ok(changed && changed.type === "narrator.changed", "the library's voice through Voxtral is a narrator now");
-      assert.deepEqual(changed.voice, { ...HARBOUR });
+      assert.deepEqual(changed.voice, { ...HARBOUR, worldId: WORLD_ID }, "a cloned choice records its world (codex on PR 1221)");
 
       await readSection(h.send, REQUEST);
       const question = h.asked(REQUEST);
@@ -165,7 +168,7 @@ describe("a cloned voice as the narrator (issue 1215)", () => {
       assert.equal(priced.voiceId, "harbour-glass");
       assert.equal(priced.estimatedMicroUsd, h.essence.length * 16);
       assert.equal(priced.voiceReference, true, "and the quote says the recording goes with the words");
-      assert.equal(priced.notice, undefined, "Mistral keeps no slot, so a first read adds nothing to say");
+      assert.equal(priced.notices, undefined, "Mistral keeps no slot, so a first read adds nothing to say");
       assert.equal(h.reader.requests.length, 0, "nothing leaves while the price is on the table");
 
       await readSection(h.send, REQUEST, { confirmationToken: priced.confirmationToken });
@@ -227,6 +230,69 @@ describe("a cloned voice as the narrator (issue 1215)", () => {
       assert.equal(result?.voiceId, "bm_george", "the default, as a stored narrator whose key is gone falls to it");
       assert.ok(h.spoken.length > 0 && h.essence.startsWith(h.spoken[0]!), "and made on this machine, in the engine's chunks");
       assert.equal(h.reader.requests.length, 0);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("is its own world's (codex on PR 1221): the same id chosen in another world is not this recording, and the default reads", async () => {
+    const h = await harness();
+    try {
+      // A choice made in another world — the same minted id, somebody else's recording there.
+      await h.settings.setNarrator({ ...HARBOUR, worldId: "01J8F3K2QW9VZX4N7M0RTYB6B2" });
+      await readSection(h.send, REQUEST);
+      assert.equal(h.asked(REQUEST).length, 0, "this world's Harbour glass is not asked for, because it was not chosen");
+      const [result] = h.audio(REQUEST);
+      assert.equal(result?.status, "ready");
+      assert.equal(result?.voiceId, "bm_george", "the default reads here");
+      assert.equal(h.reader.requests.length, 0, "and no recording left the machine");
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("keys its cache on the recording (codex on PR 1221): re-record the voice and the same words are made again, not replayed", async () => {
+    const h = await harness();
+    try {
+      await h.send({ kind: "set-narrator", voice: HARBOUR });
+      await readSection(h.send, REQUEST);
+      const [question] = h.asked(REQUEST);
+      await readSection(h.send, REQUEST, { voiceUploadConfirmedFor: question!.confirmationToken });
+      const priced = h.audio(REQUEST).find((event) => event.status === "confirmation-required")!;
+      await readSection(h.send, REQUEST, { confirmationToken: priced.confirmationToken });
+      await until(() => h.audio(REQUEST).some((event) => event.status === "ready"), "the first read to land", PATIENCE);
+      const first = h.audio(REQUEST).find((event) => event.status === "ready")!.file;
+
+      // The voice is re-recorded under the same entry: the old speech is another recording's.
+      await h.reRecord(wav(99, 16));
+      h.events.length = 0;
+      await readSection(h.send, AGAIN);
+      const again = h.audio(AGAIN).find((event) => event.status === "confirmation-required");
+      assert.ok(again, `the same words are priced again rather than replayed: ${h.audio(AGAIN).map((event) => [event.status, event.cached]).join(" | ")}`);
+      assert.equal(h.asked(AGAIN).length, 0, "the vendor's answer stands — it was given for the voice, not the recording");
+      await readSection(h.send, AGAIN, { confirmationToken: again.confirmationToken });
+      await until(() => h.audio(AGAIN).some((event) => event.status === "ready"), "the second read to land", PATIENCE);
+      assert.notEqual(h.audio(AGAIN).find((event) => event.status === "ready")!.file, first, "under a key of its own");
+      assert.deepEqual(h.reader.requests.at(-1)!.reference, wav(99, 16), "made from the new recording");
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("is listed as unable to speak when its recording is gone (codex on PR 1221), on every reader, so the picker offers nothing set-narrator would refuse", async () => {
+    const h = await harness();
+    try {
+      await h.forgetClip();
+      await h.send({ kind: "voice-catalogue", worldId: WORLD_ID });
+      const listed = h.events.find((event) => event.type === "voice.catalogue");
+      assert.ok(listed && listed.type === "voice.catalogue");
+      const rows = listed.voices.filter((voice) => voice.readsClone === "harbour-glass");
+      assert.ok(rows.length >= 1, "the voice is still listed, as an assignment to it stays visible");
+      // Every reader's row is shut; a reason already on a row — the recipe's engine is not in
+      // this build — stands, and the rest say the recording.
+      assert.ok(rows.every((voice) => voice.unavailableReason !== undefined), `shut on every reader: ${JSON.stringify(rows.map((voice) => [voice.provider, voice.unavailableReason]))}`);
+      assert.equal(rows.find((voice) => voice.provider === "mistral")?.unavailableReason, "recording missing — re-clone it");
+      assert.ok(listed.voices.some((voice) => voice.voiceId === PAUL.voiceId && voice.unavailableReason === undefined), "a preset is untouched");
     } finally {
       await h.close();
     }

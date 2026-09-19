@@ -338,7 +338,7 @@ it("the confirmation says what a first read through a slot-keeping reader adds, 
     type: "voice.audio", at: "2026-09-18T08:00:00.000Z", requestId: FIXTURE_WORLD_ID, worldId: FIXTURE_WORLD_ID,
     sheetVersion: 1, purpose: "prose", provider: "breezeblue", model: "breeze-tts-2", voiceId: "harbour-glass", format: "wav",
     status: "confirmation-required", file: null, cached: false, characterCount: 20, estimatedMicroUsd: 800, confirmationToken: "q",
-    voiceReference: true, notice: "first read · clone charge, priced by BreezeBlue",
+    voiceReference: true, notices: ["first read · clone charge, priced by BreezeBlue"],
   }} onCancel={() => {}} onConfirm={() => {}} />));
   const dialog = dom.document.querySelector('[role="dialog"]')!;
   assert.match(dialog.textContent!, /This text and the voice recording will be sent to Breeze/);

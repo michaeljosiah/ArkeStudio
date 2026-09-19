@@ -25,6 +25,7 @@ import {
 import { fileGeneratedArtifact } from "../artifacts/filing.js";
 import type { MediaProbe } from "../media/probe.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
+import { clipFor, clipHashOf } from "../voice/library.js";
 import { cachedVoiceAudioLooksRight, joinSpeech, speechCacheFile, splitForSpeech } from "../voice/service.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -106,6 +107,8 @@ export interface Speaking extends PlannedBlock {
   local: boolean;
   /** The library voice the reader is, when it is one: its recording is what leaves the machine. */
   clone: ClonedVoice | null;
+  /** That recording's hash (codex on PR 1221): a re-recorded clone is another voice to the cache and to a prior job. */
+  reference: string | null;
   text: string;
   /**
    * The block's direction as it stands, mapped for this reader (R-6, R-8): what the reader is
@@ -144,6 +147,8 @@ export interface PartIdentity {
   parts: number;
   /** The direction's name, or null for a block made with none — a job under another direction is not this part (R-14). */
   directionHash: string | null;
+  /** A cloned reader's recording, by hash, or null for a preset: a part made from an older recording is not this part (codex on PR 1221). */
+  reference: string | null;
 }
 
 /**
@@ -168,7 +173,8 @@ export function priorPartJob(jobs: readonly Job[], identity: PartIdentity, part:
       job.params["voiceId"] === identity.voiceId &&
       job.params["part"] === part &&
       job.params["parts"] === identity.parts &&
-      (job.params["directionHash"] ?? null) === identity.directionHash,
+      (job.params["directionHash"] ?? null) === identity.directionHash &&
+      (job.params["reference"] ?? null) === identity.reference,
   );
   for (const job of [...matching].reverse()) {
     if (job.status === "succeeded" && job.landedFiles?.[0] !== undefined) return { kind: "landed", job };
@@ -220,6 +226,16 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
       : { ...plan.record, takes: { ...plan.record.takes }, flags: { ...plan.record.flags } };
   const toMake = only !== undefined ? plan.blocks.filter((planned) => only.includes(planned.block.key)) : plan.blocks.filter((planned) => planned.state !== "made");
   const clonedVoices = store.getBundle().clonedVoices ?? [];
+  // Each cloned reader's recording, hashed once for the chapter (codex on PR 1221): the hash
+  // keys its cache files and names its parts' jobs, so a voice re-recorded since is read afresh.
+  const references = new Map<string, string | null>();
+  const referenceOf = async (voice: ClonedVoice): Promise<string | null> => {
+    if (!references.has(voice.id)) {
+      const clip = await clipFor(store, voice);
+      references.set(voice.id, clip === null ? null : clipHashOf(clip));
+    }
+    return references.get(voice.id)!;
+  };
 
   // Who actually speaks each block (R-12): the one rule the direction was verified against.
   const speaking: Speaking[] = [];
@@ -256,6 +272,7 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
     const local = reader.provider === "kokoro";
     const format = voiceFormatForModel(model);
     const source = voiceSourceFor(clonedVoices, reader.provider, reader.model, reader.voiceId);
+    const reference = source.kind === "cloned" ? await referenceOf(source.voice) : null;
     // An explicit `Make again`, whatever the block's state (codex on PR 1193): with its kept
     // take retired, the older take of the same words must not be the answer either.
     const remake = only !== undefined;
@@ -267,6 +284,7 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
       model,
       local,
       clone: source.kind === "cloned" ? source.voice : null,
+      reference,
       text,
       direction,
       parts,
@@ -276,7 +294,7 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
       // cached as a block, so a block over the cap is always made, the cache holds no
       // direction, so a directed block never comes from it, and a block made again unchanged
       // is another performance, not the cached one handed back (issue 1190).
-      cacheFile: local || parts.length > 1 || direction !== null || remake ? null : speechCacheFile({ provider: model.provider, model: model.id, voiceId: reader.voiceId, text, format }),
+      cacheFile: local || parts.length > 1 || direction !== null || remake ? null : speechCacheFile({ provider: model.provider, model: model.id, voiceId: reader.voiceId, text, format, ...(reference !== null ? { reference } : {}) }),
     });
   }
 
@@ -549,6 +567,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           voiceId: block.reader.voiceId,
           parts: block.parts.length,
           directionHash: block.direction?.hash ?? null,
+          reference: block.reference,
         };
         for (const [index, part] of block.parts.entries()) {
           if (signal.aborted) break;
@@ -591,6 +610,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
                 parts: block.parts.length,
                 characterCount: part.length,
                 sheetVersion: plan.chapter.version,
+                ...(block.reference !== null ? { reference: block.reference } : {}),
                 // The direction rides as the performance path's does (R-8): the words already
                 // decorated, the settings beside them, the sentence where the row takes one, and
                 // the direction's name so the job is this direction's and no other's.

@@ -141,6 +141,7 @@ import {
   type AudiobookReader,
   audiobookTextHash,
   narratorFor,
+  narratorAppliesTo,
   firstReadNotice,
   voiceFormatForModel,
   hostedReaderKeepsSlot,
@@ -347,6 +348,8 @@ import {
   AUDIO_EXTENSIONS as CLONEABLE_AUDIO_EXTENSIONS,
   audioBytesLookRight,
   clipFor,
+  clipHashOf,
+  clipPresent,
   cloneVoice,
   MIN_CLONE_SECONDS,
   recordVoiceReader,
@@ -522,7 +525,16 @@ type ExportProgressEvent = Extract<DomainEvent, { type: "export.progress" }>;
  * with the library entry beside it when the voice is a clone, since that entry's recording is
  * what goes with the words (SPEC-046 R-12) and its language what the reader's tag wants (R-23).
  */
-type NarrationVoice = { provider: string; model: string; voiceId: string; label: string; cloned: boolean; clonedVoice?: ClonedVoice };
+type NarrationVoice = {
+  provider: string;
+  model: string;
+  voiceId: string;
+  label: string;
+  cloned: boolean;
+  clonedVoice?: ClonedVoice;
+  /** The recording's hash, for the cache key: a re-recorded clone is another voice to the cache (codex on PR 1221). */
+  clipHash?: string;
+};
 
 function safeExportOutput(output: string | null): string | null {
   if (output === null) return null;
@@ -1117,10 +1129,14 @@ export class Coordinator {
     const clonedVoices = store.getBundle().clonedVoices ?? [];
     const catalogue = voice === null ? [] : ((await voice.catalogue(clonedVoices, await this.comfyUiVoiceAvailability()).catch(() => null)) ?? []);
     const narrationCatalogue = catalogue.filter((candidate) => supportsVoiceUse(candidate, "narration") && candidate.unavailableReason === undefined);
-    const chosen = narratorFor(narratorSettings?.narrator ?? null, narrationCatalogue);
+    // A cloned choice is its world's (codex on PR 1221): the same id in another world is
+    // somebody else's recording, so elsewhere the choice does not apply and the default reads.
+    const stored = narratorSettings?.narrator ?? null;
+    const chosen = narratorFor(narratorAppliesTo(stored, store.worldId) ? stored : null, narrationCatalogue);
     const source = voiceSourceFor(clonedVoices, chosen.provider, chosen.model, chosen.voiceId);
-    if (source.kind === "cloned" && (await clipFor(store, source.voice)) !== null) {
-      return { narrator: { provider: chosen.provider, model: chosen.model, voiceId: chosen.voiceId, label: chosen.label ?? source.voice.name, cloned: true, clonedVoice: source.voice }, catalogue };
+    const clip = source.kind === "cloned" ? await clipFor(store, source.voice) : null;
+    if (source.kind === "cloned" && clip !== null) {
+      return { narrator: { provider: chosen.provider, model: chosen.model, voiceId: chosen.voiceId, label: chosen.label ?? source.voice.name, cloned: true, clonedVoice: source.voice, clipHash: clipHashOf(clip) }, catalogue };
     }
     const speaks = source.kind === "catalogue" ? chosen : narratorFor(null, narrationCatalogue);
     return { narrator: { provider: speaks.provider, model: speaks.model, voiceId: speaks.voiceId, label: speaks.label ?? speaks.voiceId, cloned: false }, catalogue };
@@ -1551,6 +1567,9 @@ export class Coordinator {
       return;
     }
     const format = voiceFormatForModel(model);
+    // A cloned narrator's cache entries are its recording's (codex on PR 1221): re-record the
+    // voice and the same words are made again rather than replayed from the old one.
+    const reference = narrator.clipHash !== undefined ? { reference: narrator.clipHash } : {};
     const files = blocks.map((block) =>
       speechCacheFile({
         provider: model.provider,
@@ -1558,6 +1577,7 @@ export class Coordinator {
         voiceId: speaking.voiceId,
         text: block.text,
         format,
+        ...reference,
       }),
     );
     /*
@@ -1568,7 +1588,7 @@ export class Coordinator {
      * what makes the next read of the same words a hit rather than another spend.
      */
     const pieces = blocks.map((block) => piecesFor(block.text, model, format));
-    const pieceFile = (piece: string) => speechCacheFile({ provider: model.provider, model: model.id, voiceId: speaking.voiceId, text: piece, format });
+    const pieceFile = (piece: string) => speechCacheFile({ provider: model.provider, model: model.id, voiceId: speaking.voiceId, text: piece, format, ...reference });
     const cachedReady = (block: { heading: string; text: string }, index: number) =>
       this.emit({
         at: new Date().toISOString(),
@@ -1710,7 +1730,7 @@ export class Coordinator {
         // The recording goes with the words, said with the price (issue 1215), and what a first
         // read through a slot-keeping reader adds, on the read that incurs it (SPEC-046 R-14).
         ...(narrator.cloned ? { voiceReference: true } : {}),
-        ...(narratorNotice !== null ? { notice: narratorNotice } : {}),
+        ...(narratorNotice !== null ? { notices: [narratorNotice] } : {}),
       } as DomainEvent);
       return;
     }
@@ -1895,9 +1915,11 @@ export class Coordinator {
         if (listed === undefined || listed.unavailableReason !== undefined) return narration;
         const source = voiceSourceFor(clonedVoices, assigned.provider, model, assigned.voiceId);
         if (source.kind === "missing-clone") return narration;
-        if (source.kind === "cloned" && (await clipFor(store, source.voice)) === null) return narration;
+        const clip = source.kind === "cloned" ? await clipFor(store, source.voice) : null;
+        if (source.kind === "cloned" && clip === null) return narration;
         return { provider: assigned.provider, model, voiceId: assigned.voiceId, label: assigned.label ?? listed.label, cloned: source.kind === "cloned",
-          ...(source.kind === "cloned" ? { clonedVoice: source.voice } : {}) };
+          ...(source.kind === "cloned" ? { clonedVoice: source.voice } : {}),
+          ...(clip !== null ? { clipHash: clipHashOf(clip) } : {}) };
       }),
     );
     const isLocal = (voice: { provider: string; model: string }) => voice.provider === "kokoro" && voice.model === "kokoro-82m";
@@ -1928,7 +1950,7 @@ export class Coordinator {
       const model = modelOf(voice);
       if (model === null) return null;
       const format = voiceFormatForModel(model);
-      const cacheFile = (text: string) => speechCacheFile({ provider: model.provider, model: model.id, voiceId: voice.voiceId, text, format });
+      const cacheFile = (text: string) => speechCacheFile({ provider: model.provider, model: model.id, voiceId: voice.voiceId, text, format, ...(voice.clipHash !== undefined ? { reference: voice.clipHash } : {}) });
       const pieces = piecesFor(block.text, model, format);
       return { index, model, format, file: cacheFile(block.text), pieces: pieces.map((text) => ({ text, file: cacheFile(text) })) };
     });
@@ -2022,13 +2044,16 @@ export class Coordinator {
         // approval is the last point before a paid call leaves, and a page can span providers.
         const named = new Map<string, { label: string; provider: string }>();
         // Every recording that would go, and what a first read through a slot-keeping reader
-        // adds (SPEC-046 R-14), said on the read that incurs it: one line, each notice once.
-        const notices = new Set<string>();
+        // adds (SPEC-046 R-14), said on the read that incurs it: an entry a voice and vendor,
+        // keyed by id rather than name so two clones named alike are two charges said twice
+        // (codex on PR 1221) — the vendor's clone charge is not in the estimate, so this is
+        // the whole of its disclosure.
+        const notices = new Map<string, string>();
         for (const index of misses) {
           const voice = speaking[index]!;
           named.set(`${voice.provider}\n${voice.label}`, { label: voice.label, provider: voice.provider });
           const notice = voice.clonedVoice !== undefined ? firstReadNotice(voice.clonedVoice, voice.provider) : null;
-          if (notice !== null) notices.add(`${voice.label} · ${notice}`);
+          if (notice !== null) notices.set(`${voice.provider}\n${voice.voiceId}`, `${voice.label} · ${notice}`);
         }
         this.emit({
           at: new Date().toISOString(),
@@ -2047,7 +2072,7 @@ export class Coordinator {
           confirmationToken: token,
           voices: [...named.values()],
           ...(misses.some((index) => speaking[index]!.cloned) ? { voiceReference: true } : {}),
-          ...(notices.size > 0 ? { notice: [...notices].join(" · ").slice(0, 512) } : {}),
+          ...(notices.size > 0 ? { notices: [...notices.values()] } : {}),
         } as DomainEvent);
         return;
       }
@@ -2678,6 +2703,13 @@ export class Coordinator {
             if (status.validation !== "invalid") return {};
             const probe = status.probes.find((entry) => entry.capability === "voice-tts");
             return { unavailableReason: probe?.reason ?? `${provider} rejected the key — check it on Providers` };
+          },
+          // A library voice whose recording is gone is listed and marked, on every reader's
+          // candidate (codex on PR 1221): the picker offers nothing `set-narrator` or an
+          // assignment would then refuse. The open world's, since the library handed in is its.
+          clipMissing: async (voice) => {
+            const store = this.opts.provider.openStore?.();
+            return store ? !(await clipPresent(store, voice)) : false;
           },
           getKey: async (provider) =>
             this.credentials ? this.credentials.get(provider as ProviderId) : null,
@@ -7499,7 +7531,9 @@ export class Coordinator {
           const store = this.opts.provider.openStore?.();
           const source = store ? voiceSourceFor(clonedVoices, narrator.provider, model, narrator.voiceId) : { kind: "catalogue" as const };
           if (source.kind === "missing-clone" || (source.kind === "cloned" && (!store || (await clipFor(store, source.voice)) === null))) return;
-          narrator = { ...narrator, model };
+          // A cloned choice is this world's (codex on PR 1221): its id names a different
+          // recording in another world, where the choice must not apply.
+          narrator = { ...narrator, model, ...(source.kind === "cloned" && store ? { worldId: store.worldId } : {}) };
         }
         const saved = await this.appSettings.setNarrator(narrator);
         this.emit({ at: new Date().toISOString(), type: "narrator.changed", voice: saved.narrator });
@@ -12548,9 +12582,32 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, `No ${msg.provider} voice model is available.`);
           return;
         }
+        // A cloned voice speaks from a clip, so the clip has to exist before a job is enqueued.
+        // Missing means the recording was deleted from under the library: reported with the reason
+        // rather than dispatched into a take that cannot finish (SPEC-022 §1.3). Read before the
+        // cache is asked (codex on PR 1221): the preview cached is the recording's, so a
+        // re-recorded voice previews afresh rather than replaying the old one.
+        if (source.kind === "missing-clone") {
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            "That cloned voice is no longer in this world — choose another voice.",
+          );
+          return;
+        }
+        const clip = source.kind === "cloned" ? await clipFor(store, source.voice) : null;
+        if (source.kind === "cloned" && clip === null) {
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            "That voice's recording is missing — re-clone it, or choose another voice.",
+          );
+          return;
+        }
+        const reference = clip !== null ? clipHashOf(clip) : undefined;
         // Queued providers: cache hit replays free; a miss dispatches through the queue (R-2, R-10).
         const format = voiceFormatForModel(model);
-        const cached = previewCacheFile(msg.provider, msg.voiceId, line.text, format, model.id);
+        const cached = previewCacheFile(msg.provider, msg.voiceId, line.text, format, model.id, reference);
         try {
           const bytes = new Uint8Array(
             await readFile(toExtendedLength(join(store.dir, fromPortable(cached)))),
@@ -12579,30 +12636,6 @@ export class Coordinator {
         } catch {
           /* miss → enqueue */
         }
-        // A cloned voice speaks from a clip, so the clip has to exist before a job is enqueued.
-        // Missing means the recording was deleted from under the library: reported with the reason
-        // rather than dispatched into a take that cannot finish (SPEC-022 §1.3).
-        let voiceReference = false;
-        if (source.kind === "missing-clone") {
-          this.rejectEnqueue(
-            msg.requestId,
-            msg.kind,
-            "That cloned voice is no longer in this world — choose another voice.",
-          );
-          return;
-        }
-        if (source.kind === "cloned") {
-          const clip = await clipFor(store, source.voice);
-          if (clip === null) {
-            this.rejectEnqueue(
-              msg.requestId,
-              msg.kind,
-              "That voice's recording is missing — re-clone it, or choose another voice.",
-            );
-            return;
-          }
-          voiceReference = true;
-        }
         const request = this.voiceService.queuedPreviewRequest({
           worldId: msg.worldId,
           sheet,
@@ -12610,7 +12643,8 @@ export class Coordinator {
           voiceId: msg.voiceId,
           line,
           model,
-          ...(voiceReference ? { voiceReference: true } : {}),
+          ...(clip !== null ? { voiceReference: true } : {}),
+          ...(reference !== undefined ? { reference } : {}),
           ...(msg.voiceUploadConfirmedFor !== undefined
             ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
             : {}),
