@@ -41,7 +41,15 @@ export class IllustrationApplicationService {
           // No enqueue has run when the first request loses its source or authority. Release
           // that known-unused hold; a partial batch still needs its original reservation.
           if (jobs.length === 0) {
-            await this.operations.policy.release(context, key, reservation);
+            const settlementKey = engineHash([key, "settlement"]);
+            const fingerprint = engineHash([key, reservation]);
+            const decision = {operationKey: key, reservation, jobs: []};
+            const claim = await this.operations.store.begin({key: settlementKey, fingerprint, context, resource,
+              action: "generate", status: "started", result: decision});
+            if (claim.operation.fingerprint !== fingerprint || engineHash(claim.operation.result) !== engineHash(decision))
+              throw new Error("Settlement identity changed.");
+            if (claim.operation.status !== "completed") await this.operations.policy.release(context, key, reservation);
+            await this.operations.store.complete(settlementKey, fingerprint, decision);
             throw error;
           }
           return {operationKey: key, reservation, jobIds: jobs.map(job => job.id), needsReconciliation: true,
@@ -87,13 +95,27 @@ export class IllustrationApplicationService {
       const owner = job.params.engineOperation as { key?: string } | undefined;
       return job.worldId === worldId && owner?.key === key;
     });
+    const settlementKey = engineHash([key, "settlement"]);
+    const previousSettlement = await this.operations.store.read(settlementKey);
+    // A pre-admission release can lose its response before the admission record completes.
+    // Its saved zero-job decision is sufficient to finish the idempotent release after restart.
+    if (operation.status !== "completed" && previousSettlement) {
+      const decision = previousSettlement.result as {operationKey: string; reservation: string; jobs: EngineDeliveredJob[]};
+      if (decision.jobs.length !== 0 || jobs.length !== 0 || engineHash(previousSettlement.resource) !== engineHash(operation.resource))
+        return {status: "needs-reconciliation" as const, operationKey: key};
+      if (previousSettlement.status !== "completed") {
+        await this.operations.policy.release(context, key, decision.reservation);
+        await this.operations.store.complete(settlementKey, previousSettlement.fingerprint, decision);
+      }
+      await this.operations.store.complete(key, operation.fingerprint, {operationKey: key, reservation: decision.reservation,
+        jobIds: [], failures: [{index: 0, reason: "No provider work was admitted; the reservation was released."}], needsReconciliation: false});
+      return {status: "settled" as const, operationKey: key, jobIds: [], deliverableJobIds: []};
+    }
     // Missing evidence is not running work. Interrupted admissions and removed queue rows
     // need a host recovery decision before any reservation can be settled or released.
     if (operation.status !== "completed") return { status: "needs-reconciliation" as const, operationKey: key };
     const result = operation.result as IllustrationOutcome;
     if (result.needsReconciliation) return { status: "needs-reconciliation" as const, operationKey: key };
-    const settlementKey = engineHash([key, "settlement"]);
-    const previousSettlement = await this.operations.store.read(settlementKey);
     // A cancelled cloud request may still charge. Missing legacy certainty is not zero spend.
     if (!previousSettlement && operation.resource.mediaKind && jobs.some(job => job.status === "cancelled" &&
       (job.cancellationUncertain === true || (job.cancellationUncertain === undefined &&

@@ -24,8 +24,9 @@ async function harness(t: TestContext) {
   const provider = new FsWorldProvider(root); await provider.loadWorld(WORLD_ID);
   const fake = new FakeProvider({supportsIdempotencyKey: true});
   const state = {revoked: false, held: false, charges: 0, releases: 0, hidden: false, loseAdmissionReply: false,
-    imageFormat: "png", extraImage: false, failSettlement: false, onReserve: async () => {}};
+    hideJobs: false, failRelease: false, imageFormat: "png", extraImage: false, failSettlement: false, onReserve: async () => {}};
   const settled = new Set<string>();
+  const released = new Set<string>();
   const submit = fake.submit.bind(fake);
   fake.submit = async (key, request) => {
     assert.equal("engineOperation" in request.params, false);
@@ -42,7 +43,7 @@ async function harness(t: TestContext) {
     async reserve(_ctx, key) {await state.onReserve(); return key;}, async settle(_ctx, key) {
       if (!settled.has(key)) {state.charges++; settled.add(key);}
       if (state.failSettlement) throw new Error("Settlement reply lost");
-    }, async release() {state.releases++;},
+    }, async release(_ctx, key) {if (!released.has(key)) {state.releases++; released.add(key);} if (state.failRelease) throw new Error("Release reply lost");},
   };
   const ledger = new Set<string>();
   const queue = new JobQueue({journal: new JobJournal(join(root, "jobs.jsonl")), journalPath: join(root, "unused.jsonl"),
@@ -52,7 +53,7 @@ async function harness(t: TestContext) {
   await queue.start();
   const make = () => createEngine({worlds: createLocalWorldRepository(provider), operations: new FileEngineOperationStore(join(root, "operations.jsonl")),
     policy, queue: {enqueue: async input => {const job = await queue.enqueue(input); if (state.loseAdmissionReply) throw new Error("reply lost"); return job;},
-      jobs: () => queue.listJobs(), cancel: id => queue.cancel(id)}});
+      jobs: () => state.hideJobs ? [] : queue.listJobs(), cancel: id => queue.cancel(id)}});
   let engine = make();
   t.after(async () => {queue.stopAccepting(); queue.dispose(); await queue.drain(); await engine.close(); await provider.close();});
   const before = await engine.prose.readChapter(context, WORLD_ID, production, chapterId);
@@ -263,4 +264,41 @@ it("allows a dual-mode provider's stock voice while refusing unsupported image t
     {operationId: "unsupported-tier", model: {...image, limits: {resolutions: ["1K"], tiers: {"1K": "1K"}}},
       instruction: "A harbour", tier: "4K", baseHash: h.chapter.hash}), /page size tier/);
   assert.equal(h.queue.listJobs().length, 1);
+});
+
+
+it("cancellation retains recorded job identities when queue evidence is missing", async t => {
+  const h = await harness(t);
+  const receipt = await h.engine.storyMedia.illustratePage(context, WORLD_ID, production, chapterId,
+    {operationId: "missing-row", model: image, instruction: "Harbour", baseHash: h.chapter.hash});
+  await h.finished(); h.state.hideJobs = true;
+  const result = await h.engine.storyMedia.cancel(context, WORLD_ID, "missing-row");
+  assert.deepEqual(result.jobIds, receipt.jobIds);
+  assert.equal(result.needsReconciliation, true);
+  assert.equal(h.state.releases, 0);
+});
+
+it("bounds complete image prompts even without a model limit", async t => {
+  const h = await harness(t);
+  const saved = await h.engine.prose.saveChapter(context, WORLD_ID, production, chapterId,
+    {operationId: "long-image", baseHash: h.chapter.hash, body: "a".repeat(8001)});
+  const model = structuredClone(image); delete model.limits.maxPromptChars;
+  await assert.rejects(h.engine.storyMedia.illustratePage(context, WORLD_ID, production, chapterId,
+    {operationId: "bounded-image", model, instruction: "Harbour", baseHash: saved.value.hash}), /prompt limit/);
+  assert.equal(h.queue.listJobs().length, 0);
+});
+
+it("resumes a zero-job release after its response is lost and the engine restarts", async t => {
+  const h = await harness(t); h.state.failRelease = true;
+  h.state.onReserve = async () => {
+    await h.engine.prose.saveChapter(context, WORLD_ID, production, chapterId,
+      {operationId: "release-edit", baseHash: h.chapter.hash, body: "Changed while reserving."});
+  };
+  await assert.rejects(h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId,
+    {operationId: "lost-release", model: speech, voiceId: "stock", baseHash: h.chapter.hash}), /Release reply lost/);
+  const engine = await h.restart(); h.state.failRelease = false;
+  assert.equal((await engine.storyMedia.reconcile(context, WORLD_ID, "lost-release")).status, "settled");
+  assert.equal((await engine.storyMedia.reconcile(context, WORLD_ID, "lost-release")).status, "settled");
+  assert.equal(h.state.releases, 1);
+  assert.equal(h.queue.listJobs().length, 0);
 });
