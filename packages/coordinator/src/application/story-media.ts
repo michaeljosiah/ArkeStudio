@@ -5,6 +5,9 @@ import { proseChapterRead, proseId } from "./prose-contracts.js";
 import { engineHash, type EngineOperations } from "./operations.js";
 import type { IllustrationApplicationService } from "./generation.js";
 
+// This byte-returning API handles short pages, not unbounded audiobook chapters.
+const MAX_NARRATION_CHARS = 1000;
+
 export interface StoryMediaInput extends EngineMutation {
   /** Exact committed chapter hash. Generated proposals must be accepted first. */
   baseHash: string;
@@ -93,7 +96,7 @@ export class StoryMediaApplicationService {
       const {chapter} = await this.source(context, resource, input.expectedRevision);
       const text = normalizeSpeechText(chapter.body);
       if (!text.trim()) throw new Error("The chapter has no speakable text.");
-      if (input.model.limits.maxPromptChars !== undefined && text.length > input.model.limits.maxPromptChars)
+      if (text.length > Math.min(input.model.limits.maxPromptChars ?? MAX_NARRATION_CHARS, MAX_NARRATION_CHARS))
         throw new Error("The complete chapter exceeds this speech model's limit; it will not be truncated.");
       const format = voiceFormatForModel(input.model);
       return [{worldId, productionId, target: {kind: "voice-preview", id: `${productionId}/${chapterId}/${key}`},
@@ -123,7 +126,8 @@ export class StoryMediaApplicationService {
       operation.context.subjectId !== context.subjectId || operation.context.scopeId !== context.scopeId)
       throw new Error("Story media operation not found for this caller.");
     await this.operations.policy.authorise(context, "generate", operation.resource);
-    if (operation.status !== "completed") throw new Error("Admission is uncertain; reconcile it before cancelling.");
+    if (operation.status !== "completed" || (operation.result as {needsReconciliation?: boolean} | undefined)?.needsReconciliation !== false)
+      throw new Error("Admission is uncertain; reconcile it before cancelling.");
     if (!this.queue.cancel) throw new Error("This queue does not support cancellation.");
     const jobs = this.queue.jobs().filter(job => job.worldId === worldId &&
       (job.params.engineOperation as {key?: string} | undefined)?.key === key);

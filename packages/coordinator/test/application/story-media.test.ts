@@ -8,7 +8,7 @@ import {FsWorldProvider} from "../../src/world/provider.js";
 import {JobQueue} from "../../src/queue/dispatcher.js";
 import {JobJournal} from "../../src/queue/journal.js";
 import {makeTempRoot, WORLD_ID} from "../world/helpers.js";
-import {FakeProvider, pngBytes} from "../queue/fake-provider.js";
+import {FakeProvider, pngBytes, jpegBytes, webpBytes} from "../queue/fake-provider.js";
 import {wav} from "../audio/helpers.js";
 import {SHIPPED_MANIFEST} from "../../../providers/src/manifest-data.js";
 import {until} from "../wait.js";
@@ -23,19 +23,21 @@ async function harness(t: TestContext) {
   const {root, worldDir} = await makeTempRoot();
   const provider = new FsWorldProvider(root); await provider.loadWorld(WORLD_ID);
   const fake = new FakeProvider({supportsIdempotencyKey: true});
+  const state = {revoked: false, held: false, charges: 0, releases: 0, hidden: false, loseAdmissionReply: false,
+    imageFormat: "png", onReserve: async () => {}};
   const submit = fake.submit.bind(fake);
   fake.submit = async (key, request) => {
     assert.equal("engineOperation" in request.params, false);
     fake.artifacts = request.params.audioFormat ? [{name: "audio.wav", contentType: "audio/wav", data: wav([0, 1, 0, -1])}]
-      : [{name: "page.png", contentType: "image/png", data: pngBytes()}];
+      : [{name: `page.${state.imageFormat}`, contentType: `image/${state.imageFormat}`,
+        data: state.imageFormat === "jpeg" ? jpegBytes() : state.imageFormat === "webp" ? webpBytes() : pngBytes()}];
     return submit(key, request);
   };
-  const state = {revoked: false, held: false, charges: 0, hidden: false, loseAdmissionReply: false};
   const policy: EnginePolicy = {
     async authorise(ctx) {if (state.revoked || ctx.scopeId !== "family" || ctx.subjectId !== "child") throw new Error("Forbidden");},
     async project(_ctx, bundle) {if (state.hidden) bundle.productions = []; return bundle;},
     async deliver(_ctx, _resource, content) {if (state.held && content.kind === "artifact") throw new Error("Held");},
-    async reserve(_ctx, key) {return key;}, async settle() {state.charges++;}, async release() {},
+    async reserve(_ctx, key) {await state.onReserve(); return key;}, async settle() {state.charges++;}, async release() {state.releases++;},
   };
   const ledger = new Set<string>();
   const queue = new JobQueue({journal: new JobJournal(join(root, "jobs.jsonl")), journalPath: join(root, "unused.jsonl"),
@@ -89,7 +91,40 @@ it("an uncertain admission retains the original job across restart without a sec
   assert.deepEqual(await engine.storyMedia.illustratePage(context, WORLD_ID, production, chapterId, input), first);
   assert.equal(h.queue.listJobs().length, 1);
   assert.equal((await engine.storyMedia.reconcile(context, WORLD_ID, "lost-reply")).status, "needs-reconciliation");
+  await assert.rejects(engine.storyMedia.cancel(context, WORLD_ID, "lost-reply"), /Admission is uncertain/);
   assert.equal(h.state.charges, 0);
+});
+
+for (const format of ["jpeg", "webp"]) it(`page artwork retains verified ${format} format`, async t => {
+  const h = await harness(t); h.state.imageFormat = format;
+  await h.engine.storyMedia.illustratePage(context, WORLD_ID, production, chapterId,
+    {operationId: "format", model: image, instruction: "A harbour", baseHash: h.chapter.hash});
+  await h.finished();
+  const artifact = h.queue.listJobs()[0]!.landedFiles![0]!;
+  assert.match(artifact, format === "jpeg" ? /\.jpg$/ : /\.webp$/);
+  assert.equal((await h.engine.worlds.media(context, WORLD_ID, artifact)).contentType, `image/${format}`);
+});
+
+it("releases an unused reservation when the source changes during reservation", async t => {
+  const h = await harness(t);
+  h.state.onReserve = async () => {
+    await h.engine.prose.saveChapter(context, WORLD_ID, production, chapterId,
+      {operationId: "concurrent-edit", baseHash: h.chapter.hash, body: "Changed while reserving."});
+  };
+  await assert.rejects(h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId,
+    {operationId: "changed", model: speech, voiceId: "stock", baseHash: h.chapter.hash}), /chapter changed/);
+  assert.equal(h.queue.listJobs().length, 0);
+  assert.equal(h.state.releases, 1);
+});
+
+it("bounds narration even when the model has no declared prompt limit", async t => {
+  const h = await harness(t);
+  const saved = await h.engine.prose.saveChapter(context, WORLD_ID, production, chapterId,
+    {operationId: "long", baseHash: h.chapter.hash, body: "a".repeat(1001)});
+  const model = structuredClone(speech); delete model.limits.maxPromptChars;
+  await assert.rejects(h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId,
+    {operationId: "unbounded", model, voiceId: "stock", baseHash: saved.value.hash}), /will not be truncated/);
+  assert.equal(h.queue.listJobs().length, 0);
 });
 
 it("cancellation uses the host queue and never grants another family authority", async t => {

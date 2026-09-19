@@ -37,6 +37,13 @@ export class IllustrationApplicationService {
         try {
           await this.operations.policy.authorise(context, "generate", resource);
           if (resource.mediaKind) await readStoryMediaSource(this.worlds, this.operations.policy, context, resource);
+        } catch (error) {
+          // No enqueue has run when the first request loses its source or authority. Release
+          // that known-unused hold; a partial batch still needs its original reservation.
+          if (jobs.length === 0) await this.operations.policy.release(context, key, reservation);
+          throw error;
+        }
+        try {
           jobs.push(await this.queue.enqueue({ ...request, idempotencyKey: ulid(),
             params: { ...request.params, engineOperation: { key, requestIndex: index, reservation, context, resource } } }));
         } catch (error) {
