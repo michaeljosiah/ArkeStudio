@@ -24,13 +24,14 @@ async function harness(t: TestContext) {
   const provider = new FsWorldProvider(root); await provider.loadWorld(WORLD_ID);
   const fake = new FakeProvider({supportsIdempotencyKey: true});
   const state = {revoked: false, held: false, charges: 0, releases: 0, hidden: false, loseAdmissionReply: false,
-    imageFormat: "png", onReserve: async () => {}};
+    imageFormat: "png", extraImage: false, onReserve: async () => {}};
   const submit = fake.submit.bind(fake);
   fake.submit = async (key, request) => {
     assert.equal("engineOperation" in request.params, false);
     fake.artifacts = request.params.audioFormat ? [{name: "audio.wav", contentType: "audio/wav", data: wav([0, 1, 0, -1])}]
       : [{name: `page.${state.imageFormat}`, contentType: `image/${state.imageFormat}`,
         data: state.imageFormat === "jpeg" ? jpegBytes() : state.imageFormat === "webp" ? webpBytes() : pngBytes()}];
+    if (state.extraImage) fake.artifacts.push({name: "output-2.png", contentType: "image/png", data: pngBytes()});
     return submit(key, request);
   };
   const policy: EnginePolicy = {
@@ -132,11 +133,28 @@ it("cancellation uses the host queue and never grants another family authority",
   await h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId,
     {operationId: "cancel", model: speech, voiceId: "stock", baseHash: h.chapter.hash});
   await until(() => h.queue.listJobs().some(j => j.status === "running"), "running narration");
+  assert.equal(h.queue.listJobs()[0]!.target.kind, "story-chapter-narration");
   await assert.rejects(h.engine.storyMedia.cancel({...context, scopeId: "other"}, WORLD_ID, "cancel"), /Forbidden/);
   await h.engine.storyMedia.cancel(context, WORLD_ID, "cancel");
   assert.equal(h.queue.listJobs()[0]!.status, "cancelled");
+  await h.engine.prose.saveChapter(context, WORLD_ID, production, chapterId,
+    {operationId: "edit-after-cancel", baseHash: h.chapter.hash, body: "The next version."});
   assert.equal((await h.engine.storyMedia.reconcile(context, WORLD_ID, "cancel")).status, "settled");
   assert.equal(h.state.charges, 0);
+  assert.equal(h.state.releases, 1);
+});
+
+it("secondary provider artifacts keep the same chapter source binding", async t => {
+  const h = await harness(t); h.state.extraImage = true;
+  await h.engine.storyMedia.illustratePage(context, WORLD_ID, production, chapterId,
+    {operationId: "multiple", model: image, instruction: "A harbour", baseHash: h.chapter.hash});
+  await h.finished();
+  const secondary = h.queue.listJobs()[0]!.landedFiles![1]!;
+  assert.ok(secondary.endsWith("output-2.png"));
+  await h.engine.worlds.media(context, WORLD_ID, secondary);
+  await h.engine.prose.saveChapter(context, WORLD_ID, production, chapterId,
+    {operationId: "edit-secondary", baseHash: h.chapter.hash, body: "Changed story."});
+  await assert.rejects(h.engine.worlds.media(context, WORLD_ID, secondary), /chapter changed/);
 });
 
 it("narration lands complete audio through the same queue and survives a restart", async t => {

@@ -79,11 +79,13 @@ export class IllustrationApplicationService {
       operation.context.scopeId !== context.scopeId) throw new Error("The operation belongs to a different caller or subject.");
     // A world-level permission is insufficient for a request originally limited to one sheet.
     await this.operations.policy.authorise(context, "generate", operation.resource);
-    if (operation.resource.mediaKind) await readStoryMediaSource(this.worlds, this.operations.policy, context, operation.resource);
     const jobs = this.queue.jobs().filter(job => {
       const owner = job.params.engineOperation as { key?: string } | undefined;
       return job.worldId === worldId && owner?.key === key;
     });
+    // Failed/cancelled work has no content to deliver: source edits must not strand its hold.
+    if (operation.resource.mediaKind && jobs.some(job => job.status === "succeeded"))
+      await readStoryMediaSource(this.worlds, this.operations.policy, context, operation.resource);
     // Missing evidence is not running work. Interrupted admissions and removed queue rows
     // need a host recovery decision before any reservation can be settled or released.
     if (operation.status !== "completed") return { status: "needs-reconciliation" as const, operationKey: key };

@@ -23,8 +23,9 @@ export class WorldSessionService {
     artifactId = artifactId.replace(/\\/g, "/");
     let resource: EngineResource = { worldId, artifactId, ...(sheetId ? { sheetId } : {}) };
     await this.policy.authorise(context, "media", resource);
-    if (/^productions\/[^/]+\/media\/[^/]+\/(?:page|narration)-/i.test(artifactId)) {
-      const matches = this.queue?.jobs().filter(job => job.worldId === worldId && job.landedFiles?.includes(artifactId)) ?? [];
+    const matches = this.queue?.jobs().filter(job => job.worldId === worldId && job.landedFiles?.includes(artifactId)) ?? [];
+    if (/^productions\/[^/]+\/media\/[^/]+\//i.test(artifactId) ||
+      matches.some(job => (job.params.engineOperation as {resource?: EngineResource} | undefined)?.resource?.mediaKind)) {
       if (matches.length !== 1) throw new Error("The story media source record is unavailable or ambiguous.");
       if (matches[0]!.status !== "succeeded") throw new Error("The story media job has not completed successfully.");
       const owner = matches[0]!.params.engineOperation as {context?: EngineContext; resource?: EngineResource} | undefined;

@@ -99,7 +99,7 @@ export class StoryMediaApplicationService {
       if (text.length > Math.min(input.model.limits.maxPromptChars ?? MAX_NARRATION_CHARS, MAX_NARRATION_CHARS))
         throw new Error("The complete chapter exceeds this speech model's limit; it will not be truncated.");
       const format = voiceFormatForModel(input.model);
-      return [{worldId, productionId, target: {kind: "voice-preview", id: `${productionId}/${chapterId}/${key}`},
+      return [{worldId, productionId, target: {kind: "story-chapter-narration", id: `${productionId}/${chapterId}/${key}`},
         capability: "voice-tts", provider: input.model.provider, model: input.model.id,
         params: {voiceId: input.voiceId, text, audioFormat: format, purpose: "story-chapter", productionId, chapterId},
         estimatedMicroUsd: estimateMicroUsd(input.model, {characters: billableCharacters(input.model, text)}),
@@ -113,7 +113,6 @@ export class StoryMediaApplicationService {
     if (!operation?.resource.mediaKind || !operation.resource.sourceHash) throw new Error("Story media operation not found.");
     if (operation.context.actorId !== context.actorId || operation.context.subjectId !== context.subjectId || operation.context.scopeId !== context.scopeId)
       throw new Error("The operation belongs to a different caller or subject.");
-    await this.source(context, operation.resource);
     return this.generation.reconcile(context, worldId, operationId);
   }
 
