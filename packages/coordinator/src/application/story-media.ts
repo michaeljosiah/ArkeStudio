@@ -1,4 +1,4 @@
-import { billableCharacters, estimateMicroUsd, imageOutputFor, normalizeSpeechText, productionShape, voiceFormatForModel,
+import { billableCharacters, CLONED_VOICE_MODEL, isHostedVoiceReader, estimateMicroUsd, imageOutputFor, normalizeSpeechText, productionShape, voiceFormatForModel,
   type ManifestModel, type SizeTier } from "@arke-studio/contracts";
 import type { EngineContext, EngineMutation, EnginePolicy, EngineQueue, EngineResource, EngineWorldRepository } from "./contracts.js";
 import { proseChapterRead, proseId } from "./prose-contracts.js";
@@ -90,6 +90,8 @@ export class StoryMediaApplicationService {
     context = structuredClone(context); input = structuredClone(input);
     const resource = this.resource(worldId, productionId, chapterId, input, "speech");
     if (input.model.capability !== "voice-tts") throw new Error("Narration requires a speech model.");
+    if (input.model.id === CLONED_VOICE_MODEL || isHostedVoiceReader(input.model.provider, input.model.id))
+      throw new Error("This narration API requires a stock-voice model without cloned-reference transport.");
     if (!input.voiceId.trim() || input.voiceId.length > 200) throw new Error("A host-resolved stock voice is required.");
     await this.source(context, resource);
     return this.generation.generateFor(context, resource, input, async key => {

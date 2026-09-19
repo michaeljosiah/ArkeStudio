@@ -16,7 +16,7 @@ import {until} from "../wait.js";
 const context: EngineContext = {actorId: "parent", scopeId: "family", subjectId: "child", executorId: "host"};
 const production = "the-ledger-of-nights", chapterId = "neap";
 const image = SHIPPED_MANIFEST.models.find(m => m.capability === "image" && m.provider === "fal")!;
-const speech = structuredClone(SHIPPED_MANIFEST.models.find(m => m.capability === "voice-tts")!);
+const speech = structuredClone(SHIPPED_MANIFEST.models.find(m => m.id === "eleven_multilingual_v2")!);
 speech.limits.audioFormat = "wav";
 
 async function harness(t: TestContext) {
@@ -77,6 +77,9 @@ it("page artwork is durable, replayed once, review-gated and invalidated by a ch
   assert.equal((await restarted.storyMedia.reconcile(context, WORLD_ID, "page")).status, "settled");
   assert.equal(h.state.charges, 1);
   const artifact = h.queue.listJobs()[0]!.landedFiles![0]!;
+  assert.equal((await restarted.worlds.media(context, WORLD_ID, artifact)).contentType, "image/png");
+  await h.queue.delete(h.queue.listJobs()[0]!.id);
+  assert.equal(h.queue.listJobs().length, 1, "source metadata survives an Activity deletion attempt");
   assert.equal((await restarted.worlds.media(context, WORLD_ID, artifact)).contentType, "image/png");
   await restarted.prose.saveChapter(context, WORLD_ID, production, chapterId, {operationId: "edit", baseHash: h.chapter.hash, body: "A different story."});
   await assert.rejects(restarted.worlds.media(context, WORLD_ID, artifact), /chapter changed/);
@@ -211,5 +214,16 @@ it("refuses stale, hidden, unauthorized and oversized sources before queue admis
   h.state.hidden = false;
   await assert.rejects(h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId,
     {...input, model: {...speech, limits: {...speech.limits, maxPromptChars: 1}}}), /will not be truncated/);
+  assert.equal(h.queue.listJobs().length, 0);
+});
+
+it("refuses known cloned-reference narration models before reserving or enqueueing", async t => {
+  const h = await harness(t);
+  let reservations = 0; h.state.onReserve = async () => {reservations++;};
+  for (const model of SHIPPED_MANIFEST.models.filter(m => m.id === "comfyui-cloned-voice" || m.id === "voxtral-mini-tts")) {
+    await assert.rejects(h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId,
+      {operationId: model.id, model, voiceId: "stock", baseHash: h.chapter.hash}), /stock-voice model/);
+  }
+  assert.equal(reservations, 0);
   assert.equal(h.queue.listJobs().length, 0);
 });
