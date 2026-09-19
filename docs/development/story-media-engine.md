@@ -30,3 +30,5 @@ Version 0.3 requires all durable operation readers to accept the source-binding 
 Recovery limits: page prompts are capped at 8,000 characters and 16,000 serialized JSON characters, or the model's lower bound, before reservation. A known zero-job release decision is journaled before calling host billing and can resume after a lost response. Cancellation retains every original admitted job ID and reports reconciliation required if queue rows disappear.
 
 A saved financial decision also resumes after generation permission is withdrawn, under its original caller identity. Recovery never restores delivery permission. Story-media authorization receives the durable chapter and source identity before any artifact bytes are read, supporting chapter-scoped host policies.
+
+Cancellation uses the original chapter resource for authorization. A definitive cancellation received by provider polling is recorded as confirmed and can release its reservation. Audio is compared by verified container format rather than an exact MIME label, so equivalent WAV labels remain interoperable.

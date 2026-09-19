@@ -126,7 +126,6 @@ export class StoryMediaApplicationService {
   async cancel(context: EngineContext, worldId: string, operationId: string) {
     context = structuredClone(context);
     const key = this.operations.key(context, {worldId}, operationId);
-    await this.operations.policy.authorise(context, "generate", {worldId});
     const operation = await this.operations.store.read(key);
     if (!operation?.resource.mediaKind || operation.context.actorId !== context.actorId ||
       operation.context.subjectId !== context.subjectId || operation.context.scopeId !== context.scopeId)

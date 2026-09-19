@@ -23,21 +23,21 @@ async function harness(t: TestContext) {
   const {root, worldDir} = await makeTempRoot();
   const provider = new FsWorldProvider(root); await provider.loadWorld(WORLD_ID);
   const fake = new FakeProvider({supportsIdempotencyKey: true});
-  const state = {boundMediaOnly: false, revoked: false, held: false, charges: 0, releases: 0, hidden: false, loseAdmissionReply: false,
+  const state = {boundGenerateOnly: false, audioType: "audio/wav", boundMediaOnly: false, revoked: false, held: false, charges: 0, releases: 0, hidden: false, loseAdmissionReply: false,
     hideJobs: false, failRelease: false, imageFormat: "png", extraImage: false, failSettlement: false, onReserve: async () => {}};
   const settled = new Set<string>();
   const released = new Set<string>();
   const submit = fake.submit.bind(fake);
   fake.submit = async (key, request) => {
     assert.equal("engineOperation" in request.params, false);
-    fake.artifacts = request.params.audioFormat ? [{name: "audio.wav", contentType: "audio/wav", data: wav([0, 1, 0, -1])}]
+    fake.artifacts = request.params.audioFormat ? [{name: "audio.wav", contentType: state.audioType, data: wav([0, 1, 0, -1])}]
       : [{name: `page.${state.imageFormat}`, contentType: `image/${state.imageFormat}`,
         data: state.imageFormat === "jpeg" ? jpegBytes() : state.imageFormat === "webp" ? webpBytes() : pngBytes()}];
     if (state.extraImage) fake.artifacts.push({name: "output-2.png", contentType: "image/png", data: pngBytes()});
     return submit(key, request);
   };
   const policy: EnginePolicy = {
-    async authorise(ctx, action, resource) {if (state.boundMediaOnly && action === "media" && (!resource.productionId || !resource.chapterId || !resource.sourceHash)) throw new Error("Chapter identity required"); if (state.revoked || ctx.scopeId !== "family" || ctx.subjectId !== "child") throw new Error("Forbidden");},
+    async authorise(ctx, action, resource) {if (((state.boundMediaOnly && action === "media") || (state.boundGenerateOnly && action === "generate")) && (!resource.productionId || !resource.chapterId || !resource.sourceHash)) throw new Error("Chapter identity required"); if (state.revoked || ctx.scopeId !== "family" || ctx.subjectId !== "child") throw new Error("Forbidden");},
     async project(_ctx, bundle) {if (state.hidden) bundle.productions = []; return bundle;},
     async deliver(_ctx, _resource, content) {if (state.held && content.kind === "artifact") throw new Error("Held");},
     async reserve(_ctx, key) {await state.onReserve(); return key;}, async settle(_ctx, key) {
@@ -337,4 +337,32 @@ it("authorises story media with its chapter identity before reading bytes", asyn
   assert.equal((await h.engine.worlds.media(context, WORLD_ID, artifact)).contentType, "image/png");
   assert.equal((await h.engine.storyMedia.reconcile(context, WORLD_ID, "bound-media")).status, "settled");
   assert.equal(h.state.charges, 1);
+});
+
+it("cancels under chapter-scoped authority without a broad world grant", async t => {
+  const h = await harness(t); h.state.boundGenerateOnly = true; h.fake.pollState = "running";
+  await h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId,
+    {operationId: "scoped-cancel", model: speech, voiceId: "stock", baseHash: h.chapter.hash});
+  await until(() => h.queue.listJobs().some(job => job.status === "running"), "running narration");
+  await h.engine.storyMedia.cancel(context, WORLD_ID, "scoped-cancel");
+  assert.equal(h.queue.listJobs()[0]!.status, "cancelled");
+});
+
+it("accepts verified WAV bytes with an equivalent provider MIME label", async t => {
+  const h = await harness(t); h.state.audioType = "audio/x-wav";
+  await h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId,
+    {operationId: "wav-alias", model: speech, voiceId: "stock", baseHash: h.chapter.hash});
+  await h.finished();
+  assert.equal((await h.engine.storyMedia.reconcile(context, WORLD_ID, "wav-alias")).status, "settled");
+});
+
+it("releases a provider-confirmed cancellation after restart", async t => {
+  const h = await harness(t); h.fake.pollState = "cancelled";
+  await h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId,
+    {operationId: "provider-cancel", model: speech, voiceId: "stock", baseHash: h.chapter.hash});
+  await until(() => h.queue.listJobs()[0]?.status === "cancelled", "provider cancellation");
+  assert.equal(h.queue.listJobs()[0]!.cancellationUncertain, false);
+  const engine = await h.restart();
+  assert.equal((await engine.storyMedia.reconcile(context, WORLD_ID, "provider-cancel")).status, "settled");
+  assert.equal(h.state.releases, 1); assert.equal(h.state.charges, 0);
 });

@@ -26,7 +26,7 @@ import { toExtendedLength } from "../world/paths.js";
 import { describeCoordinatorError } from "../errors/user-message.js";
 import { backoffMs, classifyError, isRateLimit, type FailureClass } from "./classify.js";
 import { JobJournal, type JobStateStore } from "./journal.js";
-import { imageFormatOf, verifyArtifact } from "./verify.js";
+import { audioFormatOf, imageFormatOf, verifyArtifact } from "./verify.js";
 import { atomicWriteFile } from "../world/atomic.js";
 
 /**
@@ -1254,7 +1254,7 @@ export class JobQueue {
         return;
       }
       if (poll.state === "cancelled") {
-        await this.terminalize(current, "cancelled", null, poll.costMicroUsd);
+        await this.terminalize({...current, cancellationUncertain: false}, "cancelled", null, poll.costMicroUsd);
         return;
       }
       // Only when it actually moved: a poll that sees the same step as the last one is not news,
@@ -1426,10 +1426,9 @@ export class JobQueue {
       // Verify everything before anything lands (R-13): all-or-nothing.
       for (const artifact of artifacts) {
         const verified = verifyArtifact(artifact);
-        const narrationType = job.params.audioFormat === "mp3" ? "audio/mpeg" : `audio/${job.params.audioFormat}`;
         const problem =
           verified ??
-          (job.target.kind === "story-chapter-narration" && artifact.contentType !== narrationType
+          (job.target.kind === "story-chapter-narration" && audioFormatOf(artifact.data) !== job.params.audioFormat
             ? "narration format differs from the requested audio format"
             : null) ??
           (job.capability === "image" && imageFormatOf(artifact.data) === null
