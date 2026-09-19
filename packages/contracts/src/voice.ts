@@ -290,13 +290,20 @@ export function hostedReaderKeepsSlot(provider: string): boolean {
  * Breeze charges a flat per-clone fee its docs do not quantify, so the amount is the vendor's
  * to state; Fish makes the model for nothing (probed 2026-09-13), so only the making is said.
  * Null once the library records the slot — the second read is a read — and for a reader that
- * keeps nothing.
+ * keeps nothing. A recorded slot was made from one recording (R-13): given the current
+ * recording's hash, a slot made from another is one the next read remakes, and the charge is
+ * said again as a re-recording's (codex on PR 1221). A slot the vendor's console deleted is
+ * found at the read (§2.4), not here.
  */
-export function firstReadNotice(voice: Pick<ClonedVoice, "remote">, provider: string): string | null {
-  if (!hostedReaderKeepsSlot(provider) || voice.remote?.[provider]?.voiceId !== undefined) return null;
+export function firstReadNotice(voice: Pick<ClonedVoice, "remote">, provider: string, clipHash?: string): string | null {
+  if (!hostedReaderKeepsSlot(provider)) return null;
+  const held = voice.remote?.[provider];
+  const remade = held?.voiceId !== undefined && clipHash !== undefined && held.clipHash !== undefined && held.clipHash !== clipHash;
+  if (held?.voiceId !== undefined && !remade) return null;
+  const when = remade ? "re-recorded" : "first read";
   return provider === "breezeblue"
-    ? "first read · clone charge, priced by BreezeBlue"
-    : `first read · voice made on ${HOSTED_READER_LABELS[provider] ?? provider}`;
+    ? `${when} · clone charge, priced by BreezeBlue`
+    : `${when} · voice made on ${HOSTED_READER_LABELS[provider] ?? provider}`;
 }
 
 /**

@@ -192,8 +192,8 @@ export interface PreparedChapter {
   speaking: Speaking[];
   /** The cloud blocks the cache does not hold: what a press would pay for (R-17). */
   misses: Speaking[];
-  /** The cloned voices among the misses, hosted readers' first and the engine's last (R-17). */
-  clones: { provider: string; voice: ClonedVoice }[];
+  /** The cloned voices among the misses, hosted readers' first and the engine's last (R-17), each with its recording's hash. */
+  clones: { provider: string; voice: ClonedVoice; reference: string | null }[];
   priceOf: (block: Speaking) => number;
   estimate: number;
 }
@@ -320,9 +320,9 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
   // since theirs persist, the engine's last, so the token the window holds at the end is the
   // one the price's answer must carry (codex on PR 1180: without the voice on the question,
   // a hosted reader's line was refused at dispatch and flagged without ever being asked).
-  const cloneMap = new Map<string, { provider: string; voice: ClonedVoice }>();
+  const cloneMap = new Map<string, { provider: string; voice: ClonedVoice; reference: string | null }>();
   for (const block of misses) {
-    if (block.clone !== null) cloneMap.set(`${block.reader.provider}\n${block.clone.id}`, { provider: block.reader.provider, voice: block.clone });
+    if (block.clone !== null) cloneMap.set(`${block.reader.provider}\n${block.clone.id}`, { provider: block.reader.provider, voice: block.clone, reference: block.reference });
   }
   const clones = [...cloneMap.values()].sort((a, b) => Number(a.provider === CLONED_VOICE_PROVIDER) - Number(b.provider === CLONED_VOICE_PROVIDER));
   // Priced by the character as the row bills it (SPEC-046 R-8): bytes, or doubled CJK, for the
@@ -362,10 +362,10 @@ export function missIdentity(block: Speaking): string {
  * are two charges said twice, and nothing once the library records the slot. A vendor's clone
  * charge is not in the estimate, so this is the whole of its disclosure.
  */
-export function firstReadNotices(clones: readonly { provider: string; voice: ClonedVoice }[]): string[] {
+export function firstReadNotices(clones: readonly { provider: string; voice: ClonedVoice; reference?: string | null }[]): string[] {
   const lines = new Map<string, string>();
-  for (const { provider, voice } of clones) {
-    const notice = firstReadNotice(voice, provider);
+  for (const { provider, voice, reference } of clones) {
+    const notice = firstReadNotice(voice, provider, reference ?? undefined);
     if (notice !== null) lines.set(`${provider}\n${voice.id}`, `${voice.name} · ${notice}`);
   }
   return [...lines.values()];

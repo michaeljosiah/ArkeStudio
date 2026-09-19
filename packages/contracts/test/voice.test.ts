@@ -699,6 +699,13 @@ describe("what a first read through a reader adds (SPEC-046 R-14, R-34)", () => 
     assert.equal(firstReadNotice(fresh, "mistral"), null, "Mistral keeps nothing: nothing to say");
     assert.equal(firstReadNotice({ remote: { breezeblue: { confirmedAt: "2026-09-14T00:00:00.000Z" } } }, "breezeblue")?.includes("clone charge"), true, "confirmed is not yet saved");
     assert.equal(firstReadNotice({ remote: { breezeblue: { voiceId: "voc_1" } } }, "breezeblue"), null, "the second read is a read");
+    // A recorded slot was made from one recording (R-13): re-record the voice and the next read
+    // remakes the slot, so the charge is said again, as a re-recording's (codex on PR 1221).
+    const saved = { remote: { breezeblue: { voiceId: "voc_1", clipHash: "sha256:old" } } };
+    assert.equal(firstReadNotice(saved, "breezeblue", "sha256:old"), null, "the slot is the recording's");
+    assert.equal(firstReadNotice(saved, "breezeblue", "sha256:new"), "re-recorded · clone charge, priced by BreezeBlue");
+    assert.equal(firstReadNotice(saved, "breezeblue"), null, "with no recording to compare, the slot stands");
+    assert.equal(firstReadNotice({ remote: { fishaudio: { voiceId: "fv_1", clipHash: "sha256:old" } } }, "fishaudio", "sha256:new"), "re-recorded · voice made on Fish Audio");
     assert.equal(firstReadNotice({ remote: { breezeblue: { voiceId: "voc_1" } } }, "fishaudio")?.includes("Fish Audio"), true, "one vendor's slot says nothing about another's");
   });
 });

@@ -1664,7 +1664,7 @@ export class Coordinator {
     // is quoted once, whole, never per piece or again part-way through.
     const priceOf = (piece: string) => estimateMicroUsd(model, { characters: billableCharacters(model, piece) });
     const estimate = misses.reduce((sum, index) => sum + toMake(index).reduce((total, { piece }) => total + priceOf(piece), 0), 0);
-    const narratorNotice = narrator.clonedVoice !== undefined ? firstReadNotice(narrator.clonedVoice, narrator.provider) : null;
+    const narratorNotice = narrator.clonedVoice !== undefined ? firstReadNotice(narrator.clonedVoice, narrator.provider, narrator.clipHash) : null;
     const token = createHash("sha256")
       .update([subject.id, String(subject.version), ...misses.flatMap((index) => toMake(index).map(({ piece }) => pieceFile(piece)))].join("\n"))
       .digest("hex");
@@ -2052,7 +2052,7 @@ export class Coordinator {
         for (const index of misses) {
           const voice = speaking[index]!;
           named.set(`${voice.provider}\n${voice.label}`, { label: voice.label, provider: voice.provider });
-          const notice = voice.clonedVoice !== undefined ? firstReadNotice(voice.clonedVoice, voice.provider) : null;
+          const notice = voice.clonedVoice !== undefined ? firstReadNotice(voice.clonedVoice, voice.provider, voice.clipHash) : null;
           if (notice !== null) notices.set(`${voice.provider}\n${voice.voiceId}`, `${voice.label} · ${notice}`);
         }
         this.emit({
@@ -7509,7 +7509,12 @@ export class Coordinator {
         let narrator = msg.voice;
         if (narrator !== null) {
           if (!this.voiceService) return;
-          const clonedVoices = this.opts.provider.openStore?.()?.getBundle().clonedVoices ?? [];
+          // One store for the whole decision (codex on PR 1221): the library read, the catalogue
+          // asked and the recording checked are all this world's, and a world switched under the
+          // awaits — whose library may hold the same minted id — is not the one the choice was
+          // made in. Refused then, rather than bound to the wrong recording.
+          const store = this.opts.provider.openStore?.() ?? null;
+          const clonedVoices = store?.getBundle().clonedVoices ?? [];
           const model = narrator.model ?? legacyVoiceModel(narrator.provider, narrator.voiceId, clonedVoices);
           if (model === null) return;
           const available = (
@@ -7528,9 +7533,9 @@ export class Coordinator {
           // A cloned voice through a hosted reader (issue 1215): chosen only while its recording
           // is there to send, as an assignment is (SPEC-046 R-12); the picker offers what the
           // catalogue lists, and the catalogue does not read clips.
-          const store = this.opts.provider.openStore?.();
           const source = store ? voiceSourceFor(clonedVoices, narrator.provider, model, narrator.voiceId) : { kind: "catalogue" as const };
           if (source.kind === "missing-clone" || (source.kind === "cloned" && (!store || (await clipFor(store, source.voice)) === null))) return;
+          if (source.kind === "cloned" && (store === null || this.opts.provider.openStore?.() !== store || store.isClosed())) return;
           // A cloned choice is this world's (codex on PR 1221): its id names a different
           // recording in another world, where the choice must not apply.
           narrator = { ...narrator, model, ...(source.kind === "cloned" && store ? { worldId: store.worldId } : {}) };

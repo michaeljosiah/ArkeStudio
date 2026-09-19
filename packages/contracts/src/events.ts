@@ -1078,8 +1078,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       voices: z.array(
         z.object({ label: z.string().min(1), provider: z.string().min(1), characters: z.number().int().min(0), estimatedMicroUsd: z.number().int().min(0) }).strict(),
       ),
-      /** What a first read through a slot-keeping reader adds (SPEC-046 R-14), a line a voice and vendor, said on the read that incurs it (codex on PR 1221). */
-      notices: z.array(z.string().min(1).max(512)).max(1000).optional(),
+      /** What a first read through a slot-keeping reader adds (SPEC-046 R-14), a line a voice and vendor, said on the read that incurs it (codex on PR 1221). Unbounded like `voices`: a chapter's voices are its cast's. */
+      notices: z.array(z.string().min(1).max(512)).optional(),
     })
     .strict(),
   z
@@ -1176,8 +1176,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       estimatedMicroUsd: z.number().int().min(0),
       confirmationToken: z.string().min(1),
       voices: z.array(AudiobookPriceLineSchema),
-      /** As on `audiobook.priced`: a first read's clone charge, a line a voice and vendor, across the book's chapters (codex on PR 1221). */
-      notices: z.array(z.string().min(1).max(512)).max(1000).optional(),
+      /** As on `audiobook.priced`: a first read's clone charge, a line a voice and vendor, across the book's chapters (codex on PR 1221). Unbounded like `voices`: a book has no cap on its cast. */
+      notices: z.array(z.string().min(1).max(512)).optional(),
     })
     .strict(),
   z
