@@ -1670,7 +1670,7 @@ export class JobQueue {
       ? "Cancelled in Arke. The provider may still complete or charge for this request."
       : null;
     // A cancelled job still writes a ledger entry (R-15, D10).
-    await this.terminalize(job, "cancelled", reason);
+    await this.terminalize({...job, cancellationUncertain: outcomeMayBeRemote}, "cancelled", reason);
     this.emitQueueStatus(job.provider);
   }
 

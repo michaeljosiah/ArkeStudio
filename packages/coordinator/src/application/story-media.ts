@@ -136,6 +136,10 @@ export class StoryMediaApplicationService {
     const jobs = this.queue.jobs().filter(job => job.worldId === worldId &&
       (job.params.engineOperation as {key?: string} | undefined)?.key === key);
     for (const job of jobs) if (!["succeeded", "failed", "cancelled"].includes(job.status)) await this.queue.cancel(job.id);
-    return {operationKey: key, jobIds: jobs.map(job => job.id)};
+    const current = this.queue.jobs().filter(job => jobs.some(prior => prior.id === job.id));
+    return {operationKey: key, jobIds: jobs.map(job => job.id),
+      needsReconciliation: current.length !== jobs.length || current.some(job =>
+        !["succeeded", "failed", "cancelled"].includes(job.status) ||
+        (job.status === "cancelled" && job.cancellationUncertain !== false))};
   }
 }

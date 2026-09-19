@@ -1,4 +1,4 @@
-import { MAX_IMAGE_PREVIEWS, describeError, ulid, type Job } from "@arke-studio/contracts";
+import { MAX_IMAGE_PREVIEWS, describeError, ulid, PROVIDERS, type Job } from "@arke-studio/contracts";
 import type { EngineContext, EngineDeliveredJob, EngineMutation, EngineQueue, EngineResource, EngineWorldRepository, IllustrationInput, IllustrationOutcome } from "./contracts.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 import { readStoryMediaSource } from "./story-media.js";
@@ -94,10 +94,12 @@ export class IllustrationApplicationService {
     if (result.needsReconciliation) return { status: "needs-reconciliation" as const, operationKey: key };
     const settlementKey = engineHash([key, "settlement"]);
     const previousSettlement = await this.operations.store.read(settlementKey);
-    // A recorded financial decision survives source edits. Current content checks below
-    // still withhold stale bytes, but must not prevent resuming its idempotent settlement.
-    if (!previousSettlement && operation.resource.mediaKind && jobs.some(job => job.status === "succeeded"))
-      await readStoryMediaSource(this.worlds, this.operations.policy, context, operation.resource);
+    // A cancelled cloud request may still charge. Missing legacy certainty is not zero spend.
+    if (!previousSettlement && operation.resource.mediaKind && jobs.some(job => job.status === "cancelled" &&
+      (job.cancellationUncertain === true || (job.cancellationUncertain === undefined &&
+        (PROVIDERS as Record<string, {local: boolean}>)[job.provider]?.local !== true &&
+        (job.providerJobId != null || (job.attempt > 0 && job.submissionRejected !== true))))))
+      return {status: "needs-reconciliation" as const, operationKey: key};
     if (!previousSettlement && (jobs.length === 0 || jobs.length !== result.jobIds.length ||
       jobs.some(job => !result.jobIds.includes(job.id)))) {
       return { status: "needs-reconciliation" as const, operationKey: key };

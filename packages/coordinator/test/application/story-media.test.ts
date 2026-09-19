@@ -46,7 +46,7 @@ async function harness(t: TestContext) {
   };
   const ledger = new Set<string>();
   const queue = new JobQueue({journal: new JobJournal(join(root, "jobs.jsonl")), journalPath: join(root, "unused.jsonl"),
-    clients: {fal: fake, [speech.provider]: fake}, getKey: async () => "fake-key", emit() {},
+    clients: {fal: fake, kokoro: fake, [speech.provider]: fake}, getKey: async () => "fake-key", emit() {},
     ledger: {readJobIds: async () => ledger, has: async id => ledger.has(id), append: async row => {ledger.add(row.jobId);}},
     landInWorld: async (_id, fn) => {await fn(worldDir); return true;}, pollIntervalMs: 5, baseIntervalMs: 1});
   await queue.start();
@@ -138,17 +138,42 @@ it("bounds narration even when the model has no declared prompt limit", async t 
 it("cancellation uses the host queue and never grants another family authority", async t => {
   const h = await harness(t); h.fake.pollState = "running";
   await h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId,
-    {operationId: "cancel", model: speech, voiceId: "stock", baseHash: h.chapter.hash});
+    {operationId: "cancel", model: {...speech, provider: "kokoro"}, voiceId: "stock", baseHash: h.chapter.hash});
   await until(() => h.queue.listJobs().some(j => j.status === "running"), "running narration");
   assert.equal(h.queue.listJobs()[0]!.target.kind, "story-chapter-narration");
   await assert.rejects(h.engine.storyMedia.cancel({...context, scopeId: "other"}, WORLD_ID, "cancel"), /Forbidden/);
-  await h.engine.storyMedia.cancel(context, WORLD_ID, "cancel");
+  assert.equal((await h.engine.storyMedia.cancel(context, WORLD_ID, "cancel")).needsReconciliation, false);
   assert.equal(h.queue.listJobs()[0]!.status, "cancelled");
   await h.engine.prose.saveChapter(context, WORLD_ID, production, chapterId,
     {operationId: "edit-after-cancel", baseHash: h.chapter.hash, body: "The next version."});
   assert.equal((await h.engine.storyMedia.reconcile(context, WORLD_ID, "cancel")).status, "settled");
   assert.equal(h.state.charges, 0);
   assert.equal(h.state.releases, 1);
+});
+
+it("retains an uncertain remote cancellation and its reservation after restart", async t => {
+  const h = await harness(t); h.fake.pollState = "running";
+  h.fake.cancel = async () => {throw new Error("Provider cancellation unavailable");};
+  await h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId,
+    {operationId: "remote-cancel", model: speech, voiceId: "stock", baseHash: h.chapter.hash});
+  await until(() => h.queue.listJobs().some(job => job.status === "running"), "remote narration admission");
+  assert.equal((await h.engine.storyMedia.cancel(context, WORLD_ID, "remote-cancel")).needsReconciliation, true);
+  assert.equal(h.queue.listJobs()[0]!.cancellationUncertain, true);
+  const engine = await h.restart();
+  assert.equal((await engine.storyMedia.reconcile(context, WORLD_ID, "remote-cancel")).status, "needs-reconciliation");
+  assert.equal(h.state.releases, 0);
+});
+
+it("reports stale successful output as held without delivering or charging it", async t => {
+  const h = await harness(t);
+  await h.engine.storyMedia.illustratePage(context, WORLD_ID, production, chapterId,
+    {operationId: "stale-success", model: image, instruction: "A harbour", baseHash: h.chapter.hash});
+  await h.finished();
+  await h.engine.prose.saveChapter(context, WORLD_ID, production, chapterId,
+    {operationId: "edit-before-settlement", baseHash: h.chapter.hash, body: "Edited before first review."});
+  assert.equal((await h.engine.storyMedia.reconcile(context, WORLD_ID, "stale-success")).status, "held");
+  assert.equal(h.state.charges, 0);
+  assert.equal(h.state.releases, 0);
 });
 
 it("secondary provider artifacts keep the same chapter source binding", async t => {
