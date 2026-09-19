@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
-import { bibleSize, DEFAULT_NARRATOR, splitBible, supportsVoiceUse } from "@arke-studio/contracts";
+import { bibleSize, narratorLabelFor, splitBible } from "@arke-studio/contracts";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
 import { Button, Callout, IconButton } from "../components/ui.js";
@@ -12,6 +12,7 @@ import { mediaUrl } from "../lib/media.js";
 import { clearQueue, enqueueClip, playClip } from "../lib/audio.js";
 import { ClipPlayButton } from "../components/player.js";
 import { ReadAloudConfirmation } from "../components/read-aloud-confirmation.js";
+import { RemoteVoiceUploadConfirmation, useVoiceUploadAsk } from "../components/remote-voice-upload-confirmation.js";
 
 /**
  * The world Bible (master §4.5) — one page, one document, no approval step.
@@ -151,10 +152,15 @@ export function BibleScreen() {
    * read is a second charge. A revised quote is a new key, and asks again.
    */
   const [submittedRead, setSubmittedRead] = useState<string | null>(null);
-  const narrator = state?.app.narrator ?? null;
-  const narratorLabel = narrator && !supportsVoiceUse(narrator, "narration")
-    ? DEFAULT_NARRATOR.label
-    : narrator?.label ?? narrator?.voiceId ?? DEFAULT_NARRATOR.label;
+  // A cloned narrator's recording is asked about before the price (issue 1215); the answer rides
+  // on every later frame of the section's read.
+  const liveRead = useRef<string | null>(null);
+  liveRead.current = read?.requestId ?? null;
+  const upload = useVoiceUploadAsk(() => liveRead.current);
+  // Named as this world will hear it (issue 1215): a clone is its own world's, and a choice
+  // that cannot narrate here is named as the shipped local voice it falls to; once the section
+  // lands, the voice that read it (codex on PR 1221).
+  const narratorLabel = narratorLabelFor(state?.app.narrator ?? null, worldId, readResult?.status === "ready" ? readResult : undefined);
   /*
    * Plays the moment it lands, rather than making somebody press twice for the same thing.
    *
@@ -303,6 +309,7 @@ export function BibleScreen() {
                               if (!worldId) return;
                               queued.current = 0;
                               clearQueue();
+                              upload.drop();
                               setRead({ requestId: readBibleSection(worldId, section.heading), heading: section.heading });
                             }}
                           >
@@ -313,15 +320,27 @@ export function BibleScreen() {
                       {/* The one confirmation every read shares (issue 1211): the reader the
                           quote names, the price, the pieces — this column had the third copy
                           of a sentence that named ElevenLabs whatever read. */}
-                      {mine?.status === "confirmation-required" && quote !== submittedRead && (
+                      {/* The vendor's question first, for a cloned narrator (issue 1215). */}
+                      {read?.heading === section.heading && upload.asked !== null && (
+                        <RemoteVoiceUploadConfirmation
+                          destinationLabel={upload.asked.destination}
+                          destinationNotice={upload.asked.notice}
+                          onCancel={() => { upload.drop(); setRead(null); }}
+                          onConfirm={() => {
+                            const token = upload.answer();
+                            if (worldId && read && token !== null) readBibleSection(worldId, section.heading, read.requestId, undefined, token);
+                          }}
+                        />
+                      )}
+                      {upload.asked === null && mine?.status === "confirmation-required" && quote !== submittedRead && (
                         <ReadAloudConfirmation
                           title={section.heading}
                           result={mine}
-                          onCancel={() => setRead(null)}
+                          onCancel={() => { upload.drop(); setRead(null); }}
                           onConfirm={(token) => {
                             if (!worldId || !read) return;
                             setSubmittedRead(quote);
-                            readBibleSection(worldId, section.heading, read.requestId, token);
+                            readBibleSection(worldId, section.heading, read.requestId, token, upload.allowed());
                           }}
                         />
                       )}

@@ -376,8 +376,10 @@ describe("the Audiobook view (turn 146)", () => {
     const requestId = "01J8F3K2QW9VZX4N7M0RTYB6H1";
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId, toMake: 4, blocks: 4 }));
     await act(async () =>
-      __applyEventForTest({ at: AT, type: "voice.upload-confirmation-required", requestId, worldId: FIXTURE_WORLD_ID, command: "read-audiobook-chapter", destinationLabel: "the studio's ComfyUI", confirmationToken: "engine-1" }),
+      __applyEventForTest({ at: AT, type: "voice.upload-confirmation-required", requestId, worldId: FIXTURE_WORLD_ID, command: "read-audiobook-chapter", destinationLabel: "the studio's ComfyUI", confirmationToken: "engine-1", destinationNotice: "The recording is saved as a voice on the account." }),
     );
+    // With what the vendor does with the clip (SPEC-046 R-17), as every other read shows it (codex on PR 1221).
+    assert.equal(q(m, '[data-testid="remote-voice-upload-notice"]')?.textContent, "The recording is saved as a voice on the account.");
     const allow = all(m, "button").find((button) => /allow|send|confirm|yes/i.test(button.textContent ?? "") && !/cancel|not now/i.test(button.textContent ?? ""));
     assert.ok(allow, `the consent is one press: ${all(m, "button").map((b) => b.textContent).join(" | ")}`);
     await act(async () => allow.click());
@@ -386,10 +388,12 @@ describe("the Audiobook view (turn 146)", () => {
     // The restarted run passes the gate and asks the price; its answer must carry the consent too.
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId, toMake: 4, blocks: 4 }));
     await act(async () =>
-      __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 120, estimatedMicroUsd: 36_000, confirmationToken: "tok", voices: [{ label: "Low tide", provider: "elevenlabs", characters: 120, estimatedMicroUsd: 36_000 }] }),
+      __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 120, estimatedMicroUsd: 36_000, confirmationToken: "tok", voices: [{ label: "Low tide", provider: "elevenlabs", characters: 120, estimatedMicroUsd: 36_000 }], notices: ["Harbour glass · first read · clone charge, priced by BreezeBlue"] }),
     );
     const confirm = all(m, "button").find((button) => button.textContent?.startsWith("Confirm 120 characters"));
     assert.ok(confirm);
+    // What a first read through a slot-keeping reader adds, beside the price it is not in (SPEC-046 R-14; codex on PR 1221).
+    assert.equal(q(m, '[data-testid="audiobook-notice"]')?.textContent, "Harbour glass · first read · clone charge, priced by BreezeBlue");
     await act(async () => confirm.click());
     const both = m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>;
     assert.equal(both.confirmationToken, "tok");

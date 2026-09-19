@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { DEFAULT_NARRATOR, formatMicroUsd, supportsVoiceUse, type ProseReadSource } from "@arke-studio/contracts";
+import { formatMicroUsd, narratorLabelFor, type NarratorSettings, type ProseReadSource } from "@arke-studio/contracts";
 import {
   clearQueue,
   dismissPlayback,
@@ -34,8 +34,8 @@ export interface PageRead {
   at: number | null;
   count: number;
   failure: string | null;
-  /** Present only while a charged read is waiting to be answered; `voices` names each cloud voice the words would go to. */
-  cost: { characters: number; priced: string; voices: string[]; confirm: () => void } | null;
+  /** Present only while a charged read is waiting to be answered; `voices` names each cloud voice the words would go to, `notices` what a first read through a slot-keeping reader adds, a line a voice (SPEC-046 R-14). */
+  cost: { characters: number; priced: string; voices: string[]; notices: string[]; confirm: () => void } | null;
   /** Present while a cloned voice's recording waits for leave to go to a remote engine (turn 130). */
   upload: { destination: string; notice?: string; confirm: () => void } | null;
   begin: () => void;
@@ -51,7 +51,9 @@ export function usePageRead(input: {
   pageId: string | undefined;
   /** What the dock calls the read; the block's own heading is added to it. */
   title: string;
-  narratorLabel: string;
+  /** The stored narrator and this world: the player names the voice that actually spoke once a block lands (codex on PR 1221). */
+  narrator: NarratorSettings | null;
+  worldId: string | undefined;
   worldSlug: string | undefined;
   /** The blocks this screen reads, in the order it reads them. Empty ones never get here. */
   blocks: readonly PageReadBlock[];
@@ -62,7 +64,7 @@ export function usePageRead(input: {
   /** What the player calls a block's voice (turn 130); absent, the narrator's label. */
   voiceOf?: (index: number) => string;
 }): PageRead {
-  const { pageId, title, narratorLabel, worldSlug, blocks, start } = input;
+  const { pageId, title, narrator, worldId, worldSlug, blocks, start } = input;
   // Read through a ref so a caller's inline arrow does not change `stop`'s identity every render
   // — the effect below stops the read when `stop` changes, which would stop it constantly.
   const cancel = useRef(input.cancel);
@@ -89,6 +91,11 @@ export function usePageRead(input: {
   const queued = useRef(0);
   const live = useRef<string | null>(null);
   live.current = run;
+  // Named from the choice until a block lands, then from the voice that read it: the coordinator
+  // falls back for reasons this screen cannot see (a recording gone, a key withdrawn), and the
+  // player must never say the stored name over another voice. A voiced page's blocks name
+  // their own speaker through `voiceOf`.
+  const narratorLabel = narratorLabelFor(narrator, worldId, result?.status === "ready" ? result : undefined);
 
   /*
    * A page read stops when its page is left; a block read does not (issue 859).
@@ -169,6 +176,7 @@ export function usePageRead(input: {
             characters: result?.characterCount ?? 0,
             priced: formatMicroUsd(result?.estimatedMicroUsd ?? 0),
             voices: (result?.voices ?? []).map((voice) => `${voice.label} · ${voice.provider}`),
+            notices: result?.notices ?? [],
             confirm: () => {
               setConfirmed(run);
               start(run, token, uploadAllowed.current ?? undefined);
@@ -218,17 +226,11 @@ export function useProsePageRead(input: {
 }): PageRead {
   const { state } = useStore();
   const world = state?.world ?? null;
-  // Never a cloned voice: the app's reading voice is not somebody's cloned identity, and a
-  // narrator that fails that rule falls back to the shipped local one rather than being named.
-  const narrator = state?.app.narrator ?? null;
-  const narratorLabel =
-    narrator && !supportsVoiceUse(narrator, "narration")
-      ? DEFAULT_NARRATOR.label
-      : (narrator?.label ?? narrator?.voiceId ?? DEFAULT_NARRATOR.label);
   return usePageRead({
     pageId: input.pageId,
     title: input.title,
-    narratorLabel,
+    narrator: state?.app.narrator ?? null,
+    worldId: world?.meta.worldId,
     worldSlug: world?.meta.slug,
     blocks: input.blocks,
     ...(input.voiceOf !== undefined ? { voiceOf: input.voiceOf } : {}),
@@ -262,6 +264,7 @@ export function PageReadControl({ read, label }: { read: PageRead; label: string
         {/* What leaves the machine is said before it does (codex on turn 130): the words and the
             voice go to the provider, and the text stays in Activity, as a table read's does. */}
         <span className="fy-mono">the words and the voice go to the provider · the text stays in Activity</span>
+        {read.cost.notices.map((notice) => <span key={notice} className="fy-mono" data-testid="page-read-notice">{notice}</span>)}
         <Button variant="ghost" onClick={read.stop}>
           Cancel
         </Button>

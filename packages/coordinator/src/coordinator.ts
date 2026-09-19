@@ -141,6 +141,8 @@ import {
   type AudiobookReader,
   audiobookTextHash,
   narratorFor,
+  narratorAppliesTo,
+  firstReadNotice,
   voiceFormatForModel,
   hostedReaderKeepsSlot,
   legacyVoiceModel,
@@ -346,6 +348,8 @@ import {
   AUDIO_EXTENSIONS as CLONEABLE_AUDIO_EXTENSIONS,
   audioBytesLookRight,
   clipFor,
+  clipHashOf,
+  clipPresent,
   cloneVoice,
   MIN_CLONE_SECONDS,
   recordVoiceReader,
@@ -516,6 +520,21 @@ import type { WorldStatePrecondition, WorldStore } from "./world/store.js";
 
 type SingleActResult = Extract<DomainEvent, { type: "single-act.result" }>;
 type ExportProgressEvent = Extract<DomainEvent, { type: "export.progress" }>;
+/**
+ * A voice that reads a block of the app's prose — the narrator, or a voiced page's speaker —
+ * with the library entry beside it when the voice is a clone, since that entry's recording is
+ * what goes with the words (SPEC-046 R-12) and its language what the reader's tag wants (R-23).
+ */
+type NarrationVoice = {
+  provider: string;
+  model: string;
+  voiceId: string;
+  label: string;
+  cloned: boolean;
+  clonedVoice?: ClonedVoice;
+  /** The recording's hash, for the cache key: a re-recorded clone is another voice to the cache (codex on PR 1221). */
+  clipHash?: string;
+};
 
 function safeExportOutput(output: string | null): string | null {
   if (output === null) return null;
@@ -1094,19 +1113,44 @@ export class Coordinator {
 
   /** The same recipe verdict used by Settings and enqueue admission, projected onto voice rows. */
   /**
-   * The narrator as the audiobook chooses it (turn 146, SPEC-047 R-11, R-12): the app's, when
-   * the catalogue says it can speak now — the manifest still lists a model whose key was
-   * removed or whose engine is down — the local default otherwise; and the catalogue itself,
-   * which the run asks about every other reader. One rule for the run, the block panel's
-   * writes and the derivation, so a fallback is the same voice wherever it is judged.
+   * Who narrates, decided once for every read of the app's prose (issue 1215): the stored
+   * choice when the catalogue says it can speak now — the manifest still lists a model whose
+   * key was removed or whose engine is down — the shipped local voice otherwise; and, when the
+   * choice is a cloned voice through a hosted reader, the library entry whose recording goes
+   * with the words. A clone whose recording is gone falls to the default as a stored narrator
+   * whose key is gone does (`narratorFor`) and as a voiced page's block falls to the narrator
+   * when its speaker's clip has (turn 130): the reading quietens rather than failing over a
+   * voice nobody can see. One rule for the section, the page, the voiced page and the audiobook,
+   * so a fallback is the same voice wherever it is judged. The catalogue comes back with it,
+   * because the audiobook asks it about every other reader too.
    */
-  private async audiobookNarrator(store: WorldStore, voice: VoiceService | null): Promise<{ narrator: AudiobookReader; catalogue: VoiceCandidate[] }> {
+  private async narratorVoice(store: WorldStore, voice: VoiceService | null): Promise<{ narrator: NarrationVoice; catalogue: VoiceCandidate[] }> {
     const narratorSettings = this.appSettings ? await this.appSettings.load() : null;
     const clonedVoices = store.getBundle().clonedVoices ?? [];
     const catalogue = voice === null ? [] : ((await voice.catalogue(clonedVoices, await this.comfyUiVoiceAvailability()).catch(() => null)) ?? []);
     const narrationCatalogue = catalogue.filter((candidate) => supportsVoiceUse(candidate, "narration") && candidate.unavailableReason === undefined);
-    const narrator = narratorFor(narratorSettings?.narrator ?? null, narrationCatalogue);
-    return { narrator: { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId, ...(narrator.label !== undefined ? { label: narrator.label } : {}) }, catalogue };
+    // A cloned choice is its world's (codex on PR 1221): the same id in another world is
+    // somebody else's recording, so elsewhere the choice does not apply and the default reads.
+    const stored = narratorSettings?.narrator ?? null;
+    const chosen = narratorFor(narratorAppliesTo(stored, store.worldId) ? stored : null, narrationCatalogue);
+    const source = voiceSourceFor(clonedVoices, chosen.provider, chosen.model, chosen.voiceId);
+    const clip = source.kind === "cloned" ? await clipFor(store, source.voice) : null;
+    if (source.kind === "cloned" && clip !== null) {
+      return { narrator: { provider: chosen.provider, model: chosen.model, voiceId: chosen.voiceId, label: chosen.label ?? source.voice.name, cloned: true, clonedVoice: source.voice, clipHash: clipHashOf(clip) }, catalogue };
+    }
+    const speaks = source.kind === "catalogue" ? chosen : narratorFor(null, narrationCatalogue);
+    return { narrator: { provider: speaks.provider, model: speaks.model, voiceId: speaks.voiceId, label: speaks.label ?? speaks.voiceId, cloned: false }, catalogue };
+  }
+
+  /**
+   * The narrator as the audiobook chooses it (turn 146, SPEC-047 R-11, R-12): the same answer
+   * as every other read's, in the run's shape. One rule for the run, the block panel's writes
+   * and the derivation; the run finds a cloned narrator's recording per block as it finds a
+   * cloned speaker's, and asks the vendor's question the same way.
+   */
+  private async audiobookNarrator(store: WorldStore, voice: VoiceService | null): Promise<{ narrator: AudiobookReader; catalogue: VoiceCandidate[] }> {
+    const { narrator, catalogue } = await this.narratorVoice(store, voice);
+    return { narrator: { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId, label: narrator.label }, catalogue };
   }
 
   /**
@@ -1185,7 +1229,7 @@ export class Coordinator {
             this.emit({ at: at(), type: "audiobook.started", ...ids, requestId, toMake: event.toMake, blocks: event.blocks });
             return;
           case "priced":
-            this.emit({ at: at(), type: "audiobook.priced", ...ids, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices });
+            this.emit({ at: at(), type: "audiobook.priced", ...ids, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, ...(event.notices.length > 0 ? { notices: event.notices } : {}) });
             return;
           case "progress":
             if (held !== undefined) held.made = event.made;
@@ -1407,6 +1451,8 @@ export class Coordinator {
     requestId: string;
     /** Approval for this paid read only; never a remote voice-upload destination approval. */
     confirmationToken?: string;
+    /** A cloned narrator's vendor, answered (issue 1215) — the frame carries it back once asked. */
+    voiceUploadConfirmedFor?: string;
     /**
      * The passage, already resolved and normalised by the caller — this method never reads a
      * document. A page read (issue 859) is narrated in the order the screen declared and each
@@ -1442,12 +1488,7 @@ export class Coordinator {
     // Who narrates is the app's preference, not the character's. Reading prose ABOUT
     // somebody in their own voice was the old behaviour, and it refused entirely for the
     // many characters who have no voice assigned.
-    const narratorSettings = this.appSettings ? await this.appSettings.load() : null;
-    const narratorVoices = this.opts.provider.openStore?.()?.getBundle().clonedVoices ?? [];
-    const narrationCatalogue = (
-      await this.voiceService.catalogue(narratorVoices, await this.comfyUiVoiceAvailability())
-    ).filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined);
-    const narrator = narratorFor(narratorSettings?.narrator ?? null, narrationCatalogue);
+    const { narrator } = await this.narratorVoice(store, this.voiceService);
     const speaking = { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId };
     if (speaking.provider === "kokoro" && speaking.model === "kokoro-82m") {
       const ready = (
@@ -1526,6 +1567,9 @@ export class Coordinator {
       return;
     }
     const format = voiceFormatForModel(model);
+    // A cloned narrator's cache entries are its recording's (codex on PR 1221): re-record the
+    // voice and the same words are made again rather than replayed from the old one.
+    const reference = narrator.clipHash !== undefined ? { reference: narrator.clipHash } : {};
     const files = blocks.map((block) =>
       speechCacheFile({
         provider: model.provider,
@@ -1533,6 +1577,7 @@ export class Coordinator {
         voiceId: speaking.voiceId,
         text: block.text,
         format,
+        ...reference,
       }),
     );
     /*
@@ -1543,7 +1588,7 @@ export class Coordinator {
      * what makes the next read of the same words a hit rather than another spend.
      */
     const pieces = blocks.map((block) => piecesFor(block.text, model, format));
-    const pieceFile = (piece: string) => speechCacheFile({ provider: model.provider, model: model.id, voiceId: speaking.voiceId, text: piece, format });
+    const pieceFile = (piece: string) => speechCacheFile({ provider: model.provider, model: model.id, voiceId: speaking.voiceId, text: piece, format, ...reference });
     const cachedReady = (block: { heading: string; text: string }, index: number) =>
       this.emit({
         at: new Date().toISOString(),
@@ -1599,12 +1644,27 @@ export class Coordinator {
       blocks.forEach(cachedReady);
       return;
     }
+    // A cloned narrator's recording goes with what is made (issue 1215): the vendor is asked
+    // once per voice and vendor before anything is priced or queued, as the voiced page asks
+    // for a cloned speaker (SPEC-046 R-16), and a read the cache holds asks nothing.
+    if (
+      narrator.clonedVoice !== undefined &&
+      (await this.requireVoiceUploadConfirmation({
+        worldId,
+        requestId,
+        command: input.frameKind,
+        ...(input.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: input.voiceUploadConfirmedFor } : {}),
+        reader: { store, provider: narrator.provider, voice: narrator.clonedVoice },
+      }))
+    )
+      return;
     /** A missed block's pieces still to be made: every piece, less the ones on the shelf. */
     const toMake = (index: number) => pieces[index]!.map((piece, at) => ({ piece, at })).filter(({ at }) => !have.get(index)?.has(at));
     // Priced by the piece, as each request will be billed (SPEC-046 R-8), and summed: the read
     // is quoted once, whole, never per piece or again part-way through.
     const priceOf = (piece: string) => estimateMicroUsd(model, { characters: billableCharacters(model, piece) });
     const estimate = misses.reduce((sum, index) => sum + toMake(index).reduce((total, { piece }) => total + priceOf(piece), 0), 0);
+    const narratorNotice = narrator.clonedVoice !== undefined ? firstReadNotice(narrator.clonedVoice, narrator.provider, narrator.clipHash) : null;
     const token = createHash("sha256")
       .update([subject.id, String(subject.version), ...misses.flatMap((index) => toMake(index).map(({ piece }) => pieceFile(piece)))].join("\n"))
       .digest("hex");
@@ -1624,6 +1684,8 @@ export class Coordinator {
           voiceId: speaking.voiceId,
           text: piece,
           audioFormat: format,
+          // The clone's language, for the reader's tag (SPEC-046 R-23), as a voiced block carries it.
+          ...(narrator.clonedVoice !== undefined ? { language: narrator.clonedVoice.language } : {}),
           requestId,
           purpose,
           ...(input.sheetId !== undefined ? { sheetId: input.sheetId } : {}),
@@ -1635,6 +1697,11 @@ export class Coordinator {
         },
         estimatedMicroUsd: priceOf(piece),
         landing: { dir: ".cache/voice-previews", name: pieceFile(piece).split("/").pop()! },
+        // The marker the dispatcher resolves the recording by, and the vendor it was allowed to
+        // go to (issue 1215): without them a cloned narrator's piece reaches the reader as a
+        // preset id it has never heard of.
+        ...(narrator.cloned ? { voiceReference: true } : {}),
+        ...(narrator.cloned && input.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: input.voiceUploadConfirmedFor } : {}),
       })),
     );
     if (input.confirmationToken !== token) {
@@ -1660,6 +1727,10 @@ export class Coordinator {
         // a seam is audible, and a reader deciding to spend should know the text goes as several
         // requests. A page's parts are its blocks, and its own dialog counts those.
         ...(!page && pieces[0]!.length > 1 ? { parts: pieces[0]!.length } : {}),
+        // The recording goes with the words, said with the price (issue 1215), and what a first
+        // read through a slot-keeping reader adds, on the read that incurs it (SPEC-046 R-14).
+        ...(narrator.cloned ? { voiceReference: true } : {}),
+        ...(narratorNotice !== null ? { notices: [narratorNotice] } : {}),
       } as DomainEvent);
       return;
     }
@@ -1821,24 +1892,21 @@ export class Coordinator {
       purpose: "prose" as const,
       ...(heading === null ? {} : { sectionHeading: heading }),
     });
-    const narratorSettings = this.appSettings ? await this.appSettings.load() : null;
     const clonedVoices = store.getBundle().clonedVoices ?? [];
     // The catalogue is what says whether a concrete voice can speak now (codex on PR 914): the
     // manifest still lists a model whose key was removed, whose voice was withdrawn or whose
-    // engine is down, and a block sent that way fails instead of falling to the narrator.
-    const catalogue = (await this.voiceService.catalogue(clonedVoices, await this.comfyUiVoiceAvailability()).catch(() => null)) ?? [];
-    const narrationCatalogue = catalogue.filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined);
-    const narrator = narratorFor(narratorSettings?.narrator ?? null, narrationCatalogue);
+    // engine is down, and a block sent that way fails instead of falling to the narrator. The
+    // narrator itself may be a cloned voice (issue 1215): its blocks then carry the recording
+    // exactly as a cloned speaker's do below.
+    const { narrator: narration, catalogue } = await this.narratorVoice(store, this.voiceService);
     const manifest = this.opts.manifest;
     const modelOf = (voice: { provider: string; model: string }) =>
       manifest?.models.find((candidate) => candidate.provider === voice.provider && candidate.id === voice.model && candidate.capability === "voice-tts") ?? null;
-    const narration: { provider: string; model: string; voiceId: string; label: string; cloned: boolean; clonedVoice?: ClonedVoice } =
-      { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId, label: narrator.label ?? narrator.voiceId, cloned: false };
     // Each block's voice: the sheet's assignment when the manifest knows its model, the
     // catalogue says it can speak now and, for a cloned voice, its recording is still there;
     // else the narrator (R-46).
     const speaking = await Promise.all(
-      blocks.map(async (block) => {
+      blocks.map(async (block): Promise<NarrationVoice> => {
         const assigned = block.voice;
         if (assigned === undefined) return narration;
         const model = assigned.model ?? legacyVoiceModel(assigned.provider, assigned.voiceId, clonedVoices) ?? undefined;
@@ -1847,9 +1915,11 @@ export class Coordinator {
         if (listed === undefined || listed.unavailableReason !== undefined) return narration;
         const source = voiceSourceFor(clonedVoices, assigned.provider, model, assigned.voiceId);
         if (source.kind === "missing-clone") return narration;
-        if (source.kind === "cloned" && (await clipFor(store, source.voice)) === null) return narration;
+        const clip = source.kind === "cloned" ? await clipFor(store, source.voice) : null;
+        if (source.kind === "cloned" && clip === null) return narration;
         return { provider: assigned.provider, model, voiceId: assigned.voiceId, label: assigned.label ?? listed.label, cloned: source.kind === "cloned",
-          ...(source.kind === "cloned" ? { clonedVoice: source.voice } : {}) };
+          ...(source.kind === "cloned" ? { clonedVoice: source.voice } : {}),
+          ...(clip !== null ? { clipHash: clipHashOf(clip) } : {}) };
       }),
     );
     const isLocal = (voice: { provider: string; model: string }) => voice.provider === "kokoro" && voice.model === "kokoro-82m";
@@ -1880,7 +1950,7 @@ export class Coordinator {
       const model = modelOf(voice);
       if (model === null) return null;
       const format = voiceFormatForModel(model);
-      const cacheFile = (text: string) => speechCacheFile({ provider: model.provider, model: model.id, voiceId: voice.voiceId, text, format });
+      const cacheFile = (text: string) => speechCacheFile({ provider: model.provider, model: model.id, voiceId: voice.voiceId, text, format, ...(voice.clipHash !== undefined ? { reference: voice.clipHash } : {}) });
       const pieces = piecesFor(block.text, model, format);
       return { index, model, format, file: cacheFile(block.text), pieces: pieces.map((text) => ({ text, file: cacheFile(text) })) };
     });
@@ -1973,9 +2043,17 @@ export class Coordinator {
         // Every cloud voice the words would go to, named once (R-47, codex on PR 914): the
         // approval is the last point before a paid call leaves, and a page can span providers.
         const named = new Map<string, { label: string; provider: string }>();
+        // Every recording that would go, and what a first read through a slot-keeping reader
+        // adds (SPEC-046 R-14), said on the read that incurs it: an entry a voice and vendor,
+        // keyed by id rather than name so two clones named alike are two charges said twice
+        // (codex on PR 1221) — the vendor's clone charge is not in the estimate, so this is
+        // the whole of its disclosure.
+        const notices = new Map<string, string>();
         for (const index of misses) {
           const voice = speaking[index]!;
           named.set(`${voice.provider}\n${voice.label}`, { label: voice.label, provider: voice.provider });
+          const notice = voice.clonedVoice !== undefined ? firstReadNotice(voice.clonedVoice, voice.provider, voice.clipHash) : null;
+          if (notice !== null) notices.set(`${voice.provider}\n${voice.voiceId}`, `${voice.label} · ${notice}`);
         }
         this.emit({
           at: new Date().toISOString(),
@@ -1993,6 +2071,8 @@ export class Coordinator {
           estimatedMicroUsd: estimate,
           confirmationToken: token,
           voices: [...named.values()],
+          ...(misses.some((index) => speaking[index]!.cloned) ? { voiceReference: true } : {}),
+          ...(notices.size > 0 ? { notices: [...notices.values()] } : {}),
         } as DomainEvent);
         return;
       }
@@ -2623,6 +2703,13 @@ export class Coordinator {
             if (status.validation !== "invalid") return {};
             const probe = status.probes.find((entry) => entry.capability === "voice-tts");
             return { unavailableReason: probe?.reason ?? `${provider} rejected the key — check it on Providers` };
+          },
+          // A library voice whose recording is gone is listed and marked, on every reader's
+          // candidate (codex on PR 1221): the picker offers nothing `set-narrator` or an
+          // assignment would then refuse. The open world's, since the library handed in is its.
+          clipMissing: async (voice) => {
+            const store = this.opts.provider.openStore?.();
+            return store ? !(await clipPresent(store, voice)) : false;
           },
           getKey: async (provider) =>
             this.credentials ? this.credentials.get(provider as ProviderId) : null,
@@ -7422,7 +7509,12 @@ export class Coordinator {
         let narrator = msg.voice;
         if (narrator !== null) {
           if (!this.voiceService) return;
-          const clonedVoices = this.opts.provider.openStore?.()?.getBundle().clonedVoices ?? [];
+          // One store for the whole decision (codex on PR 1221): the library read, the catalogue
+          // asked and the recording checked are all this world's, and a world switched under the
+          // awaits — whose library may hold the same minted id — is not the one the choice was
+          // made in. Refused then, rather than bound to the wrong recording.
+          const store = this.opts.provider.openStore?.() ?? null;
+          const clonedVoices = store?.getBundle().clonedVoices ?? [];
           const model = narrator.model ?? legacyVoiceModel(narrator.provider, narrator.voiceId, clonedVoices);
           if (model === null) return;
           const available = (
@@ -7438,7 +7530,15 @@ export class Coordinator {
               voice.unavailableReason === undefined,
           );
           if (!available) return;
-          narrator = { ...narrator, model };
+          // A cloned voice through a hosted reader (issue 1215): chosen only while its recording
+          // is there to send, as an assignment is (SPEC-046 R-12); the picker offers what the
+          // catalogue lists, and the catalogue does not read clips.
+          const source = store ? voiceSourceFor(clonedVoices, narrator.provider, model, narrator.voiceId) : { kind: "catalogue" as const };
+          if (source.kind === "missing-clone" || (source.kind === "cloned" && (!store || (await clipFor(store, source.voice)) === null))) return;
+          if (source.kind === "cloned" && (store === null || this.opts.provider.openStore?.() !== store || store.isClosed())) return;
+          // A cloned choice is this world's (codex on PR 1221): its id names a different
+          // recording in another world, where the choice must not apply.
+          narrator = { ...narrator, model, ...(source.kind === "cloned" && store ? { worldId: store.worldId } : {}) };
         }
         const saved = await this.appSettings.setNarrator(narrator);
         this.emit({ at: new Date().toISOString(), type: "narrator.changed", voice: saved.narrator });
@@ -11223,6 +11323,19 @@ export class Coordinator {
           });
           return;
         }
+        // The narrator is a live reference too (codex on PR 1221): deleted under it, Settings
+        // would go on naming a voice that reads as the default, and the next clone with the
+        // same name would take the freed id and narrate without ever being chosen. Refused for
+        // the sheet's reason — the choice is the person's to change, on Settings.
+        const stored = this.appSettings ? (await this.appSettings.load()).narrator : null;
+        if (stored !== null && narratorAppliesTo(stored, store.worldId)) {
+          const model = stored.model ?? legacyVoiceModel(stored.provider, stored.voiceId, bundle.clonedVoices);
+          const source = model === null ? null : voiceSourceFor(bundle.clonedVoices, stored.provider, model, stored.voiceId);
+          if (source?.kind === "cloned" && source.voice.id === voice.id) {
+            answer("refused", { reason: "The narrator still reads with this voice — choose another on Settings first." });
+            return;
+          }
+        }
         const removed = await deleteVoice(store, msg.voiceId, { requestId: msg.requestId });
         if (!removed.ok) {
           answer("refused", { reason: removed.reason });
@@ -12113,7 +12226,7 @@ export class Coordinator {
                   this.emit({ at: at(), type: "audiobook.book-started", ...ids, requestId, chapters: event.chapters, blocks: event.blocks });
                   return;
                 case "priced":
-                  this.emit({ at: at(), type: "audiobook.book-priced", ...ids, chapters: event.chapters, blocks: event.blocks, cloudBlocks: event.cloudBlocks, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices });
+                  this.emit({ at: at(), type: "audiobook.book-priced", ...ids, chapters: event.chapters, blocks: event.blocks, cloudBlocks: event.cloudBlocks, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, ...(event.notices.length > 0 ? { notices: event.notices } : {}) });
                   return;
                 case "progress":
                   if (held !== undefined) held.done = event.done;
@@ -12487,9 +12600,32 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, `No ${msg.provider} voice model is available.`);
           return;
         }
+        // A cloned voice speaks from a clip, so the clip has to exist before a job is enqueued.
+        // Missing means the recording was deleted from under the library: reported with the reason
+        // rather than dispatched into a take that cannot finish (SPEC-022 §1.3). Read before the
+        // cache is asked (codex on PR 1221): the preview cached is the recording's, so a
+        // re-recorded voice previews afresh rather than replaying the old one.
+        if (source.kind === "missing-clone") {
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            "That cloned voice is no longer in this world — choose another voice.",
+          );
+          return;
+        }
+        const clip = source.kind === "cloned" ? await clipFor(store, source.voice) : null;
+        if (source.kind === "cloned" && clip === null) {
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            "That voice's recording is missing — re-clone it, or choose another voice.",
+          );
+          return;
+        }
+        const reference = clip !== null ? clipHashOf(clip) : undefined;
         // Queued providers: cache hit replays free; a miss dispatches through the queue (R-2, R-10).
         const format = voiceFormatForModel(model);
-        const cached = previewCacheFile(msg.provider, msg.voiceId, line.text, format, model.id);
+        const cached = previewCacheFile(msg.provider, msg.voiceId, line.text, format, model.id, reference);
         try {
           const bytes = new Uint8Array(
             await readFile(toExtendedLength(join(store.dir, fromPortable(cached)))),
@@ -12518,30 +12654,6 @@ export class Coordinator {
         } catch {
           /* miss → enqueue */
         }
-        // A cloned voice speaks from a clip, so the clip has to exist before a job is enqueued.
-        // Missing means the recording was deleted from under the library: reported with the reason
-        // rather than dispatched into a take that cannot finish (SPEC-022 §1.3).
-        let voiceReference = false;
-        if (source.kind === "missing-clone") {
-          this.rejectEnqueue(
-            msg.requestId,
-            msg.kind,
-            "That cloned voice is no longer in this world — choose another voice.",
-          );
-          return;
-        }
-        if (source.kind === "cloned") {
-          const clip = await clipFor(store, source.voice);
-          if (clip === null) {
-            this.rejectEnqueue(
-              msg.requestId,
-              msg.kind,
-              "That voice's recording is missing — re-clone it, or choose another voice.",
-            );
-            return;
-          }
-          voiceReference = true;
-        }
         const request = this.voiceService.queuedPreviewRequest({
           worldId: msg.worldId,
           sheet,
@@ -12549,7 +12661,8 @@ export class Coordinator {
           voiceId: msg.voiceId,
           line,
           model,
-          ...(voiceReference ? { voiceReference: true } : {}),
+          ...(clip !== null ? { voiceReference: true } : {}),
+          ...(reference !== undefined ? { reference } : {}),
           ...(msg.voiceUploadConfirmedFor !== undefined
             ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
             : {}),
@@ -12628,6 +12741,7 @@ export class Coordinator {
           worldId: msg.worldId,
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
+          ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
           blocks: [{ heading: msg.sectionHeading, text: bibleText }],
           page: false,
           purpose: "bible-section",
@@ -12679,6 +12793,7 @@ export class Coordinator {
           worldId: msg.worldId,
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
+          ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
           blocks: [{ heading: resolved.heading, text: resolved.text }],
           page: false,
           purpose: "prose",
@@ -12797,6 +12912,7 @@ export class Coordinator {
           worldId: msg.worldId,
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
+          ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
           blocks,
           page: true,
           purpose: "prose",
@@ -12859,6 +12975,7 @@ export class Coordinator {
           worldId: msg.worldId,
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
+          ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
           blocks: [{ heading: msg.sectionHeading, text: resolved.text }],
           page: false,
           purpose: "sheet-section",
@@ -12925,6 +13042,7 @@ export class Coordinator {
           worldId: msg.worldId,
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
+          ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
           blocks,
           page: true,
           purpose: "sheet-page",

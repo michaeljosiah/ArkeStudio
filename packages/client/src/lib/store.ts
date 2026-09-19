@@ -253,7 +253,7 @@ interface StoreState {
       flagged: number;
       /** The last block that landed or was flagged, and why, for the foot. */
       last?: { block: string; outcome: "made" | "adopted" | "flagged"; reason?: string };
-      price?: { characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[] };
+      price?: { characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[]; notices: string[] };
       record?: import("@arke-studio/contracts").ChapterAudiobook;
       reason?: string;
     }
@@ -1207,8 +1207,11 @@ function handleFrame(json: string): void {
     }
     if (event.type === "voice.upload-confirmation-required") {
       const expected = pendingQueueRequests.get(event.requestId);
+      // The question is a pause in the request, not its end (codex on PR 1221): a page with a
+      // cloned narrator and a cloned speaker is asked twice under one id, and the answer re-sends
+      // the same id without registering it again. The entry goes with the enqueue result, or
+      // with the connection.
       if (expected?.command === event.command) {
-        pendingQueueRequests.delete(event.requestId);
         for (const listener of voiceUploadConfirmationListeners) listener(event);
       }
     }
@@ -1543,7 +1546,7 @@ function handleFrame(json: string): void {
       const held = audiobook[key] ?? { toMake: 0, blocks: 0, made: 0, flagged: 0 };
       audiobook = {
         ...audiobook,
-        [key]: { ...held, state: "priced", price: { characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices } },
+        [key]: { ...held, state: "priced", price: { characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, notices: event.notices ?? [] } },
       };
     } else if (event.type === "audiobook.progress") {
       const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
@@ -3352,12 +3355,18 @@ export function requestVoicePreview(
   return requestId;
 }
 
+/**
+ * Every read of the app's prose carries the same two answers back (issue 1215): the price's
+ * token, and — for a cloned narrator — the vendor its recording may go to, which the coordinator
+ * asks about first and remembers per voice and vendor.
+ */
 export function readSheetSection(
   worldId: string,
   sheetId: string,
   sectionHeading: string,
   requestId = queueRequest("read-sheet-section"),
   confirmationToken?: string,
+  voiceUploadConfirmedFor?: string,
 ): string {
   send({
     kind: "read-sheet-section",
@@ -3366,6 +3375,7 @@ export function readSheetSection(
     sectionHeading,
     requestId,
     ...(confirmationToken ? { confirmationToken } : {}),
+    ...(voiceUploadConfirmedFor ? { voiceUploadConfirmedFor } : {}),
   });
   return requestId;
 }
@@ -3383,6 +3393,7 @@ export function readSheetPage(
   sections: readonly string[],
   requestId = queueRequest("read-sheet-page"),
   confirmationToken?: string,
+  voiceUploadConfirmedFor?: string,
 ): string {
   send({
     kind: "read-sheet-page",
@@ -3391,6 +3402,7 @@ export function readSheetPage(
     sections: [...sections],
     requestId,
     ...(confirmationToken ? { confirmationToken } : {}),
+    ...(voiceUploadConfirmedFor ? { voiceUploadConfirmedFor } : {}),
   });
   return requestId;
 }
@@ -3404,6 +3416,7 @@ export function readBibleSection(
   sectionHeading: string,
   requestId = queueRequest("read-bible-section"),
   confirmationToken?: string,
+  voiceUploadConfirmedFor?: string,
 ): string {
   send({
     kind: "read-bible-section",
@@ -3411,6 +3424,7 @@ export function readBibleSection(
     sectionHeading,
     requestId,
     ...(confirmationToken ? { confirmationToken } : {}),
+    ...(voiceUploadConfirmedFor ? { voiceUploadConfirmedFor } : {}),
   });
   return requestId;
 }
@@ -3427,6 +3441,7 @@ export function readProse(
   source: ProseReadSource,
   requestId = queueRequest("read-prose"),
   confirmationToken?: string,
+  voiceUploadConfirmedFor?: string,
 ): string {
   send({
     kind: "read-prose",
@@ -3434,6 +3449,7 @@ export function readProse(
     source,
     requestId,
     ...(confirmationToken ? { confirmationToken } : {}),
+    ...(voiceUploadConfirmedFor ? { voiceUploadConfirmedFor } : {}),
   });
   return requestId;
 }

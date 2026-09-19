@@ -280,7 +280,12 @@ const FOLLOW_ON_TARGETS = new Set([
   "voice-line",
   "voice-preview",
 ]);
-const COORDINATOR_ONLY_PARAMS = new Set(["frameRun", "frameRunStep", "landing", "request", "engineOperation"]);
+/**
+ * Params the coordinator keeps on the job for itself and never sends: the recording a cloned
+ * voice was made from is part of a part's durable identity (`priorPartJob`), not a control of
+ * any reader (codex on PR 1221).
+ */
+const COORDINATOR_ONLY_PARAMS = new Set(["frameRun", "frameRunStep", "landing", "request", "engineOperation", "reference"]);
 
 function providerParams(params: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(params).filter(([key]) => !COORDINATOR_ONLY_PARAMS.has(key) && (key !== "audioReferences" || (Array.isArray((params.audioReferences as { references?: unknown })?.references) && ((params.audioReferences as { references: unknown[] }).references.length > 0)))));

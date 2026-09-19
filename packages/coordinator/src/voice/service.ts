@@ -77,6 +77,13 @@ export interface VoiceServiceDeps {
   hostedReaders?: Array<{ provider: string; model: string }>;
   /** Why a keyed reader cannot read now — a rejected key, a fault — carried onto its candidates. */
   readerAvailability?: (provider: string) => { unavailableReason?: string };
+  /**
+   * Whether a library voice's recording is gone (codex on PR 1221): the catalogue then marks
+   * every reader's candidate for it unavailable, so a picker cannot offer what `set-narrator`
+   * and an assignment would refuse, and a screen judging the narrator falls back where the
+   * coordinator does. Absent, the library is taken at its word.
+   */
+  clipMissing?: (voice: ClonedVoice) => Promise<boolean>;
   getKey: (provider: string) => Promise<string | null>;
   emit: (event: DomainEvent) => void;
   clock?: () => string;
@@ -409,6 +416,13 @@ export interface SpeechSpec {
   format: VoiceAudioFormat;
   language?: string;
   params?: Record<string, number>;
+  /**
+   * The recording a cloned voice reads with, by hash (codex on PR 1221). A re-recorded clone
+   * keeps its id and is another voice to the cache: without this, speech made from the old
+   * recording would replay — and be adopted as an audiobook take — while the vendor's slot
+   * was never asked to change. Absent on a preset, whose key is unchanged.
+   */
+  reference?: string;
 }
 
 const FORMAT_CONTENT_TYPE: Record<VoiceAudioFormat, string> = {
@@ -449,6 +463,8 @@ export function previewCacheFile(
   line: string,
   format: VoiceAudioFormat,
   model?: string,
+  /** A cloned voice's recording, by hash: its preview is that recording's (codex on PR 1221). */
+  reference?: string,
 ): string {
   return speechCacheFile({
     provider,
@@ -458,6 +474,7 @@ export function previewCacheFile(
     voiceId,
     text: line,
     format,
+    ...(reference !== undefined ? { reference } : {}),
   });
 }
 
@@ -501,7 +518,7 @@ export class VoiceService {
       const health = await this.deps.sidecar.health().catch(() => null);
       const speechEngine = health === null ? "unknown" : health.engineStatus.kokoro.ready ? "ready" : "down";
       if (speechEngine === "down") {
-        return [...(await this.cloudVoices()), ...clonedVoiceCandidates(clonedVoices, clonedAvailability), ...(await this.hostedReaderCandidates(clonedVoices))];
+        return [...(await this.cloudVoices()), ...(await this.libraryCandidates(clonedVoices, clonedAvailability))];
       }
       const live = await this.deps.sidecar.listVoices().catch(() => []);
       if (live.length > 0) {
@@ -519,7 +536,28 @@ export class VoiceService {
         }));
       }
     }
-    return [...(await this.cloudVoices()), ...local, ...clonedVoiceCandidates(clonedVoices, clonedAvailability), ...(await this.hostedReaderCandidates(clonedVoices))];
+    return [...(await this.cloudVoices()), ...local, ...(await this.libraryCandidates(clonedVoices, clonedAvailability))];
+  }
+
+  /**
+   * The library's voices through every reader — the recipe's and each keyed hosted reader's —
+   * and, for a voice whose recording is gone, every candidate marked so (codex on PR 1221): a
+   * voice that cannot be read is listed, as an assignment to it stays visible, and says why.
+   */
+  private async libraryCandidates(
+    clonedVoices: readonly ClonedVoice[],
+    clonedAvailability: { local?: boolean; unavailableReason?: string },
+  ): Promise<VoiceCandidate[]> {
+    const candidates = [...clonedVoiceCandidates(clonedVoices, clonedAvailability), ...(await this.hostedReaderCandidates(clonedVoices))];
+    if (this.deps.clipMissing === undefined) return candidates;
+    const missing = new Set<string>();
+    for (const voice of clonedVoices) if (await this.deps.clipMissing(voice)) missing.add(voice.id);
+    if (missing.size === 0) return candidates;
+    return candidates.map((candidate) =>
+      candidate.readsClone !== undefined && missing.has(candidate.readsClone) && candidate.unavailableReason === undefined
+        ? { ...candidate, unavailableReason: "recording missing — re-clone it" }
+        : candidate,
+    );
   }
 
   /** The library's voices through each keyed hosted reader (SPEC-046 R-10). */
@@ -776,6 +814,8 @@ export class VoiceService {
      * not the separate paid read-aloud confirmation token.
      */
     voiceUploadConfirmedFor?: string;
+    /** The cloned voice's recording, by hash, for the cache key (codex on PR 1221). */
+    reference?: string;
   }): { input: EnqueueInput; cacheFile: string } {
     const {
       worldId,
@@ -786,6 +826,7 @@ export class VoiceService {
       model,
       voiceReference,
       voiceUploadConfirmedFor,
+      reference,
     } = input;
     const normalized = normalizeSpeechText(line.text);
     // The format the provider actually returns, not a guess: ComfyUI's SaveAudio writes FLAC, and
@@ -794,7 +835,7 @@ export class VoiceService {
     // The caller's provider, not a hardcoded one: this used to key the cache under "elevenlabs"
     // regardless, so a second provider's preview of the same voice id and line would have replayed
     // ElevenLabs' audio (SPEC-022 §2.7).
-    const cacheFile = speechCacheFile({ provider, voiceId, text: normalized, model: model.id, format });
+    const cacheFile = speechCacheFile({ provider, voiceId, text: normalized, model: model.id, format, ...(reference !== undefined ? { reference } : {}) });
     const name = cacheFile.slice(PREVIEW_CACHE_DIR.length + 1);
     return {
       cacheFile,

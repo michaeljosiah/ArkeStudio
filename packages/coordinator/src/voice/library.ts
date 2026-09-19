@@ -445,13 +445,15 @@ async function readLibraryRaw(store: WorldStore): Promise<string | null> {
 }
 
 /**
- * A confined source clip ready for a provider call. The bytes are ephemeral; only `voiceId`
- * and a boolean marker enter the durable job.
- *
- * Null is a real answer the caller must handle: a voice whose clip was deleted has to report
- * itself unusable with the reason (§1.3), never dispatch and fail in the middle of a take.
+ * Where a voice's clip is, confined to the world (§1.3): a world-relative path with no absolute,
+ * parent, drive or symlinked segment, resolving to a regular file inside the world's real
+ * directory. Null for anything else. The stat is the one the caller then compares the opened
+ * file against, so a swap between the walk and the open is caught.
  */
-export async function clipFor(store: WorldStore, voice: ClonedVoice): Promise<DispatchVoiceReference | null> {
+async function confinedClip(
+  store: WorldStore,
+  voice: ClonedVoice,
+): Promise<{ resolved: string; extension: string; name: string; validated: Awaited<ReturnType<typeof lstat>> } | null> {
   const portable = voice.clip;
   if (
     portable.length === 0 ||
@@ -478,10 +480,40 @@ export async function clipFor(store: WorldStore, voice: ClonedVoice): Promise<Di
     const resolved = await realpath(toExtendedLength(cursor));
     const rel = relative(root, resolved);
     if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null;
+    if (validated === null || !validated.isFile()) return null;
+    if (validated.size <= 0 || validated.size > MAX_CLONED_VOICE_BYTES) return null;
+    return { resolved, extension, name: segments.at(-1)!, validated };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a voice's recording is there to read (codex on PR 1221): the confinement and the
+ * bounds of `clipFor` without its bytes, so the catalogue can say a clone cannot speak now
+ * without reading every clip in the library on every listing. What this cannot see — a file
+ * that is not the audio it is named as — `clipFor` still refuses at the read.
+ */
+export async function clipPresent(store: WorldStore, voice: ClonedVoice): Promise<boolean> {
+  return (await confinedClip(store, voice)) !== null;
+}
+
+/**
+ * A confined source clip ready for a provider call. The bytes are ephemeral; only `voiceId`
+ * and a boolean marker enter the durable job.
+ *
+ * Null is a real answer the caller must handle: a voice whose clip was deleted has to report
+ * itself unusable with the reason (§1.3), never dispatch and fail in the middle of a take.
+ */
+export async function clipFor(store: WorldStore, voice: ClonedVoice): Promise<DispatchVoiceReference | null> {
+  const confined = await confinedClip(store, voice);
+  if (confined === null) return null;
+  const { resolved, extension, validated } = confined;
+  try {
     const handle = await open(toExtendedLength(resolved), "r");
     try {
       const info = await handle.stat();
-      if (!info.isFile() || !validated || info.dev !== validated.dev || info.ino !== validated.ino)
+      if (!info.isFile() || info.dev !== validated.dev || info.ino !== validated.ino)
         return null;
       if (info.size <= 0 || info.size > MAX_CLONED_VOICE_BYTES) return null;
       const data = new Uint8Array(info.size);
@@ -490,7 +522,7 @@ export async function clipFor(store: WorldStore, voice: ClonedVoice): Promise<Di
       const after = await handle.stat();
       if (after.size !== info.size || after.dev !== info.dev || after.ino !== info.ino) return null;
       const contentType = extension === "wav" ? ("audio/wav" as const) : ("audio/mpeg" as const);
-      if (verifyArtifact({ name: segments.at(-1)!, contentType, data }) !== null) return null;
+      if (verifyArtifact({ name: confined.name, contentType, data }) !== null) return null;
       const digest = createHash("sha256").update(data).digest("hex");
       return {
         name: `${digest}.${extension}`,

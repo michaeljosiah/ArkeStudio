@@ -1422,6 +1422,34 @@ describe("the cloned-voice recipe on the wire", () => {
     assert.equal(posted.prompt["4"]!.inputs["text"], VOICE_PARAMS.text);
   });
 
+  it("takes what every read path carries beside the line, and refuses only what is not a control (PR 1221)", async () => {
+    // A cloned voice on this machine is read by the Voice page's preview, a voiced page and the
+    // audiobook, each with its own bookkeeping on the job; this wall is an allow-list, so every
+    // name a real dispatch carries has to be here or the recipe refuses work the picker offered
+    // — which it did, on `language` since issue 1163, `sectionHeading` since turn 130 and
+    // `productionId` since PR 1180.
+    const reads = {
+      preview: { requestId: "01J8", purpose: "candidate-preview", sheetId: "maren-kest", sheetVersion: 4, characterCount: 29, language: "en" },
+      voicedPage: { requestId: "01J8", purpose: "prose", sheetVersion: 3, sectionHeading: "Maren Kest", characterCount: 29, part: 2, parts: 5, language: "en", blockIndex: 2, piece: 0, pieces: 1 },
+      audiobook: { purpose: "audiobook", productionId: "the-ledger", chapterId: "neap", block: "p0.0", textHash: "text-v1:abc", part: 0, parts: 1, characterCount: 29, sheetVersion: 3, voiceSettings: { speed: 0.92 }, directionHash: "d1", instructions: "measured", delivery: "measured" },
+    };
+    for (const [name, extra] of Object.entries(reads)) {
+      const { fetch } = engineFake(ROUTES);
+      await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
+        model: "comfyui-cloned-voice",
+        capability: "voice-tts",
+        params: { ...VOICE_PARAMS, ...extra },
+        voiceReference: VOICE_REFERENCE,
+      }).catch((error: Error) => assert.fail(`${name}: ${error.message}`));
+    }
+    const { fetch } = engineFake(ROUTES);
+    await assert.rejects(
+      new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", { model: "comfyui-cloned-voice", capability: "voice-tts", params: { ...VOICE_PARAMS, sampler_name: "ddim" }, voiceReference: VOICE_REFERENCE }),
+      /not a parameter/,
+      "a control the recipe does not declare is still refused",
+    );
+  });
+
   it("uploads before it submits, never after", async () => {
     // The name has to exist on the engine before the graph naming it is queued.
     const { fetch, calls } = engineFake(ROUTES);

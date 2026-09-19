@@ -489,6 +489,6 @@ it("shows one startup warning and the bundled version on a closed desktop connec
   try {
     await mount(modelState(), <Routes><Route path="/settings" element={<SettingsLayout />}><Route path="harness" element={<SettingsHarnessScreen />} /></Route></Routes>, "/settings/harness", "closed");
     assert.equal(container.textContent!.split("Starting Arke Studio").length - 1, 1);
-    assert.equal(container.querySelector(".fy-settings__version")?.textContent, "v0.5.49");
+    assert.equal(container.querySelector(".fy-settings__version")?.textContent, "0.5.49", "bare, as the rail is drawn (issue 1216)");
   } finally { window.arke = previous; }
 });

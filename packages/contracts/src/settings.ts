@@ -183,6 +183,13 @@ export const NarratorSettingsSchema = z
     model: z.string().min(1).optional(),
     voiceId: z.string().min(1),
     label: z.string().min(1).optional(),
+    /**
+     * The world a cloned narrator belongs to (issue 1215; codex on PR 1221). A cloned voice's id
+     * is unique within one world only, so the same id in another world is somebody else's
+     * recording; `set-narrator` records the world on a cloned choice and every read applies the
+     * choice in that world alone. Absent on a preset, which reads wherever its reader does.
+     */
+    worldId: z.string().min(1).optional(),
   })
   .strict()
   .nullable();
