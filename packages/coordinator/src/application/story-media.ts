@@ -1,9 +1,10 @@
-import { billableCharacters, CLONED_VOICE_MODEL, isHostedVoiceReader, estimateMicroUsd, imageOutputFor, normalizeSpeechText, productionShape, voiceFormatForModel,
+import { billableCharacters, CLONED_VOICE_MODEL, estimateMicroUsd, imageOutputFor, normalizeSpeechText, productionShape, voiceFormatForModel,
   type ManifestModel, type SizeTier } from "@arke-studio/contracts";
 import type { EngineContext, EngineMutation, EnginePolicy, EngineQueue, EngineResource, EngineWorldRepository } from "./contracts.js";
 import { proseChapterRead, proseId } from "./prose-contracts.js";
 import { engineHash, type EngineOperations } from "./operations.js";
 import type { IllustrationApplicationService } from "./generation.js";
+import { tierFor } from "../references/generate.js";
 
 // This byte-returning API handles short pages, not unbounded audiobook chapters.
 const MAX_NARRATION_CHARS = 1000;
@@ -68,6 +69,8 @@ export class StoryMediaApplicationService {
     context = structuredClone(context); input = structuredClone(input);
     const resource = this.resource(worldId, productionId, chapterId, input, "image");
     if (input.model.capability !== "image") throw new Error("Page illustrations require an image model.");
+    if (input.tier !== undefined && tierFor(input.model, input.tier) !== input.tier)
+      throw new Error("The image model does not support the requested page size tier.");
     if (!input.instruction.trim() || input.instruction.length > 8000) throw new Error("A bounded illustration instruction is required.");
     // Replays also validate the current source; a prior operation does not approve revised prose.
     await this.source(context, resource);
@@ -90,7 +93,7 @@ export class StoryMediaApplicationService {
     context = structuredClone(context); input = structuredClone(input);
     const resource = this.resource(worldId, productionId, chapterId, input, "speech");
     if (input.model.capability !== "voice-tts") throw new Error("Narration requires a speech model.");
-    if (input.model.id === CLONED_VOICE_MODEL || isHostedVoiceReader(input.model.provider, input.model.id))
+    if (input.model.id === CLONED_VOICE_MODEL)
       throw new Error("This narration API requires a stock-voice model without cloned-reference transport.");
     if (!input.voiceId.trim() || input.voiceId.length > 200) throw new Error("A host-resolved stock voice is required.");
     await this.source(context, resource);

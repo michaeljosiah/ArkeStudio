@@ -220,10 +220,22 @@ it("refuses stale, hidden, unauthorized and oversized sources before queue admis
 it("refuses known cloned-reference narration models before reserving or enqueueing", async t => {
   const h = await harness(t);
   let reservations = 0; h.state.onReserve = async () => {reservations++;};
-  for (const model of SHIPPED_MANIFEST.models.filter(m => m.id === "comfyui-cloned-voice" || m.id === "voxtral-mini-tts")) {
+  for (const model of SHIPPED_MANIFEST.models.filter(m => m.id === "comfyui-cloned-voice")) {
     await assert.rejects(h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId,
       {operationId: model.id, model, voiceId: "stock", baseHash: h.chapter.hash}), /stock-voice model/);
   }
   assert.equal(reservations, 0);
   assert.equal(h.queue.listJobs().length, 0);
+});
+
+it("allows a dual-mode provider's stock voice while refusing unsupported image tiers", async t => {
+  const h = await harness(t);
+  const model = SHIPPED_MANIFEST.models.find(m => m.id === "voxtral-mini-tts")!;
+  const result = await h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId,
+    {operationId: "stock-reader", model, voiceId: "preset", baseHash: h.chapter.hash});
+  assert.equal(result.jobIds.length, 1);
+  await assert.rejects(h.engine.storyMedia.illustratePage(context, WORLD_ID, production, chapterId,
+    {operationId: "unsupported-tier", model: {...image, limits: {resolutions: ["1K"], tiers: {"1K": "1K"}}},
+      instruction: "A harbour", tier: "4K", baseHash: h.chapter.hash}), /page size tier/);
+  assert.equal(h.queue.listJobs().length, 1);
 });
