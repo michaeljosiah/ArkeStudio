@@ -71,6 +71,8 @@ export class StoryMediaApplicationService {
     context = structuredClone(context); input = structuredClone(input);
     const resource = this.resource(worldId, productionId, chapterId, input, "image");
     if (input.model.capability !== "image") throw new Error("Page illustrations require an image model.");
+    if (!["perImage", "perMegapixel", "perImageToken", "unmetered"].includes(input.model.pricing.kind))
+      throw new Error("Page illustrations require image-based or explicitly unmetered pricing.");
     if (input.tier !== undefined && tierFor(input.model, input.tier) !== input.tier)
       throw new Error("The image model does not support the requested page size tier.");
     if (!input.instruction.trim() || input.instruction.length > 8000) throw new Error("A bounded illustration instruction is required.");

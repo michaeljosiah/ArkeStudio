@@ -1,3 +1,4 @@
+import {audioFormatOf, imageFormatOf} from "../queue/verify.js";
 import type { EngineContext, EnginePolicy, EngineQueue, EngineResource, EngineSnapshot, EngineWorldRepository } from "./contracts.js";
 import { readStoryMediaSource } from "./story-media.js";
 import { engineHash, requireContext } from "./operations.js";
@@ -43,10 +44,22 @@ export class WorldSessionService {
     if (resource.mediaKind === "speech" && !["audio/wav", "audio/mpeg", "audio/flac"].includes(artifact.contentType))
       throw new Error("The narration artifact is not supported audio.");
     artifact.bytes = new Uint8Array(artifact.bytes);
+    if (resource.mediaKind === "image") {
+      const format = imageFormatOf(artifact.bytes);
+      if (!format || artifact.contentType !== format.contentType) throw new Error("The page artifact bytes do not match a supported image format.");
+    }
+    if (resource.mediaKind === "speech") {
+      const format = audioFormatOf(artifact.bytes);
+      const mime = format === "mp3" ? "audio/mpeg" : `audio/${format}`;
+      if (!format || format !== matches[0]!.params.audioFormat || artifact.contentType !== mime)
+        throw new Error("The narration artifact bytes do not match the requested audio format.");
+    }
     const { createHash } = await import("node:crypto");
     const sha256 = createHash("sha256").update(artifact.bytes).digest("hex");
-    if (resource.mediaKind) await readStoryMediaSource(this.repository, this.policy, context, resource);
     await this.policy.deliver(context, resource, { kind: "artifact", id: artifact.id, sha256 });
+    // Delivery policy may await a remote safety review. Validate the source after it returns;
+    // the repository serializes this final check with chapter writes, with no later policy await.
+    if (resource.mediaKind) await readStoryMediaSource(this.repository, this.policy, context, resource);
     return { ...artifact, sha256 };
   }
 }

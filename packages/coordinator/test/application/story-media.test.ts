@@ -1,3 +1,4 @@
+import {writeFile} from "node:fs/promises";
 import assert from "node:assert/strict";
 import {it, type TestContext} from "node:test";
 import {join} from "node:path";
@@ -24,7 +25,7 @@ async function harness(t: TestContext) {
   const provider = new FsWorldProvider(root); await provider.loadWorld(WORLD_ID);
   const fake = new FakeProvider({supportsIdempotencyKey: true});
   const state = {boundGenerateOnly: false, audioType: "audio/wav", boundMediaOnly: false, revoked: false, held: false, charges: 0, releases: 0, hidden: false, loseAdmissionReply: false,
-    uncertainJobs: false, extraAudio: false, hideJobs: false, failRelease: false, imageFormat: "png", extraImage: false, failSettlement: false, onReserve: async () => {}};
+    onArtifactDelivery: async () => {}, emptyImage: false, uncertainJobs: false, extraAudio: false, hideJobs: false, failRelease: false, imageFormat: "png", extraImage: false, failSettlement: false, onReserve: async () => {}};
   const settled = new Set<string>();
   const released = new Set<string>();
   const submit = fake.submit.bind(fake);
@@ -35,12 +36,13 @@ async function harness(t: TestContext) {
         data: state.imageFormat === "jpeg" ? jpegBytes() : state.imageFormat === "webp" ? webpBytes() : pngBytes()}];
     if (state.extraAudio) fake.artifacts.push({name: "output.mp3", contentType: "audio/wav", data: wav([0, 1, 0, -1])});
     if (state.extraImage) fake.artifacts.push({name: "output-2.png", contentType: "image/png", data: pngBytes()});
+    if (state.emptyImage) fake.artifacts = [];
     return submit(key, request);
   };
   const policy: EnginePolicy = {
     async authorise(ctx, action, resource) {if (((state.boundMediaOnly && action === "media") || (state.boundGenerateOnly && action === "generate")) && (!resource.productionId || !resource.chapterId || !resource.sourceHash)) throw new Error("Chapter identity required"); if (state.revoked || ctx.scopeId !== "family" || ctx.subjectId !== "child") throw new Error("Forbidden");},
     async project(_ctx, bundle) {if (state.hidden) bundle.productions = []; return bundle;},
-    async deliver(_ctx, _resource, content) {if (state.held && content.kind === "artifact") throw new Error("Held");},
+    async deliver(_ctx, _resource, content) {if (content.kind === "artifact") await state.onArtifactDelivery(); if (state.held && content.kind === "artifact") throw new Error("Held");},
     async reserve(_ctx, key) {await state.onReserve(); return key;}, async settle(_ctx, key) {
       if (!settled.has(key)) {state.charges++; settled.add(key);}
       if (state.failSettlement) throw new Error("Settlement reply lost");
@@ -61,7 +63,7 @@ async function harness(t: TestContext) {
   await engine.prose.saveChapter(context, WORLD_ID, production, chapterId,
     {operationId: "fixture-prose", baseHash: before.hash, body: "The little robot planted a glowing flower beside the harbour."});
   const chapter = await engine.prose.readChapter(context, WORLD_ID, production, chapterId);
-  return {engine, state, queue, chapter, fake, async restart() {await engine.close(); engine = make(); return engine;},
+  return {engine, state, queue, chapter, fake, worldDir, async restart() {await engine.close(); engine = make(); return engine;},
     async finished() {await until(() => queue.listJobs().every(j => ["succeeded", "failed"].includes(j.status)), "story media completion"); assert.ok(queue.listJobs().every(j => j.status === "succeeded"));}};
 }
 
@@ -406,4 +408,42 @@ it("rejects multiple narration outputs before any artifact lands", async t => {
   assert.equal(h.queue.listJobs()[0]!.landedFiles?.length ?? 0, 0);
   assert.equal((await h.engine.storyMedia.reconcile(context, WORLD_ID, "extra-audio")).status, "settled");
   assert.equal(h.state.charges, 0); assert.equal(h.state.releases, 1);
+});
+
+it("refuses image pricing without a supported quantity before admission", async t => {
+  const h = await harness(t);
+  await assert.rejects(h.engine.storyMedia.illustratePage(context, WORLD_ID, production, chapterId,
+    {operationId: "image-price", model: {...image, pricing: {kind: "perSecond", microUsdPerSecond: 100}}, instruction: "Harbour", baseHash: h.chapter.hash}), /pricing/);
+  await assert.rejects(h.engine.storyMedia.reconcile(context, WORLD_ID, "image-price"), /not found/);
+});
+it("empty page output fails and releases instead of leaving a permanent hold", async t => {
+  const h = await harness(t); h.state.emptyImage = true;
+  await h.engine.storyMedia.illustratePage(context, WORLD_ID, production, chapterId,
+    {operationId: "empty-image", model: image, instruction: "Harbour", baseHash: h.chapter.hash});
+  await until(() => h.queue.listJobs().every(job => job.status === "failed"), "empty page failed");
+  assert.equal((await h.engine.storyMedia.reconcile(context, WORLD_ID, "empty-image")).status, "settled");
+  assert.equal(h.state.releases, 1);
+});
+it("an edit during asynchronous artifact policy prevents stale delivery", async t => {
+  const h = await harness(t);
+  await h.engine.storyMedia.illustratePage(context, WORLD_ID, production, chapterId,
+    {operationId: "delivery-edit", model: image, instruction: "Harbour", baseHash: h.chapter.hash});
+  await h.finished();
+  h.state.onArtifactDelivery = async () => {
+    h.state.onArtifactDelivery = async () => {};
+    await h.engine.prose.saveChapter(context, WORLD_ID, production, chapterId,
+      {operationId: "edited-in-policy", baseHash: h.chapter.hash, body: "A different story."});
+  };
+  await assert.rejects(h.engine.worlds.media(context, WORLD_ID, h.queue.listJobs()[0]!.landedFiles![0]!), /chapter changed/);
+});
+it("corrupted landed page bytes are refused before policy delivery or settlement", async t => {
+  const h = await harness(t);
+  await h.engine.storyMedia.illustratePage(context, WORLD_ID, production, chapterId,
+    {operationId: "corrupted", model: image, instruction: "Harbour", baseHash: h.chapter.hash});
+  await h.finished();
+  const id = h.queue.listJobs()[0]!.landedFiles![0]!;
+  await writeFile(join(h.worldDir, id), "not image data");
+  await assert.rejects(h.engine.worlds.media(context, WORLD_ID, id), /bytes/);
+  assert.equal((await h.engine.storyMedia.reconcile(context, WORLD_ID, "corrupted")).status, "held");
+  assert.equal(h.state.charges, 0);
 });

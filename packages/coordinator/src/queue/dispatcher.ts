@@ -1423,6 +1423,10 @@ export class JobQueue {
         }
         artifacts = prepared;
       }
+      if (job.target.kind === "story-page-illustration" && artifacts.length === 0) {
+        await this.terminalize(job, "failed", "Page illustration returned no artifacts.", undefined, "transient");
+        return;
+      }
       if (job.target.kind === "story-chapter-narration" && artifacts.length !== 1) {
         await this.terminalize(job, "failed", "Chapter narration requires exactly one complete audio artifact.", undefined, "transient");
         return;
