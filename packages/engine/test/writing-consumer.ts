@@ -1,4 +1,5 @@
-import { createEngine, type EngineContext, type WritingRuntimeFactory, type WritingResult, type ProseManuscript } from "@arke-studio/engine";
+import { createEngine, type EngineContext, type WritingRuntimeFactory, type WritingResult, type ProseManuscript,
+  type PageIllustrationInput, type ChapterNarrationInput } from "@arke-studio/engine";
 declare const engine: ReturnType<typeof createEngine>;
 declare const context: EngineContext;
 declare const runtime: WritingRuntimeFactory;
@@ -14,3 +15,12 @@ async function writingJourney() {
   return { manuscript, cancelled, runtime };
 }
 void writingJourney;
+
+async function mediaJourney(page: PageIllustrationInput, narration: ChapterNarrationInput) {
+  const image = await engine.storyMedia.illustratePage(context, "world", "story", "chapter", page);
+  const audio = await engine.storyMedia.narrateChapter(context, "world", "story", "chapter", narration);
+  const progress = await engine.storyMedia.reconcile(context, "world", narration.operationId);
+  const cancelled = await engine.storyMedia.cancel(context, "world", narration.operationId);
+  return {image, audio, progress, cancelled};
+}
+void mediaJourney;

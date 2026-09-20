@@ -209,6 +209,21 @@ it("an enqueue response lost after durable admission cannot blindly submit again
   assert.equal(h.state.charges + h.state.releases, 0);
 });
 
+it("authority loss after partial admission retains the admitted job receipt", async t => {
+  const h = await harness(t);
+  const enqueue = h.queue.enqueue.bind(h.queue);
+  h.queue.enqueue = async input => {const job = await enqueue(input); h.state.revoked = true; return job;};
+  const input = {operationId: "partial-authority", sheetId: "maren-kest", model: FAL_MODELS[0]!, prompt: "Happy",
+    count: 2, identityReferences: [], generationKey: "image"};
+  const result = await h.engine.illustrations.generate(parent, WORLD_ID, input);
+  assert.equal(result.needsReconciliation, true);
+  assert.equal(result.jobIds.length, 1);
+  assert.equal(result.failures.length, 1);
+  h.state.revoked = false;
+  assert.deepEqual(await (await h.restart()).illustrations.generate(parent, WORLD_ID, input), result);
+  assert.equal(h.state.releases, 0);
+});
+
 it("a background authoring call uses its named world while Studio has another world selected", async t => {
   const h = await harness(t);
   const other = await h.provider.createWorld({ name: "Another world" });

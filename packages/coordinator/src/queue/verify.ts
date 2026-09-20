@@ -442,6 +442,14 @@ export function imageFormatOf(data: Uint8Array): ImageFormat | null {
   return null;
 }
 
+/** Verified container format, independent of equivalent provider MIME aliases. */
+export function audioFormatOf(data: Uint8Array): "wav" | "mp3" | "flac" | null {
+  if (wavProblem(data) === null) return "wav";
+  if (flacProblem(data) === null) return "flac";
+  if (mp3Ok(data) === null) return "mp3";
+  return null;
+}
+
 /** Null when sound; otherwise the reason the artifact must not land (R-13). */
 export function verifyArtifact(artifact: VerifiableArtifact): string | null {
   if (artifact.data.length === 0) return "empty download";

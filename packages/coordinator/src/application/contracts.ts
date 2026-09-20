@@ -15,7 +15,7 @@ export interface EngineContext {
 export type EngineAction = "read" | "propose" | "accept" | "discard" | "generate" | "media" |
   "production-create" | "chapter-create" | "chapter-save" | "chapter-draft";
 export interface EngineResource { worldId: string; proposalId?: string; sheetId?: string; artifactId?: string;
-  productionId?: string; chapterId?: string }
+  productionId?: string; chapterId?: string; mediaKind?: "image" | "speech"; sourceHash?: string }
 export interface DeliveryContent { kind: "world" | "proposal" | "job" | "artifact" | "production" | "chapter"; id: string; sha256: string }
 
 /** Exact output approved before the durable financial decision. */
@@ -94,6 +94,8 @@ export interface EngineOperationStore {
 export interface EngineQueue {
   enqueue(input: EnqueueInput): Promise<Job>;
   jobs(): readonly Job[];
+  /** Optional for existing hosts. Media cancellation refuses explicitly when absent. */
+  cancel?(jobId: string): Promise<void>;
 }
 export interface EngineMutation { operationId: string; expectedRevision?: string }
 export interface EngineReceipt<T> { operationKey: string; revision: string; value: T }

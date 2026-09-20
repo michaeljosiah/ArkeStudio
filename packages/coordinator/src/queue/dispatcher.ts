@@ -26,7 +26,7 @@ import { toExtendedLength } from "../world/paths.js";
 import { describeCoordinatorError } from "../errors/user-message.js";
 import { backoffMs, classifyError, isRateLimit, type FailureClass } from "./classify.js";
 import { JobJournal, type JobStateStore } from "./journal.js";
-import { imageFormatOf, verifyArtifact } from "./verify.js";
+import { audioFormatOf, imageFormatOf, verifyArtifact } from "./verify.js";
 import { atomicWriteFile } from "../world/atomic.js";
 
 /**
@@ -267,6 +267,7 @@ const FORMAT_PRESERVING_IMAGE_TARGETS = new Set([
   "character-sheet",
   "character-look",
   "reference-tile",
+  "story-page-illustration",
   // The look preview may be promoted to the master look (SPEC-031 R-54); a JPEG under a
   // .png name would then be carried under a name its bytes contradict.
   "look-preview",
@@ -1253,7 +1254,7 @@ export class JobQueue {
         return;
       }
       if (poll.state === "cancelled") {
-        await this.terminalize(current, "cancelled", null, poll.costMicroUsd);
+        await this.terminalize({...current, cancellationUncertain: false}, "cancelled", null, poll.costMicroUsd);
         return;
       }
       // Only when it actually moved: a poll that sees the same step as the last one is not news,
@@ -1422,16 +1423,36 @@ export class JobQueue {
         }
         artifacts = prepared;
       }
+      if (job.target.kind === "story-page-illustration" && artifacts.length === 0) {
+        await this.terminalize(job, "failed", "Page illustration returned no artifacts.", costMicroUsd, "transient");
+        return;
+      }
+      if (job.target.kind === "story-chapter-narration" && artifacts.length !== 1) {
+        await this.terminalize(job, "failed", "Chapter narration requires exactly one complete audio artifact.", costMicroUsd, "transient");
+        return;
+      }
+      if (job.target.kind === "story-page-illustration" || job.target.kind === "story-chapter-narration") {
+        const names = artifacts.map((artifact, index) => landedName(job, artifact, index).toLowerCase());
+        const problem = new Set(names).size !== names.length ? "Story artifacts have colliding output names."
+          : artifacts.some(artifact => artifact.data.length > 32 * 1024 * 1024) ? "Story artifact exceeds the engine media read limit." : null;
+        if (problem) {
+          await this.terminalize(job, "failed", problem, costMicroUsd, "transient");
+          return;
+        }
+      }
       // Verify everything before anything lands (R-13): all-or-nothing.
       for (const artifact of artifacts) {
         const verified = verifyArtifact(artifact);
         const problem =
           verified ??
+          (job.target.kind === "story-chapter-narration" && audioFormatOf(artifact.data) !== job.params.audioFormat
+            ? "narration format differs from the requested audio format"
+            : null) ??
           (job.capability === "image" && imageFormatOf(artifact.data) === null
             ? "not a supported PNG, JPEG, or WebP image"
             : null);
         if (problem !== null) {
-          await this.terminalize(job, "failed", `artifact "${artifact.name}" failed verification: ${problem}`, undefined, "transient");
+          await this.terminalize(job, "failed", `artifact "${artifact.name}" failed verification: ${problem}`, costMicroUsd, "transient");
           return;
         }
       }
@@ -1665,7 +1686,7 @@ export class JobQueue {
       ? "Cancelled in Arke. The provider may still complete or charge for this request."
       : null;
     // A cancelled job still writes a ledger entry (R-15, D10).
-    await this.terminalize(job, "cancelled", reason);
+    await this.terminalize({...job, cancellationUncertain: outcomeMayBeRemote}, "cancelled", reason);
     this.emitQueueStatus(job.provider);
   }
 
