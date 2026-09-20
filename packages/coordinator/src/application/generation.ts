@@ -148,6 +148,8 @@ export class IllustrationApplicationService {
       jobs.some(job => !result.jobIds.includes(job.id)))) {
       return { status: "needs-reconciliation" as const, operationKey: key };
     }
+    if (!previousSettlement && jobs.some(job => job.status === "needs-reconciliation"))
+      return {status: "needs-reconciliation" as const, operationKey: key};
     if (!previousSettlement && jobs.some(job => !["succeeded", "failed", "cancelled"].includes(job.status))) {
       return { status: "pending" as const, operationKey: key };
     }

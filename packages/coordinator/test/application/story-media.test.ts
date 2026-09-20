@@ -24,7 +24,7 @@ async function harness(t: TestContext) {
   const provider = new FsWorldProvider(root); await provider.loadWorld(WORLD_ID);
   const fake = new FakeProvider({supportsIdempotencyKey: true});
   const state = {boundGenerateOnly: false, audioType: "audio/wav", boundMediaOnly: false, revoked: false, held: false, charges: 0, releases: 0, hidden: false, loseAdmissionReply: false,
-    hideJobs: false, failRelease: false, imageFormat: "png", extraImage: false, failSettlement: false, onReserve: async () => {}};
+    uncertainJobs: false, extraAudio: false, hideJobs: false, failRelease: false, imageFormat: "png", extraImage: false, failSettlement: false, onReserve: async () => {}};
   const settled = new Set<string>();
   const released = new Set<string>();
   const submit = fake.submit.bind(fake);
@@ -33,6 +33,7 @@ async function harness(t: TestContext) {
     fake.artifacts = request.params.audioFormat ? [{name: "audio.wav", contentType: state.audioType, data: wav([0, 1, 0, -1])}]
       : [{name: `page.${state.imageFormat}`, contentType: `image/${state.imageFormat}`,
         data: state.imageFormat === "jpeg" ? jpegBytes() : state.imageFormat === "webp" ? webpBytes() : pngBytes()}];
+    if (state.extraAudio) fake.artifacts.push({name: "output.mp3", contentType: "audio/wav", data: wav([0, 1, 0, -1])});
     if (state.extraImage) fake.artifacts.push({name: "output-2.png", contentType: "image/png", data: pngBytes()});
     return submit(key, request);
   };
@@ -53,7 +54,7 @@ async function harness(t: TestContext) {
   await queue.start();
   const make = () => createEngine({worlds: createLocalWorldRepository(provider), operations: new FileEngineOperationStore(join(root, "operations.jsonl")),
     policy, queue: {enqueue: async input => {const job = await queue.enqueue(input); if (state.loseAdmissionReply) throw new Error("reply lost"); return job;},
-      jobs: () => state.hideJobs ? [] : queue.listJobs(), cancel: id => queue.cancel(id)}});
+      jobs: () => state.hideJobs ? [] : queue.listJobs().map(job => state.uncertainJobs ? {...job, status: "needs-reconciliation" as const} : job), cancel: id => queue.cancel(id)}});
   let engine = make();
   t.after(async () => {queue.stopAccepting(); queue.dispose(); await queue.drain(); await engine.close(); await provider.close();});
   const before = await engine.prose.readChapter(context, WORLD_ID, production, chapterId);
@@ -387,4 +388,22 @@ it("invalid page and narration limits leave no admission to reconcile", async t 
     {operationId: "invalid-speech", model: {...speech, limits: {...speech.limits, maxPromptChars: 1}}, voiceId: "stock", baseHash: h.chapter.hash}), /will not be truncated/);
   await assert.rejects(h.engine.storyMedia.reconcile(context, WORLD_ID, "invalid-speech"), /not found/);
   assert.equal(h.queue.listJobs().length, 0);
+});
+
+it("reports a parked provider outcome as requiring reconciliation", async t => {
+  const h = await harness(t);
+  await h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId,
+    {operationId: "parked", model: speech, voiceId: "stock", baseHash: h.chapter.hash});
+  await h.finished(); h.state.uncertainJobs = true;
+  assert.equal((await h.engine.storyMedia.reconcile(context, WORLD_ID, "parked")).status, "needs-reconciliation");
+  assert.equal(h.state.charges, 0); assert.equal(h.state.releases, 0);
+});
+it("rejects multiple narration outputs before any artifact lands", async t => {
+  const h = await harness(t); h.state.extraAudio = true;
+  await h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId,
+    {operationId: "extra-audio", model: speech, voiceId: "stock", baseHash: h.chapter.hash});
+  await until(() => h.queue.listJobs().every(job => job.status === "failed"), "extra narration refused");
+  assert.equal(h.queue.listJobs()[0]!.landedFiles?.length ?? 0, 0);
+  assert.equal((await h.engine.storyMedia.reconcile(context, WORLD_ID, "extra-audio")).status, "settled");
+  assert.equal(h.state.charges, 0); assert.equal(h.state.releases, 1);
 });

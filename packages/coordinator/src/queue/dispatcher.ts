@@ -1423,6 +1423,10 @@ export class JobQueue {
         }
         artifacts = prepared;
       }
+      if (job.target.kind === "story-chapter-narration" && artifacts.length !== 1) {
+        await this.terminalize(job, "failed", "Chapter narration requires exactly one complete audio artifact.", undefined, "transient");
+        return;
+      }
       // Verify everything before anything lands (R-13): all-or-nothing.
       for (const artifact of artifacts) {
         const verified = verifyArtifact(artifact);
