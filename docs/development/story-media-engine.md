@@ -40,3 +40,5 @@ An admitted job parked in needs-reconciliation is reported as such rather than a
 Page illustration requires supported image pricing and at least one verified output. Story artifact reads verify the current bytes against their modality and requested audio format, refusing corrupted or renamed media. Source validity is checked again after asynchronous artifact delivery policy returns, serialized with chapter writes; no further delivery-policy await follows that final source check.
 
 A complete admission whose every job definitively failed or was confirmed cancelled may create and replay its zero-output release even after generation authority was withdrawn. Caller ownership, complete admission evidence and cancellation certainty remain required; successful or uncertain work does not use this exception.
+
+Provider output is checked before landing: normalized story artifact filenames must be unique, and each artifact must fit the 32 MiB local media reader limit. Refused output terminates and releases rather than leaving a running job. Any provider-reported cost is retained even when output is refused.

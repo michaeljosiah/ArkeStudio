@@ -1424,12 +1424,21 @@ export class JobQueue {
         artifacts = prepared;
       }
       if (job.target.kind === "story-page-illustration" && artifacts.length === 0) {
-        await this.terminalize(job, "failed", "Page illustration returned no artifacts.", undefined, "transient");
+        await this.terminalize(job, "failed", "Page illustration returned no artifacts.", costMicroUsd, "transient");
         return;
       }
       if (job.target.kind === "story-chapter-narration" && artifacts.length !== 1) {
-        await this.terminalize(job, "failed", "Chapter narration requires exactly one complete audio artifact.", undefined, "transient");
+        await this.terminalize(job, "failed", "Chapter narration requires exactly one complete audio artifact.", costMicroUsd, "transient");
         return;
+      }
+      if (job.target.kind === "story-page-illustration" || job.target.kind === "story-chapter-narration") {
+        const names = artifacts.map((artifact, index) => landedName(job, artifact, index).toLowerCase());
+        const problem = new Set(names).size !== names.length ? "Story artifacts have colliding output names."
+          : artifacts.some(artifact => artifact.data.length > 32 * 1024 * 1024) ? "Story artifact exceeds the engine media read limit." : null;
+        if (problem) {
+          await this.terminalize(job, "failed", problem, costMicroUsd, "transient");
+          return;
+        }
       }
       // Verify everything before anything lands (R-13): all-or-nothing.
       for (const artifact of artifacts) {
@@ -1443,7 +1452,7 @@ export class JobQueue {
             ? "not a supported PNG, JPEG, or WebP image"
             : null);
         if (problem !== null) {
-          await this.terminalize(job, "failed", `artifact "${artifact.name}" failed verification: ${problem}`, undefined, "transient");
+          await this.terminalize(job, "failed", `artifact "${artifact.name}" failed verification: ${problem}`, costMicroUsd, "transient");
           return;
         }
       }

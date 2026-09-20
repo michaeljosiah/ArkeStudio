@@ -25,7 +25,7 @@ async function harness(t: TestContext) {
   const provider = new FsWorldProvider(root); await provider.loadWorld(WORLD_ID);
   const fake = new FakeProvider({supportsIdempotencyKey: true});
   const state = {boundGenerateOnly: false, audioType: "audio/wav", boundMediaOnly: false, revoked: false, held: false, charges: 0, releases: 0, hidden: false, loseAdmissionReply: false,
-    onArtifactDelivery: async () => {}, emptyImage: false, uncertainJobs: false, extraAudio: false, hideJobs: false, failRelease: false, imageFormat: "png", extraImage: false, failSettlement: false, onReserve: async () => {}};
+    onArtifactDelivery: async () => {}, collidingImage: false, oversizedImage: false, emptyImage: false, uncertainJobs: false, extraAudio: false, hideJobs: false, failRelease: false, imageFormat: "png", extraImage: false, failSettlement: false, onReserve: async () => {}};
   const settled = new Set<string>();
   const released = new Set<string>();
   const submit = fake.submit.bind(fake);
@@ -37,6 +37,13 @@ async function harness(t: TestContext) {
     if (state.extraAudio) fake.artifacts.push({name: "output.mp3", contentType: "audio/wav", data: wav([0, 1, 0, -1])});
     if (state.extraImage) fake.artifacts.push({name: "output-2.png", contentType: "image/png", data: pngBytes()});
     if (state.emptyImage) fake.artifacts = [];
+    if (state.collidingImage) fake.artifacts.push({name: "extra.png", contentType: "image/png", data: pngBytes()}, {name: "extra.jpg", contentType: "image/png", data: pngBytes()});
+    if (state.oversizedImage) {
+      const bytes = new Uint8Array(32 * 1024 * 1024 + 1);
+      bytes.set(pngBytes());
+      bytes.set(pngBytes().slice(-12), bytes.length - 12);
+      fake.artifacts = [{name: "page.png", contentType: "image/png", data: bytes}];
+    }
     return submit(key, request);
   };
   const policy: EnginePolicy = {
@@ -402,12 +409,25 @@ it("reports a parked provider outcome as requiring reconciliation", async t => {
 });
 it("rejects multiple narration outputs before any artifact lands", async t => {
   const h = await harness(t); h.state.extraAudio = true;
+  h.fake.costMicroUsd = 123;
   await h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId,
     {operationId: "extra-audio", model: speech, voiceId: "stock", baseHash: h.chapter.hash});
   await until(() => h.queue.listJobs().every(job => job.status === "failed"), "extra narration refused");
   assert.equal(h.queue.listJobs()[0]!.landedFiles?.length ?? 0, 0);
   assert.equal((await h.engine.storyMedia.reconcile(context, WORLD_ID, "extra-audio")).status, "settled");
   assert.equal(h.state.charges, 0); assert.equal(h.state.releases, 1);
+  assert.equal(h.queue.listJobs()[0]!.providerCostMicroUsd, 123);
+});
+
+for (const issue of ["collidingImage", "oversizedImage"] as const) it(`${issue} fails before landing and releases the reservation`, async t => {
+  const h = await harness(t); h.state[issue] = true; h.fake.costMicroUsd = 456;
+  await h.engine.storyMedia.illustratePage(context, WORLD_ID, production, chapterId,
+    {operationId: issue, model: image, instruction: "Harbour", baseHash: h.chapter.hash});
+  await until(() => h.queue.listJobs().every(job => job.status === "failed"), "invalid page output refused");
+  assert.equal(h.queue.listJobs()[0]!.landedFiles?.length ?? 0, 0);
+  assert.equal(h.queue.listJobs()[0]!.providerCostMicroUsd, 456);
+  assert.equal((await h.engine.storyMedia.reconcile(context, WORLD_ID, issue)).status, "settled");
+  assert.equal(h.state.releases, 1);
 });
 
 it("refuses image pricing without a supported quantity before admission", async t => {
