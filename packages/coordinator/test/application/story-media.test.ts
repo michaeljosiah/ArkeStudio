@@ -142,7 +142,7 @@ it("cancellation uses the host queue and never grants another family authority",
     {operationId: "cancel", model: {...speech, provider: "kokoro"}, voiceId: "stock", baseHash: h.chapter.hash});
   await until(() => h.queue.listJobs().some(j => j.status === "running"), "running narration");
   assert.equal(h.queue.listJobs()[0]!.target.kind, "story-chapter-narration");
-  await assert.rejects(h.engine.storyMedia.cancel({...context, scopeId: "other"}, WORLD_ID, "cancel"), /Forbidden/);
+  await assert.rejects(h.engine.storyMedia.cancel({...context, scopeId: "other"}, WORLD_ID, "cancel"), /not found for this caller/);
   assert.equal((await h.engine.storyMedia.cancel(context, WORLD_ID, "cancel")).needsReconciliation, false);
   assert.equal(h.queue.listJobs()[0]!.status, "cancelled");
   await h.engine.prose.saveChapter(context, WORLD_ID, production, chapterId,
@@ -365,4 +365,26 @@ it("releases a provider-confirmed cancellation after restart", async t => {
   const engine = await h.restart();
   assert.equal((await engine.storyMedia.reconcile(context, WORLD_ID, "provider-cancel")).status, "settled");
   assert.equal(h.state.releases, 1); assert.equal(h.state.charges, 0);
+});
+
+
+it("rejects unsupported speech pricing before recording admission", async t => {
+  const h = await harness(t);
+  const input = {operationId: "pricing", model: {...speech, pricing: {kind: "perSecond" as const, microUsdPerSecond: 100}}, voiceId: "stock", baseHash: h.chapter.hash};
+  await assert.rejects(h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId, input), /pricing/);
+  await assert.rejects(h.engine.storyMedia.reconcile(context, WORLD_ID, "pricing"), /not found/);
+  assert.equal(h.queue.listJobs().length, 0);
+  await h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId, {...input, model: speech});
+  await h.finished();
+});
+
+it("invalid page and narration limits leave no admission to reconcile", async t => {
+  const h = await harness(t);
+  await assert.rejects(h.engine.storyMedia.illustratePage(context, WORLD_ID, production, chapterId,
+    {operationId: "invalid-page", model: {...image, limits: {...image.limits, maxPromptChars: 1}}, instruction: "A harbour", baseHash: h.chapter.hash}), /prompt limit/);
+  await assert.rejects(h.engine.storyMedia.reconcile(context, WORLD_ID, "invalid-page"), /not found/);
+  await assert.rejects(h.engine.storyMedia.narrateChapter(context, WORLD_ID, production, chapterId,
+    {operationId: "invalid-speech", model: {...speech, limits: {...speech.limits, maxPromptChars: 1}}, voiceId: "stock", baseHash: h.chapter.hash}), /will not be truncated/);
+  await assert.rejects(h.engine.storyMedia.reconcile(context, WORLD_ID, "invalid-speech"), /not found/);
+  assert.equal(h.queue.listJobs().length, 0);
 });

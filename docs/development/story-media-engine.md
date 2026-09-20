@@ -32,3 +32,5 @@ Recovery limits: page prompts are capped at 8,000 characters and 16,000 serializ
 A saved financial decision also resumes after generation permission is withdrawn, under its original caller identity. Recovery never restores delivery permission. Story-media authorization receives the durable chapter and source identity before any artifact bytes are read, supporting chapter-scoped host policies.
 
 Cancellation uses the original chapter resource for authorization. A definitive cancellation received by provider polling is recorded as confirmed and can release its reservation. Audio is compared by verified container format rather than an exact MIME label, so equivalent WAV labels remain interoperable.
+
+Story-media preparation validates and freezes the complete source-derived request before creating the admission journal row. Invalid prompt limits and unsupported speech pricing leave no uncertain operation or reservation. Narration accepts character-based or explicitly unmetered pricing; duration/token-based pricing needs a separate supported estimator. Source and authority are still rechecked after reservation and before enqueue.
