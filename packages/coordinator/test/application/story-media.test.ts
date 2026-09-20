@@ -447,3 +447,14 @@ it("corrupted landed page bytes are refused before policy delivery or settlement
   assert.equal((await h.engine.storyMedia.reconcile(context, WORLD_ID, "corrupted")).status, "held");
   assert.equal(h.state.charges, 0);
 });
+
+it("releases definitive zero-output failure after consent is revoked before reconciliation", async t => {
+  const h = await harness(t); h.state.emptyImage = true;
+  await h.engine.storyMedia.illustratePage(context, WORLD_ID, production, chapterId,
+    {operationId: "failed-then-revoked", model: image, instruction: "Harbour", baseHash: h.chapter.hash});
+  await until(() => h.queue.listJobs().every(job => job.status === "failed"), "definitive failure");
+  h.state.revoked = true;
+  const restarted = await h.restart();
+  assert.equal((await restarted.storyMedia.reconcile(context, WORLD_ID, "failed-then-revoked")).status, "settled");
+  assert.equal(h.state.releases, 1); assert.equal(h.state.charges, 0);
+});

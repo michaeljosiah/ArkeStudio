@@ -126,6 +126,26 @@ export class IllustrationApplicationService {
         jobIds: [], failures: [{index: 0, reason: "No provider work was admitted; the reservation was released."}], needsReconciliation: false});
       return {status: "settled" as const, operationKey: key, jobIds: [], deliverableJobIds: []};
     }
+    // A wholly failed/confirmed-cancelled admission cannot deliver content or incur new work.
+    // Return its unused hold even if consent was withdrawn before anyone first reconciled it.
+    const receipt = operation.result as IllustrationOutcome | undefined;
+    const uncertainCancellation = jobs.some(job => job.status === "cancelled" &&
+      (job.cancellationUncertain === true || (job.cancellationUncertain === undefined &&
+        (PROVIDERS as Record<string, {local: boolean}>)[job.provider]?.local !== true &&
+        (job.providerJobId != null || (job.attempt > 0 && job.submissionRejected !== true)))));
+    if (!previousSettlement && operation.status === "completed" && receipt?.needsReconciliation === false &&
+        jobs.length > 0 && jobs.length === receipt.jobIds.length && jobs.every(job => receipt.jobIds.includes(job.id)) &&
+        !uncertainCancellation && jobs.every(job => job.status === "failed" || job.status === "cancelled")) {
+      const fingerprint = engineHash([key, receipt.reservation]);
+      const decision = {operationKey: key, reservation: receipt.reservation, jobs: []};
+      const claim = await this.operations.store.begin({key: settlementKey, fingerprint, context, resource: operation.resource,
+        action: "generate", status: "started", result: decision});
+      if (claim.operation.fingerprint !== fingerprint || engineHash(claim.operation.result) !== engineHash(decision))
+        throw new Error("Settlement identity changed.");
+      if (claim.operation.status !== "completed") await this.operations.policy.release(context, key, receipt.reservation);
+      await this.operations.store.complete(settlementKey, fingerprint, decision);
+      return {status: "settled" as const, operationKey: key, jobIds: [], deliverableJobIds: []};
+    }
     try {
       await this.operations.policy.authorise(context, "generate", operation.resource);
     } catch (error) {

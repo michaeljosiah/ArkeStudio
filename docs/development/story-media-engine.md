@@ -38,3 +38,5 @@ Story-media preparation validates and freezes the complete source-derived reques
 An admitted job parked in needs-reconciliation is reported as such rather than as pending; polling is not a recovery decision. Chapter narration accepts exactly one complete artifact, refusing multiple outputs before landing so secondary filenames cannot change the delivered audio type.
 
 Page illustration requires supported image pricing and at least one verified output. Story artifact reads verify the current bytes against their modality and requested audio format, refusing corrupted or renamed media. Source validity is checked again after asynchronous artifact delivery policy returns, serialized with chapter writes; no further delivery-policy await follows that final source check.
+
+A complete admission whose every job definitively failed or was confirmed cancelled may create and replay its zero-output release even after generation authority was withdrawn. Caller ownership, complete admission evidence and cancellation certainty remain required; successful or uncertain work does not use this exception.
