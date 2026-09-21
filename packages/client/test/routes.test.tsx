@@ -50,16 +50,16 @@ function nestedButtons(html: string): string[] {
 }
 
 describe("screen inventory", () => {
-  it("covers the full screen inventory (63 screens)", () => {
+  it("covers the full screen inventory (62 screens)", () => {
     // The number is written three times on purpose — it is a tripwire, not a fact being derived,
     // so `SCREENS.length` on both sides would assert nothing. It does mean two branches that each
     // add a screen merge cleanly and land a count that was right for neither: #268 and #243 did
     // exactly that, and this is where it surfaced.
     // 63 with the production's own artifacts page (design 134).
     // Activity left the inventory with design turn 136: it is a panel over every screen, not one.
-    // 63 with the audiobook's door (design turn 146).
-    assert.equal(SCREENS.length, 63);
-    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 63, "screen ids are unique");
+    // 62 after removing the hosting-choice screen from startup.
+    assert.equal(SCREENS.length, 62);
+    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 62, "screen ids are unique");
   });
 
   for (const screen of SCREENS) {
@@ -79,13 +79,15 @@ describe("screen inventory", () => {
     }
   });
 
-  it("smoke-renders the startup screen", () => {
-    const html = renderAt("/starting");
+  for (const path of ["/", "/starting"]) it(`opens the video loading screen at ${path}`, () => {
+    const html = renderAt(path);
+    assert.ok(!html.includes("Launch Arke Studio"), "startup needs no launch click");
+    assert.ok(!html.includes("Arke Studio Cloud"), "startup has no hosting choice");
     // The screen that waits, by what it is rather than by a wordmark: the reel, and — with nothing
     // left to fetch — a door and a version number. The progress line, the byte counts and the
     // note about where worlds live all answered "what is it doing", which nobody is asking
     // once it is done.
-    assert.ok(html.includes('data-screen="startup"'), "/starting mounts the screen that waits");
+    assert.ok(html.includes('data-screen="startup"'), `${path} mounts the screen that waits`);
     assert.ok(html.includes("setup-reel.mp4"), "the reel plays while the runtimes come down");
     assert.ok(html.includes("Continue"), "and when it is ready, the way in");
     assert.ok(html.includes("fy-startup__version"), "with the version under it");

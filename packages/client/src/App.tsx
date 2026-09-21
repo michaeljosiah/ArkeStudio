@@ -25,7 +25,7 @@ import {
   WorldPickerScreen,
 } from "./screens/shell.js";
 import { BuildingScreen } from "./screens/building.js";
-import { LaunchScreen } from "./screens/launch.js";
+
 import { ArtDirectionProposalScreen, ArtDirectionScreen } from "./screens/art-direction.js";
 import { BenchScreen } from "./screens/bench.js";
 import { BibleScreen } from "./screens/bible.js";
@@ -265,7 +265,7 @@ export function App() {
           the sheet, not the sheet with it, so Settings stays reachable from a broken screen. */}
       <RouteErrorBoundary>
       <Routes location={inSettings ? settingsReturnPath() : location}>
-        <Route path="/" element={<LaunchScreen />} />
+        <Route path="/" element={<StartupScreen />} />
         <Route path="/starting" element={<StartupScreen />} />
         {/* The founding build's watch surface (SPEC-031 §1.8): full-bleed, no world chrome —
             the run needs its world open, and this screen is what keeps it that way. */}
