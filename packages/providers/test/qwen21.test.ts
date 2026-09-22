@@ -10,6 +10,17 @@ const recipe = comfyUiRecipeById("comfyui-qwen21-image")!;
 const base = () => "http://127.0.0.1:8189";
 const image = (n: number) => ({ name: "private-name.png", contentType: "image/png" as const, data: Uint8Array.of(137, 80, 78, 71, n) });
 
+it("a healthy Qwen worker keeps provider validation available while the primary restarts", async () => {
+  const worker = "http://127.0.0.1:8101";
+  const client = new ComfyUiClient(async url => {
+    assert.equal(url, `${worker}/system_stats`);
+    return Response.json({ system: { comfyui_version: "0.37.0" } });
+  }, () => null, undefined, undefined, undefined, undefined, undefined, undefined, undefined, () => [worker]);
+  try {
+    assert.ok((await client.validateKey()).every(probe => probe.available));
+  } finally { client.dispose(); }
+});
+
 it("Qwen submission, recovered polling, artifacts and cancellation use its own worker", async () => {
   const calls: string[] = [];
   const primary = "http://127.0.0.1:8100";

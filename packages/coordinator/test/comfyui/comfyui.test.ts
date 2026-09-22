@@ -499,6 +499,27 @@ it("download completion starts an isolated recipe worker with bundled code, with
   assert.deepEqual(stopped.sort(), ["comfyui", "comfyui-qwen"]);
 });
 
+it("an external Qwen guard is checked by bytes even when its old marker remains", async () => {
+  const world = fakeWorld();
+  world.urls.set("http://127.0.0.1:8188", { version: "0.37.0" });
+  const pin = "d".repeat(64);
+  const recipe = { ...FACTS[0]!, customNodes: [{ id: "ArkeQwen21Runtime", pinnedRef: pin }] };
+  const service = new ComfyUiEngineService(engineDeps(world, "C:/app", [recipe]));
+  const file = "C:/external/models/checkpoints/sd_xl_base_1.0.safetensors";
+  world.files.add(file);
+  world.hashes.set(file, "a".repeat(64));
+  const nodeDir = "C:/external/custom_nodes/ArkeQwen21Runtime";
+  world.files.add(nodeDir);
+  world.nodeRefs.set(nodeDir, pin);
+  world.hashes.set(`${nodeDir}/__init__.py`, pin);
+  try {
+    await service.applySettings({ ...NO_SETTINGS, engineUrl: "http://127.0.0.1:8188", modelsDir: "C:/external/models" });
+    assert.equal((await service.preflight(recipe.id)).ok, true);
+    world.hashes.set(`${nodeDir}/__init__.py`, "e".repeat(64));
+    assert.equal((await service.preflight(recipe.id)).ok, false);
+  } finally { await service.dispose(); }
+});
+
 it("an external URL is never replaced with a locally spawned profile", async () => {
   const world = fakeWorld();
   world.urls.set("http://127.0.0.1:8188", { version: "0.37.0" });

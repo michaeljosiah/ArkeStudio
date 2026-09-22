@@ -1118,9 +1118,9 @@ export class ComfyUiEngineService {
           reasonKind: "verification",
         };
       }
-      // The bundled Qwen guard is a single Python module, pinned by its actual bytes rather
-      // than a marker somebody could copy beside modified code.
-      const ref = bundled
+      // Qwen's guard is a single Python module. Verify its bytes even in an external
+      // installation, where a marker can outlive a modification to the installed code.
+      const ref = bundled || node.id === "ArkeQwen21Runtime"
         ? await this.deps.hashFile(join(nodeDir, "__init__.py"), hashSignal, true)
         : await this.deps.readNodeRef(nodeDir).catch(() => null);
       if (generation !== this.verificationGeneration) {

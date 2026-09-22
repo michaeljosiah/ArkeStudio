@@ -419,7 +419,7 @@ export class ComfyUiClient implements ProviderClient {
     const capabilities = ["image", "video", "voice-tts"] as const;
     // Not `require()`: this one answers rather than throws when nothing is configured, so it
     // reads the base itself — and therefore has to normalise it itself.
-    const raw = this.baseUrl();
+    const raw = this.baseUrl() ?? this.allBaseUrls?.()[0] ?? null;
     const base = raw === null ? null : ComfyUiClient.origin(raw);
     if (base === null) {
       return capabilities.map((capability) => ({
@@ -612,7 +612,7 @@ export class ComfyUiClient implements ProviderClient {
   /** The engine's own reclaim: unload every model it holds and hand the memory back. */
   async unload(signal?: AbortSignal): Promise<void> {
     if (this.engineLocality() === "remote") return;
-    const primary = this.baseUrl();
+    const primary = this.baseUrl() ?? this.allBaseUrls?.()[0] ?? null;
     for (const base of this.allBaseUrls?.() ?? (primary === null ? [] : [primary])) {
       const response = await this.fetchImpl(`${base}/free`, {
         method: "POST", headers: { "Content-Type": "application/json" }, redirect: "manual",
@@ -624,7 +624,7 @@ export class ComfyUiClient implements ProviderClient {
   }
 
   async residency(signal?: AbortSignal): Promise<import("@arke-studio/contracts").ModelResidency[]> {
-    const base = this.baseUrl();
+    const base = this.baseUrl() ?? this.allBaseUrls?.()[0] ?? null;
     if (base === null || this.engineLocality() === "remote") return [];
     const readings = await Promise.all((this.allBaseUrls?.() ?? [base]).map(async endpoint => {
       const response = await jsonRequest(this.fetchImpl, this.id, `${endpoint}/system_stats`, {
