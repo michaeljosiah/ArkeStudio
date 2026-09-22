@@ -5,6 +5,10 @@ import comfy_kitchen as kitchen
 
 
 def configured():
+    # ComfyUI gives an explicit enable precedence over disable; accepting both would
+    # advertise the very dynamic-loading path this profile was introduced to avoid.
+    if getattr(args, "enable_dynamic_vram", False) or getattr(args, "cpu", False):
+        return False
     return all(getattr(args, name, False) for name in (
         "disable_dynamic_vram", "disable_pinned_memory", "disable_async_offload",
         "disable_cuda_malloc",

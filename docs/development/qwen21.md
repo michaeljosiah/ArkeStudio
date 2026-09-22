@@ -50,7 +50,9 @@ the recipe remains unavailable. Under the explicit profile it selects eager kern
 generation; validation and execution recheck the flags and backend. A missing-node readiness
 result means to check this setup as well as the installed file. Arke's managed/default-path
 launcher does not silently adopt these engine-wide flags: use the URL setup. Other recipes in
-that process share its kernel and memory settings.
+that process share its kernel and memory settings. Use a dedicated Qwen engine profile;
+switch back to the ordinary engine URL for other recipes. Compatibility with other recipes
+under this profile is not established.
 
 Admission requires a 10 GB card and 30 GiB visible RAM, plus conservative free-memory floors
 of 6500 MiB VRAM and 10000 MiB RAM (rounded up from about 9972 MiB before the measured edit).
@@ -72,11 +74,21 @@ The combined settings are a workaround, not a proven root cause. Relevant upstre
 The proposed fix is not included: cache-disabled failures also occurred. Earlier multi-reference
 evaluation retained recognizable designs but missed scale and duplicated an object.
 
-The shipped graph's text-only provider smoke check completed in 141 seconds. A two-reference
+The shipped graph's text-only provider smoke check completed in 141 seconds, and its forty-step
+one-reference edit completed in 231 seconds. Both produced inspected 1024-square PNGs through
+Arke; the edit retained the reference teapot's shape and glaze while changing the setting.
+A two-reference
 candidate stalled before its first sampling step with a stack in weight transfer, so v1 accepts
 one reference and refuses a second before upload. The managed download pin is raised to the
 publisher's digest-verified 0.37.0 release (SPEC-021 R-21); its normal launcher still needs the
 explicit URL/profile setup above for Qwen. This does not update an existing user installation.
+
+A Krea compatibility check under this Qwen profile completed all sixteen sampling steps at 2K,
+but stopped progressing during VAE decoding. Two stack samples remained in the same VAE
+normalization call; the owned test engine was stopped after about four minutes without decode
+completion. This was a multitasking run, not a controlled performance comparison. It does not
+establish a Krea regression on its ordinary profile, but rules out claiming shared-profile
+compatibility from this evaluation.
 
 ## Checks
 

@@ -55,7 +55,7 @@ export const QWEN21_IMAGE: ComfyUiRecipe = {
       { file: "text_encoders/qwen3vl_8b_int8_convrot.safetensors", sha256: "8bfd0f6e12abf2d2d697ecc888e5e90b0d6741d6708f05799f53afa560452e8f", sizeMb: 9351, url: `${SOURCE}/text_encoders/qwen3vl_8b_int8_convrot.safetensors` },
       { file: "vae/qwen_image_2.1_vae_bf16.safetensors", sha256: "bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9", sizeMb: 676, url: `${SOURCE}/vae/qwen_image_2.1_vae_bf16.safetensors` },
     ],
-    customNodes: [{ id: "ArkeQwen21Runtime", pinnedRef: "6a383324bdb2e4ee68935dc4873415b6f28c288eb5907ac0a05ab0c19a3849e1" }],
+    customNodes: [{ id: "ArkeQwen21Runtime", pinnedRef: "b4045fac23ca04daf0f40c25f973f7db9d5b8a783b4bdfc15724ba7e8f6d85e3" }],
   },
   hardware: {
     minVramMb: 10240, minFreeVramMb: 6500, recommendedVramMb: 16384,
