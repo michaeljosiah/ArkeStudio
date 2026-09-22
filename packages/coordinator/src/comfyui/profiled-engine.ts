@@ -80,9 +80,8 @@ export class ProfiledComfyUiEngineService extends ComfyUiEngineService {
   }
 
   override async waitUntilReady(timeoutMs = 120_000): Promise<boolean> {
-    const primary = await super.waitUntilReady(timeoutMs);
-    if (this.worker.engineStatus().state === "starting") await this.worker.waitUntilReady(timeoutMs);
-    return primary;
+    const ready = await Promise.all([super.waitUntilReady(timeoutMs), this.worker.waitUntilReady(timeoutMs)]);
+    return ready.some(Boolean);
   }
 
   override stopManagedSupervision(): Promise<boolean> {

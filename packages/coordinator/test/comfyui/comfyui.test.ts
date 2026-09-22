@@ -455,10 +455,12 @@ it("download completion starts an isolated recipe worker with bundled code, with
   const writes = new Map<string, string>();
   deps.writeTextFile = async (path, text) => { writes.set(path, text); };
   const stopped: string[] = [];
+  const children: ChildSupervisor[] = [];
   let port = 51998;
   const makeSupervisor = deps.createSupervisor;
   deps.createSupervisor = spec => {
     const child = makeSupervisor(spec);
+    children.push(child);
     Object.assign(child, { port: ++port, stop: async () => { stopped.push(spec.id); } });
     world.urls.set(`http://127.0.0.1:${port}`, { version: "0.37.0" });
     return child;
@@ -493,6 +495,10 @@ it("download completion starts an isolated recipe worker with bundled code, with
     assert.equal((await service.preflight("qwen")).ok, false, "bundled code is verified by bytes");
     await service.reverify(["qwen"]);
     assert.equal(world.spawned.length, 2, "reverification does not kill an active worker");
+    Object.assign(children[0]!, { status: "failed" });
+    assert.equal(service.baseUrl(), null);
+    assert.ok(service.baseUrl("qwen"));
+    assert.equal(await service.waitUntilReady(50), true, "a healthy isolated worker releases startup recovery");
   } finally {
     await service.dispose();
   }
