@@ -4565,8 +4565,9 @@ export class Coordinator {
         if (!service || this.stopping) return;
         const now = service.engineIdentity();
         const spawned = now?.source === "managed" || now?.source === "user-path";
-        if (service.baseUrl() === null) this.jobQueue?.resetProviderTransport("comfyui");
-        if (spawned && service.baseUrl() === null) {
+        const reachable = service.baseUrls().length > 0;
+        if (!reachable) this.jobQueue?.resetProviderTransport("comfyui");
+        if (spawned && !reachable) {
           this.jobQueue?.blockRecovery("comfyui");
         }
         await this.jobQueue
@@ -4582,7 +4583,7 @@ export class Coordinator {
               : undefined,
           )
           .catch(() => []);
-        if (service.baseUrl() !== null) this.jobQueue?.releaseRecovery("comfyui");
+        if (reachable) this.jobQueue?.releaseRecovery("comfyui");
       });
     this.comfyUiLifecycleWork = work.catch(() => {});
     return work;

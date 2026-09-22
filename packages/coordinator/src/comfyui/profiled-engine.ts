@@ -33,7 +33,7 @@ export class ProfiledComfyUiEngineService extends ComfyUiEngineService {
     return model === this.model ? this.worker.baseUrl() : super.baseUrl();
   }
 
-  baseUrls(): readonly string[] {
+  override baseUrls(): readonly string[] {
     return [...new Set([super.baseUrl(), this.worker.baseUrl()].filter((url): url is string => url !== null))];
   }
 

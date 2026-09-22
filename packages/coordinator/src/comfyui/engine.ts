@@ -862,6 +862,12 @@ export class ComfyUiEngineService {
     }
   }
 
+  /** Healthy routes available for provider-wide lifecycle decisions. */
+  baseUrls(): readonly string[] {
+    const base = this.baseUrl();
+    return base === null ? [] : [base];
+  }
+
   /** Wait for a spawned child to settle without making coordinator startup wait on it. */
   waitUntilReady(timeoutMs = 120_000): Promise<boolean> {
     if (this.baseUrl() !== null) return Promise.resolve(true);

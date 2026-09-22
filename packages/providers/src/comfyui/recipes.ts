@@ -1015,7 +1015,7 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
     accepts: { referenceImages: 1, referenceRoles: false, startFrame: false, endFrame: false },
     limits: { maxPromptChars: 2000, resolutions: ["1024"], tiers: { "1K": "1024" }, aspects: Object.keys(QWEN21_BUCKETS), referenceSyntax: "qwen-image21" },
     pricing: { kind: "unmetered" },
-    requires: { accelerator: ["cuda"], vramMb: QWEN21_IMAGE.hardware.minVramMb, memMb: QWEN21_IMAGE.hardware.minMemMb },
+    requires: { accelerator: ["cuda"], vramMb: QWEN21_IMAGE.hardware.minVramMb, recommendedVramMb: QWEN21_IMAGE.hardware.recommendedVramMb, memMb: QWEN21_IMAGE.hardware.minMemMb },
   },
   {
     id: CLONED_VOICE.id,

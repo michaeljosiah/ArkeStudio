@@ -81,6 +81,7 @@ it("Qwen measures the CUDA adapter rather than borrowing another card's VRAM", (
   assert.equal(fitFor(row, { ...machine, accelerators: ["rocm"] }).fit, "unsupported");
   assert.equal(fitFor(row, { ...machine, accelerators: ["cuda", "rocm"], vramMbByAccelerator: { cuda: 8192, rocm: 24576 } }).fit, "insufficient");
   assert.equal(fitFor(row, { ...machine, accelerators: ["cuda"], vramMbByAccelerator: { cuda: 24576 } }).fit, "runs-well");
+  assert.equal(fitFor(row, { ...machine, accelerators: ["cuda"], vramMbByAccelerator: { cuda: 14336 } }).fit, "runs-slowly");
 });
 
 for (const count of [0, 1]) it(`Qwen dispatch with ${count} references preserves alpha, order and the authored canvas`, async () => {
