@@ -2576,8 +2576,8 @@ export class Coordinator {
               return comfyUiRecoveryDecision({
                 status: job.status,
                 engine: job.engine,
-                currentInstanceId: this.opts.comfyui?.service.instanceId() ?? null,
-                currentEngine: this.opts.comfyui?.service.engineIdentity() ?? null,
+                currentInstanceId: this.opts.comfyui?.service.instanceId(job.model) ?? null,
+                currentEngine: this.opts.comfyui?.service.engineIdentity(job.model) ?? null,
               });
             },
             // Landed-media sanitisation (SPEC-021 §2.10): strip embedded workflow metadata
@@ -4575,10 +4575,10 @@ export class Coordinator {
             (job) =>
               job.engine === undefined ||
               (job.engine.source !== "user-url" && job.engine.processEpoch === undefined) ||
-              (job.engine?.instanceId === now?.instanceId && job.engine?.processEpoch === now?.processEpoch),
+              (job.engine?.instanceId === service.engineIdentity(job.model)?.instanceId && job.engine?.processEpoch === service.engineIdentity(job.model)?.processEpoch),
             "the engine this job ran on is no longer configured — it was not resumed against the new one",
             spawned && now !== null
-              ? (job) => (job.engine?.source === "managed" || job.engine?.source === "user-path" ? now : null)
+              ? (job) => (job.engine?.source === "managed" || job.engine?.source === "user-path" ? service.engineIdentity(job.model) : null)
               : undefined,
           )
           .catch(() => []);

@@ -50,6 +50,7 @@ export interface ProviderClientDeps {
     /** A transport scoped to the engine, where loopback connection policy may differ from cloud HTTP. */
     fetch?: FetchLike;
     baseUrl: EngineBaseUrl;
+    allBaseUrls?: () => readonly string[];
     preflight: ComfyUiPreflight;
     /** Opens the engine's progress socket (SPEC-021 D16); omitted, jobs simply report no figure. */
     openSocket?: (url: string) => ProgressSocket;
@@ -151,6 +152,9 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
                 deps.comfyui!.freeVramMb,
                 deps.comfyui!.freeMemMb,
                 deps.comfyui!.locality,
+                undefined,
+                undefined,
+                deps.comfyui!.allBaseUrls,
               ),
             deps.comfyui!.fetch ?? fetchImpl,
             capture,

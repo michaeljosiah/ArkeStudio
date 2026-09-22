@@ -25,7 +25,26 @@ The reference machine is Windows, RTX 3080 10 GB and 32 GB RAM. ComfyUI 0.37.0, 
 partially modified configurations stalled. This recipe requires a conservative engine launch,
 including standard Torch kernels instead of Comfy Kitchen's optimized CUDA/Triton backends.
 
-Install the pinned runtime guard into an engine containing `main.py`:
+### Normal desktop installation
+
+Download/update the managed ComfyUI runtime in Settings, then download this recipe's weights.
+On a compatible machine Arke automatically starts a separate Qwen worker, loads its bundled
+runtime guard, and verifies the weights and executable guard bytes. No shell command, special
+URL, or manual custom-node installation is needed. Existing matching weights are reused.
+
+The worker uses the same selected portable runtime and mapped models folder, but has its own
+port, process identity and logs. Krea and the other recipes keep their ordinary launch settings.
+The workers share Arke's one ComfyUI execution lane; idle caches are released between profiles.
+Download completion activates Qwen without restarting the ordinary engine. Shutdown and runtime
+replacement stop both owned workers. The guard ships outside asar and packaging verifies it.
+
+The same automatic profile applies to a supervised portable path. An existing source checkout
+without embedded Python still uses the established URL setup described below.
+
+### Externally managed URL engines
+
+Arke cannot change the launch settings of an external server. Its owner must install the pinned
+runtime guard into an engine containing `main.py`:
 
 ```powershell
 node scripts/install-comfyui-qwen21.mjs C:/path/to/ComfyUI
@@ -48,9 +67,8 @@ If using `--disable-all-custom-nodes`, add `--whitelist-custom-nodes ArkeQwen21R
 On ordinary launches the guard changes nothing and does not register its required node, so
 the recipe remains unavailable. Under the explicit profile it selects eager kernels before
 generation; validation and execution recheck the flags and backend. A missing-node readiness
-result means to check this setup as well as the installed file. Arke's managed/default-path
-launcher does not silently adopt these engine-wide flags: use the URL setup. Other recipes in
-that process share its kernel and memory settings. Use a dedicated Qwen engine profile;
+result means to check this setup as well as the installed file. Other recipes in an external
+process share its kernel and memory settings. Use a dedicated Qwen engine profile;
 switch back to the ordinary engine URL for other recipes. Compatibility with other recipes
 under this profile is not established.
 
@@ -80,8 +98,8 @@ Arke; the edit retained the reference teapot's shape and glaze while changing th
 A two-reference
 candidate stalled before its first sampling step with a stack in weight transfer, so v1 accepts
 one reference and refuses a second before upload. The managed download pin is raised to the
-publisher's digest-verified 0.37.0 release (SPEC-021 R-21); its normal launcher still needs the
-explicit URL/profile setup above for Qwen. This does not update an existing user installation.
+publisher's digest-verified 0.37.0 release (SPEC-021 R-21). Installing the recipe starts its own
+profile automatically. An existing user installation is not upgraded silently.
 
 A Krea compatibility check under this Qwen profile completed all sixteen sampling steps at 2K,
 but stopped progressing during VAE decoding. Two stack samples remained in the same VAE
@@ -99,6 +117,7 @@ node --test scripts/test/install-comfyui-qwen21.test.mjs
 python scripts/test/qwen21-runtime.test.py
 node --import tsx packages/providers/scripts/smoke-qwen21.ts C:/path/to/ComfyUI C:/path/to/models http://127.0.0.1:8189 .dev/qwen-text
 node --import tsx packages/providers/scripts/smoke-qwen21.ts C:/path/to/ComfyUI C:/path/to/models http://127.0.0.1:8189 .dev/qwen-edit .dev/qwen-text/output-1.png
+node --import tsx apps/desktop/scripts/smoke-qwen-profile.ts C:/test-app-root C:/path/to/models .dev/qwen-managed-text
 ```
 
 Create the destination's parent first; every run requires a new destination. The smoke check
@@ -109,3 +128,6 @@ changing the recipe. Inspect images: success alone does not establish useful qua
 
 Unit coverage includes absent-reference pruning, ordered uploads, alpha wiring, bounded canvas,
 immutable graph identity, runtime/profile refusal and preservation of existing install files.
+The managed-profile smoke check expects a portable runtime under `C:/test-app-root/comfyui-runtime`;
+it starts both workers through desktop's profile definition, asserts Qwen readiness, submits
+through the routed client, and shuts down both children. It does not use the external-URL shortcut.

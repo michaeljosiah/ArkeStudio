@@ -347,6 +347,7 @@ export {
   type ComfyUiRecipeFacts,
   type EngineServiceDeps,
 } from "./comfyui/engine.js";
+export { ProfiledComfyUiEngineService } from "./comfyui/profiled-engine.js";
 export { CUSTOM_NODE_IDENTITY_FILE, readCustomNodeRef } from "./comfyui/node-ref.js";
 export { sanitizeComfyUiMedia, type SanitizeResult } from "./comfyui/sanitize.js";
 export { GrantStore, type RememberedGrant } from "./harness/grants.js";

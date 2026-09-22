@@ -15,6 +15,7 @@ import {
   type EngineServiceDeps,
 } from "../../src/comfyui/engine.js";
 import { readCustomNodeRef } from "../../src/comfyui/node-ref.js";
+import { ProfiledComfyUiEngineService } from "../../src/comfyui/profiled-engine.js";
 import { sanitizeComfyUiMedia } from "../../src/comfyui/sanitize.js";
 import { verifyArtifact } from "../../src/queue/verify.js";
 import { JobQueue, type EnqueueInput } from "../../src/queue/dispatcher.js";
@@ -443,6 +444,70 @@ function fakeWorld(): FakeEngineWorld {
 
 const NO_SETTINGS: ComfyUiSettings = { enginePath: null, engineUrl: null, modelsDir: null };
 const PROBES: RuntimeProbes = { vramMb: 10240, memMb: 32000, diskFreeMb: 100000 };
+
+it("download completion starts an isolated recipe worker with bundled code, without restarting the default engine", async () => {
+  const world = fakeWorld();
+  world.files.add("C:/app/comfyui-runtime/ComfyUI/main.py");
+  world.files.add("C:/app/comfyui-runtime/python_embeded/python.exe");
+  const nodeHash = "d".repeat(64);
+  const qwen = { ...FACTS[0]!, id: "qwen", customNodes: [{ id: "RuntimeGuard", pinnedRef: nodeHash }] };
+  const deps = engineDeps(world, "C:/app", [...FACTS, qwen]);
+  const writes = new Map<string, string>();
+  deps.writeTextFile = async (path, text) => { writes.set(path, text); };
+  const stopped: string[] = [];
+  let port = 51998;
+  const makeSupervisor = deps.createSupervisor;
+  deps.createSupervisor = spec => {
+    const child = makeSupervisor(spec);
+    Object.assign(child, { port: ++port, stop: async () => { stopped.push(spec.id); } });
+    world.urls.set(`http://127.0.0.1:${port}`, { version: "0.37.0" });
+    return child;
+  };
+  const service = new ProfiledComfyUiEngineService(deps, "qwen", {
+    id: "comfyui-qwen", args: ["--disable-dynamic-vram", "--reserve-vram", "4.5"],
+    customNodesDir: "C:/bundle/nodes", nodeRefs: { RuntimeGuard: nodeHash },
+  });
+  try {
+    await service.applySettings(NO_SETTINGS);
+    assert.equal(world.spawned.length, 1, "an uninstalled recipe does not launch a worker");
+    const primary = service.engineIdentity();
+    const file = "C:/app/comfyui-runtime/ComfyUI/models/checkpoints/sd_xl_base_1.0.safetensors";
+    world.files.add(file);
+    world.hashes.set(file, "a".repeat(64));
+    world.files.add("C:/bundle/nodes/RuntimeGuard");
+    world.hashes.set("C:/bundle/nodes/RuntimeGuard/__init__.py", nodeHash);
+    await service.reverify(["qwen"]);
+    assert.equal(world.spawned.length, 2);
+    assert.deepEqual(service.engineIdentity(), primary);
+    assert.notEqual(service.engineIdentity("qwen")!.instanceId, primary!.instanceId);
+    assert.notEqual(service.baseUrl("qwen"), service.baseUrl());
+    assert.equal(world.spawned[0]!.args!.includes("--disable-dynamic-vram"), false);
+    assert.ok(world.spawned[1]!.args!.includes("--disable-dynamic-vram"));
+    assert.ok([...writes.values()].some(text => text.includes('custom_nodes: "C:/bundle/nodes"')));
+    assert.equal((await service.status(PROBES)).recipes.find(recipe => recipe.recipeId === "qwen")!.state, "ready");
+    world.hashes.set("C:/bundle/nodes/RuntimeGuard/__init__.py", "e".repeat(64));
+    assert.equal((await service.preflight("qwen")).ok, false, "bundled code is verified by bytes");
+    await service.reverify(["qwen"]);
+    assert.equal(world.spawned.length, 2, "reverification does not kill an active worker");
+  } finally {
+    await service.dispose();
+  }
+  assert.deepEqual(stopped.sort(), ["comfyui", "comfyui-qwen"]);
+});
+
+it("an external URL is never replaced with a locally spawned profile", async () => {
+  const world = fakeWorld();
+  world.urls.set("http://127.0.0.1:8188", { version: "0.37.0" });
+  const service = new ProfiledComfyUiEngineService(engineDeps(world, "C:/app"), FACTS[0]!.id, {
+    id: "profile", args: ["--reserve-vram", "4.5"], customNodesDir: "C:/bundle/nodes", nodeRefs: {},
+  });
+  try {
+    await service.applySettings({ ...NO_SETTINGS, engineUrl: "http://127.0.0.1:8188" });
+    assert.equal(service.baseUrl(FACTS[0]!.id), "http://127.0.0.1:8188");
+    assert.deepEqual(service.engineIdentity(FACTS[0]!.id), service.engineIdentity());
+    assert.equal(world.spawned.length, 0);
+  } finally { await service.dispose(); }
+});
 
 describe("the engine service resolves, probes, and never spawns a URL (§2.2, D13)", () => {
   it("absent when nothing is configured and nothing is found, with detection offers when they exist", async () => {

@@ -10,6 +10,33 @@ const recipe = comfyUiRecipeById("comfyui-qwen21-image")!;
 const base = () => "http://127.0.0.1:8189";
 const image = (n: number) => ({ name: "private-name.png", contentType: "image/png" as const, data: Uint8Array.of(137, 80, 78, 71, n) });
 
+it("Qwen submission, recovered polling, artifacts and cancellation use its own worker", async () => {
+  const calls: string[] = [];
+  const primary = "http://127.0.0.1:8100";
+  const worker = "http://127.0.0.1:8101";
+  const makeClient = () => new ComfyUiClient(async url => {
+    calls.push(url);
+    if (url.endsWith("/free") || url.endsWith("/interrupt")) return Response.json({});
+    if (url.endsWith("/prompt")) return Response.json({ prompt_id: "qwen-job" });
+    if (url.endsWith("/queue")) return Response.json({ queue_running: [[0, "qwen-job"]], queue_pending: [] });
+    if (url.includes("/history/")) return Response.json({ "qwen-job": { outputs: { "8": { images: [{ filename: "result.png", type: "output", subfolder: "" }] } } } });
+    if (url.includes("/view?")) return new Response(Uint8Array.of(137, 80, 78, 71), { headers: { "Content-Type": "image/png" } });
+    throw new Error(`Unexpected request: ${url}`);
+  }, model => model === recipe.id ? worker : primary, async () => ({ ok: true }),
+  undefined, undefined, undefined, undefined, undefined, undefined, () => [primary, worker]);
+  const first = makeClient();
+  const recovered = makeClient();
+  try {
+    await first.submit("", { model: recipe.id, capability: "image", recipe: comfyUiRecipeIdentity(recipe), params: { prompt: "A teapot", output: { aspect: "1:1" } } });
+    await recovered.poll("", "qwen-job", { model: recipe.id });
+    await recovered.fetchArtifacts("", "qwen-job", { model: recipe.id });
+    await recovered.cancel("", "qwen-job", { model: recipe.id });
+    assert.ok(calls.includes(`${primary}/free`), "the idle sibling releases cached weights");
+    assert.ok(calls.includes(`${worker}/prompt`));
+    assert.ok(calls.filter(url => !url.endsWith("/free")).every(url => url.startsWith(worker)));
+  } finally { first.dispose(); recovered.dispose(); }
+});
+
 it("Qwen declares a separate 1K research recipe with a verified runtime dependency", async () => {
   const row = COMFYUI_MANIFEST_MODELS.find((m) => m.id === recipe.id)!;
   assert.ok(ManifestModelSchema.safeParse(row).success);
