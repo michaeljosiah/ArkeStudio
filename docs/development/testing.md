@@ -72,6 +72,9 @@ Host Node loads `better-sqlite3`; desktop uses the Electron native build through
 
 ## Local image generation
 
+Local Qwen Image 2.1 has a guarded runtime profile and an opt-in provider GPU check; see
+[Qwen setup and validation](qwen21.md). Its runtime unit tests need Python but no GPU.
+
 Local Krea 2 image generation has an opt-in GPU check and offline custom-node installer tests;
 see the [Krea 2 integration guide](krea2.md). A returned PNG must be inspected visually: provider
 success alone does not establish usable image quality.

@@ -104,3 +104,9 @@ jobs:
       # already carrying lint, types and build.
       - name: Test
         run: node scripts/ci-test.mjs ${{ matrix.shard }}/4
+
+      - name: Qwen runtime and installer checks (no GPU)
+        if: matrix.shard == 2
+        run: |
+          node --test scripts/test/install-comfyui-qwen21.test.mjs
+          python scripts/test/qwen21-runtime.test.py
