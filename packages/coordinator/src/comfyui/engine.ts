@@ -865,6 +865,7 @@ export class ComfyUiEngineService {
   /** Wait for a spawned child to settle without making coordinator startup wait on it. */
   waitUntilReady(timeoutMs = 120_000): Promise<boolean> {
     if (this.baseUrl() !== null) return Promise.resolve(true);
+    if (this.profileMissingFile !== null) return Promise.resolve(false);
     if (this.disposed || this.engineStatus().state !== "starting") return Promise.resolve(false);
     return new Promise((resolveReady) => {
       let timer: NodeJS.Timeout;

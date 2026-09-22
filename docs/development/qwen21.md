@@ -101,6 +101,11 @@ one reference and refuses a second before upload. The managed download pin is ra
 publisher's digest-verified 0.37.0 release (SPEC-021 R-21). Installing the recipe starts its own
 profile automatically. An existing user installation is not upgraded silently.
 
+A fresh download of that portable archive (PyTorch 2.13.0+cu130) also passed the managed-profile
+smoke check: desktop's supervisor started both workers, verified the bundled guard and weights,
+reported Qwen ready, and returned an inspected text image in 151 seconds on the 10 GB RTX 3080.
+This exercised automatic worker setup without installing a custom node into the runtime.
+
 A Krea compatibility check under this Qwen profile completed all sixteen sampling steps at 2K,
 but stopped progressing during VAE decoding. Two stack samples remained in the same VAE
 normalization call; the owned test engine was stopped after about four minutes without decode

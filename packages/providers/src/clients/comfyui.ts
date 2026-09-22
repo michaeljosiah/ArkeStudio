@@ -627,15 +627,15 @@ export class ComfyUiClient implements ProviderClient {
     const base = this.baseUrl();
     if (base === null || this.engineLocality() === "remote") return [];
     const readings = await Promise.all((this.allBaseUrls?.() ?? [base]).map(async endpoint => {
-    const response = await jsonRequest(this.fetchImpl, this.id, `${endpoint}/system_stats`, {
-      signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(3_000)]), redirect: "manual",
-    });
-    if (response.status !== 200) return null;
-    const device = (response.body as { devices?: Array<{ type?: string; torch_vram_total?: number }> } | null)?.devices?.[0];
-    const vram = device?.torch_vram_total;
-    const measured = typeof vram === "number" && Number.isFinite(vram) && vram >= 0;
-    // A zero CUDA reservation can mean unloaded or offloading, not processor-only inference.
-    return { state: device?.type === "cpu" ? "cpu" : measured && vram > 0 ? "gpu" : "unknown", vram: measured ? vram : null };
+      const response = await jsonRequest(this.fetchImpl, this.id, `${endpoint}/system_stats`, {
+        signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(3_000)]), redirect: "manual",
+      });
+      if (response.status !== 200) return null;
+      const device = (response.body as { devices?: Array<{ type?: string; torch_vram_total?: number }> } | null)?.devices?.[0];
+      const vram = device?.torch_vram_total;
+      const measured = typeof vram === "number" && Number.isFinite(vram) && vram >= 0;
+      // A zero CUDA reservation can mean unloaded or offloading, not processor-only inference.
+      return { state: device?.type === "cpu" ? "cpu" : measured && vram > 0 ? "gpu" : "unknown", vram: measured ? vram : null };
     }));
     if (readings.every(reading => reading === null)) return [];
     const state = readings.some(reading => reading?.state === "gpu") ? "gpu" : readings.every(reading => reading?.state === "cpu") ? "cpu" : "unknown";

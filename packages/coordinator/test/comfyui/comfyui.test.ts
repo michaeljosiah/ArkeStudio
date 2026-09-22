@@ -470,6 +470,10 @@ it("download completion starts an isolated recipe worker with bundled code, with
   try {
     await service.applySettings(NO_SETTINGS);
     assert.equal(world.spawned.length, 1, "an uninstalled recipe does not launch a worker");
+    assert.equal(await Promise.race([
+      service.waitUntilReady(1_000),
+      new Promise(resolve => setTimeout(() => resolve("delayed"), 50)),
+    ]), true, "an uninstalled recipe does not delay recovery of the primary engine");
     const primary = service.engineIdentity();
     const file = "C:/app/comfyui-runtime/ComfyUI/models/checkpoints/sd_xl_base_1.0.safetensors";
     world.files.add(file);
