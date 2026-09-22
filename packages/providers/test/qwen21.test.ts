@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { it } from "node:test";
 import { ComfyUiClient } from "../src/clients/comfyui.js";
 import { COMFYUI_MANIFEST_MODELS, comfyUiRecipeById, comfyUiRecipeIdentity, recipeTemplateDigest } from "../src/comfyui/recipes.js";
-import { ManifestModelSchema, referencePrompt } from "@arke-studio/contracts";
+import { fitFor, ManifestModelSchema, referencePrompt } from "@arke-studio/contracts";
 
 const recipe = comfyUiRecipeById("comfyui-qwen21-image")!;
 const base = () => "http://127.0.0.1:8189";
@@ -35,6 +35,14 @@ it("Qwen declares a separate 1K research recipe with a verified runtime dependen
   const changed = structuredClone(recipe);
   changed.referenceConditioning!.textOnly = ["4", 2];
   assert.notEqual(recipeTemplateDigest(changed), recipeTemplateDigest(recipe));
+});
+
+it("Qwen measures the CUDA adapter rather than borrowing another card's VRAM", () => {
+  const row = COMFYUI_MANIFEST_MODELS.find((m) => m.id === recipe.id)!;
+  const machine = { vramMb: 24576, memMb: 65536, diskFreeMb: 100000, platform: "win32" };
+  assert.equal(fitFor(row, { ...machine, accelerators: ["rocm"] }).fit, "unsupported");
+  assert.equal(fitFor(row, { ...machine, accelerators: ["cuda", "rocm"], vramMbByAccelerator: { cuda: 8192, rocm: 24576 } }).fit, "insufficient");
+  assert.equal(fitFor(row, { ...machine, accelerators: ["cuda"], vramMbByAccelerator: { cuda: 24576 } }).fit, "runs-well");
 });
 
 for (const count of [0, 1]) it(`Qwen dispatch with ${count} references preserves alpha, order and the authored canvas`, async () => {

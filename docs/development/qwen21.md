@@ -54,7 +54,7 @@ that process share its kernel and memory settings. Use a dedicated Qwen engine p
 switch back to the ordinary engine URL for other recipes. Compatibility with other recipes
 under this profile is not established.
 
-Admission requires a 10 GB card and 30 GiB visible RAM, plus conservative free-memory floors
+Admission requires a 10 GB CUDA card and 30 GiB visible RAM, plus conservative free-memory floors
 of 6500 MiB VRAM and 10000 MiB RAM (rounded up from about 9972 MiB before the measured edit).
 The provider requests idle model unloading before refusing
 a busy machine. These are admission policies, not a guarantee every prompt or reference fits.
