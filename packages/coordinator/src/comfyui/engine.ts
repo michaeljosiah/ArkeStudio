@@ -77,6 +77,8 @@ export interface EngineServiceDeps {
   registerSupervisorExitBackstop: (supervisor: ChildSupervisor) => () => void;
   /** Mints a per-process epoch without exposing a pid in job or renderer state. */
   createProcessEpoch: () => string;
+  /** A conservative process-existence probe for confirming an exited unload target. */
+  processExists?: (pid: number) => boolean;
   /**
    * Free graphics memory right now, in MB, or null where the device cannot be asked
    * (SPEC-022 §2.6). Optional: a build that cannot ask simply gates on total VRAM as before.
@@ -336,6 +338,7 @@ export class ComfyUiEngineService {
   /** Opaque identity replaced for every spawned process, including same-path restarts. */
   private currentProcessEpoch: string | null = null;
   private profileMissingFile: string | null = null;
+  private readonly endpointPids = new Map<string, number>();
   private readonly subscribers = new Set<() => void>();
   private readonly readinessWaiters = new Set<(ready: boolean) => void>();
   private disposed = false;
@@ -818,7 +821,10 @@ export class ComfyUiEngineService {
     }
     const supervisor = this.supervisor;
     if (supervisor && supervisor.status === "healthy" && supervisor.port !== null) {
-      return `http://127.0.0.1:${supervisor.port}`;
+      const url = `http://127.0.0.1:${supervisor.port}`;
+      if (supervisor.pid != null) this.endpointPids.set(url, supervisor.pid);
+      if (this.endpointPids.size > 128) this.endpointPids.delete(this.endpointPids.keys().next().value!);
+      return url;
     }
     return null;
   }
@@ -861,6 +867,16 @@ export class ComfyUiEngineService {
     } catch {
       return null;
     }
+  }
+
+  /** Only a known owned process's confirmed exit can waive a failed unload request. */
+  isManagedEndpointGone(url: string): boolean {
+    if (this.resolved.source === "user-url") return false;
+    const pid = this.endpointPids.get(url);
+    if (pid === undefined) return false;
+    if (this.deps.processExists) return !this.deps.processExists(pid);
+    try { process.kill(pid, 0); return false; }
+    catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
   }
 
   /** Healthy routes available for provider-wide lifecycle decisions. */

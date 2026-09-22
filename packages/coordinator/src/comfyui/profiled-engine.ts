@@ -38,6 +38,10 @@ export class ProfiledComfyUiEngineService extends ComfyUiEngineService {
     return [...new Set([super.baseUrl(), this.worker.baseUrl()].filter((url): url is string => url !== null))];
   }
 
+  override isManagedEndpointGone(url: string): boolean {
+    return super.isManagedEndpointGone(url) || this.worker.isManagedEndpointGone(url);
+  }
+
   override instanceId(model?: string): string | null {
     return model === this.model ? this.worker.instanceId() : super.instanceId();
   }

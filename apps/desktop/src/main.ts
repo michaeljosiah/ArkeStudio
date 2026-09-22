@@ -826,6 +826,7 @@ async function initialize(): Promise<{ port: number }> {
       fetch: comfyUiFetch,
       baseUrl: (model) => comfyUiEngine.baseUrl(model),
       allBaseUrls: () => comfyUiEngine.baseUrls(),
+      isEndpointGone: url => comfyUiEngine.isManagedEndpointGone(url),
       preflight: (recipeId) => comfyUiEngine.preflight(recipeId),
       locality: () => comfyUiEngine.engineStatus().locality,
       // The engine says what it is doing only on its socket (SPEC-021 D16). Node's own

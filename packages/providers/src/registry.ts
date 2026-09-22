@@ -51,6 +51,7 @@ export interface ProviderClientDeps {
     fetch?: FetchLike;
     baseUrl: EngineBaseUrl;
     allBaseUrls?: () => readonly string[];
+    isEndpointGone?: (url: string) => boolean;
     preflight: ComfyUiPreflight;
     /** Opens the engine's progress socket (SPEC-021 D16); omitted, jobs simply report no figure. */
     openSocket?: (url: string) => ProgressSocket;
@@ -155,6 +156,7 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
                 undefined,
                 undefined,
                 deps.comfyui!.allBaseUrls,
+                deps.comfyui!.isEndpointGone,
               ),
             deps.comfyui!.fetch ?? fetchImpl,
             capture,

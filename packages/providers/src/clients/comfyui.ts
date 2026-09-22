@@ -273,6 +273,7 @@ export class ComfyUiClient implements ProviderClient {
       }),
     private readonly now: () => number = Date.now,
     private readonly allBaseUrls?: () => readonly string[],
+    private readonly isEndpointGone?: (url: string) => boolean,
   ) {}
 
   /** Latest step count per prompt, fed by the engine's socket and read by `poll`. */
@@ -624,7 +625,7 @@ export class ComfyUiClient implements ProviderClient {
       } catch (error) {
         // A supervised process that has exited no longer holds any GPU allocations. A
         // still-advertised endpoint's failure is not evidence that its models were released.
-        if (!signal?.aborted && this.allBaseUrls && !this.allBaseUrls().includes(base)) continue;
+        if (!signal?.aborted && this.isEndpointGone?.(base) === true) continue;
         throw error;
       }
     }

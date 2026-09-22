@@ -63,13 +63,20 @@ it("GPU handoff accepts an exited sibling but still rejects a live endpoint's un
       throw new Error("connection refused");
     }
     return Response.json({});
-  }, () => primary, undefined, undefined, undefined, undefined, undefined, undefined, undefined, () => urls);
+  }, () => primary, undefined, undefined, undefined, undefined, undefined, undefined, undefined, () => urls, url => url === primary && exited);
   try {
     await client.unload();
     assert.deepEqual(calls, [`${primary}/free`, `${worker}/free`]);
     urls = [primary, worker];
     exited = false;
     await assert.rejects(client.unload(), /connection refused/);
+    urls = [worker];
+    assert.equal(urls.includes(primary), false);
+    // Health loss alone cannot prove the process released its allocations.
+    const unavailable = new ComfyUiClient(async () => { throw new Error("not released"); }, () => worker,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, () => [worker], () => false);
+    try { await assert.rejects(unavailable.unload(), /not released/); }
+    finally { unavailable.dispose(); }
   } finally { client.dispose(); }
 });
 

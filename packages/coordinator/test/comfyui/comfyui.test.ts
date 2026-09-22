@@ -456,12 +456,16 @@ it("download completion starts an isolated recipe worker with bundled code, with
   deps.writeTextFile = async (path, text) => { writes.set(path, text); };
   const stopped: string[] = [];
   const children: ChildSupervisor[] = [];
+  const livePids = new Set<number>();
+  deps.processExists = pid => livePids.has(pid);
   let port = 51998;
   const makeSupervisor = deps.createSupervisor;
   deps.createSupervisor = spec => {
     const child = makeSupervisor(spec);
     children.push(child);
     Object.assign(child, { port: ++port, stop: async () => { stopped.push(spec.id); } });
+    Object.assign(child, { pid: port });
+    livePids.add(port);
     world.urls.set(`http://127.0.0.1:${port}`, { version: "0.37.0" });
     return child;
   };
@@ -502,6 +506,10 @@ it("download completion starts an isolated recipe worker with bundled code, with
     ]), true, "the ready primary does not wait for an importing sibling");
     Object.assign(children[1]!, { status: "healthy" });
     Object.assign(children[0]!, { status: "failed" });
+    const primaryUrl = `http://127.0.0.1:${children[0]!.port}`;
+    assert.equal(service.isManagedEndpointGone(primaryUrl), false, "unhealthy is not proof of exit");
+    livePids.delete(children[0]!.pid!);
+    assert.equal(service.isManagedEndpointGone(primaryUrl), true);
     assert.equal(service.baseUrl(), null);
     assert.ok(service.baseUrl("qwen"));
     assert.equal(await service.waitUntilReady(50), true, "a healthy isolated worker releases startup recovery");
