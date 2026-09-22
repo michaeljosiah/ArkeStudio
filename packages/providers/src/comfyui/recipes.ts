@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ManifestModel, RecipeIdentity } from "@arke-studio/contracts";
 import { KREA2_IMAGE, KREA2_BUCKETS } from "./krea2-recipe.js";
+import { QWEN21_IMAGE, QWEN21_BUCKETS } from "./qwen21-recipe.js";
 import { H3_REFERENCE, H3_REFERENCE_MODEL } from "./h3-reference-recipe.js";
 
 /**
@@ -108,7 +109,7 @@ export interface ComfyUiRecipe {
   referenceImages?: ReadonlyArray<NonNullable<ComfyUiRecipe["referenceFrame"]>>;
   referenceVideos?: ReadonlyArray<NonNullable<ComfyUiRecipe["referenceFrame"]>>;
   referenceAudio?: ReadonlyArray<NonNullable<ComfyUiRecipe["referenceFrame"]>>;
-  /** Use ordinary text conditioning when no references were supplied. Both paths are authored. */
+  /** Switch an authored conditioning or latent input when no references were supplied. */
   referenceConditioning?: {
     nodes: readonly string[];
     slot: readonly [nodeId: string, inputKey: string];
@@ -127,6 +128,7 @@ export interface ComfyUiRecipe {
     unavailableReason?: string;
   };
   hardware: {
+    accelerator?: "cuda";
     /** The card-size floor: total VRAM the machine must have, or the recipe is disabled. */
     minVramMb: number;
     /**
@@ -749,7 +751,7 @@ const CLONED_VOICE: ComfyUiRecipe = {
   },
 };
 
-export const COMFYUI_RECIPES: readonly ComfyUiRecipe[] = deepFreeze([KREA2_IMAGE, DRAFT_IMAGE, DRAFT_VIDEO, H3_VIDEO, H3_VIDEO_768, H3_REFERENCE, CLONED_VOICE]);
+export const COMFYUI_RECIPES: readonly ComfyUiRecipe[] = deepFreeze([KREA2_IMAGE, QWEN21_IMAGE, DRAFT_IMAGE, DRAFT_VIDEO, H3_VIDEO, H3_VIDEO_768, H3_REFERENCE, CLONED_VOICE]);
 
 export function comfyUiRecipeById(modelId: string): ComfyUiRecipe | null {
   return COMFYUI_RECIPES.find((recipe) => recipe.id === modelId) ?? null;
@@ -934,6 +936,7 @@ export const WAN_DIMENSIONS: Record<string, { width: number; height: number }> =
 export const IMAGE_DIMENSIONS: Record<string, Record<string, { width: number; height: number }>> = {
   [DRAFT_IMAGE.id]: SDXL_BUCKETS,
   [KREA2_IMAGE.id]: KREA2_BUCKETS,
+  [QWEN21_IMAGE.id]: QWEN21_BUCKETS,
 };
 
 /**
@@ -1007,6 +1010,13 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
     },
     pricing: { kind: "unmetered" },
     requires: { vramMb: KREA2_IMAGE.hardware.minVramMb, memMb: KREA2_IMAGE.hardware.minMemMb },
+  },
+  {
+    id: QWEN21_IMAGE.id, provider: "comfyui", capability: "image", displayName: QWEN21_IMAGE.displayName,
+    accepts: { referenceImages: 1, referenceRoles: false, startFrame: false, endFrame: false },
+    limits: { maxPromptChars: 2000, resolutions: ["1024"], tiers: { "1K": "1024" }, aspects: Object.keys(QWEN21_BUCKETS), referenceSyntax: "qwen-image21" },
+    pricing: { kind: "unmetered" },
+    requires: { accelerator: ["cuda"], vramMb: QWEN21_IMAGE.hardware.minVramMb, recommendedVramMb: QWEN21_IMAGE.hardware.recommendedVramMb, memMb: QWEN21_IMAGE.hardware.minMemMb },
   },
   {
     id: CLONED_VOICE.id,

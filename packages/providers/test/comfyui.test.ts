@@ -264,7 +264,7 @@ describe("the recipe catalogue projects into the manifest like any other model",
     // the count it happened to state while the count was zero.
     for (const recipe of COMFYUI_RECIPES) {
       for (const node of recipe.requires.customNodes) {
-        assert.match(node.pinnedRef, /^[0-9a-f]{40}$/, `${recipe.id}: ${node.id} needs a commit pin`);
+        assert.match(node.pinnedRef, /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/, `${recipe.id}: ${node.id} needs a commit or content pin`);
       }
       for (const checkpoint of recipe.requires.checkpoints) {
         assert.match(checkpoint.sha256, /^[0-9a-f]{64}$/, checkpoint.file);

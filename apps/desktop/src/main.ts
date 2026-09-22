@@ -8,6 +8,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { createFfprobe, resolveFfprobe } from "./media-probe.js";
 import { createComfyUiFetch } from "./comfyui-transport.js";
 import { ComfyUiDigestCache } from "./comfyui-digest-cache.js";
+import { cudaFreeMemoryArgs, detectQwenCudaDevice, qwenEngineProfile } from "./comfyui-profiles.js";
 import { CloudProviderTransport } from "./provider-transport.js";
 import { appendFileSync, existsSync } from "node:fs";
 import { copyFile, readdir, stat, writeFile } from "node:fs/promises";
@@ -22,7 +23,7 @@ import {
   describeCodexAvailability,
   ChildLedger,
   ChildSupervisor,
-  ComfyUiEngineService,
+  ProfiledComfyUiEngineService,
   Coordinator,
   createStudioHost,
   type StudioServer,
@@ -705,11 +706,12 @@ async function initialize(): Promise<{ port: number }> {
    * One implementation, two readers: readiness asks it so a busy machine says so before Generate
    * is pressed, and the dispatch path asks it again after telling the engine to unload.
    */
-  const freeVramMb = (): Promise<number | null> =>
+  const qwenCudaDevice = await detectQwenCudaDevice();
+  const freeVramMb = (model?: string): Promise<number | null> =>
     new Promise((resolve) => {
       execFile(
         "nvidia-smi",
-        ["--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+        cudaFreeMemoryArgs(model === "comfyui-qwen21-image" && comfyUiEngine.engineStatus().source !== "user-url" ? qwenCudaDevice : null),
         { timeout: 5_000, windowsHide: true },
         (err, stdout) => {
           if (err) return resolve(null);
@@ -739,7 +741,8 @@ async function initialize(): Promise<{ port: number }> {
   const comfyUiFetch = createComfyUiFetch((url, init) => fetch(url, init));
   const comfyUiDigests = new ComfyUiDigestCache(appRoot);
 
-  const comfyUiEngine = new ComfyUiEngineService({
+  const qwenProfile = qwenEngineProfile(app.isPackaged ? join(process.resourcesPath, "comfyui-nodes") : join(repoRoot, "vendor", "comfyui"), qwenCudaDevice);
+  const comfyUiEngine = new ProfiledComfyUiEngineService({
     freeVramMb,
     freeMemMb,
     appRoot,
@@ -751,6 +754,7 @@ async function initialize(): Promise<{ port: number }> {
       minEngineVersion: recipe.engine.minVersion,
       exercisedThroughVersion: recipe.engine.exercisedThroughVersion,
       minVramMb: recipe.hardware.minVramMb,
+      ...(recipe.hardware.accelerator ? { accelerator: recipe.hardware.accelerator } : {}),
       minFreeVramMb: recipe.hardware.minFreeVramMb,
       ...(recipe.hardware.minMemMb !== undefined ? { minMemMb: recipe.hardware.minMemMb } : {}),
       ...(recipe.hardware.minFreeMemMb !== undefined ? { minFreeMemMb: recipe.hardware.minFreeMemMb } : {}),
@@ -790,7 +794,7 @@ async function initialize(): Promise<{ port: number }> {
     },
     registerSupervisorExitBackstop: (supervisor) => registerExitBackstop(supervisor),
     createProcessEpoch: () => randomUUID(),
-  });
+  }, qwenProfile.model, qwenProfile.launch);
   // Per-recipe weight entries for setup (SPEC-021 §2.4): derived from the provider layer's
   // recipe facts so the digests live in exactly one place, landing in the engine's own models
   // folder through the coordinator's external-dir resolver.
@@ -820,7 +824,9 @@ async function initialize(): Promise<{ port: number }> {
     voxaTranscribe: (input, options) => voxaClient.transcribe(input.audio, input.contentType, options),
     comfyui: {
       fetch: comfyUiFetch,
-      baseUrl: () => comfyUiEngine.baseUrl(),
+      baseUrl: (model) => comfyUiEngine.baseUrl(model),
+      allBaseUrls: () => comfyUiEngine.baseUrls(),
+      isEndpointGone: url => comfyUiEngine.isManagedEndpointGone(url),
       preflight: (recipeId) => comfyUiEngine.preflight(recipeId),
       locality: () => comfyUiEngine.engineStatus().locality,
       // The engine says what it is doing only on its socket (SPEC-021 D16). Node's own

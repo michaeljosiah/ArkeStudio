@@ -214,7 +214,7 @@ export const ModelLimitsSchema = z
      * the Krea 2 rebalance node reuses: each picture is handed to the encoder behind a
      * `Picture N:` label ahead of the prompt, so the prose has to call it that (issue 1083).
      */
-    referenceSyntax: z.enum(["minimax-h3", "picture-labels", "seedance"]).optional(),
+    referenceSyntax: z.enum(["minimax-h3", "picture-labels", "seedance", "qwen-image21"]).optional(),
     /**
      * The longest output the *reference* route will make, where it is shorter than the text
      * route's (probed 2026-08-16).

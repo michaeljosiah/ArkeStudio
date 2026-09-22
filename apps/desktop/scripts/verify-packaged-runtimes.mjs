@@ -3,10 +3,20 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { assertPeArchitecture, verifyManifest } from "./runtime-support.mjs";
 
+export function assertQwenRuntime(resources) {
+  const qwenNode = join(resources, "comfyui-nodes", "ArkeQwen21Runtime");
+  const qwenManifest = JSON.parse(readFileSync(join(qwenNode, "manifest.json"), "utf8"));
+  const qwenHash = createHash("sha256").update(readFileSync(join(qwenNode, "__init__.py"))).digest("hex");
+  if (qwenHash !== qwenManifest.commit || qwenHash !== qwenManifest.files["__init__.py"]) {
+    throw new Error("the packaged Qwen runtime guard does not match its pinned content");
+  }
+}
+
 export default async function verifyPackagedRuntimes(context) {
   const arch = context.arch === 1 ? "x64" : context.arch === 3 ? "arm64" : null;
   if (!arch) throw new Error(`unsupported Electron package architecture ${context.arch}`);
   const resources = join(context.appOutDir, "resources");
+  assertQwenRuntime(resources);
   const voxa = join(resources, "voxa");
   const espeak = join(resources, "espeak-ng");
   assertPeArchitecture(join(voxa, "voxa.exe"), arch);

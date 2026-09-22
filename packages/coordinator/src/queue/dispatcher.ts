@@ -233,6 +233,8 @@ export interface JobQueueOptions {
   acquireLocalGpu?: (job: Job, signal: AbortSignal, waiting: (reason: string | null) => void) => Promise<(() => void) | undefined>;
   /** Recovered work for this provider is not pumped until the runtime has settled. */
   awaitRecoveryReady?: (provider: string) => Promise<boolean>;
+  /** Keep a restarting model queued while healthy siblings may use the same provider lane. */
+  runtimeReady?: (job: Job) => boolean;
   baseIntervalMs?: number;
 }
 
@@ -684,6 +686,7 @@ export class JobQueue {
         continue;
       }
       const at = lane.notBefore.get(jobId) ?? 0;
+      if (this.opts.runtimeReady?.(job) === false) continue;
       if (at <= now) {
         lane.fifo.splice(i, 1);
         lane.notBefore.delete(jobId);
@@ -809,7 +812,7 @@ export class JobQueue {
   }
 
   private async runQueuedJob(job: Job): Promise<void> {
-    if (this.disposed) return;
+    if (this.disposed || this.opts.runtimeReady?.(job) === false) return;
     const client = this.opts.clients[job.provider];
     if (!client) {
       await this.terminalize({ ...job, attempt: job.attempt }, "failed", `no client for provider "${job.provider}"`);
@@ -1018,6 +1021,8 @@ export class JobQueue {
       await this.terminalize(job, "failed", "Multimedia reference preparation is unavailable.");
       return;
     }
+
+    if (this.disposed || !this.stillQueued(job) || this.opts.runtimeReady?.(job) === false) return;
 
     // Persist the physical call before I/O. A crash may overcount one authorized call, but the
     // journal can never undercount requests that may have reached a paid provider.
@@ -1920,7 +1925,6 @@ export class JobQueue {
   /** A runtime that became ready after a failed startup releases its recovered work. */
   releaseRecovery(provider: string): void {
     const lane = this.lane(provider);
-    if (!lane.recoveryBlocked) return;
     lane.recoveryBlocked = false;
     const deferred = lane.deferredRecovery.splice(0);
     for (const work of deferred) this.trackRun(work());

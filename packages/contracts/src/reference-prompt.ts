@@ -12,6 +12,8 @@ export function referencePrompt(text: string, model: ManifestModel, videos = 0, 
   return text.replace(pattern, (match: string, kind: string, index: string) => {
     const number = Number(index);
     if (syntax === "seedance") return `@${kind[0]!.toUpperCase()}${kind.slice(1).toLowerCase()}${number + (kind.toLowerCase() === "audio" ? standaloneAudioOffset : 0)}`;
+    // Qwen 2.1's tokenizer puts each image behind <imageN>, distinct from older Qwen/Krea.
+    if (syntax === "qwen-image21") return kind.toLowerCase() === "image" ? `<image${number}>` : match;
     if (syntax === "picture-labels") {
       // The Krea 2 rebalance node hands the encoder each picture behind a "Picture N:" label
       // ahead of the prompt (issue 1083), so the prose has to call it that or it names a picture

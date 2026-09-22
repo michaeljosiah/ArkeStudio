@@ -54,6 +54,9 @@ asarUnpack:
   - "**/*.node"
   - "node_modules/better-sqlite3-electron/**"
 extraResources:
+  - from: ../../vendor/comfyui/ArkeQwen21Runtime
+    to: comfyui-nodes/ArkeQwen21Runtime
+    filter: ["__init__.py", "manifest.json"]
   - from: ../../packages/client/dist
     to: client
   # Runtime preparation is a hard package prerequisite. ${arch} is expanded independently for
