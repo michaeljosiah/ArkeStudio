@@ -753,6 +753,7 @@ async function initialize(): Promise<{ port: number }> {
       minEngineVersion: recipe.engine.minVersion,
       exercisedThroughVersion: recipe.engine.exercisedThroughVersion,
       minVramMb: recipe.hardware.minVramMb,
+      ...(recipe.hardware.accelerator ? { accelerator: recipe.hardware.accelerator } : {}),
       minFreeVramMb: recipe.hardware.minFreeVramMb,
       ...(recipe.hardware.minMemMb !== undefined ? { minMemMb: recipe.hardware.minMemMb } : {}),
       ...(recipe.hardware.minFreeMemMb !== undefined ? { minFreeMemMb: recipe.hardware.minFreeMemMb } : {}),

@@ -58,7 +58,7 @@ export const QWEN21_IMAGE: ComfyUiRecipe = {
     customNodes: [{ id: "ArkeQwen21Runtime", pinnedRef: "b4045fac23ca04daf0f40c25f973f7db9d5b8a783b4bdfc15724ba7e8f6d85e3" }],
   },
   hardware: {
-    minVramMb: 10240, minFreeVramMb: 6500, recommendedVramMb: 16384,
+    accelerator: "cuda", minVramMb: 10240, minFreeVramMb: 6500, recommendedVramMb: 16384,
     minMemMb: 30720, minFreeMemMb: 10000,
     floorSource: "RTX 3080 10 GB / 32 GB Windows, ComfyUI 0.37.0 conservative profile; 1K repeated text and reference edit, about 9972 MiB RAM free before edit and 753 MiB minimum during it. Admission rounds up to 10000 MiB; see docs/development/qwen21.md.",
   },

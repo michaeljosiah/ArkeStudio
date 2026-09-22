@@ -128,6 +128,7 @@ export interface ComfyUiRecipe {
     unavailableReason?: string;
   };
   hardware: {
+    accelerator?: "cuda";
     /** The card-size floor: total VRAM the machine must have, or the recipe is disabled. */
     minVramMb: number;
     /**

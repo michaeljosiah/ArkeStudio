@@ -1471,6 +1471,26 @@ describe("readiness is one ladder with a specific reason on every rung (§2.12, 
     assert.equal((await streaming(4100)).startsWith("ready|"), true);
   });
 
+  it("mapped CUDA weights cannot borrow another accelerator's VRAM", async () => {
+    const world = fakeWorld();
+    world.urls.set("http://127.0.0.1:8188", {});
+    world.files.add("C:/models/checkpoints/sd_xl_base_1.0.safetensors");
+    world.hashes.set("C:/models/checkpoints/sd_xl_base_1.0.safetensors", "a".repeat(64));
+    const service = new ComfyUiEngineService({ ...engineDeps(world, "C:/app"),
+      recipes: [{ ...FACTS[0]!, accelerator: "cuda", minVramMb: 10240 }] });
+    try {
+      await service.applySettings({ ...NO_SETTINGS, engineUrl: "http://127.0.0.1:8188", modelsDir: "C:/models" });
+      const mixed: RuntimeProbes = { ...PROBES, vramMb: 24576, accelerators: ["cuda", "rocm"],
+        vramMbByAccelerator: { cuda: 8192, rocm: 24576 } };
+      const small = (await service.status(mixed)).recipes[0]!;
+      assert.equal(small.state, "disabled");
+      assert.match(small.reason!, /8 GB/);
+      assert.equal((await service.status({ ...mixed, vramMbByAccelerator: { cuda: 16384, rocm: 24576 } })).recipes[0]!.state, "ready");
+      assert.equal((await service.status({ ...mixed, accelerators: ["rocm"] })).recipes[0]!.state, "disabled");
+      assert.equal((await service.status({ ...mixed, vramMbByAccelerator: undefined })).recipes[0]!.state, "unknown");
+    } finally { await service.dispose(); }
+  });
+
   it("a declared memory floor is a readiness rung, because mapped weights never meet the setup gate", async () => {
     // The manifest gate only steers setup: weights already sitting in a mapped models folder
     // reach dispatch admission through this walk alone, and the H3 workload that measured 32 GB

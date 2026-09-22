@@ -35,6 +35,7 @@ export interface ComfyUiRecipeFacts {
   capability: "image" | "video" | "voice-tts";
   version: number;
   minVramMb: number;
+  accelerator?: "cuda";
   /** The busy check's floor — free VRAM, a different question from the card-size floor above. */
   minFreeVramMb: number;
   /** The measured system-memory floor, where the recipe states one — offloading spends RAM. */
@@ -1399,7 +1400,16 @@ export class ComfyUiEngineService {
     // 6 · Hardware (§2.7): both figures when measured; unknown stays unknown and dispatches (D15).
     // Desktop probes describe this computer. Applying them to a non-loopback URL would report
     // this machine's card as if it belonged to the remote engine.
-    const vram = engine.locality === "remote" ? null : (probes?.vramMb ?? null);
+    const accelerator = recipe.accelerator;
+    const families = probes?.accelerators;
+    if (engine.locality !== "remote" && accelerator && families && !families.includes(accelerator)) {
+      return disabled("vram", `Needs ${accelerator.toUpperCase()}. This machine does not report a compatible accelerator.`);
+    }
+    const localVram = accelerator
+      ? (probes?.vramMbByAccelerator?.[accelerator]
+        ?? (families?.length === 1 && families[0] === accelerator ? probes?.vramMb : null))
+      : probes?.vramMb;
+    const vram = engine.locality === "remote" ? null : (localVram ?? null);
     if (vram === null) {
       return {
         ...base,
