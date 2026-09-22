@@ -81,7 +81,7 @@ export interface EngineServiceDeps {
    * Free graphics memory right now, in MB, or null where the device cannot be asked
    * (SPEC-022 §2.6). Optional: a build that cannot ask simply gates on total VRAM as before.
    */
-  freeVramMb?: () => Promise<number | null>;
+  freeVramMb?: (model?: string) => Promise<number | null>;
   /**
    * Free system memory right now, in MB, or null where it cannot be asked (issue 846). Optional
    * for the same reason: without it a recipe's free-RAM floor is simply not checked here.

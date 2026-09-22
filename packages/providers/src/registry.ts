@@ -55,7 +55,7 @@ export interface ProviderClientDeps {
     /** Opens the engine's progress socket (SPEC-021 D16); omitted, jobs simply report no figure. */
     openSocket?: (url: string) => ProgressSocket;
     /** Free graphics memory right now, in MB, or null where the device cannot be asked. */
-    freeVramMb?: () => Promise<number | null>;
+      freeVramMb?: (model?: string) => Promise<number | null>;
     /** Free system memory right now, in MB, or null where it cannot be asked (issue 846). */
     freeMemMb?: () => Promise<number | null>;
     locality?: EngineLocality;

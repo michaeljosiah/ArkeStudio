@@ -10,18 +10,19 @@ import { ChildLedger, ChildSupervisor, ProfiledComfyUiEngineService, readCustomN
 import { COMFYUI_RECIPES, ComfyUiClient, recipeNodeClasses } from "@arke-studio/providers";
 import { comfyUiRecipeIdentity } from "../../../packages/providers/src/comfyui/recipes.js";
 import { ComfyUiDigestCache } from "../src/comfyui-digest-cache.js";
-import { qwenEngineProfile } from "../src/comfyui-profiles.js";
+import { detectQwenCudaDevice, qwenEngineProfile } from "../src/comfyui-profiles.js";
 
 const [root, models, output, reference] = process.argv.slice(2);
 if (!root || !models || !output) throw new Error("Usage: node --import tsx apps/desktop/scripts/smoke-qwen-profile.ts <app root with comfyui-runtime> <models folder> <new output folder> [reference PNG]");
 const appRoot = resolve(root);
 const destination = resolve(output);
 await mkdir(destination, { recursive: false });
-const profile = qwenEngineProfile(fileURLToPath(new URL("../../../vendor/comfyui", import.meta.url)));
+const cudaDevice = await detectQwenCudaDevice();
+const profile = qwenEngineProfile(fileURLToPath(new URL("../../../vendor/comfyui", import.meta.url)), cudaDevice);
 const cache = new ComfyUiDigestCache(appRoot);
 const ledger = new ChildLedger(join(appRoot, "run", "children.json"));
 const memory = async (field: "free" | "total") => {
-  const { stdout } = await promisify(execFile)("nvidia-smi", [`--query-gpu=memory.${field}`, "--format=csv,noheader,nounits"], { timeout: 5000, windowsHide: true });
+  const { stdout } = await promisify(execFile)("nvidia-smi", [`--query-gpu=memory.${field}`, "--format=csv,noheader,nounits", ...(cudaDevice ? ["--id", cudaDevice] : [])], { timeout: 5000, windowsHide: true });
   return Number.parseInt(stdout.trim().split(/\r?\n/)[0]!, 10);
 };
 const freeVramMb = () => memory("free");
@@ -53,6 +54,9 @@ undefined, undefined, undefined, () => service.baseUrls());
 try {
   await service.applySettings({ enginePath: null, engineUrl: null, modelsDir: resolve(models) });
   if (!(await service.waitUntilReady())) throw new Error("The managed engine did not start");
+  const deadline = Date.now() + 120_000;
+  while (service.baseUrl(profile.model) === null && Date.now() < deadline) await setTimeout(500);
+  if (service.baseUrl(profile.model) === null) throw new Error("The Qwen worker did not start");
   await service.reverify([profile.model]);
   const status = await service.status({ vramMb: await memory("total"), memMb: Math.round(totalmem() / 2 ** 20), diskFreeMb: null, accelerators: ["cuda"] });
   await writeFile(join(destination, "readiness.json"), JSON.stringify(status, null, 2));

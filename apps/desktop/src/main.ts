@@ -8,7 +8,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { createFfprobe, resolveFfprobe } from "./media-probe.js";
 import { createComfyUiFetch } from "./comfyui-transport.js";
 import { ComfyUiDigestCache } from "./comfyui-digest-cache.js";
-import { qwenEngineProfile } from "./comfyui-profiles.js";
+import { cudaFreeMemoryArgs, detectQwenCudaDevice, qwenEngineProfile } from "./comfyui-profiles.js";
 import { CloudProviderTransport } from "./provider-transport.js";
 import { appendFileSync, existsSync } from "node:fs";
 import { copyFile, readdir, stat, writeFile } from "node:fs/promises";
@@ -706,11 +706,12 @@ async function initialize(): Promise<{ port: number }> {
    * One implementation, two readers: readiness asks it so a busy machine says so before Generate
    * is pressed, and the dispatch path asks it again after telling the engine to unload.
    */
-  const freeVramMb = (): Promise<number | null> =>
+  const qwenCudaDevice = await detectQwenCudaDevice();
+  const freeVramMb = (model?: string): Promise<number | null> =>
     new Promise((resolve) => {
       execFile(
         "nvidia-smi",
-        ["--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+        cudaFreeMemoryArgs(model === "comfyui-qwen21-image" && comfyUiEngine.engineStatus().source !== "user-url" ? qwenCudaDevice : null),
         { timeout: 5_000, windowsHide: true },
         (err, stdout) => {
           if (err) return resolve(null);
@@ -740,7 +741,7 @@ async function initialize(): Promise<{ port: number }> {
   const comfyUiFetch = createComfyUiFetch((url, init) => fetch(url, init));
   const comfyUiDigests = new ComfyUiDigestCache(appRoot);
 
-  const qwenProfile = qwenEngineProfile(app.isPackaged ? join(process.resourcesPath, "comfyui-nodes") : join(repoRoot, "vendor", "comfyui"));
+  const qwenProfile = qwenEngineProfile(app.isPackaged ? join(process.resourcesPath, "comfyui-nodes") : join(repoRoot, "vendor", "comfyui"), qwenCudaDevice);
   const comfyUiEngine = new ProfiledComfyUiEngineService({
     freeVramMb,
     freeMemMb,

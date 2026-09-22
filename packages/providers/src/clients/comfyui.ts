@@ -246,7 +246,7 @@ export class ComfyUiClient implements ProviderClient {
      * the game holding the other 3 GB. Asking the device is the only honest answer, and the
      * device is the host's to ask.
      */
-    private readonly freeVramMb?: () => Promise<number | null>,
+    private readonly freeVramMb?: (model?: string) => Promise<number | null>,
     /**
      * How much system memory is free RIGHT NOW, in MB, or null where that cannot be asked
      * (issue 846). The resource offloading spends: a streaming video recipe bottoms out in RAM,
@@ -614,12 +614,19 @@ export class ComfyUiClient implements ProviderClient {
     if (this.engineLocality() === "remote") return;
     const primary = this.baseUrl() ?? this.allBaseUrls?.()[0] ?? null;
     for (const base of this.allBaseUrls?.() ?? (primary === null ? [] : [primary])) {
-      const response = await this.fetchImpl(`${base}/free`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, redirect: "manual",
-        body: JSON.stringify({ unload_models: true, free_memory: true }),
-        signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(15_000)]),
-      });
-      if (!response.ok) throw new Error("ComfyUI could not release its models. Check the ComfyUI engine and try again.");
+      try {
+        const response = await this.fetchImpl(`${base}/free`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, redirect: "manual",
+          body: JSON.stringify({ unload_models: true, free_memory: true }),
+          signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(15_000)]),
+        });
+        if (!response.ok) throw new Error("ComfyUI could not release its models. Check the ComfyUI engine and try again.");
+      } catch (error) {
+        // A supervised process that has exited no longer holds any GPU allocations. A
+        // still-advertised endpoint's failure is not evidence that its models were released.
+        if (!signal?.aborted && this.allBaseUrls && !this.allBaseUrls().includes(base)) continue;
+        throw error;
+      }
     }
   }
 
@@ -686,7 +693,7 @@ export class ComfyUiClient implements ProviderClient {
     type Room = { what: string; need: number; probe: () => Promise<number | null>; free: number | null };
     const rooms: Room[] = [];
     if (this.freeVramMb && recipe.hardware.minFreeVramMb > 0) {
-      rooms.push({ what: "graphics memory", need: recipe.hardware.minFreeVramMb, probe: this.freeVramMb, free: null });
+      rooms.push({ what: "graphics memory", need: recipe.hardware.minFreeVramMb, probe: () => this.freeVramMb!(recipe.id), free: null });
     }
     if (this.freeMemMb && (recipe.hardware.minFreeMemMb ?? 0) > 0) {
       rooms.push({ what: "memory", need: recipe.hardware.minFreeMemMb!, probe: this.freeMemMb, free: null });

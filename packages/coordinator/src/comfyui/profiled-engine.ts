@@ -9,7 +9,8 @@ export class ProfiledComfyUiEngineService extends ComfyUiEngineService {
 
   constructor(deps: EngineServiceDeps, private readonly model: string, launch: NonNullable<EngineServiceDeps["launch"]>) {
     super({ ...deps, recipes: deps.recipes.filter(recipe => recipe.id !== model) });
-    this.worker = new ComfyUiEngineService({ ...deps, recipes: deps.recipes.filter(recipe => recipe.id === model), launch });
+    this.worker = new ComfyUiEngineService({ ...deps, recipes: deps.recipes.filter(recipe => recipe.id === model), launch,
+      freeVramMb: () => deps.freeVramMb?.(model) ?? Promise.resolve(null) });
   }
 
   override subscribe(listener: () => void): () => void {

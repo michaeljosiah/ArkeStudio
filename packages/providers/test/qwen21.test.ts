@@ -23,6 +23,7 @@ it("a healthy Qwen worker keeps provider validation available while the primary 
 
 it("Qwen submission, recovered polling, artifacts and cancellation use its own worker", async () => {
   const calls: string[] = [];
+  const memoryModels: Array<string | undefined> = [];
   const primary = "http://127.0.0.1:8100";
   const worker = "http://127.0.0.1:8101";
   const makeClient = () => new ComfyUiClient(async url => {
@@ -34,7 +35,7 @@ it("Qwen submission, recovered polling, artifacts and cancellation use its own w
     if (url.includes("/view?")) return new Response(Uint8Array.of(137, 80, 78, 71), { headers: { "Content-Type": "image/png" } });
     throw new Error(`Unexpected request: ${url}`);
   }, model => model === recipe.id ? worker : primary, async () => ({ ok: true }),
-  undefined, undefined, undefined, undefined, undefined, undefined, () => [primary, worker]);
+  undefined, async model => { memoryModels.push(model); return 20000; }, undefined, undefined, undefined, undefined, () => [primary, worker]);
   const first = makeClient();
   const recovered = makeClient();
   try {
@@ -44,8 +45,32 @@ it("Qwen submission, recovered polling, artifacts and cancellation use its own w
     await recovered.cancel("", "qwen-job", { model: recipe.id });
     assert.ok(calls.includes(`${primary}/free`), "the idle sibling releases cached weights");
     assert.ok(calls.includes(`${worker}/prompt`));
+    assert.deepEqual(memoryModels, [recipe.id]);
     assert.ok(calls.filter(url => !url.endsWith("/free")).every(url => url.startsWith(worker)));
   } finally { first.dispose(); recovered.dispose(); }
+});
+
+it("GPU handoff accepts an exited sibling but still rejects a live endpoint's unload failure", async () => {
+  const primary = "http://127.0.0.1:8100";
+  const worker = "http://127.0.0.1:8101";
+  let urls = [primary, worker];
+  let exited = true;
+  const calls: string[] = [];
+  const client = new ComfyUiClient(async url => {
+    calls.push(url);
+    if (url.startsWith(primary)) {
+      if (exited) urls = [worker];
+      throw new Error("connection refused");
+    }
+    return Response.json({});
+  }, () => primary, undefined, undefined, undefined, undefined, undefined, undefined, undefined, () => urls);
+  try {
+    await client.unload();
+    assert.deepEqual(calls, [`${primary}/free`, `${worker}/free`]);
+    urls = [primary, worker];
+    exited = false;
+    await assert.rejects(client.unload(), /connection refused/);
+  } finally { client.dispose(); }
 });
 
 it("Qwen declares a separate 1K research recipe with a verified runtime dependency", async () => {
