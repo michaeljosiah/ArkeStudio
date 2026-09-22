@@ -18,7 +18,6 @@ export const QWEN21_IMAGE: ComfyUiRecipe = {
     width: { kind: "int", internal: true, required: true, min: 1024, max: 1024, bind: [["5", "width"]] },
     height: { kind: "int", internal: true, required: true, min: 1024, max: 1024, bind: [["5", "height"]] },
     reference1: { kind: "string", internal: true, maxChars: 260, bind: [["11", "image"]] },
-    reference2: { kind: "string", internal: true, maxChars: 260, bind: [["12", "image"]] },
   },
   graph: {
     "1": { class_type: "UNETLoader", inputs: { unet_name: "qwen_image_2.1_int8_convrot.safetensors", weight_dtype: "default" } },
@@ -26,7 +25,7 @@ export const QWEN21_IMAGE: ComfyUiRecipe = {
     "3": { class_type: "VAELoader", inputs: { vae_name: "qwen_image_2.1_vae_bf16.safetensors" } },
     "4": { class_type: "TextEncodeQwenImage21", inputs: {
       clip: ["2", 0], vae: ["3", 0], prompt: "", negative_prompt: "", resolution: 1024,
-      "images.image_1": ["31", 0], "images.image_2": ["32", 0],
+      "images.image_1": ["31", 0],
     } },
     "5": { class_type: "EmptyLatentImage", inputs: { width: 1024, height: 1024, batch_size: 1 } },
     "6": { class_type: "KSampler", inputs: {
@@ -38,17 +37,13 @@ export const QWEN21_IMAGE: ComfyUiRecipe = {
     "9": { class_type: "QwenImage21Cache", inputs: { model: ["1", 0], device: "off", dtype: "default" } },
     "10": { class_type: "ArkeQwen21Runtime", inputs: { model: ["9", 0] } },
     "11": { class_type: "LoadImage", inputs: { image: "" } },
-    "12": { class_type: "LoadImage", inputs: { image: "" } },
     // LoadImage separates alpha from RGB. Rejoin before encoding or transparent pixels'
     // hidden purple background becomes reference content. Crop, never stretch, to the canvas.
     "21": { class_type: "JoinImageWithAlpha", inputs: { image: ["11", 0], alpha: ["11", 1] } },
-    "22": { class_type: "JoinImageWithAlpha", inputs: { image: ["12", 0], alpha: ["12", 1] } },
     "31": { class_type: "ImageScale", inputs: { image: ["21", 0], upscale_method: "lanczos", width: 1024, height: 1024, crop: "center" } },
-    "32": { class_type: "ImageScale", inputs: { image: ["22", 0], upscale_method: "lanczos", width: 1024, height: 1024, crop: "center" } },
   },
   referenceImages: [
     { param: "reference1", nodes: ["11", "21", "31"], slot: ["4", "images.image_1"] },
-    { param: "reference2", nodes: ["12", "22", "32"], slot: ["4", "images.image_2"] },
   ],
   // Editing must sample at the encoder's first-reference size. With no reference, the
   // declared empty canvas supplies the latent; positive and negative stay on the same node.

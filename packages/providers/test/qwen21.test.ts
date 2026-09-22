@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { it } from "node:test";
 import { ComfyUiClient } from "../src/clients/comfyui.js";
 import { COMFYUI_MANIFEST_MODELS, comfyUiRecipeById, comfyUiRecipeIdentity, recipeTemplateDigest } from "../src/comfyui/recipes.js";
-import { ManifestModelSchema } from "@arke-studio/contracts";
+import { ManifestModelSchema, referencePrompt } from "@arke-studio/contracts";
 
 const recipe = comfyUiRecipeById("comfyui-qwen21-image")!;
 const base = () => "http://127.0.0.1:8189";
@@ -15,9 +15,12 @@ it("Qwen declares a separate 1K research recipe with a verified runtime dependen
   assert.ok(ManifestModelSchema.safeParse(row).success);
   assert.deepEqual(row.limits.aspects, ["1:1"]);
   assert.deepEqual(row.limits.tiers, { "1K": "1024" });
-  assert.equal(row.accepts.referenceImages, 2);
+  assert.equal(row.accepts.referenceImages, 1);
   assert.equal(COMFYUI_MANIFEST_MODELS.find((m) => m.capability === "image")!.id, "comfyui-krea2-image");
   assert.match(row.displayName, /Research/);
+  assert.equal(referencePrompt("Keep @Image 1 beside @image2; @Video 1 remains unsupported.", row), "Keep <image1> beside <image2>; @Video 1 remains unsupported.");
+  assert.equal(referencePrompt("Image 1 and Image 2", row, 0, 0, true), "<image1> and <image2>");
+  assert.equal(referencePrompt("An image 1 note without a citation", row), "An image 1 note without a citation");
   assert.equal(recipe.engine.minVersion, "0.37.0");
   assert.equal(recipe.graph["9"].inputs.device, "off");
   assert.equal(recipe.graph["7"].class_type, "VAEDecodeTiled");
@@ -34,7 +37,7 @@ it("Qwen declares a separate 1K research recipe with a verified runtime dependen
   assert.notEqual(recipeTemplateDigest(changed), recipeTemplateDigest(recipe));
 });
 
-for (const count of [0, 1, 2]) it(`Qwen dispatch with ${count} references preserves alpha, order and the authored canvas`, async () => {
+for (const count of [0, 1]) it(`Qwen dispatch with ${count} references preserves alpha, order and the authored canvas`, async () => {
   const uploads: string[] = [];
   let graph: Record<string, { class_type: string; inputs: Record<string, unknown> }> = {};
   const client = new ComfyUiClient(async (url, init) => {
@@ -83,7 +86,7 @@ it("Qwen rejects missing, excessive and unverified references before uploading",
   try {
     for (const request of [
       { params: { prompt: "x", references: ["missing.png"] } },
-      { params: { prompt: "x" }, imageReferences: [image(1), image(2), image(3)] },
+      { params: { prompt: "x" }, imageReferences: [image(1), image(2)] },
       { params: { prompt: "x" }, imageReferences: [image(1)] },
     ]) await assert.rejects(client.submit("", { model: recipe.id, capability: "image", ...request }));
     assert.equal(calls, 0);

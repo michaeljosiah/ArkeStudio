@@ -8,8 +8,8 @@ import { ComfyUiClient } from "../src/clients/comfyui.js";
 import { comfyUiRecipeById, comfyUiRecipeIdentity, recipeNodeClasses } from "../src/comfyui/recipes.js";
 
 const [engineDir, modelsDir, base, destination, ...references] = process.argv.slice(2);
-if (!engineDir || !modelsDir || !base || !destination || references.length > 2) {
-  throw new Error("Usage: node --import tsx packages/providers/scripts/smoke-qwen21.ts <engine> <models> <URL> <output directory> [reference PNG] [reference PNG]");
+if (!engineDir || !modelsDir || !base || !destination || references.length > 1) {
+  throw new Error("Usage: node --import tsx packages/providers/scripts/smoke-qwen21.ts <engine> <models> <URL> <output directory> [reference PNG]");
 }
 const recipe = comfyUiRecipeById("comfyui-qwen21-image")!;
 const target = resolve(destination);

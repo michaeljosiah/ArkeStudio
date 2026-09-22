@@ -1,7 +1,7 @@
 # Qwen Image 2.1 local recipe
 
 `comfyui-qwen21-image` implements SPEC-021 R-2, R-13 and R-16 as a separate research recipe.
-It offers 1024 × 1024 PNG images and up to two ordered references. Krea and SDXL keep their
+It offers 1024 × 1024 PNG images and one optional reference. Krea and SDXL keep their
 existing identities and defaults. The [Qwen Research License](https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE)
 permits noncommercial research and evaluation; commercial use requires separate terms. The
 model row says **Research** for that reason.
@@ -14,7 +14,8 @@ The immutable publisher revision and three SHA-256 hashes live in
 References are center-cropped to a square, then scaled to 1024 before encoding. Subjects near
 the edges can be cropped: prepare square references when framing matters. Alpha is rejoined
 after loading and preserved in PNG output. Editing uses the encoder's first-reference latent;
-text-only generation uses the declared empty canvas. Use ordinary `image 1` / `image 2` wording.
+text-only generation uses the declared empty canvas. Arke translates `@Image 1` to the native
+`<image1>` marker before prompt review and submission.
 Precise relative scale is not assured. 2K output is not offered in this version.
 
 ## Runtime setup
@@ -71,6 +72,12 @@ The combined settings are a workaround, not a proven root cause. Relevant upstre
 The proposed fix is not included: cache-disabled failures also occurred. Earlier multi-reference
 evaluation retained recognizable designs but missed scale and duplicated an object.
 
+The shipped graph's text-only provider smoke check completed in 141 seconds. A two-reference
+candidate stalled before its first sampling step with a stack in weight transfer, so v1 accepts
+one reference and refuses a second before upload. The managed download pin is raised to the
+publisher's digest-verified 0.37.0 release (SPEC-021 R-21); its normal launcher still needs the
+explicit URL/profile setup above for Qwen. This does not update an existing user installation.
+
 ## Checks
 
 ```powershell
@@ -85,7 +92,7 @@ node --import tsx packages/providers/scripts/smoke-qwen21.ts C:/path/to/ComfyUI 
 Create the destination's parent first; every run requires a new destination. The smoke check
 verifies weight and runtime-source hashes, loaded classes and engine version, then submits
 through Arke's provider client and saves the exact graph, output and report. A second reference
-PNG may follow the first. `ARKE_SMOKE_PROMPT` and `ARKE_SMOKE_SEED` vary the test without
+is refused in v1. `ARKE_SMOKE_PROMPT` and `ARKE_SMOKE_SEED` vary the test without
 changing the recipe. Inspect images: success alone does not establish useful quality.
 
 Unit coverage includes absent-reference pruning, ordered uploads, alpha wiring, bounded canvas,
