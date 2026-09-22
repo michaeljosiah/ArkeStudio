@@ -14,7 +14,7 @@ import { foldConversation } from "./fold.js";
 import { lookHasMoved } from "./look.js";
 import { canonIdsNeeded, materialiseCandidate, MaterialiseError, planIdentities } from "./materialise.js";
 import { evaluateReadiness, explainNotCarried, type NotCarried } from "./readiness.js";
-import { conversationDir, WorldChatStore } from "./store.js";
+import { ConversationSequenceError, conversationDir, WorldChatStore } from "./store.js";
 import { accountedProposalIdsOf, type Leftover, leftoversOf, openIntentOf } from "./wrapup-recovery.js";
 
 /**
@@ -660,6 +660,9 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
   }
 
   const view = foldConversation(meta.id, meta.createdAt, events).view;
+  if (view.deletionBlock === "pending-inputs") {
+    throw new WrapUpError("in-flight", "Messages are still waiting for delivery. Resolve them before wrapping up.");
+  }
   const bundle = input.store.getBundle();
   const { carried, mediaIdeas, notCarried } = evaluateReadiness(view.candidates, bundle);
 
@@ -680,15 +683,22 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
 
   // Step 1: the intent is durable before anything is reserved or written, so a crash leaves a
   // record of what was being attempted rather than an unexplained set of burned ids.
-  await log.append(
-    {
-      type: "wrapup.intent-recorded",
-      requestId: input.requestId,
-      expectedConversationSeq: input.expectedConversationSeq,
-      plannedProposalIds: [],
-    },
-    { at },
-  );
+  try {
+    await log.append(
+      {
+        type: "wrapup.intent-recorded",
+        requestId: input.requestId,
+        expectedConversationSeq: input.expectedConversationSeq,
+        plannedProposalIds: [],
+      },
+      { at, expectedSeq: lastSeq },
+    );
+  } catch (error) {
+    if (error instanceof ConversationSequenceError) {
+      throw new WrapUpError("stale", "This conversation moved on while you were looking at it. Open it again and wrap up from there.");
+    }
+    throw error;
+  }
 
   const { proposals, openChoices, threadProposalIds } = await buildAndStage({
     log,

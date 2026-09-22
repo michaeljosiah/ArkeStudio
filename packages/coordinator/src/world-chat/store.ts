@@ -207,7 +207,13 @@ export class WorldChatStore {
     const cut = raw.lastIndexOf("\n");
     const keep = cut === -1 ? "" : raw.slice(0, cut + 1);
     const tmp = join(this.dir, `.tmp-events-repair-${process.pid}`);
-    await writeFile(toExtendedLength(tmp), keep, "utf8");
+    const repaired = await open(toExtendedLength(tmp), "w");
+    try {
+      await repaired.writeFile(keep, "utf8");
+      await repaired.sync();
+    } finally {
+      await repaired.close();
+    }
     await rename(toExtendedLength(tmp), toExtendedLength(this.eventsPath));
     this.settleRepair();
     problems.push({
@@ -261,18 +267,7 @@ export class WorldChatStore {
         await mkdir(toExtendedLength(this.dir), { recursive: true });
         await this.repairTail(problems);
 
-        if (options.requestId) {
-          const existing = await this.findByRequestId(options.requestId);
-          if (existing) {
-            result = { envelope: existing, deduplicated: true };
-            return;
-          }
-        }
-
         const current = await this.inspectTail();
-        if (options.expectedSeq !== undefined && current.seq !== options.expectedSeq) {
-          throw new ConversationSequenceError(options.expectedSeq, current.seq);
-        }
         const seen = this.writer.tail;
         if (seen && (current.size !== seen.size || current.digest !== seen.digest)) {
           throw new ConversationIntegrityError({
@@ -281,6 +276,27 @@ export class WorldChatStore {
               "This conversation changed outside Arke Studio. Nothing was appended, so no record has been lost.",
             atSeq: current.seq,
           });
+        }
+
+        if (options.requestId) {
+          const existing = await this.findByRequestId(options.requestId);
+          if (existing) {
+            // A readable line may be the result of an append whose sync failed. A duplicate
+            // receipt authorises the same next side effect as a fresh one, so flush it again.
+            const handle = await open(toExtendedLength(this.eventsPath), "r+");
+            try {
+              await handle.sync();
+            } finally {
+              await handle.close();
+            }
+            this.writer.tail = current;
+            result = { envelope: existing, deduplicated: true };
+            return;
+          }
+        }
+
+        if (options.expectedSeq !== undefined && current.seq !== options.expectedSeq) {
+          throw new ConversationSequenceError(options.expectedSeq, current.seq);
         }
 
         const envelope = WorldChatEventEnvelopeSchema.parse({
