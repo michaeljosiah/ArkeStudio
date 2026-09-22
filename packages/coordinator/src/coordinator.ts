@@ -2605,6 +2605,7 @@ export class Coordinator {
                 : provider === "kokoro"
                   ? ((await this.opts.voice?.waitUntilReady?.()) ?? false)
                   : true,
+            runtimeReady: (job) => job.provider !== "comfyui" || (this.opts.comfyui?.service.baseUrl(job.model) ?? null) !== null,
           })
         : null;
     this.voiceService = opts.voice

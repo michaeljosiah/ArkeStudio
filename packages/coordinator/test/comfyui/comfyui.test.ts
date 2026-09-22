@@ -495,6 +495,12 @@ it("download completion starts an isolated recipe worker with bundled code, with
     assert.equal((await service.preflight("qwen")).ok, false, "bundled code is verified by bytes");
     await service.reverify(["qwen"]);
     assert.equal(world.spawned.length, 2, "reverification does not kill an active worker");
+    Object.assign(children[1]!, { status: "starting" });
+    assert.equal(await Promise.race([
+      service.waitUntilReady(1_000),
+      new Promise(resolve => setTimeout(() => resolve("delayed"), 50)),
+    ]), true, "the ready primary does not wait for an importing sibling");
+    Object.assign(children[1]!, { status: "healthy" });
     Object.assign(children[0]!, { status: "failed" });
     assert.equal(service.baseUrl(), null);
     assert.ok(service.baseUrl("qwen"));
@@ -1616,6 +1622,7 @@ function queueWith(
       | { ok: false; reason: string };
     providerConcurrency?: Readonly<Record<string, number>>;
     awaitRecoveryReady?: (provider: string) => Promise<boolean>;
+    runtimeReady?: (job: Job) => boolean;
   } = {},
 ): { queue: JobQueue; events: DomainEvent[]; ledger: LedgerEntry[] } {
   const events: DomainEvent[] = [];
@@ -2215,6 +2222,37 @@ describe("retiring an engine mid-flight (§2.11)", () => {
     // Terminal local work still records its zero.
     assert.equal(ledger.find((e) => e.jobId === theirs.id)!.actualSource, "local-zero");
     queue.dispose();
+  });
+
+  it("a restarting profile stays queued while a healthy sibling runs, then resumes on readiness", async () => {
+    const dir = await tempDir("arke-profile-recovery-");
+    const provider = new FakeProvider();
+    provider.pollState = "running";
+    let ready = true;
+    const { queue } = queueWith({ comfyui: provider }, join(dir, "jobs.jsonl"), dir, {
+      providerConcurrency: { comfyui: 1 },
+      runtimeReady: job => job.model !== "restarting" || ready,
+    });
+    try {
+      await queue.start();
+      const job = await queue.enqueue({ ...localInput(), model: "restarting",
+        engine: { source: "managed", instanceId: "profile", processEpoch: "old" } });
+      await until(() => queue.listJobs().find(item => item.id === job.id)?.status === "running", "first profile running");
+      ready = false;
+      await queue.failJobsForRetiredEngine("comfyui", () => false, "restarted",
+        () => ({ source: "managed", instanceId: "profile", processEpoch: "new" }));
+      assert.equal(queue.listJobs().find(item => item.id === job.id)?.status, "queued");
+      assert.equal(provider.submitCount, 1, "the replacement is not contacted before readiness");
+      const sibling = await queue.enqueue({ ...localInput(), model: "healthy" });
+      await until(() => queue.listJobs().find(item => item.id === sibling.id)?.status === "running", "healthy sibling running");
+      assert.equal(provider.submitCount, 2);
+      assert.equal(queue.listJobs().find(item => item.id === job.id)?.status, "queued");
+      await queue.cancel(sibling.id);
+      ready = true;
+      queue.releaseRecovery("comfyui");
+      await until(() => provider.submitCount === 3, "recovered profile dispatch");
+      assert.notEqual(queue.listJobs().find(item => item.id === job.id)?.status, "failed");
+    } finally { queue.dispose(); }
   });
 
   for (const sample of [
