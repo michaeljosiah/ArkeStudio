@@ -9,6 +9,8 @@ import { PublicationFileError, readPublicationFile, requirePublicationDigest } f
 
 export interface PublicationFileLimits {
   manifestBytes: number;
+  /** Capture-only bound for editable source records, which can include timeline history. */
+  recordBytes: number;
   assetBytes: number;
   totalBytes: number;
   entries: number;
@@ -16,6 +18,7 @@ export interface PublicationFileLimits {
 
 export const DEFAULT_PUBLICATION_FILE_LIMITS: Readonly<PublicationFileLimits> = Object.freeze({
   manifestBytes: 1024 * 1024,
+  recordBytes: 64 * 1024 * 1024,
   assetBytes: 32 * 1024 ** 3,
   totalBytes: 64 * 1024 ** 3,
   entries: MAX_PUBLICATION_ASSETS * 4,

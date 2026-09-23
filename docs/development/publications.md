@@ -84,7 +84,9 @@ inventory and streams every asset through SHA-256 and length validation. Links/j
 non-portable names, case aliases and unlisted files are refused. Directory enumeration is streamed
 and bounded by count and depth. Defaults cap the manifest at 1 MiB, each asset at 32 GiB, total
 package bytes at 64 GiB and directory entries at four times the contract's asset-count limit.
-Hosts can provide lower limits; actual reads/copies are also bounded by declared media lengths.
+Source capture has a separate configurable `recordBytes` bound of 64 MiB per editable record;
+timeline/history records do not inherit the small manifest limit. Hosts can tune these limits;
+actual media reads/copies are also bounded by declared media lengths.
 
 The verifier returns the parsed manifest, manifest digest, measured total bytes and canonical
 directory path. `PublicationFileError.code` distinguishes compatibility, path, limit and integrity

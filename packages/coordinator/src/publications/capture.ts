@@ -63,7 +63,7 @@ export async function capturePublicationInputs(
       signal.throwIfAborted();
       const checkRecords = async () => {
         for (const record of receipt.records) {
-          requirePublicationDigest(await readPublicationFile(store.dir, records[record.key]!, limits.manifestBytes, signal), record);
+          requirePublicationDigest(await readPublicationFile(store.dir, records[record.key]!, limits.recordBytes, signal), record);
         }
       };
       await checkRecords();
@@ -93,8 +93,8 @@ export async function capturePublicationInputs(
         requirePublicationDigest(await readPublicationFile(store.dir, media[source.key]!, source.byteLength, signal), source);
       }
       signal.throwIfAborted();
-      await store.assertOwnership();
       const fingerprint = await fingerprintPublicationCapture(receipt);
+      await store.assertOwnership();
       signal.throwIfAborted();
       return { directory, receipt, fingerprint, media: copies, dispose: discard };
     });

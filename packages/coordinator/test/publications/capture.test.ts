@@ -142,3 +142,30 @@ it("bounds copies by declared lengths even when a larger file fits the host limi
     (error: unknown) => error instanceof PublicationFileError && error.code === "limit-exceeded");
   assert.deepEqual(await readdir(f.scratch), []);
 });
+
+it("captures records larger than the package manifest limit with an independent bound", async t => {
+  const f = await fixture(t);
+  const record = JSON.stringify({ history: "x".repeat(2 * 1024 * 1024) });
+  await writeFile(join(f.world, ".cache/selection.json"), record);
+  f.request.receipt.records[0]!.sha256 = digest(record);
+  const captured = await capturePublicationInputs(f.store, f.request, f.scratch, { limits: { manifestBytes: 16 } });
+  await captured.dispose();
+  await assert.rejects(capturePublicationInputs(f.store, f.request, f.scratch, { limits: { recordBytes: 1024 } }),
+    (error: unknown) => error instanceof PublicationFileError && error.code === "limit-exceeded");
+  assert.deepEqual(await readdir(f.scratch), []);
+});
+
+it("refuses a takeover during asynchronous fingerprinting before acknowledging capture", async t => {
+  const f = await fixture(t);
+  const successor = { pid: process.pid, startedAt: "2099-01-01T00:00:00.000Z" };
+  const originalDigest = globalThis.crypto.subtle.digest.bind(globalThis.crypto.subtle);
+  t.mock.method(globalThis.crypto.subtle, "digest", async (...args: Parameters<typeof originalDigest>) => {
+    const result = await originalDigest(...args);
+    await writeFile(join(f.world, "world.lock"), JSON.stringify(successor));
+    return result;
+  });
+  await assert.rejects(capturePublicationInputs(f.store, f.request, f.scratch), WorldLockDeposedError);
+  assert.deepEqual(await readdir(f.scratch), []);
+  await assert.rejects(f.store.close(), WorldLockDeposedError);
+  assert.deepEqual(JSON.parse(await readFile(join(f.world, "world.lock"), "utf8")), successor);
+});
