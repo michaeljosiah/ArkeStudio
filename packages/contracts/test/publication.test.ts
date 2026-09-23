@@ -141,6 +141,17 @@ describe("video publication contract (SPEC-048 R-12..R-23)", () => {
     invalid(surplus, /unreferenced/);
   });
 
+  it("rejects an own __proto__ asset key instead of accepting a silently reduced inventory", () => {
+    const manifest = movie();
+    Object.defineProperty(manifest.assets, "__proto__", {
+      value: { ...manifest.assets.movie!, href: "draft.mp4" }, enumerable: true,
+    });
+    const parsed = JSON.parse(JSON.stringify(manifest));
+    assert.equal(Object.hasOwn(parsed.assets, "__proto__"), true);
+    invalid(parsed);
+    assert.equal(VideoPublicationManifestSchema.safeParse(parsed).success, false);
+  });
+
   it("requires complete hashes and safe byte counts", () => {
     for (const sha256 of ["abc", "sha256:" + digest("x"), "G".repeat(64)]) {
       const manifest = movie();

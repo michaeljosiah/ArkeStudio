@@ -298,6 +298,12 @@ export class WorldStore {
     return this.closingController.signal;
   }
 
+  /** Recheck disk ownership before acknowledging a long operation already under ownedWrite. */
+  async assertOwnership(): Promise<void> {
+    this.assertWritable();
+    await this.verifyOwnership();
+  }
+
   /**
    * Raise world.json.schemaVersion to `version` if the world is still below it (SPEC-023
    * R-23, issue #403). A no-op when the world already crossed the boundary, so every feature

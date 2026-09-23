@@ -378,3 +378,9 @@ export * from "./audio/storage.js";
 export * from "./audio/rights.js";
 export * from "./audio/dispatch-gate.js";
 export * from "./audio/transcript-comparison.js";
+export { capturePublicationInputs, type PublicationCaptureRequest, type CapturedPublicationInputs } from "./publications/capture.js";
+export {
+  verifyPublicationDirectory, DEFAULT_PUBLICATION_FILE_LIMITS,
+  type PublicationFileLimits, type VerifiedPublicationDirectory,
+} from "./publications/verify.js";
+export { PublicationFileError } from "./publications/files.js";

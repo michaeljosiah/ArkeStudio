@@ -150,6 +150,17 @@ Implemented landing directories include:
 | Render production | Encodes to `W\.cache\exports\ex_<id>.mp4`, then renames the complete file to `W\exports\<name>.mp4`. Cancel or failure removes the staged file. |
 | Export whole world | Recursively copies to `R\exports\<world>-<timestamp>\`. Includes `.history`; excludes `.index`, `.commit`, `.proposals`, `.staging`, `.cache`, `world.lock`, and temporary files. The whole copy is not atomic, so failure can leave a partial export directory. |
 
+## Publication foundation
+
+Publication foundation services (SPEC-048, issue #1228) are not yet exposed as export commands.
+`capturePublicationInputs` checks declared dependencies under the world's existing write gate and
+copies media into a unique `arke-publication-*` child of a host-provided scratch directory. It
+does not edit authored sources or create a completed edition. Cancellation/failure removes that
+child; successful callers own its `dispose()` cleanup. Abrupt process exit can leave scratch files;
+there is no publication recovery or automatic sweep yet. `verifyPublicationDirectory` is read-only
+and checks a portable directory independently of an open world. See the
+[service boundaries](development/publications.md) for ownership, limits and remaining work.
+
 ## Artifacts and extraction
 
 | Operation | Creates, changes, or removes |

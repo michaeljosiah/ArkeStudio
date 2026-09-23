@@ -1,7 +1,8 @@
-# Publication contracts
+# Publication contracts and file services
 
-The first implementation slice of SPEC-048 supplies the shared contract for a portable video
-publication. It does not yet build packages, open them in a player, or add an export command.
+The implemented foundation of SPEC-048 supplies the shared contract for a portable video
+publication, declared-source capture and directory integrity verification. It does not yet
+compile a production, build packages, open them in a player, or add an export command.
 Track the remaining work in [issue #1228](https://github.com/michaeljosiah/ArkeStudio/issues/1228).
 
 `packages/contracts/src/publication.ts` exports the video manifest schema, compatibility reader,
@@ -33,14 +34,14 @@ The compiler will mint these filenames independently of Unicode display titles. 
 URL escapes, traversal, Windows device names, trailing dots, case collisions, file/directory
 conflicts and collisions with the root `publication.json` are rejected.
 
-Successful parsing is **not package verification**. The future package reader must additionally
-bound input/extraction sizes, reject duplicate ZIP entries and escaping symlinks, verify every
-file's measured length and digest, check WebVTT timing and preflight codecs before presentation.
+Successful parsing is **not package verification**. The coordinator directory verifier below
+checks file integrity. A future ZIP reader must also bound extraction sizes and reject duplicate
+entries before extraction. WebVTT timing and codec preflight remain separate, unimplemented checks.
 The schema cannot establish those facts from a JSON description alone.
 
 ## Dependency boundary
 
-`PublicationCaptureSchema` describes a receipt from a future coherent capture operation. It holds
+`PublicationCaptureSchema` describes a dependency receipt. It holds
 hashed source records and measured media, a resolved-plan hash, settings hash, compiler identity
 and optional timeline revision. Record/media keys must be unique within their inventories.
 The receipt remains internal; only its fingerprint is public build provenance.
@@ -52,9 +53,50 @@ settings hashes; this helper does not canonicalize arbitrary JSON or read the wo
 
 Changing a selection, source bytes, resolved trim/order, settings or compiler identity must change
 the receipt even when the timeline revision stays the same. The tests exercise this distinction.
-The future coordinator capture service still has to freeze all dependencies under the world's
-coordination boundary, revalidate the receipt, and pin source bytes before rendering. Possessing a
-valid receipt does not prove that this operation took place.
+Possessing a valid receipt does not prove that the dependencies were captured or that the compiler
+declared all of them.
+
+## Coordinator file services
+
+`capturePublicationInputs(store, request, scratchRoot, options?)` in coordinator
+`src/publications/capture.ts` accepts a receipt and exact key-to-world-relative-path maps for its
+records and media. The future profile compiler must supply a complete dependency set, derived from
+the same records as its resolved plan and settings. This service does not discover dependencies,
+resolve a RenderPlan or validate the plan/settings hashes on its behalf.
+
+Under `WorldStore.ownedWrite`, capture checks the declared record hashes, copies and hashes media
+into a unique child of an existing host-owned scratch directory, then rechecks every source record
+and media file. It rechecks disk ownership before returning the receipt, fingerprint, copied media
+paths and an idempotent `dispose()` function. No returned host path belongs in a public manifest.
+App writes wait for capture; subsequent source edits do not change the copies. External file edits
+are detected by hashes and file identity/stat checks. As with world ownership, these checks are
+not an atomic filesystem fence against a process actively swapping ancestors.
+
+Caller cancellation and world close abort in-flight capture. Failure removes only its unique
+scratch child; successful callers must dispose it after consuming the copies. Files are synced
+before return, but this is temporary input storage, not a durable completion receipt or recovery
+protocol. The optional `onCopied` progress callback runs inside the world gate: it must not await
+another operation needing that gate, including `store.close()`.
+
+`verifyPublicationDirectory(directory, options?)` in `src/publications/verify.ts` runs without a
+world. It reads bounded UTF-8 JSON, rejects duplicate object keys (including escaped aliases),
+negotiates compatibility, checks the directory's exact file
+inventory and streams every asset through SHA-256 and length validation. Links/junctions,
+non-portable names, case aliases and unlisted files are refused. Directory enumeration is streamed
+and bounded by count and depth. Defaults cap the manifest at 1 MiB, each asset at 32 GiB, total
+package bytes at 64 GiB and directory entries at four times the contract's asset-count limit.
+Source capture has a separate configurable `recordBytes` bound of 64 MiB per editable record;
+timeline/history records do not inherit the small manifest limit. Hosts can tune these limits;
+actual media reads/copies are also bounded by declared media lengths.
+
+The verifier returns the parsed manifest, manifest digest, measured total bytes and canonical
+directory path. `PublicationFileError.code` distinguishes compatibility, path, limit and integrity
+refusals; ordinary filesystem errors retain their system codes. Verification grants point-in-time
+integrity, not lasting trust in an externally editable folder. The future player must pin or
+reverify inputs and validate codecs and captions before presenting them.
+Before returning, the verifier checks the inventory again and revalidates the identity, size and
+timestamps recorded for every hashed file, detecting edits to earlier assets while later ones
+were being read. The optional `onAssetVerified` callback reports each completed asset hash.
 
 Run the focused tests from `packages/contracts`:
 
@@ -62,5 +104,11 @@ Run the focused tests from `packages/contracts`:
 node --import tsx --test test/publication.test.ts
 ```
 
-Typecheck consumers when changing this exported contract. The next slice should implement capture
-and package verification before wiring an independent player or presenting a new export action.
+Run the coordinator service regressions from `packages/coordinator`:
+
+```powershell
+node --import tsx --test test/publications/*.test.ts test/world/ownership.test.ts test/world/store.test.ts
+```
+
+Typecheck consumers after changes. Next work binds capture to the production's shared RenderPlan,
+adds package writing/promotion and recovery, then wires an independent player and export action.
