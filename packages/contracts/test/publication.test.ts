@@ -85,6 +85,17 @@ describe("video publication contract (SPEC-048 R-12..R-23)", () => {
     if (!result.ok) assert.equal(result.code, "unsupported-capability");
   });
 
+  it("recognizes future schemas without assuming they retain the v1 header", () => {
+    for (const fields of [{}, { profile: { kind: "video" }, profileVersion: "next", requires: {} }]) {
+      const result = readPublicationManifest({ format: "arke-publication", schemaVersion: 2, ...fields });
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.code, "unsupported-schema");
+    }
+    invalid({ format: "arke-publication", schemaVersion: 1 });
+    invalid({ format: "other", schemaVersion: 2 });
+    invalid({ format: "arke-publication", schemaVersion: "2" });
+  });
+
   it("requires capabilities implied by content, unique track assets and at most one default", () => {
     const manifest = movie();
     manifest.requires = ["video-v1"];
