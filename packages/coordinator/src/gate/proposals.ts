@@ -34,6 +34,8 @@ import {
   type RipplePreview,
   orderedShots,
   propSlug,
+  changedSpan,
+  countWords,
 } from "@arke-studio/contracts";
 import { ripplesForCanonEntry, ripplesForSheet } from "../index-db/queries.js";
 import { atomicWriteFile, renameWithRetry, withTransientRetry } from "../world/atomic.js";
@@ -153,7 +155,19 @@ export interface MergeFormInput {
   requestId: string;
   path: string;
   expectedDraftRevision: number;
-  edit(content: string): { content: string } | { reason: string };
+  edit(content: string, proposal: Proposal): { content: string } | { reason: string };
+}
+
+export interface UpdatePassageInput {
+  proposalId: string;
+  requestId: string;
+  path: string;
+  /** The span as the screen drew it, before and after the revision. */
+  before: string;
+  after: string;
+  /** What the span becomes: the edits the reviewer kept. */
+  text: string;
+  expectedDraftRevision: number;
 }
 
 export interface ResolveOpenChoiceInput {
@@ -616,7 +630,7 @@ export class ProposalManager {
 
       const current = await this.readProposalFile(input.proposalId, input.path);
       if (current === null) return { status: "unknown-target" };
-      const edited = input.edit(current);
+      const edited = input.edit(current, proposal);
       if ("reason" in edited) return { status: "rejected", message: edited.reason };
 
       const nextManifest: Proposal = {
@@ -641,6 +655,45 @@ export class ProposalManager {
       await writeDraftRecord(dir, { ...op, state: "committing" });
       await this.commitDraft(dir, { ...op, state: "committing" });
       return { status: "updated", proposal: nextManifest };
+    });
+  }
+
+  /**
+   * Keep part of a passage revision (turn 128): the span the revision changed becomes `text`, and
+   * nothing else in the chapter moves. The span is found here, between the chapter as it stood
+   * when the passage was staged and the staged chapter, rather than taken from the screen — the
+   * screen says only what it drew, and is refused when that is not this span. The live file is
+   * the base only while its hash is the one the target was staged against; past that, the base is
+   * gone and the span cannot be placed, which is the stale proposal accept would refuse anyway.
+   */
+  async updatePassage(input: UpdatePassageInput): Promise<UpdateFieldOutcome> {
+    const live = await this.readLive(input.path);
+    return this.mergeFormEdit({
+      proposalId: input.proposalId,
+      requestId: input.requestId,
+      path: input.path,
+      expectedDraftRevision: input.expectedDraftRevision,
+      edit(content, proposal) {
+        if (proposal.kind !== "chapter-draft" || proposal.origin?.gesture !== "passage-revision") {
+          return { reason: "Only a passage revision can be kept in part." };
+        }
+        const target = proposal.targets.find((one) => one.path === input.path);
+        if (live === null || target === undefined || target.baseHash === null || sha256(live) !== target.baseHash) {
+          return { reason: "The chapter changed after this passage was proposed. Discard it and ask again." };
+        }
+        const base = MarkdownFile.parse(live).body;
+        const staged = MarkdownFile.parse(content);
+        const span = changedSpan(base, staged.body);
+        if (span === null || span.before !== input.before || span.after !== input.after) {
+          return { reason: "This passage is not the one on screen. Reload it and choose again." };
+        }
+        if (input.text === span.before) return { reason: "Nothing is kept. Discard the passage instead." };
+        const body = base.slice(0, span.start) + input.text + base.slice(span.start + span.before.length);
+        staged.setBody(body);
+        staged.setData({ words: countWords(body) });
+        if (!ChapterFrontmatterSchema.safeParse(staged.data).success) return { reason: "The chapter could not be read." };
+        return { content: staged.serialize() };
+      },
     });
   }
 

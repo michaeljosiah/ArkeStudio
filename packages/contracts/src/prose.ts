@@ -331,6 +331,100 @@ export function changedSpan(before: string, after: string): ChangedSpan | null {
   };
 }
 
+/** A passage revision in the order it reads: runs it leaves alone, and the edits between them. */
+export type PassageSegment =
+  | { kind: "same"; text: string }
+  | { kind: "edit"; index: number; before: string; after: string };
+
+/** Past this many token pairs the diff is not worth its table, and the passage is one edit. */
+const PASSAGE_DIFF_CELLS = 4_000_000;
+
+/**
+ * A passage revision taken apart into edits a reviewer can keep or refuse one at a time, as a
+ * tracked change is: words and the whitespace between them are diffed as tokens, and edits
+ * separated only by whitespace are one edit, so "big red" → "small blue" is one choice rather
+ * than two that leave "small red" on the table. Whitespace is kept exactly, so keeping every
+ * edit gives `after` and keeping none gives `before`, character for character.
+ */
+export function passageDiff(before: string, after: string): PassageSegment[] {
+  const a = before.match(/\s+|\S+/g) ?? [];
+  const b = after.match(/\s+|\S+/g) ?? [];
+  type Op = { kind: "same" | "del" | "ins"; text: string };
+  const ops: Op[] = [];
+  if (a.length * b.length > PASSAGE_DIFF_CELLS) {
+    if (before !== "") ops.push({ kind: "del", text: before });
+    if (after !== "") ops.push({ kind: "ins", text: after });
+  } else {
+    // Longest common subsequence from the ends, so the walk forward reads it off in order.
+    const width = b.length + 1;
+    const table = new Uint32Array((a.length + 1) * width);
+    for (let i = a.length - 1; i >= 0; i--) {
+      for (let j = b.length - 1; j >= 0; j--) {
+        table[i * width + j] = a[i] === b[j] ? table[(i + 1) * width + j + 1]! + 1 : Math.max(table[(i + 1) * width + j]!, table[i * width + j + 1]!);
+      }
+    }
+    let i = 0;
+    let j = 0;
+    while (i < a.length || j < b.length) {
+      if (i < a.length && j < b.length && a[i] === b[j]) {
+        ops.push({ kind: "same", text: a[i]! });
+        i++;
+        j++;
+      } else if (j < b.length && (i === a.length || table[i * width + j + 1]! >= table[(i + 1) * width + j]!)) {
+        ops.push({ kind: "ins", text: b[j]! });
+        j++;
+      } else {
+        ops.push({ kind: "del", text: a[i]! });
+        i++;
+      }
+    }
+  }
+  // Group: a run of changes is one edit, and so are two runs with only whitespace between them.
+  const out: PassageSegment[] = [];
+  let edit: { before: string; after: string } | null = null;
+  let gap = "";
+  const flushEdit = () => {
+    if (edit === null) return;
+    out.push({ kind: "edit", index: out.filter((s) => s.kind === "edit").length, before: edit.before, after: edit.after });
+    edit = null;
+  };
+  const same = (text: string) => {
+    const last = out[out.length - 1];
+    if (last?.kind === "same") last.text += text;
+    else if (text !== "") out.push({ kind: "same", text });
+  };
+  for (const op of ops) {
+    if (op.kind === "same") {
+      if (edit !== null && /^\s+$/.test(op.text) && gap === "") gap = op.text;
+      else if (edit !== null) {
+        const held = gap;
+        gap = "";
+        flushEdit();
+        same(held + op.text);
+      } else same(op.text);
+      continue;
+    }
+    if (edit === null) edit = { before: "", after: "" };
+    else if (gap !== "") {
+      // The whitespace between two runs belongs to both sides of the one edit they become.
+      edit.before += gap;
+      edit.after += gap;
+      gap = "";
+    }
+    if (op.kind === "del") edit.before += op.text;
+    else edit.after += op.text;
+  }
+  const held = gap;
+  flushEdit();
+  same(held);
+  return out;
+}
+
+/** The passage with the edits kept taken from `after` and the rest left as `before` had them. */
+export function composePassage(segments: readonly PassageSegment[], kept: ReadonlySet<number>): string {
+  return segments.map((s) => (s.kind === "same" ? s.text : kept.has(s.index) ? s.after : s.before)).join("");
+}
+
 /**
  * Whether a staged draft is a passage — one span changed, the rest of the chapter untouched —
  * rather than a draft of the chapter (turn 128). A passage is shorter than the body it sits in

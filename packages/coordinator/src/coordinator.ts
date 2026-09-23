@@ -5575,22 +5575,34 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
-      case "proposal-update-field": {
+      // Keeping part of a passage revision is the same kind of edit as changing one field, and is
+      // fenced, journalled and refused out loud the same way; only what is edited differs.
+      case "proposal-update-field":
+      case "proposal-update-passage": {
         const gate = this.opts.provider.gate?.();
         if (!gate) return;
         // The journal's revision check cannot see the agent, which does not write through it —
         // so an edit landing mid-run is the interleaving it exists to refuse, unnoticed.
         if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
-        const outcome = await gate
-          .updateField({
-            proposalId: msg.proposalId,
-            requestId: msg.requestId,
-            path: msg.path,
-            field: msg.field,
-            value: msg.value,
-            expectedDraftRevision: msg.expectedDraftRevision,
-          })
-          .catch(() => null);
+        const outcome = await (msg.kind === "proposal-update-field"
+          ? gate.updateField({
+              proposalId: msg.proposalId,
+              requestId: msg.requestId,
+              path: msg.path,
+              field: msg.field,
+              value: msg.value,
+              expectedDraftRevision: msg.expectedDraftRevision,
+            })
+          : gate.updatePassage({
+              proposalId: msg.proposalId,
+              requestId: msg.requestId,
+              path: msg.path,
+              before: msg.before,
+              after: msg.after,
+              text: msg.text,
+              expectedDraftRevision: msg.expectedDraftRevision,
+            })
+        ).catch(() => null);
         // A refusal is said out loud. The screen is showing a value the person just typed, and
         // silently reverting it on the next snapshot would read as the app losing their work
         // rather than as somebody else having changed it first.

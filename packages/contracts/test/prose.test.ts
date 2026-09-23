@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ProseReadSourceSchema, changedSpan, chapterParagraphs, countWords, overviewMoved, passageOf, targetWords } from "../src/prose.js";
+import { ProseReadSourceSchema, changedSpan, chapterParagraphs, composePassage, countWords, overviewMoved, passageDiff, passageOf, targetWords } from "../src/prose.js";
 import { ChapterContinuitySchema, ChapterFrontmatterSchema, ChapterImpliesWriteSchema, ChapterSummarySchema, ChapterVoicesSchema, ProseStyleSchema, summariseContinuity, summariseVoices } from "../src/world.js";
 import { occurrencesOf, voicedBlocks } from "../src/prose.js";
 import { ClientMessageSchema } from "../src/frames.js";
@@ -225,5 +225,48 @@ describe("the cast of lines (turn 130, SPEC-012 §2.4.2)", () => {
     const copied = voicedBlocks("“No,” she said.\n\n“No,” he said.", record);
     assert.deepEqual(copied.blocks.map((block) => block.speaker ?? null), [null, null], "two spans for one attribution: narration");
     assert.equal(copied.ambiguous, 1);
+  });
+});
+
+/**
+ * Partial accept of a passage revision: the passage taken apart into edits kept or refused one
+ * at a time, and put back together exactly.
+ */
+describe("a passage revision taken apart into edits", () => {
+  const every = (segments: ReturnType<typeof passageDiff>) =>
+    new Set(segments.flatMap((s) => (s.kind === "edit" ? [s.index] : [])));
+  const edits = (segments: ReturnType<typeof passageDiff>) =>
+    segments.flatMap((s) => (s.kind === "edit" ? [{ before: s.before, after: s.after }] : []));
+
+  it("keeping every edit gives the revision and keeping none gives the passage, character for character", () => {
+    const cases: Array<[string, string]> = [
+      ["Maren counted the bells.", "Maren counted the seven bells slowly."],
+      ["The big red dog ran home.", "The small blue dog walked home."],
+      ["  Leading and trailing  ", " Leading, then trailing\n"],
+      ["One.\nTwo lines here.", "One line.\n\nTwo here."],
+      ["", "Written from nothing."],
+      ["Removed entirely.", ""],
+      ["Same words.", "Same words."],
+    ];
+    for (const [before, after] of cases) {
+      const segments = passageDiff(before, after);
+      assert.equal(composePassage(segments, every(segments)), after, `all kept: ${JSON.stringify(after)}`);
+      assert.equal(composePassage(segments, new Set()), before, `none kept: ${JSON.stringify(before)}`);
+    }
+  });
+
+  it("changes separated only by whitespace are one edit, and separate changes are separate", () => {
+    assert.deepEqual(edits(passageDiff("The big red dog ran home.", "The small blue dog walked home.")), [
+      { before: "big red", after: "small blue" },
+      { before: "ran", after: "walked" },
+    ]);
+    assert.deepEqual(edits(passageDiff("Maren counted the bells.", "Maren counted the seven bells.")), [{ before: "", after: "seven " }]);
+    assert.deepEqual(edits(passageDiff("Same words.", "Same words.")), [], "no change, no edits");
+  });
+
+  it("keeps one edit and refuses another", () => {
+    const segments = passageDiff("The big red dog ran home.", "The small blue dog walked home.");
+    assert.equal(composePassage(segments, new Set([0])), "The small blue dog ran home.");
+    assert.equal(composePassage(segments, new Set([1])), "The big red dog walked home.");
   });
 });

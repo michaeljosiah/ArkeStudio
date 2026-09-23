@@ -1244,6 +1244,27 @@ describe("domain events and frames", () => {
     assert.throws(() => ClientMessageSchema.parse({ ...answer, targetPath: "canon/CANON-018.md" }));
   });
 
+  it("fences a kept part of a passage revision to the draft and the span shown", () => {
+    const kept = {
+      kind: "proposal-update-passage",
+      worldId: WORLD_ID,
+      requestId: "req-passage-1",
+      proposalId: "pr_1",
+      path: "productions/inkbound/chapters/01-neap.md",
+      before: "the bells",
+      after: "the seven bells slowly",
+      text: "the seven bells",
+      expectedDraftRevision: 1,
+    };
+    assert.doesNotThrow(() => ClientMessageSchema.parse(kept));
+    for (const missing of ["requestId", "path", "before", "after", "text", "expectedDraftRevision"]) {
+      const { [missing]: _dropped, ...without } = kept as Record<string, unknown>;
+      assert.throws(() => ClientMessageSchema.parse(without), `${missing} must be required`);
+    }
+    assert.throws(() => ClientMessageSchema.parse({ ...kept, text: "x".repeat(2_401) }), "no more than a passage replacement may carry");
+    assert.throws(() => ClientMessageSchema.parse({ ...kept, body: "the whole chapter" }), "strict");
+  });
+
   it("carries non-empty authoritative World Chat ripples as transient news", () => {
     const event = {
       at: "2026-08-04T08:00:00Z",

@@ -527,6 +527,28 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
+   * Keep part of a staged passage revision (turn 128): the span Arke's revision changed, as the
+   * reviewer composed it from the edits they kept. The gate finds the span itself, from the base
+   * the chapter was staged against and the staged chapter, and replaces only that — the rest of
+   * the chapter cannot be touched from here. `before` and `after` are the span as the screen drew
+   * it, refused when they are not what the gate finds, so a reviewer who chose among edits of a
+   * different passage never has their choices applied to this one. The revision fence and the
+   * idempotent retry are `proposal-update-field`'s.
+   */
+  z
+    .object({
+      kind: z.literal("proposal-update-passage"),
+      worldId: UlidSchema,
+      requestId: z.string().min(1),
+      proposalId: z.string().min(1),
+      path: z.string().min(1),
+      before: z.string().max(2_400),
+      after: z.string().max(2_400),
+      text: z.string().max(2_400),
+      expectedDraftRevision: z.number().int().min(1),
+    })
+    .strict(),
+  /**
    * #70: open one conversation's workspace, or close the open one.
    *
    * A null id closes it. The client holds one conversation at a time, so leaving a screen should
