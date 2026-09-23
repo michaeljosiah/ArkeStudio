@@ -513,3 +513,51 @@ describe("the takes, watched (turn 102c)", () => {
     );
   });
 });
+
+describe("Advanced, on the bench's wall (design 142a)", () => {
+  const ADVANCED = `${GENERATE}?view=bench`;
+
+  it("keeps an interrupted play quiet and says so when the clip cannot play", async () => {
+    const mounted = await mount(FIXTURE_STATE, ADVANCED);
+    const wall = mounted.container.querySelector(".fy-bench__media")!;
+    const video = wall.querySelector<HTMLVideoElement>("video")!;
+    const disc = wall.querySelector<HTMLButtonElement>(".fy-bench__playdisc")!;
+    Object.defineProperty(video, "paused", { value: true });
+    video.play = async () => { throw new DOMException("Interrupted", "AbortError"); };
+    await act(async () => disc.click());
+    assert.equal(wall.querySelector(".fy-bench__playfail"), null, "switching takes is not a failure");
+    video.play = async () => { throw new DOMException("Unsupported media", "NotSupportedError"); };
+    await act(async () => wall.querySelector<HTMLButtonElement>(".fy-bench__playdisc")!.click());
+    assert.ok(wall.textContent?.includes("Could not play video"));
+    assert.equal(wall.querySelector('[data-testid="bench-transport"]'), null, "no transport for a clip that cannot play");
+  });
+
+  it("shows a still that did not arrive as a labelled frame, never a broken image", async () => {
+    const state = withSaltlight((p) => ({ ...p, takes: p.takes.map((take) => ({ ...take, media: "take.png" })) }));
+    const mounted = await mount(state, ADVANCED);
+    const wall = mounted.container.querySelector(".fy-bench__media")!;
+    const still = wall.querySelector("img.fy-portrait")!;
+    await act(async () => still.dispatchEvent(new dom.window.Event("error")));
+    assert.ok(wall.querySelector(".fy-portrait--fallback"));
+    assert.equal(wall.querySelector("img"), null);
+  });
+
+  it("lets the frozen prop provenance wrap rather than clip it", () => {
+    const state = withSaltlight((p) => ({
+      ...p,
+      takes: p.takes.map((take) => ({
+        ...take,
+        provenance: {
+          ...take.provenance,
+          propStates: [
+            { propId: "tide-clock", stateId: null, referenceId: null, resolutionSource: "unresolved", overrideSource: null },
+          ],
+        },
+      })),
+    }));
+    const html = render(state, ADVANCED);
+    assert.match(html, /class="fy-gen__provenance fy-mono" data-testid="take-prop-provenance"/);
+    assert.doesNotMatch(html, /fy-bench__briefline[^"]*" data-testid="take-prop-provenance"/);
+  });
+});
+

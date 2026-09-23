@@ -369,7 +369,7 @@ export function GenerateScreen() {
               // The five fields frozen at dispatch (design turn 105; issue 536), named rather
               // than by id — what this take was made with, not what the shot says now.
               <div className="fy-bench__briefrow">
-                <span className="fy-bench__briefline fy-mono" data-testid="take-prop-provenance">
+                <span className="fy-gen__provenance fy-mono" data-testid="take-prop-provenance">
                   {take.provenance.propStates!
                     .map((entry) => {
                       const prop = world?.props.find((candidate) => candidate.id === entry.propId);
@@ -390,11 +390,9 @@ export function GenerateScreen() {
                     segment={take.segment}
                   />
                 ) : (
-                  <img
-                    src={mediaUrl(slug, view.sourcePath)}
-                    alt={`Take ${takes.indexOf(take) + 1}`}
-                    style={{ width: "100%", height: "100%", objectFit: "contain" }}
-                  />
+                  // Portrait, not a bare <img>: a recorded file that is missing reads as a
+                  // labelled frame, never the browser's broken-image glyph.
+                  <Portrait worldSlug={slug} path={view.sourcePath} label={`Take ${takes.indexOf(take) + 1}`} radius={0} />
                 )
               ) : null}
               <div className="fy-bench__overlaychips">

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PauseSolid, PlaySolid } from "./icons.js";
 import { clock } from "./player.js";
 
@@ -25,6 +25,10 @@ export function BenchPlayer({
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  // A clip that will not play says so, as the takes view's tiles do; a play merely interrupted
+  // by switching takes (AbortError) is not a failure and says nothing.
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
   const start = segment?.inSec ?? 0;
   const length = segment !== undefined ? Math.max(0, segment.outSec - segment.inSec) : duration;
   const elapsed = Math.min(length, Math.max(0, time - start));
@@ -35,8 +39,9 @@ export function BenchPlayer({
       if (segment !== undefined && (el.currentTime < segment.inSec || el.currentTime >= segment.outSec)) {
         el.currentTime = segment.inSec;
       }
-      // Switching takes can interrupt a pending play; that is not a fault worth surfacing.
-      void el.play().catch(() => undefined);
+      void el.play().catch((error: unknown) => {
+        if (!(error instanceof Error && error.name === "AbortError")) setFailed(true);
+      });
     } else el.pause();
   };
   const seek = (fraction: number) => {
@@ -69,39 +74,47 @@ export function BenchPlayer({
           if (segment !== undefined) el.currentTime = segment.inSec;
         }}
         onClick={toggle}
+        onError={() => setFailed(true)}
       />
-      {!playing && (
+      {failed && (
+        <span className="fy-bench__playfail" role="status">
+          Could not play video
+        </span>
+      )}
+      {!playing && !failed && (
         <button type="button" className="fy-bench__playdisc" aria-label="Play" onClick={toggle}>
           <PlaySolid size={22} />
         </button>
       )}
-      <div className="fy-bench__transport" data-testid="bench-transport">
-        <button type="button" className="fy-bench__transportplay" aria-label={playing ? "Pause" : "Play"} onClick={toggle}>
-          {playing ? <PauseSolid size={11} /> : <PlaySolid size={11} />}
-        </button>
-        <span className="fy-bench__transporttime">{clock(elapsed)}</span>
-        <div
-          className="fy-bench__transporttrack"
-          role="slider"
-          aria-label="Position"
-          aria-valuemin={0}
-          aria-valuemax={Math.round(length)}
-          aria-valuenow={Math.round(elapsed)}
-          tabIndex={0}
-          onClick={(e) => {
-            const box = e.currentTarget.getBoundingClientRect();
-            seek((e.clientX - box.left) / box.width);
-          }}
-          onKeyDown={(e) => {
-            if (length === 0) return;
-            if (e.key === "ArrowRight") seek((elapsed + 1) / length);
-            if (e.key === "ArrowLeft") seek((elapsed - 1) / length);
-          }}
-        >
-          <span style={{ width: `${length > 0 ? (elapsed / length) * 100 : 0}%` }} />
+      {!failed && (
+        <div className="fy-bench__transport" data-testid="bench-transport">
+          <button type="button" className="fy-bench__transportplay" aria-label={playing ? "Pause" : "Play"} onClick={toggle}>
+            {playing ? <PauseSolid size={11} /> : <PlaySolid size={11} />}
+          </button>
+          <span className="fy-bench__transporttime">{clock(elapsed)}</span>
+          <div
+            className="fy-bench__transporttrack"
+            role="slider"
+            aria-label="Position"
+            aria-valuemin={0}
+            aria-valuemax={Math.round(length)}
+            aria-valuenow={Math.round(elapsed)}
+            tabIndex={0}
+            onClick={(e) => {
+              const box = e.currentTarget.getBoundingClientRect();
+              seek((e.clientX - box.left) / box.width);
+            }}
+            onKeyDown={(e) => {
+              if (length === 0) return;
+              if (e.key === "ArrowRight") seek((elapsed + 1) / length);
+              if (e.key === "ArrowLeft") seek((elapsed - 1) / length);
+            }}
+          >
+            <span style={{ width: `${length > 0 ? (elapsed / length) * 100 : 0}%` }} />
+          </div>
+          <span className="fy-bench__transporttime fy-bench__transporttime--end">{clock(length)}</span>
         </div>
-        <span className="fy-bench__transporttime fy-bench__transporttime--end">{clock(length)}</span>
-      </div>
+      )}
     </>
   );
 }

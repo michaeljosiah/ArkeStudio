@@ -1953,6 +1953,10 @@ select.fy-sheetselect { padding-right: 24px; }
 .fy-gen__decision { display: inline-flex; align-items: center; gap: 6px; flex: none; }
 .fy-gen__empty { margin-top: 14px; margin-bottom: 14px; }
 .fy-gen__strip { width: 104px; flex: none; box-sizing: border-box; }
+/* The frozen dispatch provenance wraps: it has no other way to be read in full. */
+.fy-gen__provenance { flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; color: var(--muted-foreground); }
+/* A still on the wall letterboxes like a clip does (142a), rather than Portrait's cover crop. */
+.fy-gen__center .fy-bench__media > .fy-portrait { object-fit: contain; background: transparent; }
 .fy-viewer__tag {
   position: absolute;
   left: 12px;
@@ -5408,6 +5412,11 @@ select.fy-set__pill { padding-right: 26px; }
 }
 .fy-bench__transporttrack > span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 99px; background: var(--media-overlay-fg); }
 .fy-bench__transporttrack:focus-visible { outline: 2px solid var(--media-overlay-fg); outline-offset: 4px; }
+.fy-bench__playfail {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  padding: 3px 9px; border-radius: 999px; font: 400 var(--text-2xs)/1.4 var(--font-mono);
+  background: color-mix(in srgb, var(--media-overlay-fg) 13%, var(--media-overlay-bg)); color: var(--media-overlay-fg);
+}
 .fy-bench__empty {
   flex: 1; min-height: 0; margin: 0 14px; border: 1px dashed var(--border); border-radius: 12px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
