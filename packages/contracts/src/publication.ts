@@ -146,19 +146,22 @@ export function readPublicationManifest(
     schemaVersion: z.number().int().positive(),
     profile: z.string().min(1),
     profileVersion: z.number().int().positive(),
+    requires: z.array(CapabilitySchema).min(1).max(64),
   }).passthrough().safeParse(input);
   if (!header.success) return { ok: false, code: "invalid-manifest", reason: "This is not an Arke publication manifest." };
   if (header.data.schemaVersion !== 1) return { ok: false, code: "unsupported-schema", reason: `Publication schema ${header.data.schemaVersion} is not supported.` };
   if (header.data.profile !== "video" || header.data.profileVersion !== 1) {
     return { ok: false, code: "unsupported-profile", reason: `Publication profile ${header.data.profile} v${header.data.profileVersion} is not supported.` };
   }
+  // A required extension can introduce fields this version cannot interpret. Negotiate the
+  // header first so a newer package is unsupported rather than incorrectly called corrupt.
+  const unsupported = header.data.requires.filter((capability) => !supportedCapabilities.includes(capability));
+  if (unsupported.length) return { ok: false, code: "unsupported-capability", reason: `Required capabilities are not supported: ${unsupported.join(", ")}.` };
   const parsed = VideoPublicationManifestSchema.safeParse(input);
   if (!parsed.success) {
     const issue = parsed.error.issues[0]!;
     return { ok: false, code: "invalid-manifest", reason: `${issue.path.join(".") || "manifest"}: ${issue.message}` };
   }
-  const unsupported = parsed.data.requires.filter((capability) => !supportedCapabilities.includes(capability));
-  if (unsupported.length) return { ok: false, code: "unsupported-capability", reason: `Required capabilities are not supported: ${unsupported.join(", ")}.` };
   return { ok: true, manifest: parsed.data };
 }
 

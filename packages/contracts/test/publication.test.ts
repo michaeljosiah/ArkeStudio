@@ -101,6 +101,20 @@ describe("video publication contract (SPEC-048 R-12..R-23)", () => {
     invalid(manifest, /one text track/);
   });
 
+  it("negotiates required extensions before interpreting their new content fields", () => {
+    const manifest = {
+      ...movie(), requires: ["video-v1", "webvtt-v1", "hdr-v1"],
+      content: { ...movie().content, toneMap: { mode: "hdr" } },
+    };
+    const result = readPublicationManifest(manifest);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "unsupported-capability");
+    // Declaring support cannot make a field this parser does not implement silently disappear.
+    const claimed = readPublicationManifest(manifest, manifest.requires);
+    assert.equal(claimed.ok, false);
+    if (!claimed.ok) assert.equal(claimed.code, "invalid-manifest");
+  });
+
   it("refuses unresolved, empty, mistyped and surplus assets", () => {
     const missing = movie();
     missing.content.video = "constructor";
