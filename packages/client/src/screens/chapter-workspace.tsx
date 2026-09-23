@@ -5,6 +5,9 @@ import {
   countWords,
   paragraphSpans,
   passageOf,
+  passageDiff,
+  composePassage,
+  type PassageSegment,
   targetWords,
   type ChangedSpan,
   type ChapterContinuity,
@@ -53,6 +56,10 @@ import {
   useCasting,
   useAudiobookRuns,
   useAudiobookRecords,
+  acceptProposal,
+  updateProposalPassage,
+  useGateNotices,
+  type GateNotice,
 } from "../lib/store.js";
 
 /**
@@ -258,6 +265,7 @@ export function paragraphAt(text: string, offset: number): number | null {
 }
 
 const TIGHTEN = passageAction("tighten")!;
+const NONE_REFUSED: ReadonlySet<number> = new Set();
 const HOLD_TO_STYLE = passageAction("style")!;
 /** The menu's groups, ruled apart: what rewrites the passage, what only answers, and the rest. */
 const groupOf = (action: PassageAction) => (action.replyOnly ? "reply" : action.id === "other" ? "other" : "rewrite");
@@ -1091,6 +1099,64 @@ export function ChapterWorkspace({
       ? null
       : passageOf(stagedDraft.before, stagedDraft.body);
   const waiting = stagedDraft === undefined ? null : passageChange === null ? "draft" : "passage";
+
+  /*
+   * Keeping part of a passage: the revision taken apart into edits, each kept until the author
+   * refuses it. Only a revision of two edits or more offers the choice — one edit refused is a
+   * discard, which the card already has. What is refused belongs to the draft revision it was
+   * chosen against, so a revision that moves (the part kept, landed) starts every edit kept.
+   */
+  const segments = useMemo(
+    (): PassageSegment[] => (passageChange === null ? [] : passageDiff(passageChange.before, passageChange.after)),
+    [passageChange?.before, passageChange?.after],
+  );
+  const editCount = segments.filter((segment) => segment.kind === "edit").length;
+  const passageParagraphs = stagedDraft === undefined ? [] : paragraphSpans(stagedDraft.body ?? live);
+  const anchorParagraph = passageChange === null
+    ? -1
+    : passageParagraphs.findIndex((paragraph) => paragraph.end >= passageChange.start && paragraph.start <= passageChange.start + Math.max(passageChange.after.length, 1));
+  const choosing = stagedDraft !== undefined && passageChange !== null && editCount > 1;
+  const choiceKey = stagedDraft === undefined ? null : `${stagedDraft.staged.proposal.id}:${stagedDraft.staged.proposal.draftRevision}`;
+  const [refusedFor, setRefusedFor] = useState<{ key: string | null; refused: ReadonlySet<number> }>({ key: null, refused: new Set() });
+  const refused = choosing && refusedFor.key === choiceKey ? refusedFor.refused : NONE_REFUSED;
+  const keptCount = editCount - refused.size;
+  const toggleEdit = (index: number) => {
+    const next = new Set(refused);
+    if (!next.delete(index)) next.add(index);
+    setRefusedFor({ key: choiceKey, refused: next });
+  };
+  /*
+   * Accepting part is two presses the author makes as one: the part is kept through the gate,
+   * and once the draft revision it lands as is here, that revision is accepted. A refusal of the
+   * first (a notice for the proposal, new since the press) ends it there, said on the card, and
+   * accepts nothing — the author sees the passage as it now stands and decides again.
+   */
+  const notices = useGateNotices();
+  const [keeping, setKeeping] = useState<{ id: string; revision: number; notice: GateNotice | undefined } | null>(null);
+  const stagedId = stagedDraft?.staged.proposal.id;
+  const stagedRevision = stagedDraft?.staged.proposal.draftRevision;
+  useEffect(() => {
+    if (keeping === null) return;
+    if (stagedId !== keeping.id) setKeeping(null);
+    else if (stagedRevision !== undefined && stagedRevision > keeping.revision) {
+      acceptProposal(worldId, keeping.id);
+      setKeeping(null);
+    } else if (notices[keeping.id] !== keeping.notice) setKeeping(null);
+  }, [keeping, stagedId, stagedRevision, notices, worldId]);
+  const accept = !choosing || stagedDraft === undefined || passageChange === null
+    ? undefined
+    : keptCount === editCount
+      ? { label: "Accept" }
+      : {
+          label: `Accept ${keptCount} of ${editCount}`,
+          ...(keptCount === 0 ? { blocked: "Nothing kept" } : keeping !== null ? { blocked: "Keeping…" } : {}),
+          onAccept: () => {
+            const proposal = stagedDraft.staged.proposal;
+            const kept = new Set(segments.flatMap((segment) => (segment.kind === "edit" && !refused.has(segment.index) ? [segment.index] : [])));
+            updateProposalPassage(worldId, proposal.id, path, passageChange, composePassage(segments, kept), proposal.draftRevision);
+            setKeeping({ id: proposal.id, revision: proposal.draftRevision, notice: notices[proposal.id] });
+          },
+        };
   const foot = locked && stagedDraft !== undefined
     ? `Locked while a ${waiting} waits · v${record?.version ?? chapter.version} · ${words.toLocaleString()} words`
     : saveRefusal !== null
@@ -1252,21 +1318,56 @@ export function ChapterWorkspace({
                 <div className="fy-ch__band">
                   <span className="fy-ch__band-who">Arke&rsquo;s passage</span>
                   <span>· {countWords(passageChange.before).toLocaleString()} → {countWords(passageChange.after).toLocaleString()} words</span>
+                  {choosing && <span>· {keptCount} of {editCount} changes kept</span>}
                   <span>· against v{record.version}</span>
                   <span className="fy-ch__band-push" />
                   <span>decide in the thread</span>
                 </div>
                 <div className="fy-ch__draft-passage" aria-label="Arke's passage">
-                  {paragraphSpans(stagedDraft.body ?? live).map((paragraph, i) => {
+                  {passageParagraphs.map((paragraph, i) => {
                     // Inclusive at both ends, and at least one character wide (codex on PR 899):
                     // a deletion at a paragraph's first character, or of a whole paragraph, is a
                     // zero-width span on a boundary, and the paragraph it touches is still marked.
                     const from = passageChange.start;
                     const to = from + Math.max(passageChange.after.length, 1);
                     const changed = paragraph.end >= from && paragraph.start <= to;
+                    // With edits to choose among, the paragraph the span starts in carries the
+                    // whole span as edits, and any later paragraph the span reached is not drawn
+                    // twice: the edits are the passage, head and tail around them as they stand.
+                    if (!choosing || !changed) {
+                      return (
+                        <p key={i} className={changed ? "fy-ch__passage" : undefined}>
+                          {paragraph.text}
+                        </p>
+                      );
+                    }
+                    const body = stagedDraft.body ?? live;
+                    // The first paragraph the span touches draws it, even when the span begins in
+                    // the blank line before it (a paragraph removed whole).
+                    if (anchorParagraph !== i) return null;
+                    const endOfSpan = from + passageChange.after.length;
+                    const tailEnd = Math.max(paragraph.end, body.indexOf("\n\n", endOfSpan) < 0 ? body.length : body.indexOf("\n\n", endOfSpan));
                     return (
-                      <p key={i} className={changed ? "fy-ch__passage" : undefined}>
-                        {paragraph.text}
+                      <p key={i} className="fy-ch__passage fy-ch__passage--choose">
+                        {body.slice(Math.min(paragraph.start, from), from)}
+                        {segments.map((segment, n) =>
+                          segment.kind === "same" ? (
+                            <span key={n}>{segment.text}</span>
+                          ) : (
+                            <button
+                              key={n}
+                              type="button"
+                              className={cx("fy-ch__edit", refused.has(segment.index) && "fy-ch__edit--refused")}
+                              aria-pressed={!refused.has(segment.index)}
+                              title={refused.has(segment.index) ? "Refused · press to keep" : "Kept · press to refuse"}
+                              onClick={() => toggleEdit(segment.index)}
+                            >
+                              {segment.before !== "" && <del>{segment.before}</del>}
+                              {segment.after !== "" && <ins>{segment.after}</ins>}
+                            </button>
+                          ),
+                        )}
+                        {body.slice(endOfSpan, tailEnd)}
                       </p>
                     );
                   })}
@@ -1720,6 +1821,7 @@ export function ChapterWorkspace({
                     worldId={worldId}
                     subject={chapterLabel}
                     staged={stagedDraft.staged}
+                    {...(accept !== undefined ? { accept } : {})}
                     items={[
                       passageChange !== null
                         ? {

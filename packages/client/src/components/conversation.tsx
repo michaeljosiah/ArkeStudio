@@ -1530,8 +1530,11 @@ export function StagedDecision({
   staged,
   items,
   onAccepted,
+  accept,
 }: {
   worldId: string | undefined;
+  /** Accept as the page needs it (see ConnectedProposalPanel); absent accepts the whole draft. */
+  accept?: { label?: string; blocked?: string; onAccept?: (confirmSignature?: string) => void };
   /** What is being decided, in the words of the level — "season", "episode 03". */
   subject: string;
   staged: StagedProposal;
@@ -1553,6 +1556,7 @@ export function StagedDecision({
       <ConnectedProposalPanel
         staged={staged}
         onAccepted={onAccepted}
+        {...(accept !== undefined ? { accept } : {})}
       />
       <div className="fy-mono">
         {items !== undefined && items.length > 0 ? items.map((item) => item.label).join(" · ") : files.join(" · ")}

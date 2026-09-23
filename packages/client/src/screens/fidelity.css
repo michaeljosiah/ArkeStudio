@@ -6797,6 +6797,14 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
  */
 .fy-ch__manuscript { position: relative; }
 .fy-ch__ask-wrap { position: absolute; z-index: 2; }
+.fy-ch__passage--choose { white-space: pre-wrap; }
+.fy-ch__edit { display: inline; padding: 0 1px; border: 0; border-radius: 3px; background: color-mix(in srgb, var(--accent) 60%, transparent); font: inherit; color: inherit; text-align: inherit; cursor: pointer; }
+.fy-ch__edit del { color: var(--muted-foreground); }
+.fy-ch__edit ins { text-decoration: none; font-weight: 600; }
+.fy-ch__edit del + ins { margin-left: 3px; }
+.fy-ch__edit--refused { background: transparent; outline: 1px dashed var(--border); }
+.fy-ch__edit--refused del { color: inherit; text-decoration: none; }
+.fy-ch__edit--refused ins { font-weight: inherit; color: var(--muted-foreground); text-decoration: line-through; }
 .fy-ch__ask { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--background); box-shadow: var(--shadow-xs); font: 500 10.5px var(--font-sans); color: var(--foreground); cursor: pointer; white-space: nowrap; transition: var(--transition-control); }
 .fy-ch__ask:hover { background: var(--accent); }
 .fy-ch__ask-menu { position: absolute; top: calc(100% + 4px); left: 0; display: flex; flex-direction: column; min-width: 180px; padding: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); box-shadow: var(--shadow-md); }

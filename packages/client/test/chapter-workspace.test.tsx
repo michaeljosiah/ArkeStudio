@@ -587,6 +587,103 @@ describe("the craft loop (turn 128)", () => {
     assert.doesNotMatch(text(m), /Ask Arke · /, "nothing is offered on a locked manuscript");
   });
 
+  describe("keeping part of a passage", () => {
+    const TWO: StagedProposal = {
+      ...PASSAGE,
+      proposal: { ...PASSAGE.proposal, id: "pr_01J8H0000000000000000000PB" },
+      review: {
+        targets: [
+          {
+            path: PATH,
+            label: "The counting of bells",
+            kind: "chapter",
+            action: "amend",
+            fields: [{ field: "Prose", before: BODY, proposed: BODY.replace("Maren counted the bells.", "Ines counted the seven bells.") }],
+          },
+        ],
+      },
+    };
+    const edits = (m: Mounted) => [...m.container.querySelectorAll("button.fy-ch__edit")] as HTMLElement[];
+    const acceptButton = (m: Mounted) =>
+      [...m.container.querySelectorAll("button")].find((b) => /^Accept( \d+ of \d+)?$/.test(b.textContent ?? "")) as HTMLButtonElement;
+
+    it("draws each edit to keep or refuse, and Accept says how much it accepts", async () => {
+      const m = await mount(inkbound([TWO]));
+      await answerOpen(m);
+      assert.equal(edits(m).length, 2, "Maren→Ines and the seven are two edits");
+      assert.match(text(m), /2 of 2 changes kept/);
+      assert.equal(acceptButton(m).textContent, "Accept");
+      assert.match(text(m), /Six, and the tide/, "the rest of the chapter stands as it was");
+
+      await act(async () => edits(m)[0]!.click());
+      assert.match(text(m), /1 of 2 changes kept/);
+      assert.equal(edits(m)[0]!.getAttribute("aria-pressed"), "false");
+      assert.equal(acceptButton(m).textContent, "Accept 1 of 2");
+
+      await act(async () => edits(m)[1]!.click());
+      assert.equal(acceptButton(m).disabled, true, "nothing kept is a discard, not an accept");
+    });
+
+    it("keeps the part through the gate first, then accepts the revision it lands as", async () => {
+      const state = inkbound([TWO]);
+      const m = await mount(state);
+      await answerOpen(m);
+      await act(async () => edits(m)[0]!.click());
+      await act(async () => acceptButton(m).click());
+      const keep = m.sent.find((message) => message.kind === "proposal-update-passage") as Extract<ClientMessage, { kind: "proposal-update-passage" }> | undefined;
+      assert.ok(keep, "the part kept is sent");
+      assert.equal(keep.proposalId, TWO.proposal.id);
+      assert.equal(keep.path, PATH);
+      assert.equal(keep.before, "Maren counted the");
+      assert.equal(keep.after, "Ines counted the seven");
+      assert.equal(keep.text, "Maren counted the seven", "the refused name stays, the kept word lands");
+      assert.equal(keep.expectedDraftRevision, 1);
+      assert.equal(m.sent.some((message) => message.kind === "proposal-accept"), false, "nothing is accepted before the part lands");
+
+      // The part lands: the draft moves on a revision, now holding only what was kept.
+      const landed: StagedProposal = {
+        ...TWO,
+        proposal: { ...TWO.proposal, draftRevision: 2 },
+        review: {
+          targets: [{ ...TWO.review!.targets[0]!, fields: [{ field: "Prose", before: BODY, proposed: BODY.replace("Maren counted the bells.", "Maren counted the seven bells.") }] }],
+        },
+      };
+      await act(async () => __setStateForTest(inkbound([landed]), { connection: "open" }));
+      const accepted = m.sent.filter((message) => message.kind === "proposal-accept");
+      assert.equal(accepted.length, 1, "then the revision it landed as is accepted, once");
+      assert.equal((accepted[0] as { proposalId: string }).proposalId, TWO.proposal.id);
+    });
+
+    it("a refused keep accepts nothing", async () => {
+      const m = await mount(inkbound([TWO]));
+      await answerOpen(m);
+      await act(async () => edits(m)[0]!.click());
+      await act(async () => acceptButton(m).click());
+      await act(async () => {
+        __applyEventForTest({
+          at: "2026-09-06T12:00:03Z",
+          type: "proposal.blocked",
+          worldId: FIXTURE_WORLD_ID,
+          proposalId: TWO.proposal.id,
+          reason: "invalid",
+          detail: "This passage is not the one on screen. Reload it and choose again.",
+        });
+      });
+      assert.equal(acceptButton(m).disabled, false, "the press is the author's again");
+      assert.equal(m.sent.some((message) => message.kind === "proposal-accept"), false);
+    });
+
+    it("a revision of one edit is accepted or discarded whole, as before", async () => {
+      const m = await mount(inkbound([PASSAGE]));
+      await answerOpen(m);
+      assert.equal(edits(m).length, 0);
+      assert.equal(acceptButton(m).textContent, "Accept");
+      await act(async () => acceptButton(m).click());
+      assert.equal(m.sent.some((message) => message.kind === "proposal-update-passage"), false);
+      assert.equal(m.sent.some((message) => message.kind === "proposal-accept"), true);
+    });
+  });
+
   it("a deletion at a paragraph's first word still marks the paragraph it touches (codex on PR 899)", async () => {
     const deletion: StagedProposal = {
       ...PASSAGE,

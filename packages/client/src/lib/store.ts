@@ -2413,6 +2413,31 @@ export function resolveProposalChoice(
   });
 }
 
+/**
+ * Keep part of a staged passage revision (turn 128): the span as the screen drew it, and what it
+ * becomes from the edits kept. Fenced to the draft revision shown, as a field edit is.
+ */
+export function updateProposalPassage(
+  worldId: string,
+  proposalId: string,
+  path: string,
+  span: { before: string; after: string },
+  text: string,
+  expectedDraftRevision: number,
+): void {
+  send({
+    kind: "proposal-update-passage",
+    worldId,
+    requestId: crypto.randomUUID(),
+    proposalId,
+    path,
+    before: span.before,
+    after: span.after,
+    text,
+    expectedDraftRevision,
+  });
+}
+
 export function useGateNotices(): Record<string, GateNotice> {
   return useStore().gateNotices;
 }

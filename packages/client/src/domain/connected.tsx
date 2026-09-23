@@ -23,8 +23,15 @@ export function ConnectedProposalPanel({
   staged,
   onAccepted,
   conversationPath,
+  accept,
 }: {
   staged: StagedProposal;
+  /**
+   * Accept as the surface deciding needs it: a label, a reason it cannot be pressed, and what a
+   * press does — keeping part of a passage first, then accepting (turn 128). Absent, Accept
+   * accepts the whole proposal.
+   */
+  accept?: { label?: string; blocked?: string; onAccept?: (confirmSignature?: string) => void };
   /** Called only after the coordinator reports that this proposal actually landed. */
   onAccepted?: () => void;
   /** A proposal-backed Studio conversation that can keep revising this same draft. */
@@ -73,7 +80,9 @@ export function ConnectedProposalPanel({
       <ProposalPanel
         staged={staged}
         notice={notices[id]}
-        onAccept={running ? undefined : (confirmSignature) => acceptProposal(worldId, id, confirmSignature)}
+        onAccept={running ? undefined : accept?.onAccept ?? ((confirmSignature) => acceptProposal(worldId, id, confirmSignature))}
+        {...(accept?.label !== undefined ? { acceptLabel: accept.label } : {})}
+        {...(accept?.blocked !== undefined ? { acceptBlocked: accept.blocked } : {})}
         onDiscard={running ? undefined : () => discardProposal(worldId, id)}
         {...(!running && (staged.proposal.worldChatOrigins ?? []).length > 0
           ? { onSendBack: () => sendProposalBack(worldId, id) }

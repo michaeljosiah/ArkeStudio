@@ -251,9 +251,15 @@ export function ProposalPanel({
   onMarkSeen,
   onSendBack,
   disabledReason,
+  acceptLabel = "Accept",
+  acceptBlocked,
 }: {
   staged: StagedProposal;
   notice?: ProposalGateNotice;
+  /** What Accept says when it accepts less than the whole draft — `Accept 2 of 3`. */
+  acceptLabel?: string;
+  /** Why Accept cannot be pressed now, from the surface deciding (nothing kept, say). */
+  acceptBlocked?: string;
   onAccept?: (confirmSignature?: string) => void;
   onDiscard?: () => void;
   onRebase?: () => void;
@@ -401,10 +407,10 @@ export function ProposalPanel({
           <Button
             variant="primary"
             onClick={() => onAccept?.()}
-            disabled={!onAccept || unresolved.length > 0 || openChoices.length > 0}
-            title={openChoices.length > 0 ? "Answer the question above before accepting" : disabledReason}
+            disabled={!onAccept || unresolved.length > 0 || openChoices.length > 0 || acceptBlocked !== undefined}
+            title={openChoices.length > 0 ? "Answer the question above before accepting" : acceptBlocked ?? disabledReason}
           >
-            Accept
+            {acceptLabel}
           </Button>
         )}
         {onSendBack && (
