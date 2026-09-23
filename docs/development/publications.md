@@ -79,7 +79,8 @@ protocol. The optional `onCopied` progress callback runs inside the world gate: 
 another operation needing that gate, including `store.close()`.
 
 `verifyPublicationDirectory(directory, options?)` in `src/publications/verify.ts` runs without a
-world. It reads bounded UTF-8 JSON, negotiates compatibility, checks the directory's exact file
+world. It reads bounded UTF-8 JSON, rejects duplicate object keys (including escaped aliases),
+negotiates compatibility, checks the directory's exact file
 inventory and streams every asset through SHA-256 and length validation. Links/junctions,
 non-portable names, case aliases and unlisted files are refused. Directory enumeration is streamed
 and bounded by count and depth. Defaults cap the manifest at 1 MiB, each asset at 32 GiB, total
@@ -93,6 +94,9 @@ directory path. `PublicationFileError.code` distinguishes compatibility, path, l
 refusals; ordinary filesystem errors retain their system codes. Verification grants point-in-time
 integrity, not lasting trust in an externally editable folder. The future player must pin or
 reverify inputs and validate codecs and captions before presenting them.
+Before returning, the verifier checks the inventory again and revalidates the identity, size and
+timestamps recorded for every hashed file, detecting edits to earlier assets while later ones
+were being read. The optional `onAssetVerified` callback reports each completed asset hash.
 
 Run the focused tests from `packages/contracts`:
 

@@ -51,13 +51,20 @@ function unchanged(before: Stats, after: Stats): boolean {
 export async function readPublicationFile(
   root: string, portable: string, maxBytes: number, signal?: AbortSignal,
   destination?: FileHandle, collect?: Buffer[],
-): Promise<PublicationFileDigest> {
+): Promise<PublicationFileDigest & { assertUnchanged(): Promise<void> }> {
   signal?.throwIfAborted();
   const path = await checkedPublicationPath(root, portable);
   const before = await lstat(toExtendedLength(path));
   if (!Number.isSafeInteger(before.size) || before.size > maxBytes) {
     throw new PublicationFileError("limit-exceeded", "Publication file exceeds its byte limit.");
   }
+  const assertUnchanged = async () => {
+    signal?.throwIfAborted();
+    const afterPath = await checkedPublicationPath(root, portable);
+    if (afterPath !== path || !unchanged(before, await lstat(toExtendedLength(afterPath)))) {
+      throw new PublicationFileError("source-changed", "Publication source changed since it was read.");
+    }
+  };
   const file = await open(toExtendedLength(path), constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
     if (!unchanged(before, await file.stat())) throw new PublicationFileError("source-changed", "Publication source changed while opening.");
@@ -84,12 +91,11 @@ export async function readPublicationFile(
       }
     }
     signal?.throwIfAborted();
-    const afterPath = await checkedPublicationPath(root, portable);
-    if (length !== before.size || !unchanged(before, await file.stat()) ||
-        afterPath !== path || !unchanged(before, await lstat(toExtendedLength(afterPath)))) {
+    if (length !== before.size || !unchanged(before, await file.stat())) {
       throw new PublicationFileError("source-changed", "Publication source changed while reading.");
     }
-    return { sha256: hash.digest("hex"), byteLength: length };
+    await assertUnchanged();
+    return { sha256: hash.digest("hex"), byteLength: length, assertUnchanged };
   } finally {
     await file.close();
   }

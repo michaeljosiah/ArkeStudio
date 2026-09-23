@@ -39,6 +39,28 @@ export interface VerifiedPublicationDirectory {
   byteLength: number;
 }
 
+/** JSON.parse validates syntax first; then track decoded keys in each object before Zod sees it. */
+function parseManifest(text: string): unknown {
+  const value: unknown = JSON.parse(text);
+  const scopes: (Set<string> | null)[] = [];
+  let quoted = "";
+  // Strings are consumed whole, so punctuation inside them cannot change object scope.
+  for (const match of text.matchAll(/"(?:[^"\\]|\\[\s\S])*"|[{}[\]:]/g)) {
+    const token = match[0];
+    if (token.startsWith('"')) quoted = token;
+    else if (token === "{") scopes.push(new Set());
+    else if (token === "[") scopes.push(null);
+    else if (token === "}" || token === "]") scopes.pop();
+    else if (token === ":") {
+      const key = JSON.parse(quoted) as string;
+      const keys = scopes.at(-1)!;
+      if (keys!.has(key)) throw new PublicationFileError("invalid-package", "Publication manifest contains duplicate JSON members.");
+      keys!.add(key);
+    }
+  }
+  return value;
+}
+
 /**
  * Directory-only integrity verification. The future ZIP reader must validate entries before
  * extraction. This checks bytes, not codecs or caption semantics, and grants no lasting trust
@@ -46,7 +68,8 @@ export interface VerifiedPublicationDirectory {
  */
 export async function verifyPublicationDirectory(
   directory: string,
-  options: { signal?: AbortSignal; limits?: Partial<PublicationFileLimits>; supportedCapabilities?: readonly string[] } = {},
+  options: { signal?: AbortSignal; limits?: Partial<PublicationFileLimits>; supportedCapabilities?: readonly string[];
+    onAssetVerified?: (key: string) => void | Promise<void> } = {},
 ): Promise<VerifiedPublicationDirectory> {
   const { signal } = options;
   const limits = publicationFileLimits(options.limits);
@@ -57,8 +80,11 @@ export async function verifyPublicationDirectory(
   const chunks: Buffer[] = [];
   const manifestDigest = await readPublicationFile(root, PUBLICATION_MANIFEST_FILE, limits.manifestBytes, signal, undefined, chunks);
   let json: unknown;
-  try { json = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks))); }
-  catch { throw new PublicationFileError("invalid-package", "Publication manifest is not valid UTF-8 JSON."); }
+  try { json = parseManifest(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks))); }
+  catch (error) {
+    if (error instanceof PublicationFileError) throw error;
+    throw new PublicationFileError("invalid-package", "Publication manifest is not valid UTF-8 JSON.");
+  }
   const result = readPublicationManifest(json, options.supportedCapabilities);
   if (!result.ok) throw new PublicationFileError(result.code, result.reason);
   const manifest = result.manifest;
@@ -92,16 +118,25 @@ export async function verifyPublicationDirectory(
   await scan("");
   if (found.size !== expected.size) throw new PublicationFileError("invalid-package", "Publication is missing a declared file.");
   let bytes = manifestDigest.byteLength;
-  for (const asset of Object.values(manifest.assets)) {
+  const reads = [manifestDigest];
+  for (const [key, asset] of Object.entries(manifest.assets)) {
     if (asset.byteLength > limits.assetBytes || asset.byteLength > limits.totalBytes - bytes) {
       throw new PublicationFileError("limit-exceeded", "Publication exceeds its asset or total byte limit.");
     }
     const actual = await readPublicationFile(root, asset.href, asset.byteLength, signal);
     requirePublicationDigest(actual, asset);
+    reads.push(actual);
     bytes += actual.byteLength;
+    await options.onAssetVerified?.(key);
   }
   if (bytes > limits.totalBytes) throw new PublicationFileError("limit-exceeded", "Publication exceeds its total byte limit.");
   requirePublicationDigest(await readPublicationFile(root, PUBLICATION_MANIFEST_FILE, limits.manifestBytes, signal), manifestDigest);
+  // A later, large asset can take a long time to hash. Recheck the inventory and the file
+  // identities/timestamps saved by every read so edits to earlier assets are still refused.
+  entries = 0; found.clear(); spellings.clear();
+  await scan("");
+  if (found.size !== expected.size) throw new PublicationFileError("invalid-package", "Publication is missing a declared file.");
+  for (const read of reads) await read.assertUnchanged();
   signal?.throwIfAborted();
   return { directory: root, manifest, manifestSha256: manifestDigest.sha256, byteLength: bytes };
 }

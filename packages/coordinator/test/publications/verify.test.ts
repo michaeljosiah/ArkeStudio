@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { cp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { it } from "node:test";
 import type { VideoPublicationManifest } from "@arke-studio/contracts";
@@ -99,4 +99,39 @@ it("refuses directory casing aliases on case-sensitive filesystems", { skip: pro
   const f = await fixture();
   await mkdir(join(f.directory, "MEDIA"));
   await assert.rejects(verifyPublicationDirectory(f.directory), refusal("unsafe-path"));
+});
+
+it("refuses duplicate JSON keys including escaped aliases before interpreting the manifest", async () => {
+  const f = await fixture();
+  const original = JSON.stringify(f.manifest);
+  for (const modified of [
+    original.replace('"schemaVersion":1', '"schemaVersion":2,"schemaVersion":1'),
+    original.replace('"assets":{', '"assets":{"movie":{},'),
+    original.replace('"video":"movie"', '"video":"draft","vi\\u0064eo":"movie"'),
+  ]) {
+    await writeFile(join(f.directory, "publication.json"), modified);
+    await assert.rejects(verifyPublicationDirectory(f.directory), /duplicate JSON members/);
+  }
+  f.manifest.metadata = { "https://example.org/nested": [{ key: 'text with ":{}[] and \\" quotes' }, { key: "same name in a different object" }] };
+  await f.save();
+  assert.deepEqual((await verifyPublicationDirectory(f.directory)).manifest, f.manifest);
+});
+
+it("detects changes to earlier files and the inventory while later assets are verified", async () => {
+  const f = await fixture();
+  await assert.rejects(verifyPublicationDirectory(f.directory, {
+    onAssetVerified: async key => {
+      if (key !== "movie") return;
+      const path = join(f.directory, "media/movie.mp4");
+      await writeFile(path, Buffer.alloc(f.video.length, 8));
+      const changed = new Date(Date.now() + 1000);
+      await utimes(path, changed, changed);
+    },
+  }), refusal("source-changed"));
+  await writeFile(join(f.directory, "media/movie.mp4"), f.video);
+  await assert.rejects(verifyPublicationDirectory(f.directory, {
+    onAssetVerified: async key => {
+      if (key === "movie") await writeFile(join(f.directory, "draft.txt"), "unlisted late file");
+    },
+  }), refusal("invalid-package"));
 });
