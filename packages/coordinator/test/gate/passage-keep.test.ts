@@ -61,6 +61,10 @@ describe("keeping part of a passage revision (turn 128)", () => {
     assert.equal(after.data["words"], after.body.trim().split(/\s+/).length);
     assert.equal(outcome.status === "updated" ? outcome.proposal.draftRevision : 0, proposal.draftRevision + 1);
 
+    // An accept fenced to the revision before the keep is refused rather than landing unseen.
+    const late = await gate.accept(proposal.id, { expectedDraftRevision: proposal.draftRevision });
+    assert.equal(late.status, "stale");
+
     // The same request again is the same edit, not a second one.
     const retry = await gate.updatePassage({ proposalId: proposal.id, requestId: "req-1", path: CHAPTER, ...chosen, expectedDraftRevision: proposal.draftRevision });
     assert.equal(retry.status, "updated");

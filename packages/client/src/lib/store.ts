@@ -2364,12 +2364,13 @@ export function setArtDirection(worldId: string, description: string, masterLook
   }) ? requestId : null;
 }
 
-export function acceptProposal(worldId: string, proposalId: string, confirmRipples?: string): void {
+export function acceptProposal(worldId: string, proposalId: string, confirmRipples?: string, expectedDraftRevision?: number): void {
   send({
     kind: "proposal-accept",
     worldId,
     proposalId,
     ...(confirmRipples !== undefined ? { confirmRipples } : {}),
+    ...(expectedDraftRevision !== undefined ? { expectedDraftRevision } : {}),
   });
 }
 

@@ -1144,14 +1144,18 @@ export function ChapterWorkspace({
   const stagedId = stagedDraft?.staged.proposal.id;
   const stagedRevision = stagedDraft?.staged.proposal.draftRevision;
   const stagedBody = stagedDraft?.body ?? null;
+  // A keep sent into a connection that then dropped has no answer coming (codex on PR 1232): the
+  // rejoin brings the snapshot as it was, so the wait ends with the connection, not with a reply.
   useEffect(() => {
     if (keeping === null) return;
-    if (stagedId !== keeping.id || notices[keeping.id] !== keeping.notice) setKeeping(null);
+    if (connection !== "open" || stagedId !== keeping.id || notices[keeping.id] !== keeping.notice) setKeeping(null);
     else if (stagedRevision !== undefined && stagedRevision > keeping.revision) {
-      if (stagedBody === keeping.expected) acceptProposal(worldId, keeping.id);
+      // Fenced to the revision seen (codex on PR 1232): one moved on again before the accept
+      // reaches the gate is refused as stale there, not accepted unseen.
+      if (stagedBody === keeping.expected) acceptProposal(worldId, keeping.id, undefined, stagedRevision);
       setKeeping(null);
     }
-  }, [keeping, stagedId, stagedRevision, stagedBody, notices, worldId]);
+  }, [keeping, connection, stagedId, stagedRevision, stagedBody, notices, worldId]);
   const accept = !choosing || stagedDraft === undefined || passageChange === null
     ? undefined
     : keptCount === editCount
@@ -1369,6 +1373,9 @@ export function ChapterWorkspace({
                             <button
                               key={n}
                               type="button"
+                              // Held while a keep is in flight (codex on PR 1232): what lands is
+                              // what was pressed, never a choice changed after it.
+                              disabled={keeping !== null}
                               className={cx("fy-ch__edit", refused.has(segment.index) && "fy-ch__edit--refused")}
                               aria-pressed={!refused.has(segment.index)}
                               title={refused.has(segment.index) ? "Refused · press to keep" : "Kept · press to refuse"}

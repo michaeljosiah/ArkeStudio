@@ -5407,7 +5407,11 @@ export class Coordinator {
         // tell the conversation what became of its propositions.
         try {
           const outcome = (await this.engine.proposals.accept(LOCAL_ENGINE_CONTEXT, msg.worldId,
-            msg.proposalId, { operationId: ulid(), ...(msg.confirmRipples === undefined ? {} : { confirmRipples: msg.confirmRipples }) })).value;
+            msg.proposalId, {
+              operationId: ulid(),
+              ...(msg.confirmRipples === undefined ? {} : { confirmRipples: msg.confirmRipples }),
+              ...(msg.expectedDraftRevision === undefined ? {} : { expectedDraftRevision: msg.expectedDraftRevision }),
+            })).value;
           const at = new Date().toISOString();
           // `no-op` retires the proposal too (gate/proposals.ts): every target already reads as
           // proposed, so there is nothing to decide. It has to settle here for the same reason —

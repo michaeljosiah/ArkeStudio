@@ -1244,6 +1244,13 @@ describe("domain events and frames", () => {
     assert.throws(() => ClientMessageSchema.parse({ ...answer, targetPath: "canon/CANON-018.md" }));
   });
 
+  it("an accept may name the draft revision it decided on", () => {
+    const accept = { kind: "proposal-accept", worldId: WORLD_ID, proposalId: "pr_1" };
+    assert.doesNotThrow(() => ClientMessageSchema.parse(accept), "unfenced, as every accept has been");
+    assert.doesNotThrow(() => ClientMessageSchema.parse({ ...accept, expectedDraftRevision: 2 }));
+    assert.throws(() => ClientMessageSchema.parse({ ...accept, expectedDraftRevision: 0 }));
+  });
+
   it("fences a kept part of a passage revision to the draft and the span shown", () => {
     const kept = {
       kind: "proposal-update-passage",

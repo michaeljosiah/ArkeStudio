@@ -668,6 +668,21 @@ describe("the craft loop (turn 128)", () => {
       const accepted = m.sent.filter((message) => message.kind === "proposal-accept");
       assert.equal(accepted.length, 1, "then the revision it landed as is accepted, once");
       assert.equal((accepted[0] as { proposalId: string }).proposalId, TWO.proposal.id);
+      assert.equal((accepted[0] as { expectedDraftRevision?: number }).expectedDraftRevision, 2, "fenced to the revision seen (codex on PR 1232)");
+    });
+
+    it("holds the choices while a keep is in flight, and lets go when the connection drops (codex on PR 1232)", async () => {
+      const m = await mount(inkbound([TWO]));
+      await answerOpen(m);
+      await act(async () => edits(m)[0]!.click());
+      await act(async () => acceptButton(m).click());
+      assert.ok(edits(m).every((edit) => (edit as HTMLButtonElement).disabled), "what lands is what was pressed");
+      assert.equal(acceptButton(m).disabled, true, "Keeping…");
+      await act(async () => __setStateForTest(inkbound([TWO]), { connection: "closed" }));
+      await act(async () => __setStateForTest(inkbound([TWO]), { connection: "open" }));
+      assert.equal(acceptButton(m).disabled, false, "no answer is coming for a keep the connection lost");
+      assert.ok(edits(m).every((edit) => !(edit as HTMLButtonElement).disabled));
+      assert.equal(m.sent.some((message) => message.kind === "proposal-accept"), false);
     });
 
     it("a newer revision that is not the passage kept is somebody else's, and is not accepted (codex on PR 1232)", async () => {

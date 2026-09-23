@@ -1059,6 +1059,8 @@ export function ProductionConversation({
     if (ask === undefined) return;
     onAskTaken?.();
     if (ask.draft === true) {
+      // A later press replaces a waiting ask, whichever kind it is (codex on PR 1232).
+      setWaitingAsk(null);
       setMessage(ask.line);
       return;
     }

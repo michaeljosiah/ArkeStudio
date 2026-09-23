@@ -470,6 +470,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       proposalId: z.string().min(1),
       confirmRipples: z.string().optional(),
+      /**
+       * The draft revision the person decided on. Present, a proposal that has moved past it is
+       * refused as stale rather than accepted — an accept a screen sends on the author's behalf
+       * (the part of a passage kept, then accepted) must land on the revision it observed.
+       */
+      expectedDraftRevision: z.number().int().min(1).optional(),
     })
     .strict(),
   z
