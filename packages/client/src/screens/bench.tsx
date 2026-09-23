@@ -84,7 +84,6 @@ import {
   Home,
   ImageMark,
   Message,
-  PauseSolid,
   PlaySolid,
   Plus,
   RefreshCw,
@@ -105,6 +104,7 @@ import {
 import { Portrait } from "../components/portrait.js";
 import { ImageDownload } from "../components/image-actions.js";
 import { BenchBrief } from "../components/bench-brief.js";
+import { BenchPlayer } from "../components/bench-player.js";
 import { PromptCapabilityNotices } from "../components/prompt-review.js";
 import { droppedMentions, mentionOptions } from "../lib/bench-mention.js";
 import { mediaUrl } from "../lib/media.js";
@@ -2923,80 +2923,6 @@ function takeMeta(take: BenchTake): string {
   ]
     .filter((part): part is string => part !== undefined)
     .join(" · ");
-}
-
-/**
- * The wall's clip, with the design's own transport (142a) rather than the browser's: a play disc
- * while it rests, and a bar of play, the time, a track to seek on and the length. One element
- * owns the clip; the bar and the disc only ask it.
- */
-function BenchPlayer({ src }: { src: string }) {
-  const video = useRef<HTMLVideoElement>(null);
-  const [playing, setPlaying] = useState(false);
-  const [time, setTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const toggle = () => {
-    const el = video.current;
-    if (!el) return;
-    if (el.paused) void el.play();
-    else el.pause();
-  };
-  return (
-    <>
-      <video
-        ref={video}
-        src={src}
-        playsInline
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
-        onEnded={() => setPlaying(false)}
-        onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
-        onLoadedMetadata={(e) => setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)}
-        onClick={toggle}
-      />
-      {!playing && (
-        <button type="button" className="fy-bench__playdisc" aria-label="Play" onClick={toggle}>
-          <PlaySolid size={22} />
-        </button>
-      )}
-      <div className="fy-bench__transport" data-testid="bench-transport">
-        <button type="button" className="fy-bench__transportplay" aria-label={playing ? "Pause" : "Play"} onClick={toggle}>
-          {playing ? <PauseSolid size={11} /> : <PlaySolid size={11} />}
-        </button>
-        <span className="fy-bench__transporttime">{clock(time)}</span>
-        <div
-          className="fy-bench__transporttrack"
-          role="slider"
-          aria-label="Position"
-          aria-valuemin={0}
-          aria-valuemax={Math.round(duration)}
-          aria-valuenow={Math.round(time)}
-          tabIndex={0}
-          onClick={(e) => {
-            const el = video.current;
-            if (!el || duration === 0) return;
-            const box = e.currentTarget.getBoundingClientRect();
-            const fraction = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
-            el.currentTime = fraction * duration;
-          }}
-          onKeyDown={(e) => {
-            const el = video.current;
-            if (!el || duration === 0) return;
-            if (e.key === "ArrowRight") el.currentTime = Math.min(duration, el.currentTime + 1);
-            if (e.key === "ArrowLeft") el.currentTime = Math.max(0, el.currentTime - 1);
-          }}
-        >
-          <span style={{ width: `${duration > 0 ? (time / duration) * 100 : 0}%` }} />
-        </div>
-        <span className="fy-bench__transporttime fy-bench__transporttime--end">{clock(duration)}</span>
-      </div>
-    </>
-  );
-}
-
-function clock(seconds: number): string {
-  const whole = Math.max(0, Math.floor(seconds));
-  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 
 /**
