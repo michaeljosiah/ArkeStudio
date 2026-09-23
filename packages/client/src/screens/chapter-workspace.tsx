@@ -28,6 +28,7 @@ import { PageReadControl, useProsePageRead, type PageReadBlock } from "../compon
 import { EmptyState, Screen } from "../components/layout.js";
 import { Button, cx } from "../components/ui.js";
 import { continuityStamp } from "../lib/continuity.js";
+import { passageAction, passageActions, type PassageAction } from "../lib/passage-actions.js";
 import { useProduction } from "../lib/selectors.js";
 import { EditableText, SceneTitle } from "./storyboard.js";
 import { AudiobookBlocks, AudiobookSide, DirectionCard, useChapterAudiobook, type AudiobookIntent } from "./chapter-audiobook.js";
@@ -254,6 +255,88 @@ export function passageSubject(text: string | null): string | null {
 export function paragraphAt(text: string, offset: number): number | null {
   const index = paragraphSpans(text).findIndex((span) => offset >= span.start && offset <= span.end);
   return index < 0 ? null : index + 1;
+}
+
+const TIGHTEN = passageAction("tighten")!;
+const HOLD_TO_STYLE = passageAction("style")!;
+/** The menu's groups, ruled apart: what rewrites the passage, what only answers, and the rest. */
+const groupOf = (action: PassageAction) => (action.replyOnly ? "reply" : action.id === "other" ? "other" : "rewrite");
+
+/**
+ * The press beside a selection (turn 128), opened into what can be asked of it. Mouse-down is
+ * swallowed on the press and on every item, so a click does not collapse the selection it is
+ * about before it lands; the menu is keyed by the selection, so a new one starts it closed.
+ */
+function PassageMenu({
+  words,
+  top,
+  left,
+  actions,
+  onAsk,
+}: {
+  words: number;
+  top: number;
+  left: number;
+  actions: readonly PassageAction[];
+  onAsk: (action: PassageAction) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const items = useRef<(HTMLButtonElement | null)[]>([]);
+  const move = (from: number, by: number) => items.current[(from + by + actions.length) % actions.length]?.focus();
+  return (
+    <div
+      className="fy-ch__ask-wrap"
+      style={{ top, left }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && open) {
+          e.stopPropagation();
+          setOpen(false);
+        }
+      }}
+    >
+      <button
+        type="button"
+        className="fy-ch__ask"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => setOpen((was) => !was)}
+      >
+        Ask Arke · {words.toLocaleString()} words
+      </button>
+      {open && (
+        <div className="fy-ch__ask-menu" role="menu" aria-label="Ask about this passage">
+          {actions.map((action, i) => (
+            <button
+              key={action.id}
+              ref={(el) => {
+                items.current[i] = el;
+              }}
+              type="button"
+              role="menuitem"
+              className={cx("fy-ch__ask-item", i > 0 && groupOf(actions[i - 1]!) !== groupOf(action) && "fy-ch__ask-item--rule")}
+              onMouseDown={(e) => e.preventDefault()}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  move(i, 1);
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  move(i, -1);
+                }
+              }}
+              onClick={() => {
+                setOpen(false);
+                onAsk(action);
+              }}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -985,6 +1068,16 @@ export function ChapterWorkspace({
     if (locked) setSelection(null);
   }, [locked]);
   const passage = selection?.text ?? null;
+  /*
+   * An ask from the menu beside the selection, handed to the dock to say with the passage as its
+   * subject, exactly as the dock's own quick asks are. Held until the dock takes it, so an ask
+   * that brings the dock back is said by the dock it brought.
+   */
+  const [ask, setAsk] = useState<PassageAction | null>(null);
+  const askPassage = (action: PassageAction) => {
+    setDock(true);
+    setAsk(action);
+  };
 
   /*
    * A passage waits (turn 128): the staged draft changes one span and leaves the rest of the
@@ -1246,15 +1339,14 @@ export function ChapterWorkspace({
             {/* The press beside a selection (turn 128). Mouse-down is swallowed so the press does
                 not collapse the selection it is about before the click lands. */}
             {selection !== null && !locked && (
-              <button
-                type="button"
-                className="fy-ch__ask"
-                style={{ top: selection.top, left: selection.left }}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => setDock(true)}
-              >
-                Ask Arke · {countWords(selection.text).toLocaleString()} words
-              </button>
+              <PassageMenu
+                key={selection.text}
+                words={countWords(selection.text)}
+                top={selection.top}
+                left={selection.left}
+                actions={passageActions(style !== null)}
+                onAsk={askPassage}
+              />
             )}
             <div className="fy-ch__foot">
               <span className="fy-mono">{foot}</span>
@@ -1583,6 +1675,9 @@ export function ChapterWorkspace({
             subject: `${chapter.title} · ${production.meta.title}`,
             conversationFirst: true,
             onPutAway: () => setDock(false),
+            ...(ask !== null
+              ? { ask: { line: ask.line, ...(ask.replyOnly ? { replyOnly: true } : {}), ...(ask.draft ? { draft: true } : {}) }, onAskTaken: () => setAsk(null) }
+              : {}),
             // The first prompt follows the plan (turn 127): a synopsis with no prose is drafted
             // from; a chapter with prose is continued. While a passage is selected the prompts
             // are a revision's (turn 128), and the passage is the subject.
@@ -1595,7 +1690,7 @@ export function ChapterWorkspace({
             prompts: view === "audiobook"
               ? [{ label: directionStands ? "Direct again" : "Direct this chapter", press: audiobook.directPress }, "Who reads this chapter?", "Which blocks are stale?"]
               : passage !== null
-              ? ["Tighten this", { label: "Hold this against the style", replyOnly: true }]
+              ? [TIGHTEN.line, { label: HOLD_TO_STYLE.line, replyOnly: true }]
               : voicesRecord !== null && voicesStale
                 ? [{ label: "Cast again", press: castLinesPress }, "Who speaks in this chapter?"]
                 : voicesRecord !== null && speakers.length > 0 && !(continuityRecord !== null && continuityStale)

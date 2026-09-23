@@ -799,6 +799,12 @@ export function ProductionConversation({
      */
     prompts?: readonly (string | { label: string; replyOnly?: boolean; press?: () => void })[];
     /**
+     * An ask handed in from outside the dock, said once as a quick ask is. `draft` only puts the
+     * line in the composer for the author to finish. The page clears it in `onAskTaken`.
+     */
+    ask?: { line: string; replyOnly?: boolean; draft?: boolean };
+    onAskTaken?: () => void;
+    /**
      * Said before whatever is typed while a shot is the subject. The thread enters at the scene,
      * so the shot the dock names has to be in the words themselves or the studio never hears it.
      */
@@ -1035,6 +1041,29 @@ export function ProductionConversation({
     const prefix = dock?.subjectPrefix;
     say(prefix === undefined ? text : `${prefix} ${text}`);
   };
+
+  /*
+   * An ask handed in from the page — the chapter's selection menu — taken once and handed back.
+   * It is said exactly as a quick ask would be, subject and all, so a passage revision from the
+   * menu is the same turn as one from the dock. One that cannot be said now (a turn running, a
+   * thread opening, no model) goes into the composer instead of vanishing, and so does one that
+   * only starts a line for the author to finish.
+   */
+  const ask = dock?.ask;
+  const onAskTaken = dock?.onAskTaken;
+  useEffect(() => {
+    if (ask === undefined) return;
+    onAskTaken?.();
+    const sayable = ask.draft !== true && opening === null && !running && languageUnavailableReason === undefined;
+    if (!sayable) {
+      setMessage(ask.line);
+      return;
+    }
+    const prefix = dock?.subjectPrefix;
+    say(prefix === undefined ? ask.line : `${prefix} ${ask.line}`, ask.replyOnly === true);
+    // Taken on arrival only: the page clears it in onAskTaken, so the rest cannot re-fire it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ask]);
 
   const points = loaded?.points ?? [];
   const carriedPoints = points.filter((p) => p.kind === "point" && p.settled).length;

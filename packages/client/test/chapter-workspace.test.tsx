@@ -23,6 +23,12 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }), innerWidth: 1024, innerHeight: 768 });
 Object.assign(dom.HTMLElement.prototype, { focus() {}, scrollIntoView() {} });
+// The composer writes a line handed to it through innerText, which linkedom only reads.
+Object.defineProperty(dom.HTMLElement.prototype, "innerText", {
+  get(this: HTMLElement) { return this.textContent ?? ""; },
+  set(this: HTMLElement, value: string) { this.textContent = value; },
+  configurable: true,
+});
 Object.assign(Object.getPrototypeOf(dom.document.createElement("video")), {
   pause() {},
   play: () => Promise.resolve(),
@@ -502,6 +508,63 @@ describe("the craft loop (turn 128)", () => {
     assert.doesNotMatch(text(m), /Ask Arke · /, "the selection collapsed, the press goes");
     assert.doesNotMatch(text(m), /about this passage/);
     assert.match(text(m), /Draft the rest/, "and the prompts are the chapter's again");
+  });
+
+  it("the press beside a selection opens what can be asked of it, each said with the passage as the dock's own asks are", async () => {
+    const styled = inkbound([], STYLE);
+    const m = await mount({ ...styled, world: { ...styled.world!, conversations: [THREAD] } });
+    await answerOpen(m);
+    const area = q(m, "textarea.fy-ch__source") as HTMLTextAreaElement;
+    await keyup(area, 0, 24);
+    assert.equal(q(m, "[role=menu]"), null, "closed until pressed");
+    await act(async () => {
+      (q(m, "button.fy-ch__ask") as HTMLElement).click();
+    });
+    const labels = [...m.container.querySelectorAll("[role=menuitem]")].map((b) => b.textContent);
+    assert.deepEqual(labels, ["Tighten", "Expand", "Simplify", "Make it vivid", "Change tone…", "Check against style", "Critique", "Ask something else…"]);
+
+    const item = (label: string) => [...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === label) as HTMLElement;
+    await act(async () => {
+      item("Expand").click();
+    });
+    assert.equal(q(m, "[role=menu]"), null, "an ask closes the menu");
+    const sends = () => m.sent.filter((message) => message.kind === "world-chat-send") as Array<{ text: string; replyOnly?: boolean; subject?: unknown }>;
+    const expand = sends().find((message) => message.text.includes("Expand this"));
+    assert.match(expand?.text ?? "", /^About this passage in chapter 02, paragraph 1: «Maren counted the bells.» Expand this/);
+    assert.deepEqual(expand?.subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells." });
+    assert.equal(expand?.replyOnly, undefined, "a rewrite may stage");
+
+    await act(async () => {
+      (q(m, "button.fy-ch__ask") as HTMLElement).click();
+    });
+    await act(async () => {
+      item("Critique").click();
+    });
+    assert.equal(sends().find((message) => message.text.includes("What works here"))?.replyOnly, true, "a critique is a reply and nothing else");
+
+    // A line that only starts the ask goes into the composer, said by nobody yet.
+    const before = sends().length;
+    await act(async () => {
+      (q(m, "button.fy-ch__ask") as HTMLElement).click();
+    });
+    await act(async () => {
+      item("Change tone…").click();
+    });
+    assert.equal(sends().length, before, "nothing is said for a line the author finishes");
+    const composer = q(m, ".fy-arke .fy-cx__editor");
+    assert.equal(composer?.textContent, "Make this ");
+  });
+
+  it("without a prose style the menu does not offer to hold the passage against one", async () => {
+    const m = await mount({ ...inkbound(), world: { ...inkbound().world!, conversations: [THREAD] } });
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => {
+      (q(m, "button.fy-ch__ask") as HTMLElement).click();
+    });
+    const labels = [...m.container.querySelectorAll("[role=menuitem]")].map((b) => b.textContent);
+    assert.equal(labels.includes("Check against style"), false);
+    assert.equal(labels.includes("Critique"), true);
   });
 
   it("a passage waiting stands in place with the rest untouched; the band, the chip, the foot and the card say the span", async () => {
