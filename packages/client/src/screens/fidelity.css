@@ -1946,18 +1946,13 @@ select.fy-sheetselect { padding-right: 24px; }
 .fy-param { border: 1px solid var(--border); border-radius: 7px; padding: 5px 10px; font: 400 11px var(--font-mono); color: var(--muted-foreground); }
 .fy-gen__cta { display: flex; align-items: center; gap: 10px; margin-top: 14px; flex: none; }
 
-.fy-gen__center { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 24px 30px; background: var(--muted); }
-.fy-gen__meta { display: flex; align-items: baseline; gap: 10px; flex: none; }
-.fy-viewer {
-  flex: 1;
-  min-height: 220px;
-  margin-top: 12px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  overflow: hidden;
-  position: relative;
-  background: var(--primary);
-}
+/* The wall, on the bench's bands (142a): the take line, the black box 14px in from each side,
+   the verdict at the foot. The pieces inside are the bench's own `fy-bench__*` rules. */
+.fy-gen__center { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--muted); position: relative; }
+.fy-bench__briefrow.fy-gen__takeline { padding-top: 12px; }
+.fy-gen__decision { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.fy-gen__empty { margin-top: 14px; margin-bottom: 14px; }
+.fy-gen__strip { width: 104px; flex: none; box-sizing: border-box; }
 .fy-viewer__tag {
   position: absolute;
   left: 12px;
@@ -1987,16 +1982,7 @@ select.fy-sheetselect { padding-right: 24px; }
 }
 .fy-playbtn:hover { transform: scale(1.08); }
 .fy-scrub { display: flex; align-items: center; gap: 12px; margin-top: 12px; flex: none; }
-.fy-scrub__bar { flex: 1; height: 5px; border-radius: 99px; background: var(--border); position: relative; overflow: hidden; }
-.fy-scrub__fill { height: 100%; border-radius: 99px; background: var(--foreground); }
-.fy-gen__verdict { display: flex; align-items: center; gap: 10px; margin-top: 14px; flex: none; flex-wrap: wrap; }
 
-.fy-gen__takes { width: 153px; flex: none; border-left: 1px solid var(--border); padding: 20px 12px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
-.fy-taketile { cursor: pointer; opacity: 0.75; transition: opacity 0.2s; background: transparent; border: none; padding: 0; }
-.fy-taketile:hover, .fy-taketile--active { opacity: 1; }
-.fy-taketile__frame { width: 100%; height: 58px; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
-.fy-taketile--active .fy-taketile__frame { border: 2px solid var(--foreground); }
-.fy-taketile__meta { display: flex; align-items: center; gap: 5px; margin-top: 4px; justify-content: center; font: 400 10px var(--font-mono); color: var(--muted-foreground); }
 
 /* cut (24a) */
 .fy-cutviewer {
@@ -5336,6 +5322,9 @@ select.fy-set__pill { padding-right: 26px; }
   appearance: none; border: 1px solid var(--border); border-radius: 8px; background: var(--background);
   color: var(--muted-foreground); font: 400 var(--text-2xs)/1.4 var(--font-mono); padding: 5px 8px; cursor: pointer;
   transition: var(--transition-control);
+  /* A select is as wide as its longest option, so `720p` sat in a box sized for
+     `resolution · default`. The master's chip is as wide as what it says. */
+  field-sizing: content;
 }
 .fy-bench__chip:hover { background: var(--accent); color: var(--foreground); }
 /* A chip that states the shot's own fact — its length, the production's aspect — is not a control. */
@@ -5470,11 +5459,13 @@ select.fy-set__pill { padding-right: 26px; }
 }
 .fy-bench__takeframe { opacity: 0.7; }
 .fy-bench__take[aria-current="true"] .fy-bench__takeframe { border-color: var(--foreground); opacity: 1; }
-/* A clip says it plays; a take still out is a hatched box with a spinner (R-24). */
-.fy-bench__takeplay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+/* A clip says it plays with the master's small mark in the corner (68b), not a disc over the
+   middle of a 34px frame, which hid most of the picture it was labelling. A take still out is a
+   hatched box with a spinner (R-24). */
+.fy-bench__takeplay { position: absolute; right: 3px; top: 3px; display: flex; line-height: 0; }
 .fy-bench__takeplay > span {
-  width: 16px; height: 16px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center;
-  background: color-mix(in srgb, var(--background) 90%, transparent); color: var(--foreground);
+  display: inline-flex; color: var(--media-overlay-fg);
+  filter: drop-shadow(0 0 1px color-mix(in srgb, var(--media-overlay-bg) 80%, transparent));
 }
 .fy-bench__takeframe[data-inflight="true"] {
   background: repeating-linear-gradient(45deg, var(--neutral-100) 0 9px, var(--neutral-50) 9px 18px);

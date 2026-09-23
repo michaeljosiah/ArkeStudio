@@ -784,6 +784,21 @@ describe("screen inventory", () => {
     assert.ok(workspace.includes("carries as text"));
   });
 
+  it("draws Advanced's wall with the bench's own viewer, not a cropped still on a --primary box (142a)", () => {
+    const worldId = FIXTURE_STATE.world!.meta.worldId;
+    const workspace = renderAt(`/w/${worldId}/p/saltlight/generate?view=bench`);
+    assert.match(workspace, /class="fy-bench__media"/, "the bench's black, letterboxing box");
+    assert.match(workspace, /<video[^>]*poster=/, "the take plays where it is judged");
+    assert.match(workspace, /data-testid="bench-transport"/, "with the clip's transport inside the box");
+    assert.match(workspace, /fy-bench__overlaychip--name">TAKE 1</);
+    assert.match(workspace, /class="fy-bench__strip fy-gen__strip"/);
+    assert.doesNotMatch(workspace, /fy-viewer"|fy-taketile/, "the old viewer and tiles are gone");
+    assert.ok(
+      workspace.indexOf("Reject · cite the sheet") < workspace.indexOf("Accept take"),
+      "the primary closes the row, as Keep does on the bench",
+    );
+  });
+
   it("names a production look instead of claiming the world look is inherited", () => {
     const world = FIXTURE_STATE.world!;
     __setStateForTest({

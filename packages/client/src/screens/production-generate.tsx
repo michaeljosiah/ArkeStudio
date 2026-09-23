@@ -9,10 +9,11 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { productionModel } from "../components/dispatch-bar.js";
-import { Play, Plus } from "../components/icons.js";
+import { BenchPlayer } from "../components/bench-player.js";
+import { PlaySolid, Plus } from "../components/icons.js";
 import { EmptyState } from "../components/layout.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
-import { Button, cx } from "../components/ui.js";
+import { Button } from "../components/ui.js";
 import { seconds, usd } from "../lib/format.js";
 import { acceptedTakeId, takeDecisions, takesForShot, useProduction } from "../lib/selectors.js";
 import {
@@ -22,7 +23,8 @@ import {
   subscribeBenchSubjectOpened,
   useStore,
 } from "../lib/store.js";
-import { decisionTone, takeMediaPath } from "../lib/take-presentation.js";
+import { mediaUrl } from "../lib/media.js";
+import { decisionTone, takeMediaPath, takeMediaView } from "../lib/take-presentation.js";
 import { carriedSubjects } from "./production-cast.js";
 import { TakesView } from "./production-takes.js";
 
@@ -63,6 +65,7 @@ export function GenerateScreen() {
     takes[takes.length - 1] ??
     null;
   const slug = world?.meta.slug;
+  const view = production && take ? takeMediaView(production, take) : null;
   const model =
     (state?.app.manifest?.models ?? []).find(
       (m) => m.id === (productionModel(state, prodId, "video") ?? state?.app.routing.defaults["video"]),
@@ -341,18 +344,32 @@ export function GenerateScreen() {
           {generatorError === null ? null : <span role="alert" className="fy-mono">{generatorError}</span>}
         </div>
       </div>
+      {/* The wall and the strip are the bench's own (design 142a), not a second drawing of
+          them: one black box that letterboxes rather than crops, the take's chips on the
+          picture, the clip's transport inside it, and the verdict at the foot, right-aligned. */}
       <div className="fy-gen__center">
         {take ? (
           <>
-            <div className="fy-gen__meta">
-              <span className="fy-mono">
-                take {takes.indexOf(take) + 1} · {take.model} · {seconds(shot?.durationSec)}
-                {take.completedAt ? ` · finished ${take.completedAt.slice(11, 16)}` : ""}
+            <div className="fy-bench__briefrow fy-gen__takeline">
+              <span className="fy-bench__briefline">
+                {[
+                  model?.id === take.model ? model.displayName : take.model,
+                  seconds(shot?.durationSec),
+                  take.completedAt ? `finished ${take.completedAt.slice(11, 16)}` : undefined,
+                ]
+                  .filter((part): part is string => part !== undefined)
+                  .join(" · ")}
               </span>
-              {(take.provenance.propStates ?? []).length === 0 ? null : (
-                // The five fields frozen at dispatch (design turn 105; issue 536), named rather
-                // than by id — what this take was made with, not what the shot says now.
-                <span className="fy-mono" data-testid="take-prop-provenance" style={{ display: "block" }}>
+              <span className="fy-gen__decision">
+                <span className={`fy-dot fy-dot--${decisionTone(decisions[take.id])}`} />
+                <span className="fy-mono">{decisions[take.id] ?? "pending"}</span>
+              </span>
+            </div>
+            {(take.provenance.propStates ?? []).length === 0 ? null : (
+              // The five fields frozen at dispatch (design turn 105; issue 536), named rather
+              // than by id — what this take was made with, not what the shot says now.
+              <div className="fy-bench__briefrow">
+                <span className="fy-bench__briefline fy-mono" data-testid="take-prop-provenance">
                   {take.provenance.propStates!
                     .map((entry) => {
                       const prop = world?.props.find((candidate) => candidate.id === entry.propId);
@@ -361,39 +378,38 @@ export function GenerateScreen() {
                     })
                     .join("  ")}
                 </span>
-              )}
-              <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <span className={`fy-dot fy-dot--${decisionTone(decisions[take.id])}`} />
-                <span className="fy-mono">{decisions[take.id] ?? "pending"}</span>
-              </span>
-            </div>
-            <div className="fy-viewer">
-              <Portrait
-                worldSlug={slug}
-                path={takeMediaPath(production!, take) ?? ""}
-                label={`Take: first frame`}
-                radius={0}
-              />
-              <span className="fy-playbtn" aria-hidden style={{ pointerEvents: "none" }}>
-                <Play size={22} />
-              </span>
-            </div>
-            <div className="fy-scrub">
-              <span className="fy-mono">0:00</span>
-              <div className="fy-scrub__bar">
-                <div className="fy-scrub__fill" style={{ width: "0%" }} />
               </div>
-              <span className="fy-mono">{seconds(shot?.durationSec)}</span>
+            )}
+            <div className="fy-bench__media">
+              {view !== null && slug ? (
+                view.isVideo ? (
+                  <BenchPlayer
+                    key={take.id}
+                    src={mediaUrl(slug, view.sourcePath)}
+                    poster={mediaUrl(slug, view.posterPath)}
+                    segment={take.segment}
+                  />
+                ) : (
+                  <img
+                    src={mediaUrl(slug, view.sourcePath)}
+                    alt={`Take ${takes.indexOf(take) + 1}`}
+                    style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                  />
+                )
+              ) : null}
+              <div className="fy-bench__overlaychips">
+                <span className="fy-bench__overlaychip fy-bench__overlaychip--name">{`TAKE ${takes.indexOf(take) + 1}`}</span>
+                {production && (
+                  <span className="fy-bench__overlaychip">
+                    {[productionAspect(production.meta), seconds(shot?.durationSec)].join(" · ")}
+                  </span>
+                )}
+              </div>
             </div>
-            <div className="fy-gen__verdict">
+            <div className="fy-bench__wallactions">
+              <span style={{ flex: 1 }} />
               <Button
-                variant="primary"
-                disabled={!shotId || decisions[take.id] === "accepted"}
-                onClick={() => worldId && prodId && shotId && acceptTake(worldId, prodId, take.id, shotId)}
-              >
-                Accept take
-              </Button>
-              <Button
+                variant="outline"
                 disabled={
                   Object.keys(take.provenance.sheets).length === 0 || decisions[take.id] === "rejected"
                 }
@@ -412,44 +428,51 @@ export function GenerateScreen() {
               >
                 Reject · cite the sheet
               </Button>
-              <span className="fy-h1row__push" />
+              <Button
+                variant="primary"
+                disabled={!shotId || decisions[take.id] === "accepted"}
+                onClick={() => worldId && prodId && shotId && acceptTake(worldId, prodId, take.id, shotId)}
+              >
+                Accept take
+              </Button>
             </div>
           </>
         ) : (
-          <EmptyState
-            title="No takes for this shot yet"
-            hint="Dispatch sends the shot out; takes land here for review."
-          />
+          <div className="fy-bench__empty fy-gen__empty">
+            <EmptyState
+              title="No takes for this shot yet"
+              hint="Dispatch sends the shot out; takes land here for review."
+            />
+          </div>
         )}
       </div>
-      <div className="fy-gen__takes">
-        <div className="fy-eyebrow-sm" style={{ textAlign: "center" }}>
-          TAKES
-        </div>
-        {takes.map((t, i) => (
-          <button
-            key={t.id}
-            type="button"
-            className={cx("fy-taketile", take?.id === t.id && "fy-taketile--active")}
-            onClick={() => setSelectedTakeId(t.id)}
-          >
-            <div className="fy-taketile__frame">
-              <Portrait
-                worldSlug={slug}
-                path={takeMediaPath(production!, t) ?? ""}
-                label={`take ${i + 1}`}
-                radius={0}
-              />
-            </div>
-            <div className="fy-taketile__meta">
-              <span>{i + 1}</span>
-              <span
-                className={`fy-dot fy-dot--${decisionTone(decisions[t.id])}`}
-                style={{ width: 5, height: 5 }}
-              />
-            </div>
-          </button>
-        ))}
+      <div className="fy-bench__strip fy-gen__strip">
+        {takes.map((t, i) => {
+          const tileView = production ? takeMediaView(production, t) : null;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              className="fy-bench__take"
+              aria-current={take?.id === t.id}
+              aria-label={`Take ${i + 1} · ${decisions[t.id] ?? "pending"}`}
+              title={decisions[t.id] ?? "pending"}
+              onClick={() => setSelectedTakeId(t.id)}
+            >
+              <span className="fy-bench__taken">{i + 1}</span>
+              <span className="fy-bench__takeframe">
+                <Portrait worldSlug={slug} path={tileView?.posterPath ?? ""} label={`take ${i + 1}`} radius={0} />
+                {tileView?.isVideo && (
+                  <span className="fy-bench__takeplay" aria-hidden="true">
+                    <span>
+                      <PlaySolid size={9} />
+                    </span>
+                  </span>
+                )}
+              </span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
