@@ -141,15 +141,20 @@ export function readPublicationManifest(
   input: unknown,
   supportedCapabilities: readonly string[] = PUBLICATION_VIDEO_CAPABILITIES,
 ): PublicationManifestRead {
-  const header = z.object({
+  const envelope = z.object({
     format: z.literal("arke-publication"),
     schemaVersion: z.number().int().positive(),
+  }).passthrough().safeParse(input);
+  if (!envelope.success) return { ok: false, code: "invalid-manifest", reason: "This is not an Arke publication manifest." };
+  // A later schema can replace the entire v1 header, so only this stable discriminator can
+  // be required before reporting that the schema is unsupported.
+  if (envelope.data.schemaVersion !== 1) return { ok: false, code: "unsupported-schema", reason: `Publication schema ${envelope.data.schemaVersion} is not supported.` };
+  const header = z.object({
     profile: z.string().min(1),
     profileVersion: z.number().int().positive(),
     requires: z.array(CapabilitySchema).min(1).max(64),
   }).passthrough().safeParse(input);
   if (!header.success) return { ok: false, code: "invalid-manifest", reason: "This is not an Arke publication manifest." };
-  if (header.data.schemaVersion !== 1) return { ok: false, code: "unsupported-schema", reason: `Publication schema ${header.data.schemaVersion} is not supported.` };
   if (header.data.profile !== "video" || header.data.profileVersion !== 1) {
     return { ok: false, code: "unsupported-profile", reason: `Publication profile ${header.data.profile} v${header.data.profileVersion} is not supported.` };
   }
