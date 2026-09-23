@@ -1253,16 +1253,16 @@ describe("domain events and frames", () => {
       path: "productions/inkbound/chapters/01-neap.md",
       before: "the bells",
       after: "the seven bells slowly",
-      text: "the seven bells",
+      kept: [0],
       expectedDraftRevision: 1,
     };
     assert.doesNotThrow(() => ClientMessageSchema.parse(kept));
-    for (const missing of ["requestId", "path", "before", "after", "text", "expectedDraftRevision"]) {
+    for (const missing of ["requestId", "path", "before", "after", "kept", "expectedDraftRevision"]) {
       const { [missing]: _dropped, ...without } = kept as Record<string, unknown>;
       assert.throws(() => ClientMessageSchema.parse(without), `${missing} must be required`);
     }
-    assert.throws(() => ClientMessageSchema.parse({ ...kept, text: "x".repeat(2_401) }), "no more than a passage replacement may carry");
-    assert.throws(() => ClientMessageSchema.parse({ ...kept, body: "the whole chapter" }), "strict");
+    assert.throws(() => ClientMessageSchema.parse({ ...kept, kept: [-1] }), "an edit is named by its index");
+    assert.throws(() => ClientMessageSchema.parse({ ...kept, text: "words the reviewer never saw" }), "the passage is composed by the gate, never sent");
   });
 
   it("carries non-empty authoritative World Chat ripples as transient news", () => {

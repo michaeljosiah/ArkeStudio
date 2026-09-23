@@ -527,13 +527,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
-   * Keep part of a staged passage revision (turn 128): the span Arke's revision changed, as the
-   * reviewer composed it from the edits they kept. The gate finds the span itself, from the base
-   * the chapter was staged against and the staged chapter, and replaces only that — the rest of
-   * the chapter cannot be touched from here. `before` and `after` are the span as the screen drew
-   * it, refused when they are not what the gate finds, so a reviewer who chose among edits of a
-   * different passage never has their choices applied to this one. The revision fence and the
-   * idempotent retry are `proposal-update-field`'s.
+   * Keep part of a staged passage revision (turn 128): which of the revision's edits the reviewer
+   * kept, by their index in `passageDiff` of the span. The gate finds the span itself, from the
+   * base the chapter was staged against and the staged chapter, takes the same edits apart and
+   * composes the passage from the ones named — so what lands can only be the reviewed edits, and
+   * the rest of the chapter cannot be touched from here. `before` and `after` are the span as the
+   * screen drew it, refused when they are not what the gate finds, so choices made among the edits
+   * of a different passage are never applied to this one. The revision fence and the idempotent
+   * retry are `proposal-update-field`'s.
    */
   z
     .object({
@@ -544,7 +545,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       path: z.string().min(1),
       before: z.string().max(2_400),
       after: z.string().max(2_400),
-      text: z.string().max(2_400),
+      kept: z.array(z.number().int().min(0)).max(2_400),
       expectedDraftRevision: z.number().int().min(1),
     })
     .strict(),

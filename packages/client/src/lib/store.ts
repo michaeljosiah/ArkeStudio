@@ -2414,18 +2414,19 @@ export function resolveProposalChoice(
 }
 
 /**
- * Keep part of a staged passage revision (turn 128): the span as the screen drew it, and what it
- * becomes from the edits kept. Fenced to the draft revision shown, as a field edit is.
+ * Keep part of a staged passage revision (turn 128): the span as the screen drew it, and the edits
+ * kept by index; the gate composes the passage. Fenced to the draft revision shown, as a field
+ * edit is. False when nothing was sent, so the screen does not wait for an answer that cannot come.
  */
 export function updateProposalPassage(
   worldId: string,
   proposalId: string,
   path: string,
   span: { before: string; after: string },
-  text: string,
+  kept: readonly number[],
   expectedDraftRevision: number,
-): void {
-  send({
+): boolean {
+  return send({
     kind: "proposal-update-passage",
     worldId,
     requestId: crypto.randomUUID(),
@@ -2433,7 +2434,7 @@ export function updateProposalPassage(
     path,
     before: span.before,
     after: span.after,
-    text,
+    kept: [...kept],
     expectedDraftRevision,
   });
 }

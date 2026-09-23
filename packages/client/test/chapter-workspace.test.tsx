@@ -555,6 +555,22 @@ describe("the craft loop (turn 128)", () => {
     assert.equal(composer?.textContent, "Make this ");
   });
 
+  it("an ask pressed while the dock is busy waits with its own passage, never in the composer (codex on PR 1232)", async () => {
+    // No thread yet: the first ask opens one, and the dock is busy until it arrives.
+    const m = await mount(inkbound([], STYLE));
+    await answerOpen(m);
+    const area = q(m, "textarea.fy-ch__source") as HTMLTextAreaElement;
+    const item = (label: string) => [...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === label) as HTMLElement;
+    await keyup(area, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => item("Expand").click());
+    assert.equal(m.sent.filter((message) => message.kind === "world-chat-create").length, 1, "the first ask opens the thread");
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => item("Critique").click());
+    assert.equal(m.sent.filter((message) => message.kind === "world-chat-create" || message.kind === "world-chat-send").length, 1, "the second waits for the dock");
+    assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent ?? "", "", "and is not left in the composer to be said about whatever is selected next");
+  });
+
   it("without a prose style the menu does not offer to hold the passage against one", async () => {
     const m = await mount({ ...inkbound(), world: { ...inkbound().world!, conversations: [THREAD] } });
     await answerOpen(m);
@@ -636,7 +652,7 @@ describe("the craft loop (turn 128)", () => {
       assert.equal(keep.path, PATH);
       assert.equal(keep.before, "Maren counted the");
       assert.equal(keep.after, "Ines counted the seven");
-      assert.equal(keep.text, "Maren counted the seven", "the refused name stays, the kept word lands");
+      assert.deepEqual(keep.kept, [1], "the refused name stays, the kept word lands: edits named, never words");
       assert.equal(keep.expectedDraftRevision, 1);
       assert.equal(m.sent.some((message) => message.kind === "proposal-accept"), false, "nothing is accepted before the part lands");
 
@@ -652,6 +668,50 @@ describe("the craft loop (turn 128)", () => {
       const accepted = m.sent.filter((message) => message.kind === "proposal-accept");
       assert.equal(accepted.length, 1, "then the revision it landed as is accepted, once");
       assert.equal((accepted[0] as { proposalId: string }).proposalId, TWO.proposal.id);
+    });
+
+    it("a newer revision that is not the passage kept is somebody else's, and is not accepted (codex on PR 1232)", async () => {
+      const m = await mount(inkbound([TWO]));
+      await answerOpen(m);
+      await act(async () => edits(m)[0]!.click());
+      await act(async () => acceptButton(m).click());
+      // Another window moved the draft on: a revision past the press, holding other words.
+      const theirs: StagedProposal = {
+        ...TWO,
+        proposal: { ...TWO.proposal, draftRevision: 2 },
+        review: {
+          targets: [{ ...TWO.review!.targets[0]!, fields: [{ field: "Prose", before: BODY, proposed: BODY.replace("Maren counted the bells.", "Odile counted the nine bells.") }] }],
+        },
+      };
+      await act(async () => __setStateForTest(inkbound([theirs]), { connection: "open" }));
+      assert.equal(m.sent.some((message) => message.kind === "proposal-accept"), false, "a revision the author never saw is never accepted");
+      assert.equal(acceptButton(m).disabled, false, "and the press is theirs again");
+    });
+
+    it("a keep that could not be sent leaves the press the author's (codex on PR 1232)", async () => {
+      const m = await mount(inkbound([TWO]));
+      await answerOpen(m);
+      await act(async () => edits(m)[0]!.click());
+      await act(async () => __setStateForTest(inkbound([TWO]), { connection: "closed" }));
+      await act(async () => acceptButton(m).click());
+      assert.equal(m.sent.some((message) => message.kind === "proposal-update-passage"), false);
+      assert.equal(acceptButton(m).textContent, "Accept 1 of 2");
+      assert.equal(acceptButton(m).disabled, false, "not stuck on Keeping…");
+    });
+
+    it("a passage rewritten under the same revision starts every edit kept again (codex on PR 1232)", async () => {
+      const m = await mount(inkbound([TWO]));
+      await answerOpen(m);
+      await act(async () => edits(m)[0]!.click());
+      assert.match(text(m), /1 of 2 changes kept/);
+      const rewritten: StagedProposal = {
+        ...TWO,
+        review: {
+          targets: [{ ...TWO.review!.targets[0]!, fields: [{ field: "Prose", before: BODY, proposed: BODY.replace("Maren counted the bells.", "Odile counted the nine bells.") }] }],
+        },
+      };
+      await act(async () => __setStateForTest(inkbound([rewritten]), { connection: "open" }));
+      assert.match(text(m), /2 of 2 changes kept/, "a refusal chosen against other edits does not carry over");
     });
 
     it("a refused keep accepts nothing", async () => {

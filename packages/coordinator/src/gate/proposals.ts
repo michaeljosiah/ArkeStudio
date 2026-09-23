@@ -35,7 +35,9 @@ import {
   orderedShots,
   propSlug,
   changedSpan,
+  composePassage,
   countWords,
+  passageDiff,
 } from "@arke-studio/contracts";
 import { ripplesForCanonEntry, ripplesForSheet } from "../index-db/queries.js";
 import { atomicWriteFile, renameWithRetry, withTransientRetry } from "../world/atomic.js";
@@ -165,8 +167,8 @@ export interface UpdatePassageInput {
   /** The span as the screen drew it, before and after the revision. */
   before: string;
   after: string;
-  /** What the span becomes: the edits the reviewer kept. */
-  text: string;
+  /** The edits the reviewer kept, by their index in `passageDiff` of the span. */
+  kept: readonly number[];
   expectedDraftRevision: number;
 }
 
@@ -687,8 +689,14 @@ export class ProposalManager {
         if (span === null || span.before !== input.before || span.after !== input.after) {
           return { reason: "This passage is not the one on screen. Reload it and choose again." };
         }
-        if (input.text === span.before) return { reason: "Nothing is kept. Discard the passage instead." };
-        const body = base.slice(0, span.start) + input.text + base.slice(span.start + span.before.length);
+        // Composed here from the edits the reviewer was shown, never taken as words: what lands can
+        // only be the revision's own edits, whatever a client sends.
+        const segments = passageDiff(span.before, span.after);
+        const edits = segments.filter((segment) => segment.kind === "edit").length;
+        if (input.kept.some((index) => index >= edits)) return { reason: "This passage is not the one on screen. Reload it and choose again." };
+        if (input.kept.length === 0) return { reason: "Nothing is kept. Discard the passage instead." };
+        const text = composePassage(segments, new Set(input.kept));
+        const body = base.slice(0, span.start) + text + base.slice(span.start + span.before.length);
         staged.setBody(body);
         staged.setData({ words: countWords(body) });
         if (!ChapterFrontmatterSchema.safeParse(staged.data).success) return { reason: "The chapter could not be read." };

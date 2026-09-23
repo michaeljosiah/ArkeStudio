@@ -1116,7 +1116,12 @@ export function ChapterWorkspace({
     ? -1
     : passageParagraphs.findIndex((paragraph) => paragraph.end >= passageChange.start && paragraph.start <= passageChange.start + Math.max(passageChange.after.length, 1));
   const choosing = stagedDraft !== undefined && passageChange !== null && editCount > 1;
-  const choiceKey = stagedDraft === undefined ? null : `${stagedDraft.staged.proposal.id}:${stagedDraft.staged.proposal.draftRevision}`;
+  // The passage is in the key as well as the revision (codex on PR 1232): an authoring run can
+  // rewrite the staged file without moving the revision, and an index refused against one set of
+  // edits must never refuse a different edit of the next.
+  const choiceKey = stagedDraft === undefined || passageChange === null
+    ? null
+    : `${stagedDraft.staged.proposal.id}:${stagedDraft.staged.proposal.draftRevision}:${passageChange.before}\u0000${passageChange.after}`;
   const [refusedFor, setRefusedFor] = useState<{ key: string | null; refused: ReadonlySet<number> }>({ key: null, refused: new Set() });
   const refused = choosing && refusedFor.key === choiceKey ? refusedFor.refused : NONE_REFUSED;
   const keptCount = editCount - refused.size;
@@ -1127,22 +1132,26 @@ export function ChapterWorkspace({
   };
   /*
    * Accepting part is two presses the author makes as one: the part is kept through the gate,
-   * and once the draft revision it lands as is here, that revision is accepted. A refusal of the
-   * first (a notice for the proposal, new since the press) ends it there, said on the card, and
-   * accepts nothing — the author sees the passage as it now stands and decides again.
+   * and once it lands, the revision it landed as is accepted. A refusal of the first (a notice
+   * for the proposal, new since the press) ends it there, said on the card, and accepts nothing.
+   * A newer revision alone is not proof the keep landed (codex on PR 1232): another window can
+   * move the draft on, and this keep is then refused as stale in the same breath. So the refusal
+   * is looked at first, and a revision is accepted only when its passage is the one this press
+   * composed — anything else is somebody else's draft, and the author decides it afresh.
    */
   const notices = useGateNotices();
-  const [keeping, setKeeping] = useState<{ id: string; revision: number; notice: GateNotice | undefined } | null>(null);
+  const [keeping, setKeeping] = useState<{ id: string; revision: number; notice: GateNotice | undefined; expected: string } | null>(null);
   const stagedId = stagedDraft?.staged.proposal.id;
   const stagedRevision = stagedDraft?.staged.proposal.draftRevision;
+  const stagedBody = stagedDraft?.body ?? null;
   useEffect(() => {
     if (keeping === null) return;
-    if (stagedId !== keeping.id) setKeeping(null);
+    if (stagedId !== keeping.id || notices[keeping.id] !== keeping.notice) setKeeping(null);
     else if (stagedRevision !== undefined && stagedRevision > keeping.revision) {
-      acceptProposal(worldId, keeping.id);
+      if (stagedBody === keeping.expected) acceptProposal(worldId, keeping.id);
       setKeeping(null);
-    } else if (notices[keeping.id] !== keeping.notice) setKeeping(null);
-  }, [keeping, stagedId, stagedRevision, notices, worldId]);
+    }
+  }, [keeping, stagedId, stagedRevision, stagedBody, notices, worldId]);
   const accept = !choosing || stagedDraft === undefined || passageChange === null
     ? undefined
     : keptCount === editCount
@@ -1152,9 +1161,12 @@ export function ChapterWorkspace({
           ...(keptCount === 0 ? { blocked: "Nothing kept" } : keeping !== null ? { blocked: "Keeping…" } : {}),
           onAccept: () => {
             const proposal = stagedDraft.staged.proposal;
-            const kept = new Set(segments.flatMap((segment) => (segment.kind === "edit" && !refused.has(segment.index) ? [segment.index] : [])));
-            updateProposalPassage(worldId, proposal.id, path, passageChange, composePassage(segments, kept), proposal.draftRevision);
-            setKeeping({ id: proposal.id, revision: proposal.draftRevision, notice: notices[proposal.id] });
+            const kept = segments.flatMap((segment) => (segment.kind === "edit" && !refused.has(segment.index) ? [segment.index] : []));
+            // Nothing sent is nothing to wait for (codex on PR 1232): the press stays the author's.
+            if (!updateProposalPassage(worldId, proposal.id, path, passageChange, kept, proposal.draftRevision)) return;
+            const body = stagedDraft.body ?? live;
+            const expected = body.slice(0, passageChange.start) + composePassage(segments, new Set(kept)) + body.slice(passageChange.start + passageChange.after.length);
+            setKeeping({ id: proposal.id, revision: proposal.draftRevision, notice: notices[proposal.id], expected });
           },
         };
   const foot = locked && stagedDraft !== undefined

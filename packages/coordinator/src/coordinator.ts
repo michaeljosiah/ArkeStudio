@@ -5599,7 +5599,7 @@ export class Coordinator {
               path: msg.path,
               before: msg.before,
               after: msg.after,
-              text: msg.text,
+              kept: msg.kept,
               expectedDraftRevision: msg.expectedDraftRevision,
             })
         ).catch(() => null);

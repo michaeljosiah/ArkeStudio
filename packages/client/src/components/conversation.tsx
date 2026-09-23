@@ -1003,7 +1003,7 @@ export function ProductionConversation({
   }, [openWith, worldId, productionId, conversationId]);
 
   /** Says one thing into the thread — the composer's draft, or a quick ask said as it stands. */
-  const say = (text: string, replyOnly = false) => {
+  const say = (text: string, replyOnly = false, about: WorldChatSubject | undefined = subject) => {
     if (!text || !worldId || !productionId) return;
     // A second line said while the first is still opening its thread would open a second one,
     // and one said over a running turn starts a second turn the first can no longer stop.
@@ -1018,7 +1018,7 @@ export function ProductionConversation({
       setOpening({
         text,
         was: workspace?.conversationId ?? null,
-        ...(subject !== undefined ? { subject } : {}),
+        ...(about !== undefined ? { subject: about } : {}),
         ...(languageModelId !== undefined ? { modelId: languageModelId } : {}),
         ...(replyOnly ? { replyOnly: true } : {}),
       });
@@ -1029,7 +1029,7 @@ export function ProductionConversation({
     // Only the turn's explicit choice travels as an override. The coordinator resolves the
     // captured agent preference before the production default; sending the displayed fallback
     // here would promote that default above the agent and run a different model.
-    sendWorldChat(worldId, conversationId, text, [], subject, languageModelId, replyOnly);
+    sendWorldChat(worldId, conversationId, text, [], about, languageModelId, replyOnly);
     setLanguageModelId(undefined);
   };
   const submit = () => {
@@ -1045,25 +1045,35 @@ export function ProductionConversation({
   /*
    * An ask handed in from the page — the chapter's selection menu — taken once and handed back.
    * It is said exactly as a quick ask would be, subject and all, so a passage revision from the
-   * menu is the same turn as one from the dock. One that cannot be said now (a turn running, a
-   * thread opening, no model) goes into the composer instead of vanishing, and so does one that
-   * only starts a line for the author to finish.
+   * menu is the same turn as one from the dock. What it is about is fixed at the press (codex on
+   * PR 1232): an ask that has to wait (a turn running, a thread opening, no model yet) waits with
+   * its own words and subject, and is said when the dock is free, whatever is selected by then —
+   * reduced to composer text it would be said about the next selection instead. A later press
+   * replaces a waiting one. A line that only starts an ask goes to the composer, where it is the
+   * author's to finish under whatever they then select.
    */
+  const [waitingAsk, setWaitingAsk] = useState<{ text: string; subject: WorldChatSubject | undefined; replyOnly: boolean } | null>(null);
   const ask = dock?.ask;
   const onAskTaken = dock?.onAskTaken;
   useEffect(() => {
     if (ask === undefined) return;
     onAskTaken?.();
-    const sayable = ask.draft !== true && opening === null && !running && languageUnavailableReason === undefined;
-    if (!sayable) {
+    if (ask.draft === true) {
       setMessage(ask.line);
       return;
     }
     const prefix = dock?.subjectPrefix;
-    say(prefix === undefined ? ask.line : `${prefix} ${ask.line}`, ask.replyOnly === true);
+    setWaitingAsk({ text: prefix === undefined ? ask.line : `${prefix} ${ask.line}`, subject, replyOnly: ask.replyOnly === true });
     // Taken on arrival only: the page clears it in onAskTaken, so the rest cannot re-fire it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ask]);
+  useEffect(() => {
+    if (waitingAsk === null || opening !== null || running || languageUnavailableReason !== undefined) return;
+    setWaitingAsk(null);
+    say(waitingAsk.text, waitingAsk.replyOnly, waitingAsk.subject);
+    // say is rebuilt every render; the ask and the dock's readiness are what decide.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waitingAsk, opening, running, languageUnavailableReason]);
 
   const points = loaded?.points ?? [];
   const carriedPoints = points.filter((p) => p.kind === "point" && p.settled).length;

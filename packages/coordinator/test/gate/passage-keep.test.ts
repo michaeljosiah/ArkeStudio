@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { changedSpan, composePassage, newId, passageDiff, type ConversationId } from "@arke-studio/contracts";
+import { changedSpan, newId, passageDiff, type ConversationId } from "@arke-studio/contracts";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { stageWorldChatProductionAuthoredAction } from "../../src/world-chat/production-authoring.js";
 import { MarkdownFile } from "../../src/world/text-files.js";
@@ -38,10 +38,10 @@ async function open() {
   return { dir, store, gate, stage, read };
 }
 
-/** The span as the screen draws it, and the passage with only the edits at `keep` taken. */
+/** The span as the screen draws it, and the edits kept by index. */
 function choose(base: string, staged: string, keep: number[]) {
   const span = changedSpan(base, staged)!;
-  return { before: span.before, after: span.after, text: composePassage(passageDiff(span.before, span.after), new Set(keep)) };
+  return { before: span.before, after: span.after, kept: keep };
 }
 
 describe("keeping part of a passage revision (turn 128)", () => {
@@ -82,9 +82,14 @@ describe("keeping part of a passage revision (turn 128)", () => {
     assert.equal(elsewhere.status, "rejected");
     assert.match(elsewhere.status === "rejected" ? elsewhere.message : "", /not the one on screen/);
 
-    const nothing = await gate.updatePassage({ ...base, requestId: "req-none", ...chosen, text: chosen.before });
+    const nothing = await gate.updatePassage({ ...base, requestId: "req-none", ...chosen, kept: [] });
     assert.equal(nothing.status, "rejected");
     assert.match(nothing.status === "rejected" ? nothing.message : "", /Nothing is kept/);
+
+    // An edit the revision does not have is not one the reviewer was shown.
+    const unseen = await gate.updatePassage({ ...base, requestId: "req-unseen", ...chosen, kept: [0, 7] });
+    assert.equal(unseen.status, "rejected");
+    assert.match(unseen.status === "rejected" ? unseen.message : "", /not the one on screen/);
   });
 
   it("refuses a whole-chapter draft, and a passage whose chapter moved after it was staged", async () => {
@@ -98,7 +103,7 @@ describe("keeping part of a passage revision (turn 128)", () => {
       path: CHAPTER,
       before: "",
       after: "A closing line.",
-      text: "",
+      kept: [0],
       expectedDraftRevision: draft.draftRevision,
     });
     assert.equal(whole.status, "rejected");
