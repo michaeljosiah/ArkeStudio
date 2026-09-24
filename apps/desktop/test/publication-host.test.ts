@@ -78,7 +78,9 @@ it("flushes the intent before work and drains cancellation during shutdown", asy
       signal.throwIfAborted(); return compiler;
     } });
   assert.ok((await host.start({ worldId: "world", request, format: "zip" })).ok);
-  await running; await host.stop();
+  await running; await host.resetPlayback();
+  const active = await host.list(); assert.ok(active.ok); assert.equal(active.value[0]!.status, "running", "renderer reset leaves export running");
+  await host.stop();
   assert.equal((await host.list()).ok, false, "shutdown does not resurrect work");
 });
 it("preflights real codec metadata and reports unsupported pixel formats", async () => {
@@ -87,6 +89,23 @@ it("preflights real codec metadata and reports unsupported pixel formats", async
     streams: [{ codec_type: "video", codec_name: "h264", pix_fmt }, { codec_type: "audio", codec_name: "aac" }] })), stderr: "", timedOut: false, outputLimitExceeded: false, cancelled: false }) });
   assert.deepEqual(await media.playback("opaque", "video/mp4"), { duration: 2, mediaType: 'video/mp4; codecs="avc1, mp4a.40.2"' });
   pix_fmt = "yuv420p10le"; await assert.rejects(media.playback("opaque", "video/mp4"), /Unsupported publication codec/);
+});
+
+it("releases lost renderer sessions and cancels a pending open", async t => {
+  const f = await fixture(t); let delay = false; let entered!: () => void; let release!: () => void;
+  const picking = new Promise<void>(resolve => { entered = resolve; });
+  const picker = new Promise<void>(resolve => { release = resolve; });
+  const host = new PublicationHost({ ...f.ports, pick: async () => { if (delay) { entered(); await picker; } return f.source; } });
+  t.after(() => host.stop());
+  const first = await host.open("directory"); assert.ok(first.ok);
+  delay = true; const opening = host.open("directory"); await picking;
+  await host.resetPlayback(); release();
+  const abandoned = await opening; assert.ok(!abandoned.ok && abandoned.cancelled);
+  assert.deepEqual(await readdir(join(f.ports.root, "playback")), []);
+  assert.equal((await fetch(first.value.assets.movie!, { headers: { Authorization: `Bearer ${host.session!.token}` } })).status, 404);
+  delay = false;
+  for (let n = 0; n < 3; n++) { assert.ok((await host.open("directory")).ok); await host.resetPlayback(); }
+  assert.ok((await host.list()).ok, "renderer lifetime does not stop the host");
 });
 
 it("keeps an existing player session after cancellation or failed replacement", async t => {

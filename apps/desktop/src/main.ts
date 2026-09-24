@@ -576,6 +576,7 @@ async function createWindow(): Promise<void> {
       activityActivationReady = false;
       rendererThemeReady = false;
       void stageExporter?.cancelAll();
+      void publicationHost?.resetPlayback().catch(() => traceDesktop("publication.playback-cleanup-failed"));
       if (window?.isVisible()) window.hide();
     }
   });
@@ -590,6 +591,7 @@ async function createWindow(): Promise<void> {
   window.webContents.on("render-process-gone", (_event, details) => {
     activityActivationReady = false;
     void stageExporter?.cancelAll();
+    void publicationHost?.resetPlayback().catch(() => traceDesktop("publication.playback-cleanup-failed"));
     traceDesktop("window.render-process-gone", { reason: details.reason, exitCode: details.exitCode });
   });
   window.on("close", (event) => {
@@ -603,6 +605,7 @@ async function createWindow(): Promise<void> {
   });
   window.on("closed", () => {
     void stageExporter?.cancelAll();
+    void publicationHost?.resetPlayback().catch(() => traceDesktop("publication.playback-cleanup-failed"));
     if (windowShowFallback) clearTimeout(windowShowFallback);
     windowShowFallback = null;
     window = null;

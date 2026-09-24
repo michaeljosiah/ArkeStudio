@@ -298,5 +298,6 @@ Only the desktop host currently supplies disk opening/export; the reusable HTML 
 verified URLs. No browser upload host, book/audio/interactive profile or OTIO adapter is claimed.
 Cancelled or failed opens preserve current playback. A successful replacement mounts before the
 previous session is closed; the host allows at most two sessions for this handoff. Closing playback
-removes its owned copy. Abrupt exit can leave scratch files; no orphan
+removes its owned copy. A renderer reload/crash cancels pending opens and releases playback copies
+without cancelling host-owned export jobs. Abrupt exit can leave scratch files; no orphan
 sweep or power-loss durability guarantee is added by the UI.

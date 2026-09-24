@@ -38,7 +38,7 @@ try {
   await build({ stdin: { contents: `
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises';
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { PublicationHost } from ${imports("apps/desktop/src/publication-host.ts")};
 import { publicationMedia } from ${imports("apps/desktop/src/publication-media.ts")};
@@ -52,11 +52,13 @@ const timeout = setTimeout(() => { console.error('Publication smoke timed out');
 app.whenReady().then(async () => {
   const source = join(__dirname, 'publication'); const zip = join(__dirname, 'publication.zip');
   await writePublicationZip(source, zip);
+  const reopenZip = join(__dirname, 'reopen.zip'); await copyFile(zip, reopenZip);
   const media = publicationMedia(createMediaProcessRunner({ ffmpeg: ${JSON.stringify(ffmpeg)}, ffprobe: ${JSON.stringify(ffprobe)} }));
   const host = new PublicationHost({ root: join(__dirname, 'host'), origins: ['null', 'file://'], providers: () => ({ starting: null, live: null }),
     pick: async kind => kind === 'zip' ? zip : source, reveal: () => {}, compiler: media.compiler, probe: media.playback });
   ipcMain.on('arke:get-theme', event => { event.returnValue = { preference: 'system', resolved: 'light' }; });
   const window = new BrowserWindow({ show: false, width: 1120, height: 840, webPreferences: { preload: ${JSON.stringify(join(desktop, "dist/preload.cjs"))}, sandbox: true, contextIsolation: true, nodeIntegration: false } });
+  window.webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => { if (isMainFrame && !isInPlace) void host.resetPlayback(); });
   window.webContents.on('console-message', (_event, details) => { if (details.level === 'error') console.error('[renderer]', details.message); });
   for (const method of ['open', 'close', 'list', 'start', 'retry', 'cancel', 'reveal']) ipcMain.handle('arke:publication-' + method, (event, input) => {
     assert.equal(event.sender, window.webContents); assert.equal(event.senderFrame, window.webContents.mainFrame);
@@ -103,8 +105,15 @@ app.whenReady().then(async () => {
   await mkdir(${JSON.stringify(join(repo, ".dev"))}, { recursive: true });
   await window.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
   await writeFile(${JSON.stringify(join(repo, ".dev/publication-player.png"))}, (await window.webContents.capturePage()).toPNG());
+  await copyFile(reopenZip, zip);
+  for (let n = 0; n < 3; n++) {
+    await window.loadFile(${JSON.stringify(join(repo, "packages/client/dist/index.html"))}, { hash: '/publications' });
+    await wait('!!document.querySelector("[data-screen=publications]")');
+    await window.webContents.executeJavaScript('Array.from(document.querySelectorAll("button")).find(b => b.textContent === "Open ZIP").click()');
+    await wait('document.querySelector("video")?.readyState >= 1');
+  }
   window.destroy(); await host.stop(); clearTimeout(timeout);
-  console.log('[smoke] real file-page player: directory + ZIP, source removed, offline video, two tracks, captions off, keyboard play/pause and seek');
+  console.log('[smoke] real file-page player: directory + ZIP, source removed, offline video, two tracks, captions off, keyboard play/pause, seek and renderer reload');
   app.exit(0);
 }).catch(error => { console.error(error); app.exit(1); });
 `, resolveDir: repo, sourcefile: "publication-smoke.ts", loader: "ts" }, bundle: true, platform: "node", format: "cjs", outfile: join(root, "main.cjs"), external: ["electron"],

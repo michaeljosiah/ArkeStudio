@@ -45,6 +45,7 @@ export class PublicationHost implements PublicationBridge {
   private starting: Promise<void> | undefined;
   private pending = new Set<Promise<unknown>>();
   private controller = new AbortController();
+  private playbackController = new AbortController();
   private startingJob = false;
   private opening = false;
   private readonly token = randomBytes(32).toString("hex");
@@ -166,6 +167,7 @@ export class PublicationHost implements PublicationBridge {
       if (this.opening) throw new Error("A publication is already opening.");
       if (this.players.size >= 2) throw new PublicationFileError("operation-conflict", "Close an unused playback session before opening another.");
       this.opening = true;
+      const signal = AbortSignal.any([this.controller.signal, this.playbackController.signal]);
       try {
         await this.initialize();
         let source: string | null; let format: "directory" | "zip";
@@ -177,10 +179,11 @@ export class PublicationHost implements PublicationBridge {
           source = result.path; format = result.format;
         }
         if (!source) throw new DOMException("Cancelled", "AbortError");
-        const pinned = await openPublication(source, format, join(this.ports.root, "playback"), this.ports.probe, { signal: this.controller.signal });
+        signal.throwIfAborted();
+        const pinned = await openPublication(source, format, join(this.ports.root, "playback"), this.ports.probe, { signal });
         try {
           await this.listen();
-          this.controller.signal.throwIfAborted();
+          signal.throwIfAborted();
           // Keep the current session until the renderer has mounted this successful replacement.
           // The two-session bound allows that handoff without retaining an unbounded library.
           const sessionId = randomUUID();
@@ -199,6 +202,12 @@ export class PublicationHost implements PublicationBridge {
     this.pending.add(work);
     void work.then(() => this.pending.delete(work), () => this.pending.delete(work));
     return work;
+  }
+  /** Renderer reload/crash loses session ids, but must not cancel host-owned publication jobs. */
+  async resetPlayback(): Promise<void> {
+    this.playbackController.abort();
+    this.playbackController = new AbortController();
+    await Promise.all([...this.players.keys()].map(id => this.close(id)));
   }
   private listen(): Promise<void> {
     return this.starting ??= new Promise((resolve, reject) => {
