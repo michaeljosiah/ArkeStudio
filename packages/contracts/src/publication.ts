@@ -183,7 +183,8 @@ export const PublicationCaptureSchema = z.object({
   compiler: CompilerSchema,
   timelineRevision: SafeIntegerSchema.nullable(),
   records: z.array(CaptureRecordSchema).min(1).max(MAX_PUBLICATION_ASSETS),
-  media: z.array(CaptureMediaSchema).min(1).max(MAX_PUBLICATION_ASSETS),
+  // A deliberately blank picture interval can render without reading a media file.
+  media: z.array(CaptureMediaSchema).max(MAX_PUBLICATION_ASSETS),
   resolvedPlanSha256: DigestSchema,
   settingsSha256: DigestSchema,
 }).strict().superRefine((capture, ctx) => {

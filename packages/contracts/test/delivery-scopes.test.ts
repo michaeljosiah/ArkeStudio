@@ -6,6 +6,8 @@ import {
   audioAtSec,
   buildFfmpegArgs,
   buildRenderPlan,
+  buildVideoPublicationPlan,
+  VideoPublicationRequestSchema,
   cueAtSec,
   episodeTimelineRange,
   pictureAtSec,
@@ -22,7 +24,68 @@ import {
   type RenderArtifact,
   type Scene,
   type TimelineClip,
+  type VideoPublicationRequest,
 } from "../src/index.js";
+
+describe("video publication scope parity (SPEC-048)", () => {
+  const request = (revision: number | null): VideoPublicationRequest => ({
+    productionId: "bell-watch", id: "urn:uuid:12345678-1234-1234-1234-123456789012", title: "Bell Watch", edition: "1", language: "en",
+    preset: "review-cut", timelineRevision: revision, scope: { kind: "episode", episodeId: "ep_two" },
+    textTracks: [{ trackId: "tr_en", kind: "captions", label: "English CC", default: true },
+      { trackId: "tr_fr", kind: "subtitles", label: "French", default: false }],
+  });
+
+  it("rebases and clips each selected track exactly like the episode RenderPlan", () => {
+    const value = production();
+    const timeline = applyTimelineCommands(seedStoryPictureTimeline(value), [
+      { kind: "set-track", trackId: "tr_picture", muted: true },
+      { kind: "add-subtitle-track", trackId: "tr_en", name: "English", language: "en" },
+      { kind: "add-cue", trackId: "tr_en", cue: { id: "cu_cross", text: "Across the cut", startFrame: 75, endFrame: 125 } },
+      { kind: "add-subtitle-track", trackId: "tr_fr", name: "French", language: "fr" },
+      { kind: "add-cue", trackId: "tr_fr", cue: { id: "cu_end", text: "Fin", startFrame: 225, endFrame: 300 } },
+    ]);
+    const input = { production: value, artifacts, timeline: { status: "ready" as const, timeline } };
+    const settings = request(timeline.revision);
+    const { plan } = ok(buildVideoPublicationPlan(input, settings));
+    assert.equal(plan.render.totalSec, 6);
+    assert.equal(plan.render.subtitles, null);
+    assert.equal(plan.render.burnIn, undefined);
+    assert.deepEqual(plan.media, [], "intentional blank picture needs no source media");
+    for (const [index, track] of settings.textTracks.entries()) {
+      const expected = ok(buildRenderPlan({ ...input, scope: settings.scope, preset: settings.preset,
+        subtitles: { trackId: track.trackId, mode: "sidecar", sidecar: "vtt" } })).plan.subtitles!;
+      assert.deepEqual(plan.textTracks[index]!.cues, expected.cues);
+    }
+    assert.equal(plan.textTracks[0]!.cues[0]!.startSec, 0);
+    assert.equal(plan.textTracks[1]!.cues[0]!.endSec, 6);
+  });
+
+  it("refuses gaps representing missing footage, unknown sound, stale revisions and legacy captions", () => {
+    const value = production(), timeline = seedStoryPictureTimeline(value);
+    const input = { production: value, artifacts, timeline: { status: "ready" as const, timeline } };
+    const settings = { ...request(timeline.revision), textTracks: [] };
+    let result = buildVideoPublicationPlan(input, settings);
+    assert.ok(!result.ok); assert.match(result.reason, /Missing picture/);
+    timeline.tracks[0]!.clips = timeline.tracks[0]!.clips.filter(clip => clip.id === "cl_sh-3");
+    delete value.takeMediaInfo[TAKE_C];
+    result = buildVideoPublicationPlan(input, settings);
+    assert.ok(!result.ok); assert.match(result.reason, /Unmeasured audio/);
+    result = buildVideoPublicationPlan(input, { ...settings, timelineRevision: 999 });
+    assert.ok(!result.ok); assert.match(result.reason, /revision changed/);
+    // A saved timeline's absent state must not drop a requested caption choice on the
+    // legacy episode branch, even when the legacy movie itself resolves successfully.
+    value.episodes[1]!.scenes = ["sc_b"];
+    value.scenes[1] = scene("sc_b", 2, [{ id: "sh_3" }]);
+    result = buildVideoPublicationPlan({ ...input, timeline: { status: "absent" } }, request(null));
+    assert.ok(!result.ok); assert.match(result.reason, /saved timeline/);
+  });
+
+  it("rejects duplicate track choices and more than one default before capture", () => {
+    const settings = request(1);
+    assert.equal(VideoPublicationRequestSchema.safeParse({ ...settings, textTracks: [settings.textTracks[0], settings.textTracks[0]] }).success, false);
+    assert.equal(VideoPublicationRequestSchema.safeParse({ ...settings, textTracks: settings.textTracks.map(track => ({ ...track, default: true })) }).success, false);
+  });
+});
 
 /**
  * Every visible track in production, episode and music-timed delivery (SPEC-037 R-32..R-34,

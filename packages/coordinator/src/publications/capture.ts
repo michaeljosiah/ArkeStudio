@@ -24,6 +24,24 @@ export interface CapturedPublicationInputs {
   dispose(): Promise<void>;
 }
 
+/** Both callbacks run inside ownedWrite and must not await another operation using that gate. */
+export interface PreparedPublicationCapture {
+  request: PublicationCaptureRequest;
+  /** Recheck discovery, including dependencies that were absent when preparing the plan. */
+  revalidate(): Promise<void>;
+}
+
+function copyRequest(request: PublicationCaptureRequest): PublicationCaptureRequest {
+  const receipt = PublicationCaptureSchema.parse(request.receipt);
+  const records = { ...request.records }, media = { ...request.media };
+  for (const [field, paths] of [["records", records], ["media", media]] as const) {
+    if (Object.keys(paths).length !== receipt[field].length || receipt[field].some(item => !Object.hasOwn(paths, item.key) || typeof paths[item.key] !== "string")) {
+      throw new PublicationFileError("invalid-package", `Publication ${field} paths must match the receipt exactly.`);
+    }
+  }
+  return { receipt, records, media };
+}
+
 /**
  * Pin the compiler's declared source dependencies, serialised with app writes. This does not
  * derive a RenderPlan or discover omitted dependencies: a trusted profile compiler must provide
@@ -32,21 +50,14 @@ export interface CapturedPublicationInputs {
  */
 export async function capturePublicationInputs(
   store: WorldStore,
-  request: PublicationCaptureRequest,
+  request: PublicationCaptureRequest | (() => Promise<PreparedPublicationCapture>),
   scratchRoot: string,
   options: { signal?: AbortSignal; limits?: Partial<PublicationFileLimits>; onCopied?: (key: string) => void | Promise<void> } = {},
 ): Promise<CapturedPublicationInputs> {
   const signal = options.signal ? AbortSignal.any([options.signal, store.closingSignal]) : store.closingSignal;
   signal.throwIfAborted();
-  const receipt = PublicationCaptureSchema.parse(request.receipt);
-  const records = { ...request.records };
-  const media = { ...request.media };
+  const supplied = typeof request === "function" ? null : copyRequest(request);
   const limits = publicationFileLimits(options.limits);
-  for (const [field, paths] of [["records", records], ["media", media]] as const) {
-    if (Object.keys(paths).length !== receipt[field].length || receipt[field].some(item => !Object.hasOwn(paths, item.key) || typeof paths[item.key] !== "string")) {
-      throw new PublicationFileError("invalid-package", `Publication ${field} paths must match the receipt exactly.`);
-    }
-  }
   // Only use an existing host-owned scratch root. mkdtemp reserves a fresh child; a caller
   // cannot ask this operation to overwrite an edition or clean somebody else's directory.
   const scratch = await realpath(toExtendedLength(scratchRoot));
@@ -60,6 +71,9 @@ export async function capturePublicationInputs(
   };
   try {
     return await store.ownedWrite(async () => {
+      signal.throwIfAborted();
+      const prepared = typeof request === "function" ? await request() : null;
+      const { receipt, records, media } = supplied ?? copyRequest(prepared!.request);
       signal.throwIfAborted();
       const checkRecords = async () => {
         for (const record of receipt.records) {
@@ -88,6 +102,7 @@ export async function capturePublicationInputs(
       }
       // Managed writes were held by ownedWrite. External writes still need a second check,
       // including source bytes: a file may have been replaced after its copy completed.
+      await prepared?.revalidate();
       await checkRecords();
       for (const source of receipt.media) {
         requirePublicationDigest(await readPublicationFile(store.dir, media[source.key]!, source.byteLength, signal), source);
