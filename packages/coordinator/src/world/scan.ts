@@ -256,14 +256,17 @@ const SHEET_DIRS: ReadonlyArray<{ dir: string; type: SheetKind }> = [
  */
 const mediaHashCache = new Map<string, { size: number; mtimeMs: number; ctimeMs: number; hash: string }>();
 
-export async function hashMedia(absolutePath: string): Promise<string | null> {
+export async function hashMedia(absolutePath: string, signal?: AbortSignal): Promise<string | null> {
+  signal?.throwIfAborted();
   const path = toExtendedLength(absolutePath);
   let identity;
   try {
     identity = await stat(path);
   } catch {
+    signal?.throwIfAborted();
     return null;
   }
+  signal?.throwIfAborted();
   const cached = mediaHashCache.get(path);
   // ctime as well as size and mtime (Codex round 3): copy, restore and repair tools preserve
   // mtime, and a same-size rewrite with a restored timestamp would otherwise return the previous
@@ -280,35 +283,47 @@ export async function hashMedia(absolutePath: string): Promise<string | null> {
   }
   try {
     const digest = createHash("sha256");
-    for await (const chunk of createReadStream(path)) digest.update(chunk as Buffer);
+    for await (const chunk of createReadStream(path, { signal })) digest.update(chunk as Buffer);
+    signal?.throwIfAborted();
     const hash = `sha256:${digest.digest("hex")}`;
     mediaHashCache.set(path, { size: identity.size, mtimeMs: identity.mtimeMs, ctimeMs: identity.ctimeMs, hash });
     return hash;
   } catch {
+    signal?.throwIfAborted();
     return null;
   }
 }
 
-async function exists(path: string): Promise<boolean> {
+async function exists(path: string, signal?: AbortSignal): Promise<boolean> {
+  signal?.throwIfAborted();
   try {
     await stat(toExtendedLength(path));
+    signal?.throwIfAborted();
     return true;
   } catch {
+    signal?.throwIfAborted();
     return false;
   }
 }
 
-async function listDir(path: string): Promise<string[]> {
+async function listDir(path: string, signal?: AbortSignal): Promise<string[]> {
+  signal?.throwIfAborted();
   try {
-    return await readdir(toExtendedLength(path));
+    const entries = await readdir(toExtendedLength(path));
+    signal?.throwIfAborted();
+    return entries;
   } catch {
+    signal?.throwIfAborted();
     return [];
   }
 }
 
-async function read(path: string): Promise<string> {
-  return readFile(toExtendedLength(path), "utf8");
+async function read(path: string, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
+  return readFile(toExtendedLength(path), { encoding: "utf8", signal });
 }
+
+const scanIo = { exists, listDir, read };
 
 /**
  * Read world.json alone — the openability gate (R-1, R-25).
@@ -319,12 +334,13 @@ async function read(path: string): Promise<string> {
  */
 export async function readWorldMeta(
   dir: string,
-  { supports = SUPPORTED_SCHEMA_VERSION }: { supports?: number } = {},
+  { supports = SUPPORTED_SCHEMA_VERSION, signal }: { supports?: number; signal?: AbortSignal } = {},
 ): Promise<WorldMeta> {
   let raw: string;
   try {
-    raw = await read(join(dir, "world.json"));
+    raw = await read(join(dir, "world.json"), signal);
   } catch {
+    signal?.throwIfAborted();
     throw new WorldOpenError(`${dir} has no world.json`, "not-a-world");
   }
   let parsed: unknown;
@@ -355,7 +371,17 @@ export async function readWorldMeta(
  */
 const CANDIDATE_BACKED_TAKE_KINDS: ReadonlySet<string> = new Set(["main-photo", "location-view"]);
 
-export async function scanWorld(dir: string, opts: { supports?: number } = {}): Promise<ScanResult> {
+/**
+ * Input discovery can omit operational/session projections and cancel authored reads and media
+ * hashing. The ordinary world scan retains those projections and its existing default behavior.
+ */
+export async function scanWorld(dir: string, opts: { supports?: number; signal?: AbortSignal; includeOperationalState?: boolean } = {}): Promise<ScanResult> {
+  const { signal } = opts;
+  const operational = opts.includeOperationalState !== false;
+  const read = (path: string) => scanIo.read(path, signal);
+  const exists = (path: string) => scanIo.exists(path, signal);
+  const listDir = (path: string) => scanIo.listDir(path, signal);
+  signal?.throwIfAborted();
   // The boundary first, and nothing before it (R-9): a build that refuses this world must not
   // have read one scene file by the time it says so, or the refusal is a report about strict
   // shapes it does not understand rather than about the version that fences them.
@@ -380,6 +406,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
       manifest[toPortable(rel)] = sha256(raw);
       return parse(raw);
     } catch (err) {
+      signal?.throwIfAborted();
       problems.push({ path: toPortable(rel), message: (err as Error).message.slice(0, 500) });
       return null;
     }
@@ -389,7 +416,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
 
   // Bible bytes participate in history integrity checks. Outside-edit reconciliation still
   // excludes this ungated document; the store adopts its hand-edits directly.
-  const bible = await readBible(dir);
+  const bible = await readBible(dir, signal);
   if (bible.present) manifest[BIBLE_PATH] = sha256(await read(join(dir, BIBLE_PATH)));
 
   let artDirectionRecord: ArtDirectionRecord | null = null;
@@ -671,7 +698,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
 
     const takes = [];
     const takeMediaInfo: ProductionBundle["takeMediaInfo"] = {};
-    for (const takeDir of await listDir(join(pdir, "takes"))) {
+    for (const takeDir of (await listDir(join(pdir, "takes"))).sort()) {
       if (!(await exists(join(pdir, "takes", takeDir, "take.json")))) continue;
       const take = await tryParse(`productions/${id}/takes/${takeDir}/take.json`, (raw) =>
         TakeSchema.parse(JSON.parse(raw)),
@@ -699,7 +726,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
          * served until an unrelated reload.
          */
         const rel = `productions/${id}/takes/${takeDir}/media-info.json`;
-        const raw = await readFile(toExtendedLength(join(dir, rel)), "utf8").catch(
+        const raw = await read(join(dir, rel)).catch(
           (err: NodeJS.ErrnoException) => (err.code === "ENOENT" ? null : err),
         );
         let record: TakeMediaInfoRecord | null = null;
@@ -732,7 +759,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
         const safeMedia = take.media !== undefined && basename(take.media) === take.media && take.media !== "..";
         if (record && take.media && safeMedia) {
           const mediaPath = join(pdir, "takes", takeDir, take.media);
-          const actual = await hashMedia(mediaPath);
+          const actual = await hashMedia(mediaPath, signal);
           if (actual === record.sourceHash) takeMediaInfo[take.id] = record;
           /*
            * The media's identity joins the manifest (Codex round 2).
@@ -750,7 +777,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
 
     let reviews: ProductionBundle["reviews"] = [];
     if (await exists(join(pdir, "reviews.jsonl"))) {
-      reviews = (await readChanges(join(pdir, "reviews.jsonl")))
+      reviews = (await readChanges(join(pdir, "reviews.jsonl"), signal))
         .map((line) => {
           const r = ReviewDecisionSchema.safeParse(line);
           return r.success ? r.data : null;
@@ -805,14 +832,18 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
       : null;
 
     const performances: ProductionBundle["performances"] = [];
-    for (const entry of await readdir(join(pdir, "performances"), { withFileTypes: true }).catch(() => [])) {
+    const performanceEntries = await readdir(join(pdir, "performances"), { withFileTypes: true }).catch(() => []);
+    // These are record inventories, not authored order. Stable path order keeps a copied world
+    // independent of directory enumeration and also breaks equal-time take ordering ties above.
+    performanceEntries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+    for (const entry of performanceEntries) {
       if (!entry.isDirectory() || !/^pf_[0-9A-HJKMNP-TV-Z]{26}$/.test(entry.name)) continue;
       if (!(await exists(join(pdir, "performances", entry.name, "performance.json")))) continue;
       const record = await tryParse(`productions/${id}/performances/${entry.name}/performance.json`, raw => PerformanceRecordSchema.parse(JSON.parse(raw)));
       if (record && record.id === entry.name && record.target.productionId === id) performances.push(record);
     }
     const rehearsals: ProductionBundle["rehearsals"] = [], rehearsalHashes: Record<string, string> = {};
-    for (const file of await readdir(join(pdir, "rehearsals")).catch(() => [])) {
+    for (const file of (await readdir(join(pdir, "rehearsals")).catch(() => [])).sort()) {
       if (!/^rh_[0-9A-HJKMNP-TV-Z]{26}\.json$/.test(file)) continue;
       const path = `productions/${id}/rehearsals/${file}`;
       const rehearsal = await tryParse(path, raw => RehearsalSessionSchema.parse(JSON.parse(raw)));
@@ -894,7 +925,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
 
   let referenceReviews: WorldBundle["referenceReviews"] = [];
   if (await exists(join(dir, "references", "reviews.jsonl"))) {
-    referenceReviews = (await readChanges(join(dir, "references", "reviews.jsonl")))
+    referenceReviews = (await readChanges(join(dir, "references", "reviews.jsonl"), signal))
       .map((line) => {
         const parsed = ReviewDecisionSchema.safeParse(line);
         return parsed.success ? parsed.data : null;
@@ -903,7 +934,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
   }
 
   const proposals: StagedProposal[] = [];
-  for (const pid of await listDir(join(dir, ".proposals"))) {
+  for (const pid of operational ? await listDir(join(dir, ".proposals")) : []) {
     // A settled proposal is over, whatever is still on disk. `accept` writes the tombstone and
     // then deletes best-effort, so a directory that lost its delete to a busy handle lingers with
     // the decision already recorded — and a founding build, accepting several in quick succession
@@ -927,7 +958,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
     // proposed file and the base captured beside it.
     const readStaged = async (rel: string): Promise<string | null> =>
       (await exists(join(dir, ".proposals", pid, ...rel.split("/"))))
-        ? await readFile(toExtendedLength(join(dir, ".proposals", pid, ...rel.split("/"))), "utf8").catch(() => null)
+        ? await read(join(dir, ".proposals", pid, ...rel.split("/"))).catch(() => null)
         : null;
     const proposedByPath = new Map<string, string | null>();
     const baseByPath = new Map<string, string | null>();
@@ -974,7 +1005,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
     if (path.startsWith(".proposals/")) delete manifest[path];
   }
 
-  const allChanges = await readChanges(join(dir, "changes.jsonl"));
+  const allChanges = operational ? await readChanges(join(dir, "changes.jsonl"), signal) : [];
   const historyCommits: ScanResult["historyCommits"] = {};
   for (const [index, change] of allChanges.entries()) {
     const path = change["path"];
@@ -1001,12 +1032,12 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
    */
   const keyArtCandidates = await imagesIn(dir, join("incoming", "world-image"), "incoming/world-image");
   const masterLookCandidates = await imagesIn(dir, join("incoming", "master-look"), "incoming/master-look");
-  const stagedReferences = await readStagedReferences(dir);
+  const stagedReferences = operational ? await readStagedReferences(dir) : {};
   const stagedReferenceOrigins: Record<string, BorrowedImageOrigin> = {};
   for (const file of Object.values(stagedReferences)) {
     if (!file.startsWith("incoming/staged-refs/")) continue;
     try {
-      const origin = BorrowedImageOriginSchema.parse(JSON.parse(await readFile(toExtendedLength(join(dir, file + ".origin.json")), "utf8")));
+      const origin = BorrowedImageOriginSchema.parse(JSON.parse(await read(join(dir, file + ".origin.json"))));
       stagedReferenceOrigins[file] = origin;
     } catch { /* Uploaded and local pictures have no borrowed origin. */ }
   }
@@ -1195,12 +1226,13 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
     series,
     proposals,
     // Rows only. discoverConversations reads summaries, never transcripts.
-    conversations: (await discoverConversations(dir)).summaries,
+    conversations: operational ? (await discoverConversations(dir)).summaries : [],
     // Same split for the bench (issue 305): rows to resume from, never the takes.
-    benchSessions: await discoverBenchSessions(dir),
+    benchSessions: operational ? await discoverBenchSessions(dir) : [],
     changes,
     problems,
     externalEdits: [],
   };
+  signal?.throwIfAborted();
   return { meta, bundle, problems, manifest, mediaManifest, changeCount: allChanges.length, historyCommits };
 }
