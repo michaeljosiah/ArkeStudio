@@ -501,7 +501,9 @@ describe("the craft loop (turn 128)", () => {
       `the selection travels as a subject (${said?.subject === undefined ? "none sent" : "sent"})`,
     );
 
-    // The thread shows the first line before the next can go (codex on PR 1232).
+    // Taken, and the thread shows it, before the next can go (codex on PR 1232).
+    const first = m.sent.find((message) => message.kind === "world-chat-send") as { requestId: string };
+    await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: first.requestId, admitted: true }));
     await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 5 } } as ClientState, { connection: "open" }));
     // The style check asks for a reply and nothing else, and the send says so.
     const hold = [...m.container.querySelectorAll("button.fy-arke__prompt")].find((b) => b.textContent === "Hold this against the style") as HTMLElement;
@@ -1129,6 +1131,65 @@ describe("the craft loop (turn 128)", () => {
     await act(async () => __setStateForTest({ ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState, { connection: "open", rejoins: 1 }));
     assert.equal(m.sent.filter((message) => message.kind === "world-chat-send").length, 1, "said into the thread it opened");
     assert.doesNotMatch(text(m), /Not sent ·/, "sent after the rejoin, so its answer is still coming");
+  });
+
+  it("the hold on a line just sent waits for its own answer, not any movement in the thread (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const m = await mount(state);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const sent = m.sent.find((message) => message.kind === "world-chat-send") as { requestId: string };
+    const prompts = () => [...m.container.querySelectorAll("button.fy-arke__prompt")] as HTMLButtonElement[];
+    // Another window moves the thread while this line is still being taken.
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 5 } } as ClientState, { connection: "open" }));
+    assert.ok(prompts().every((b) => b.disabled), "the thread moving is not this line's answer");
+    await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: sent.requestId, admitted: true }));
+    assert.ok(prompts().every((b) => b.disabled), "taken, it waits for the thread to show its turn");
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 6 } } as ClientState, { connection: "open" }));
+    assert.ok(prompts().every((b) => !b.disabled), "shown, the dock is free");
+  });
+
+  it("a thread's create lost with the connection is made again (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const m = await mount(styled);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Expand") as HTMLElement).click());
+    const creates = () => m.sent.filter((message) => message.kind === "world-chat-create");
+    assert.equal(creates().length, 1);
+    await act(async () => __setStateForTest(styled, { connection: "closed" }));
+    await act(async () => __setStateForTest(styled, { connection: "open", rejoins: 1 }));
+    assert.equal(creates().length, 2, "rejoined with no thread, nothing would open one: the ask goes again");
+  });
+
+  it("an answer for an ask put away is kept however much is said meanwhile (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const m = await mount({ ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const sent = m.sent.find((message) => message.kind === "world-chat-send") as { requestId: string };
+    await act(async () => (q(m, "button.fy-arke__pin") as HTMLElement).click());
+    await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: sent.requestId, admitted: false }));
+    // Enough other answers to push this one out of the store's own record.
+    await act(async () => {
+      for (let i = 0; i < 80; i += 1) __applyEventForTest({ at: "2026-09-06T12:00:06Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: `other-${i}`, admitted: true });
+    });
+    await act(async () => (q(m, "button.fy-sw__rail") as HTMLElement).click());
+    assert.match(text(m), /Not sent · Tighten this/, "the ask kept its own answer");
   });
 
   it("a line typed while the last one is still being taken stays in the composer (codex on PR 1232)", async () => {

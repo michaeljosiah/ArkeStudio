@@ -59,6 +59,7 @@ import {
   useAudiobookRecords,
   acceptProposal,
   onWorldChange,
+  subscribeWorldChatSendResults,
   updateProposalPassage,
   useGateNotices,
   type GateNotice,
@@ -159,6 +160,13 @@ const heldAsks = new Map<string, DockAsk>();
 // Only for the world's session they were pressed in (codex on PR 1232): closed and opened again,
 // an ask still waiting would otherwise go by itself, quoting prose that may have moved since.
 onWorldChange(() => heldAsks.clear());
+// The answer to a held ask is kept with it (codex on PR 1232): the store remembers only recent
+// answers, and a chapter left for long enough would come back to one it no longer has.
+subscribeWorldChatSendResults((result) => {
+  for (const [key, held] of heldAsks) {
+    if (held.sent?.requestId === result.requestId) heldAsks.set(key, { ...held, answered: result.admitted });
+  }
+});
 /** Test hook: asks outlive a screen by design, so each test starts with none. */
 export function __clearHeldAsksForTest(): void {
   heldAsks.clear();
@@ -1156,6 +1164,10 @@ export function ChapterWorkspace({
     else heldAsks.set(askKey, next);
     setAskState(next);
   }, [askKey]);
+  // The screen's own copy takes its answer too, for a dock put away while it came.
+  useEffect(() => subscribeWorldChatSendResults((result) => {
+    setAskState((held) => (held?.sent?.requestId === result.requestId ? { ...held, answered: result.admitted } : held));
+  }), []);
   // Any ask held is about the passage it was pressed on, waiting, sent or not taken (codex on
   // PR 1232): the dock says so, whatever is selected by then.
   const shownSubject = ask?.subject ?? dockSubject;

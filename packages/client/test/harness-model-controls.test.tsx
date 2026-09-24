@@ -8,7 +8,7 @@ import { OPENCODE_AVAILABILITY, type ClientMessage, type ClientState } from "@ar
 import { AgentsPanel } from "../src/screens/agents.js";
 import { SettingsHarnessScreen, SettingsLayout } from "../src/screens/shell.js";
 import { ProductionConversation } from "../src/components/conversation.js";
-import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -295,7 +295,8 @@ describe("live harness model controls (#1123, #1124)", () => {
     const inherited = sent.findLast((message) => message.kind === "world-chat-send");
     assert.ok(inherited && inherited.kind === "world-chat-send");
     assert.equal(inherited.modelId, undefined, "the coordinator resolves the inherited production choice");
-    // The thread shows the first line before the next is said.
+    // Taken, and the thread shows it, before the next is said.
+    await act(async () => __applyEventForTest({ at: "2026-09-13T00:00:01Z", type: "world-chat.send-result", conversationId: CV as never, requestId: inherited.requestId, admitted: true }));
     await act(async () => __setStateForTest({ ...modelState(), worldChat: workspaceAt(2) }));
     await choose("Language model", OPUS);
     await press("Explain the scene");

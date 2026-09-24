@@ -747,8 +747,16 @@ export type DockAsk = {
   sent?: { requestId: string; at: string; rejoins: number; after?: string };
   /** A line lost on the way, tried again under the request it first went as. */
   again?: string;
-  /** Said first into a thread it opened, which has not arrived yet: `was` is the thread before. */
-  opening?: { was: string | null };
+  /**
+   * Said first into a thread it opened, which has not arrived yet: `was` is the thread before,
+   * `rejoins` the store's count when the create went.
+   */
+  opening?: { was: string | null; rejoins: number };
+  /**
+   * The coordinator's answer for `sent`, kept with the ask by whoever holds it (codex on PR 1232):
+   * the store's own record of answers is bounded, and an ask can wait a long while for its dock.
+   */
+  answered?: boolean;
   /** Sent and not taken: shown to be tried again or dismissed. */
   declined?: boolean;
   /** What the author has typed to finish a `draft` line, kept by the page with the ask. */
@@ -1152,23 +1160,34 @@ export function ProductionConversation({
    * A line just sent that the thread has not shown yet (codex on PR 1232). Between the send and
    * the snapshot that reports its turn, nothing here says a turn is running, and an ask released
    * in that gap is refused by the runner as already working. So the dock counts as busy until
-   * the conversation's sequence moves past the one it sent at. A send the coordinator refused
-   * never moves it, so its answer for the request ends the wait too, as does a rejoin that may
-   * have lost that answer — the rejoined thread says whether a turn is running. Never a clock
-   * (codex on PR 1232): a slow admission is still coming, and a line released over it would be
-   * refused as already working with nothing to say so.
+   * the coordinator answers for that request: refused, the wait is over; taken, it lasts until
+   * the thread shows the turn — running, or moved on since the answer. The sequence alone is not
+   * enough (codex on PR 1232): another window's edit moves it too, while this line is still
+   * being taken. A rejoin that may have lost the answer ends the wait as well — the rejoined
+   * thread says whether a turn is running. Never a clock: a slow admission is still coming.
    */
-  const [echo, setEcho] = useState<{ seq: number | null; requestId: string; rejoins: number } | null>(null);
+  const [echo, setEcho] = useState<{ seq: number | null; requestId: string; rejoins: number; takenAt?: number | null } | null>(null);
   useEffect(() => {
     if (echo === null) return;
-    if ((loaded?.seq ?? null) !== echo.seq || rejoins !== echo.rejoins || worldChatSendResult(echo.requestId) === false) {
+    const seq = loaded?.seq ?? null;
+    if (rejoins !== echo.rejoins || worldChatSendResult(echo.requestId) === false) {
       setEcho(null);
       return;
     }
+    if (echo.takenAt !== undefined) {
+      if (running || seq !== echo.takenAt) setEcho(null);
+      return;
+    }
+    if (worldChatSendResult(echo.requestId) === true) {
+      setEcho({ ...echo, takenAt: seq });
+      return;
+    }
     return subscribeWorldChatSendResults((result) => {
-      if (result.requestId === echo.requestId && !result.admitted) setEcho(null);
+      if (result.requestId !== echo.requestId) return;
+      if (!result.admitted) setEcho(null);
+      else setEcho((was) => (was?.requestId === result.requestId && was.takenAt === undefined ? { ...was, takenAt: loadedRef.current?.seq ?? null } : was));
     });
-  }, [echo, loaded?.seq, rejoins]);
+  }, [echo, loaded?.seq, rejoins, running]);
   // A line to finish: the composer, if empty, and the caret either way — once per press, and
   // again when a dock brought back meets it, with whatever the author had typed so far (codex on
   // PR 1232), which the page keeps with the ask as they type.
@@ -1198,7 +1217,7 @@ export function ProductionConversation({
   const rejoinsRef = useRef(rejoins);
   rejoinsRef.current = rejoins;
   const sentAs = (pressed: DockAsk) => (requestId: string) => {
-    const { again: _again, opening: _opening, ...sent } = pressed;
+    const { again: _again, opening: _opening, answered: _answered, ...sent } = pressed;
     const after = loadedRef.current?.messages.at(-1)?.id;
     onAsk?.({ ...sent, sent: { requestId, at: new Date().toISOString(), rejoins: rejoinsRef.current, ...(after !== undefined ? { after } : {}) } });
   };
@@ -1212,11 +1231,23 @@ export function ProductionConversation({
     // Opening a thread first, the ask says so (codex on PR 1232): a dock put away before the
     // thread arrives comes back waiting for it, rather than opening a second.
     if (say(pressed.text, pressed.replyOnly === true, pressed.subject, sentAs(pressed), pressed.again) && opens) {
-      onAsk?.({ ...pressed, opening: { was } });
+      onAsk?.({ ...pressed, opening: { was, rejoins: rejoinsRef.current } });
     }
     // say is rebuilt every render; the ask and the dock's readiness are what decide.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ask, opening, echo, running, languageUnavailableReason, connection, loaded === null]);
+  /*
+   * A create lost with the connection (codex on PR 1232): rejoined and still no thread, nothing
+   * will open one, so the ask goes again from the start. A thread that did open arrives with the
+   * rejoin, and the line is said into it instead.
+   */
+  useEffect(() => {
+    if (ask?.opening === undefined || connection !== "open" || conversationId || rejoins === ask.opening.rejoins) return;
+    const { opening: _opening, ...again } = ask;
+    setOpening(null);
+    onAsk?.(again);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ask?.opening, connection, rejoins, conversationId]);
   // Brought back while its thread is still opening: wait for that thread, and say it there.
   useEffect(() => {
     if (ask?.opening === undefined || opening !== null) return;
@@ -1242,7 +1273,7 @@ export function ProductionConversation({
       const { sent: _sent, ...refused } = ask;
       onAsk?.({ ...refused, declined: true });
     };
-    const already = worldChatSendResult(requestId);
+    const already = ask.answered ?? worldChatSendResult(requestId);
     if (already !== undefined) {
       settle(already);
       return;
