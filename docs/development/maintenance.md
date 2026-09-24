@@ -1,5 +1,11 @@
 # Generated files, assets and delivery
 
+Runtime staging retries transient rename locks for up to 30 seconds, starting at 250 ms and
+doubling to a 2-second cap. Exhaustion reports the attempt and elapsed time while retaining
+the filesystem error code. OpenCode's version probe runs on the verified extracted copy before
+it is copied into the stage, so the directory being swapped has not executed a binary (#1227).
+Run `node --test apps/desktop/test/runtime-support.test.mjs` for the retry and staging checks.
+
 Commands below run from the repository root unless stated otherwise. Read the script before running a generator: regeneration can fetch remote data or change many files and is not part of ordinary documentation validation.
 
 | Output or asset | Owner / source | Maintenance route |

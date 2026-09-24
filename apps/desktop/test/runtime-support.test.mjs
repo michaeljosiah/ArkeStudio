@@ -12,9 +12,56 @@ import {
   manifestFor,
   peArchitecture,
   pruneEmptyDirectories,
+  renameWithRetry,
   swapStagedDirectory,
   verifyManifest,
 } from "../scripts/runtime-support.mjs";
+
+describe("runtime rename lock budget (#1227)", () => {
+  function clock(rename) {
+    let elapsed = 0;
+    const delays = [];
+    return { delays, options: { rename, now: () => elapsed, wait: ms => { delays.push(ms); elapsed += ms; } } };
+  }
+
+  for (const code of ["EPERM", "EBUSY", "EACCES", "ENOTEMPTY"]) {
+    it(`recovers from ${code} beyond the old five-second budget`, () => {
+      let calls = 0;
+      const fake = clock((from, to) => {
+        assert.equal(from, "fresh"); assert.equal(to, "landing");
+        if (++calls <= 6) throw Object.assign(new Error("locked"), { code });
+      });
+      renameWithRetry("fresh", "landing", fake.options);
+      assert.equal(calls, 7);
+      assert.ok(fake.delays.reduce((a, b) => a + b, 0) > 5_000);
+      assert.deepEqual(fake.delays.slice(0, 4), [250, 500, 1000, 2000]);
+      assert.ok(fake.delays.every(ms => ms <= 2000));
+    });
+  }
+
+  it("stops after thirty seconds and preserves the filesystem error with a diagnostic", () => {
+    let calls = 0;
+    const error = Object.assign(new Error("locked"), { code: "EPERM" });
+    const fake = clock(() => { calls++; throw error; });
+    assert.throws(() => renameWithRetry("fresh", "landing", fake.options), caught => {
+      assert.equal(caught, error);
+      assert.equal(caught.code, "EPERM");
+      assert.match(caught.message, new RegExp(`attempt ${calls} after 30000 ms: fresh -> landing`));
+      return true;
+    });
+    assert.equal(fake.delays.reduce((a, b) => a + b, 0), 30_000);
+  });
+
+  for (const code of ["EXDEV", "ENOENT"]) {
+    it(`passes ${code} straight to the caller without waiting`, () => {
+      const error = Object.assign(new Error("cannot rename"), { code });
+      const fake = clock(() => { throw error; });
+      assert.throws(() => renameWithRetry("fresh", "landing", fake.options), caught => caught === error);
+      assert.deepEqual(fake.delays, []);
+      assert.equal(error.message, "cannot rename");
+    });
+  }
+});
 
 async function pe(machine) {
   const path = join(tmpdir(), `arke-pe-${machine}-${Date.now()}.exe`);
