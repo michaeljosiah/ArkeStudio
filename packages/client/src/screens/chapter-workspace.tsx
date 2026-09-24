@@ -1303,10 +1303,13 @@ export function ChapterWorkspace({
   const choosing = stagedDraft !== undefined && passageChange !== null && editCount > 1;
   // A passage that removes whole paragraphs has no replacement to stand in their place: what it
   // removes is drawn struck instead, or the page would show nothing to decide (codex on PR 1232).
-  // Told by a line break among what goes: words cut inside a paragraph still mark the paragraph,
-  // as they always have.
-  const cut = passageChange !== null && passageChange.after.trim() === "" && passageChange.before.includes("\n");
-  const struck = passageChange === null ? null : <p className="fy-ch__passage"><del>{passageChange.before.trim()}</del></p>;
+  // Read from its one edit rather than the span, which is widened to whole words and so carries
+  // the next paragraph's first word when the cut is in the chapter's middle. Told by a line
+  // break among what goes: words cut inside a paragraph still mark the paragraph, as always.
+  const lone = editCount === 1 ? segments.find((segment) => segment.kind === "edit") : undefined;
+  const removed = lone?.kind === "edit" && lone.after.trim() === "" && lone.before.includes("\n") ? lone.before.trim() : null;
+  const cut = removed !== null;
+  const struck = removed === null ? null : <p className="fy-ch__passage"><del>{removed}</del></p>;
   const edits = () =>
     segments.map((segment, n) =>
       segment.kind === "same" ? (
@@ -1679,7 +1682,7 @@ export function ChapterWorkspace({
                       to decide on the page as well as on the card. */}
                   {anchorParagraph === -1 && (choosing
                     ? <p className="fy-ch__passage fy-ch__passage--choose">{edits()}</p>
-                    : struck)}
+                    : struck ?? <p className="fy-ch__passage"><del>{passageChange.before.trim()}</del></p>)}
                 </div>
               </div>
             ) : stagedDraft !== undefined ? (

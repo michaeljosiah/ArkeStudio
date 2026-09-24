@@ -1575,6 +1575,31 @@ describe("the craft loop (turn 128)", () => {
     assert.match(passage.querySelector(".fy-ch__passage del")?.textContent ?? "", /Six, and the tide/, "what goes is on the page, struck");
   });
 
+  it("a paragraph cut from the chapter's middle is drawn struck where it stood (codex on PR 1232)", async () => {
+    const MIDDLE = "Maren counted the bells.\n\nThe harbour stayed silent all night.\n\nSix, and the tide <br> not yet called.";
+    const CUT: StagedProposal = {
+      ...PASSAGE,
+      proposal: { ...PASSAGE.proposal, id: "pr_01J8H0000000000000000000PD" },
+      review: {
+        targets: [
+          {
+            path: PATH,
+            label: "The counting of bells",
+            kind: "chapter",
+            action: "amend",
+            fields: [{ field: "Prose", before: MIDDLE, proposed: BODY }],
+          },
+        ],
+      },
+    };
+    const m = await mount(inkbound([CUT]));
+    await answerOpen(m);
+    const drawn = [...(q(m, ".fy-ch__draft-passage") as HTMLElement).querySelectorAll("p")].map((p) => p.textContent);
+    // The span is widened to the next paragraph's first word; what goes is the paragraph alone.
+    assert.deepEqual(drawn, ["Maren counted the bells.", "The harbour stayed silent all night.", "Six, and the tide <br> not yet called."]);
+    assert.equal(q(m, ".fy-ch__draft-passage del")?.textContent, "The harbour stayed silent all night.", "struck, between the paragraphs it stood between");
+  });
+
   describe("keeping part of a passage", () => {
     const TWO: StagedProposal = {
       ...PASSAGE,
