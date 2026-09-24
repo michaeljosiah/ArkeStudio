@@ -530,6 +530,11 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
          * working directory out from under the agent — both are refused until the run ends.
          */
         "drafting",
+        /**
+         * The proposal's draft moved on since the press (PR 1232): the newer one is to be read.
+         * Not the world moving, so nothing is offered to rebase.
+         */
+        "draft-changed",
       ]),
       detail: z.string().optional(),
       /** On needs-reconfirm: the authoritative set and its signature to echo back (R-10). */

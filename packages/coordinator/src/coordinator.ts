@@ -5419,6 +5419,11 @@ export class Coordinator {
               ...(msg.expectedDraftRevision === undefined ? {} : { expectedDraftRevision: msg.expectedDraftRevision }),
             })).value;
           const at = new Date().toISOString();
+          // Refused against a revision the press was fenced to, and the draft has since moved on
+          // (codex on PR 1232): another window kept or edited part of it. That is not the world
+          // moving, so the answer is to read the newer draft, never to rebase it.
+          const draftMoved = outcome.status === "stale" && msg.expectedDraftRevision !== undefined
+            && (await gate.readManifest(msg.proposalId).then((p) => p.draftRevision !== msg.expectedDraftRevision, () => false));
           // `no-op` retires the proposal too (gate/proposals.ts): every target already reads as
           // proposed, so there is nothing to decide. It has to settle here for the same reason —
           // a conversation whose propositions stayed `proposed` behind a proposal that no longer
@@ -5445,7 +5450,7 @@ export class Coordinator {
                 outcome.status === "needs-reconfirm"
                   ? "needs-reconfirm"
                   : outcome.status === "stale"
-                    ? "stale"
+                    ? draftMoved ? "draft-changed" : "stale"
                     : outcome.status === "pending-review"
                       ? "pending-review"
                       : outcome.status === "unresolved-conflicts"
@@ -5459,7 +5464,9 @@ export class Coordinator {
                             : "target-retired",
               detail:
                 outcome.status === "stale"
-                  ? `moved since drafting: ${outcome.stalePaths.join(", ")}`
+                  ? draftMoved
+                    ? "another change to this draft arrived first; read the draft as it stands now"
+                    : `moved since drafting: ${outcome.stalePaths.join(", ")}`
                   : outcome.status === "unresolved-conflicts"
                     ? `${outcome.count} conflicted field${outcome.count === 1 ? "" : "s"} await a choice`
                     : outcome.status === "open-choices"

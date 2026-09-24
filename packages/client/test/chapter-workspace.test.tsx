@@ -1073,6 +1073,45 @@ describe("the craft loop (turn 128)", () => {
     assert.equal(sends.length, 0, "nothing pressed in the last session goes by itself");
   });
 
+  it("a selection begun on the blank line before a paragraph is about that paragraph (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const m = await mount({ ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState);
+    await answerOpen(m);
+    // From the first newline after paragraph one to "tide" in paragraph two.
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, BODY.indexOf("\n"), BODY.indexOf("tide") + 4);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const sent = m.sent.find((message) => message.kind === "world-chat-send") as { subject?: { paragraph?: number; text?: string } } | undefined;
+    assert.equal(sent?.subject?.text, "Six, and the tide");
+    assert.equal(sent?.subject?.paragraph, 2, "anchored at its first word, not where the drag began");
+  });
+
+  it("a dock put away while its first ask opens the thread does not open a second (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const m = await mount(styled);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Expand") as HTMLElement).click());
+    const creates = () => m.sent.filter((message) => message.kind === "world-chat-create");
+    assert.equal(creates().length, 1);
+    await act(async () => (q(m, "button.fy-arke__pin") as HTMLElement).click());
+    await act(async () => (q(m, "button.fy-sw__rail") as HTMLElement).click());
+    assert.equal(creates().length, 1, "brought back, it waits for the thread already being opened");
+    // The thread arrives: the ask is said into it, once.
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 1, actions: [], messages: [], points: [],
+    };
+    await act(async () => __setStateForTest({ ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState, { connection: "open" }));
+    const sends = m.sent.filter((message) => message.kind === "world-chat-send" && (message as { text: string }).text.includes("Expand this"));
+    assert.equal(sends.length, 1);
+  });
+
   it("a line typed while the last one is still being taken stays in the composer (codex on PR 1232)", async () => {
     const styled = inkbound([], STYLE);
     const workspace = {
@@ -1350,6 +1389,23 @@ describe("the craft loop (turn 128)", () => {
       });
       assert.equal(acceptButton(m).disabled, false, "the press is the author's again");
       assert.equal(m.sent.some((message) => message.kind === "proposal-accept"), false);
+    });
+
+    it("an accept refused because the draft moved on asks for a read, not a rebase (codex on PR 1232)", async () => {
+      const m = await mount(inkbound([TWO]));
+      await answerOpen(m);
+      await act(async () => {
+        __applyEventForTest({
+          at: "2026-09-06T12:00:03Z",
+          type: "proposal.blocked",
+          worldId: FIXTURE_WORLD_ID,
+          proposalId: TWO.proposal.id,
+          reason: "draft-changed",
+          detail: "another change to this draft arrived first; read the draft as it stands now",
+        });
+      });
+      assert.match(text(m), /The draft changed since you read it/);
+      assert.doesNotMatch(text(m), /Rebase onto current/, "only the draft moved, so there is nothing to rebase");
     });
 
     it("a revision of one edit is accepted or discarded whole, as before", async () => {

@@ -13,6 +13,7 @@ import { worldChatActionAdapters } from "../../src/world-chat/actions.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { chaptersFence, jobsFence, sceneFence, storyFence, timelineFence, worldMetadataFence } from "../../src/world-chat/target-reads.js";
+import { ProposalManager } from "../../src/gate/proposals.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { WorldStateStaleError, type WorldStore } from "../../src/world/store.js";
 import { sha256 } from "../../src/world/text-files.js";
@@ -458,4 +459,18 @@ it("a chat line sent again under the same request is not a second turn (codex on
   assert.equal(sends, 1, "taken: not said twice");
   const answers = w.events.filter((event) => event.type === "world-chat.send-result" && event.requestId === "req-again");
   assert.deepEqual(answers.map((event) => (event as { admitted: boolean }).admitted), [true, true], "answered as taken each time it was asked after");
+});
+
+it("an accept refused because the draft moved on says so, rather than offering a rebase (codex on PR 1232)", async (t) => {
+  const w = await setup();
+  await w.coordinator.openWorld(WORLD_ID);
+  const MOVED_ID = newId("pr");
+  // Another window kept part of the draft first: the gate refuses the fenced accept as stale,
+  // and the proposal's draft is now a revision past the one the press was made on.
+  const engine = (w.coordinator as unknown as { engine: { proposals: { accept: unknown } } }).engine;
+  Object.assign(engine.proposals, { accept: async () => ({ value: { status: "stale", stalePaths: ["x.md"], detail: "The proposal changed since review." } }) });
+  t.mock.method(ProposalManager.prototype, "readManifest", async () => ({ draftRevision: 3 }));
+  await w.internal.handleClientMessage({ kind: "proposal-accept", worldId: WORLD_ID, proposalId: MOVED_ID, expectedDraftRevision: 2 });
+  const blocked = w.events.find((event) => event.type === "proposal.blocked" && event.proposalId === MOVED_ID);
+  assert.equal((blocked as { reason?: string } | undefined)?.reason, "draft-changed");
 });

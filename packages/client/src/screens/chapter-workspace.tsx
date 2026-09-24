@@ -1123,7 +1123,11 @@ export function ChapterWorkspace({
   // string in a browser, and only the first is there under test.
   const onTextareaSelect = (e: { currentTarget: HTMLTextAreaElement }) => {
     const { selectionStart, selectionEnd } = e.currentTarget;
-    onSelect(selectionStart === selectionEnd ? null : text.slice(selectionStart, selectionEnd), paragraphAt(text, selectionStart));
+    const selected = text.slice(selectionStart, selectionEnd);
+    // Anchored at the first word the ask quotes (codex on PR 1232): a drag begun on the blank line
+    // before a paragraph is trimmed to that paragraph's words, and must be placed in it too.
+    const lead = selected.length - selected.trimStart().length;
+    onSelect(selectionStart === selectionEnd ? null : selected, paragraphAt(text, selectionStart + lead));
   };
   useEffect(() => {
     if (locked) setSelection(null);

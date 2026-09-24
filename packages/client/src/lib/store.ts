@@ -72,7 +72,9 @@ export interface GateNotice {
     /** #70 SS11.4.1: an in-place edit whose outcome is unknown, so accepting is not offered. */
     | "draft-unresolved"
     /** Issue 239: a turn is writing into the proposal, so it is not settled enough to act on. */
-    | "drafting";
+    | "drafting"
+    /** PR 1232: the draft moved on since the press; the newer one is to be read, not rebased. */
+    | "draft-changed";
   detail?: string;
   authoritativeSignature?: string;
 }

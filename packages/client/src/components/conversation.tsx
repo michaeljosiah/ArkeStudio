@@ -747,6 +747,8 @@ export type DockAsk = {
   sent?: { requestId: string; at: string; rejoins: number; after?: string };
   /** A line lost on the way, tried again under the request it first went as. */
   again?: string;
+  /** Said first into a thread it opened, which has not arrived yet: `was` is the thread before. */
+  opening?: { was: string | null };
   /** Sent and not taken: shown to be tried again or dismissed. */
   declined?: boolean;
   /** What the author has typed to finish a `draft` line, kept by the page with the ask. */
@@ -1010,6 +1012,8 @@ export function ProductionConversation({
     setOpening(null);
   }, [opening, worldId, workspace?.conversationId, conversationId]);
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
+  const loadedRef = useRef(loaded);
+  loadedRef.current = loaded;
   const progress = useWorldChatProgress(conversationId ?? undefined, loaded?.runStartedAt ?? null);
   const running = loaded?.runStatus === "running";
   const failure = loaded?.lastFailure ?? null;
@@ -1189,19 +1193,39 @@ export function ProductionConversation({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [message]);
   // Said when the dock is free.
+  const sentAs = (pressed: DockAsk) => (requestId: string) => {
+    const { again: _again, opening: _opening, ...sent } = pressed;
+    const after = loadedRef.current?.messages.at(-1)?.id;
+    onAsk?.({ ...sent, sent: { requestId, at: new Date().toISOString(), rejoins, ...(after !== undefined ? { after } : {}) } });
+  };
   useEffect(() => {
-    if (ask === undefined || ask.draft === true || ask.declined === true || ask.sent !== undefined) return;
+    if (ask === undefined || ask.draft === true || ask.declined === true || ask.sent !== undefined || ask.opening !== undefined) return;
     if (opening !== null || echo !== null || running || languageUnavailableReason !== undefined || connection !== "open") return;
     if (conversationId && loaded === null) return;
     const pressed = ask;
-    say(pressed.text, pressed.replyOnly === true, pressed.subject, (requestId) => {
-      const { again: _again, ...sent } = pressed;
-      const after = loaded?.messages.at(-1)?.id;
-      onAsk?.({ ...sent, sent: { requestId, at: new Date().toISOString(), rejoins, ...(after !== undefined ? { after } : {}) } });
-    }, pressed.again);
+    const was = workspace?.conversationId ?? null;
+    const opens = !conversationId;
+    // Opening a thread first, the ask says so (codex on PR 1232): a dock put away before the
+    // thread arrives comes back waiting for it, rather than opening a second.
+    if (say(pressed.text, pressed.replyOnly === true, pressed.subject, sentAs(pressed), pressed.again) && opens) {
+      onAsk?.({ ...pressed, opening: { was } });
+    }
     // say is rebuilt every render; the ask and the dock's readiness are what decide.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ask, opening, echo, running, languageUnavailableReason, connection, loaded === null]);
+  // Brought back while its thread is still opening: wait for that thread, and say it there.
+  useEffect(() => {
+    if (ask?.opening === undefined || opening !== null) return;
+    const pressed = ask;
+    setOpening({
+      text: pressed.text,
+      was: pressed.opening!.was,
+      ...(pressed.subject !== undefined ? { subject: pressed.subject } : {}),
+      ...(pressed.replyOnly === true ? { replyOnly: true } : {}),
+      onSent: sentAs(pressed),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ask?.opening, opening === null]);
   // Answered: taken is done with; not taken is shown, and stays the page's until it is tried
   // again or dismissed (codex on PR 1232) — a dock put away over it finds it on return.
   useEffect(() => {
