@@ -611,7 +611,7 @@ describe("the craft loop (turn 128)", () => {
     assert.deepEqual((tightened()[0] as { subject?: unknown }).subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells." });
   });
 
-  it("an ask the coordinator declines is tried once more, then left in the composer (codex on PR 1232)", async (t) => {
+  it("an ask the coordinator declines is shown to be tried again, never written over the composer (codex on PR 1232)", async (t) => {
     const styled = inkbound([], STYLE);
     const workspace = {
       conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
@@ -629,19 +629,51 @@ describe("the craft loop (turn 128)", () => {
     // taken (codex on PR 1232), so it is still held.
     const foreign = { ...workspace, seq: 5, messages: [{ id: "msg_01J8F3K2QW9VZX4N7M0RTYB6H1" as never, role: "user" as const, text: "Something another window said.", receipts: [], refusals: [], createdAt: "2026-09-06T12:00:00Z" }] };
     await act(async () => __setStateForTest({ ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: foreign } as ClientState, { connection: "open" }));
-    // The coordinator declined it. Tried again once...
+    assert.doesNotMatch(text(m), /Not sent ·/);
+    // The lapse passes without the thread holding it: declined, and said so.
     await act(async () => t.mock.timers.tick(15_000));
-    assert.equal(tightened(), 2, "declined once, it is tried again");
-    // ...and declined again, it is handed to the author rather than lost.
-    await act(async () => t.mock.timers.tick(15_000));
-    assert.equal(tightened(), 2, "not tried a third time");
     assert.match(text(m), /Not sent · Tighten this/, "shown to the author rather than lost");
     assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent ?? "", "", "and never written over the composer");
-    // Try again puts it back in the queue.
     await act(async () => ([...m.container.querySelectorAll(".fy-arke__declined button")].find((b) => b.textContent === "Try again") as HTMLElement).click());
-    assert.equal(tightened(), 3, "tried again at the author's word");
+    assert.equal(tightened(), 2, "tried again at the author's word");
     assert.doesNotMatch(text(m), /Not sent ·/);
     t.mock.timers.reset();
+  });
+
+  it("an ask survives the dock being put away and brought back (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const m = await mount(state);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => __setStateForTest(state, { connection: "closed" }));
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    await act(async () => (q(m, "button.fy-arke__pin") as HTMLElement).click());
+    assert.equal(q(m, ".fy-arke"), null, "the dock is put away with the ask still waiting");
+    await act(async () => (q(m, "button.fy-sw__rail") as HTMLElement).click());
+    await act(async () => __setStateForTest(state, { connection: "open" }));
+    const sends = m.sent.filter((message) => message.kind === "world-chat-send" && (message as { text: string }).text.endsWith("Tighten this"));
+    assert.equal(sends.length, 1, "brought back, the dock says it");
+    assert.deepEqual((sends[0] as { subject?: unknown }).subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells." });
+  });
+
+  it("a line to finish never replaces what the author has typed (codex on PR 1232)", async () => {
+    const m = await mount({ ...inkbound([], STYLE), world: { ...inkbound([], STYLE).world!, conversations: [THREAD] } });
+    await answerOpen(m);
+    const composer = q(m, ".fy-arke .fy-cx__editor")!;
+    composer.textContent = "My own question about the tide";
+    await act(async () => {
+      composer.dispatchEvent(new dom.Event("input", { bubbles: true }));
+    });
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone…") as HTMLElement).click());
+    assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent, "My own question about the tide");
   });
 
   it("Ask something else… puts the caret in the composer (codex on PR 1232)", async () => {
@@ -829,6 +861,21 @@ describe("the craft loop (turn 128)", () => {
       };
       await act(async () => __setStateForTest(inkbound([rewritten]), { connection: "open" }));
       assert.match(text(m), /2 of 2 changes kept/, "a refusal chosen against other edits does not carry over");
+    });
+
+    it("a blank line holding spaces is still a paragraph boundary: nothing after the passage is drawn twice (codex on PR 1232)", async () => {
+      const SPACED = BODY.replace("\n\n", "\n  \n");
+      const spaced: StagedProposal = {
+        ...TWO,
+        review: {
+          targets: [{ ...TWO.review!.targets[0]!, fields: [{ field: "Prose", before: SPACED, proposed: SPACED.replace("Maren counted the bells.", "Ines counted the seven bells.") }] }],
+        },
+      };
+      const m = await mount(inkbound([spaced]));
+      await answerOpen(m, SPACED);
+      assert.equal(edits(m).length, 2);
+      const drawn = q(m, ".fy-ch__draft-passage")?.textContent ?? "";
+      assert.equal(drawn.split("Six, and the tide").length - 1, 1, "the paragraph after the passage appears once");
     });
 
     it("a refused keep accepts nothing", async () => {

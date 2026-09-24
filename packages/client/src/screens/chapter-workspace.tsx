@@ -20,10 +20,11 @@ import {
   type ProductionBundle,
   type ProseReadSource,
   type StagedProposal,
+  type WorldChatSubject,
   type WorldBundle,
   overviewMoved,
 } from "@arke-studio/contracts";
-import { ProductionConversation, StagedDecision } from "../components/conversation.js";
+import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
 import { Pin, RotateCcw } from "../components/icons.js";
@@ -1087,14 +1088,31 @@ export function ChapterWorkspace({
   }, [locked]);
   const passage = selection?.text ?? null;
   /*
-   * An ask from the menu beside the selection, handed to the dock to say with the passage as its
-   * subject, exactly as the dock's own quick asks are. Held until the dock takes it, so an ask
-   * that brings the dock back is said by the dock it brought.
+   * What the dock is about and what it says first: the passage, when one is selected. The dock's
+   * own quick asks read these at the send; the menu's are fixed at the press (codex on PR 1232),
+   * because an ask that has to wait is still about the passage it was pressed on.
    */
-  const [ask, setAsk] = useState<PassageAction | null>(null);
+  const dockSubject: WorldChatSubject = passage === null
+    ? { kind: "chapter", chapterId: chapter.id }
+    : { kind: "passage", chapterId: chapter.id, ...(selection?.paragraph ? { paragraph: selection.paragraph } : {}), text: passage };
+  const dockPrefix = passage !== null
+    ? `About this passage in ${chapterLabel}${selection?.paragraph ? `, paragraph ${selection.paragraph}` : ""}: «${passage}»`
+    : `About ${chapterLabel}:`;
+  /*
+   * An ask from the menu beside the selection. The page holds it, not the dock, until the dock
+   * says it is done with it (codex on PR 1232): putting the dock away while it waits, or while
+   * the thread has yet to show it, loses nothing.
+   */
+  const [ask, setAsk] = useState<DockAsk | null>(null);
   const askPassage = (action: PassageAction) => {
     setDock(true);
-    setAsk(action);
+    setAsk({
+      line: action.line,
+      text: `${dockPrefix} ${action.line}`,
+      subject: dockSubject,
+      ...(action.replyOnly ? { replyOnly: true } : {}),
+      ...(action.draft ? { draft: true } : {}),
+    });
   };
 
   /*
@@ -1376,7 +1394,12 @@ export function ChapterWorkspace({
                     // the blank line before it (a paragraph removed whole).
                     if (anchorParagraph !== i) return null;
                     const endOfSpan = from + passageChange.after.length;
-                    const tailEnd = Math.max(paragraph.end, body.indexOf("\n\n", endOfSpan) < 0 ? body.length : body.indexOf("\n\n", endOfSpan));
+                    // The passage runs to the end of the last paragraph the span touches — the
+                    // same paragraphs marked changed above, and drawn nowhere else — found by the
+                    // spans, not by a separator, so a blank line holding spaces is still a
+                    // boundary (codex on PR 1232).
+                    const touched = passageParagraphs.filter((p) => p.end >= from && p.start <= to);
+                    const tailEnd = Math.max(endOfSpan, touched[touched.length - 1]?.end ?? endOfSpan);
                     return (
                       <p key={i} className="fy-ch__passage fy-ch__passage--choose">
                         {body.slice(Math.min(paragraph.start, from), from)}
@@ -1802,17 +1825,14 @@ export function ChapterWorkspace({
           // The selection travels beside the words as well as inside them (codex on turn 128):
           // the coordinator holds a revision that comes back to this chapter, this paragraph
           // and these words, whatever the model retold.
-          {...(passage === null
-            ? { subject: { kind: "chapter" as const, chapterId: chapter.id } }
-            : { subject: { kind: "passage" as const, chapterId: chapter.id, ...(selection?.paragraph ? { paragraph: selection.paragraph } : {}), text: passage } })}
+          subject={dockSubject}
           dock={{
             title: `Arke · Chapter ${String(chapter.order).padStart(2, "0")}`,
             subject: `${chapter.title} · ${production.meta.title}`,
             conversationFirst: true,
             onPutAway: () => setDock(false),
-            ...(ask !== null
-              ? { ask: { line: ask.line, ...(ask.replyOnly ? { replyOnly: true } : {}), ...(ask.draft ? { draft: true } : {}) }, onAskTaken: () => setAsk(null) }
-              : {}),
+            ...(ask !== null ? { ask } : {}),
+            onAsk: setAsk,
             // The first prompt follows the plan (turn 127): a synopsis with no prose is drafted
             // from; a chapter with prose is continued. While a passage is selected the prompts
             // are a revision's (turn 128), and the passage is the subject.
@@ -1837,9 +1857,7 @@ export function ChapterWorkspace({
                   : [firstPrompt(live, chapter.synopsis), style !== null ? { label: "Hold this against the style", replyOnly: true } : "What does this chapter draw on?"],
             // The thread is the production's own (no new entry context, turn 126): the chapter
             // the dock names has to be in the words themselves or the studio never hears it.
-            subjectPrefix: passage !== null
-              ? `About this passage in ${chapterLabel}${selection?.paragraph ? `, paragraph ${selection.paragraph}` : ""}: «${passage}»`
-              : `About ${chapterLabel}:`,
+            subjectPrefix: dockPrefix,
             ...(passage !== null ? { subjectLine: `about this passage · ${countWords(passage).toLocaleString()} words` } : {}),
           }}
           openingNote="opening…"

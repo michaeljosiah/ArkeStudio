@@ -727,6 +727,20 @@ export function languageChoiceReason(
  * to make a conversation before they can say anything — and it is opened on arrival and released
  * on the way out, so a session that visits every view still holds one workspace.
  */
+/**
+ * An ask a page hands the dock (the chapter's selection menu), with its words and subject fixed
+ * at the press. `draft` only starts a line in the composer. `sent` is set by the dock once it has
+ * gone, with how many times the thread already held these words.
+ */
+export type DockAsk = {
+  line: string;
+  text: string;
+  subject?: WorldChatSubject;
+  replyOnly?: boolean;
+  draft?: boolean;
+  sent?: { said: number };
+};
+
 export function ProductionConversation({
   worldId,
   productionId,
@@ -802,8 +816,9 @@ export function ProductionConversation({
      * An ask handed in from outside the dock, said once as a quick ask is. `draft` only puts the
      * line in the composer for the author to finish. The page clears it in `onAskTaken`.
      */
-    ask?: { line: string; replyOnly?: boolean; draft?: boolean };
-    onAskTaken?: () => void;
+    ask?: DockAsk;
+    /** The dock's word on the ask: sent (the ask back, marked), or done with (null). */
+    onAsk?: (next: DockAsk | null) => void;
     /**
      * Said before whatever is typed while a shot is the subject. The thread enters at the scene,
      * so the shot the dock names has to be in the words themselves or the studio never hears it.
@@ -1050,53 +1065,32 @@ export function ProductionConversation({
   };
 
   /*
-   * An ask handed in from the page — the chapter's selection menu — taken once and handed back.
-   * It is said exactly as a quick ask would be, subject and all, so a passage revision from the
-   * menu is the same turn as one from the dock. What it is about is fixed at the press (codex on
-   * PR 1232): an ask that has to wait (a turn running, a thread opening, no model yet) waits with
-   * its own words and subject, and is said when the dock is free, whatever is selected by then —
-   * reduced to composer text it would be said about the next selection instead. A later press
-   * replaces a waiting one. A line that only starts an ask goes to the composer, where it is the
-   * author's to finish under whatever they then select.
+   * An ask handed in from the page — the chapter's selection menu. The page owns it (codex on PR
+   * 1232): its words and passage were fixed at the press, and it stays with the page until the
+   * thread shows it said, so putting the dock away and bringing it back loses nothing. The dock
+   * says it when it is free, exactly as a quick ask is said, and reports back through `onAsk`:
+   * sent (with how many times the thread already held those words), taken, or handed back to
+   * try again.
+   *
+   * Said means the thread holds one more user message with exactly these words than it did at
+   * the send. The sequence moving is not proof — another window's turn moves it too while the
+   * coordinator quietly declines this one — and the words carry the quoted passage, so nobody
+   * else's turn matches them. The count is taken only once the thread is loaded, so words said
+   * before are never mistaken for this send. Not said within the lapse, the ask was declined;
+   * it is shown beside the prompts to be tried again or dismissed, never written over the
+   * composer. A line that only starts an ask goes to the composer, and only an empty one.
    */
   const [focusRequest, setFocusRequest] = useState(0);
-  type QueuedAsk = { line: string; text: string; subject: WorldChatSubject | undefined; replyOnly: boolean; tries: number };
-  const [waitingAsk, setWaitingAsk] = useState<QueuedAsk | null>(null);
-  /*
-   * The ask last sent from the queue, held until the thread shows it said (codex on PR 1232). A
-   * frame that reached the coordinator can still be declined there without a word — another
-   * window's turn already running, the conversation gone. The sequence moving is not proof it
-   * was taken, because that other window's turn moves it too; the thread holding one more user
-   * message with exactly these words is, and the words carry the quoted passage, so nobody
-   * else's turn matches them. Declined once, it goes back in the queue; declined again, it is
-   * shown beside the prompts to be tried again or dismissed, never written over the composer.
-   */
-  const sentAsk = useRef<{ ask: QueuedAsk; said: number } | null>(null);
-  const [sentAt, setSentAt] = useState(0);
-  const [declinedAsk, setDeclinedAsk] = useState<QueuedAsk | null>(null);
+  const [declinedAsk, setDeclinedAsk] = useState<DockAsk | null>(null);
+  const ask = dock?.ask;
+  const onAsk = dock?.onAsk;
   const timesSaid = (text: string) => (loaded?.messages ?? []).filter((m) => m.role === "user" && m.text === text).length;
-  useEffect(() => {
-    const sent = sentAsk.current;
-    if (sent !== null && timesSaid(sent.ask.text) > sent.said) sentAsk.current = null;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded?.messages]);
-  useEffect(() => {
-    if (sentAt === 0) return;
-    const lapse = setTimeout(() => {
-      const declined = sentAsk.current;
-      sentAsk.current = null;
-      if (declined === null) return;
-      if (declined.ask.tries < 2) setWaitingAsk((later) => later ?? declined.ask);
-      else setDeclinedAsk(declined.ask);
-    }, 15_000);
-    return () => clearTimeout(lapse);
-  }, [sentAt]);
   /*
    * A line just sent that the thread has not shown yet (codex on PR 1232). Between the send and
-   * the snapshot that reports its turn, nothing here says a turn is running, and a waiting ask
-   * released in that gap is refused by the runner as already working. So the dock counts as busy
-   * until the conversation's sequence moves past the one it sent at; a send the coordinator
-   * refused never moves it, so the wait also ends on its own after a while.
+   * the snapshot that reports its turn, nothing here says a turn is running, and an ask released
+   * in that gap is refused by the runner as already working. So the dock counts as busy until
+   * the conversation's sequence moves past the one it sent at; a send the coordinator refused
+   * never moves it, so the wait also ends on its own after a while.
    */
   const [echo, setEcho] = useState<{ seq: number | null } | null>(null);
   useEffect(() => {
@@ -1108,39 +1102,45 @@ export function ProductionConversation({
     const lapse = setTimeout(() => setEcho(null), 15_000);
     return () => clearTimeout(lapse);
   }, [echo, loaded?.seq]);
-  const ask = dock?.ask;
-  const onAskTaken = dock?.onAskTaken;
+  // A new press replaces whatever was shown as not sent.
   useEffect(() => {
-    if (ask === undefined) return;
-    onAskTaken?.();
-    setDeclinedAsk(null);
-    if (ask.draft === true) {
-      // A later press replaces a waiting ask, whichever kind it is (codex on PR 1232).
-      setWaitingAsk(null);
-      setMessage(ask.line);
-      // And the caret goes to the box, so a line to finish — or none at all, for "Ask something
-      // else…" — is visibly the author's to type (codex on PR 1232).
-      setFocusRequest((n) => n + 1);
-      return;
-    }
-    const prefix = dock?.subjectPrefix;
-    setWaitingAsk({ line: ask.line, text: prefix === undefined ? ask.line : `${prefix} ${ask.line}`, subject, replyOnly: ask.replyOnly === true, tries: 0 });
-    // Taken on arrival only: the page clears it in onAskTaken, so the rest cannot re-fire it.
+    if (ask !== undefined && ask.sent === undefined) setDeclinedAsk(null);
+  }, [ask]);
+  // A line to finish: the composer, if empty, and the caret either way.
+  useEffect(() => {
+    if (ask === undefined || ask.draft !== true) return;
+    onAsk?.(null);
+    if (message.trim() === "") setMessage(ask.line);
+    setFocusRequest((n) => n + 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ask]);
+  // Said when the dock is free and the thread it would be said into is loaded.
+  const threadReady = !conversationId || loaded !== null;
   useEffect(() => {
-    if (waitingAsk === null || opening !== null || echo !== null || running || languageUnavailableReason !== undefined || connection !== "open") return;
-    // Kept until it has actually gone (codex on PR 1232): a send into a closed transport is
-    // tried again when the connection comes back rather than dropped.
-    const said = timesSaid(waitingAsk.text);
-    if (say(waitingAsk.text, waitingAsk.replyOnly, waitingAsk.subject)) {
-      sentAsk.current = { ask: { ...waitingAsk, tries: waitingAsk.tries + 1 }, said };
-      setSentAt((n) => n + 1);
-      setWaitingAsk(null);
-    }
+    if (ask === undefined || ask.draft === true || ask.sent !== undefined) return;
+    if (!threadReady || opening !== null || echo !== null || running || languageUnavailableReason !== undefined || connection !== "open") return;
+    const said = timesSaid(ask.text);
+    if (say(ask.text, ask.replyOnly === true, ask.subject)) onAsk?.({ ...ask, sent: { said } });
     // say is rebuilt every render; the ask and the dock's readiness are what decide.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [waitingAsk, opening, echo, running, languageUnavailableReason, connection]);
+  }, [ask, threadReady, opening, echo, running, languageUnavailableReason, connection]);
+  // Taken once the thread holds it.
+  useEffect(() => {
+    if (ask?.sent === undefined || loaded === null) return;
+    if (timesSaid(ask.text) > ask.sent.said) onAsk?.(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ask, loaded?.messages]);
+  // Declined when it is not, within the lapse.
+  useEffect(() => {
+    if (ask?.sent === undefined) return;
+    const declined = ask;
+    const lapse = setTimeout(() => {
+      onAsk?.(null);
+      setDeclinedAsk(declined);
+    }, 15_000);
+    return () => clearTimeout(lapse);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ask]);
 
   const points = loaded?.points ?? [];
   const carriedPoints = points.filter((p) => p.kind === "point" && p.settled).length;
@@ -1348,7 +1348,7 @@ export function ProductionConversation({
           {declinedAsk !== null && (
             <div className="fy-mono fy-arke__declined" role="status">
               <span>Not sent · {declinedAsk.line}</span>
-              <button type="button" onClick={() => { setWaitingAsk({ ...declinedAsk, tries: 0 }); setDeclinedAsk(null); }}>Try again</button>
+              <button type="button" onClick={() => { const { sent: _sent, ...again } = declinedAsk; onAsk?.(again); setDeclinedAsk(null); }}>Try again</button>
               <button type="button" onClick={() => setDeclinedAsk(null)}>Dismiss</button>
             </div>
           )}
