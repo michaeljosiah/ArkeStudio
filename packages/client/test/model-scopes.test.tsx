@@ -143,6 +143,19 @@ describe("the Models card", () => {
     assert.match(html, /<option[^>]*value="kling-3"[^>]*>FAL · Kling 3\.0<\/option>/);
   });
 
+  it("states an inherited default that cannot run, rather than calling it fine", () => {
+    // Following Settings is not the same as being healthy: this row runs on that default.
+    const state = stateWith({});
+    const off = { ...state, app: { ...state.app, models: { disabled: [SEEDANCE.id] } } };
+    const html = card(off, undefined);
+    assert.match(plain(html), /turned off/);
+    assert.doesNotMatch(html, /<span class="fy-fact__state">default<\/span>/, "not labelled as a healthy default");
+    const gone = { ...state, app: { ...state.app, routing: { ...state.app.routing, defaults: { video: "retired-model" } } } };
+    const goneHtml = card(gone, undefined);
+    assert.match(plain(goneHtml), /not in the manifest/);
+    assert.match(goneHtml, /<option value=""[^>]*>retired-model · default<\/option>/, "the stored route is shown, not hidden");
+  });
+
   it("removes a capability on reset, and the map with its last entry", () => {
     assert.deepEqual(withModelChoice({ video: "a", image: "b" }, "video", null), { image: "b" });
     assert.equal(withModelChoice({ video: "a" }, "video", null), undefined);

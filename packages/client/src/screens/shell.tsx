@@ -901,8 +901,11 @@ export function NewWorldScreen() {
   // Any of them can change behind an open card — the gear goes to Settings and back — and the
   // review must be asked again, or it shows one model and price while the press spends on another.
   const imageRoute = (() => {
-    const id = models?.image ?? state?.app.routing.defaults.image;
-    const model = id === undefined ? undefined : state?.app.manifest?.models.find((m) => m.id === id);
+    // Resolved the way the build resolves it: the card's choice, else what Settings routes —
+    // which, with no saved default, is the manifest's first image model, not nothing.
+    const manifest = state?.app.manifest;
+    const id = models?.image ?? (manifest ? modelForCapability(manifest, state?.app.routing.defaults, "image")?.id : undefined);
+    const model = id === undefined ? undefined : manifest?.models.find((m) => m.id === id);
     const provider = model === undefined ? undefined : state?.app.providers.find((p) => p.id === model.provider);
     return [
       id ?? "",

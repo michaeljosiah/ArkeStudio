@@ -15,6 +15,8 @@ import {
   type WorldChatMessage,
 } from "@arke-studio/contracts";
 import { WorldStore } from "../../src/world/store.js";
+import { WORLD_MODELS_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { SUPPORTED_SCHEMA_VERSION } from "../../src/world/scan.js";
 import { imageModelFor } from "../../src/references/generate.js";
 import { planProductionSetup } from "../../src/productions/setup-plan.js";
 import { validateTurnResult } from "../../src/world-chat/turn-result.js";
@@ -67,6 +69,20 @@ describe("a world's own models (design turn 153)", () => {
     const raw = JSON.parse(await readFile(join(store.dir, "world.json"), "utf8")) as Record<string, unknown>;
     // An empty map reads as a choice made and then emptied; never having chosen has no key.
     assert.equal("models" in raw, false);
+  });
+});
+
+describe("the schema boundary (design turn 153)", () => {
+  it("raises world.json past the field with the write that carries it, and not before", async () => {
+    // world.json is strict: a build that predates `models` would fail the parse and drop the
+    // world from its list, rather than say an update is needed (Codex, #1237).
+    const store = await open();
+    const before = store.getBundle().meta.schemaVersion;
+    await store.setWorldModel("image", null);
+    assert.equal(store.getBundle().meta.schemaVersion, before, "a clear with nothing kept needs no boundary");
+    await store.setWorldModel("image", "chosen");
+    assert.equal(store.getBundle().meta.schemaVersion, Math.max(before, WORLD_MODELS_SCHEMA_VERSION));
+    assert.ok(WORLD_MODELS_SCHEMA_VERSION <= SUPPORTED_SCHEMA_VERSION, "this build reads what it writes");
   });
 });
 

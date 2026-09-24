@@ -27,7 +27,10 @@ type State = ReturnType<typeof useStore>["state"];
  * the voice its lines are read in. Music and a world's voices join when a path reads them.
  */
 export const WORLD_MODEL_CAPABILITIES: readonly Capability[] = ["image", "video"];
-export const PRODUCTION_MODEL_CAPABILITIES: readonly Capability[] = ["image", "video", "voice-tts"];
+// Not voice: a production's lines follow each voice's own model when nothing is kept, not
+// Settings, so a `default` row would name a model that decides nothing. The voice-line screen's
+// own "remember" still keeps a production voice model where that is what is wanted.
+export const PRODUCTION_MODEL_CAPABILITIES: readonly Capability[] = ["image", "video"];
 
 /**
  * What a model row says about the model it holds, in the state cell's three words (design turn
@@ -179,7 +182,9 @@ export function ModelsCard({
               onChange={(e) => onChange(capability, e.target.value === "" ? null : e.target.value)}
               {...(source === undefined ? {} : { mark: <ProviderMark id={source.id} label={source.label} size="xs" /> })}
             >
-              <option value="">{defaultModel ? `${name(defaultModel)} · default` : "Default · not set"}</option>
+              <option value="">
+                {defaultModel ? `${name(defaultModel)} · default` : defaultId !== undefined ? `${defaultId} · default` : "Default · not set"}
+              </option>
               {/* The stored choice stays visible when it can no longer be offered, so the control
                   shows what is kept rather than silently reading as the default. */}
               {ownUnlisted && <option value={own}>{ownModel ? name(ownModel) : own}</option>}
@@ -191,8 +196,16 @@ export function ModelsCard({
             </Select>
             {/* A kind with no default and no choice has no state: there is nothing to report on
                 a model nobody chose (turn 149). */}
+            {/* Following Settings is not the same as being fine: a default that is switched off,
+                keyless or gone is stated here in General's words, since this row runs on it. */}
             {own === undefined ? (
-              defaultModel !== undefined && <span className="fy-fact__state">default</span>
+              defaultId === undefined ? null : defaultModel === undefined ? (
+                <Warn words="not in the manifest" />
+              ) : usable(defaultModel) ? (
+                <span className="fy-fact__state">default</span>
+              ) : (
+                <Warn words={strandState(defaultModel)} />
+              )
             ) : ownModel === undefined ? (
               <Warn words="not in the manifest" />
             ) : usable(ownModel) ? (

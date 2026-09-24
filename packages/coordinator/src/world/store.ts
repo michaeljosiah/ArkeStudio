@@ -29,6 +29,7 @@ import {
   type CommitInput,
   type CommitResult,
   type PendingCommit,
+  WORLD_MODELS_SCHEMA_VERSION,
 } from "./commit.js";
 import { WorldLock, type WorldLockOptions } from "./lock.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
@@ -424,6 +425,9 @@ export class WorldStore {
         source,
         files: [],
         worldFields: { models: Object.keys(current).length > 0 ? current : null },
+        // Raised with the bytes that need it, never ahead of them: a world that only ever
+        // clears stays openable by the builds before the field.
+        ...(modelId !== null ? { raiseSchemaVersion: WORLD_MODELS_SCHEMA_VERSION } : {}),
       });
     });
   }

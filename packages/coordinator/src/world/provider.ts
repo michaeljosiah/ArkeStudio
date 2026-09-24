@@ -14,6 +14,7 @@ import {
   type WorldSummary,
 } from "@arke-studio/contracts";
 import { ProposalManager } from "../gate/proposals.js";
+import { WORLD_MODELS_SCHEMA_VERSION } from "./commit.js";
 import { AppIndex } from "../index-db/app-index.js";
 import type { DatabaseCtor } from "../index-db/sqlite.js";
 import type { WorldProvider } from "../world-provider.js";
@@ -301,7 +302,8 @@ export class FsWorldProvider implements WorldProvider {
       // Worlds are born at the oldest schema they satisfy, not the newest this build knows
       // (SPEC-023 R-23): a fresh world has no conversations and no new-model entities, so
       // older builds may open it; the first write that needs the boundary raises it.
-      schemaVersion: 1,
+      // A world founded with its own models is born past their boundary (design turn 153).
+      schemaVersion: input.models && Object.keys(input.models).length > 0 ? WORLD_MODELS_SCHEMA_VERSION : 1,
       name: input.name,
       ...(input.logline ? { logline: input.logline } : {}),
       ...(input.tone ? { tone: input.tone } : {}),

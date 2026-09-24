@@ -12,7 +12,7 @@ import { WorldChatStore, conversationDir } from "../world-chat/store.js";
 import { foldConversation } from "../world-chat/fold.js";
 import { discoverConversations } from "../world-chat/discover.js";
 import { WorldChatService } from "../world-chat/service.js";
-import { CommitStaleError } from "../world/commit.js";
+import { CommitStaleError, WORLD_MODELS_SCHEMA_VERSION } from "../world/commit.js";
 import { WorldStateStaleError, type WorldStore } from "../world/store.js";
 import { toExtendedLength } from "../world/paths.js";
 
@@ -112,12 +112,19 @@ export class ProductionSetupService {
   }
 
   async update(id: ConversationId, update: ProductionSetupUpdate): Promise<ProductionSetupState> {
-    return this.serial(id, () => this.world.ownedWrite(async () => {
+    return this.serial(id, async () => {
+      // A draft carrying models is past their boundary (design turn 153): the strict draft of
+      // an older build would refuse the whole setup. Raised before the write, as `start` does.
+      if (update.fields?.models && Object.keys(update.fields.models).length > 0) {
+        await this.world.ensureSchemaVersion(WORLD_MODELS_SCHEMA_VERSION, "production-setup");
+      }
+      return this.world.ownedWrite(async () => {
       const view = await this.read(id);
       const state = this.editable(view, update.expectedRevision);
       const draft = applyProductionSetupUpdate(state.draft, update);
       return this.append(id, view, { draft, status: "draft", review: null });
-    }));
+      });
+    });
   }
 
   async review(id: ConversationId, expectedRevision: number): Promise<ProductionSetupState> {
