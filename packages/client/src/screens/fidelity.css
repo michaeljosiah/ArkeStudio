@@ -6796,11 +6796,29 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
  * the left the way the draft is, and the rest of the chapter stands untouched around it.
  */
 .fy-ch__manuscript { position: relative; }
-.fy-ch__ask { position: absolute; z-index: 2; display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--background); box-shadow: var(--shadow-xs); font: 500 10.5px var(--font-sans); color: var(--foreground); cursor: pointer; white-space: nowrap; transition: var(--transition-control); }
-.fy-ch__ask:hover { background: var(--accent); }
+.fy-ch__ask-wrap { position: absolute; z-index: 2; }
+.fy-ch__passage--choose { white-space: pre-wrap; }
+.fy-ch__edit { display: inline; padding: 0 1px; border: 0; border-radius: 3px; background: color-mix(in srgb, var(--accent) 60%, transparent); font: inherit; color: inherit; text-align: inherit; cursor: pointer; }
+.fy-ch__edit del { color: var(--muted-foreground); }
+.fy-ch__edit ins { text-decoration: none; font-weight: 600; }
+.fy-ch__edit del + ins { margin-left: 3px; }
+.fy-ch__edit--refused { background: transparent; outline: 1px dashed var(--border); }
+.fy-ch__edit--refused del { color: inherit; text-decoration: none; }
+.fy-ch__edit--refused ins { font-weight: inherit; color: var(--muted-foreground); text-decoration: line-through; }
+.fy-ch__ask { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--background); box-shadow: var(--shadow-xs); font: 500 10.5px var(--font-sans); color: var(--foreground); cursor: pointer; white-space: nowrap; transition: var(--transition-control); }
+.fy-ch__ask:hover:not(:disabled) { background: var(--accent); }
+.fy-ch__ask:disabled { color: var(--muted-foreground); cursor: default; }
+.fy-ch__ask-menu { position: absolute; top: calc(100% + 4px); left: 0; display: flex; flex-direction: column; width: 190px; max-width: 190px; padding: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); box-shadow: var(--shadow-md); }
+.fy-ch__ask-menu--end { left: auto; right: 0; }
+.fy-ch__ask-item { padding: 5px 8px; border: 0; border-radius: 5px; background: transparent; font: 500 11.5px var(--font-sans); color: var(--foreground); text-align: left; cursor: pointer; white-space: nowrap; }
+.fy-ch__ask-item:hover, .fy-ch__ask-item:focus-visible { background: var(--accent); outline: none; }
+.fy-ch__ask-item--rule { margin-top: 4px; border-top: 1px solid var(--border); border-radius: 0 0 5px 5px; padding-top: 8px; }
 .fy-ch__passage { border-left: 2px solid var(--foreground); padding-left: 12px; }
 .fy-ch__style { font: 400 11.5px/1.55 var(--font-sans); color: var(--muted-foreground); margin: 0; }
 .fy-arke__subject { color: var(--neutral-400); padding: 0 2px; }
+.fy-arke__declined { display: flex; align-items: center; gap: 8px; padding: 0 2px; color: var(--neutral-400); }
+.fy-arke__declined span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-arke__declined button { border: 0; background: none; padding: 0; font: inherit; color: var(--foreground); text-decoration: underline; cursor: pointer; }
 .fy-story__stylehead { display: flex; align-items: baseline; gap: 10px; margin-top: 6px; }
 .fy-story__stylehead > .fy-mono { color: var(--neutral-400); font-size: 10px; }
 /*

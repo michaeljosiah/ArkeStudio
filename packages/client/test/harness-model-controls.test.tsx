@@ -8,7 +8,7 @@ import { OPENCODE_AVAILABILITY, type ClientMessage, type ClientState } from "@ar
 import { AgentsPanel } from "../src/screens/agents.js";
 import { SettingsHarnessScreen, SettingsLayout } from "../src/screens/shell.js";
 import { ProductionConversation } from "../src/components/conversation.js";
-import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __clearWorldChatHoldsForTest, __setBridgeForTest, __setStateForTest, __stateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -56,6 +56,15 @@ function modelState(): ClientState {
         pointCount: 0, openProposalCount: 0, notCarried: [], entryContext: { kind: "production", productionId: "saltlight" },
       }],
     },
+    // Loaded: a thread still loading takes nothing said into it.
+    worldChat: workspaceAt(1),
+  };
+}
+
+function workspaceAt(seq: number): NonNullable<ClientState["worldChat"]> {
+  return {
+    conversationId: CV as never, status: "open", initiative: "collaborate", hasMore: false, runStatus: null,
+    runStartedAt: null, retrievalUnavailable: false, attachments: [], seq, actions: [], messages: [], points: [],
   };
 }
 
@@ -76,6 +85,7 @@ async function mount(state: ClientState, children: ReactNode, path = "/settings/
 }
 
 afterEach(async () => {
+  __clearWorldChatHoldsForTest();
   if (root) await act(async () => root!.unmount());
   root = undefined;
   container?.remove();
@@ -286,6 +296,9 @@ describe("live harness model controls (#1123, #1124)", () => {
     const inherited = sent.findLast((message) => message.kind === "world-chat-send");
     assert.ok(inherited && inherited.kind === "world-chat-send");
     assert.equal(inherited.modelId, undefined, "the coordinator resolves the inherited production choice");
+    // Taken, and the thread shows it, before the next is said.
+    await act(async () => __applyEventForTest({ at: "2026-09-13T00:00:01Z", type: "world-chat.send-result", conversationId: CV as never, requestId: inherited.requestId, admitted: true }));
+    await act(async () => __setStateForTest({ ...modelState(), worldChat: workspaceAt(2) }));
     await choose("Language model", OPUS);
     await press("Explain the scene");
     const explicit = sent.findLast((message) => message.kind === "world-chat-send");
@@ -293,6 +306,17 @@ describe("live harness model controls (#1123, #1124)", () => {
     assert.equal(explicit.modelId, OPUS);
     assert.match(container.textContent!, /THIS PRODUCTION/);
     assert.equal(sent.some((message) => message.kind === "set-production-model"), false);
+  });
+
+  it("a line held for a world that closes is not held when that world opens again (codex on PR 1232)", async () => {
+    await mount(modelState(), conversation());
+    await press("Explain the scene");
+    assert.equal(Object.keys(__stateForTest().worldChatHolds).length, 1, "held until its answer comes");
+    const elsewhere = modelState();
+    elsewhere.world = { ...elsewhere.world!, meta: { ...elsewhere.world!.meta, worldId: "wld_elsewhere" as never } };
+    await act(async () => __setStateForTest(elsewhere));
+    await act(async () => __setStateForTest(modelState()));
+    assert.deepEqual(__stateForTest().worldChatHolds, {}, "its answer belonged to the session that closed");
   });
 
   it("shows the chat agent override ahead of an unavailable production choice", async () => {

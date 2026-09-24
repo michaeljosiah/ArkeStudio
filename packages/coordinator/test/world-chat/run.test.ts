@@ -285,6 +285,21 @@ describe("taking a turn", () => {
     assert.deepEqual((await view()).messages, [], "and no turn was started at all");
   });
 
+  it("tells the sender a line was taken only once it is a turn (PR 1232)", async () => {
+    const down = { ...fakeAdapter([]), readiness: () => ({ ready: false, reason: "OpenCode is not running" }) };
+    const declined = await setup(down as HarnessAdapter);
+    let told = 0;
+    await declined.runner.send(declined.store, declined.conversationId, "hello", [], undefined, undefined, false, () => told++);
+    assert.equal(told, 0, "a send the runner declines before appending is never called taken");
+
+    const up = await setup(fakeAdapter(["bad", "bad"]));
+    let admittedWith = -1;
+    await up.runner.send(up.store, up.conversationId, "hello", [], undefined, undefined, false, async () => {
+      admittedWith = (await up.view()).messages.filter((m) => m.role === "user").length;
+    });
+    assert.equal(admittedWith, 1, "taken once the words are in the log, even when the turn then fails");
+  });
+
   it("releases the lease and scratch whatever the outcome", async () => {
     const { runner, store, conversationId, released } = await setup(fakeAdapter(["bad", "bad"]));
     await runner.send(store, conversationId, "anything");

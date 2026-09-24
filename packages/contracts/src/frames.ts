@@ -54,6 +54,14 @@ import { DecideConversationActionSchema } from "./arke-actions.js";
  * receives a fresh snapshot — partial replay is deliberately not offered (D4).
  */
 
+/**
+ * The bounds on a partial accept's frame (PR 1232), shared so a screen can decline a keep the
+ * transport would drop: a frame past them is refused without an answer, and a screen holding its
+ * controls for one would wait for ever.
+ */
+export const PASSAGE_SPAN_MAX = 20_000;
+export const PASSAGE_KEPT_MAX = 2_400;
+
 export const FrameSchema = valueSchema(z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("snapshot"), seq: z.number().int().min(1), state: ClientStateSchema }).strict(),
   z.object({ kind: z.literal("event"), seq: z.number().int().min(1), event: DomainEventSchema }).strict(),
@@ -470,6 +478,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       proposalId: z.string().min(1),
       confirmRipples: z.string().optional(),
+      /**
+       * The draft revision the person decided on. Present, a proposal that has moved past it is
+       * refused as stale rather than accepted — an accept a screen sends on the author's behalf
+       * (the part of a passage kept, then accepted) must land on the revision it observed.
+       */
+      expectedDraftRevision: z.number().int().min(1).optional(),
+      /** Echoed on a refusal, so the screen that pressed knows the answer is its own (PR 1232). */
+      requestId: z.string().min(1).optional(),
     })
     .strict(),
   z
@@ -527,6 +543,32 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
+   * Keep part of a staged passage revision (turn 128): which of the revision's edits the reviewer
+   * kept, by their index in `passageDiff` of the span. The gate finds the span itself, from the
+   * base the chapter was staged against and the staged chapter, takes the same edits apart and
+   * composes the passage from the ones named — so what lands can only be the reviewed edits, and
+   * the rest of the chapter cannot be touched from here. `before` and `after` are the span as the
+   * screen drew it, refused when they are not what the gate finds, so choices made among the edits
+   * of a different passage are never applied to this one. The revision fence and the idempotent
+   * retry are `proposal-update-field`'s.
+   */
+  z
+    .object({
+      kind: z.literal("proposal-update-passage"),
+      worldId: UlidSchema,
+      requestId: z.string().min(1),
+      proposalId: z.string().min(1),
+      path: z.string().min(1),
+      // The span as drawn is the replacement widened to whole words at both ends, so it can run
+      // past the 2,400 the model's replacement is held to (codex on PR 1232); the gate compares
+      // it with the span it finds, so the bound is only there to keep the frame sane.
+      before: z.string().max(PASSAGE_SPAN_MAX),
+      after: z.string().max(PASSAGE_SPAN_MAX),
+      kept: z.array(z.number().int().min(0)).max(PASSAGE_KEPT_MAX),
+      expectedDraftRevision: z.number().int().min(1),
+    })
+    .strict(),
+  /**
    * #70: open one conversation's workspace, or close the open one.
    *
    * A null id closes it. The client holds one conversation at a time, so leaving a screen should
@@ -564,6 +606,19 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        * promises to stage nothing cannot be talked into staging something.
        */
       replyOnly: z.boolean().optional(),
+    })
+    .strict(),
+  /**
+   * Where a sent line stands, asked again after a rejoin that may have lost its answer (PR 1232).
+   * Answered with `world-chat.send-result`: taken, or not known to be taken — declined, or never
+   * received. A line still being taken is answered when it is, as it would have been anyway.
+   */
+  z
+    .object({
+      kind: z.literal("world-chat-send-status"),
+      worldId: UlidSchema,
+      requestId: z.string().min(1),
+      conversationId: ConversationIdSchema,
     })
     .strict(),
   /**

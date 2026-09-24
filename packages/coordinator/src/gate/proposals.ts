@@ -34,6 +34,10 @@ import {
   type RipplePreview,
   orderedShots,
   propSlug,
+  changedSpan,
+  composePassage,
+  countWords,
+  passageDiff,
 } from "@arke-studio/contracts";
 import { ripplesForCanonEntry, ripplesForSheet } from "../index-db/queries.js";
 import { atomicWriteFile, renameWithRetry, withTransientRetry } from "../world/atomic.js";
@@ -153,7 +157,19 @@ export interface MergeFormInput {
   requestId: string;
   path: string;
   expectedDraftRevision: number;
-  edit(content: string): { content: string } | { reason: string };
+  edit(content: string, proposal: Proposal): { content: string } | { reason: string } | Promise<{ content: string } | { reason: string }>;
+}
+
+export interface UpdatePassageInput {
+  proposalId: string;
+  requestId: string;
+  path: string;
+  /** The span as the screen drew it, before and after the revision. */
+  before: string;
+  after: string;
+  /** The edits the reviewer kept, by their index in `passageDiff` of the span. */
+  kept: readonly number[];
+  expectedDraftRevision: number;
 }
 
 export interface ResolveOpenChoiceInput {
@@ -218,6 +234,13 @@ export class DraftUnresolvedError extends Error {
     this.name = "DraftUnresolvedError";
   }
 }
+
+/**
+ * The detail of an accept refused because the proposal's own draft moved past the revision the
+ * press was fenced to (PR 1232), as opposed to the world moving under it. Said by the gate while
+ * it holds the lock, so a caller can tell the two apart without reading the proposal again.
+ */
+export const DRAFT_CHANGED_DETAIL = "The proposal changed since review.";
 
 export type AcceptOutcome =
   | { status: "accepted"; result: CommitResult; ripples: RippleItem[] }
@@ -616,7 +639,7 @@ export class ProposalManager {
 
       const current = await this.readProposalFile(input.proposalId, input.path);
       if (current === null) return { status: "unknown-target" };
-      const edited = input.edit(current);
+      const edited = await input.edit(current, proposal);
       if ("reason" in edited) return { status: "rejected", message: edited.reason };
 
       const nextManifest: Proposal = {
@@ -641,6 +664,53 @@ export class ProposalManager {
       await writeDraftRecord(dir, { ...op, state: "committing" });
       await this.commitDraft(dir, { ...op, state: "committing" });
       return { status: "updated", proposal: nextManifest };
+    });
+  }
+
+  /**
+   * Keep part of a passage revision (turn 128): the span the revision changed becomes `text`, and
+   * nothing else in the chapter moves. The span is found here, between the chapter as it stood
+   * when the passage was staged and the staged chapter, rather than taken from the screen — the
+   * screen says only what it drew, and is refused when that is not this span. The live file is
+   * the base only while its hash is the one the target was staged against; past that, the base is
+   * gone and the span cannot be placed, which is the stale proposal accept would refuse anyway.
+   */
+  async updatePassage(input: UpdatePassageInput): Promise<UpdateFieldOutcome> {
+    return this.mergeFormEdit({
+      proposalId: input.proposalId,
+      requestId: input.requestId,
+      path: input.path,
+      expectedDraftRevision: input.expectedDraftRevision,
+      // The base is read inside the gate operation (codex on PR 1232): read before it, a chapter
+      // moved in between would have its old bytes composed into a draft the next accept refuses.
+      edit: async (content, proposal) => {
+        const live = await this.readLive(input.path);
+        if (proposal.kind !== "chapter-draft" || proposal.origin?.gesture !== "passage-revision") {
+          return { reason: "Only a passage revision can be kept in part." };
+        }
+        const target = proposal.targets.find((one) => one.path === input.path);
+        if (live === null || target === undefined || target.baseHash === null || sha256(live) !== target.baseHash) {
+          return { reason: "The chapter changed after this passage was proposed. Discard it and ask again." };
+        }
+        const base = MarkdownFile.parse(live).body;
+        const staged = MarkdownFile.parse(content);
+        const span = changedSpan(base, staged.body);
+        if (span === null || span.before !== input.before || span.after !== input.after) {
+          return { reason: "This passage is not the one on screen. Reload it and choose again." };
+        }
+        // Composed here from the edits the reviewer was shown, never taken as words: what lands can
+        // only be the revision's own edits, whatever a client sends.
+        const segments = passageDiff(span.before, span.after);
+        const edits = segments.filter((segment) => segment.kind === "edit").length;
+        if (input.kept.some((index) => index >= edits)) return { reason: "This passage is not the one on screen. Reload it and choose again." };
+        if (input.kept.length === 0) return { reason: "Nothing is kept. Discard the passage instead." };
+        const text = composePassage(segments, new Set(input.kept));
+        const body = base.slice(0, span.start) + text + base.slice(span.start + span.before.length);
+        staged.setBody(body);
+        staged.setData({ words: countWords(body) });
+        if (!ChapterFrontmatterSchema.safeParse(staged.data).success) return { reason: "The chapter could not be read." };
+        return { content: staged.serialize() };
+      },
     });
   }
 
@@ -974,7 +1044,7 @@ export class ProposalManager {
       const proposal = await this.readManifest(proposalId);
 
       if (opts.expectedDraftRevision !== undefined && proposal.draftRevision !== opts.expectedDraftRevision) {
-        return { status: "stale", stalePaths: proposal.targets.map(target => target.path), detail: "The proposal changed since review." };
+        return { status: "stale", stalePaths: proposal.targets.map(target => target.path), detail: DRAFT_CHANGED_DETAIL };
       }
 
       const openChoices = proposal.openChoices ?? [];
@@ -1494,6 +1564,9 @@ export class ProposalManager {
         targets,
         baseCanonRevision: this.store.getBundle().meta.canonRevision,
         rebasedAt: this.store.now(),
+        // The files were rewritten, so a screen fenced to the revision before must not accept
+        // them unread (codex on PR 1232): the draft revision marks every rewrite, not only edits.
+        draftRevision: proposal.draftRevision + 1,
         pendingReview: true, // must be seen before accept (R-7)
         ...(conflicts.length > 0 ? { conflicts } : { conflicts: [] }),
       };
@@ -1579,7 +1652,8 @@ export class ProposalManager {
       const conflicts = (proposal.conflicts ?? []).map((c) =>
         c.path === path && c.field === field ? { ...c, resolution: choice } : c,
       );
-      await this.writeManifest({ ...proposal, conflicts });
+      // A choice changes what the proposal writes, so it moves the draft revision too.
+      await this.writeManifest({ ...proposal, conflicts, draftRevision: proposal.draftRevision + 1 });
     });
   }
 
@@ -1823,6 +1897,15 @@ export class ProposalManager {
       }
     }
     return out;
+  }
+
+  /**
+   * Whether this proposal's change landed (PR 1232): the tombstone is written before the
+   * directory goes, and may outlive a removal a busy handle refused. Only a landing writes it —
+   * a discard removes the directory outright — so a tombstone is never a discard.
+   */
+  async landed(id: string): Promise<boolean> {
+    return this.isSettled(id);
   }
 
   private async isSettled(id: string): Promise<boolean> {

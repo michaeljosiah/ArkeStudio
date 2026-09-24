@@ -530,8 +530,18 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
          * working directory out from under the agent — both are refused until the run ends.
          */
         "drafting",
+        /**
+         * The proposal's draft moved on since the press (PR 1232): the newer one is to be read.
+         * Not the world moving, so nothing is offered to rebase.
+         */
+        "draft-changed",
       ]),
       detail: z.string().optional(),
+      /**
+       * The request refused, when the command carried one (PR 1232): a notice for the same
+       * proposal can come from another window's command, and only its own answers a screen.
+       */
+      requestId: z.string().min(1).optional(),
       /** On needs-reconfirm: the authoritative set and its signature to echo back (R-10). */
       authoritativeSignature: z.string().optional(),
     })
@@ -1288,6 +1298,25 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
    * the screen two sources for one fact — and they would eventually disagree. A refusal has no
    * such home: nothing was written, so if this does not say it, nothing does.
    */
+  /**
+   * Whether a line sent into a conversation was taken as a turn, answered for its `requestId`
+   * (PR 1232). The coordinator can decline a send without appending anything — a turn already
+   * running from another window, the conversation gone — and nothing durable records that, so a
+   * screen holding the line (the chapter's selection menu) would otherwise have to infer it from
+   * a transcript that is only ever the last few messages.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("world-chat.send-result"),
+      conversationId: z.string().min(1),
+      requestId: z.string().min(1),
+      admitted: z.boolean(),
+      /** The turn the line became, when taken: the transcript names it, so a screen can tell its own line from the same words said again. */
+      turnId: z.string().min(1).optional(),
+    })
+    .strict(),
+
   z
     .object({
       ...base,
