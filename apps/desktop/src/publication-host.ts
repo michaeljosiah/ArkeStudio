@@ -15,7 +15,7 @@ interface Job { intent: Intent; view: PublicationJob; controller?: AbortControll
 interface Ports {
   root: string;
   origins: string[];
-  provider(): WorldProvider | null;
+  providers(): { starting: WorldProvider | null; live: WorldProvider | null };
   pick(kind: "directory" | "zip" | "output"): Promise<string | null>;
   reveal(path: string): void;
   compiler(signal: AbortSignal): Promise<Omit<VideoPublicationCompilerOptions, "scratchRoot">>;
@@ -36,6 +36,11 @@ export class PublicationHost implements PublicationBridge {
   private readonly token = randomBytes(32).toString("hex");
   session: { port: number; token: string } | null = null;
   constructor(private readonly ports: Ports) {}
+
+  private provider(): WorldProvider | null {
+    const { starting, live } = this.ports.providers();
+    return live ?? starting;
+  }
 
   private initialize(): Promise<void> {
     return this.ready ??= (async () => {
@@ -81,7 +86,7 @@ export class PublicationHost implements PublicationBridge {
         const outputRoot = await this.ports.pick("output");
         if (!outputRoot) throw new DOMException("Cancelled", "AbortError");
         this.controller.signal.throwIfAborted();
-        const provider = this.ports.provider();
+        const provider = this.provider();
         if (!provider?.assertWritingScratch) throw new Error("World storage is unavailable.");
         await provider.assertWritingScratch(outputRoot);
         const compiler = await this.ports.compiler(this.controller.signal);
@@ -117,7 +122,7 @@ export class PublicationHost implements PublicationBridge {
         job.result = await publishPublication({ operationId: intent.operationId, publicationId: intent.request.id, requestFingerprint, format: intent.format }, async scratchRoot => {
           const compiler = await this.ports.compiler(signal);
           if (compiler.encoderVersion !== intent.encoderVersion) throw new Error("Encoder changed; create a new publication.");
-          const provider = this.ports.provider();
+          const provider = this.provider();
           if (!provider?.withWorldStore) throw new Error("World is unavailable.");
           job.view.phase = "Capturing and rendering";
           return provider.withWorldStore(intent.worldId, store => compileVideoPublication(store, intent.request, { ...compiler, scratchRoot, signal,

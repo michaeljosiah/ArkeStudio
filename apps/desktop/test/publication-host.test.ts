@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it, type TestContext } from "node:test";
-import { publishPublication, verifyPublicationDirectory, type VideoPublicationCompilerOptions } from "@arke-studio/coordinator";
+import { publishPublication, verifyPublicationDirectory, type VideoPublicationCompilerOptions, type WorldProvider } from "@arke-studio/coordinator";
 import { VideoPublicationRequestSchema, type VideoPublicationRequest } from "@arke-studio/contracts";
 import { PublicationHost } from "../src/publication-host.js";
 import { publicationMedia } from "../src/publication-media.js";
@@ -25,7 +25,7 @@ async function fixture(t: TestContext) {
     assets: { movie: { href: "movie.mp4", mediaType: "video/mp4", byteLength: 11, sha256: hash("movie-bytes") } },
     content: { video: "movie", textTracks: [] }, build: { compiler: "test", compilerVersion: "1", dependencyFingerprint: hash("source") } };
   await writeFile(join(source, "publication.json"), JSON.stringify(manifest));
-  const ports = { root: join(root, "host"), origins: ["null"], provider: () => null, pick: async () => source,
+  const ports = { root: join(root, "host"), origins: ["null"], providers: () => ({ starting: null, live: null }), pick: async () => source,
     reveal: (_path: string) => {}, compiler: async () => compiler, probe: async () => ({ duration: 1, mediaType: "video/mp4" }) };
   return { root, source, output, ports };
 }
@@ -68,7 +68,7 @@ it("flushes the intent before work and drains cancellation during shutdown", asy
   const f = await fixture(t); let calls = 0; let entered!: () => void;
   const running = new Promise<void>(resolve => { entered = resolve; });
   const host = new PublicationHost({ ...f.ports, pick: async () => f.output,
-    provider: () => ({ listWorlds: async () => [], loadWorld: async () => { throw new Error(); }, assertWritingScratch: async () => {} }),
+    providers: () => ({ starting: null, live: { listWorlds: async () => [], loadWorld: async () => { throw new Error(); }, assertWritingScratch: async () => {} } }),
     compiler: async signal => {
       if (++calls === 1) return compiler;
       const [name] = await readdir(join(f.ports.root, "operations")); assert.ok(name?.endsWith(".json"));
@@ -87,4 +87,22 @@ it("preflights real codec metadata and reports unsupported pixel formats", async
     streams: [{ codec_type: "video", codec_name: "h264", pix_fmt }, { codec_type: "audio", codec_name: "aac" }] })), stderr: "", timedOut: false, outputLimitExceeded: false, cancelled: false }) });
   assert.deepEqual(await media.playback("opaque", "video/mp4"), { duration: 2, mediaType: 'video/mp4; codecs="avc1, mp4a.40.2"' });
   pix_fmt = "yuv420p10le"; await assert.rejects(media.playback("opaque", "video/mp4"), /Unsupported publication codec/);
+});
+
+it("keeps publishing available after startup hands its provider to the live coordinator", { timeout: 30_000 }, async t => {
+  const f = await fixture(t); let checked = false; let acquired!: () => void;
+  const captured = new Promise<void>(resolve => { acquired = resolve; });
+  const provider: WorldProvider = {
+    listWorlds: async () => [], loadWorld: async () => { throw new Error("unused"); },
+    assertWritingScratch: async path => { assert.equal(path, f.output); checked = true; },
+    withWorldStore: async worldId => { assert.equal(worldId, "world"); acquired(); throw new Error("test stops at source capture"); },
+  };
+  const providers: { starting: WorldProvider | null; live: WorldProvider | null } = { starting: provider, live: null };
+  const host = new PublicationHost({ ...f.ports, providers: () => providers, pick: async () => f.output });
+  t.after(() => host.stop());
+  // This is initialize()'s handoff: the IPC handler already exists when startup clears its slot.
+  providers.live = providers.starting; providers.starting = null;
+  assert.ok((await host.start({ worldId: "world", request, format: "directory" })).ok);
+  assert.ok(checked);
+  await captured;
 });

@@ -329,7 +329,7 @@ function registerHostIpc(): void {
   };
   publicationHost = new PublicationHost({
     root: join(appRoot, "publications"), origins: desktopTransportOrigins(process.env.ARKE_DEV_SERVER_URL),
-    provider: () => startupProvider,
+    providers: () => ({ starting: startupProvider, live: coordinator?.worldProvider ?? null }),
     compiler: signal => media().compiler(signal), probe: (path, type, signal) => media().playback(path, type, signal),
     pick: async kind => {
       if (!window || shuttingDown) return null;
@@ -343,7 +343,8 @@ function registerHostIpc(): void {
   for (const method of ["open", "close", "list", "start", "retry", "cancel", "reveal"] as const) {
     ipcMain.handle(`arke:publication-${method}`, async (event, input: unknown) => {
       if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || shuttingDown) return { ok: false, reason: "Publication action unavailable." };
-      return publicationHost![method](input as never);
+      try { return await publicationHost![method](input as never); }
+      catch { throw new Error("Publication action failed."); }
     });
   }
   performanceSpool = createPerformanceSpool(appRoot);

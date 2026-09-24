@@ -53,7 +53,7 @@ app.whenReady().then(async () => {
   const source = join(__dirname, 'publication'); const zip = join(__dirname, 'publication.zip');
   await writePublicationZip(source, zip);
   const media = publicationMedia(createMediaProcessRunner({ ffmpeg: ${JSON.stringify(ffmpeg)}, ffprobe: ${JSON.stringify(ffprobe)} }));
-  const host = new PublicationHost({ root: join(__dirname, 'host'), origins: ['null', 'file://'], provider: () => null,
+  const host = new PublicationHost({ root: join(__dirname, 'host'), origins: ['null', 'file://'], providers: () => ({ starting: null, live: null }),
     pick: async kind => kind === 'zip' ? zip : source, reveal: () => {}, compiler: media.compiler, probe: media.playback });
   ipcMain.on('arke:get-theme', event => { event.returnValue = { preference: 'system', resolved: 'light' }; });
   const window = new BrowserWindow({ show: false, width: 1120, height: 840, webPreferences: { preload: ${JSON.stringify(join(desktop, "dist/preload.cjs"))}, sandbox: true, contextIsolation: true, nodeIntegration: false } });
