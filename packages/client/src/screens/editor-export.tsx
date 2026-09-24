@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { PublicationExport } from "./publication-export.js";
 import {
   deriveSpineCut,
   resolvePictureTimeline,
@@ -233,6 +234,7 @@ export function ExportSheet({
             })}
           </div>
         )}
+        {production && worldId && <PublicationExport worldId={worldId} production={production} world={world} preset={preset} disabled={commandsDisabled} />}
         {mine.length > 0 && (
           <div className="fy-exsheet__delivered">
             <span className="fy-exsheet__name">Delivered</span>

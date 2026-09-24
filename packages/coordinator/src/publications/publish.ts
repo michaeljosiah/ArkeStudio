@@ -56,9 +56,18 @@ async function realDirectory(path: string): Promise<string> {
 async function record<T>(root: string, name: string, schema: z.ZodType<T>): Promise<T | undefined> {
   if (!await exists(join(root, name))) return undefined;
   const chunks: Buffer[] = [];
-  await readPublicationFile(root, name, 16 * 1024, undefined, undefined, chunks);
+  await readPublicationFile(root, name, 16 * 1024, undefined, undefined, chunks).catch(recoveryFailure);
   try { return schema.parse(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)))); }
   catch { throw new PublicationFileError("incomplete-publication", "Publication recovery record is invalid; existing output has been preserved."); }
+}
+
+function recoveryFailure(error: unknown): never {
+  // Damaged prepared bytes cannot be replaced by rerendering this operation. Keep transient
+  // system failures (permissions, busy files, disk errors) and cancellation retryable.
+  if (error instanceof PublicationFileError || ["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException)?.code ?? "")) {
+    throw new PublicationFileError("incomplete-publication", "Saved publication data is missing, invalid or changed; existing output has been preserved.");
+  }
+  throw error;
 }
 
 /** Files are flushed before an atomic, no-replace link. Never overwrite a competing receipt. */
@@ -141,24 +150,26 @@ export async function publishPublication(
     const chosen = prepared;
     if ((operation.format === "zip") !== (chosen.archive !== null)) throw new PublicationFileError("incomplete-publication", "Publication container does not match the prepared attempt.");
     const attemptRoot = join(operationRoot, chosen.attempt);
-    await realDirectory(attemptRoot);
+    await realDirectory(attemptRoot).catch(recoveryFailure);
     const staged = operation.format === "zip" ? "staged.zip" : "staged";
     const target = operation.format === "zip" ? "publication.zip" : "publication";
     const destination = join(attemptRoot, target);
     const verify = async (name: string): Promise<VerifiedPublicationDirectory> => {
-      let verified: VerifiedPublicationDirectory;
-      if (chosen.archive) {
-        const measured = await readPublicationFile(attemptRoot, name, publicationArchiveByteLimit(options.limits), options.signal);
-        requirePublicationDigest(measured, chosen.archive);
-        const extracted = await extractPublicationZip(join(attemptRoot, name), attemptRoot, options);
-        try { verified = extracted; }
-        finally { await extracted.dispose(); }
-        await measured.assertUnchanged();
-      } else verified = await verifyPublicationDirectory(join(attemptRoot, name), options);
-      if (verified.manifestSha256 !== chosen.manifestSha256 || verified.manifest.id !== operation.publicationId || verified.byteLength !== chosen.byteLength) {
-        throw new PublicationFileError("incomplete-publication", "Publication output differs from its prepared receipt; it has been preserved.");
-      }
-      return verified;
+      try {
+        let verified: VerifiedPublicationDirectory;
+        if (chosen.archive) {
+          const measured = await readPublicationFile(attemptRoot, name, publicationArchiveByteLimit(options.limits), options.signal);
+          requirePublicationDigest(measured, chosen.archive);
+          const extracted = await extractPublicationZip(join(attemptRoot, name), attemptRoot, options);
+          try { verified = extracted; }
+          finally { await extracted.dispose(); }
+          await measured.assertUnchanged();
+        } else verified = await verifyPublicationDirectory(join(attemptRoot, name), options);
+        if (verified.manifestSha256 !== chosen.manifestSha256 || verified.manifest.id !== operation.publicationId || verified.byteLength !== chosen.byteLength) {
+          throw new PublicationFileError("incomplete-publication", "Publication output differs from its prepared receipt; it has been preserved.");
+        }
+        return verified;
+      } catch (error) { options.signal?.throwIfAborted(); return recoveryFailure(error); }
     };
     options.signal?.throwIfAborted();
     if (!await exists(destination)) {

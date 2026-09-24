@@ -143,11 +143,13 @@ if (!/--font-sans:\s*"Geist Sans"/.test(typography) || /--font-sans:\s*"Geist"[;
   // the outline/continuity view choice; the voice-sample panel persists a schema-validated
   // preparation UUID for restart recovery; the storyboard remembers which of two layouts it
   // opens on (turn 145); the launch announcement remembers the version it announced, for as long
-  // as the window lives (turn 152). Each strips that one word; keys, auth and decryption still fail.
+  // as the window lives (turn 152); publication preferences keep only position and caption id,
+  // keyed by edition and manifest digest. Each strips that one word; keys, auth and decryption still fail.
   const stripped = new Map([
     [join("lib", "dev-session.ts"), "sessionStorage"],
     [join("lib", "continuity.ts"), "sessionStorage"],
     [join("lib", "storyboard-layout.ts"), "localStorage"],
+    [join("lib", "publication-preferences.ts"), "localStorage"],
     [join("components", "character-voice-sample.tsx"), "localStorage"],
     [join("components", "update-announcement.tsx"), "sessionStorage"],
   ]);

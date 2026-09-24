@@ -7,7 +7,7 @@ import { toExtendedLength } from "../world/paths.js";
 export class PublicationFileError extends Error {
   constructor(readonly code: "unsafe-path" | "limit-exceeded" | "source-changed" | "invalid-package" |
     "invalid-manifest" | "unsupported-schema" | "unsupported-profile" | "unsupported-capability" |
-    "operation-conflict" | "incomplete-publication", message: string) {
+    "operation-conflict" | "incomplete-publication" | "unsupported-codec", message: string) {
     super(message);
     this.name = "PublicationFileError";
   }

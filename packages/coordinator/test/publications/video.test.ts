@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, readdir, realpath, unlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, open, readFile, readdir, realpath, unlink, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, toNamespacedPath } from "node:path";
 import { it, type TestContext } from "node:test";
 import { promisify } from "node:util";
 import { applyTimelineCommands, seedEmptyPictureTimeline, type VideoPublicationRequest } from "@arke-studio/contracts";
-import { compileVideoPublication, type VideoPublicationCompilerOptions } from "../../src/publications/video.js";
+import { compileVideoPublication, prepareVideoPublication, type VideoPublicationCompilerOptions } from "../../src/publications/video.js";
+import { FsWorldProvider } from "../../src/world/provider.js";
 import { verifyPublicationDirectory } from "../../src/publications/verify.js";
 import { publishVideoPublication } from "../../src/publications/publish.js";
 import { extractPublicationZip } from "../../src/publications/archive.js";
+import { openPublication } from "../../src/publications/playback.js";
 import { parseFfprobeJson } from "../../src/media/probe.js";
 import { WorldStore } from "../../src/world/store.js";
 import { hashMedia, scanWorld } from "../../src/world/scan.js";
@@ -99,6 +101,19 @@ it("keeps the same fingerprint for unchanged inputs and changes it for trim or s
   assert.notEqual(fingerprints[2], fingerprints[3]);
 });
 
+it("checks generated captions against measured output with the same tolerance as playback", async t => {
+  const f = await fixture(t); let duration = 1.93;
+  const options = { ...f.options, probe: { info: async (path: string) => ({ durationSec: basename(path) === "movie.mp4" ? duration : 6, hasAudio: true, hasVideo: true }) } };
+  // A 70 ms shortfall passes the video frame/container tolerance but cannot carry the final cue.
+  await assert.rejects(compileVideoPublication(f.store, f.request, options), /WebVTT/);
+  assert.deepEqual(await readdir(f.scratch), []);
+  duration = 1.96;
+  const result = await compileVideoPublication(f.store, f.request, options);
+  t.after(() => result.dispose());
+  const opened = await openPublication(result.directory, "directory", f.scratch, async () => ({ duration, mediaType: "video/mp4" }));
+  await opened.dispose();
+});
+
 it("publishes a production ZIP and retries the captured edition after the source changes", async t => {
   const f = await fixture(t);
   const options = { ...f.options, outputRoot: f.scratch, operationId: randomUUID(), format: "zip" as const };
@@ -180,6 +195,43 @@ it("allows deliberate blank picture with no input media and no captions", async 
     assert.deepEqual((await readdir(result.directory)).sort(), ["movie.mp4", "publication.json"]);
     assert.ok(f.invocations[0]!.includes("lavfi"));
   } finally { await result.dispose(); }
+});
+
+it("releases provider access after capture so another world can open during encoding", { timeout: 30_000 }, async t => {
+  const f = await fixture(t);
+  const worldId = f.store.worldId;
+  await f.store.close();
+  const root = await tempDir("arke-publication-provider-");
+  await cp(f.world, join(root, "worlds", "the-undersong"), { recursive: true });
+  const provider = new FsWorldProvider(root);
+  const other = await provider.createWorld({ name: "Another world" });
+  await provider.loadWorld(worldId);
+  let entered!: () => void, release!: () => void;
+  const encoding = new Promise<void>(resolve => { entered = resolve; });
+  const wait = new Promise<void>(resolve => { release = resolve; });
+  const prepared = await provider.withWorldStore(worldId, store => prepareVideoPublication(store, f.request, { ...f.options,
+    encoder: { slateFont: "unused", run: async args => { entered(); await wait; await writeFile(args.at(-1)!, "encoded movie"); } } }));
+  const rendering = prepared.render();
+  t.after(async () => { release(); const result = await rendering.catch(() => null); await result?.dispose(); await prepared.dispose(); await provider.close(); });
+  await encoding;
+  const selected = await provider.loadWorld(other.worldId);
+  assert.equal(selected.meta.worldId, other.worldId, "selection completes while the encoder is still waiting");
+  release();
+  const result = await rendering;
+  assert.equal(result.manifest.id, f.request.id, "closing the source store after capture does not cancel the edition");
+});
+
+it("disposes unused prepared inputs and honors operation cancellation after source-world close", async t => {
+  const f = await fixture(t);
+  const unused = await prepareVideoPublication(f.store, f.request, f.options);
+  await unused.dispose();
+  await assert.rejects(unused.render(), /already been consumed/);
+  assert.deepEqual(await readdir(f.scratch), []);
+  const controller = new AbortController();
+  const prepared = await prepareVideoPublication(f.store, f.request, { ...f.options, signal: controller.signal });
+  await f.store.close(); controller.abort();
+  await assert.rejects(prepared.render(), { name: "AbortError" });
+  assert.deepEqual(await readdir(f.scratch), []);
 });
 
 it("refuses replaced artifact bytes and missing source files before encoding", async t => {
@@ -293,8 +345,15 @@ it("cancellation during discovery releases the read gate without a post-capture 
 it("encodes and probes a real captured MP4 with selectable captions", { skip: !process.env.ARKE_TEST_FFMPEG || !process.env.ARKE_TEST_FFPROBE }, async t => {
   const f = await fixture(t), execute = promisify(execFile);
   const ffmpeg = process.env.ARKE_TEST_FFMPEG!, ffprobe = process.env.ARKE_TEST_FFPROBE!;
+  const metadata = join(f.scratch, "source-metadata.txt");
+  await writeFile(metadata, ";FFMETADATA1\ntitle=Private camera title\ncomment=Private shooting notes\nlocation=+51.5000-000.1200/\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=4000\ntitle=Raw source chapter\n");
   await execute(ffmpeg, ["-y", "-f", "lavfi", "-i", "color=c=blue:s=128x72:r=24", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
-    "-t", "4", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", join(f.world, "artifacts/movie.mp4")], { windowsHide: true });
+    "-f", "ffmetadata", "-i", metadata, "-map", "0:v", "-map", "1:a", "-map_metadata", "2", "-map_chapters", "2",
+    "-metadata:s:v:0", "handler_name=Private camera stream", "-t", "4", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", join(f.world, "artifacts/movie.mp4")], { windowsHide: true });
+  const inspect = async (path: string) => JSON.parse((await execute(ffprobe, ["-v", "error", "-show_streams", "-show_format", "-show_chapters", "-of", "json", path], { windowsHide: true })).stdout);
+  const sourceInfo = await inspect(join(f.world, "artifacts/movie.mp4"));
+  assert.equal(sourceInfo.format.tags.title, "Private camera title"); assert.equal(sourceInfo.chapters.length, 1);
+  assert.ok(JSON.stringify(sourceInfo).includes("Private camera stream"));
   const artifactPath = join(f.world, "artifacts/movie.json");
   const artifact = JSON.parse(await readFile(artifactPath, "utf8"));
   artifact.hash = hash(await readFile(join(f.world, "artifacts/movie.mp4")));
@@ -311,6 +370,11 @@ it("encodes and probes a real captured MP4 with selectable captions", { skip: !p
   try {
     assert.equal(result.manifest.content.textTracks.length, 2);
     await execute(ffmpeg, ["-v", "error", "-i", join(extracted.directory, "movie.mp4"), "-f", "null", "-"], { windowsHide: true });
+    const outputInfo = await inspect(join(extracted.directory, "movie.mp4"));
+    assert.deepEqual(outputInfo.chapters, []);
+    assert.equal(outputInfo.format.tags.location, undefined); assert.equal(outputInfo.format.tags["location-eng"], undefined);
+    assert.ok(!/Private|Raw source chapter|51\.5000/.test(JSON.stringify(outputInfo)), "source tags and stale chapter names must not enter the edition");
+    assert.ok(outputInfo.streams.every((stream: { codec_type: string }) => ["video", "audio"].includes(stream.codec_type)));
     assert.ok(result.manifest.assets.movie!.byteLength > 1000);
   } finally { await extracted.dispose(); }
 });

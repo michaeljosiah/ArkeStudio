@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
+import type { PublicationBridge } from "@arke-studio/contracts";
 
 /**
  * The typed preload bridge (SPEC-001 R-9): one object on `window.arke` exposing connect,
@@ -125,6 +126,15 @@ async function spoolBytes(name: string, bytes: Uint8Array): Promise<{ path: stri
 }
 
 const bridge = {
+  publications: {
+    open: input => ipcRenderer.invoke("arke:publication-open", input),
+    close: id => ipcRenderer.invoke("arke:publication-close", id),
+    list: () => ipcRenderer.invoke("arke:publication-list"),
+    start: input => ipcRenderer.invoke("arke:publication-start", input),
+    retry: id => ipcRenderer.invoke("arke:publication-retry", id),
+    cancel: id => ipcRenderer.invoke("arke:publication-cancel", id),
+    reveal: id => ipcRenderer.invoke("arke:publication-reveal", id),
+  } satisfies PublicationBridge,
   stagePerformanceAudio(input: { name: string; contentType: string; bytes: Uint8Array }): Promise<{ ok: true; spoolId: string } | { ok: false; reason: string }> {
     return ipcRenderer.invoke("arke:performance-stage", input);
   },

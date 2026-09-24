@@ -12,8 +12,11 @@ import { toExtendedLength } from "../world/paths.js";
 import { scanWorld } from "../world/scan.js";
 import type { WorldStore } from "../world/store.js";
 import { capturePublicationInputs, type CapturedPublicationInputs } from "./capture.js";
+import { validatePublicationVtt } from "./captions.js";
 import { PublicationFileError, readPublicationFile } from "./files.js";
 import { publicationFileLimits, verifyPublicationDirectory, type PublicationFileLimits, type VerifiedPublicationDirectory } from "./verify.js";
+
+export const VIDEO_PUBLICATION_COMPILER_VERSION = "2";
 
 export interface VideoPublicationCompilerOptions {
   /** Existing trusted host directory. The returned package is a unique, disposable child. */
@@ -34,6 +37,13 @@ export interface CompiledVideoPublication extends VerifiedPublicationDirectory {
   dispose(): Promise<void>;
 }
 
+export interface PreparedVideoPublication {
+  /** Consume the pinned inputs once, outside world-provider access. */
+  render(): Promise<CompiledVideoPublication>;
+  /** Release unused inputs; an active render owns their cleanup and cancellation. */
+  dispose(): Promise<void>;
+}
+
 // Records can have different property insertion orders after a rescan. Arrays remain ordered:
 // picture stacking, selections and cue order are decisions, unlike object key spelling order.
 function canonical(value: unknown): string {
@@ -50,22 +60,22 @@ const digest = (value: unknown) => createHash("sha256").update(canonical(value))
 export async function compileVideoPublication(
   store: WorldStore, input: VideoPublicationRequest, options: VideoPublicationCompilerOptions,
 ): Promise<CompiledVideoPublication> {
+  const signal = options.signal ? AbortSignal.any([options.signal, store.closingSignal]) : store.closingSignal;
+  return (await prepareVideoPublication(store, input, { ...options, signal })).render();
+}
+
+/** Capture under provider access, then render independently of source-world selection/close. */
+export async function prepareVideoPublication(
+  store: WorldStore, input: VideoPublicationRequest, options: VideoPublicationCompilerOptions,
+): Promise<PreparedVideoPublication> {
   const request = VideoPublicationRequestSchema.parse(input);
   const signal = options.signal ? AbortSignal.any([options.signal, store.closingSignal]) : store.closingSignal;
   signal.throwIfAborted();
   const limits = publicationFileLimits(options.limits);
   if (!options.encoderVersion.trim() || options.encoderVersion.length > 256) throw new Error("A bounded encoder build identity is required.");
-  const compiler = { compiler: "arke-video-publication", compilerVersion: `1; ${options.encoderVersion}` };
+  const compiler = { compiler: "arke-video-publication", compilerVersion: `${VIDEO_PUBLICATION_COMPILER_VERSION}; ${options.encoderVersion}` };
   const scratch = await realpath(toExtendedLength(options.scratchRoot));
   let captured: CapturedPublicationInputs | undefined;
-  let directory: string | undefined;
-  let disposed = false;
-  const dispose = async () => {
-    if (directory && !disposed) {
-      await rm(toExtendedLength(directory), { recursive: true, force: true });
-      disposed = true;
-    }
-  };
   let plan: VideoPublicationPlan | undefined;
   const snapshot = async () => {
     signal.throwIfAborted();
@@ -131,7 +141,41 @@ export async function compileVideoPublication(
       } };
     }, scratch, { signal, limits, ...(options.onCopied ? { onCopied: options.onCopied } : {}) });
     signal.throwIfAborted();
-    const frozen = plan!;
+    const inputs = captured;
+    let renderStarted = false, discarded = false;
+    return {
+      render: async () => {
+        if (renderStarted || discarded) throw new PublicationFileError("operation-conflict", "This publication capture has already been consumed.");
+        renderStarted = true;
+        return renderCapturedVideoPublication(request, inputs, plan!, compiler, scratch, options);
+      },
+      dispose: async () => {
+        if (renderStarted || discarded) return;
+        discarded = true;
+        await inputs.dispose();
+      },
+    };
+  } catch (error) { await captured?.dispose(); throw error; }
+}
+
+async function renderCapturedVideoPublication(
+  request: VideoPublicationRequest, inputs: CapturedPublicationInputs, frozen: VideoPublicationPlan,
+  compiler: { compiler: string; compilerVersion: string }, scratch: string, options: VideoPublicationCompilerOptions,
+): Promise<CompiledVideoPublication> {
+  // Only the operation/host signal survives capture. Switching worlds must not withdraw frozen bytes.
+  const signal = options.signal ?? new AbortController().signal;
+  const limits = publicationFileLimits(options.limits);
+  let captured: CapturedPublicationInputs | undefined = inputs;
+  let directory: string | undefined;
+  let disposed = false;
+  const dispose = async () => {
+    if (directory && !disposed) {
+      await rm(toExtendedLength(directory), { recursive: true, force: true });
+      disposed = true;
+    }
+  };
+  try {
+    signal.throwIfAborted();
     const pathOf = (path: string) => {
       const copy = captured!.media[path];
       if (!copy) throw new PublicationFileError("invalid-package", `Uncaptured render input: ${path}`);
@@ -175,7 +219,9 @@ export async function compileVideoPublication(
     for (let index = 0; index < args.length - 1; index++) {
       if (args[index] === "-i" && args[index + 1]!.startsWith(`${captured.directory}/`)) args[index + 1] = normalize(args[index + 1]!);
     }
-    args.splice(args.length - 1, 0, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart");
+    // Camera tags and source chapters belong to the editing inputs, not the published edition.
+    args.splice(args.length - 1, 0, "-map_metadata", "-1", "-map_metadata:s", "-1", "-map_chapters", "-1",
+      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart");
     await options.encoder.run(args, options.onProgress ?? (() => {}), signal);
     signal.throwIfAborted();
     const info = await options.probe.info(movie, { signal });
@@ -192,7 +238,11 @@ export async function compileVideoPublication(
     for (const entry of frozen.textTracks) {
       signal.throwIfAborted();
       const href = `${entry.track.asset}.vtt`;
-      await writeFlushed(join(directory, href), serializeTimedText(entry.cues, "vtt"));
+      const text = serializeTimedText(entry.cues, "vtt");
+      // Encoder duration tolerance is wider than caption tolerance. Validate actual serialized
+      // sidecars against the measured movie so a completed package passes player preflight.
+      validatePublicationVtt(text, info.durationSec);
+      await writeFlushed(join(directory, href), text);
       const measured = await readPublicationFile(directory, href, limits.assetBytes, signal);
       assets[entry.track.asset] = { href, mediaType: "text/vtt", sha256: measured.sha256, byteLength: measured.byteLength };
     }

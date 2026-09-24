@@ -2,8 +2,8 @@
 
 The implemented foundation of SPEC-048 supplies the shared contract for a portable video
 publication, source capture, directory integrity verification, a video compiler, recoverable local
-publication delivery and bounded ZIP writing/extraction. A player and an export command are not
-yet implemented.
+publication delivery and bounded ZIP writing/extraction. Desktop adds an export-sheet action and
+a world-independent player at `/publications`.
 Track the remaining work in [issue #1228](https://github.com/michaeljosiah/ArkeStudio/issues/1228).
 
 `packages/contracts/src/publication.ts` exports the video manifest schema, compatibility reader,
@@ -148,6 +148,9 @@ inputs and refuses missing streams or out-of-source seek ranges. Existing short-
 behavior stays in the shared FFmpeg graph. It writes H.264/yuv420p MP4, with AAC when sound is
 present, and checks the output's video, audio and duration through the host probe. Encoder
 availability and codec decoding support still belong to the platform/player.
+Compiler version 2 disables inherited global/stream metadata and chapter mappings. Source camera
+tags, notes and stale chapter markers are not publication metadata; FFmpeg may still write its own
+normal encoder/container tags.
 Video overlays must have enough source for their full window, because the shared graph passes
 through to the lower picture at EOF. Discovery passes cancellation into authored reads, review
 logs, performance-byte checks and streamed take hashing. It omits operational proposals, change
@@ -158,7 +161,8 @@ files. No world paths or private source records enter the manifest. Blank lines 
 control characters in cues are refused because they would split WebVTT blocks and lose text.
 Output files are synced, inventoried and independently verified before returning. Capture storage
 is then removed. The returned package includes an idempotent `dispose()`; callers must consume it
-and dispose it. Failure, cancellation or world close removes this operation's temporary files.
+and dispose it. Failure, cancellation or world close removes this operation's temporary files
+when using the one-shot `compileVideoPublication` API.
 No destination is promoted or reported as durably completed, and a process crash can leave
 scratch files. The publisher below consumes this temporary output and adds promotion and retry
 reconciliation.
@@ -166,8 +170,11 @@ reconciliation.
 Regression coverage includes scope parity in contracts `test/delivery-scopes.test.ts` and compiler
 lifecycle in coordinator `test/publications/video.test.ts`. To also encode, probe and decode real
 media, set `ARKE_TEST_FFMPEG` and `ARKE_TEST_FFPROBE` to executable paths before running that test.
-Typecheck consumers after changes. The remaining user-facing work is the independent player and
-export action, including persisted operation ids, progress, cancellation and retry controls.
+Typecheck consumers after changes. Desktop uses `prepareVideoPublication` to capture under
+`withWorldStore`, releases provider access, then calls the returned `render()` once. Rendering
+uses only the operation signal and pinned inputs, so switching/closing the source world after
+capture does not block or cancel it. An unused capture must be disposed; rendering owns cleanup
+once started. The one-shot compiler retains its world-close cancellation behavior.
 
 ## Recoverable local delivery
 
@@ -253,3 +260,65 @@ caption-semantic validation; the player still owns those checks.
 `test/publications/delivery.test.ts` covers malformed archives, receipts, cancellation, preservation
 of existing output, abrupt process exit and competing processes. `test/publications/video.test.ts`
 includes compiler-to-publisher retry after source edits and opt-in real-media ZIP decode.
+
+## Desktop publishing and playback
+
+In Cut → Export film, **Publish playable edition** chooses title, edition, language, full production
+or episode, ZIP/folder and explicitly selected caption/subtitle tracks. The resolution comes from
+the export sheet. Each selected track has an editable label and kind; only one may be default.
+The shared publication plan refuses missing-picture slates, stale/invalid timelines and unsupported
+source state before starting. Deliberate blank gaps publish as black. Native folder selection
+chooses the output root, outside managed world storage.
+
+Desktop `src/publication-host.ts` flushes an immutable intent under
+`<appRoot>/publications/operations/<operationId>.json` before starting. This preserves the request,
+world id, format, application compiler version, encoder build identity and private output root. IPC exposes only opaque ids and
+status. Jobs show phases, cancellation, retry, Play and Show in folder. On restart saved operations
+appear as **Check or retry**; reconciliation verifies completion before showing success. Prepared
+output can finish without a world or encoder. An unprepared retry needs the source world and same
+encoder build and application compiler version; changed settings require a new edition. Legacy
+intents lacking an application compiler version can reconcile prepared output but cannot build.
+After the final intent hard link is installed, temporary-alias cleanup is best effort and cannot
+hide the saved job. Shutdown aborts and drains jobs before
+closing the world provider. Provider access lasts only through capture, so world selection remains
+available during encoding. The renderer does not own operation lifetime.
+Unreadable/incompatible intent files are preserved and reported individually without hiding valid
+jobs or blocking unrelated playback. A changed encoder on an unprepared retry explicitly requires
+a new edition; conflicting saved operation identities and damaged prepared/completed data are
+likewise non-retryable, while transient system
+errors remain retryable. Native picker waits are raced against shutdown/renderer cancellation;
+late dialog answers cannot restart work. Clean video-v1 uses no drawtext: the adapter
+refuses accidental text-drawing graphs, while ordinary exports retain their bundled-font checks.
+
+Worlds → **Open publication** opens a directory or ZIP without opening a world or making a provider
+call. Coordinator `openPublication` pins it into a private scratch child, verifies the inventory,
+then preflights media and captions. It never serves the original mutable package. Desktop's separate
+authenticated loopback endpoint resolves only session/asset ids, supports byte ranges, checks
+origins, and accepts no query credentials. Main injects the private capability for this window and
+endpoint only. The public bridge contains neither paths nor credentials. Named domain refusals
+map to fixed product copy, including when their internal messages contain filesystem errors.
+
+The current native media preflight accepts H.264/AAC MP4 and VP8/VP9 WebM with Opus/Vorbis,
+one video and at most one audio stream, with 8-bit 4:2:0 video and no other embedded streams.
+Subtitle, data and attachment streams are refused; selectable text belongs in inventoried sidecars.
+Other codecs get `unsupported-codec`.
+The browser also checks `canPlayType`; later decode/asset errors remain visible. Caption preflight
+accepts bounded UTF-8 WebVTT with cue ids, plain timing lines, native cue text and NOTE blocks.
+It refuses styles, regions, cue settings, invalid/reversed/out-of-order times and cues beyond the
+movie (50 ms rounding tolerance). Each sidecar is limited to 8 MiB. This is deliberately narrower
+than all of WebVTT; future support needs explicit fixtures rather than silently discarding features.
+Compiler and player share `src/publications/captions.ts`: generated sidecars must pass the same
+8 MiB, syntax and measured-movie duration checks before publication. The encoder's broader
+frame/container tolerance does not allow captions extending more than 50 ms beyond the movie.
+
+The client uses native media controls and an explicit captions/off selector. Resume time and caption
+choice live in browser storage keyed by publication id and manifest digest, outside immutable files.
+Only the desktop host currently supplies disk opening/export; the reusable HTML player receives
+verified URLs. No browser upload host, book/audio/interactive profile or OTIO adapter is claimed.
+Cancelled or failed opens preserve current playback. A candidate video loads beside the current
+movie and remains hidden until Chromium decodes its first frame. Codec/decode failures or a 30-second
+readiness timeout discard only the candidate; promotion keeps its decoded element and closes the
+previous session after unmount. The host allows at most two sessions for this handoff. Closing playback
+removes its owned copy. A renderer reload/crash cancels pending opens and releases playback copies
+without cancelling host-owned export jobs. Abrupt exit can leave scratch files; no orphan
+sweep or power-loss durability guarantee is added by the UI.

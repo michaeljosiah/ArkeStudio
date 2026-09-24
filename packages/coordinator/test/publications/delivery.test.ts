@@ -203,7 +203,7 @@ it("preserves corrupted or missing completed output and never replaces it with a
   const operation = request();
   const result = await publishPublication(operation, packageDirectory, { outputRoot: root });
   await writeFile(join(result.path, "media/movie.mp4"), "externally changed");
-  await assert.rejects(publishPublication(operation, async () => { throw new Error("must not rebuild"); }, { outputRoot: root }), refusal("source-changed"));
+  await assert.rejects(publishPublication(operation, async () => { throw new Error("must not rebuild"); }, { outputRoot: root }), refusal("incomplete-publication"));
   assert.equal(await readFile(join(result.path, "media/movie.mp4"), "utf8"), "externally changed");
   await rm(result.path, { recursive: true });
   await assert.rejects(publishPublication(operation, packageDirectory, { outputRoot: root }), refusal("incomplete-publication"));

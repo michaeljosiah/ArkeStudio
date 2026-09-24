@@ -150,6 +150,23 @@ its recovery assertions must pass without dismissing external-edit warnings.
 
 ## CI
 
+For publications, run coordinator `test/publications/`, desktop `test/publication-host.test.ts`
+with `preload-auth.test.ts` and `transport-auth.test.ts`, and client `test/publications.test.tsx`
+with `routes.test.tsx` from the client package. After building, the real desktop file-page check is:
+
+```powershell
+$env:ARKE_TEST_FFMPEG = 'C:/path/to/ffmpeg.exe'
+$env:ARKE_TEST_FFPROBE = 'C:/path/to/ffprobe.exe'
+node apps/desktop/scripts/smoke-publications.mjs
+```
+
+It opens the built client/preload without a coordinator or world, pins directory and ZIP packages,
+removes their source files, blocks external network requests and checks video, two caption tracks,
+captions off, seeking and keyboard play/pause. It leaves `.dev/publication-player.png` for visual
+inspection and removes its temporary profile/package. The same variables enable the coordinator's
+real encode/ZIP/decode test. The smoke requires a desktop display (or an appropriate Linux display
+environment); ordinary CI unit tests do not replace it.
+
 [ci.yml](../../.github/workflows/ci.yml) runs on Windows and Linux with four shards per platform. Shard 1 runs lint, typecheck and build. [ci-test.mjs](../../scripts/ci-test.mjs) partitions coordinator tests and runs other workspaces on shard 2. To inspect a shard locally, run `node scripts/ci-test.mjs 1/4` from the root; this is only that test shard, not the complete CI gate.
 
 The runner uses a silence guard as well as a workflow timeout. Diagnose leaked resources before treating a silent run as merely slow. Local Windows success cannot establish Linux path/case correctness. Packaging/release workflows perform additional delivery work beyond CI's build.

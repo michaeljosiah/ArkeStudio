@@ -1,7 +1,9 @@
 import { pathToFileURL } from "node:url";
 import { createPerformanceSpool } from "./performance-spool.js";
 import { microphoneAllowed } from "./microphone-permission.js";
-import { audioMediaOptions } from "./media-tools.js";
+import { audioMediaOptions, createMediaProcessRunner } from "./media-tools.js";
+import { PublicationHost } from "./publication-host.js";
+import { publicationMedia } from "./publication-media.js";
 import { authenticatedMediaHeaders, desktopTransportOrigins } from "./transport-auth.js";
 import { execFile } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -215,6 +217,7 @@ let providerTransport: CloudProviderTransport | null = null;
 let startupState: StartupState = { status: "initializing" };
 let transportSession: { port: number; token: string } | null = null;
 let stageExporter: StageExporter | null = null;
+let publicationHost: PublicationHost | null = null;
 let performanceSpool: ReturnType<typeof createPerformanceSpool>;
 
 async function closeProviderTransport(): Promise<void> {
@@ -319,6 +322,31 @@ function publishStartup(state: StartupState): void {
 }
 
 function registerHostIpc(): void {
+  const media = () => {
+    const ffmpeg = ffmpegPath(); const ffprobe = ffprobeResolution().path;
+    if (!ffprobe) throw new Error("ffprobe is unavailable.");
+    return publicationMedia(createMediaProcessRunner({ ffmpeg: ffmpeg ?? "", ffprobe }));
+  };
+  publicationHost = new PublicationHost({
+    root: join(appRoot, "publications"), origins: desktopTransportOrigins(process.env.ARKE_DEV_SERVER_URL),
+    providers: () => ({ starting: startupProvider, live: coordinator?.worldProvider ?? null }),
+    compiler: signal => media().compiler(signal), probe: (path, type, signal) => media().playback(path, type, signal),
+    pick: async kind => {
+      if (!window || shuttingDown) return null;
+      const result = await dialog.showOpenDialog(window, { title: kind === "output" ? "Publish to folder" : "Open publication",
+        properties: kind === "zip" ? ["openFile"] : ["openDirectory", "createDirectory"],
+        ...(kind === "zip" ? { filters: [{ name: "Publication ZIP", extensions: ["zip"] }] } : {}) });
+      return result.canceled ? null : result.filePaths[0] ?? null;
+    },
+    reveal: path => shell.showItemInFolder(path),
+  });
+  for (const method of ["open", "close", "list", "start", "retry", "cancel", "reveal"] as const) {
+    ipcMain.handle(`arke:publication-${method}`, async (event, input: unknown) => {
+      if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || shuttingDown) return { ok: false, reason: "Publication action unavailable." };
+      try { return await publicationHost![method](input as never); }
+      catch { throw new Error("Publication action failed."); }
+    });
+  }
   performanceSpool = createPerformanceSpool(appRoot);
   ipcMain.handle("arke:performance-stage", async (event, input: unknown) => {
     if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) return { ok: false, reason: "Only the main studio can stage a recording." };
@@ -515,7 +543,9 @@ async function createWindow(): Promise<void> {
   })));
   window.webContents.session.webRequest.onBeforeSendHeaders(
     { urls: ["<all_urls>"] },
-    (details, callback) => callback({ requestHeaders: authenticatedMediaHeaders(details, transportSession, window?.webContents.id) }),
+    (details, callback) => callback({ requestHeaders: authenticatedMediaHeaders({ ...details,
+      requestHeaders: authenticatedMediaHeaders(details, transportSession, window?.webContents.id),
+    }, publicationHost?.session ?? null, window?.webContents.id) }),
   );
   traceDesktop("window.created", { themePreference, resolvedTheme });
   windowShowFallback = setTimeout(() => {
@@ -546,6 +576,7 @@ async function createWindow(): Promise<void> {
       activityActivationReady = false;
       rendererThemeReady = false;
       void stageExporter?.cancelAll();
+      void publicationHost?.resetPlayback().catch(() => traceDesktop("publication.playback-cleanup-failed"));
       if (window?.isVisible()) window.hide();
     }
   });
@@ -560,6 +591,7 @@ async function createWindow(): Promise<void> {
   window.webContents.on("render-process-gone", (_event, details) => {
     activityActivationReady = false;
     void stageExporter?.cancelAll();
+    void publicationHost?.resetPlayback().catch(() => traceDesktop("publication.playback-cleanup-failed"));
     traceDesktop("window.render-process-gone", { reason: details.reason, exitCode: details.exitCode });
   });
   window.on("close", (event) => {
@@ -573,6 +605,7 @@ async function createWindow(): Promise<void> {
   });
   window.on("closed", () => {
     void stageExporter?.cancelAll();
+    void publicationHost?.resetPlayback().catch(() => traceDesktop("publication.playback-cleanup-failed"));
     if (windowShowFallback) clearTimeout(windowShowFallback);
     windowShowFallback = null;
     window = null;
@@ -1483,6 +1516,7 @@ async function shutdownConfirmed(): Promise<void> {
   backgroundNotifications.stop();
   const stop = (async () => {
     try {
+      await publicationHost?.stop();
       await (studioServer?.stop() ?? startupProvider?.close() ?? Promise.resolve());
     } finally {
       await closeProviderTransport();

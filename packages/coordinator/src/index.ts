@@ -384,6 +384,8 @@ export {
   type PublicationFileLimits, type VerifiedPublicationDirectory,
 } from "./publications/verify.js";
 export { PublicationFileError } from "./publications/files.js";
-export { compileVideoPublication, type VideoPublicationCompilerOptions, type CompiledVideoPublication } from "./publications/video.js";
+export { compileVideoPublication, prepareVideoPublication, VIDEO_PUBLICATION_COMPILER_VERSION, type VideoPublicationCompilerOptions, type CompiledVideoPublication, type PreparedVideoPublication } from "./publications/video.js";
 export { writePublicationZip, extractPublicationZip, type PublicationArchiveOptions, type ExtractedPublication } from "./publications/archive.js";
 export { publishPublication, publishVideoPublication, type PublicationDeliveryRequest, type PublicationPublisherOptions, type PublishedPublication } from "./publications/publish.js";
+export { openPublication, type PinnedPublication } from "./publications/playback.js";
+export { parseByteRange } from "./transport.js";
