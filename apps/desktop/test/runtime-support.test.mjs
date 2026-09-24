@@ -17,13 +17,13 @@ import {
   verifyManifest,
 } from "../scripts/runtime-support.mjs";
 
-describe("runtime rename lock budget (#1227)", () => {
-  function clock(rename) {
-    let elapsed = 0;
-    const delays = [];
-    return { delays, options: { rename, now: () => elapsed, wait: ms => { delays.push(ms); elapsed += ms; } } };
-  }
+function clock(rename) {
+  let elapsed = 0;
+  const delays = [];
+  return { delays, options: { rename, now: () => elapsed, wait: ms => { delays.push(ms); elapsed += ms; } } };
+}
 
+describe("runtime rename lock budget (#1227)", () => {
   for (const code of ["EPERM", "EBUSY", "EACCES", "ENOTEMPTY"]) {
     it(`recovers from ${code} beyond the old five-second budget`, () => {
       let calls = 0;
