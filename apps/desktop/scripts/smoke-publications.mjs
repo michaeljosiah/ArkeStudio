@@ -77,7 +77,7 @@ app.whenReady().then(async () => {
     await rm(kind === 'folder' ? source : zip, { recursive: true, force: true });
     assert.equal(await window.webContents.executeJavaScript('document.querySelector("video").textTracks.length'), 2);
     await window.webContents.executeJavaScript('document.querySelector("video").muted = true; document.querySelector("video").currentTime = 1;');
-    await wait('Math.abs(document.querySelector("video").currentTime - 1) < 0.15');
+    await wait('Math.abs(document.querySelector("video").currentTime - 1) < 0.15 && !document.querySelector("video").seeking && document.querySelector("video").readyState >= 2');
     await window.webContents.executeJavaScript('(() => { const s = document.querySelector(".fy-publication-video select"); s.value = "fr"; s.dispatchEvent(new Event("change", {bubbles:true})); })()');
     await wait('document.querySelector("video").textTracks[1].mode === "showing" && document.querySelector("video").textTracks[1].cues?.length === 1');
     await window.webContents.executeJavaScript('document.querySelector("video").focus()');
@@ -85,6 +85,8 @@ app.whenReady().then(async () => {
     await wait('document.querySelector("video").paused === false');
     window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Space' }); window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Space' });
     await wait('document.querySelector("video").paused === true');
+    await window.webContents.executeJavaScript('document.querySelector("video").textTracks[1].mode = "disabled"; document.querySelector("video").textTracks[0].mode = "showing";');
+    await wait('document.querySelector(".fy-publication-video select").value === "en"');
     await window.webContents.executeJavaScript('document.querySelector(".fy-publication-video select").value = ""; document.querySelector(".fy-publication-video select").dispatchEvent(new Event("change", {bubbles:true}));');
     await wait('Array.from(document.querySelector("video").textTracks).every(t => t.mode === "disabled")');
     const state = await window.webContents.executeJavaScript('JSON.stringify(window.arke)');

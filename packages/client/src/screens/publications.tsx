@@ -26,6 +26,18 @@ export function PublicationVideo({ publication }: { publication: PublicationPlay
     manifest.content.textTracks.forEach((track, index) => { if (tracks[index]) tracks[index]!.mode = track.asset === caption ? "showing" : "disabled"; });
   };
   useEffect(applyCaption, [caption, manifest]);
+  useEffect(() => {
+    const tracks = video.current?.textTracks;
+    if (!tracks?.addEventListener) return;
+    // The native fullscreen menu can change tracks too. Keep the explicit selector and saved
+    // preference in step with it instead of restoring a stale choice on the next open.
+    const changed = () => {
+      const index = Array.from(tracks).findIndex(track => track.mode === "showing");
+      setCaption(manifest.content.textTracks[index]?.asset ?? "");
+    };
+    tracks.addEventListener("change", changed);
+    return () => tracks.removeEventListener("change", changed);
+  }, [supported, manifest]);
   const remember = () => {
     savePublicationPreference(key, { time: video.current?.currentTime ?? saved.current.time, caption });
   };
