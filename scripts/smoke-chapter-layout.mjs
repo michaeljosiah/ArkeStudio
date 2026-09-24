@@ -112,6 +112,13 @@ window.checkModels = async () => {
   const reset = sent.findLast(message => message.kind === "set-production-model");
   check(reset?.productionId === "saltlight" && reset.capability === "video" && reset.modelId === null, "reset clears this production's choice");
 };
+window.checkAudiobook = async () => {
+  [...document.querySelectorAll("button")].find(button => button.textContent === "Audiobook").click();
+  await settle();
+  const column = document.querySelector('[data-testid="audiobook-column"]');
+  check(column?.getBoundingClientRect().height >= 360, "audiobook also keeps its height when stacked");
+  check(document.querySelector('.fy-ch__manuscript[hidden]')?.getBoundingClientRect().height === 0, "hidden manuscript takes no space");
+};
 `, resolveDir: join(root, "packages/client"), loader: "tsx" },
     bundle: true, outfile: join(dir, "app.js"), platform: "browser", format: "iife",
     jsx: "automatic", loader: { ".woff": "dataurl", ".woff2": "dataurl" },
@@ -141,6 +148,7 @@ app.whenReady().then(async () => {
         await window.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
         writeFileSync(process.env.ARKE_LAYOUT_SCREENSHOT, (await window.webContents.capturePage()).toPNG());
       }
+      if (mode === "rich") await window.webContents.executeJavaScript('checkAudiobook()');
     }
   }
   for (const kind of ["series", "microdrama"]) {
