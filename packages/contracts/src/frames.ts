@@ -54,6 +54,14 @@ import { DecideConversationActionSchema } from "./arke-actions.js";
  * receives a fresh snapshot — partial replay is deliberately not offered (D4).
  */
 
+/**
+ * The bounds on a partial accept's frame (PR 1232), shared so a screen can decline a keep the
+ * transport would drop: a frame past them is refused without an answer, and a screen holding its
+ * controls for one would wait for ever.
+ */
+export const PASSAGE_SPAN_MAX = 20_000;
+export const PASSAGE_KEPT_MAX = 2_400;
+
 export const FrameSchema = valueSchema(z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("snapshot"), seq: z.number().int().min(1), state: ClientStateSchema }).strict(),
   z.object({ kind: z.literal("event"), seq: z.number().int().min(1), event: DomainEventSchema }).strict(),
@@ -554,9 +562,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       // The span as drawn is the replacement widened to whole words at both ends, so it can run
       // past the 2,400 the model's replacement is held to (codex on PR 1232); the gate compares
       // it with the span it finds, so the bound is only there to keep the frame sane.
-      before: z.string().max(20_000),
-      after: z.string().max(20_000),
-      kept: z.array(z.number().int().min(0)).max(2_400),
+      before: z.string().max(PASSAGE_SPAN_MAX),
+      after: z.string().max(PASSAGE_SPAN_MAX),
+      kept: z.array(z.number().int().min(0)).max(PASSAGE_KEPT_MAX),
       expectedDraftRevision: z.number().int().min(1),
     })
     .strict(),

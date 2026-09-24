@@ -1691,6 +1691,63 @@ describe("the craft loop (turn 128)", () => {
       assert.equal(accepted[0]!.expectedDraftRevision, 2);
     });
 
+    it("a newer draft that takes the card waits for the keep before it (codex on PR 1232)", async () => {
+      const m = await mount(inkbound([TWO]));
+      await answerOpen(m);
+      await act(async () => edits(m)[0]!.click());
+      await act(async () => acceptButton(m).click());
+      const newer: StagedProposal = { ...DRAFT, proposal: { ...DRAFT.proposal, id: "pr_01J8H0000000000000000000PN", created: "2026-09-06T13:00:00Z" } };
+      await act(async () => __setStateForTest(inkbound([TWO, newer]), { connection: "open" }));
+      const button = (label: string) => [...m.container.querySelectorAll("button")].find((b) => b.textContent === label) as HTMLButtonElement | undefined;
+      assert.equal(button("Discard")?.disabled, true, "the same chapter: its decisions wait for the keep");
+      assert.ok(button("Accept") === undefined || button("Accept")!.disabled, "and it is not accepted over it");
+      assert.equal(button("Send back"), undefined);
+    });
+
+    it("consequences confirmed with a partial accept are carried to the accept after the keep (codex on PR 1232)", async () => {
+      const m = await mount(inkbound([TWO]));
+      await answerOpen(m);
+      await act(async () => edits(m)[0]!.click());
+      await act(async () => {
+        __applyEventForTest({ at: "2026-09-06T12:00:03Z", type: "proposal.blocked", worldId: FIXTURE_WORLD_ID, proposalId: TWO.proposal.id, reason: "needs-reconfirm", authoritativeSignature: "sig-ripples" });
+      });
+      const confirm = [...m.container.querySelectorAll("button")].find((b) => /consequences/i.test(b.textContent ?? "")) as HTMLButtonElement;
+      assert.ok(confirm, "the consequences are offered for confirmation");
+      await act(async () => confirm.click());
+      assert.equal(m.sent.filter((message) => message.kind === "proposal-update-passage").length, 1, "the part is kept first");
+      const landed: StagedProposal = {
+        ...TWO,
+        proposal: { ...TWO.proposal, draftRevision: 2 },
+        review: {
+          targets: [{ ...TWO.review!.targets[0]!, fields: [{ field: "Prose", before: BODY, proposed: BODY.replace("Maren counted the bells.", "Maren counted the seven bells.") }] }],
+        },
+      };
+      await act(async () => __setStateForTest(inkbound([landed]), { connection: "open" }));
+      const accepted = m.sent.filter((message) => message.kind === "proposal-accept") as Array<{ confirmRipples?: string }>;
+      assert.equal(accepted.length, 1);
+      assert.equal(accepted[0]!.confirmRipples, "sig-ripples", "not asked for again");
+    });
+
+    it("a passage too long for the keep's frame is not kept in part (codex on PR 1232)", async () => {
+      // An unbroken run past the frame's bound, which the span is widened round.
+      const run = "x".repeat(20_001);
+      const LONG: StagedProposal = {
+        ...TWO,
+        proposal: { ...TWO.proposal, id: "pr_01J8H0000000000000000000PL" },
+        review: {
+          targets: [{ ...TWO.review!.targets[0]!, fields: [{ field: "Prose", before: `Maren said ${run} and left.\n\nTail.`, proposed: `Ines said ${run}y and went.\n\nTail.` }] }],
+        },
+      };
+      const m = await mount(inkbound([LONG]));
+      await answerOpen(m);
+      await act(async () => edits(m)[0]!.click());
+      const press = acceptButton(m);
+      assert.equal(press.disabled, true, "the part cannot be kept");
+      assert.equal(press.title, "Too long to keep in part");
+      await act(async () => press.click());
+      assert.equal(m.sent.some((message) => message.kind === "proposal-update-passage"), false, "nothing is sent the transport would drop unanswered");
+    });
+
     it("a partial accept left mid-way is finished by the next screen to see the keep land (codex on PR 1232)", async () => {
       const first = await mount(inkbound([TWO]));
       await answerOpen(first);

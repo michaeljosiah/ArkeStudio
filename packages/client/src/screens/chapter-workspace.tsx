@@ -23,6 +23,8 @@ import {
   type WorldChatSubject,
   type WorldBundle,
   overviewMoved,
+  PASSAGE_KEPT_MAX,
+  PASSAGE_SPAN_MAX,
 } from "@arke-studio/contracts";
 import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
@@ -167,6 +169,8 @@ type HeldKeep = {
   revision: number;
   expected: string;
   rejoins: number;
+  /** The consequences confirmed with the press, carried to the accept the keep promised. */
+  confirm?: string;
   /** The keep itself, to send again under its own id after a rejoin that may have lost it. */
   request: { requestId: string; path: string; span: { before: string; after: string }; kept: number[] };
 };
@@ -1383,8 +1387,8 @@ export function ChapterWorkspace({
       // controls in its turn, so nothing races it between the two (codex on PR 1232).
       const requestId = crypto.randomUUID();
       if (keptRevision === keeping.revision + 1 && keptBody === keeping.expected
-        && acceptProposal(worldId, keeping.id, undefined, keptRevision, requestId)) {
-        setAccepting({ id: keeping.id, requestId, revision: keptRevision });
+        && acceptProposal(worldId, keeping.id, keeping.confirm, keptRevision, requestId)) {
+        setAccepting({ id: keeping.id, requestId, revision: keptRevision, ...(keeping.confirm !== undefined ? { confirm: keeping.confirm } : {}) });
       }
       setKeeping(null);
     } else if (gateAnswered(keeping.request.requestId)) {
@@ -1432,8 +1436,16 @@ export function ChapterWorkspace({
   }, [accepting, connection, rejoins, acceptingGone, notices]);
   // Every passage accept is fenced to the revision on screen (codex on PR 1232), one edit or many.
   const pending = keeping !== null || accepting !== null;
-  const accept = stagedDraft === undefined || passageChange === null
+  // Too long for the frame a keep travels in (codex on PR 1232): a span widened to whole words
+  // round an unbroken run can outgrow it, and the transport would drop the keep unanswered.
+  const keepFits = passageChange !== null && passageChange.before.length <= PASSAGE_SPAN_MAX
+    && passageChange.after.length <= PASSAGE_SPAN_MAX && editCount <= PASSAGE_KEPT_MAX;
+  const accept = stagedDraft === undefined
     ? undefined
+    : passageChange === null
+      // A newer draft that took the card while a keep or accept of the passage before it is
+      // still held (codex on PR 1232): the same chapter, so its decisions wait for that one.
+      ? pending ? { pending, blocked: keeping !== null ? "Keeping…" : "Accepting…" } : undefined
     : !choosing || keptCount === editCount
       ? {
           label: "Accept",
@@ -1453,8 +1465,11 @@ export function ChapterWorkspace({
       : {
           label: `Accept ${keptCount} of ${editCount}`,
           pending,
-          ...(keptCount === 0 ? { blocked: "Nothing kept" } : keeping !== null ? { blocked: "Keeping…" } : {}),
-          onAccept: () => {
+          ...(keptCount === 0
+            ? { blocked: "Nothing kept" }
+            : !keepFits ? { blocked: "Too long to keep in part" } : keeping !== null ? { blocked: "Keeping…" } : {}),
+          onAccept: (confirmSignature?: string) => {
+            if (!keepFits) return;
             const proposal = stagedDraft.staged.proposal;
             const kept = segments.flatMap((segment) => (segment.kind === "edit" && !refused.has(segment.index) ? [segment.index] : []));
             // Nothing sent is nothing to wait for (codex on PR 1232): the press stays the author's.
@@ -1464,6 +1479,9 @@ export function ChapterWorkspace({
             const expected = body.slice(0, passageChange.start) + composePassage(segments, new Set(kept)) + body.slice(passageChange.start + passageChange.after.length);
             setKeeping({
               id: proposal.id, revision: proposal.draftRevision, expected, rejoins,
+              // The consequences confirmed with this press (codex on PR 1232): the accept after
+              // the keep carries them, rather than asking the author to confirm them again.
+              ...(confirmSignature !== undefined ? { confirm: confirmSignature } : {}),
               request: { requestId, path, span: { before: passageChange.before, after: passageChange.after }, kept },
             });
           },
