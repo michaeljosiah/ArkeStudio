@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import type { Capability, ClientState, ManifestModel } from "@arke-studio/contracts";
 import { DispatchBar, useResolvedModel } from "../src/components/dispatch-bar.js";
 import { ModelsCard, withModelChoice } from "../src/components/models-card.js";
+import { ProductionHomeScreen } from "../src/screens/production-dashboard.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -115,6 +116,28 @@ function card(state: ClientState, choices: Partial<Record<Capability, string>> |
 }
 
 describe("the Models card", () => {
+  for (const kind of ["series", "microdrama"] as const) {
+    it(`keeps the ${kind} production's own models editable on its overview (#1238)`, () => {
+      const state = stateWith({ world: { video: KLING.id }, production: { video: VEO.id } });
+      const production = state.world!.productions.find((p) => p.meta.id === "saltlight")!;
+      production.meta = { ...production.meta, medium: "video", kind };
+      __setStateForTest(state);
+      const html = renderToString(
+        <MemoryRouter initialEntries={[`/w/${state.world!.meta.worldId}/p/saltlight`]}>
+          <Routes>
+            <Route path="/w/:worldId/p/:prodId" element={<ProductionHomeScreen />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      assert.match(html, /data-screen="development"/);
+      assert.match(html, /data-testid="models-card"/);
+      assert.match(html, /value="veo-3" selected=""/);
+      assert.match(plain(html), /this production/);
+      assert.match(html, /aria-label="Use the default"/);
+      assert.match(html, /aria-label="AI models"/);
+    });
+  }
+
   it("follows Settings until chosen, and says so", () => {
     const html = card(stateWith({}), undefined);
     const text = plain(html);
@@ -124,7 +147,7 @@ describe("the Models card", () => {
     assert.doesNotMatch(html, /aria-label="Use the default"/, "nothing to reset when nothing was chosen");
     // The default is one option, first, named by its model — and not offered a second time.
     const options = [...html.matchAll(/<option[^>]*>([^<]*)<\/option>/g)].map((m) => m[1]);
-    assert.equal(options[0], "FAL · Seedance 2.0 · default");
+    assert.equal(options[0], "FAL · Seedance 2.0");
     assert.equal(options.filter((o) => o?.includes("Seedance")).length, 1);
     assert.ok(html.includes('aria-label="AI models"'), "the way to the other models is on the card");
   });
@@ -153,7 +176,7 @@ describe("the Models card", () => {
     const gone = { ...state, app: { ...state.app, routing: { ...state.app.routing, defaults: { video: "retired-model" } } } };
     const goneHtml = card(gone, undefined);
     assert.match(plain(goneHtml), /not in the manifest/);
-    assert.match(goneHtml, /<option value=""[^>]*>retired-model · default<\/option>/, "the stored route is shown, not hidden");
+    assert.match(goneHtml, /<option value=""[^>]*>retired-model<\/option>/, "the stored route is shown, not hidden");
   });
 
   it("removes a capability on reset, and the map with its last entry", () => {

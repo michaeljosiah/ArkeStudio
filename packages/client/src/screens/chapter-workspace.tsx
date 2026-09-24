@@ -502,12 +502,14 @@ function askAtSource(host: HTMLElement | null, area: HTMLTextAreaElement): AskAt
   mirror.appendChild(mark);
   document.body.appendChild(mirror);
   // A layout-less DOM (the tests') measures nothing; the offsets then count as the box's corner.
-  const [offsetLeft, offsetTop, offsetHeight] = [mark.offsetLeft || 0, mark.offsetTop || 0, mark.offsetHeight || 0];
+  const [offsetTop, offsetHeight] = [mark.offsetTop || 0, mark.offsetHeight || 0];
   mirror.remove();
   const border = (side: string) => parseFloat(side) || 0;
   return askBeside(
     host,
-    box.left + border(style.borderLeftWidth) + offsetLeft - area.scrollLeft,
+    // Keep the line's height, but put the press in the source's reserved right gutter. The
+    // selection can end mid-line, where anchoring at its last word would cover the next ones.
+    box.right,
     box.top + border(style.borderTopWidth) + offsetTop + offsetHeight - area.scrollTop,
   );
 }

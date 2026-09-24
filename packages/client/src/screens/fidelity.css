@@ -6744,7 +6744,8 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ch__manuscript[hidden] { display: none; }
 .fy-ch__prose { flex: 1; min-height: 0; overflow: auto; padding: 6px 2px 0; max-width: 640px; font: 400 15px/1.75 var(--font-sans); }
 .fy-ch__prose .rich-markdown-editor { min-height: 100%; }
-.fy-ch__source { flex: 1; min-height: 0; max-width: 640px; resize: none; padding: 6px 2px 0; border: 0; background: transparent; color: var(--foreground); font: 400 15px/1.75 var(--font-sans); }
+/* The source selection press lives in this gutter; it must not cover the words after a selection. */
+.fy-ch__source { flex: 1; min-width: 0; min-height: 0; max-width: 640px; margin-right: 158px; resize: none; padding: 6px 2px 0; border: 0; background: transparent; color: var(--foreground); font: 400 15px/1.75 var(--font-sans); }
 .fy-ch__source:focus-visible { outline: 2px solid var(--ring); outline-offset: -1px; border-radius: 6px; }
 .fy-ch__foot { flex: none; display: flex; align-items: center; gap: 14px; padding: 10px 0 16px; border-top: 1px solid var(--border); font: 400 10.5px var(--font-mono); color: var(--neutral-400); }
 .fy-ch__foot-push { flex: 1; }
@@ -6899,8 +6900,10 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-cont__stamp { padding: 8px 0 8px 10px; border-bottom: 1px solid var(--border); font-size: 9.5px; white-space: nowrap; text-align: right; }
 .fy-cont__stamp--warn { color: var(--warning); }
 @container (max-width: 900px) {
-  .fy-ch__body { flex-direction: column; }
-  .fy-ch__side { width: auto; }
+  /* The side cards must follow the manuscript, not consume its height in the fixed frame. */
+  .fy-ch__body { flex-direction: column; overflow: auto; }
+  .fy-ch__manuscript { flex: none; height: max(360px, 60vh); }
+  .fy-ch__side { width: auto; overflow: visible; }
 }
 
 .fy-sw { display: grid; grid-template-columns: minmax(0, 1fr) 331px; width: 100%; height: 100%; min-height: 0; }

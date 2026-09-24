@@ -183,7 +183,7 @@ export function ModelsCard({
               {...(source === undefined ? {} : { mark: <ProviderMark id={source.id} label={source.label} size="xs" /> })}
             >
               <option value="">
-                {defaultModel ? `${name(defaultModel)} · default` : defaultId !== undefined ? `${defaultId} · default` : "Default · not set"}
+                {defaultModel ? name(defaultModel) : defaultId ?? "Default · not set"}
               </option>
               {/* The stored choice stays visible when it can no longer be offered, so the control
                   shows what is kept rather than silently reading as the default. */}

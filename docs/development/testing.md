@@ -120,6 +120,14 @@ It bundles only the preload and theme entry point, then checks first-paint syste
 choices across reloads of a sandboxed Electron file page. It uses a disposable profile and
 process-local theme overrides; a desktop display is required.
 
+## Chapter workspace layout
+
+For chapter layout changes, run `node scripts/smoke-chapter-layout.mjs` from the root with a
+desktop display. It renders fixture chapters in sandboxed Chromium at laptop and desktop sizes,
+checks the manuscript and stacked cards, the Markdown selection gutter, and model resets on
+series and microdrama overviews. It never opens a user's world. Set `ARKE_LAYOUT_SCREENSHOT`
+to a PNG path to capture the 1200×791 source view for visual inspection.
+
 ## Independent editor media
 
 After building desktop, run `node apps/desktop/scripts/smoke-editor-import.mjs` from the repository root. It opens a hidden sandboxed Electron file page with the built preload, supplies real file-backed selections, and verifies ordered path resolution and private authentication. It uses a temporary profile and requires a desktop display (it is separate from headless CI).
