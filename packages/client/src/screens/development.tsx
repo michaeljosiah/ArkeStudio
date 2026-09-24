@@ -17,12 +17,13 @@ import { Pin } from "../components/icons.js";
 import { EmptyState } from "../components/layout.js";
 import { Loading } from "../components/loading.js";
 import { Badge } from "../components/ui.js";
+import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES } from "../components/models-card.js";
 import { ReadAloud } from "../components/read-aloud.js";
 import { PageReadControl, useProsePageRead, type PageReadBlock } from "../components/page-read.js";
 import { nextEpisodeOrder, pendingEpisodes, useProduction } from "../lib/selectors.js";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
 import { SingleActFeedback, useSingleAct } from "../components/single-act.js";
-import { createEpisode, proposeEpisode, reorderEpisodes } from "../lib/store.js";
+import { createEpisode, proposeEpisode, reorderEpisodes, setProductionModel, useStore } from "../lib/store.js";
 import { useBlockDigests } from "./storyboard.js";
 import { sceneIsComplete } from "./scene-workspace/completion.js";
 
@@ -210,6 +211,7 @@ function SeasonTile({
 
 export function DevelopmentWorkspace() {
   const { worldId, prodId } = useParams();
+  const { state } = useStore();
   const { world, production } = useProduction(worldId, prodId);
   const series = world?.series.find((s) => prodId !== undefined && s.seasons.includes(prodId)) ?? null;
   /*
@@ -320,6 +322,15 @@ export function DevelopmentWorkspace() {
         says what is missing; the panel is what to do about it.
       */}
       <EpisodesBoard />
+      {worldId !== undefined && prodId !== undefined && (
+        <ModelsCard
+          state={state}
+          capabilities={PRODUCTION_MODEL_CAPABILITIES}
+          choices={production.meta.models}
+          scopeWord="this production"
+          onChange={(capability, modelId) => setProductionModel(worldId, prodId, capability, modelId)}
+        />
+      )}
     </div>
       <ArkeEdge>{(putAway) => <SeasonDock onPutAway={putAway} />}</ArkeEdge>
     </div>

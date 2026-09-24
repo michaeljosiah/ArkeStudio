@@ -171,6 +171,10 @@ export function ModelsCard({
         const offered = all.filter((m) => m.id !== defaultId && usable(m));
         const ownUnlisted = own !== undefined && !offered.some((m) => m.id === own);
         const label = CARD_LABEL[capability] ?? CAPABILITY_LABEL[capability];
+        const defaultName = defaultModel ? name(defaultModel) : defaultId ?? "Default · not set";
+        // When Settings catches up with a kept choice, clearing and keeping still differ.
+        // Only that open-list collision needs a second label; the selected override stays plain.
+        const defaultLabel = own !== undefined && own === defaultId ? `${defaultName} · default` : defaultName;
         return (
           <div key={capability} className="fy-models__row">
             <span className="fy-models__what">{label}</span>
@@ -182,9 +186,7 @@ export function ModelsCard({
               onChange={(e) => onChange(capability, e.target.value === "" ? null : e.target.value)}
               {...(source === undefined ? {} : { mark: <ProviderMark id={source.id} label={source.label} size="xs" /> })}
             >
-              <option value="">
-                {defaultModel ? `${name(defaultModel)} · default` : defaultId !== undefined ? `${defaultId} · default` : "Default · not set"}
-              </option>
+              <option value="">{defaultLabel}</option>
               {/* The stored choice stays visible when it can no longer be offered, so the control
                   shows what is kept rather than silently reading as the default. */}
               {ownUnlisted && <option value={own}>{ownModel ? name(ownModel) : own}</option>}

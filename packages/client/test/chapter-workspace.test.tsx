@@ -1308,7 +1308,7 @@ describe("the craft loop (turn 128)", () => {
     }
   });
 
-  it("in the Markdown source, the press sits beside the selection, not the page's corner (codex on PR 1232)", async () => {
+  it("in the Markdown source, the press sits in the gutter at the selection's line (#1238)", async () => {
     const m = await mount({ ...inkbound([], STYLE), world: { ...inkbound([], STYLE).world!, conversations: [THREAD] } });
     await answerOpen(m);
     const area = q(m, "textarea.fy-ch__source") as HTMLTextAreaElement;
@@ -1317,7 +1317,7 @@ describe("the craft loop (turn 128)", () => {
       ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON() {} });
     // The manuscript at (100, 50); the source box inside it at (120, 80). A layout-less DOM lays
     // nothing out, so the selection's end measures at the box's corner, past its scroll.
-    Object.assign(host, { getBoundingClientRect: () => rect(100, 50, 800, 600) });
+    Object.assign(host, { getBoundingClientRect: () => rect(100, 50, 878, 600) });
     // A scrollbar takes 15px of the box's 700: the text wraps in what is left, and so must the copy.
     Object.assign(area, { getBoundingClientRect: () => rect(120, 80, 700, 500), scrollTop: 0, scrollLeft: 0, clientWidth: 685 });
     const mirrors: HTMLElement[] = [];
@@ -1330,7 +1330,7 @@ describe("the craft loop (turn 128)", () => {
     }
     assert.equal(mirrors.at(-1)?.style.width, "685px", "the copy wraps at the box's text width, not its CSS width");
     const press = q(m, ".fy-ch__ask-wrap") as HTMLElement;
-    assert.match(press.getAttribute("style") ?? "", /left:\s*28px/, "measured from the source box, not the document's selection");
+    assert.match(press.getAttribute("style") ?? "", /left:\s*728px/, "beyond the source box, clear of unselected words on the same line");
     assert.match(press.getAttribute("style") ?? "", /top:\s*8px/);
   });
 
