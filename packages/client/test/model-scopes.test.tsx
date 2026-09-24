@@ -158,6 +158,14 @@ describe("the Models card", () => {
     assert.match(card(stateWith({}), { video: KLING.id }), /aria-label="Use the default"/);
   });
 
+  it("distinguishes clearing from keeping when Settings now matches the override", () => {
+    const html = card(stateWith({}), { video: SEEDANCE.id });
+    assert.match(html, /<option value="">FAL · Seedance 2\.0 · default<\/option>/);
+    assert.match(html, /<option value="seedance-2\.0" selected="">FAL · Seedance 2\.0<\/option>/);
+    assert.match(plain(html), /this world/);
+    assert.match(html, /aria-label="Use the default"/);
+  });
+
   it("keeps an override that can no longer run, and says why, rather than showing the default", () => {
     const state = stateWith({});
     const off = { ...state, app: { ...state.app, models: { disabled: [KLING.id] } } };
