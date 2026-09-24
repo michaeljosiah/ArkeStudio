@@ -239,6 +239,30 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
     }
   });
 
+  it("budgets a pinned session from its own model's window, not the default's (issue 1247)", async () => {
+    const adapter = makeAdapter();
+    try {
+      await adapter.init();
+      stub.models = [
+        { id: "gpt-5.4-mini", providerID: "openai", limit: { context: 400_000, input: 272_000 } },
+        { id: "gemma4:12b", providerID: "ollama", limit: { context: 131_072 } },
+      ];
+      stub.defaultModel = { id: "gpt-5.4-mini", providerID: "openai" };
+      await adapter.listModels();
+      adapter.prepareSession({ preparationId: "prep_window", model: "ollama/gemma4:12b" });
+      const pinned = await adapter.createSession({ purpose: "authoring", agent: "scene-writer", preparationId: "prep_window" });
+      adapter.prepareSession({ preparationId: "prep_unpinned" });
+      const unpinned = await adapter.createSession({ purpose: "authoring", agent: "scene-writer", preparationId: "prep_unpinned" });
+      assert.equal(adapter.knownInputTokenLimit(pinned.sessionId), 131_072);
+      assert.equal(adapter.knownInputTokenLimit(unpinned.sessionId), 272_000, "an unpinned session answers with the default model");
+      assert.equal(adapter.knownInputTokenLimit(), 272_000);
+    } finally {
+      stub.models = [];
+      stub.defaultModel = null;
+      await adapter.dispose();
+    }
+  });
+
   it("detects a session created in the wrong location — the silent failure mode", async () => {
     const adapter = makeAdapter();
     try {

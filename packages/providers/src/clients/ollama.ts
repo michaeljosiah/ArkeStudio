@@ -3,6 +3,11 @@ import { setTimeout as pause } from "node:timers/promises";
 import { jsonRequest, tryProbe } from "./http.js";
 import type { FetchedArtifact, FetchLike, PollResult, ProviderClient, SubmitRequest, SubmitResult } from "../types.js";
 
+/** The whole listing pass, tags and shows together, against a runtime that may have stopped answering. */
+const LISTING_DEADLINE_MS = 8_000;
+/** Shows in flight at once. Ollama serves these from metadata, so a few at a time is plenty. */
+const SHOW_CONCURRENCY = 4;
+
 /**
  * Ollama — local llm runtime, no key, unmetered (R-18): every run is a ledger local-zero.
  * The "key" parameter is ignored throughout; validate probes reachability, which is the only
@@ -24,6 +29,7 @@ export class OllamaClient implements ProviderClient {
     private readonly fetchImpl: FetchLike,
     private readonly baseUrl = "http://127.0.0.1:11434",
     private readonly residencyPause: (signal?: AbortSignal) => Promise<void> = async (signal) => { await pause(1_000, undefined, { signal }); },
+    private readonly listingDeadlineMs = LISTING_DEADLINE_MS,
   ) {}
 
   async validateKey(): Promise<CapabilityProbe[]> {
@@ -105,35 +111,59 @@ export class OllamaClient implements ProviderClient {
    * fails still lists the model, with tools assumed: a wrong assumption is a refused call the
    * person can read, where an omitted model is one they cannot find. Ollama down is an empty
    * list, not an error — the caller publishes whatever the runtime holds, and that is nothing.
+   *
+   * One deadline covers the whole pass, and the shows run a few at a time under it: the caller
+   * holds the local-runtime probe open while this answers, so twenty pulled models against a
+   * runtime that has stopped answering must cost seconds, not minutes. A model the deadline
+   * cuts off is listed without metadata, the same as one whose show failed.
    */
   async listModels(signal?: AbortSignal): Promise<LocalHarnessModel[]> {
-    const bounded = (ms: number) => AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(ms)]);
+    // A held timer rather than AbortSignal.timeout, whose timer does not keep the process
+    // alive: a pass waiting only on that could see the loop drain under it.
+    const cutoff = new AbortController();
+    const timer = setTimeout(() => cutoff.abort(new Error("Ollama listing deadline")), this.listingDeadlineMs);
+    try {
+      return await this.listUnder(AbortSignal.any([...(signal ? [signal] : []), cutoff.signal]));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async listUnder(deadline: AbortSignal): Promise<LocalHarnessModel[]> {
     let tags: { status: number; body: unknown };
     try {
-      tags = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/api/tags`, { signal: bounded(3_000) });
+      tags = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/api/tags`, { signal: deadline });
     } catch {
       return [];
     }
+    if (tags.status >= 400) return [];
     const names = ((tags.body as { models?: Array<{ name?: unknown }> } | null)?.models ?? [])
       .map((model) => model.name).filter((name): name is string => typeof name === "string" && name.length > 0);
-    if (tags.status >= 400) return [];
+    const shown = Array.from({ length: names.length }, (): { capabilities?: unknown; model_info?: Record<string, unknown> } | null => null);
+    let next = 0;
+    const worker = async () => {
+      while (next < names.length && !deadline.aborted) {
+        const index = next++;
+        try {
+          const response = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/api/show`, {
+            method: "POST", headers: { "Content-Type": "application/json" }, signal: deadline,
+            body: JSON.stringify({ model: names[index] }),
+          });
+          if (response.status < 400 && response.body && typeof response.body === "object") {
+            shown[index] = response.body as { capabilities?: unknown; model_info?: Record<string, unknown> };
+          }
+        } catch { /* listed without metadata, as the comment above says */ }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(SHOW_CONCURRENCY, names.length) }, worker));
     const models: LocalHarnessModel[] = [];
-    for (const id of names) {
-      let shown: { capabilities?: unknown; model_info?: Record<string, unknown> } | null = null;
-      try {
-        const response = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/api/show`, {
-          method: "POST", headers: { "Content-Type": "application/json" }, signal: bounded(5_000),
-          body: JSON.stringify({ model: id }),
-        });
-        if (response.status < 400 && response.body && typeof response.body === "object") {
-          shown = response.body as { capabilities?: unknown; model_info?: Record<string, unknown> };
-        }
-      } catch { /* listed without metadata, as the comment above says */ }
-      const capabilities = Array.isArray(shown?.capabilities) ? shown.capabilities.filter((c): c is string => typeof c === "string") : null;
+    for (const [index, id] of names.entries()) {
+      const details = shown[index];
+      const capabilities = Array.isArray(details?.capabilities) ? details.capabilities.filter((c): c is string => typeof c === "string") : null;
       if (capabilities && !capabilities.includes("completion")) continue;
       // The key is architecture-prefixed — `gemma4.context_length` — and the architecture
       // itself is stated beside it, so one lookup names the other.
-      const info = shown?.model_info ?? {};
+      const info = details?.model_info ?? {};
       const architecture = typeof info["general.architecture"] === "string" ? info["general.architecture"] : null;
       const context = architecture !== null ? info[`${architecture}.context_length`] : undefined;
       models.push({

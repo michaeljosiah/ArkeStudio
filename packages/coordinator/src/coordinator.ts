@@ -3919,9 +3919,11 @@ export class Coordinator {
    * picker only through here. Same cadence as the runtime probe: a pull finishes between
    * ticks, and a person who just watched one finish will look for the model at once. The
    * first pass always writes, because the file may still describe last run's models — and
-   * the catalogue is invalidated a moment after the write rather than at once, because the
+   * the catalogue is refreshed a moment after the write rather than at once, because the
    * harness takes about three seconds (measured) to reload its configuration; an immediate
-   * refresh would read the old rows and then cache them.
+   * refresh would read the old rows and then cache them. Refreshed and published, not only
+   * invalidated: the screens that show models ask for them on mount and on a harness change,
+   * so a pull that lands while a picker is open would otherwise wait for a Retry.
    */
   private async publishLocalHarnessModels(): Promise<void> {
     const publish = this.opts.publishLocalHarnessModels;
@@ -3940,7 +3942,11 @@ export class Coordinator {
     this.publishedLocalHarnessModels = fingerprint;
     const timer = setTimeout(() => {
       this.lifecycleTimers.delete(timer);
-      if (!this.stopping) this.modelCatalog.invalidate();
+      if (this.stopping) return;
+      this.modelCatalog.invalidate();
+      const work = this.modelCatalog.get(true).catch(() => {});
+      this.backgroundWork.add(work);
+      void work.finally(() => this.backgroundWork.delete(work));
     }, 5_000);
     timer.unref?.();
     this.lifecycleTimers.add(timer);

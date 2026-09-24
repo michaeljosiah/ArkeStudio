@@ -179,9 +179,13 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   // ---- the model window (§8.5) ---------------------------------------------
 
   private lastKnownWindow: number | null = null;
+  /** Every catalogue row's window by `provider/id`, so a pinned session can be budgeted from its own model. */
+  private readonly modelWindows = new Map<string, number>();
+  /** The pinned model's window per session, taken at creation from the catalogue as it stood then. */
+  private readonly sessionWindows = new Map<string, number>();
 
-  knownInputTokenLimit(): number | null {
-    return this.lastKnownWindow;
+  knownInputTokenLimit(sessionId?: string): number | null {
+    return (sessionId !== undefined ? this.sessionWindows.get(sessionId) : undefined) ?? this.lastKnownWindow;
   }
 
   /**
@@ -245,6 +249,8 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     );
     const sessionId = session?.id ?? "";
     if (!sessionId) throw new Error("OpenCode v2 did not return a session id");
+    const window = model !== null ? this.modelWindows.get(`${model.providerID}/${model.id}`) : undefined;
+    if (window !== undefined) this.sessionWindows.set(sessionId, window);
     // The envelope assertion in reqData covers scoped GETs; session create echoes the location
     // inside data, so assert here too — a session in the wrong directory writes the wrong world.
     if (location && session?.location?.directory !== undefined && !sameDirectory(session.location.directory, location)) {
@@ -500,10 +506,12 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     }
     const out: ModelInfo[] = [];
     this.lastKnownWindow = null;
+    this.modelWindows.clear();
     for (const row of rows) {
       if (!row.id || !row.providerID || !modelEnabled(row)) continue;
       const key = `${row.providerID}/${row.id}`;
       const metadata = modelMetadata(row);
+      if (metadata.inputTokenLimit !== undefined) this.modelWindows.set(key, metadata.inputTokenLimit);
       if (key === defaultKey) this.lastKnownWindow = metadata.inputTokenLimit ?? null;
       out.push({
         id: row.id,
@@ -729,6 +737,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
 
   async dispose(): Promise<void> {
     this.disposed = true;
+    this.sessionWindows.clear();
     this.pumpAbort.abort();
     for (const sub of this.subscribers) {
       sub.wake?.();

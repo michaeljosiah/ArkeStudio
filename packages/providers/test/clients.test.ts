@@ -80,6 +80,33 @@ it("Ollama lists what is pulled with what each model can do, and leaves out what
   assert.deepEqual(await new OllamaClient(fakeFetch([])).listModels(), [], "Ollama down is an empty list");
 });
 
+it("Ollama's listing pass ends at one deadline, listing what the shows never answered for", async () => {
+  const hanging = new OllamaClient(async (url, init) => {
+    if (url.endsWith("/api/tags")) return Response.json({ models: [{ name: "a" }, { name: "b" }, { name: "c" }, { name: "d" }, { name: "e" }, { name: "f" }] });
+    // A show that answers only when the deadline cancels it: the whole pass must still return.
+    await new Promise<void>((resolve) => init?.signal?.addEventListener("abort", () => resolve(), { once: true }));
+    throw new Error("aborted");
+  }, "http://127.0.0.1:11434", async () => {}, 50);
+  const started = Date.now();
+  const listed = await hanging.listModels();
+  assert.ok(Date.now() - started < 2_000, "six hanging shows must not cost six timeouts");
+  assert.deepEqual(listed.map((m) => m.id), ["a", "b", "c", "d", "e", "f"]);
+  assert.ok(listed.every((m) => m.tools && !m.vision && m.contextLength === undefined));
+});
+
+it("the provider registry forwards the Ollama listing through the capture wrapper (issue 1247)", async () => {
+  const clients = createProviderClients({
+    fetch: async (url) => {
+      if (String(url).endsWith("/api/tags")) return Response.json({ models: [{ name: "gemma4:12b" }] });
+      return Response.json({ capabilities: ["completion", "tools"], model_info: { "general.architecture": "gemma4", "gemma4.context_length": 131072 } });
+    },
+  });
+  // The wrapper rebuilds the client from a method list; a method left off it is one the
+  // coordinator never sees, which is exactly how this listing first shipped unreachable.
+  assert.deepEqual(await clients.ollama!.listModels!(), [{ id: "gemma4:12b", contextLength: 131072, tools: true, vision: false }]);
+  assert.equal(clients.openai!.listModels, undefined, "only a local runtime lists for the harness");
+});
+
 describe("provider HTTP failures preserve the provider's reason", () => {
   it("reads a 403 JSON detail before raising the provider fault", async () => {
     const detail = "User is locked. Reason: Exhausted balance. Top up at fal.ai/dashboard/billing.";
