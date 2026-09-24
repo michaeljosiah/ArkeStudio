@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, readdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, realpath, unlink, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, toNamespacedPath } from "node:path";
 import { it, type TestContext } from "node:test";
 import { promisify } from "node:util";
@@ -58,8 +58,10 @@ it("compiles a clean movie and selectable WebVTT from deduplicated captured inpu
   const inputs = args.flatMap((arg, i) => arg === "-i" ? [args[i + 1]!] : []);
   assert.equal(inputs.length, 2);
   assert.equal(inputs[0], inputs[1]);
+  // Hosted Windows can supply an 8.3 TEMP alias; the compiler canonicalizes that root.
+  const scratch = await realpath(f.scratch);
   assert.ok(inputs.every(path => {
-    const child = relative(toNamespacedPath(f.scratch), toNamespacedPath(path));
+    const child = relative(toNamespacedPath(scratch), toNamespacedPath(path));
     return !isAbsolute(child) && !child.startsWith("..");
   }));
   assert.ok(!args.join(" ").includes("drawtext"));
