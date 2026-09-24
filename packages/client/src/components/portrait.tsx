@@ -17,6 +17,7 @@ export function Portrait({
   downloadName,
   version,
   onAvailabilityChange,
+  onDimensionsChange,
 }: {
   worldSlug: string | undefined;
   /** World-relative media path, e.g. "references/maren-kest/head-front.png". */
@@ -43,6 +44,7 @@ export function Portrait({
    */
   version?: number | null;
   onAvailabilityChange?: (available: boolean) => void;
+  onDimensionsChange?: (dimensions: { width: number; height: number } | null) => void;
 }) {
   const [failed, setFailed] = useState(false);
   /*
@@ -61,6 +63,8 @@ export function Portrait({
   // callback that changes every render is detached and reattached every render with it.
   const notify = useRef(onAvailabilityChange);
   notify.current = onAvailabilityChange;
+  const dimensions = useRef(onDimensionsChange);
+  dimensions.current = onDimensionsChange;
 
   /*
    * Availability is read off the element as well as listened for.
@@ -77,9 +81,11 @@ export function Portrait({
       if (node.naturalWidth > 0) {
         setLoadedSubject(subject);
         notify.current?.(true);
+        dimensions.current?.({ width: node.naturalWidth, height: node.naturalHeight });
       } else {
         setFailed(true);
         notify.current?.(false);
+        dimensions.current?.(null);
       }
     },
     [subject],
@@ -114,13 +120,15 @@ export function Portrait({
       alt={label}
       loading={loading}
       draggable={false}
-      onLoad={() => {
+      onLoad={(event) => {
         setLoadedSubject(subject);
         notify.current?.(true);
+        dimensions.current?.({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight });
       }}
       onError={() => {
         setFailed(true);
         notify.current?.(false);
+        dimensions.current?.(null);
       }}
     />
   );

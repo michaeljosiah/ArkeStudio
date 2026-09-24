@@ -4,7 +4,9 @@ import {
   modelCapabilityCopy,
   orderedShots,
   productionAspect,
+  takeMediaFacts,
   type CompiledPass,
+  type TakeMediaMeasurements,
 } from "@arke-studio/contracts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
@@ -66,6 +68,18 @@ export function GenerateScreen() {
     null;
   const slug = world?.meta.slug;
   const view = production && take ? takeMediaView(production, take) : null;
+  const mediaKey = `${ownerKey}/${take?.id ?? ""}/${slug ?? ""}/${view?.sourcePath ?? ""}`;
+  const currentMediaKey = useRef(mediaKey);
+  currentMediaKey.current = mediaKey;
+  const [measured, setMeasured] = useState<{ key: string; info: TakeMediaMeasurements } | null>(null);
+  const observeMedia = (info: TakeMediaMeasurements | null) => {
+    // A late event from the previous take must not replace this take's observation.
+    if (currentMediaKey.current === mediaKey) setMeasured(info === null ? null : { key: mediaKey, info });
+  };
+  const facts = take ? takeMediaFacts(take, measured?.key === mediaKey ? measured.info : {}) : null;
+  const takeDuration = facts?.durationSec === undefined ? undefined : seconds(facts.durationSec);
+  const takeShape = facts?.dimensions ? `${facts.dimensions.width}×${facts.dimensions.height}` : facts?.aspect;
+  const takeLabels = [takeShape, takeDuration].filter((label): label is string => label !== undefined);
   const model =
     (state?.app.manifest?.models ?? []).find(
       (m) => m.id === (productionModel(state, prodId, "video") ?? state?.app.routing.defaults["video"]),
@@ -354,7 +368,7 @@ export function GenerateScreen() {
               <span className="fy-bench__briefline">
                 {[
                   model?.id === take.model ? model.displayName : take.model,
-                  seconds(shot?.durationSec),
+                  takeDuration,
                   take.completedAt ? `finished ${take.completedAt.slice(11, 16)}` : undefined,
                 ]
                   .filter((part): part is string => part !== undefined)
@@ -384,22 +398,23 @@ export function GenerateScreen() {
               {view !== null && slug ? (
                 view.isVideo ? (
                   <BenchPlayer
-                    key={take.id}
+                    key={mediaKey}
                     src={mediaUrl(slug, view.sourcePath)}
                     poster={mediaUrl(slug, view.posterPath)}
                     segment={take.segment}
+                    onMetadata={observeMedia}
                   />
                 ) : (
                   // Portrait, not a bare <img>: a recorded file that is missing reads as a
                   // labelled frame, never the browser's broken-image glyph.
-                  <Portrait worldSlug={slug} path={view.sourcePath} label={`Take ${takes.indexOf(take) + 1}`} radius={0} />
+                  <Portrait key={mediaKey} worldSlug={slug} path={view.sourcePath} label={`Take ${takes.indexOf(take) + 1}`} radius={0} onDimensionsChange={observeMedia} />
                 )
               ) : null}
               <div className="fy-bench__overlaychips">
                 <span className="fy-bench__overlaychip fy-bench__overlaychip--name">{`TAKE ${takes.indexOf(take) + 1}`}</span>
-                {production && (
+                {takeLabels.length > 0 && (
                   <span className="fy-bench__overlaychip">
-                    {[productionAspect(production.meta), seconds(shot?.durationSec)].join(" · ")}
+                    {takeLabels.join(" · ")}
                   </span>
                 )}
               </div>

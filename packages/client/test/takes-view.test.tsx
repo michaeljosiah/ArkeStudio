@@ -517,6 +517,60 @@ describe("the takes, watched (turn 102c)", () => {
 describe("Advanced, on the bench's wall (design 142a)", () => {
   const ADVANCED = `${GENERATE}?view=bench`;
 
+  it("shows an old take's saved and then measured facts while dispatch keeps current settings (#1234)", async () => {
+    const state = withSaltlight((p) => ({
+      ...p,
+      meta: { ...p.meta, aspect: "1:1" },
+      scenes: p.scenes.map((scene) => "shots" in scene
+        ? { ...scene, shots: scene.shots.map((shot) => ({ ...shot, durationSec: 15 })) } : scene),
+      takes: p.takes.map((take) => ({ ...take, params: {
+        durationSec: 4, aspect: "9:16", ...(take.kind === "frame" ? { output: { width: 2048, height: 1536 } } : {}),
+      } })),
+    }));
+    const { container } = await mount(state, ADVANCED);
+    const heading = () => container.querySelector(".fy-gen__takeline")!.textContent!;
+    const chip = () => container.querySelector(".fy-bench__overlaychips")!.textContent!;
+    assert.match(heading(), /4s/);
+    assert.match(chip(), /9:16 · 4s/);
+    assert.doesNotMatch(heading() + chip(), /15s|1:1/);
+    assert.match(container.textContent!, /15s/, "dispatch still uses the current shot duration");
+    const video = container.querySelector("video")!;
+    Object.assign(video, { duration: 4.086, videoWidth: 720, videoHeight: 1280 });
+    await act(async () => video.dispatchEvent(new dom.window.Event("loadedmetadata")));
+    assert.match(heading(), /4\.1s/);
+    assert.match(chip(), /720×1280 · 4\.1s/);
+
+    const stillButton = [...container.querySelectorAll<HTMLButtonElement>(".fy-bench__take")]
+      .find((button) => button.getAttribute("aria-label")?.startsWith("Take 2"))!;
+    await act(async () => stillButton.click());
+    assert.doesNotMatch(heading() + chip(), /4\.1s|720×1280|4s/, "a still cannot inherit the previous clip's facts");
+    assert.match(chip(), /2048×1536/, "frame-run dimensions are available before the image loads");
+    const still = container.querySelector(".fy-bench__media img.fy-portrait")!;
+    Object.assign(still, { naturalWidth: 1024, naturalHeight: 1024 });
+    await act(async () => still.dispatchEvent(new dom.window.Event("load")));
+    assert.match(chip(), /1024×1024/);
+    await act(async () => video.dispatchEvent(new dom.window.Event("loadedmetadata")));
+    assert.match(chip(), /1024×1024/, "late events from an old player cannot relabel the selected take");
+    await act(async () => still.dispatchEvent(new dom.window.Event("error")));
+    assert.match(chip(), /2048×1536/, "unavailable media still has its saved output dimensions");
+  });
+
+  it("omits unknown duration and shape instead of borrowing dispatch settings (#1234)", () => {
+    const state = withSaltlight((p) => ({ ...p, takes: p.takes.map((take) => ({ ...take, params: {} })) }));
+    const page = parseHTML(render(state, ADVANCED)).document;
+    assert.equal(page.querySelectorAll(".fy-bench__overlaychip").length, 1, "only the take number is known");
+    assert.doesNotMatch(page.querySelector(".fy-gen__takeline")!.textContent!, /\d+s/);
+  });
+
+  it("keeps a pass segment's duration when the whole source file loads (#1234)", async () => {
+    const { container } = await mount(withSaltlight(withPassSegment), `${ADVANCED}&shot=sh_13`);
+    const video = container.querySelector("video")!;
+    Object.assign(video, { duration: 20, videoWidth: 1920, videoHeight: 1080 });
+    await act(async () => video.dispatchEvent(new dom.window.Event("loadedmetadata")));
+    assert.match(container.querySelector(".fy-gen__takeline")!.textContent!, /5s/);
+    assert.match(container.querySelector(".fy-bench__overlaychips")!.textContent!, /1920×1080 · 5s/);
+  });
+
   it("keeps an interrupted play quiet and says so when the clip cannot play", async () => {
     const mounted = await mount(FIXTURE_STATE, ADVANCED);
     const wall = mounted.container.querySelector(".fy-bench__media")!;
@@ -560,4 +614,3 @@ describe("Advanced, on the bench's wall (design 142a)", () => {
     assert.doesNotMatch(html, /fy-bench__briefline[^"]*" data-testid="take-prop-provenance"/);
   });
 });
-

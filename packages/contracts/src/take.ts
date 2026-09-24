@@ -1,6 +1,7 @@
 import { DialogueDispatchAssessmentSchema } from "./dialogue-assessment.js";
 import { AudioAssetProvenanceSchema } from "./audio.js";
 import { z } from "zod";
+import { normalizeAspect, parseAspect } from "./manifest.js";
 import { PropIdSchema, PropStateIdSchema, PropStateProvenanceSchema } from "./prop.js";
 import {
   IsoDateTimeSchema,
@@ -220,6 +221,37 @@ export const TakeSchema = z
     }
   });
 export type Take = z.infer<typeof TakeSchema>;
+
+/** Observations of the selected media, never a rewrite of the immutable take record. */
+export type TakeMediaMeasurements = { durationSec?: number; width?: number; height?: number };
+
+/** A take's labels must survive later changes to the shot and production (#1234). */
+export function takeMediaFacts(take: Pick<Take, "params" | "segment" | "kind">, measured: TakeMediaMeasurements = {}) {
+  const positive = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+  const dimensions = (width: unknown, height: unknown) =>
+    positive(width) !== undefined && positive(height) !== undefined && Number.isSafeInteger(width) && Number.isSafeInteger(height)
+      ? { width: width as number, height: height as number }
+      : undefined;
+  const storedAspect = typeof take.params["aspect"] === "string" ? take.params["aspect"] : undefined;
+  const output = take.params["output"];
+  const savedOutput = typeof output === "object" && output !== null && !Array.isArray(output)
+    ? output as Record<string, unknown> : {};
+  const ratio = storedAspect === undefined ? null : parseAspect(storedAspect);
+  // A segment describes a range of the backing file, not that entire file's measured length.
+  // Stills have no runtime, even when an old record happens to carry a duration parameter.
+  const durationSec = take.kind === "frame" || take.kind === "still" ? undefined
+    : take.segment !== undefined ? positive(take.segment.outSec - take.segment.inSec)
+    : positive(measured.durationSec) ?? positive(take.params["durationSec"]);
+  return {
+    durationSec,
+    dimensions: dimensions(measured.width, measured.height)
+      ?? dimensions(savedOutput["width"], savedOutput["height"])
+      ?? dimensions(take.params["width"], take.params["height"]),
+    aspect: storedAspect !== undefined && ratio !== null && Number.isFinite(ratio) && ratio > 0
+      ? normalizeAspect(storedAspect) ?? undefined : undefined,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Review decisions — reviews.jsonl (§2.3.6). Append-only; later lines win.
