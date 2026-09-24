@@ -5,8 +5,22 @@ import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { z } from "zod";
 import { VideoPublicationRequestSchema, type PublicationBridge, type PublicationJob, type PublicationPlayback, type PublicationReply } from "@arke-studio/contracts";
-import { compileVideoPublication, openPublication, parseByteRange, publishPublication, PublicationFileError,
-  type PinnedPublication, type PublishedPublication, type WorldProvider, type VideoPublicationCompilerOptions } from "@arke-studio/coordinator";
+import { prepareVideoPublication, openPublication, parseByteRange, publishPublication, PublicationFileError,
+  type PinnedPublication, type PreparedVideoPublication, type PublishedPublication, type WorldProvider, type VideoPublicationCompilerOptions } from "@arke-studio/coordinator";
+
+const REFUSALS: Record<PublicationFileError["code"], string> = {
+  "unsafe-path": "The package contains unsafe paths or linked files.",
+  "limit-exceeded": "The publication exceeds supported file or size limits.",
+  "source-changed": "Source files changed during capture. Check the source and try again.",
+  "invalid-package": "The package or source media is invalid or unsupported.",
+  "invalid-manifest": "The publication manifest is invalid.",
+  "unsupported-schema": "This publication uses an unsupported schema version.",
+  "unsupported-profile": "This player does not support the publication profile.",
+  "unsupported-capability": "The publication requires unsupported player features.",
+  "operation-conflict": "The saved operation conflicts with these settings or is already in use.",
+  "incomplete-publication": "Saved publication output is incomplete or damaged. It has been preserved.",
+  "unsupported-codec": "Unsupported codec. Use H.264/AAC MP4 or VP8/VP9 WebM with Opus/Vorbis in 8-bit 4:2:0.",
+};
 
 const Start = z.object({ worldId: z.string().min(1), request: VideoPublicationRequestSchema, format: z.enum(["directory", "zip"]) }).strict();
 const Intent = Start.extend({ operationId: z.string().uuid(), outputRoot: z.string().min(1), encoderVersion: z.string().min(1).max(256) }).strict();
@@ -63,15 +77,15 @@ export class PublicationHost implements PublicationBridge {
   private reply<T>(work: () => Promise<T>): Promise<PublicationReply<T>> {
     const promise = (async (): Promise<PublicationReply<T>> => {
       try { this.controller.signal.throwIfAborted(); return { ok: true, value: await work() }; }
-      catch (error) { return { ok: false, reason: this.reason(error) }; }
+      catch (error) { return { ok: false, reason: this.reason(error), ...(error instanceof Error && error.name === "AbortError" ? { cancelled: true } : {}) }; }
     })();
     this.pending.add(promise);
     void promise.finally(() => this.pending.delete(promise));
     return promise;
   }
   private reason(error: unknown): string {
-    // Filesystem/process errors can contain private paths. Domain refusals are safe product copy.
-    if (error instanceof PublicationFileError) return `${error.code}: ${error.message}`;
+    // Domain wrappers can contain nested filesystem errors too. Only fixed copy crosses IPC.
+    if (error instanceof PublicationFileError) return `${error.code}: ${REFUSALS[error.code]}`;
     if (error instanceof Error && error.name === "AbortError") return "Publication cancelled.";
     return "The publication could not be processed. Check the package, media tools and available disk space, then retry.";
   }
@@ -124,9 +138,16 @@ export class PublicationHost implements PublicationBridge {
           if (compiler.encoderVersion !== intent.encoderVersion) throw new Error("Encoder changed; create a new publication.");
           const provider = this.provider();
           if (!provider?.withWorldStore) throw new Error("World is unavailable.");
-          job.view.phase = "Capturing and rendering";
-          return provider.withWorldStore(intent.worldId, store => compileVideoPublication(store, intent.request, { ...compiler, scratchRoot, signal,
-            onProgress: value => { job.view.phase = value >= 100 ? "Verifying package" : "Rendering"; } }));
+          job.view.phase = "Capturing";
+          let prepared: PreparedVideoPublication | undefined;
+          try {
+            await provider.withWorldStore(intent.worldId, async store => {
+              prepared = await prepareVideoPublication(store, intent.request, { ...compiler, scratchRoot, signal,
+                onProgress: value => { job.view.phase = value >= 100 ? "Verifying package" : "Rendering"; } });
+            });
+            job.view.phase = "Rendering";
+            return await prepared!.render();
+          } finally { await prepared?.dispose(); }
         }, { outputRoot: intent.outputRoot, signal, onPhase: phase => { job.view.phase = phase === "prepared" ? "Publishing" : "Verifying output"; } });
         job.view = { ...job.view, status: "completed", phase: "Ready to play" };
       } catch (error) {
@@ -143,6 +164,7 @@ export class PublicationHost implements PublicationBridge {
   open(kind: Parameters<PublicationBridge["open"]>[0]) {
     return this.reply(async () => {
       if (this.opening) throw new Error("A publication is already opening.");
+      if (this.players.size >= 2) throw new PublicationFileError("operation-conflict", "Close an unused playback session before opening another.");
       this.opening = true;
       try {
         await this.initialize();
@@ -159,8 +181,8 @@ export class PublicationHost implements PublicationBridge {
         try {
           await this.listen();
           this.controller.signal.throwIfAborted();
-          // One viewer per window bounds retained package copies; replacing it releases the old one.
-          for (const id of this.players.keys()) await this.close(id);
+          // Keep the current session until the renderer has mounted this successful replacement.
+          // The two-session bound allows that handoff without retaining an unbounded library.
           const sessionId = randomUUID();
           this.players.set(sessionId, pinned);
           const assets = Object.fromEntries(Object.keys(pinned.manifest.assets).map(id => [id, `http://127.0.0.1:${this.session!.port}/media/${sessionId}/${id}`]));

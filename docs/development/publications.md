@@ -158,7 +158,8 @@ files. No world paths or private source records enter the manifest. Blank lines 
 control characters in cues are refused because they would split WebVTT blocks and lose text.
 Output files are synced, inventoried and independently verified before returning. Capture storage
 is then removed. The returned package includes an idempotent `dispose()`; callers must consume it
-and dispose it. Failure, cancellation or world close removes this operation's temporary files.
+and dispose it. Failure, cancellation or world close removes this operation's temporary files
+when using the one-shot `compileVideoPublication` API.
 No destination is promoted or reported as durably completed, and a process crash can leave
 scratch files. The publisher below consumes this temporary output and adds promotion and retry
 reconciliation.
@@ -166,8 +167,11 @@ reconciliation.
 Regression coverage includes scope parity in contracts `test/delivery-scopes.test.ts` and compiler
 lifecycle in coordinator `test/publications/video.test.ts`. To also encode, probe and decode real
 media, set `ARKE_TEST_FFMPEG` and `ARKE_TEST_FFPROBE` to executable paths before running that test.
-Typecheck consumers after changes. The remaining user-facing work is the independent player and
-export action, including persisted operation ids, progress, cancellation and retry controls.
+Typecheck consumers after changes. Desktop uses `prepareVideoPublication` to capture under
+`withWorldStore`, releases provider access, then calls the returned `render()` once. Rendering
+uses only the operation signal and pinned inputs, so switching/closing the source world after
+capture does not block or cancel it. An unused capture must be disposed; rendering owns cleanup
+once started. The one-shot compiler retains its world-close cancellation behavior.
 
 ## Recoverable local delivery
 
@@ -269,14 +273,16 @@ status. Jobs show phases, cancellation, retry, Play and Show in folder. On resta
 appear as **Check or retry**; reconciliation verifies completion before showing success. Prepared
 output can finish without a world or encoder. An unprepared retry needs the source world and same
 encoder build; changed settings require a new edition. Shutdown aborts and drains jobs before
-closing the world provider. The renderer does not own operation lifetime.
+closing the world provider. Provider access lasts only through capture, so world selection remains
+available during encoding. The renderer does not own operation lifetime.
 
 Worlds → **Open publication** opens a directory or ZIP without opening a world or making a provider
 call. Coordinator `openPublication` pins it into a private scratch child, verifies the inventory,
 then preflights media and captions. It never serves the original mutable package. Desktop's separate
 authenticated loopback endpoint resolves only session/asset ids, supports byte ranges, checks
 origins, and accepts no query credentials. Main injects the private capability for this window and
-endpoint only. The public bridge contains neither paths nor credentials.
+endpoint only. The public bridge contains neither paths nor credentials. Named domain refusals
+map to fixed product copy, including when their internal messages contain filesystem errors.
 
 The current native media preflight accepts H.264/AAC MP4 and VP8/VP9 WebM with Opus/Vorbis,
 one video and at most one audio stream, with 8-bit 4:2:0 video. Other codecs get `unsupported-codec`.
@@ -290,5 +296,7 @@ The client uses native media controls and an explicit captions/off selector. Res
 choice live in browser storage keyed by publication id and manifest digest, outside immutable files.
 Only the desktop host currently supplies disk opening/export; the reusable HTML player receives
 verified URLs. No browser upload host, book/audio/interactive profile or OTIO adapter is claimed.
-Closing/replacing playback removes its owned copy. Abrupt exit can leave scratch files; no orphan
+Cancelled or failed opens preserve current playback. A successful replacement mounts before the
+previous session is closed; the host allows at most two sessions for this handoff. Closing playback
+removes its owned copy. Abrupt exit can leave scratch files; no orphan
 sweep or power-loss durability guarantee is added by the UI.

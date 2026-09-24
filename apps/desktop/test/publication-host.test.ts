@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it, type TestContext } from "node:test";
-import { publishPublication, verifyPublicationDirectory, type VideoPublicationCompilerOptions, type WorldProvider } from "@arke-studio/coordinator";
+import { publishPublication, verifyPublicationDirectory, PublicationFileError, type VideoPublicationCompilerOptions, type WorldProvider } from "@arke-studio/coordinator";
 import { VideoPublicationRequestSchema, type VideoPublicationRequest } from "@arke-studio/contracts";
 import { PublicationHost } from "../src/publication-host.js";
 import { publicationMedia } from "../src/publication-media.js";
@@ -87,6 +87,27 @@ it("preflights real codec metadata and reports unsupported pixel formats", async
     streams: [{ codec_type: "video", codec_name: "h264", pix_fmt }, { codec_type: "audio", codec_name: "aac" }] })), stderr: "", timedOut: false, outputLimitExceeded: false, cancelled: false }) });
   assert.deepEqual(await media.playback("opaque", "video/mp4"), { duration: 2, mediaType: 'video/mp4; codecs="avc1, mp4a.40.2"' });
   pix_fmt = "yuv420p10le"; await assert.rejects(media.playback("opaque", "video/mp4"), /Unsupported publication codec/);
+});
+
+it("keeps an existing player session after cancellation or failed replacement", async t => {
+  const f = await fixture(t); let cancelled = false;
+  const host = new PublicationHost({ ...f.ports, pick: async () => cancelled ? null : f.source }); t.after(() => host.stop());
+  const first = await host.open("directory"); assert.ok(first.ok);
+  cancelled = true;
+  const cancel = await host.open("zip"); assert.ok(!cancel.ok && cancel.cancelled);
+  cancelled = false; await writeFile(join(f.source, "movie.mp4"), "corrupt");
+  assert.equal((await host.open("directory")).ok, false);
+  const response = await fetch(first.value.assets.movie!, { headers: { Authorization: `Bearer ${host.session!.token}` } });
+  assert.equal(response.status, 200); assert.equal(await response.text(), "movie-bytes");
+});
+
+it("never forwards nested filesystem paths inside domain refusals", async t => {
+  const f = await fixture(t);
+  const host = new PublicationHost({ ...f.ports, probe: async () => { throw new PublicationFileError("source-changed", `ENOENT: ${f.root}/private-world/secret-file`); } });
+  t.after(() => host.stop());
+  const result = await host.open("directory"); assert.ok(!result.ok);
+  assert.match(result.reason, /^source-changed:/);
+  assert.ok(!result.reason.includes(f.root)); assert.ok(!result.reason.includes("secret-file"));
 });
 
 it("keeps publishing available after startup hands its provider to the live coordinator", { timeout: 30_000 }, async t => {

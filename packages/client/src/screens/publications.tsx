@@ -110,28 +110,28 @@ export function PublicationsScreen() {
   const [error, setError] = useState<string | null>(null);
   const alive = useRef(true);
   const opening = useRef(false);
-  const current = useRef<string | null>(null);
   const bridge = typeof window === "undefined" ? undefined : window.arke?.publications;
   const open = async (kind: "directory" | "zip" | { operationId: string }) => {
     if (!bridge || opening.current) return;
     opening.current = true;
     setBusy(true); setError(null);
-    // Stop the old element before the host releases its pinned files (particularly on Windows).
-    setPublication(null);
     try {
-      if (current.current) await bridge.close(current.current);
-      current.current = null;
       const result = await bridge.open(kind);
       if (!alive.current) { if (result.ok) await bridge.close(result.value.sessionId); return; }
-      if (result.ok) { current.current = result.value.sessionId; setPublication(result.value); }
-      else setError(result.reason);
+      if (result.ok) setPublication(result.value);
+      else if (!result.cancelled) setError(result.reason);
     } catch { if (alive.current) setError("Could not open the publication."); }
     finally { opening.current = false; if (alive.current) setBusy(false); }
   };
   useEffect(() => {
     alive.current = true;
-    return () => { alive.current = false; if (current.current) void bridge?.close(current.current); };
+    return () => { alive.current = false; };
   }, [bridge]);
+  useEffect(() => () => {
+    // The old video has unmounted before its pinned bytes are released. Cancelled/failed
+    // replacements never change this dependency, so the current movie remains playable.
+    if (publication) void bridge?.close(publication.sessionId).catch(() => {});
+  }, [bridge, publication?.sessionId]);
   useEffect(() => {
     const id = params.get("operation");
     if (id && bridge) { setParams({}, { replace: true }); void open({ operationId: id }); }

@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, readdir, realpath, unlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, open, readFile, readdir, realpath, unlink, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, toNamespacedPath } from "node:path";
 import { it, type TestContext } from "node:test";
 import { promisify } from "node:util";
 import { applyTimelineCommands, seedEmptyPictureTimeline, type VideoPublicationRequest } from "@arke-studio/contracts";
-import { compileVideoPublication, type VideoPublicationCompilerOptions } from "../../src/publications/video.js";
+import { compileVideoPublication, prepareVideoPublication, type VideoPublicationCompilerOptions } from "../../src/publications/video.js";
+import { FsWorldProvider } from "../../src/world/provider.js";
 import { verifyPublicationDirectory } from "../../src/publications/verify.js";
 import { publishVideoPublication } from "../../src/publications/publish.js";
 import { extractPublicationZip } from "../../src/publications/archive.js";
@@ -180,6 +181,43 @@ it("allows deliberate blank picture with no input media and no captions", async 
     assert.deepEqual((await readdir(result.directory)).sort(), ["movie.mp4", "publication.json"]);
     assert.ok(f.invocations[0]!.includes("lavfi"));
   } finally { await result.dispose(); }
+});
+
+it("releases provider access after capture so another world can open during encoding", { timeout: 30_000 }, async t => {
+  const f = await fixture(t);
+  const worldId = f.store.worldId;
+  await f.store.close();
+  const root = await tempDir("arke-publication-provider-");
+  await cp(f.world, join(root, "worlds", "the-undersong"), { recursive: true });
+  const provider = new FsWorldProvider(root);
+  const other = await provider.createWorld({ name: "Another world" });
+  await provider.loadWorld(worldId);
+  let entered!: () => void, release!: () => void;
+  const encoding = new Promise<void>(resolve => { entered = resolve; });
+  const wait = new Promise<void>(resolve => { release = resolve; });
+  const prepared = await provider.withWorldStore(worldId, store => prepareVideoPublication(store, f.request, { ...f.options,
+    encoder: { slateFont: "unused", run: async args => { entered(); await wait; await writeFile(args.at(-1)!, "encoded movie"); } } }));
+  const rendering = prepared.render();
+  t.after(async () => { release(); const result = await rendering.catch(() => null); await result?.dispose(); await prepared.dispose(); await provider.close(); });
+  await encoding;
+  const selected = await provider.loadWorld(other.worldId);
+  assert.equal(selected.meta.worldId, other.worldId, "selection completes while the encoder is still waiting");
+  release();
+  const result = await rendering;
+  assert.equal(result.manifest.id, f.request.id, "closing the source store after capture does not cancel the edition");
+});
+
+it("disposes unused prepared inputs and honors operation cancellation after source-world close", async t => {
+  const f = await fixture(t);
+  const unused = await prepareVideoPublication(f.store, f.request, f.options);
+  await unused.dispose();
+  await assert.rejects(unused.render(), /already been consumed/);
+  assert.deepEqual(await readdir(f.scratch), []);
+  const controller = new AbortController();
+  const prepared = await prepareVideoPublication(f.store, f.request, { ...f.options, signal: controller.signal });
+  await f.store.close(); controller.abort();
+  await assert.rejects(prepared.render(), { name: "AbortError" });
+  assert.deepEqual(await readdir(f.scratch), []);
 });
 
 it("refuses replaced artifact bytes and missing source files before encoding", async t => {

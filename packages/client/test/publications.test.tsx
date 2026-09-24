@@ -62,6 +62,31 @@ it("resume state is isolated by edition identity and manifest digest", () => {
   assert.deepEqual(readPublicationPreference("bad", ""), { time: 0, caption: "" });
 });
 
+it("keeps the current movie on cancelled/invalid opens and releases it only after a successful replacement", async t => {
+  Object.assign(Object.getPrototypeOf(document.createElement("video")), { canPlayType: () => "probably" });
+  const previous = window.arke;
+  const closed: string[] = []; let opening = 0;
+  window.arke = { appVersion: "test", platform: "test", connect() {}, send() {}, subscribe() {}, publications: {
+    list: async () => ({ ok: true, value: [] }), close: async id => { closed.push(id); },
+    open: async () => {
+      opening++;
+      if (opening === 2) return { ok: false, cancelled: true, reason: "cancelled" };
+      if (opening === 3) return { ok: false, reason: "unsupported package" };
+      return { ok: true, value: { ...publication, sessionId: opening === 1 ? "first" : "second" } };
+    },
+    start: async () => ({ ok: false, reason: "unused" }), retry: async () => ({ ok: false, reason: "unused" }), cancel: async () => {}, reveal: async () => ({ ok: true, value: null }),
+  } };
+  const node = document.createElement("div"); document.body.append(node); const root = createRoot(node);
+  t.after(async () => { await act(async () => root.unmount()); node.remove(); window.arke = previous; });
+  await act(async () => root.render(<MemoryRouter><PublicationsScreen /></MemoryRouter>));
+  const open = async () => { await act(async () => Array.from(node.querySelectorAll("button")).find(button => button.textContent === "Open folder")!.click()); };
+  await open(); const first = node.querySelector("video"); assert.ok(first);
+  await open(); assert.equal(node.querySelector("video"), first); assert.equal(node.querySelector('[role="alert"]'), null);
+  await open(); assert.equal(node.querySelector("video"), first); assert.match(node.textContent!, /unsupported package/);
+  assert.deepEqual(closed, []);
+  await open(); assert.notEqual(node.querySelector("video"), first); assert.deepEqual(closed, ["first"]);
+});
+
 it("submits a fresh edition identity with the saved revision and explicit publication options", async t => {
   const state = structuredClone(FIXTURE_STATE) as ClientState;
   const production = state.world!.productions[0]!;
