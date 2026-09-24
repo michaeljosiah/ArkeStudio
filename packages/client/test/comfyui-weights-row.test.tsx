@@ -87,6 +87,50 @@ function render(path: string, state: ClientState): string {
   );
 }
 
+function qwenState(source: "user-url" | "managed" | "user-path", reason?: string, downloadState: SetupComponent["state"] = "available"): ClientState {
+  const state = stateWith(weights({ id: comfyUiWeightsComponentId("comfyui-qwen21-image"), sizeMb: 17284, state: downloadState }), reason);
+  const comfyui = state.app.comfyui!;
+  return { ...state, app: { ...state.app, comfyui: { ...comfyui,
+    engine: { ...comfyui.engine, source, state: reason === "the engine did not answer" ? "unreachable" : "ready" },
+    recipes: [{ ...comfyui.recipes[0]!, recipeId: "comfyui-qwen21-image", displayName: "Qwen Image 2.1 · Research", state: reason ? "disabled" : "ready" }],
+  } } };
+}
+
+describe("Qwen's terms and external setup are visible before download (#1226)", () => {
+  it("places the noncommercial label and official licence beside the download controls", () => {
+    const html = render("/settings/models?half=local&kind=image", qwenState("managed"));
+    assert.match(html, /Noncommercial research/);
+    assert.match(html, /href="https:\/\/huggingface.co\/Qwen\/Qwen-Image-2.1\/blob\/main\/LICENSE"[^>]*>Licence<\/a>/);
+    assert.ok(html.indexOf("Noncommercial research") < html.indexOf("Download ·"));
+    assert.doesNotMatch(html, /Dedicated engine profile required/);
+  });
+
+  it("keeps external setup next to the action through offline, missing-guard and ready states", () => {
+    for (const reason of ["the engine did not answer", "custom node ArkeQwen21Runtime is missing from the engine", undefined]) {
+      const html = render("/settings/models?half=local&kind=image", qwenState("user-url", reason));
+      assert.match(html, /Dedicated engine profile required/);
+      assert.match(html, /href="https:\/\/github.com\/michaeljosiah\/ArkeStudio\/blob\/main\/docs\/development\/qwen21.md#externally-managed-url-engines"[^>]*>Setup<\/a>/);
+      assert.ok(html.indexOf("Dedicated engine profile required") < html.indexOf("Download ·"));
+      if (reason) assert.ok(html.includes(reason), "the measured readiness reason remains available");
+    }
+  });
+
+  it("retains the licence after download without asking supervised engines for manual setup", () => {
+    for (const source of ["managed", "user-path"] as const) {
+      const html = render("/settings/models?half=local&kind=image", qwenState(source, undefined, "ready"));
+      assert.match(html, /Noncommercial research/);
+      assert.doesNotMatch(html, /Dedicated engine profile required/);
+    }
+  });
+
+  it("does not attach Qwen's terms or setup to another recipe", () => {
+    const state = stateWith(weights({}));
+    state.app.comfyui!.engine.source = "user-url";
+    const html = render("/settings/models?half=local&kind=image", state);
+    assert.doesNotMatch(html, /Noncommercial research|Dedicated engine profile required|Qwen-Image-2.1\/blob/);
+  });
+});
+
 describe("a recipe's weights hang off the recipe", () => {
   it("offers the download, at its size, on the row that says the files are missing", () => {
     const html = render(

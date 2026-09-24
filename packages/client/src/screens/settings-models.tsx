@@ -381,7 +381,7 @@ function recipeTileFacts(
 }
 
 /** A local model as a tile: name, size, state, the controls its row had, and its one clause (R-13, R-16). */
-function LocalTile({ facts }: { facts: LocalFacts }) {
+function LocalTile({ facts, externalEngine }: { facts: LocalFacts; externalEngine: boolean }) {
   return (
     <div
       className={cx("fy-mtile", facts.dim && "fy-mtile--out")}
@@ -398,6 +398,20 @@ function LocalTile({ facts }: { facts: LocalFacts }) {
           <span style={{ flex: 1 }} />
           <RuntimeStatus tone={facts.tone}>{facts.word}</RuntimeStatus>
         </div>
+        {/* These terms and setup steps matter before a large download (issue 1226), even when
+            readiness cannot get past an unreachable engine. Keep the measured reason below. */}
+        {facts.model.id === "comfyui-qwen21-image" && (
+          <>
+            <div className="fy-set__why">
+              <span>Noncommercial research · <a className="fy-set__link" href="https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">Licence</a></span>
+            </div>
+            {externalEngine && (
+              <div className="fy-set__why">
+                <span>Dedicated engine profile required · <a className="fy-set__link" href="https://github.com/michaeljosiah/ArkeStudio/blob/main/docs/development/qwen21.md#externally-managed-url-engines" target="_blank" rel="noopener noreferrer">Setup</a></span>
+              </div>
+            )}
+          </>
+        )}
         <div className="fy-mtile__does">{facts.controls}</div>
         {((facts.model.accepts.referenceVideos ?? 0) > 0 || (facts.model.accepts.referenceAudio ?? 0) > 0) && (
           <div className="fy-mtile__meta">{modelCapabilityCopy(facts.model)}</div>
@@ -506,7 +520,7 @@ function LocalSection({ engine, models, visual }: { engine: EngineId; models: Ma
   return (
     <Section id={engine} name={ENGINE_LABEL[engine]} right={right}>
       {visual ? (
-        <div className="fy-tiles">{items.map((i) => i.facts && <LocalTile key={i.model.id} facts={i.facts} />)}</div>
+        <div className="fy-tiles">{items.map((i) => i.facts && <LocalTile key={i.model.id} facts={i.facts} externalEngine={comfyui?.engine.source === "user-url"} />)}</div>
       ) : (
         <div className="fy-rows">
           {items.map((i) =>

@@ -4,7 +4,8 @@
 It offers 1024 × 1024 PNG images and one optional reference. Krea and SDXL keep their
 existing identities and defaults. The [Qwen Research License](https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE)
 permits noncommercial research and evaluation; commercial use requires separate terms. The
-model row says **Research** for that reason.
+model name retains **Research**; its AI models card explicitly says **Noncommercial research**
+and links the licence beside the download controls, including after installation.
 
 The graph uses the native Qwen 2.1 encoder, INT8 ConvRot transformer and encoder weights, BF16
 VAE, forty Euler/simple steps, CFG 1, disabled prefix caching, and tiled decoding (512/64).
@@ -42,6 +43,12 @@ The same automatic profile applies to a supervised portable path. An existing so
 without embedded Python still uses the established URL setup described below.
 
 ### Externally managed URL engines
+
+The Qwen card states **Dedicated engine profile required** and links this setup beside its
+download controls whenever the configured source is a user URL, including when that engine
+cannot answer. The measured readiness reason remains below it: installing the guard alone
+does not resolve a missing-node refusal when the engine still uses ordinary launch settings.
+Managed and supervised-path engines do not show this manual-setup notice.
 
 Arke cannot change the launch settings of an external server. Its owner must install the pinned
 runtime guard into an engine containing `main.py`:
