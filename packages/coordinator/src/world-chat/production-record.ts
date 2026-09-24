@@ -25,6 +25,7 @@ export function productionRecord(bundle: WorldBundle, productionId: string): Rec
     kind: shape.kind,
     ...(production.meta.aspect !== undefined ? { aspect: production.meta.aspect } : {}),
     story: production.story,
+    narrative: production.narrative ?? null,
     season: production.season,
     episodes: production.episodes.map((e) => ({
       id: e.id,

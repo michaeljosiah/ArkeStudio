@@ -44,6 +44,8 @@ export const SetupComponentSchema = z
     sizeMb: z.number().int().min(0),
     /** The concrete folder this component occupies; null when it has no local filesystem path. */
     installLocation: z.string().min(1).nullable(),
+    /** Resolved file identities and observed progress, derived from the setup catalogue. */
+    files: z.array(z.object({ key: z.string().min(1), sizeMb: z.number().min(0), bytesDone: z.number().int().min(0) }).strict()).optional(),
     /**
      * Peak disk this component needs where that differs from what it downloads — an archive that
      * is extracted holds both copies at once. On the wire so the closure's total is the same

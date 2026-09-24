@@ -1,16 +1,19 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { legacySceneView, type ClientState, type Episode, type ProductionBundle, type StagedProposal } from "@arke-studio/contracts";
+import { parseHTML } from "linkedom";
+import { legacySceneView, type ClientMessage, type ClientState, type Episode, type ProductionBundle, type StagedProposal } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { ProductionChatScreen, StoryScreen, takeMediaPath } from "../src/screens/production.js";
+import { ProductionChatScreen } from "../src/screens/production-shell.js";
+import { StoryScreen } from "../src/screens/production-story.js";
+import { takeMediaPath } from "../src/lib/take-presentation.js";
 import { EpisodeChatScreen, EpisodeDetailScreen, StoryStructureScreen } from "../src/screens/development.js";
 import { acceptedTakeId, isDayOne, mediaTakeFor, takesForShot } from "../src/lib/selectors.js";
-import { __setStateForTest } from "../src/lib/store.js";
+import type { ArkeBridge } from "../src/arke-bridge.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 
@@ -115,22 +118,79 @@ function renderApp(state: ClientState, path: string): string {
 const SEASON = (prodId: string) => `/w/${FIXTURE_WORLD_ID}/p/${prodId}/season`;
 const ONE = episode("ep_the-missing-night", 1, { promise: { opens: "The page is gone." } });
 
-describe("Development single-act reachability", () => {
-  const screens = ["development.tsx", "production.tsx"].map((file) =>
-    readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../src/screens", file), "utf8"),
-  );
+it("uses a scene number instead of its file id on the episode card (#1005)", () => {
+  const state = withMicrodramaScenes([structuredClone(ONE)], [FIXTURE_STATE.world!.productions[0]!.scenes[0]!]);
+  const production = state.world!.productions.find((candidate) => candidate.meta.id === "bell-watch-season-1")!;
+  const scene = production.scenes[0]!;
+  production.episodes[0]!.scenes = [scene.id];
+  const html = render(state, `/w/${FIXTURE_WORLD_ID}/p/${production.meta.id}/episodes/${ONE.id}`, <EpisodeDetailScreen />, "/w/:worldId/p/:prodId/episodes/:episodeId");
+  assert.ok(html.includes(`Scene ${scene.number} ·`));
+  assert.ok(!html.includes(`${scene.id} ·`));
+});
 
-  it("correlates the reachable existing-episode edit at its initiating control", () => {
-    assert.match(screens[0]!, /edit\.track\(proposeEpisode\(worldId, prodId, \{[\s\S]*?episodeId: episode\.id/);
-    assert.match(screens[0]!, /<SingleActFeedback result=\{edit\.result\}/);
-  });
-
-  it("has no reachable story-overview or season form sender to misclassify", () => {
-    for (const source of screens) {
-      assert.doesNotMatch(source, /proposeStoryOverview\(/);
-      assert.doesNotMatch(source, /proposeSeason\(/);
+it("adopting a drafted scene amends this episode — the frame names it — and the result is shown here", async () => {
+  // The episodeId is what selects the coordinator's amendment branch: without it the same press
+  // would stage the creation of a new episode. Pressed for real, and read off the wire.
+  const dom = parseHTML("<!doctype html><html><body></body></html>");
+  Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }), innerWidth: 1024, innerHeight: 768 });
+  // A DOM for this case alone: the rest of the file renders to strings, and a `window` left behind
+  // changes what those renders do.
+  const globals = { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Node: dom.Node, Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true, requestAnimationFrame: (cb: (t: number) => void) => setTimeout(() => cb(0), 0) };
+  const before = Object.fromEntries(Object.keys(globals).map((key) => [key, (globalThis as Record<string, unknown>)[key]]));
+  Object.assign(globalThis, globals);
+  const state = withMicrodramaScenes([structuredClone(ONE)], [FIXTURE_STATE.world!.productions[0]!.scenes[0]!]);
+  const production = state.world!.productions.find((candidate) => candidate.meta.id === "bell-watch-season-1")!;
+  const scene = production.scenes[0]!;
+  production.episodes[0]!.scenes = [];
+  const sent: ClientMessage[] = [];
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(JSON.parse(json) as ClientMessage); } } as unknown as ArkeBridge);
+  __setStateForTest(state);
+  const host = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/p/${production.meta.id}/episodes/${ONE.id}`]}>
+        <Routes><Route path="/w/:worldId/p/:prodId/episodes/:episodeId" element={<EpisodeDetailScreen />} /></Routes>
+      </MemoryRouter>,
+    ));
+    const adopt = [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "add to this episode");
+    assert.ok(adopt, "the drafted scene offers itself to this episode");
+    await act(async () => adopt.click());
+    const frame = sent.find((message): message is Extract<ClientMessage, { kind: "propose-episode" }> => message.kind === "propose-episode");
+    assert.ok(frame, "one propose-episode frame");
+    assert.equal(frame.episodeId, ONE.id, "naming this episode, so the coordinator amends rather than creates");
+    assert.deepEqual(frame.scenes, [scene.id]);
+    await act(async () => __applyEventForTest({
+      type: "single-act.result", at: "2026-09-12T08:00:00.000Z", requestId: frame.requestId, worldId: FIXTURE_WORLD_ID, operation: "episode-edit",
+      path: `productions/${production.meta.id}/episodes/${ONE.id}.json`, disposition: "refused", reason: "The episode changed underneath you.",
+    }));
+    assert.match(host.querySelector('[role="alert"]')?.textContent ?? "", /The episode changed underneath you\./, "and the single-act result lands beside the control that asked");
+  } finally {
+    await act(async () => root.unmount());
+    __setBridgeForTest(null);
+    __setStateForTest(FIXTURE_STATE);
+    for (const [key, value] of Object.entries(before)) {
+      if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
+      else (globalThis as Record<string, unknown>)[key] = value;
     }
-  });
+  }
+});
+
+it("distinguishes an episode wait from missing episode and production ids (issue 1000)", () => {
+  const state = withMicrodrama([ONE]);
+  const base = `/w/${FIXTURE_WORLD_ID}/p/bell-watch-season-1`;
+  const path = `${base}/episodes/the-missing-night`;
+  const opening = render({ ...state, world: null }, path, <EpisodeDetailScreen />, "/w/:worldId/p/:prodId/episodes/:episodeId");
+  assert.match(opening, /Opening episode/);
+  assert.doesNotMatch(opening, /not found/);
+  const missing = renderApp(state, path);
+  assert.match(missing, /Episode not found/);
+  assert.match(missing, new RegExp(`href="${base}/season"`));
+  assert.doesNotMatch(missing, /Opening episode/);
+  const missingProduction = renderApp(state, `/w/${FIXTURE_WORLD_ID}/p/missing/episodes/${ONE.id}`);
+  assert.match(missingProduction, /Production not found/);
+  assert.match(missingProduction, new RegExp(`href="/w/${FIXTURE_WORLD_ID}/productions"`));
 });
 
 describe("shot take selection", () => {
@@ -220,19 +280,19 @@ describe("the season page (design turn 91)", () => {
     assert.match(html, /Every episode answers one bell/);
   });
 
-  it("counts the season it promised, not the episodes that happen to exist", () => {
-    // Seven were declared on the day it was made (turn 87), so the board is seven wide at once.
+  it("shows only existing episodes even when an old season has a target", () => {
     const html = seasonPage([ONE]);
-    assert.match(html, /of 7 written/, "the meter states the promise and how much of it is written");
-    assert.match(html, /1 of 7 written/);
-    assert.match(html, /6 of 7 promised by the season and not started/);
-    assert.match(html, /not written yet/i, "the unwritten ones are a place to start, not a gap");
+    assert.match(html, /1 episode/);
+    assert.match(html, /Add episode/);
+    assert.doesNotMatch(html, /of 7|promised by|not written yet/);
+    assert.equal((html.match(/class="fy-seasontile"/g) ?? []).length, 1);
   });
 
-  it("shows the board with nothing written, because that is when it is looked for", () => {
+  it("offers the first episode on an empty season", () => {
     const html = seasonPage([]);
-    assert.match(html, /of 7 written/, "the board is not hidden until an episode exists");
-    assert.match(html, /0 of 7 written/);
+    assert.match(html, /0 episodes/);
+    assert.match(html, /Create the first episode/);
+    assert.doesNotMatch(html, /class="fy-seasontile"/);
   });
 
   it("says where the season was decided", () => {
@@ -274,6 +334,8 @@ describe("an episode is a chat and a page, not one screen doing both (design tur
     assert.match(html, /role="textbox"/, "a composer, not a form");
     assert.match(html, /EPISODE CHAT · 01/, "the subject is named");
     assert.match(html, /What happens in this one\?/);
+    assert.match(html, /Develop the-missing-night here/);
+    assert.doesNotMatch(html, /Nothing written/, "an empty thread is not an unwritten episode");
     assert.doesNotMatch(html, /Edit the promise|Propose the promise/, "the promise editor is retired");
   });
 
@@ -290,6 +352,8 @@ describe("an episode is a chat and a page, not one screen doing both (design tur
     assert.match(html, /The page is gone\./);
     assert.match(html, /No scenes yet\./, "an empty membership is said, not hidden");
     assert.match(html, /data-dock="conversation"/, "the chat is docked here now (turn 100)");
+    assert.match(html, /Develop the-missing-night here/);
+    assert.doesNotMatch(html, /Nothing written/, "the dock acknowledges the existing promise");
     assert.doesNotMatch(html, /Edit the promise/, "authoring happens in the conversation");
   });
 
@@ -382,7 +446,7 @@ describe("a press that stages something says so where it was pressed (design tur
     assert.match(html, /STAGED/, "the mark is on the frame that was pressed");
     assert.match(html, /1 started and waiting on the gate/, "and the board counts it");
     // Seven promised, one written, one started — five untouched, not six.
-    assert.match(html, /5 of 7 promised by the season and not started/);
+    assert.doesNotMatch(html, /promised by the season/);
   });
 
   it("the gate's own labels are what the board reads, whatever their case", () => {
@@ -456,7 +520,8 @@ describe("the season level has a wrap-up and an accept (design turn 92)", () => 
     assert.match(html, />Discard</);
     assert.match(html, /The season, as it stands/, "the thing the gate would make");
     assert.match(html, /Who is ringing the drowned bell\?/);
-    assert.match(html, /the gate writes season\.json · nothing else moves/);
+    assert.match(html, /season\.json/, "the file is the fact under the buttons, with no sentence around it");
+    assert.doesNotMatch(html, /the gate writes/, "no caption under the gate (turn 137)");
     // The rail has two states and never both at once (turns 89, 91).
     assert.doesNotMatch(html, /What it understood/, "the points are not up beside a decision");
   });
@@ -473,8 +538,25 @@ describe("the season level has a wrap-up and an accept (design turn 92)", () => 
       <ProductionChatScreen />,
       "/w/:worldId/p/:prodId/story",
     );
-    assert.match(html, /the gate writes story\.json · nothing else moves/);
+    assert.match(html, /story\.json/);
     assert.match(html, /the overview/, "named as what it is, not as a season");
+  });
+
+  it("the style the book is written in is settled here too, in its own file (turn 128)", () => {
+    const staged = stagedAgainst(
+      "productions/saltlight/prose-style.json",
+      [["Point of view", "close third"], ["Voice", "Short declaratives."]],
+      "Prose style: Saltlight",
+    );
+    const html = render(
+      withProposal(withMicrodrama([]), staged),
+      `/w/${FIXTURE_WORLD_ID}/p/saltlight/story`,
+      <ProductionChatScreen />,
+      "/w/:worldId/p/:prodId/story",
+    );
+    assert.match(html, /prose-style\.json/);
+    assert.match(html, /the style/, "named as what it is");
+    assert.match(html, /close third/);
   });
 });
 
@@ -487,7 +569,7 @@ describe("an episodic production's front page is its season (design turn 93)", (
   it("the production's own address shows the season, not a second screen", () => {
     const html = home(PROD);
     assert.match(html, /data-screen="development"/, "the season page is the front page");
-    assert.match(html, /of 7 written/);
+    assert.match(html, /1 episode/);
     assert.doesNotMatch(html, /Nothing written yet/, "and never contradicts it with a day one");
   });
 
@@ -495,12 +577,42 @@ describe("an episodic production's front page is its season (design turn 93)", (
     const html = home(PROD);
     const labels = [...html.matchAll(/<span class="fy-prodrail__label">([^<]*)</g)].map((m) => m[1]);
     assert.deepEqual(
-      labels.slice(0, 9),
-      ["Overview", "Episodes", "New scene", "Takes", "Artifacts", "Audio", "Generate", "Cut", "Exports"],
+      labels.slice(0, 7),
+      ["Overview", "Episodes", "New scene", "Takes", "Artifacts", "Generate", "Cut"],
     );
     assert.ok(!labels.includes("Dashboard"), "a series has an overview and episodes instead");
     assert.ok(!labels.includes("Cast"), "the scene workspace keeps the production hierarchy quiet");
     assert.match(html, /series · 1 episode · 0 scenes/);
+  });
+
+  it("keeps only the current production destination selected and omits retired destinations (#995)", () => {
+    const activeLabels = (html: string) =>
+      [...html.matchAll(/<a[^>]*class="fy-prodrail__item[^"]*--active[^>]*>[\s\S]*?<span class="fy-prodrail__label">([^<]*)/g)]
+        .map((match) => match[1]);
+    for (const [suffix, expected] of [
+      ["", ["Overview"]],
+      ["/generate", ["Takes"]],
+      ["/generate?view=stills", ["Takes"]],
+      ["/generate?view=bench", ["Generate"]],
+      ["/cast", []],
+    ] as const) {
+      const html = home(`${PROD}${suffix}`);
+      assert.deepEqual(activeLabels(html), expected, suffix || "Overview");
+      assert.doesNotMatch(html, /fy-prodrail__label">(?:Audio|Exports)</);
+      assert.doesNotMatch(html, /<a[^>]*aria-current="page"[^>]*class="fy-prodrail__foot/, "the parent world is not the current page");
+    }
+    const base = `/w/${FIXTURE_WORLD_ID}/p/saltlight`;
+    const video = renderApp(FIXTURE_STATE, `${base}/narrative`);
+    assert.deepEqual(activeLabels(video), ["Overview"]);
+    assert.doesNotMatch(video, /fy-prodrail__label">(?:Audio|Exports)</);
+    const storyState = structuredClone(FIXTURE_STATE);
+    const story = storyState.world!.productions.find((production) => production.meta.id === "saltlight")!;
+    story.meta.medium = "story";
+    story.meta.kind = "novel";
+    const manuscript = renderApp(storyState, `${base}/story/chapters`);
+    assert.deepEqual(activeLabels(manuscript), ["Chapters"]);
+    assert.doesNotMatch(manuscript, /fy-prodrail__label">(?:Audio|Exports)</);
+    assert.match(manuscript, /data-testid="export-manuscript"/, "manuscript delivery remains on Chapters");
   });
 
   it("opens the current episode in the rail and shows its scene in place", () => {
@@ -516,12 +628,12 @@ describe("an episodic production's front page is its season (design turn 93)", (
       state,
       `/w/${FIXTURE_WORLD_ID}/p/bell-watch-season-1/scenes/sc_04`,
     );
-    assert.match(html, /aria-label="Collapse Episode 2: The vigil"/);
+    assert.match(html, /aria-label="Collapse Episode 1: The vigil"/);
     assert.match(html, /fy-prodrail__scene fy-prodrail__scene--active/);
     assert.match(html, /4 · The verse rises/);
     assert.ok(html.indexOf("4 · The verse rises") < html.indexOf("2 · Before the watch"), "episode order wins");
     // A press, not a link (SPEC-036 R-37): the episode's New scene makes the scene and opens it.
-    assert.match(html, /class="fy-prodrail__new-scene" aria-label="New scene in Episode 2: The vigil"/);
+    assert.match(html, /class="fy-prodrail__new-scene" aria-label="New scene in Episode 1: The vigil"/);
     assert.doesNotMatch(html, /scenes\/new/, "the brief form is retired");
     assert.match(html, /New episode/);
     assert.match(html, /fy-prodrail--folded/);
@@ -547,7 +659,7 @@ describe("an episodic production's front page is its season (design turn 93)", (
       `/w/${FIXTURE_WORLD_ID}/p/bell-watch-season-1/scenes/sc_05`,
     );
 
-    assert.match(html, /aria-label="Expand Episode 2: The vigil"/);
+    assert.match(html, /aria-label="Expand Episode 1: The vigil"/);
     assert.match(html, /aria-label="Collapse Unassigned scenes"/);
     assert.match(html, /href="\/w\/[^/]+\/p\/bell-watch-season-1\/scenes\/sc_05"/);
     assert.match(html, /fy-prodrail__scene fy-prodrail__scene--active/);
@@ -619,7 +731,7 @@ describe("an episodic production's front page is its season (design turn 93)", (
     const html = renderApp(stripped, `/w/${FIXTURE_WORLD_ID}/p/${PROD}`);
     assert.match(html, /Let’s shape the season\. What is it about\?/, "Arke opens rather than a card explaining");
     assert.doesNotMatch(html, /is where the season gets shaped/, "the card that pointed at a page is gone");
-    assert.match(html, /not written yet/i, "beside the shape it was promised");
+    assert.match(html, /Create the first episode/);
   });
 });
 
@@ -724,7 +836,7 @@ describe("Arke is docked on the thing it is about (design turns 99, 100)", () =>
     );
     assert.match(html, />Accept</, "the yes is in the panel");
     assert.match(html, />Discard</, "the ordinary gate actions stay together");
-    assert.match(html, /nothing else changes/, "and says what it does not touch");
+    assert.doesNotMatch(html, /nothing else changes/, "no caption under the gate's buttons (turn 137)");
     assert.match(html, /Who is ringing the drowned bell\?/);
     // The two rail states are still never up together (turn 91): a point is not a proposal.
     assert.doesNotMatch(html, /What it understood/, "the understanding gives way to the decision");
@@ -734,7 +846,7 @@ describe("Arke is docked on the thing it is about (design turns 99, 100)", () =>
     const html = render(withMicrodrama([ONE]), SEASON(PROD), <StoryScreen />, "/w/:worldId/p/:prodId/season");
     assert.match(html, /Wrap up/, "without it a conversation cannot become anything (turn 92)");
     assert.match(html, /What it understood/, "still reachable, behind a disclosure");
-    assert.match(html, /talking changes nothing/, "and the promise beside the composer survives");
+    assert.doesNotMatch(html, /talking changes nothing/, "and no longer says so beside the composer (issue 1008)");
   });
 });
 

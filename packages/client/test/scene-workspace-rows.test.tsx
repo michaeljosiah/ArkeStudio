@@ -6,16 +6,16 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
 import { orderedShots, type ClientMessage, type ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
- * The storyboard row, band and divider as the design draws them (SPEC-036 R-6..R-8, R-11): the
- * menu's order, the trailing Add shot card, the readiness line, the band's grip and icon controls,
- * and the prompt slot that hides while its disclosure is open. Same harness as
- * scene-workspace.test.tsx; these are the assertions that file did not carry.
+ * The storyboard row, band and divider as the design draws them (SPEC-036 R-6..R-8, R-11; turn
+ * 145): the Grid first and by default, the row that is a row and opens the page, the menu's order,
+ * the trailing Add shot card, the readiness line, the band's grip and icon controls. Same harness
+ * as scene-workspace.test.tsx; these are the assertions that file did not carry.
  */
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -68,6 +68,7 @@ afterEach(async () => {
   dom.document.body.replaceChildren();
   __setStateForTest(FIXTURE_STATE);
   __setBridgeForTest(null);
+  __connectionStatusForTest("closed");
 });
 
 function capture(sent: ClientMessage[]): ArkeBridge {
@@ -106,18 +107,110 @@ function sceneOf(state: ClientState): SceneShape {
 }
 
 describe("Storyboard rows follow the design's row anatomy (SPEC-036 R-6..R-8)", () => {
+  it("opens on the Grid, Grid first in the control, and switches to the List without replacing the editor, draft, selection or shot order (turns 138, 145)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState();
+    const list = q(mounted, '[data-testid="workspace-rows"]')!;
+    assert.equal(list.dataset.layout, "grid", "the Grid is the storyboard's default (turn 145)");
+    assert.equal(list.dataset.aspect, "landscape", "the fixture production is 16:9, so its cards lie down");
+    assert.deepEqual(buttons(q(mounted, ".fy-sw__layouts")!).map((button) => button.textContent), ["Grid", "List"]);
+    await click(byText(q(mounted, ".fy-sw__layouts")!, "List"));
+    const band = q(mounted, ".fy-swrow__band")!;
+    await click(band);
+    const editor = band.querySelector(".fy-swrow__script textarea") as HTMLTextAreaElement;
+    await act(async () => {
+      editor.value = "An unfinished shot draft";
+      // Linkedom does not implement React's native textarea value tracking.
+      const key = Object.keys(editor).find((candidate) => candidate.startsWith("__reactProps$"))!;
+      const props = (editor as unknown as Record<string, { onChange: (event: { target: HTMLTextAreaElement }) => void }>)[key]!;
+      props.onChange({ target: editor });
+    });
+    const order = all(mounted, ".fy-swrow__band").map((row) => row.dataset.shotId);
+    assert.equal(list.dataset.layout, "list");
+    await click(byText(q(mounted, ".fy-sw__layouts")!, "Grid"));
+    assert.equal(list.dataset.layout, "grid");
+    assert.equal(q(mounted, ".fy-swrow__band"), band);
+    assert.equal(band.querySelector(".fy-swrow__script textarea"), editor);
+    assert.equal(editor.value, "An unfinished shot draft");
+    assert.equal(band.dataset.selected, "true");
+    assert.deepEqual(all(mounted, ".fy-swrow__band").map((row) => row.dataset.shotId), order);
+    await click(byText(q(mounted, ".fy-sw__layouts")!, "List"));
+    assert.equal(list.dataset.layout, "list");
+    assert.equal(sent.filter((message) => message.kind === "scene-command").length, 0, "layout alone authors no scene change");
+  });
+
+  it("shows board controls in List and restores an ungrouped Grid without changing boards", async () => {
+    const mounted = await mountState();
+    await click(byText(q(mounted, ".fy-sw__layouts")!, "Grid"));
+    await click(q(mounted, ".fy-sw__boards-toggle")!);
+    assert.equal(q(mounted, ".fy-swrows")?.dataset.layout, "list");
+    assert.ok(q(mounted, ".fy-swboard"));
+    await click(byText(q(mounted, ".fy-sw__layouts")!, "Grid"));
+    assert.equal(q(mounted, ".fy-swrows")?.dataset.layout, "grid");
+    assert.equal(q(mounted, ".fy-swboard"), null);
+    assert.equal(q(mounted, ".fy-sw__boards-toggle")?.getAttribute("aria-pressed"), "false");
+  });
+
   it("orders the ··· menu as the design does and keeps reordering on the label handle", async () => {
     const mounted = await mountState();
     const row = q(mounted, ".fy-swrow")!;
     const trigger = row.querySelector(".fy-swrow__more") as unknown as HTMLElement;
     assert.ok(trigger.querySelector("svg circle"), "the trigger is the three-dot glyph, not text");
     assert.equal(trigger.getAttribute("title"), "More");
-    assert.equal(row.querySelector(".fy-swrow__label")?.getAttribute("title"), "Drag to reorder");
+    assert.equal(row.querySelector(".fy-swrow__label")?.getAttribute("title"), "Open the shot · drag to reorder");
+    assert.equal(row.querySelector(".fy-swrow__chevron")?.getAttribute("aria-label"), "Open shot 12", "the chevron beside the overflow opens the page");
     await click(trigger);
+    // Advanced and Stage this shot left the menu (turn 145): the page is both doors.
     assert.deepEqual(
       menuButtons().map((button) => button.textContent),
-      ["Stage this shot", "Open in generator", "Advanced", "Duplicate", "Add shot after", "Delete"],
+      ["Open in generator", "Duplicate", "Add shot after", "Delete"],
     );
+  });
+
+  it("remembers the layout per person: the List once chosen, the Grid again once chosen back", async () => {
+    const store = new Map<string, string>();
+    Object.defineProperty(dom.window, "localStorage", {
+      configurable: true,
+      value: { getItem: (key: string) => store.get(key) ?? null, setItem: (key: string, value: string) => { store.set(key, value); } },
+    });
+    try {
+      const first = await mountState();
+      await click(byText(q(first, ".fy-sw__layouts")!, "List"));
+      assert.equal(store.get("arke.storyboard.layout"), "list");
+      await act(async () => first.root.unmount());
+      first.container.remove();
+      open.splice(open.indexOf(first), 1);
+      const second = await mountState();
+      assert.equal(q(second, '[data-testid="workspace-rows"]')?.dataset.layout, "list", "the choice outlives the scene");
+      await click(byText(q(second, ".fy-sw__layouts")!, "Grid"));
+      assert.equal(store.get("arke.storyboard.layout"), "grid");
+    } finally {
+      Reflect.deleteProperty(dom.window, "localStorage");
+    }
+  });
+
+  it("opens the page from the number, the frame, the title and the chevron, and selects on a press anywhere else (turn 145)", async () => {
+    for (const door of [".fy-swrow__label", ".fy-swrow__img, .fy-swrow__hatch", ".fy-swrow__title", ".fy-swrow__chevron"]) {
+      const mounted = await mountState();
+      await click(byText(q(mounted, ".fy-sw__layouts")!, "List"));
+      const row = q(mounted, ".fy-swrow")!;
+      await click(row.querySelector(door) as HTMLElement);
+      assert.ok(q(mounted, '[data-testid="shot-page"]'), `${door} opens the shot page`);
+      assert.equal(q(mounted, '[data-testid="workspace-rows"]'), null);
+      await act(async () => mounted.root.unmount());
+      mounted.container.remove();
+      open.splice(open.indexOf(mounted), 1);
+    }
+    const mounted = await mountState();
+    await click(byText(q(mounted, ".fy-sw__layouts")!, "List"));
+    const band = q(mounted, ".fy-swrow__band")!;
+    await click(band.querySelector(".fy-swrow__timing") as HTMLElement);
+    await click(band);
+    assert.equal(band.dataset.selected, "true", "a press on the row is the selection");
+    assert.ok(q(mounted, '[data-testid="workspace-rows"]'), "and it opens nothing");
+    assert.equal(band.querySelector(".fy-swrow__prompt-toggle"), null, "the row carries no Frame prompt toggle (139c withdrawn)");
+    assert.equal(band.getAttribute("data-open"), null, "and no row unfolds (143 withdrawn)");
   });
 
   it("moves a shot from the keyboard with Alt and an arrow, since the menu has no Move entries", async () => {
@@ -176,69 +269,104 @@ describe("Storyboard rows follow the design's row anatomy (SPEC-036 R-6..R-8)", 
     assert.ok(all(mounted, ".fy-swready").length === 1, "one line, beneath the list, not one per row");
   });
 
-  it("puts the state dot after its label and the shot size on the title line", async () => {
+  it("shows only exceptional state and keeps the authored title when framing is set (#931)", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const scene = sceneOf(state);
     scene.shots[0]!.framing = { size: "wide" };
     const mounted = await mountState(state);
     const [first, second] = all(mounted, ".fy-swrow__title");
-    assert.equal(first?.textContent, "Shot 12 · wide", "a framed shot names its size (notes §7.1)");
-    assert.equal(second?.textContent, "Shot 13 · The lamps answer", "an unframed shot falls back to its title");
+    assert.equal(first?.textContent, scene.shots[0]!.title, "framing must not replace the authored title");
+    assert.equal(second?.textContent, "The lamps answer", "every shot shows its title");
     const chip = q(mounted, ".fy-swchip")!;
-    assert.equal(chip.lastElementChild?.tagName, "SPAN");
-    assert.equal(chip.lastElementChild?.getAttribute("aria-hidden"), "true", "the dot follows the label");
-    assert.equal(chip.firstChild?.nodeType, dom.window.Node.TEXT_NODE);
+    assert.equal(chip.firstElementChild?.tagName, "SPAN");
+    assert.equal(chip.firstElementChild?.getAttribute("aria-hidden"), "true", "the exception has a decorative dot");
+    assert.match(chip.textContent ?? "", /Needs frame|Needs attention/);
   });
 
-  it("leads each reference chip with a round thumbnail and caps override labels at two", async () => {
+  it("does not ask for a frame when an accepted clip makes the shot rendered", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
-    sceneOf(state).shots[0]!.framing = { size: "MCU", lens: "50mm", movement: "slow push-in" };
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const clip = production.takes.find((take) => take.kind === "clip")!;
+    const shot = sceneOf(state).shots[0]!;
+    production.selections[shot.id] = { acceptedTakeId: clip.id, trimInSec: 0 };
     const mounted = await mountState(state);
-    const row = q(mounted, ".fy-swrow")!;
-    const refs = [...row.querySelectorAll(".fy-swrow__ref")] as unknown as HTMLElement[];
-    assert.ok(refs.length >= 2);
-    for (const ref of refs) {
-      assert.equal(ref.firstElementChild?.className, "fy-swrow__refthumb", "the thumb comes before the name");
-      assert.match(ref.getAttribute("title") ?? "", /^(character|location|faction) · v\d+$/);
-    }
-    const overrides = [...row.querySelectorAll(".fy-swrow__override")] as unknown as HTMLElement[];
-    assert.deepEqual(overrides.map((label) => label.textContent), ["MCU override", "50mm override"]);
-    assert.ok(overrides.every((label) => label.getAttribute("title") === "overrides the scene"));
+    const row = q(mounted, `[data-shot-id="${shot.id}"]`)!;
+    assert.equal(row.getAttribute("data-state"), "rendered");
+    assert.equal(row.querySelector(".fy-swchip"), null);
+    assert.doesNotMatch(row.textContent ?? "", /Needs frame/);
   });
 
-  it("hides the prompt slot while its disclosure is open, and Edit opens it in place", async () => {
+  it("reports the confirmed connection and version without claiming local edits are saved", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    __connectionStatusForTest("open");
     const mounted = await mountState();
-    const row = q(mounted, ".fy-swrow")!;
-    assert.equal(row.querySelector(".fy-swrow__slot span")?.textContent, "prompt · auto");
-    await click(byText(row, "Edit"));
-    const prompt = row.querySelector('.fy-swrow__prompt textarea[aria-label^="Image prompt for shot"]');
-    assert.equal(prompt?.getAttribute("role"), "combobox", "Edit opens the row's mention-aware prompt");
-    assert.equal(row.querySelector(".fy-swrow__slot"), null, "the slot gives way to the disclosure");
-    assert.ok(q(mounted, '[data-testid="workspace-rows"]'), "and nobody left the storyboard");
-    assert.equal(row.querySelector(".fy-swrow__prompthead > span")?.textContent, "image prompt");
+    const editor = q(mounted, ".fy-swrow__script textarea") as HTMLTextAreaElement;
+    await act(async () => {
+      editor.value = "An unsaved local script";
+      const key = Object.keys(editor).find((candidate) => candidate.startsWith("__reactProps$"))!;
+      const props = (editor as unknown as Record<string, { onChange: (event: { target: HTMLTextAreaElement }) => void }>)[key]!;
+      props.onChange({ target: editor });
+    });
+    assert.equal(editor.value, "An unsaved local script");
+    assert.equal(sent.filter((message) => message.kind === "scene-command").length, 0);
+    assert.equal(q(mounted, ".fy-sw__save")?.textContent, `Connected · v${sceneOf(FIXTURE_STATE).version}`);
+    assert.doesNotMatch(q(mounted, ".fy-sw__save")?.textContent ?? "", /saved/i);
   });
 
-  it("always offers Prompt and Rebuild, enabled only once there is something behind them", async () => {
+  it("the scene dock has no language-model select above its composer", async () => {
+    const mounted = await mountState();
+    assert.ok(q(mounted, ".fy-arke .fy-cx"), "the composer is there");
+    assert.equal(q(mounted, ".fy-arke .fy-arke__model"), null);
+    assert.equal(q(mounted, '.fy-arke select[aria-label="Language model"]'), null);
+  });
+
+  it("the frame rides a wrap the number sits on, the empty slot is bare and says so by attribute, and the state sits on the title line (issue 1114)", async () => {
+    // The fixture's shot 12 has a clip accepted, not a frame; the frame take stands in as the
+    // accepted one so the row draws a picture. Shot 13 stays empty.
     const state = structuredClone(FIXTURE_STATE) as ClientState;
-    const scene = sceneOf(state);
-    scene.shots[1]!.description = "";
-    (scene.shots[1] as { promptOverride?: { text: string; sheetVersions: Record<string, never> } }).promptOverride = {
-      text: "A hand-written prompt",
-      sheetVersions: {},
-    };
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    production.selections["sh_12"] = { acceptedTakeId: "tk_01J8A0000000000000000000A1" } as never;
     const mounted = await mountState(state);
-    const [written, blank] = all(mounted, ".fy-swrow");
-    const blankPrompt = byText(blank!.querySelector(".fy-swrow__frameactions")!, "Prompt") as unknown as HTMLButtonElement;
-    assert.equal(blankPrompt.disabled, true, "a blank script has no prompt to show");
+    const [framed, empty] = all(mounted, ".fy-swrow__band");
+    assert.ok(framed && empty);
+    assert.ok(framed.querySelector(".fy-swrow__frame > .fy-swrow__img"), "shot 12 draws its frame");
+    // The number is the wrap's, not the frame's: on the card the frame is inset and the number
+    // straddles its corner (145f); on the row the two boxes coincide.
+    assert.ok(framed.querySelector(".fy-swrow__framewrap > .fy-swrow__label"), "the number sits on the wrap");
+    assert.equal(framed.querySelector(".fy-swrow__frame .fy-swrow__label"), null);
+    assert.equal(framed.querySelector(".fy-swrow__frame")?.getAttribute("data-empty"), null);
+    const slot = empty.querySelector(".fy-swrow__frame")!;
+    assert.equal(slot.getAttribute("data-empty"), "true", "the dashed slot is drawn from the attribute the page's frame uses");
+    assert.ok(slot.querySelector(".fy-swrow__hatch svg"), "the slot holds the picture mark");
+    assert.equal(slot.querySelector(".fy-swrow__hatch")?.textContent, "", "and no caption of its own — Needs frame is the state, under the title");
+    assert.ok(empty.querySelector(".fy-swrow__titleline > .fy-swchip"), "the state sits on the title line, as 145a and 145f draw it");
+    assert.equal(empty.querySelector(".fy-swrow__timing .fy-swchip"), null);
+    assert.match(empty.querySelector(".fy-swrow__titleline > .fy-swchip")?.textContent ?? "", /Needs frame/);
+  });
 
-    await click(byText(written!.querySelector(".fy-swrow__frameactions")!, "Prompt"));
-    const rebuild = byText(written!.querySelector(".fy-swrow__prompt")!, "Rebuild") as unknown as HTMLButtonElement;
-    assert.equal(rebuild.getAttribute("title"), "Rebuild from the script, references and camera");
-    assert.equal(rebuild.disabled, true, "nothing to rebuild while the prompt is the assembled one");
+  it("the script reads a mention as its name until the editor is written in, then as its token (issues 1103, 1114)", async () => {
+    const mounted = await mountState();
+    const row = q(mounted, '[data-shot-id="sh_12"]')!;
+    const under = row.querySelector(".fy-swrow__script .fy-bench__briefunder")!;
+    assert.equal(under.textContent?.replace("\u200b", ""), "Maren Kest grips the rail of The Vigil.", "read mode: the sheet's name, not the slug");
+    assert.equal(under.querySelectorAll(".fy-mentionname").length, 2);
+    assert.equal(under.querySelector(".fy-bench__briefchip"), null);
+    const editor = row.querySelector(".fy-swrow__script textarea") as HTMLTextAreaElement;
+    assert.equal(editor.value, "@maren-kest grips the rail of @the-vigil.", "the record keeps the tokens");
+    // Focus arrives on the editor's box rather than the textarea: React's input-event polyfill
+    // reaches for attachEvent when a linkedom textarea gains focus, and the box's onFocus is the
+    // same handler.
+    await act(async () => q(mounted, ".fy-swrow__script")!.dispatchEvent(new dom.window.Event("focusin", { bubbles: true })));
+    assert.equal(under.textContent?.replace("\u200b", ""), "@maren-kest grips the rail of @the-vigil.", "edit mode: the token, letter for letter with the caret above it");
+    assert.equal(under.querySelectorAll(".fy-bench__briefchip").length, 2, "chipped as the bench chips a citation");
+    await act(async () => q(mounted, ".fy-swrow__script")!.dispatchEvent(new dom.window.Event("focusout", { bubbles: true })));
+    assert.equal(under.querySelectorAll(".fy-mentionname").length, 2, "and back to names when the editor is left");
+  });
 
-    await click(byText(blank!, "Edit"));
-    const stored = byText(blank!.querySelector(".fy-swrow__prompt")!, "Rebuild") as unknown as HTMLButtonElement;
-    assert.equal(stored.disabled, false, "a stored override is something to rebuild from");
+  it("the breadcrumb parts its levels on slashes (turn 139)", async () => {
+    const mounted = await mountState();
+    assert.equal(q(mounted, ".fy-sw__breadcrumb")?.textContent, "Saltlight \u00a0/\u00a0 Scene 4");
   });
 });
 
@@ -282,6 +410,28 @@ describe("Board bands and dividers follow the design (SPEC-036 R-8, R-11)", () =
     assert.equal(merge.getAttribute("title"), "Remove this hand split");
   });
 
+  it("offers Render board and Plan video only where the scene can be written", async () => {
+    // A mutation sample found both controls' `disabled` guards untested: with `locked || staged`
+    // flipped to `&&`, Plan video stayed pressable on a scene that cannot take a write. A scene
+    // with no file on disk is locked and nothing on it is staged, which is the case that tells the
+    // two apart.
+    const open = await mountState(split());
+    await click(q(open, ".fy-sw__boards-toggle")!);
+    const band = (m: Mounted) => q(m, '[data-testid="workspace-board-A"] .fy-swboard__line')!;
+    const control = (m: Mounted, text: string) => [...band(m).querySelectorAll("button")].find((b) => b.textContent?.trim() === text) as unknown as HTMLButtonElement;
+    assert.equal(control(open, "Plan video").disabled, false, "a scene that can be written offers the plan");
+    assert.equal(control(open, "Render board").disabled, false);
+    await act(async () => open.root.unmount());
+
+    const state = split();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    delete production.sceneFiles["sc_04"];
+    const locked = await mountState(state);
+    await click(q(locked, ".fy-sw__boards-toggle")!);
+    assert.equal(control(locked, "Plan video").disabled, true, "no file to write the plan against");
+    assert.equal(control(locked, "Render board").disabled, true);
+  });
+
   it("removes a hand split instead of leaving a latent merge override", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
@@ -321,4 +471,20 @@ describe("Board bands and dividers follow the design (SPEC-036 R-8, R-11)", () =
     const command = sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>;
     assert.deepEqual(command.command, { kind: "move-board-boundary", fromShotId: "sh_13", toShotId: "sh_14" });
   });
+});
+
+it("shows the advisory 180-degree marker on the shot row and Flow staging node (#1045)", async () => {
+  const state = structuredClone(FIXTURE_STATE);
+  const scene = state.world!.productions.find(p => p.meta.id === "saltlight")!.scenes.find(s => s.id === "sc_04")!;
+  const shot = orderedShots(scene)[0]!;
+  shot.durationSec = 4;
+  shot.staging = { version: 1, cast: [{ sheetId: "alice", x: -1, z: 0 }, { sheetId: "bob", x: 1, z: 0 }], sets: [],
+    keys: [{ t: 0, p: [0, 1.5, 4], l: [0, 1, 0] }, { t: 4, p: [0, 1.5, -4], l: [0, 1, 0] }],
+  };
+  const mounted = await mountState(state);
+  const marker = q(mounted, '.fy-swrow__titleline [title^="180° line:"]');
+  assert.equal(marker?.textContent, "180° line");
+  assert.match(marker?.getAttribute("title") ?? "", /crosses/);
+  await click(byText(mounted.container, "Flow"));
+  assert.equal(q(mounted, '.fy-swnode[data-kind="block"] [title^="180° line:"]')?.textContent, "180° line");
 });

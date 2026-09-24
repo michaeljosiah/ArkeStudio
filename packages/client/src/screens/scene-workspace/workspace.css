@@ -1,0 +1,294 @@
+/* Scene workspace · design turn 138. After fidelity.css; shell and other views keep their rules. */
+.fy-sw:where([data-screen="scene-detail"]) { grid-template-columns: minmax(0, 1fr) clamp(300px, 23vw, 364px); }
+:where([data-screen="scene-detail"]) .fy-sw__centre { padding-inline: 32px 24px; }
+:where([data-screen="scene-detail"]) .fy-sw__head { padding: 18px 0 12px; animation: none; }
+:where([data-screen="scene-detail"]) .fy-sw__breadcrumb { font: 400 13px/1.5 var(--font-sans); color: var(--muted-foreground); margin-bottom: 6px; }
+:where([data-screen="scene-detail"]) .fy-sw__headline { align-items: center; }
+:where([data-screen="scene-detail"]) .fy-sw__title { font-size: 24px; font-weight: 600; line-height: 1.2; }
+:where([data-screen="scene-detail"]) .fy-sw__actions > .ui-btn { min-height: 36px; padding-inline: 14px; font-size: 13px; }
+:where([data-screen="scene-detail"]) .fy-sw__head .fy-sbsynopsis { margin: 5px 0 10px; }
+:where([data-screen="scene-detail"]) .fy-sw__context { position: relative; gap: 14px 20px; margin-top: 6px; }
+:where([data-screen="scene-detail"]) .fy-sw__context-label { color: var(--muted-foreground); font: 400 13px/1.4 var(--font-sans); }
+:where([data-screen="scene-detail"]) .fy-sw__cast { margin: 0; gap: 8px; flex-wrap: wrap; }
+:where([data-screen="scene-detail"]) .fy-sw__cast > .fy-sw__context-label { margin-right: 4px; }
+:where([data-screen="scene-detail"]) .fy-sw__tile { width: 36px; height: 36px; flex: none; border-radius: 9px; }
+:where([data-screen="scene-detail"]) .fy-sw__tile--add { border-style: solid; border-color: var(--border); }
+:where([data-screen="scene-detail"]) .fy-sw__tile:hover, :where([data-screen="scene-detail"]) .fy-sw__tile:focus-visible { border-color: var(--muted-foreground); color: var(--foreground); }
+:where([data-screen="scene-detail"]) .fy-sw__tile:disabled, :where([data-screen="scene-detail"]) .fy-sw__door:disabled { opacity: .45; cursor: default; }
+:where([data-screen="scene-detail"]) .fy-sw__location { border-left: 1px solid var(--border); padding-left: 18px; min-width: 0; max-width: 100%; }
+:where([data-screen="scene-detail"]) .fy-sw__place { display: flex; align-items: center; gap: 12px; padding: 0; border: 0; background: transparent; color: var(--foreground); cursor: pointer; text-align: left; max-width: 100%; }
+:where([data-screen="scene-detail"]) .fy-sw__plate { width: 64px; height: 36px; border-radius: 8px; font-size: 16px; }
+:where([data-screen="scene-detail"]) .fy-sw__place-name { display: flex; flex-direction: column; gap: 3px; min-width: 0; font: 400 13px/1.4 var(--font-sans); }
+:where([data-screen="scene-detail"]) .fy-sw__place-name > span:last-child { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:where([data-screen="scene-detail"]) .fy-sw__place:hover .fy-sw__place-name > span:last-child { text-decoration: underline; text-underline-offset: 3px; }
+:where([data-screen="scene-detail"]) .fy-sw__door { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 10px; border: 1px dashed var(--border); border-radius: 8px; background: transparent; color: var(--muted-foreground); font: 400 12px var(--font-sans); cursor: pointer; }
+:where([data-screen="scene-detail"]) .fy-sw__metrics { display: flex; align-items: center; gap: 14px; padding: 0; color: var(--muted-foreground); font: 400 13px var(--font-sans); }
+:where([data-screen="scene-detail"]) .fy-sw__metrics > span { display: inline-flex; align-items: center; gap: 8px; padding-left: 14px; border-left: 1px solid var(--border); white-space: nowrap; }
+:where([data-screen="scene-detail"]) .fy-sw__details { margin-left: auto; }
+:where([data-screen="scene-detail"]) .fy-sw__details > summary { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 7px; color: var(--muted-foreground); cursor: pointer; list-style: none; }
+:where([data-screen="scene-detail"]) .fy-sw__details > summary::-webkit-details-marker { display: none; }
+:where([data-screen="scene-detail"]) .fy-sw__details > summary:hover, :where([data-screen="scene-detail"]) .fy-sw__details[open] > summary { background: var(--accent); color: var(--foreground); }
+:where([data-screen="scene-detail"]) .fy-sw__detailspanel { position: absolute; z-index: 3; top: calc(100% + 8px); right: 0; width: min(100%, 420px); padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--popover); box-shadow: var(--shadow-lg); }
+:where([data-screen="scene-detail"]) .fy-sw__detailspanel > span:not(:first-child) { display: inline-block; margin: 8px 12px 0 0; color: var(--muted-foreground); font-size: 13px; }
+:where([data-screen="scene-detail"]) .fy-sw__toolbar { max-width: none; gap: 12px; padding-bottom: 12px; flex-wrap: wrap; }
+:where([data-screen="scene-detail"]) .fy-sw__tabs { border-radius: 10px; padding: 3px; background: color-mix(in srgb, var(--secondary) 38%, var(--background)); }
+:where([data-screen="scene-detail"]) .fy-sw__tab[data-on="true"] { background: var(--secondary); font-weight: 500; }
+:where([data-screen="scene-detail"]) .fy-sw__tab { min-height: 30px; padding: 6px 14px; font-size: 13px; font-weight: 500; border-radius: 8px; }
+:where([data-screen="scene-detail"]) .fy-sw__coverage { display: inline-flex; align-items: center; gap: 9px; font: 400 13px var(--font-sans); }
+:where([data-screen="scene-detail"]) .fy-sw__coverage > span { width: 11px; height: 11px; border-radius: 50%; background: var(--neutral-400); }
+:where([data-screen="scene-detail"]) .fy-sw__coverage[data-ready] > span { background: var(--success); }
+:where([data-screen="scene-detail"]) .fy-sw__layouts { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid var(--border); border-radius: 10px; }
+:where([data-screen="scene-detail"]) .fy-sw__layouts button { display: inline-flex; align-items: center; gap: 8px; min-height: 30px; padding: 6px 14px; border: 0; border-radius: 7px; background: transparent; color: var(--muted-foreground); font: 400 13px var(--font-sans); cursor: pointer; }
+:where([data-screen="scene-detail"]) .fy-sw__layouts button[aria-pressed="true"] { background: var(--secondary); color: var(--foreground); box-shadow: var(--shadow-xs); }
+:where([data-screen="scene-detail"]) .fy-sw__layouts button:hover:not(:disabled) { color: var(--foreground); background: var(--accent); }
+:where([data-screen="scene-detail"]) .fy-sw__layouts button:disabled { opacity: .4; cursor: default; }
+
+:where([data-screen="scene-detail"]) .fy-swrows { padding: 1px 3px 20px 1px; align-items: stretch; scrollbar-gutter: stable; }
+:where([data-screen="scene-detail"]) .fy-swrow, :where([data-screen="scene-detail"]) .fy-swaddshot { width: 100%; }
+:where([data-screen="scene-detail"]) .fy-swrow { flex: none; }
+/* 14px above and below the frame (turn 145): the picture sits inside the row, not on its border. */
+:where([data-screen="scene-detail"]) .fy-swrow__band { grid-template-columns: 54px 285px minmax(0, 1fr); align-items: stretch; min-height: 236px; padding: 14px 0; border-radius: 12px; box-shadow: none; background: color-mix(in srgb, var(--secondary) 38%, var(--background)); }
+:where([data-screen="scene-detail"]) .fy-swrow__band:hover { box-shadow: none; border-color: color-mix(in srgb, var(--muted-foreground) 35%, var(--border)); }
+:where([data-screen="scene-detail"]) .fy-swrow__band[data-selected="true"] { background: color-mix(in srgb, var(--secondary) 70%, var(--background)); }
+:where([data-screen="scene-detail"]) .fy-swrow__ring { border: 1px solid color-mix(in srgb, var(--muted-foreground) 70%, var(--border)); border-radius: 12px; }
+:where([data-screen="scene-detail"]) .fy-swrow__grip { padding-top: 24px; display: flex; justify-content: center; color: var(--muted-foreground); }
+:where([data-screen="scene-detail"]) .fy-swrow__grip > svg { width: 20px; height: 24px; }
+:where([data-screen="scene-detail"]) .fy-swrow__grip[draggable="true"] { cursor: grab; }
+:where([data-screen="scene-detail"]) .fy-swrow__grip[draggable="true"]:active { cursor: grabbing; }
+/* List previews match the approved image box; Expand keeps the full source composition. */
+:where([data-screen="scene-detail"]) .fy-swrow__framewrap { position: relative; align-self: start; min-width: 0; }
+:where([data-screen="scene-detail"]) .fy-swrow__frame { box-sizing: border-box; width: 100%; height: auto; aspect-ratio: 285 / 208; border-radius: 8px; }
+:where([data-screen="scene-detail"]) .fy-swrow__frame[data-empty="true"] { border: 1px dashed var(--border); }
+:where([data-screen="scene-detail"]) .fy-swrow__img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.fy-swlightbox__frame > img { object-fit: contain; }
+:where([data-screen="scene-detail"]) .fy-swrow__label { min-width: 32px; height: 34px; box-sizing: border-box; display: grid; place-items: center; padding: 0 5px; background: var(--media-overlay-bg); color: var(--media-overlay-fg); border-color: color-mix(in srgb, var(--media-overlay-fg) 45%, transparent); border-radius: 6px; font: 400 16px var(--font-sans); }
+:where([data-screen="scene-detail"]) .fy-swrow__chipmeta { font: 400 13px var(--font-sans); bottom: 9px; top: auto; left: 9px; }
+:where([data-screen="scene-detail"]) .fy-swrow__frame:hover .fy-swrow__chipmeta, :where([data-screen="scene-detail"]) .fy-swrow__frame:focus-within .fy-swrow__chipmeta { opacity: 0; }
+:where([data-screen="scene-detail"]) .fy-swrow__hatch { position: absolute; inset: 0; background: var(--muted); }
+:where([data-screen="scene-detail"]) .fy-swrow__body { padding: 18px 30px; gap: 6px; }
+:where([data-screen="scene-detail"]) .fy-swrow__titleline { min-height: 30px; padding-right: 210px; gap: 12px; flex-wrap: wrap; }
+:where([data-screen="scene-detail"]) .fy-swrow__title-edit { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+:where([data-screen="scene-detail"]) .fy-swrow__title { min-width: 0; padding: 0; border: 0; background: transparent; color: var(--foreground); font: 600 15px/1.4 var(--font-sans); text-align: left; cursor: pointer; }
+:where([data-screen="scene-detail"]) .fy-swrow__title:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 3px; }
+:where([data-screen="scene-detail"]) .fy-swrow__title:disabled { cursor: default; }
+:where([data-screen="scene-detail"]) .fy-swrow__pencil { flex: none; display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
+:where([data-screen="scene-detail"]) .fy-swrow__pencil:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
+:where([data-screen="scene-detail"]) .fy-swrow__pencil:disabled { opacity: .45; cursor: default; }
+:where([data-screen="scene-detail"]) .fy-swrow__open { cursor: pointer; }
+:where([data-screen="scene-detail"]) .fy-swrow__title-input { width: 100%; min-width: 80px; padding: 2px 5px; border: 1px solid var(--border); border-radius: 5px; background: var(--background); color: var(--foreground); font: 600 16px/1.4 var(--font-sans); }
+:where([data-screen="scene-detail"]) .fy-swrow__timing { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--muted-foreground); font: 400 13px/1.4 var(--font-sans); }
+:where([data-screen="scene-detail"]) .fy-swrow__timing > button { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; cursor: text; text-underline-offset: 3px; }
+:where([data-screen="scene-detail"]) .fy-swrow__timing > button:hover { text-decoration: underline; }
+:where([data-screen="scene-detail"]) .fy-swrow__timing > input { width: 72px; border: 1px solid var(--border); border-radius: 4px; background: var(--background); color: var(--foreground); font: inherit; }
+:where([data-screen="scene-detail"]) .fy-swrow__titleline .fy-swchip { gap: 8px; font: 400 var(--text-sm)/1.4 var(--font-sans); color: var(--muted-foreground); }
+:where([data-screen="scene-detail"]) .fy-swrow__titleline .fy-swchip > span { width: 8px; height: 8px; }
+:where([data-screen="scene-detail"]) .fy-swrow__titleline .fy-swchip[data-state="story"] > span { background: var(--neutral-400); }
+:where([data-screen="scene-detail"]) .fy-swrow__scripteditor { margin-top: 12px; }
+:where([data-screen="scene-detail"]) .fy-swrow__scripteditor .fy-bench__briefstack { min-height: 44px; }
+:where([data-screen="scene-detail"]) .fy-swrow__scripteditor .fy-bench__briefunder,
+:where([data-screen="scene-detail"]) .fy-swrow__scripteditor .fy-bench__briefmirror,
+:where([data-screen="scene-detail"]) .fy-swrow__scripteditor .fy-bench__brieftext { font: 400 13px/1.55 var(--font-sans); }
+/* The words size the box: the underlay sits in flow and the transparent editor covers it, so a
+   script shows whole on the row as 145a draws it, and read mode's names — not the tokens'
+   length — never leave lines behind a fixed height or a scroll that counted the tokens. Written
+   in, the editor and the underlay hold the same characters and agree line for line; until then
+   the editor's own overflow stays out of sight. The card reads three lines (145f) and grows to
+   the whole script only while it is written in. */
+:where([data-screen="scene-detail"]) .fy-swrow__scripteditor .fy-bench__briefunder { position: static; height: auto; overflow: visible; }
+:where([data-screen="scene-detail"]) .fy-swrow__scripteditor:not(:focus-within) .fy-bench__brieftext { overflow: hidden; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__scripteditor:not(:focus-within) .fy-bench__briefunder { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+:where([data-screen="scene-detail"]) .fy-swrow__actions { position: absolute; top: 34px; right: 20px; border: 0; padding: 0; }
+:where([data-screen="scene-detail"]) .fy-swrow__actionline { align-items: center; gap: 10px; }
+:where([data-screen="scene-detail"]) .fy-swrow__generate { flex: none; padding: 8px 16px; min-height: 36px; font-size: 13px; font-weight: 400; }
+:where([data-screen="scene-detail"]) .fy-swrow__more { height: 30px; }
+:where([data-screen="scene-detail"]) .fy-swaddshot button { height: 50px; border-radius: 12px; }
+:where([data-screen="scene-detail"]) .fy-swready { padding: 8px 0; font-size: 11px; }
+:where([data-screen="scene-detail"]) .fy-sw__footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex: none; min-height: 50px; border-top: 1px solid var(--border); font: 400 12px var(--font-sans); }
+:where([data-screen="scene-detail"]) .fy-sw__save { display: inline-flex; align-items: center; gap: 8px; color: var(--muted-foreground); }
+:where([data-screen="scene-detail"]) .fy-sw__save > span { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+:where([data-screen="scene-detail"]) .fy-sw__save[data-pending] > span { background: var(--neutral-400); }
+:where([data-screen="scene-detail"]) .fy-sw__back { display: inline-flex; align-items: center; gap: 12px; border: 0; background: transparent; color: var(--foreground); font: 500 11px var(--font-sans); cursor: pointer; padding: 8px 0; }
+:where([data-screen="scene-detail"]) .fy-sw__back:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+/* All four controls stay in the same place on reveal; keyboard focus and touch have equal access. */
+:where([data-screen="scene-detail"]) .fy-swrow__frameactions { left: auto; right: 8px; bottom: 8px; transform: none; width: max-content; max-width: calc(100% - 16px); justify-content: center; flex-wrap: wrap; gap: 6px; padding: 5px; border: 1px solid color-mix(in srgb, var(--media-overlay-fg) 16%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--media-overlay-bg) 90%, transparent); backdrop-filter: blur(8px); pointer-events: none; }
+:where([data-screen="scene-detail"]) .fy-swrow__frameactions > button { position: static; transform: none; opacity: 1; pointer-events: none; display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; padding: 0; border: 1px solid color-mix(in srgb, var(--media-overlay-fg) 16%, transparent); background: transparent; border-radius: 6px; color: var(--media-overlay-fg); backdrop-filter: none; }
+:where([data-screen="scene-detail"]) .fy-swrow__frame:hover .fy-swrow__frameactions,
+:where([data-screen="scene-detail"]) .fy-swrow__frame:focus-within .fy-swrow__frameactions,
+:where([data-screen="scene-detail"]) .fy-swrow__frameactions[data-open] { opacity: 1; pointer-events: auto; }
+:where([data-screen="scene-detail"]) .fy-swrow__frame:hover .fy-swrow__frameactions > button, :where([data-screen="scene-detail"]) .fy-swrow__frame:focus-within .fy-swrow__frameactions > button, :where([data-screen="scene-detail"]) .fy-swrow__frameactions[data-open] > button { pointer-events: auto; }
+:where([data-screen="scene-detail"]) .fy-swrow__frameactions > button:focus-visible { outline: 2px solid var(--media-overlay-fg); outline-offset: 1px; }
+.fy-swimage-menu { position: fixed; z-index: 100; min-width: 168px; display: flex; flex-direction: column; padding: 5px; border: 1px solid var(--border); border-radius: 9px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--shadow-lg); }
+.fy-swimage-menu[hidden] { display: none; }
+.fy-swimage-menu button { border: 0; border-radius: 5px; padding: 8px 10px; background: transparent; color: inherit; font: 400 12px var(--font-sans); text-align: left; cursor: pointer; }
+.fy-swimage-menu button:hover:not(:disabled), .fy-swimage-menu button:focus-visible { background: var(--accent); }
+.fy-swimage-menu button:disabled { opacity: .45; cursor: default; }
+
+/* The row head: title line, then timing; one column, as 145a draws it. */
+:where([data-screen="scene-detail"]) .fy-swrow__head { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+
+/* The overview reuses the same rows and editors, so switching layout preserves drafts and selection. */
+/* The columns follow the production's aspect (turn 145): four across at portrait and three at
+   landscape at the drawing's width, one fewer whenever a card would fall under 176 or 280 wide. */
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] { display: grid; grid-template-columns: repeat(auto-fill, minmax(max(176px, calc((100% - 54px) / 4)), 1fr)); align-content: start; gap: 18px; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"][data-aspect="landscape"] { grid-template-columns: repeat(auto-fill, minmax(max(280px, calc((100% - 36px) / 3)), 1fr)); }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__band { display: flex; flex-direction: column; height: calc(100% - 18px); min-height: 0; padding: 0; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow:first-child { padding-top: 18px; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow:first-child .fy-swrow__band { height: 100%; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__grip { position: absolute; top: 10px; right: 10px; z-index: 1; padding: 0; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__framewrap { display: flex; justify-content: center; width: 100%; box-sizing: border-box; padding: 14px 16px 0; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__frame { flex: none; width: min(100%, calc(272px * var(--shot-aspect))); aspect-ratio: var(--shot-aspect); background: var(--neutral-950); }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__frame[data-empty="true"] { background: var(--muted); }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__label { top: 10px; left: 10px; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__title { white-space: normal; overflow: visible; text-overflow: clip; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__title > span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__titleline > .fy-swchip { flex-basis: 100%; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__img { object-fit: contain; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__body { flex: 1; width: 100%; padding: 14px 16px; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__titleline { padding-right: 0; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__actions { position: static; padding: 0 16px 14px; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__actionline { justify-content: space-between; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swaddshot { align-self: start; }
+
+/* Empty slots keep the shot visible without spending a full image's height. */
+:where([data-screen="scene-detail"]) .fy-swrow__band:has(.fy-swrow__frame[data-empty="true"]) { min-height: 128px; }
+:where([data-screen="scene-detail"]) .fy-swrow__frame[data-empty="true"] { aspect-ratio: auto; height: 100px; }
+.fy-swplans { flex: none; max-height: 35%; overflow-y: auto; }
+/* Design turn 144 (on the scene route until turn 145, on the shot route since): the Stage panel is an inspector — the stage list, then one form for the selection —
+   in one field grammar. A row is 24px: a label in a 64px mono column, then the control, which starts at
+   the column's edge on every row of every form. */
+/* The list's lines bleed 6px past the column for their fill (margin: 0 -6px below); a scroll
+   container counts that as sideways overflow and grows a scrollbar for it, so only up and down. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__panel { width: 264px; gap: 10px; overflow: hidden auto; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__block { gap: 4px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__block + .fy-swstage__block { padding-top: 9px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__eyebrow > span:first-child { font: 500 var(--text-2xs)/1.2 var(--font-sans); letter-spacing: var(--tracking-label); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__eyebrow > span:last-child:not(:first-child) { font: 400 var(--text-2xs)/1.4 var(--font-mono); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__row { min-height: 24px; gap: 8px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__row[data-top="true"] { align-items: flex-start; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__row > .fy-swstage__rowlabel { width: 64px; flex: none; color: var(--neutral-400); font: 400 var(--text-2xs)/1.4 var(--font-mono); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__row[data-top="true"] > .fy-swstage__rowlabel { padding-top: 5px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__row > .fy-swstage__value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 var(--text-xs)/1.4 var(--font-sans); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__value[data-muted="true"] { color: var(--muted-foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__value[data-filed="true"] { color: var(--success); font: 400 var(--text-2xs)/1.4 var(--font-mono); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__select,
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__field { flex: 1; min-width: 0; width: 0; height: 24px; box-sizing: border-box; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__select:focus-visible,
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__field:focus-visible,
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__triad input:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__field::placeholder { color: var(--muted-foreground); }
+/* A number: the value, its unit, and the stepper at the right end. The box is the value's own
+   text; the browser's spinner would be a second stepper. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__stepper { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__stepper > input { flex: none; max-width: 100%; height: 24px; box-sizing: border-box; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); appearance: textfield; -moz-appearance: textfield; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__stepper > input::-webkit-outer-spin-button,
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__stepper > input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__stepper > input::placeholder { color: var(--muted-foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__stepper > input:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__stepper[data-inherited="true"] > .fy-swstage__unit { color: var(--muted-foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__unit { flex: none; color: var(--muted-foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__stepper > .fy-swstage__nudge { margin-left: auto; }
+/* Three of a kind on one row, each cell prefixed with its axis. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__triad { flex: 1; min-width: 0; display: flex; gap: 6px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__triad > label { flex: 1; min-width: 0; display: flex; align-items: center; gap: 5px; color: var(--neutral-400); font: 400 var(--text-2xs)/1.4 var(--font-mono); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__triad input { flex: 1; min-width: 0; width: 0; height: 24px; box-sizing: border-box; padding: 0 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); appearance: textfield; -moz-appearance: textfield; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__triad input::-webkit-outer-spin-button,
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__triad input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__check { flex: 1; display: inline-flex; align-items: center; gap: 8px; min-height: 24px; color: var(--muted-foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); cursor: pointer; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__check > input { width: 12px; height: 12px; margin: 0; accent-color: var(--foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__check:has(> input:checked) { color: var(--foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__range { flex: 1; min-width: 0; margin: 0; accent-color: var(--foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__link { flex: none; border: 0; padding: 0; background: transparent; color: var(--muted-foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__link:hover:not(:disabled) { color: var(--foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__link:disabled { opacity: .45; cursor: default; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__chips { padding-top: 2px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__chips button { font: 400 var(--text-2xs)/1.4 var(--font-sans); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__quiet { font: 400 var(--text-2xs)/1.4 var(--font-mono); }
+/* The stage list: what is on the stage, one line each with its state; the selected line is filled. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__item { display: flex; align-items: center; gap: 8px; height: 24px; box-sizing: border-box; padding: 0 6px; margin: 0 -6px; border: 0; border-radius: 6px; background: transparent; color: var(--foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); text-align: left; cursor: pointer; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__item:hover { background: var(--accent); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__item:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__item[data-selected="true"] { background: var(--secondary); font-weight: 500; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__item > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__item > span:last-child { flex: none; color: var(--neutral-400); font: 400 var(--text-2xs)/1.4 var(--font-mono); white-space: nowrap; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__item[data-selected="true"] > span:last-child { color: var(--foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark { width: 8px; height: 8px; flex: none; border-radius: 2px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="camera"] { background: var(--foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="set"] { box-sizing: border-box; border: 1.5px solid var(--neutral-400); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__add { display: inline-flex; align-items: center; gap: 6px; height: 22px; align-self: flex-start; border: 0; padding: 0; background: transparent; color: var(--muted-foreground); font: 400 var(--text-2xs)/1.4 var(--font-mono); cursor: pointer; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__add:hover:not(:disabled) { color: var(--foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__add:disabled { opacity: .45; cursor: default; }
+/* A figure's or a group's marks, one line each; the selected mark's fields follow. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__markrow { display: flex; align-items: center; gap: 8px; height: 22px; box-sizing: border-box; padding: 0 6px 0 72px; margin: 0 -6px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); font: 400 var(--text-2xs)/1.4 var(--font-mono); text-align: left; cursor: pointer; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__markrow:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__markrow[data-motion-mark="selected"] { background: var(--secondary); color: var(--foreground); font-weight: 500; outline: 0; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__markrow > span:last-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__slot { display: contents; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__block--ways { border-top: 1px solid var(--border); padding-top: 9px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__ways { display: flex; gap: 6px; padding-top: 4px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__ways > .ui-btn { flex: 1; min-width: 0; }
+/* The way out of full screen: on the head row, where the way in stood. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__exit { width: 32px; height: 32px; flex: none; display: inline-grid; place-items: center; border: 1px solid var(--border); border-radius: 8px; background: var(--secondary); color: var(--foreground); cursor: pointer; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__exit:hover { background: var(--accent); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__exit:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+/* Completed generation reports collapse by run; failures and their retry controls remain visible. */
+.fy-chat__runsummary { margin-top: 8px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--card); }
+.fy-chat__runsummary > summary { display: flex; align-items: center; gap: 9px; padding: 12px; font: 400 12px var(--font-sans); cursor: pointer; list-style: none; }
+.fy-chat__runsummary > summary::-webkit-details-marker { display: none; }
+.fy-chat__runsummary > summary::after { content: "⌄"; margin-left: auto; color: var(--muted-foreground); }
+.fy-chat__runsummary[open] > summary::after { transform: rotate(180deg); }
+.fy-chat__runsummary > summary > span { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--success); }
+.fy-chat__runsummary[data-state="attention"] > summary > span { background: var(--warning); }
+.fy-chat__runsummary[data-state="pending"] > summary > span { background: var(--muted-foreground); }
+.fy-chat__runsummary[data-state="cancelled"] > summary > span { background: var(--muted-foreground); }
+.fy-chat__runsummary .fy-chat__runreport { margin: 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; box-shadow: none; }
+.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) > .fy-arke { background: var(--background); border-left: 1px solid var(--border); }
+.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-arke__pin::after { left: auto; right: 0; transform: none; }
+.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-arke__head { min-height: 60px; }
+.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-arke__name { font-size: 16px; font-weight: 500; }
+.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-arke__who .fy-mono { margin-top: 3px; font-size: 11px; }
+.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-arke__thumb { display: grid; place-items: center; width: 32px; height: 36px; background: transparent; }
+.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-arke[data-conversation-first="true"] .fy-chat__bubble { border-radius: 12px; background: var(--secondary); font-size: 14px; line-height: 1.6; }
+.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-arke[data-conversation-first="true"] .fy-chat__turn--studio .fy-chat__bubble, .fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-arke[data-conversation-first="true"] .fy-chat__turn--user .fy-chat__bubble { background: color-mix(in srgb, var(--secondary) 66%, var(--background)); color: var(--foreground); border: 0; padding: 14px 16px; }
+.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-arke[data-conversation-first="true"] .fy-arke__thumb { display: grid; width: 32px; height: 36px; background: transparent; }
+.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-arke__prompts { order: 0; gap: 8px; margin-bottom: 12px; }
+.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-arke__prompt { font-size: 13px; padding: 7px 12px; color: var(--foreground); }
+.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-arke__foot > .fy-cx { order: 2; }
+.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-cx__editor, .fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-cx__placeholder { font-size: 14px; }
+.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-cx__editorwrap { min-height: 54px; }
+.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-cx__send { width: 38px; height: 38px; border-radius: 8px; }
+.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-chat__runsummary > summary { padding: 16px; font-size: 14px; min-height: 54px; }
+.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-chat__runsummary > summary > span { width: 20px; height: 20px; }
+.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-chat__runsummary[data-state="complete"] > summary > span::after { content: "✓"; display: grid; place-items: center; height: 100%; color: var(--success-bg); font-size: 13px; }
+
+/* The row's actions sit beside the title only where the title keeps its room: the title line
+   is the centre column less the grip, the frame, the body's padding and the 210px the actions
+   reserve, which is 353px at the design's 1360 window and 193px at the 1200 × 790 default,
+   where "Maren at the rail, listening" became "Maren at the r…" and the state chip fell under
+   it (issue 1117). Under 900px the actions take the line below the body instead, as they do
+   on the card, and the title line has the width 145a draws it with. */
+@container (max-width: 900px) {
+  :where([data-screen="scene-detail"]) .fy-swrow__framewrap { grid-row: span 2; }
+  :where([data-screen="scene-detail"]) .fy-swrow__body { padding: 14px 16px 12px; }
+  :where([data-screen="scene-detail"]) .fy-swrow__titleline { padding-right: 0; }
+  :where([data-screen="scene-detail"]) .fy-swrow__actions { position: static; grid-column: 3; padding: 0 16px 14px; }
+  :where([data-screen="scene-detail"]) .fy-swrow__actionline { justify-content: space-between; }
+}
+@container (max-width: 780px) {
+  :where([data-screen="scene-detail"]) .fy-sw__actions { flex-wrap: wrap; }
+}
+@container (max-width: 560px) {
+  :where([data-screen="scene-detail"]) .fy-swrow__band { grid-template-columns: 26px minmax(0, 1fr); }
+  :where([data-screen="scene-detail"]) .fy-swrow__framewrap { grid-column: 2; grid-row: auto; }
+  :where([data-screen="scene-detail"]) .fy-swrows[data-layout="list"] .fy-swrow__frame { width: min(100%, 285px); }
+  :where([data-screen="scene-detail"]) .fy-swrow__body { grid-column: 2; padding-left: 0; }
+  :where([data-screen="scene-detail"]) .fy-swrow__actions { grid-column: 2; padding-left: 0; }
+}
+
+/* Issue 1095: expand real controls, avoiding invisible hit areas over adjacent content. */
+:where([data-screen="scene-detail"]) .fy-swrow__timing > button { min-width: 44px; min-height: 44px; }
+:where([data-screen="scene-detail"]) .fy-swdivider { height: 44px; }
+:where([data-screen="scene-detail"]) .fy-swdivider button { min-width: 44px; min-height: 44px; justify-content: center; }
+/* Issue 1094: enter and leave use the Stage's approved 32px surface. */
+.fy-sw .fy-sw__full, .fy-sw .fy-sw__fullexit { width: 32px; height: 32px; box-sizing: border-box; padding: 0; display: inline-grid; place-items: center; border: 1px solid var(--border); border-radius: 8px; background: var(--secondary); color: var(--foreground); }

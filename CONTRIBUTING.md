@@ -50,6 +50,9 @@ corporate agreement is a different document.
 
 ## Getting set up
 
+To run against your own persistent root without Electron, see
+[the standalone server guide](docs/development/standalone-server.md).
+
 ```bash
 npm ci               # npm workspaces monorepo, Node >= 22.12 (CI uses Node 22)
 npm run typecheck    # every workspace
@@ -77,22 +80,47 @@ local success does not establish correctness on the other platform. For focused 
 native runtime checks and documentation-only validation, see [the testing guide](docs/development/testing.md).
 Start with [the developer index](docs/development/README.md) for code navigation and shared agent guidance.
 
+### Writing engines and models
+
+Settings chooses the writing engine for the next launch. OpenCode ships with the desktop;
+Claude Code and Codex use your own installation and login. Codex requires the native executable
+from version 0.154.0 or newer, with the matching `codex-code-mode-host` beside it (both names
+end in `.exe` on Windows). If PATH discovery misses it, choose that native executable in
+Settings; shell scripts and npm shims are not supported as executable selections.
+An unavailable selected engine remains unavailable until you repair it or choose another;
+it does not silently switch engines.
+Codex's confined file tools support local Windows volumes and Linux with `/proc/self/fd`
+available. Windows uses its built-in PowerShell for the private file-access helper.
+
+For development, `ARKE_HARNESS=opencode|claude|codex` overrides the saved engine as a whole.
+`ARKE_CLAUDE_CMD` and `ARKE_CODEX_CMD` override executable discovery. Settings discloses an
+active engine override; clear it to use the saved preference on restart. The Codex app-server
+uses private stdio and the user's Codex login store; no renderer connection to it is exposed.
+
+The production dock, production setup and Agents read the running engine's live catalog.
+A turn's explicit model wins over the agent override, then the production default, then the
+harness default. Stage requires either its own Stage designer override or a production model
+and refuses known text-only models. A saved unavailable choice remains visible and clearable.
+Media provider API keys do not determine which models a bring-your-own writing engine can use.
+
 ## How changes are shaped
 
-Arke Studio is **specification-first**. `docs/specification.md` is the master product spec, and
-`docs/specifications/NNN.*.md` are the capability specs that break out of its §19. Behaviour is
-decided in a spec and then built.
+Arke Studio is **specification-first**: behaviour is decided in a capability spec and then built.
+The specification set is not published with the code, so a contribution cannot amend one directly.
+That changes the order of work rather than the standard:
 
-So:
-
-- **A change to behaviour needs a spec change.** Amend the relevant capability spec in the same
-  pull request, or link the spec section your change implements. A pull request that changes what
-  the product does without touching a spec will be asked for one.
+- **A change to behaviour starts with an issue, not a pull request.** Say what should be different
+  and why. If it is accepted the spec is amended here, and the issue comes back with the section
+  your change implements. A pull request that changes what the product does, with no spec section
+  behind it, will be asked for the issue first — not because the idea is unwelcome, but because
+  the spec is where that decision is recorded and it has to be recorded somewhere.
 - **A bug fix, a refactor, a test, a typo** needs none of that. Just send it.
-- Specs use RFC-2119 keywords and numbered acceptance criteria (`R-1`, `R-2`, …). Match the house
-  format of the file you are editing.
-- Record *why*, not just *what*. The specs keep decision tables for reversed and rejected
-  decisions, because the reasoning outlives the decision.
+- **Cite the spec section you are implementing** in the pull request, the way the code already
+  does: `SPEC-014 §3`. The document is private; the citation is not, and it is how the change is
+  reviewed against what was decided.
+- Record *why*, not just *what*. The reasoning outlives the decision, and in a public repository
+  whose specs are private, a comment explaining the failure that motivated the code is often the
+  only place that reasoning survives.
 
 ## Pull requests
 
@@ -102,6 +130,25 @@ So:
 - Say what you tested. If it touches the world folder, the accept gate, the job queue or
   packaging, say how you know it is safe: those four are where a mistake is expensive and quiet.
 - Never commit credentials, world content, or anything from `.dev/`.
+
+## Cutting a release
+
+A release is a tag: push `v<major>.<minor>.<patch>` matching `apps/desktop/package.json` and the
+release workflow builds, verifies and publishes it. Before tagging, write the release's card at
+`docs/releases/v<version>/notes.md` with a `picture.jpg` beside it (960×540 reads well):
+
+```markdown
+---
+title: A world remembers why it was made
+date: 2026-08-23
+picture: picture.jpg
+---
+The notes, as plain paragraphs separated by blank lines.
+```
+
+The workflow refuses a tag without one and publishes the GitHub release's title and body from
+it; the application bundles the newest eight cards for the Activity panel's What's new. Check a
+card before tagging with `node scripts/release-notes.mjs check v<version>`.
 
 ## Reporting a security issue
 

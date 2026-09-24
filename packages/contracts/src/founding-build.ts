@@ -24,11 +24,11 @@ export const FoundingBuildIdSchema = prefixedIdSchema("fb");
 // ---------------------------------------------------------------------------
 
 export const BUILD_STAGES = [
-  { id: "understanding", label: "Understanding your vision" },
-  { id: "shaping", label: "Shaping the world" },
-  { id: "creating", label: "Creating characters" },
-  { id: "forging", label: "Forging history and lore" },
-  { id: "finalizing", label: "Finalizing the details" },
+  { id: "understanding", label: "Blueprint ready" },
+  { id: "shaping", label: "World records" },
+  { id: "creating", label: "Main photos · establishing views" },
+  { id: "forging", label: "Character sheets · key art" },
+  { id: "finalizing", label: "Finishing" },
 ] as const;
 export type BuildStageId = (typeof BUILD_STAGES)[number]["id"];
 
@@ -161,6 +161,7 @@ export const BuildJournalEntrySchema = z.discriminatedUnion("kind", [
       kind: z.literal("intent"),
       key: z.string().min(1),
       idempotencyKey: UlidSchema.optional(),
+      detail: z.string().optional(),
       at: IsoDateTimeSchema,
     })
     .strict(),
@@ -245,6 +246,13 @@ export const FoundingBuildStateSchema = z
       .nullable(),
     /** The notice shows until dismissed or the work it names is no longer outstanding (R-45). */
     noticeDismissed: z.boolean(),
+    /**
+     * When the run ended — the `stopped` or `completed` journal entry's stamp. Absent while it
+     * is still running. The notice carries it because a notice that never ages reads as news
+     * for as long as it is on screen: a build that fell short on Sunday was still announcing
+     * itself on Wednesday with nothing on it to say so (issue 1007).
+     */
+    endedAt: IsoDateTimeSchema.optional(),
     capMicroUsd: z.number().int().min(0),
     estimatedSpendMicroUsd: z.number().int().min(0),
   })
@@ -281,15 +289,26 @@ export function foldFoundingBuild(
   // Last word wins, per key: a terminal followed by a fresh intent is the item running
   // again — the shape every Activity re-run leaves behind (R-48, R-49).
   const lastByKey = new Map<string, Extract<BuildJournalEntry, { kind: "intent" | "terminal" }>>();
+  const detailByKey = new Map<string, string>();
   const jobIdByKey = new Map<string, string>();
   let stopped = false;
   let completed = false;
   let noticeDismissed = false;
+  let endedAt: string | undefined;
   for (const entry of entries) {
+    if (entry.kind === "intent") {
+      detailByKey.delete(entry.key);
+      if (entry.detail) detailByKey.set(entry.key, entry.detail);
+    }
     if (entry.kind === "intent" || entry.kind === "terminal") lastByKey.set(entry.key, entry);
     else if (entry.kind === "enqueued") jobIdByKey.set(entry.key, entry.jobId);
-    else if (entry.kind === "stopped") stopped = true;
-    else if (entry.kind === "completed") completed = true;
+    else if (entry.kind === "stopped") {
+      stopped = true;
+      endedAt = entry.at;
+    } else if (entry.kind === "completed") {
+      completed = true;
+      endedAt = entry.at;
+    }
     else if (entry.kind === "notice-dismissed") noticeDismissed = true;
   }
 
@@ -301,6 +320,7 @@ export function foldFoundingBuild(
       stage: item.stage,
       subject: item.subject,
       name: item.name,
+      ...(detailByKey.has(item.key) ? { detail: detailByKey.get(item.key)! } : {}),
       authorized: item.authorized,
       estimatedMicroUsd: item.estimatedMicroUsd,
       ...(jobId !== undefined ? { jobId } : {}),
@@ -395,6 +415,7 @@ export function foldFoundingBuild(
     items,
     shortfall,
     noticeDismissed,
+    ...(endedAt !== undefined && (completed || stopped) ? { endedAt } : {}),
     capMicroUsd: record.capMicroUsd,
     estimatedSpendMicroUsd,
   };
@@ -510,6 +531,7 @@ export function compileBuildItems(
       estimatedMicroUsd: 0,
       authorized: true,
     });
+    if (character.neverDepicted === true) continue;
     items.push({
       key: `main-photo:${character.slug}`,
       kind: "main-photo",
@@ -537,6 +559,7 @@ export function compileBuildItems(
   }
 
   for (const character of blueprint.characters) {
+    if (character.neverDepicted === true) continue;
     const sheetImageRefusal = refusal ?? sheetsRefused;
     items.push({
       key: `sheet-image:${character.slug}`,
@@ -552,7 +575,9 @@ export function compileBuildItems(
     });
   }
   // Key art needs a brief: one is never invented from a logline (R-5).
-  if (keyArtBriefSettled(blueprint.keyArt)) {
+  if (keyArtBriefSettled(blueprint.keyArt) && !blueprint.characters.some((character) =>
+    character.neverDepicted === true && blueprint.keyArt?.characters.some((name) =>
+      name.toLowerCase() === character.name.toLowerCase() || name === character.slug))) {
     items.push({
       key: "key-art:world",
       kind: "key-art",

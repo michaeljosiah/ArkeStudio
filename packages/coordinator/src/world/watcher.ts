@@ -20,6 +20,11 @@ const IGNORED = [
   // every landed take would otherwise accuse the app of editing its own world.
   /^\.sessions([/\\]|$)/,
   /^\.cache([/\\]|$)/,
+  // Continuity records (turn 129) are derived by the app beside each chapter; its own write
+  // must not read as the world changing outside it.
+  /(^|[/\\])\.continuity([/\\]|$)/,
+  // The cast of lines (turn 130) is written beside each chapter the same way.
+  /(^|[/\\])\.voices([/\\]|$)/,
   /^\.staging([/\\]|$)/,
   /^world\.lock$/,
   /\.tmp-[0-9A-Z]+$/i,

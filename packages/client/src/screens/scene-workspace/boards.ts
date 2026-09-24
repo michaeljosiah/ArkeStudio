@@ -25,6 +25,35 @@ export function shotHasFrame(
   return take?.kind === "frame" || take?.kind === "still";
 }
 
+/**
+ * The picture a shot shows for itself, wherever it is shown — the row, the card, the filmstrip,
+ * the page: the filed frame artifact first, else the accepted legacy still. One resolution, so a
+ * shot never has a frame on the list and none on its page. `path` is relative to the world's
+ * media root; `pointer` says whether the shot claims a frame at all, filed or not, which is
+ * what Clear frame needs to know.
+ */
+export function shotFramePath(
+  production: ProductionBundle,
+  artifacts: readonly ArtifactSidecar[],
+  shotId: string,
+  newShot = false,
+): { path: string | null; hasFrame: boolean; pointer: boolean; artifact: ArtifactSidecar | undefined } {
+  const hasFrame = !newShot && shotHasFrame(production, artifacts, shotId);
+  const selection = production.selections[shotId];
+  const artifactId = selection?.startFrameArtifactId ?? null;
+  const artifact = artifactId === null ? undefined : artifacts.find((candidate) => candidate.id === artifactId);
+  const pointer = artifactId !== null || (selection?.startFrameTakeId ?? null) !== null;
+  const accepted = newShot ? undefined : selection?.acceptedTakeId;
+  const take = accepted === undefined ? undefined : production.takes.find((candidate) => candidate.id === accepted);
+  const legacyStill = take?.kind === "frame" || take?.kind === "still" ? take : undefined;
+  const path = artifact !== undefined && hasFrame
+    ? `artifacts/${artifact.file}`
+    : legacyStill?.media === undefined
+      ? null
+      : `productions/${production.meta.id}/takes/${legacyStill.id}/${legacyStill.media}`;
+  return { path, hasFrame, pointer, artifact };
+}
+
 export type WorkspaceBoardPack = { ok: true; boards: PackedBoard[] } | { ok: false; reason: string };
 
 export function boardsForScene(input: {

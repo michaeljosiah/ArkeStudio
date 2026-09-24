@@ -1,3 +1,4 @@
+import { modelCapabilityCopy } from "@arke-studio/contracts";
 import { useState } from "react";
 import { useParams } from "react-router";
 import {
@@ -148,7 +149,19 @@ export function productionModel(
 }
 
 /**
- * Which model this surface will use, with the production's choice already in it.
+ * The model this world's own work reaches for, for a capability (design turn 153). Read only for
+ * world work: a production falls back to Settings, never to its world.
+ */
+export function worldModel(
+  state: ReturnType<typeof useStore>["state"],
+  capability: Capability,
+): string | undefined {
+  return state?.world?.meta.models?.[capability];
+}
+
+/**
+ * Which model this surface will use, with the production's choice already in it — or, outside
+ * a production, the world's.
  *
  * The hook rather than the function, everywhere inside a production. `resolveModel` takes the
  * remembered id as an argument, and an argument a caller can forget is an argument some caller
@@ -162,7 +175,9 @@ export function useResolvedModel(
   chosenId?: string,
 ): { model: ManifestModel | null; stranded: ManifestModel | null; remembered: string | undefined } {
   const { prodId } = useParams<{ prodId?: string }>();
-  const remembered = productionModel(state, prodId, capability);
+  // Two scopes, one parent (design turn 153): inside a production its own choice, outside one
+  // the world's. Never the world's inside a production — that choice was for making the world.
+  const remembered = prodId !== undefined ? productionModel(state, prodId, capability) : worldModel(state, capability);
   return { ...resolveModel(state, capability, chosenId, remembered), remembered };
 }
 
@@ -182,7 +197,8 @@ export function resolveModel(
   capability: "image" | "video",
   chosenId?: string,
   /**
-   * The production's own choice, where the surface is inside one (R-77). It seeds the picker and
+   * The scope's own choice — the production's inside one (R-77), the world's for world work
+   * (design turn 153). It seeds the picker and
    * does not lock it: an explicit per-dispatch choice still wins, and a stored reference that
    * cannot be honoured is *stated* rather than swapped — R-78, and the same shape a stranded
    * routing default already had, because falling back quietly is how somebody discovers they
@@ -218,6 +234,10 @@ export function resolveModel(
  */
 export function strandReason(state: ReturnType<typeof useStore>["state"], model: ManifestModel): string {
   if ((state?.app.models.disabled ?? []).includes(model.id)) return "turned off in AI models";
+  const fit = state?.app.runtime?.models.find((row) => row.modelId === model.id);
+  if (fit?.fit === "insufficient" || fit?.fit === "unsupported") {
+    return fit.reason ?? "this machine does not meet the model requirements";
+  }
   // A stranded local recipe carries its readiness reason — the measured one, never key advice
   // for a provider that takes no key (SPEC-021 R-10).
   if (model.provider === "comfyui") {
@@ -225,6 +245,9 @@ export function strandReason(state: ReturnType<typeof useStore>["state"], model:
   }
   const status = (state?.app.providers ?? []).find((p) => p.id === model.provider);
   const info = PROVIDERS[model.provider];
+  // The other local providers take no key either: Kokoro is refused when Voxa has not started,
+  // and `the Kokoro key does not unlock this` sent people looking for a field that does not exist.
+  if (info.local) return "the local engine is not ready";
   // Not every provider takes a key, and telling someone to paste one they can never paste
   // sends them to a field that does not exist (issue 137).
   if (info.credential === "external") {
@@ -291,7 +314,9 @@ export function modelDetail(
   aspect?: string,
 ): string {
   const references =
-    model.unverified === true || model.accepts.referenceImages === 0
+    model.unverified !== true && ((model.accepts.referenceVideos ?? 0) > 0 || (model.accepts.referenceAudio ?? 0) > 0)
+      ? modelCapabilityCopy(model)
+      : model.unverified === true || model.accepts.referenceImages === 0
       ? "no references"
       : `up to ${model.accepts.referenceImages} references`;
   const size = tier ?? "provider default";
@@ -368,6 +393,8 @@ export function DispatchBar({
   // prop that half its callers cannot fill is a prop that gets filled wrongly.
   const { prodId, worldId } = useParams<{ prodId?: string; worldId?: string }>();
   const { model, stranded, remembered } = useResolvedModel(state, capability, choice.modelId);
+  // Whose choice `remembered` is: the production's inside one, the world's outside (turn 153).
+  const scopeBadge = prodId !== undefined ? "THIS PRODUCTION" : "THIS WORLD";
   // No model at all — no key, or nothing of this capability in the manifest. The bar stays,
   // because vanishing would take Cancel and the explanation with it and leave a dialog with no
   // way out and no reason given.
@@ -456,7 +483,7 @@ export function DispatchBar({
               <span className="fy-dispatchbar__provider">{PROVIDERS[candidate.provider].displayName}</span>
               <span>{candidate.displayName}</span>
               {candidate.unverified === true && <em>UNVERIFIED</em>}
-              {candidate.id === remembered && <strong>THIS PRODUCTION</strong>}
+              {candidate.id === remembered && <strong>{scopeBadge}</strong>}
               {candidate.id === routedId && candidate.id !== remembered && <strong>DEFAULT</strong>}
             </button>
           ))}
@@ -518,7 +545,7 @@ export function DispatchBar({
           {stranded && <em>UNAVAILABLE</em>}
           {/* The production's own choice outranks the installation's default and says so, so the
               two are never both claimed on one pill. */}
-          {remembered === model.id && !stranded && <strong>THIS PRODUCTION</strong>}
+          {remembered === model.id && !stranded && <strong>{scopeBadge}</strong>}
           {isDefault && remembered !== model.id && !stranded && <strong>DEFAULT</strong>}
           {models.length > 1 && (
             <>
@@ -648,6 +675,9 @@ export function DispatchBar({
         {stranded
           ? `${model.displayName} · unavailable, ${strandReason(state, stranded)}`
           : modelDetail(model, tier, isDefault, chosenAspect)}
+        {!stranded && recipeReadinessFor(state, model.id)?.state === "unknown" && (
+          <span> · {recipeReadinessFor(state, model.id)?.reason ?? "Hardware not checked."} Generation is allowed.</span>
+        )}
       </div>
     </div>
   );

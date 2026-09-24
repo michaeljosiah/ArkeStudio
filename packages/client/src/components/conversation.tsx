@@ -1,9 +1,9 @@
+import { ProductionSetupOutline } from "./production-setup-outline.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, type NavigateFunction } from "react-router";
 import type {
   ConversationActionCard,
   FrameRunState,
-  ManifestModel,
   StagedProposal,
   WorldChatContext,
   WorldChatPoint,
@@ -11,7 +11,7 @@ import type {
   WorldChatSubject,
   WorldChatWorkspace,
 } from "@arke-studio/contracts";
-import { modelEligible, proposalDecisionOf, providerModelId, PROVIDERS } from "@arke-studio/contracts";
+import { findHarnessModel, proposalDecisionOf } from "@arke-studio/contracts";
 import { Composer } from "./composer.js";
 import {
   cancelWorldChat,
@@ -26,6 +26,9 @@ import {
   openWorldChatMedia,
   retryWorldChatTurn,
   sendWorldChat,
+  askWorldChatSendStatus,
+  subscribeWorldChatSendResults,
+  worldChatSendResult,
   setProductionModel,
   subscribeWorldChatMediaOpened,
   subscribeConversationActionDecision,
@@ -36,12 +39,15 @@ import {
   promoteWorldChatAttachment,
   wrapUpWorldChat,
 } from "../lib/store.js";
-import { eligibilityInputs, productionModel } from "./dispatch-bar.js";
+import { productionModel } from "./dispatch-bar.js";
+import { HarnessModelOptions, HarnessModelStatus, harnessModelUnavailableReason } from "./harness-models.js";
 import { Working } from "./working.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Button, IconButton, cx } from "./ui.js";
-import { Pin } from "./icons.js";
+import { Film, Pin } from "./icons.js";
+import { PosterVideo } from "./player.js";
 import { ReadAloud } from "./read-aloud.js";
+import { renderInlineMarkdown } from "./inline-markdown.js";
 import { mediaUrl } from "../lib/media.js";
 
 /**
@@ -129,7 +135,7 @@ export function ConversationTranscript({
           )}
         >
           <div className="fy-chat__bubble">
-            {m.text}
+            {m.role === "studio" ? renderInlineMarkdown(m.text) : m.text}
             {m.role === "studio" && m.receipts.length > 0 && (
               // One tick for the row, not one per receipt: the tick means "this is what was
               // read", and repeating it turned a footnote into a checklist.
@@ -319,6 +325,7 @@ export function ConversationPermissionCard({
     setAnnouncement("");
   };
 
+  const stageRequest = state?.stageConstructionRequests?.find(request=>request.actionId===action.actionId&&request.conversationId===action.conversationId);
   const body = <ConversationActionBody action={action} supported={supported} />;
   const consequences = action.shown.ripples.length > 0 ? (
     <div className="fy-actioncard__body">
@@ -375,6 +382,10 @@ export function ConversationPermissionCard({
                         <img className="fy-actioncard__media" src={mediaUrl(state.world!.meta.slug, result.mediaPath)} alt={result.description} />
                       </a>
                     ) : result.medium === "video" ? (
+                      /* The one place the platform's player stays (SPEC-041 R-81): a generation
+                         result SHALL provide native playback controls, so seeking, volume and
+                         fullscreen are the requirement rather than an accident. The take-review
+                         card below owes only playable media (R-26) and uses the house player. */
                       <video className="fy-actioncard__media" controls preload="metadata" src={mediaUrl(state.world!.meta.slug, result.mediaPath)} {...(result.posterPath ? { poster: mediaUrl(state.world!.meta.slug, result.posterPath) } : {})} />
                     ) : result.medium === "audio" ? (
                       <audio className="fy-actioncard__media" controls preload="metadata" src={mediaUrl(state.world!.meta.slug, result.mediaPath)} />
@@ -395,6 +406,7 @@ export function ConversationPermissionCard({
           ) : null}
         </div>
       )}
+      {action.status === "awaiting-host" && stageRequest ? <Button variant="primary" onClick={()=>void navigate(`/w/${action.worldId}/p/${stageRequest.productionId}/scenes/${stageRequest.sceneId}`)}>Open Stage to construct</Button>:null}
       {action.undo && <div className="fy-actioncard__audit">Undo available · {action.undo.kind}</div>}
       {supported && (action.status === "pending" || action.availableDecisions.includes("deny")) && (
         <div className="fy-actioncard__actions">
@@ -462,11 +474,10 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
       return <div className="fy-actioncard__body">
         {body.mediaPath && state?.world ? (
           body.mediaKind === "video" ? (
-            <video
+            <PosterVideo
               className="fy-actioncard__media"
-              controls
-              preload="metadata"
               src={mediaUrl(state.world.meta.slug, body.mediaPath)}
+              label={`Take ${body.mediaId}`}
               {...(body.posterPath ? { poster: mediaUrl(state.world.meta.slug, body.posterPath) } : {})}
             />
           ) : body.mediaKind === "audio" ? (
@@ -597,11 +608,24 @@ function FrameRunReport({
       );
     }
   });
+  const generated = new Set(run.steps.flatMap((step) => step.shots.filter((shot) => REPORT_RETURNED_STATUSES.has(shot.status)).map((shot) => shot.shotId))).size;
+  const cancelled = run.status === "cancelled";
+  // A completed run can lose every landing race to a newer frame without being empty or pending.
+  const summary = [
+    cancelled ? "Cancelled" : null,
+    generated > 0 || (!cancelled && run.supersededShots === 0) ? `${generated} frame${generated === 1 ? "" : "s"} generated` : null,
+    run.supersededShots > 0 ? `${run.supersededShots} newer frame${run.supersededShots === 1 ? "" : "s"} kept` : null,
+  ].filter(Boolean).join(" · ");
+  // Reconciled failures stay in the history, but a successful retry needs no more attention.
+  const needsAttention = !cancelled && run.steps.some((step) => step.shots.some((shot) => REPORT_FAILURE_STATUSES.has(shot.status)));
   return (
-    <div className="fy-chat__runreport" aria-label="Frame run report">
-      {stepRows}
-      {failureRows}
-    </div>
+    <details className="fy-chat__runsummary" data-state={cancelled ? "cancelled" : needsAttention ? "attention" : generated > 0 || run.supersededShots > 0 ? "complete" : "pending"} open={needsAttention || (!cancelled && run.status !== "completed") ? true : undefined}>
+      <summary><span aria-hidden="true" />{summary}{needsAttention ? " · needs attention" : ""}</summary>
+      <div className="fy-chat__runreport" aria-label="Frame run report">
+        {stepRows}
+        {failureRows}
+      </div>
+    </details>
   );
 }
 
@@ -637,9 +661,11 @@ export function failureLine(failure: { status: string; detail?: string }): strin
   const opening =
     failure.status === "timeout"
       ? "That took too long and stopped."
-      : failure.status === "budget-exceeded"
-        ? "That turn ran past its budget and stopped."
-        : "That did not go through.";
+      : failure.status === "interrupted"
+        ? "That turn was interrupted. You can retry it."
+        : failure.status === "budget-exceeded"
+          ? "That turn ran past its budget and stopped."
+          : "That did not go through.";
   return `${opening} Nothing was lost — your message is still here.`;
 }
 
@@ -684,29 +710,16 @@ export function conversationTitle(text: string): string {
 export function languageChoiceReason(
   state: ReturnType<typeof useStore>["state"],
   modelId: string | undefined,
-  model?: ManifestModel,
 ): string | undefined {
   if (modelId === undefined) return undefined;
-  if (model === undefined) return `This production still names ${modelId}, which is no longer available.`;
-  if ((state?.app.models.disabled ?? []).includes(model.id)) {
-    return `${model.displayName} is turned off in AI models and has not been replaced.`;
-  }
-  if (PROVIDERS[model.provider].local && !modelEligible(model, eligibilityInputs(state))) {
-    return `${model.displayName} is unavailable and has not been replaced.`;
-  }
-  if (state?.app.harnessInfo?.generation === "claude" && model.provider !== "anthropic") {
-    return `${model.displayName} is not available through Claude Code.`;
-  }
-  const harnessModels = state?.app.harnessModels ?? [];
-  if (
-    harnessModels.length > 0 &&
-    !harnessModels.some(
-      (candidate) => candidate.provider === model.provider && candidate.id === providerModelId(model),
-    )
-  ) {
-    return `${model.displayName} is not available through the current harness.`;
-  }
-  return undefined;
+  if (state?.app.harnessModelStatus?.status === "loading") return "Checking language models…";
+  if (state?.app.harnessModelStatus?.status === "error") return state.app.harnessModelStatus.reason ?? "Model discovery failed. Retry models to check this choice.";
+  if (state?.app.harnessModelStatus?.status !== "ready") return "Language models need to be refreshed.";
+  const model = findHarnessModel(modelId, state?.app.harnessModels ?? [], state?.app.manifest?.models);
+  if (!model) return `${modelId} is no longer available through the running harness. Choose another model or clear the saved choice.`;
+  if (state?.app.health.harness.status !== "healthy") return state?.app.health.harness.reason ?? "The harness is not running.";
+  const reason = harnessModelUnavailableReason(state, model);
+  return reason ? `${model.displayName ?? model.id} is ${reason}.` : undefined;
 }
 
 /**
@@ -717,6 +730,42 @@ export function languageChoiceReason(
  * to make a conversation before they can say anything — and it is opened on arrival and released
  * on the way out, so a session that visits every view still holds one workspace.
  */
+/**
+ * An ask a page hands the dock (the chapter's selection menu), with its words and subject fixed
+ * at the press. `draft` only starts a line in the composer. `sent` is set by the dock once it has
+ * gone, with the request id the coordinator answers for.
+ */
+export type DockAsk = {
+  line: string;
+  text: string;
+  subject?: WorldChatSubject;
+  replyOnly?: boolean;
+  draft?: boolean;
+  /**
+   * `rejoins` is the store's count when it went, or when it was last asked after: a larger one
+   * means its answer may have been lost, and the coordinator is asked where it stands.
+   */
+  sent?: { requestId: string; at: string; rejoins: number; conversationId: string };
+  /** A line lost on the way, tried again under the request it first went as. */
+  again?: string;
+  /**
+   * Said first into a thread it opened, which has not arrived yet: `was` is the thread before,
+   * `rejoins` the store's count when the create went, `request` the create's own id.
+   */
+  opening?: { was: string | null; rejoins: number; request: string };
+  /**
+   * The coordinator's answer for `sent`, kept with the ask by whoever holds it (codex on PR 1232):
+   * the store's own record of answers is bounded, and an ask can wait a long while for its dock.
+   */
+  answered?: boolean;
+  /** Which press made it: the same words pressed twice are two presses. */
+  press?: string;
+  /** Sent and not taken: shown to be tried again or dismissed. */
+  declined?: boolean;
+  /** What the author has typed to finish a `draft` line, kept by the page with the ask. */
+  typed?: string;
+};
+
 export function ProductionConversation({
   worldId,
   productionId,
@@ -782,18 +831,39 @@ export function ProductionConversation({
     /** Flips the subject between the shot and the whole scene; the title is a button when set. */
     onToggleSubject?: () => void;
     /** Quick asks above the composer, each said as it stands. */
-    prompts?: readonly string[];
+    /**
+     * Quick asks. A prompt that promises a reply and nothing else (turn 128: `Hold this against
+     * the style`) says so, and the send carries it, so the coordinator refuses any action the
+     * turn comes back with.
+     */
+    prompts?: readonly (string | { label: string; replyOnly?: boolean; press?: () => void })[];
+    /**
+     * An ask handed in from outside the dock, said once as a quick ask is. `draft` only puts the
+     * line in the composer for the author to finish. The page clears it in `onAskTaken`.
+     */
+    ask?: DockAsk;
+    /** The dock's word on the ask: sent (the ask back, marked), or done with (null). */
+    onAsk?: (next: DockAsk | null) => void;
     /**
      * Said before whatever is typed while a shot is the subject. The thread enters at the scene,
      * so the shot the dock names has to be in the words themselves or the studio never hears it.
      */
     subjectPrefix?: string;
+    /**
+     * A line over the prompts that says what the subject is right now — `about this passage ·
+     * 42 words` (turn 128). The prefix is what the thread hears; this is what the author sees.
+     */
+    subjectLine?: string;
     /** Names a shot for the report card; the run state carries ids, and only the screen has numbers. */
     shotLabel?: (shotId: string) => string;
     /**
-     * The line under the composer. The default promises that talking changes nothing; a dock
-     * that offers a direct write — the scene's name (SPEC-036 R-38) — must say so instead, or
-     * the promise is false the moment the offer is taken.
+     * The line under the composer, drawn only when there is one.
+     *
+     * There used to be a default here promising that talking changes nothing, under every dock
+     * in the app. That is the rule the docks are built to and it belongs in the rule, not on
+     * nine screens (design turn 69). What is left is the exception: a dock that offers a direct
+     * write — the scene's name (SPEC-036 R-38) — has to say so, because there the promise would
+     * be false the moment the offer was taken.
      */
     note?: string;
   };
@@ -801,10 +871,11 @@ export function ProductionConversation({
   /** What is selected on the timeline while they talk (SPEC-039 R-26), sent with each turn. */
   subject?: WorldChatSubject;
 }) {
-  const { state } = useStore();
+  const { state, connection, rejoins, worldChatHolds } = useStore();
   const navigate = useNavigate();
   const [message, setMessage] = useState("");
   const [languageModelId, setLanguageModelId] = useState<string | undefined>();
+  const pendingRemember = useRef<string | undefined>(undefined);
   /*
    * Wrap-up state lives here rather than inside WrapUp (review 2026-08-22): retry is a way of
    * saying something again, so it is held back while a wrap-up commits — a condition the
@@ -825,12 +896,18 @@ export function ProductionConversation({
   /** An opening message waiting for the conversation it opened to arrive. */
   const [opening, setOpening] = useState<{
     text: string;
+    attach?: boolean;
     was: string | null;
     subject?: WorldChatSubject;
     modelId?: string;
+    replyOnly?: boolean;
+    /** Told the request id once the line is sent into the thread this opened. */
+    onSent?: (requestId: string) => void;
   } | null>(null);
   const [busyMedia, setBusyMedia] = useState<string | null>(null);
   const [mediaRefusal, setMediaRefusal] = useState<string | null>(null);
+  /** The dock's points: put away by default (turn 92), opened by a refusal that points at them (issue 909). */
+  const [pointsOpen, setPointsOpen] = useState(false);
   const mediaRequest = useRef<{ requestId: string; candidateId: string; conversationId: string } | null>(null);
   const context: WorldChatContext = entry ?? { kind: "production", productionId: productionId ?? "" };
   const contextKey = JSON.stringify(context);
@@ -851,21 +928,28 @@ export function ProductionConversation({
   useEffect(() => {
     setMessage("");
     setLanguageModelId(undefined);
+    pendingRemember.current = undefined;
     setOpening(null);
     setBusyMedia(null);
     setMediaRefusal(null);
     mediaRequest.current = null;
   }, [contextKey]);
   useEffect(() => {
-    if (state?.app.health.harness.status === "healthy" && state.app.harnessInfo?.generation !== "claude") {
+    if (state?.app.health.harness.status === "healthy") {
       listHarnessModels();
     }
   }, [state?.app.health.harness.status, state?.app.harnessInfo?.generation]);
   const rememberedLanguageModel = productionModel(state, productionId, "llm");
-  const effectiveLanguageModelId = languageModelId ?? rememberedLanguageModel;
-  const languageModels = state?.app.manifest?.models.filter((model) => model.capability === "llm") ?? [];
-  const languageModel = languageModels.find((model) => model.id === effectiveLanguageModelId);
-  const languageUnavailableReason = languageChoiceReason(state, effectiveLanguageModelId, languageModel);
+  // Keep the chosen model visible until the authoritative save arrives, including legacy ids.
+  useEffect(() => {
+    if (pendingRemember.current !== undefined && pendingRemember.current === rememberedLanguageModel) {
+      if (languageModelId === pendingRemember.current) setLanguageModelId(undefined);
+      pendingRemember.current = undefined;
+    }
+  }, [languageModelId, rememberedLanguageModel]);
+  const agentLanguageModel = state?.app.agents.find((agent) => agent.name === "world-builder")?.model;
+  const effectiveLanguageModelId = languageModelId ?? agentLanguageModel ?? rememberedLanguageModel;
+  const languageUnavailableReason = languageChoiceReason(state, effectiveLanguageModelId);
   const thread = useMemo(() => {
     const wanted = JSON.parse(contextKey) as WorldChatContext;
     const rows = (state?.world?.conversations ?? []).filter((c) => sameContext(c.entryContext, wanted));
@@ -916,11 +1000,21 @@ export function ProductionConversation({
   useEffect(() => {
     if (!opening || !worldId) return;
     const opened = workspace?.conversationId ?? null;
-    if (!opened || opened === opening.was) return;
-    sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId);
+    if (!opened || opened === opening.was || opened !== conversationId) return;
+    // Said only on a connection that can carry it (codex on PR 1232): a send that does not leave
+    // keeps the line waiting for its thread, rather than dropping the wait to be made again.
+    if (connection !== "open") return;
+    if (opening.attach) worldChatAttachFiles(worldId, opened);
+    else {
+      const requestId = sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId, opening.replyOnly ?? false);
+      if (requestId === null) return;
+      opening.onSent?.(requestId);
+    }
     setOpening(null);
-  }, [opening, worldId, workspace?.conversationId]);
+  }, [opening, worldId, workspace?.conversationId, conversationId, connection]);
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
+  const loadedRef = useRef(loaded);
+  loadedRef.current = loaded;
   const progress = useWorldChatProgress(conversationId ?? undefined, loaded?.runStartedAt ?? null);
   const running = loaded?.runStatus === "running";
   const failure = loaded?.lastFailure ?? null;
@@ -945,13 +1039,13 @@ export function ProductionConversation({
     }
     handedOver.current = true;
     if (conversationId) {
-      sendWorldChat(worldId, conversationId, openWith, [], undefined, effectiveLanguageModelId);
+      sendWorldChat(worldId, conversationId, openWith, [], undefined, languageModelId);
       return;
     }
     setOpening({
       text: openWith,
       was: workspace?.conversationId ?? null,
-      ...(effectiveLanguageModelId !== undefined ? { modelId: effectiveLanguageModelId } : {}),
+      ...(languageModelId !== undefined ? { modelId: languageModelId } : {}),
     });
     createWorldChat(worldId, conversationTitle(openWith), crypto.randomUUID(), context);
     // context is derived from route params and rebuilt each render; the latch above is what
@@ -960,48 +1054,222 @@ export function ProductionConversation({
   }, [openWith, worldId, productionId, conversationId]);
 
   /** Says one thing into the thread — the composer's draft, or a quick ask said as it stands. */
-  const say = (text: string) => {
-    if (!text || !worldId || !productionId) return;
+  /** True when the line went out; false when it was held back or the transport is down. */
+  const say = (
+    text: string,
+    replyOnly = false,
+    about: WorldChatSubject | undefined = subject,
+    /** Told the request id once the line has gone — at once, or after the thread it opens. */
+    onSent?: (requestId: string) => void,
+    /** The request a line lost on the way goes again under — or, opening a thread, its create. */
+    again?: string,
+  ): boolean => {
+    if (!text || !worldId || !productionId) return false;
     // A second line said while the first is still opening its thread would open a second one,
     // and one said over a running turn starts a second turn the first can no longer stop.
-    if (opening || running) return;
+    // Nor over a line just sent that the thread has not shown yet (codex on PR 1232): the runner
+    // would refuse it as already working, and nothing would say so.
+    if (opening || running || echo !== null) return false;
+    // Nor into a thread still loading (codex on PR 1232): with no sequence to watch, the line
+    // could not be held as just sent, and the next would go out over it.
+    if (conversationId && loaded === null) return false;
     /*
      * No thread yet: the first thing said opens one and is then said into it. Creating does not
      * take a turn — it only names the conversation — so without the send that follows, the
      * opening message became a title and the studio never answered it (turn 95).
      */
     if (!conversationId) {
+      // Nothing is waited on for a create that never left (codex on PR 1232).
+      // A create made again after it was lost goes under its first request, which the coordinator
+      // makes at most once (codex on PR 1232).
+      if (!createWorldChat(worldId, conversationTitle(text), again ?? crypto.randomUUID(), context)) return false;
       // The subject goes with it: the first thing said is the likeliest "move this earlier".
       setOpening({
         text,
         was: workspace?.conversationId ?? null,
-        ...(subject !== undefined ? { subject } : {}),
-        ...(effectiveLanguageModelId !== undefined ? { modelId: effectiveLanguageModelId } : {}),
+        ...(about !== undefined ? { subject: about } : {}),
+        ...(languageModelId !== undefined ? { modelId: languageModelId } : {}),
+        ...(replyOnly ? { replyOnly: true } : {}),
+        ...(onSent !== undefined ? { onSent } : {}),
       });
       setLanguageModelId(undefined);
-      createWorldChat(worldId, conversationTitle(text), crypto.randomUUID(), context);
-      return;
+      return true;
     }
-    sendWorldChat(worldId, conversationId, text, [], subject, effectiveLanguageModelId);
+    // Only the turn's explicit choice travels as an override. The coordinator resolves the
+    // captured agent preference before the production default; sending the displayed fallback
+    // here would promote that default above the agent and run a different model.
+    const requestId = sendWorldChat(worldId, conversationId, text, [], about, languageModelId, replyOnly, again);
+    if (requestId === null) return false;
     setLanguageModelId(undefined);
+    onSent?.(requestId);
+    return true;
   };
   const submit = () => {
     const text = message.trim();
     if (!text || !worldId || !productionId) return;
     // The field keeps its words while a thread is still opening; say() would drop them.
     if (opening) return;
-    setMessage("");
+    // The words leave the box only once they have gone (codex on PR 1232): a line held back —
+    // a turn running, one just sent — stays where the author typed it.
+    // A line a menu press started is about the passage it was pressed on (codex on PR 1232).
+    // Finished, it becomes an ask like any press (codex on PR 1232): said when the dock is free
+    // and kept by the page until the coordinator takes it, so a refusal shows it as not sent
+    // rather than losing what the author wrote.
+    if (draftAsk !== null) {
+      const prefix = draftAsk.text.slice(0, draftAsk.text.length - draftAsk.line.length).trimEnd();
+      onAsk?.({ line: text, text: `${prefix} ${text}`, ...(draftAsk.subject !== undefined ? { subject: draftAsk.subject } : {}) });
+      setMessage("");
+      return;
+    }
     const prefix = dock?.subjectPrefix;
-    say(prefix === undefined ? text : `${prefix} ${text}`);
+    if (say(prefix === undefined ? text : `${prefix} ${text}`)) setMessage("");
   };
+
+  /*
+   * An ask handed in from the page — the chapter's selection menu. The page owns it (codex on PR
+   * 1232): its words and passage were fixed at the press, and it stays with the page until it is
+   * done with, so putting the dock away and bringing it back loses nothing. The dock says it when
+   * it is free, exactly as a quick ask is said, and reports back through `onAsk`: sent (with its
+   * request id), or done with.
+   *
+   * Taken or not is the coordinator's answer for that request id (`world-chat.send-result`),
+   * given once the runner has made the line a turn, not a guess from the transcript. The store
+   * keeps recent answers, so a dock brought back after its answer arrived still finds it. While
+   * the connection holds, the answer always comes, however long admission takes, so it is waited
+   * for; only a connection lost on the way loses it, and then the rejoined thread says. Not
+   * taken, it is shown beside the prompts to be tried again or dismissed, never written over the
+   * composer.
+   *
+   * A line that only starts an ask (`draft`) stays the page's too, until it is sent or another
+   * press replaces it: the dock puts it in an empty composer — again after being brought back —
+   * and sends what the author finishes with the passage it was pressed on, whatever is selected
+   * by then.
+   */
+  const [focusRequest, setFocusRequest] = useState(0);
+  const ask = dock?.ask;
+  const onAsk = dock?.onAsk;
+  const draftAsk = ask?.draft === true ? ask : null;
+  const declinedAsk = ask?.declined === true ? ask : null;
+  /*
+   * A line just sent that the thread has not shown yet (codex on PR 1232): nothing here says a
+   * turn is running, and a line released into that gap is refused by the runner as already
+   * working. The store holds it by conversation until the coordinator's answer and the thread
+   * say otherwise, so a dock put away and brought back in the gap still waits.
+   */
+  const echo = conversationId ? worldChatHolds[conversationId] ?? null : null;
+  // A line to finish: the composer, if empty, and the caret either way — once per press, and
+  // again when a dock brought back meets it, with whatever the author had typed so far (codex on
+  // PR 1232), which the page keeps with the ask as they type.
+  const seededFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (draftAsk === null) {
+      seededFor.current = null;
+      return;
+    }
+    // By press, not by words (codex on PR 1232): the same line pressed again is a new press.
+    const key = draftAsk.press ?? draftAsk.text;
+    if (seededFor.current === key) return;
+    seededFor.current = key;
+    if (message.trim() === "") setMessage(draftAsk.typed ?? draftAsk.line);
+    // Words already in the composer are what the ask now carries (codex on PR 1232): put away
+    // before another keystroke, the dock would otherwise come back with only the menu's line.
+    else if (message !== draftAsk.typed) onAsk?.({ ...draftAsk, typed: message });
+    setFocusRequest((n) => n + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftAsk]);
+  useEffect(() => {
+    if (draftAsk === null || seededFor.current !== (draftAsk.press ?? draftAsk.text) || message === (draftAsk.typed ?? draftAsk.line)) return;
+    onAsk?.({ ...draftAsk, typed: message });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [message]);
+  // Said when the dock is free.
+  // Read when the line goes, not when the callback was made (codex on PR 1232): a line said into
+  // a thread it opened goes after that thread arrives, perhaps across a rejoin.
+  const rejoinsRef = useRef(rejoins);
+  rejoinsRef.current = rejoins;
+  const conversationIdRef = useRef(conversationId);
+  conversationIdRef.current = conversationId;
+  const sentAs = (pressed: DockAsk) => (requestId: string) => {
+    const { again: _again, opening: _opening, answered: _answered, ...sent } = pressed;
+    const into = loadedRef.current?.conversationId ?? conversationIdRef.current ?? "";
+    onAsk?.({ ...sent, sent: { requestId, at: new Date().toISOString(), rejoins: rejoinsRef.current, conversationId: into } });
+  };
+  /*
+   * One ask, one step at a time (codex on PR 1232). An ask moves through its life — waiting for
+   * the dock, opening a thread, sent, answered — by one transition per render, decided from where
+   * it stands now. Separate effects each took their step from the same render and wrote over one
+   * another's result: an answer undone by a rejoin's bookkeeping, a retry undone by a restore.
+   *
+   * Sent, it is settled by the coordinator's answer for its request: taken is done with; not
+   * taken is shown to be tried again. The answer is not durable — a connection lost between send
+   * and answer loses it, even for a line the runner took — and no clock or rejoined transcript
+   * can stand in for it: admission can be slow, and a rejoin snapshot can predate it. So after a
+   * rejoin the coordinator is asked where the line stands, once per rejoin, and its answer
+   * settles it. Opening a thread first, the ask says so: a dock put away before the thread
+   * arrives comes back waiting for it rather than opening a second, and a create lost with the
+   * connection — rejoined and still no thread — is made again under the same create, which the
+   * coordinator makes at most once.
+   */
+  const askRef = useRef(ask);
+  askRef.current = ask;
+  const [answers, setAnswers] = useState(0);
+  // Answers arrive between renders; noted, the transition reads them.
+  useEffect(() => subscribeWorldChatSendResults((result) => {
+    if (askRef.current?.sent?.requestId === result.requestId) setAnswers((n) => n + 1);
+  }), []);
+  useEffect(() => {
+    if (ask === undefined || ask.draft === true || ask.declined === true) return;
+    if (ask.sent !== undefined) {
+      const answer = ask.answered ?? worldChatSendResult(ask.sent.requestId);
+      if (answer === true) {
+        onAsk?.(null);
+      } else if (answer === false) {
+        const { sent: _sent, ...refused } = ask;
+        onAsk?.({ ...refused, declined: true });
+      } else if (connection === "open" && rejoins !== ask.sent.rejoins && worldId) {
+        askWorldChatSendStatus(worldId, ask.sent.conversationId, ask.sent.requestId);
+        onAsk?.({ ...ask, sent: { ...ask.sent, rejoins } });
+      }
+      return;
+    }
+    if (ask.opening !== undefined) {
+      if (connection === "open" && !conversationId && rejoins !== ask.opening.rejoins) {
+        const { opening: lost, ...again } = ask;
+        setOpening(null);
+        onAsk?.({ ...again, again: lost.request });
+      } else if (opening === null) {
+        setOpening({
+          text: ask.text,
+          was: ask.opening.was,
+          ...(ask.subject !== undefined ? { subject: ask.subject } : {}),
+          ...(ask.replyOnly === true ? { replyOnly: true } : {}),
+          onSent: sentAs(ask),
+        });
+      }
+      return;
+    }
+    // Waiting: said when the dock is free.
+    if (opening !== null || echo !== null || running || languageUnavailableReason !== undefined || connection !== "open") return;
+    if (conversationId && loaded === null) return;
+    const pressed = ask;
+    const was = workspace?.conversationId ?? null;
+    const opens = !conversationId;
+    const request = opens ? pressed.again ?? crypto.randomUUID() : pressed.again;
+    if (say(pressed.text, pressed.replyOnly === true, pressed.subject, sentAs(pressed), request) && opens) {
+      onAsk?.({ ...pressed, opening: { was, rejoins: rejoinsRef.current, request: request! } });
+    }
+    // say and sentAs are rebuilt every render; where the ask stands and the dock's readiness are
+    // what decide.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ask, answers, opening, echo, running, languageUnavailableReason, connection, rejoins, conversationId, loaded === null, worldId]);
 
   const points = loaded?.points ?? [];
   const carriedPoints = points.filter((p) => p.kind === "point" && p.settled).length;
   /*
    * Every composer carries attach (turn 41's binding; review 2026-08-22 found this one did
    * not). Same wiring as World Chat: chips from the workspace, upload through the picker.
-   * There is no held-attachment path here — a production thread exists before anything can be
-   * dropped on it, and the first message creates it if not.
+   * The first attachment opens the thread before invoking its private file picker, just as
+   * the world composer does. No assistant turn is needed to start collecting references.
    */
   const attachChips = (loaded?.attachments ?? []).map((a) => ({
     id: a.id,
@@ -1011,51 +1279,71 @@ export function ProductionConversation({
   }));
   const attachProps = {
     attachments: attachChips,
-    ...(worldId && conversationId
-      ? { onAttach: () => worldChatAttachFiles(worldId, conversationId) }
+    ...(worldId
+      ? { onAttach: () => {
+          if (opening || running) return;
+          if (conversationId) worldChatAttachFiles(worldId, conversationId);
+          else {
+            setOpening({ text: "", attach: true, was: workspace?.conversationId ?? null });
+            createWorldChat(worldId, "Production references", crypto.randomUUID(), context);
+          }
+        } }
       : {}),
     ...(worldId && conversationId
       ? { onPromoteAttachment: (attachmentId: string) => promoteWorldChatAttachment(worldId, conversationId, attachmentId) }
       : {}),
   };
+  const sceneDock = dock?.conversationFirst === true && context.kind === "scene";
   const languageControl = productionId ? (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+    <>
+    <div className="fy-arke__model" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 8 }}>
       <select
         className="fy-set__pill"
+        style={{ maxWidth: "100%" }}
         aria-label="Language model"
         value={effectiveLanguageModelId ?? ""}
         onChange={(event) => setLanguageModelId(event.target.value || undefined)}
       >
-        {rememberedLanguageModel === undefined && <option value="">whatever the harness is set to</option>}
-        {effectiveLanguageModelId !== undefined && languageModel === undefined && (
-          <option value={effectiveLanguageModelId}>{effectiveLanguageModelId} · unavailable</option>
-        )}
-        {languageModels.map((model) => (
-          <option key={`${model.provider}/${model.id}`} value={model.id}>
-            {model.displayName}
-          </option>
-        ))}
+        <option value="">{agentLanguageModel || rememberedLanguageModel ? "Use saved choice" : "Ask the harness"}</option>
+        <HarnessModelOptions state={state} selected={effectiveLanguageModelId} />
       </select>
-      <span className="fy-mono">
+      <span className="fy-mono fy-arke__modelscope">
         {languageModelId !== undefined
           ? "THIS TURN"
-          : rememberedLanguageModel !== undefined
-            ? "THIS PRODUCTION"
-            : "HARNESS DEFAULT"}
+          : agentLanguageModel !== undefined
+            ? "CHAT AGENT"
+            : rememberedLanguageModel !== undefined
+              ? "THIS PRODUCTION"
+              : "DEFAULT"}
       </span>
       {languageModelId !== undefined && languageModelId !== rememberedLanguageModel && worldId && (
         <button
           type="button"
           className="fy-set__link"
+          disabled={languageUnavailableReason !== undefined}
           onClick={() => {
+            pendingRemember.current = languageModelId;
             setProductionModel(worldId, productionId, "llm", languageModelId);
-            setLanguageModelId(undefined);
           }}
         >
           Remember for this production
         </button>
       )}
+      {rememberedLanguageModel !== undefined && worldId && (
+        <button
+          type="button"
+          className="fy-set__link"
+          onClick={() => {
+            setProductionModel(worldId, productionId, "llm", null);
+            setLanguageModelId(undefined);
+          }}
+        >
+          Clear production default
+        </button>
+      )}
     </div>
+    <HarnessModelStatus state={state} />
+    </>
   ) : null;
   const transcript = (
     <ConversationTranscript
@@ -1103,7 +1391,7 @@ export function ProductionConversation({
           {/* The slot stays whether or not there is a frame to show in it, so the title does
               not shift left the moment the subject is the scene, a board, or a frameless shot. */}
           <span className="fy-arke__thumb">
-            {dock.thumbnail === undefined ? null : <img src={dock.thumbnail.src} alt={dock.thumbnail.alt} />}
+            {dock.thumbnail === undefined ? (sceneDock ? <Film size={24} /> : null) : <img src={dock.thumbnail.src} alt={dock.thumbnail.alt} />}
           </span>
           {dock.onToggleSubject === undefined ? (
             <span className="fy-arke__who">
@@ -1133,9 +1421,13 @@ export function ProductionConversation({
                   narrow cannot hold it open beside a transcript, and the wrap-up beneath it is
                   the only way a conversation becomes anything (turn 92). */}
               {pointsEmpty !== undefined && (!dock.conversationFirst || points.length > 0) && (
-                <details className="fy-arke__points">
+                <details
+                  className="fy-arke__points"
+                  open={pointsOpen}
+                  onToggle={(event) => setPointsOpen(event.currentTarget.open)}
+                >
                   <summary>
-                    What it understood <span className="fy-mono">{points.length > 0 ? points.length : "nothing yet"}</span>
+                    What it understood <span className="fy-mono">{points.length > 0 ? points.length : "no new notes"}</span>
                   </summary>
                   <ConversationPoints
                     points={points}
@@ -1164,6 +1456,7 @@ export function ProductionConversation({
                   subjectKey={contextKey}
                   wrapping={wrapping}
                   onWrappingChange={setWrapping}
+                  onRefused={() => setPointsOpen(true)}
                 />
               ) : null}
             </>
@@ -1171,29 +1464,64 @@ export function ProductionConversation({
           </div>
         ) : null}
         <div className="fy-arke__foot">
-          {languageControl}
-          {dock.prompts === undefined || dock.prompts.length === 0 ? null : (
-            <div className="fy-arke__prompts">
-              {dock.prompts.map((prompt) => (
-                <button key={prompt} type="button" className="fy-arke__prompt" disabled={opening !== null || running || languageUnavailableReason !== undefined} onClick={() => say(prompt)}>
-                  {prompt}
-                </button>
-              ))}
+          {sceneDock ? null : languageControl}
+          {dock.subjectLine !== undefined && <div className="fy-mono fy-arke__subject">{dock.subjectLine}</div>}
+          {declinedAsk !== null && (
+            <div className="fy-mono fy-arke__declined" role="status">
+              <span>Not sent · {declinedAsk.line}</span>
+              <button type="button" onClick={() => {
+                // Only a line the coordinator says it did not take is shown here, so trying
+                // again is a new request.
+                const { sent: _sent, declined: _declined, ...again } = declinedAsk;
+                onAsk?.(again);
+              }}>Try again</button>
+              <button type="button" onClick={() => onAsk?.(null)}>Dismiss</button>
             </div>
           )}
+          {dock.prompts === undefined || dock.prompts.length === 0 ? null : (
+            <div className="fy-arke__prompts">
+              {dock.prompts.map((entry) => {
+                const prompt = typeof entry === "string" ? entry : entry.label;
+                const replyOnly = typeof entry === "string" ? false : entry.replyOnly === true;
+                const press = typeof entry === "string" ? undefined : entry.press;
+                // A prompt is said with the subject before it, as a typed line is (turn 128):
+                // `Tighten this` said bare names nothing, and the thread never sees the selection.
+                // A prompt with a press of its own is a press, not a line (turn 129): `Derive
+                // again` under a stale record derives, and nothing is said.
+                return (
+                  <button
+                    key={prompt}
+                    type="button"
+                    className="fy-arke__prompt"
+                    disabled={press === undefined && (opening !== null || running || echo !== null || languageUnavailableReason !== undefined)}
+                    onClick={() => (press !== undefined ? press() : say(dock.subjectPrefix === undefined ? prompt : `${dock.subjectPrefix} ${prompt}`, replyOnly))}
+                  >
+                    {prompt}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {/* The scene dock has no model select above its composer (design turn 143): the
+              production's language model is chosen in Settings and remembered from the other
+              docks, which keep their control. */}
           <Composer
             value={message}
             onChange={setMessage}
             onSubmit={submit}
             placeholder={placeholder}
             {...(dock.conversationFirst ? {} : { agentLabel: "story author" })}
-            busy={running || opening !== null}
+            busy={running || opening !== null || echo !== null}
             busyLabel={opening !== null ? openingNote ?? "opening…" : "reading the world…"}
+            focusRequest={focusRequest}
             disabledReason={languageUnavailableReason}
             onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
             {...attachProps}
           />
-          <div className="fy-mono">{dock.note ?? "talking changes nothing · a change waits for your yes"}</div>
+          {/* Only a dock that departs from the promise says anything here (issue 1008). The
+              promise itself — talking changes nothing, a change waits for a yes — is the rule
+              the docks are built to, not a sentence repeated under every one of them. */}
+          {dock.note !== undefined && <div className="fy-mono">{dock.note}</div>}
         </div>
       </aside>
     );
@@ -1224,9 +1552,6 @@ export function ProductionConversation({
           onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
           {...attachProps}
         />
-        <div className="fy-mono" style={{ marginTop: 8 }}>
-          talking changes nothing · wrap-up stages what you keep
-        </div>
         {footer}
       </div>
     </div>
@@ -1248,8 +1573,14 @@ export function ProductionConversation({
       <div className="fy-story__side">
         <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
           <div style={{ font: "600 15px var(--font-sans)" }}>What it understood</div>
-          <span className="fy-mono">{points.length > 0 ? `${points.length} so far` : "nothing yet"}</span>
+          <span className="fy-mono">{points.length > 0 ? `${points.length} so far` : "no new notes"}</span>
         </div>
+        {loaded?.productionSetup?.status === "created" && <details>
+          <summary>From production setup</summary>
+          <p>The outline and open questions at creation. Current production records are in Overview and Scenes.</p>
+          <ProductionSetupOutline draft={loaded.productionSetup.draft}
+            sheetName={id => state?.world?.sheets.find(sheet => sheet.id === id)?.name ?? id} />
+        </details>}
         <ConversationPoints
           points={points}
           empty={pointsEmpty}
@@ -1305,6 +1636,7 @@ function WrapUp({
   subjectKey,
   wrapping,
   onWrappingChange,
+  onRefused,
 }: {
   worldId: string | undefined;
   conversationId: string | null;
@@ -1317,6 +1649,8 @@ function WrapUp({
   /* Lifted (review 2026-08-22): the transcript holds retry back while a wrap-up commits. */
   wrapping: boolean;
   onWrappingChange: (next: boolean) => void;
+  /** A refusal answered this press; the dock opens the points the refusal names. */
+  onRefused?: () => void;
 }) {
   const setWrapping = onWrappingChange;
   /*
@@ -1347,6 +1681,19 @@ function WrapUp({
   useEffect(() => {
     if (wrapping && (refusedMine || status === "closed")) setWrapping(false);
   }, [wrapping, refusedMine, status]);
+  /*
+   * The refusal opens the points it points at (issue 909).
+   *
+   * A refusal names two points and asks which one comes first, and the points are under a
+   * disclosure the dock keeps shut for room — so what the message asked about was the one
+   * thing not on the screen.
+   * Keyed to the attempt, not the callback: opened once per refusal, and a person who shuts it
+   * again is not fighting an effect that reopens it on every render.
+   */
+  const refusedRequestId = refusedMine && refusal ? refusal.requestId : null;
+  useEffect(() => {
+    if (refusedRequestId !== null) onRefused?.();
+  }, [refusedRequestId]);
   // A press that transmitted nothing has no answer coming, so the wait must never begin on one.
   return (
     <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
@@ -1392,16 +1739,16 @@ function WrapUp({
 export function StagedDecision({
   subject,
   staged,
-  writes,
   items,
   onAccepted,
+  accept,
 }: {
   worldId: string | undefined;
+  /** Accept as the page needs it (see ConnectedProposalPanel); absent accepts the whole draft. */
+  accept?: { label?: string; blocked?: string; pending?: boolean; onAccept?: (confirmSignature?: string) => void };
   /** What is being decided, in the words of the level — "season", "episode 03". */
   subject: string;
   staged: StagedProposal;
-  /** What applying does, said plainly under the buttons. */
-  writes: string;
   /** A dock can name the concrete things this draft would touch instead of repeating its file. */
   items?: readonly { label: string; meta?: string }[];
   /**
@@ -1412,16 +1759,19 @@ export function StagedDecision({
 }) {
   const world = useStore().state?.world;
   if (!world || proposalDecisionOf(staged.proposal, world.conversations).mode !== "attended") return null;
+  // Under the buttons goes a fact, never a promise (design turn 137): the file the gate would
+  // write, or — where the caller can be more concrete than a path — the things it would touch.
+  const files = staged.proposal.targets.map((target) => target.path.split("/").pop() ?? target.path);
   return (
     <div aria-label={`Changes to ${subject}`} style={{ display: "grid", gap: 8 }}>
       <ConnectedProposalPanel
         staged={staged}
         onAccepted={onAccepted}
+        {...(accept !== undefined ? { accept } : {})}
       />
-      {items !== undefined && items.length > 0 && (
-        <div className="fy-mono">{items.map((item) => item.label).join(" · ")}</div>
-      )}
-      <div className="fy-mono">{writes}</div>
+      <div className="fy-mono">
+        {items !== undefined && items.length > 0 ? items.map((item) => item.label).join(" · ") : files.join(" · ")}
+      </div>
     </div>
   );
 }

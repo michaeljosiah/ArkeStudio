@@ -1,6 +1,7 @@
 import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
 import { z } from "zod";
-import { ArtifactIdSchema, IsoDateTimeSchema, SceneIdSchema, Sha256Schema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
+import { ArtifactIdSchema, IsoDateTimeSchema, prefixedIdSchema, SceneIdSchema, Sha256Schema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
+import { FullSha256Schema } from "./audio.js";
 import { PropIdSchema, PropStateIdSchema } from "./prop.js";
 
 /**
@@ -89,14 +90,17 @@ export const StagingKeySchema = z
     p: z.tuple([z.number(), z.number(), z.number()]),
     /** Where the lens points — world metres, or an offset from `anchor`. */
     l: z.tuple([z.number(), z.number(), z.number()]),
+    anchorSpace: z.enum(["world", "local"]).optional(),
+    roll: z.number().finite().min(-180).max(180).optional(),
+    focalMm: z.number().finite().positive().max(1000).optional(),
     /** The cast sheet the position rides with. */
     anchor: SlugSchema.optional(),
     /** The cast sheet the aim follows live. */
     track: SlugSchema.optional(),
-    /** Fraction of the incoming leg spent decelerating into this mark. */
-    easeIn: z.number().min(0).max(1).optional(),
-    /** Fraction of the outgoing leg spent accelerating away from this mark. */
-    easeOut: z.number().min(0).max(1).optional(),
+    /** Ease into a camera rest; ignored at passing keys. */
+    easeIn: z.number().min(0).max(1).optional().describe("Decelerating into a camera rest; ignored at passing keys."),
+    /** Ease away from a camera rest; ignored at passing keys. */
+    easeOut: z.number().min(0).max(1).optional().describe("Accelerating away from a camera rest; ignored at passing keys."),
   })
   .strict();
 export type StagingKey = z.infer<typeof StagingKeySchema>;
@@ -106,6 +110,10 @@ export const StagingFigureSchema = z
     sheetId: SlugSchema,
     x: z.number(),
     z: z.number(),
+    parent: SlugSchema.optional(),
+    facing: z.number().finite().optional(),
+    y: z.number().finite().optional(),
+    height: z.number().finite().positive().max(20).optional(),
     /** Static greybox posture; absent is standing. */
     pose: z.enum(["sit", "lie"]).optional(),
     /** Where the figure ends the shot; absent holds still. */
@@ -123,6 +131,13 @@ export type StagingFigure = z.infer<typeof StagingFigureSchema>;
 export const StagingSetSchema = z
   .object({
     name: z.string().min(1),
+    shape: z.enum(["box", "sphere", "cylinder", "mesh"]).optional(),
+    group: SlugSchema.optional(),
+    vertices: z.array(z.tuple([z.number().finite(),z.number().finite(),z.number().finite()])).min(3).max(2048).optional(),
+    triangles: z.array(z.number().int().nonnegative()).min(3).max(12288).optional(),
+    y: z.number().finite().optional(),
+    rotation: z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]).optional(),
+    solid: z.boolean().optional(),
     x: z.number(),
     z: z.number(),
     w: z.number(),
@@ -145,7 +160,41 @@ export type SceneBlocking = z.infer<typeof SceneBlockingSchema>;
 export const StageRigSchema = z.enum(["sticks", "dolly", "steadicam", "handheld", "crane", "drone", "car-mount"]);
 export type StageRig = z.infer<typeof StageRigSchema>;
 
+export const StageGaitSchema = z.enum(["walk", "jog", "run"]);
+export type StageGait = z.infer<typeof StageGaitSchema>;
+
+export const StagePerformanceKeySchema = z.object({
+  t: z.number().finite().nonnegative(), x: z.number().finite(), z: z.number().finite(),
+  gait: StageGaitSchema.optional(),
+  easeIn: z.number().min(0).max(.5).optional(),
+  easeOut: z.number().min(0).max(.5).optional(),
+  hold: z.number().finite().nonnegative().optional(),
+  y: z.number().finite().optional(), facing: z.number().finite().optional(),
+  pose: z.enum(["stand", "sit", "lie"]).optional(),
+}).strict();
+export type StagePerformanceKey = z.infer<typeof StagePerformanceKeySchema>;
+export const StagePerformanceSchema = z.object({
+  sheetId: SlugSchema, keys: z.array(StagePerformanceKeySchema).min(1).max(120),
+}).strict();
+export type StagePerformance = z.infer<typeof StagePerformanceSchema>;
+export const StageObjectMotionSchema = z.object({
+  group: SlugSchema,
+  maxSpeed: z.number().finite().positive().optional(),
+  keys: z.array(z.object({ t: z.number().finite().nonnegative(), p: z.tuple([z.number().finite(),z.number().finite(),z.number().finite()]), rotation: z.tuple([z.number().finite(),z.number().finite(),z.number().finite()]).optional(), easeIn: z.number().min(0).max(1).optional(), easeOut: z.number().min(0).max(1).optional() }).strict()).min(1).max(120),
+}).strict();
+export type StageObjectMotion = z.infer<typeof StageObjectMotionSchema>;
+export const StageAuthorshipSchema = z.object({
+  sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  instruction: z.string().max(4000).optional(),
+  model: z.string().min(1), sourceVersion: z.number().int().positive(),
+  assumptions: z.array(z.string().max(1000)).max(20),
+  assessment: z.string().max(4000), inspectedFrames: z.number().int().nonnegative().max(24),
+}).strict();
+
 const ShotRigShape = {
+  objectMotions: z.array(StageObjectMotionSchema).max(30).optional(),
+  performances: z.array(StagePerformanceSchema).max(30).optional(),
+  authorship: StageAuthorshipSchema.optional(),
   rig: StageRigSchema.optional(),
   seed: z.number().int().min(0).optional(),
   rigIntensity: z.number().min(0).max(2).optional(),
@@ -168,6 +217,13 @@ export const ShotStageEditSchema = z
   });
 export type ShotStageEdit = z.infer<typeof ShotStageEditSchema>;
 
+/** Additional views filed with a playblast (issue 1043); opening remains its structural frame. */
+export const StageReferenceFrameSchema = z.object({
+  kind: z.enum(["last", "key", "overview"]),
+  at: z.number().finite().nonnegative(),
+}).strict();
+export type StageReferenceFrame = z.infer<typeof StageReferenceFrameSchema>;
+
 export const ShotStagingSchema = z
   .object({
     /** Counted up on every Keep, so a filed playblast can say which staging it was rendered from. */
@@ -176,14 +232,17 @@ export const ShotStagingSchema = z
     ...ShotRigShape,
     keys: z.array(StagingKeySchema),
     /**
-      * The playblast and opening frame filed from this staging, and what they were rendered from:
+      * The playblast and reference images filed from this staging, and what they were rendered from:
       * the staging version and the shot length, lens and aspect. A pin that disagrees with any of
       * them is stale — the files still exist, they just no longer show this shot.
      */
     playblast: z
       .object({
+        evaluatorVersion: z.number().int().positive().optional(),
+        sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
         artifactId: ArtifactIdSchema,
         openingFrameArtifactId: ArtifactIdSchema.optional(),
+        referenceFrames: z.array(StageReferenceFrameSchema.extend({ artifactId: ArtifactIdSchema })).optional(),
         version: z.number().int().min(1),
         durationSec: z.number().positive().optional(),
         aspect: z.string().min(1).optional(),
@@ -208,6 +267,13 @@ export const ShotStagingSchema = z
   });
 export type ShotStaging = z.infer<typeof ShotStagingSchema>;
 
+/**
+ * The title a shot is born with. A title cannot be blank on disk, so this literal is how "no
+ * title yet" is stored — which means prompt assembly has to know it, or the words `Untitled
+ * shot.` reach the image model as content on every shot nobody has named (issue 910).
+ */
+export const UNTITLED_SHOT = "Untitled shot";
+
 export const ShotSchema = z
   .object({
     visualFacts: ShotVisualFactsSchema.optional(),
@@ -216,6 +282,14 @@ export const ShotSchema = z
     title: z.string().min(1),
     /** `@slug` tokens are live sheet references, resolved at prompt assembly (§2.3.4). */
     description: z.string(),
+    /**
+     * Working notes on the shot (design turn 143). The person's, first: prompt assembly reads
+     * the shot's named fields and never this one, so a note is not spliced into an image or
+     * video prompt. A model that is handed the whole shot — World Chat's scene reads, Stage
+     * construction — sees the note with the rest of it, which is the point of a note Arke can
+     * act on; it is not a private field.
+     */
+    notes: z.string().optional(),
     camera: z.string().optional(),
     audio: ShotAudioSchema.optional(),
     durationSec: z.number().positive().optional(),
@@ -282,6 +356,8 @@ export const ShotSchema = z
     promptOverride: z
       .object({
         text: z.string().min(1),
+        /** A video prompt must not become the prompt for its storyboard still. */
+        capability: z.enum(["image", "video"]).optional(),
         /** Cited sheet versions at the moment of the edit. */
         sheetVersions: z.record(SlugSchema, z.number().int().min(1)),
       })
@@ -346,6 +422,29 @@ export type SceneStoryboard = z.infer<typeof SceneStoryboardSchema>;
  * because apart from the structural field there is nothing to drift — every other field keeps
  * its identity, owner, optionality, and meaning in both.
  */
+/**
+ * What a character in the scene brings as a voice (SPEC-044 R-7): the kit's designated sample,
+ * or one read made for this scene, by its immutable id and full hash. Absent means the sample.
+ */
+export const SceneVoiceChoiceSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("sample") }).strict(),
+  // `prefixedIdSchema("pf")` rather than PerformanceIdSchema: performance.ts reaches this file
+  // through scene-flow.ts, so importing it back here is a cycle that resolves as a TDZ crash.
+  z.object({ kind: z.literal("performance"), performanceId: prefixedIdSchema("pf"), hash: FullSha256Schema }).strict(),
+]);
+export type SceneVoiceChoice = z.infer<typeof SceneVoiceChoiceSchema>;
+
+/**
+ * A member of the scene's cast (SPEC-044 R-6..R-8). `added` marks someone put in the scene by
+ * hand rather than cited by a shot; a member held only for its choices has no `added`. The look
+ * is not here: it is the kit look attached to this scene (SPEC-017 R-20), which the planner
+ * already prefers, so a second record of it would only drift.
+ */
+export const SceneCastMemberSchema = z
+  .object({ added: IsoDateTimeSchema.optional(), voice: SceneVoiceChoiceSchema.optional() })
+  .strict();
+export type SceneCastMember = z.infer<typeof SceneCastMemberSchema>;
+
 export const SceneBaseShape = {
     id: SceneIdSchema,
     /**
@@ -376,6 +475,12 @@ export const SceneBaseShape = {
       })
       .strict()
       .optional(),
+    /**
+     * The scene's cast by character sheet id (SPEC-044 R-6..R-8): who is in it beyond the names
+     * its shots cite, and what each brings. Absent, the cast is the citations alone, every
+     * member on its defaults, and nothing is written for that.
+     */
+    cast: z.record(SlugSchema, SceneCastMemberSchema).optional(),
     /** Turn 97 (14d): camera defaults every shot inherits — a shot's `framing` field wins. */
     defaults: ShotFramingSchema.optional(),
     /** The action and set shared by the scene's cameras; a shot may carry a complete override. */

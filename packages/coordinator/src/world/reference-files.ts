@@ -40,6 +40,28 @@ export class WorldReferenceError extends Error {
   }
 }
 
+/** Standalone audio references use the same containment and stable-handle checks as images. */
+export async function readContainedAudioReferences(worldDir: string, paths: readonly string[]) {
+  if (paths.length > 3) throw new WorldReferenceError("at most three audio references are supported");
+  const root = await realpath(toExtendedLength(worldDir));
+  const results: Array<{ name: string; contentType: "audio/wav" | "audio/mpeg"; data: Uint8Array }> = [];
+  for (const [index, portable] of paths.entries()) {
+    const { resolved, validatedFile } = await walkContained(root, portable, "audio reference");
+    const extension = portable.toLowerCase().endsWith(".wav") ? "wav" : portable.toLowerCase().endsWith(".mp3") ? "mp3" : null;
+    if (!extension) throw new WorldReferenceError("audio references must be WAV or MP3");
+    const handle = await open(toExtendedLength(resolved), "r");
+    try {
+      const before = await handle.stat();
+      if (!before.isFile() || !validatedFile || before.dev !== validatedFile.dev || before.ino !== validatedFile.ino || before.size <= 0 || before.size > 15_000_000) throw new WorldReferenceError("audio reference changed or exceeds 15 MB");
+      const data = Uint8Array.from(await handle.readFile());
+      const after = await handle.stat();
+      if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || data.length !== before.size) throw new WorldReferenceError("audio reference changed during preparation");
+      results.push({ name: `audio-${index + 1}.${extension}`, contentType: extension === "wav" ? "audio/wav" : "audio/mpeg", data });
+    } finally { await handle.close(); }
+  }
+  return results;
+}
+
 function validatePortablePath(path: string, what = "image reference"): string[] {
   if (
     path.length === 0 ||

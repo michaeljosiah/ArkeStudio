@@ -1,4 +1,5 @@
-import { useId, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type Ref, type TextareaHTMLAttributes } from "react";
+import { useId, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type Ref, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { Check as CheckMark, ChevronDown } from "./icons.js";
 
 /**
  * The SpecOne component layer, reimplemented as React against the token contract
@@ -14,11 +15,22 @@ export function Button({
   size = "default",
   className,
   type = "button",
+  hint,
   ref,
   ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: ButtonVariant;
   size?: ButtonSize;
+  /**
+   * What pressing leaves behind, when a person must know it before pressing (design turn 137).
+   *
+   * It rides on the control instead of on a line beneath it, and it has to reach whoever is
+   * about to press. `title` on its own answers the pointer: Chromium draws it under a cursor
+   * and never on focus, so tabbing to the button meets the consequence stripped out — the hole
+   * `IconButton` opened `.fy-tip` for. So both. `.fy-tip` draws the bubble on `:hover` and
+   * `:focus-visible` alike, and `title` is what a screen reader reads out as the description.
+   */
+  hint?: string;
   /** For the callers that have to put focus back on this button — a dialog returning it, say. */
   ref?: Ref<HTMLButtonElement>;
 }) {
@@ -26,20 +38,44 @@ export function Button({
     <button
       ref={ref}
       type={type}
-      className={cx("ui-btn", `ui-btn--${variant}`, `ui-btn--${size}`, className)}
+      className={cx("ui-btn", `ui-btn--${variant}`, `ui-btn--${size}`, hint === undefined ? undefined : "fy-tip", className)}
+      {...(hint === undefined ? {} : { "data-tip": hint, title: hint })}
       {...rest}
     />
   );
 }
 
+/**
+ * A verb drawn as its glyph, with the word on its tooltip and its accessible name (issue 1010).
+ *
+ * The tooltip is `.fy-tip`'s drawn bubble rather than the platform's `title`, because `title`
+ * answers the pointer and nobody else: tab to a glyph-only control and it says nothing, which is
+ * exactly what a row of marks costs a keyboard user that a row of words did not. `.fy-tip` draws
+ * on `:hover` and `:focus-visible` alike, and escapes clipping ancestors — see the rule for how,
+ * and for what the put-away World Chat rail taught us about needing that.
+ */
 export function IconButton({
   label,
+  hint,
   className,
   children,
   ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  label: string;
+  /**
+   * What the press costs or leaves behind, for the tooltip only. The accessible name stays the
+   * verb; this is where a consequence the text button used to carry in its own `title` goes, so
+   * dropping the word does not drop what the word was standing next to.
+   */
+  hint?: string;
+}) {
   return (
-    <button className={cx("ui-iconbtn", className)} aria-label={label} title={label} {...rest}>
+    <button
+      className={cx("ui-iconbtn", "fy-tip", className)}
+      aria-label={label}
+      data-tip={hint === undefined ? label : `${label} — ${hint}`}
+      {...rest}
+    >
       {children}
     </button>
   );
@@ -51,6 +87,59 @@ export function Input({ className, ...rest }: InputHTMLAttributes<HTMLInputEleme
 
 export function Textarea({ className, ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return <textarea className={cx("ui-input", "ui-textarea", className)} {...rest} />;
+}
+
+/**
+ * A `<select>` wearing the house control rather than the platform's (issue 1010, U2).
+ *
+ * The element stays a real `<select>` — the operating system's list is the one part of it worth
+ * keeping, and a hand-built menu would lose keyboard type-ahead and the native touch sheet. What
+ * is replaced is the closed state: `appearance: none` strips the platform button, and the
+ * chevron beside it is the same one every other disclosure in the app draws.
+ *
+ * `label` is the accessible name, because these sit beside a caption rather than a `<label for>`.
+ *
+ * `mark` draws in front of the value (design turn 149): a provider's plate on General's
+ * defaults, so a row scans by colour before it is read. It sits over the control's own left
+ * padding, inert to the pointer, because the `<select>` has to stay the whole hit target — a
+ * click on the mark still opens the list, and the platform's list cannot carry a picture anyway.
+ */
+export function Select({
+  label,
+  className,
+  wrapClassName,
+  mark,
+  children,
+  ...rest
+}: SelectHTMLAttributes<HTMLSelectElement> & { label: string; wrapClassName?: string; mark?: ReactNode }) {
+  return (
+    <span className={cx("ui-select", mark !== undefined && "ui-select--marked", wrapClassName)}>
+      {mark !== undefined && <span className="ui-select__mark">{mark}</span>}
+      <select className={cx("ui-select__control", className)} aria-label={label} {...rest}>
+        {children}
+      </select>
+      <ChevronDown size={12} />
+    </span>
+  );
+}
+
+/**
+ * The same trade for a checkbox: a real input, drawn by us and never by the platform.
+ */
+export function Checkbox({
+  label,
+  className,
+  ...rest
+}: Omit<InputHTMLAttributes<HTMLInputElement>, "type"> & { label: ReactNode }) {
+  return (
+    <label className={cx("ui-check", className)}>
+      <span className="ui-check__box">
+        <input type="checkbox" {...rest} />
+        <CheckMark size={11} />
+      </span>
+      <span className="ui-check__label">{label}</span>
+    </label>
+  );
 }
 
 export function Switch({
@@ -170,17 +259,19 @@ export function Callout({
 }: {
   tone?: "neutral" | "warning" | "danger" | "success";
   title?: string;
-  children: ReactNode;
+  /** A refusal is one clause, and that clause is the title; the body is for what a person answers (turn 137). */
+  children?: ReactNode;
 }) {
   return (
     <div className={cx("ui-callout", `ui-callout--${tone}`)} role={tone === "danger" ? "alert" : "note"}>
       {title && <div className="ui-callout__title">{title}</div>}
-      <div className="ui-callout__body">{children}</div>
+      {children !== undefined && <div className="ui-callout__body">{children}</div>}
     </div>
   );
 }
 
-export function Avatar({ name, image }: { name: string; image?: string }) {
+/** `onImageError` lets a caller fall back to the initials when the picture cannot be fetched. */
+export function Avatar({ name, image, onImageError }: { name: string; image?: string; onImageError?: () => void }) {
   const short = name
     .split(/\s+/)
     .filter(Boolean)
@@ -188,7 +279,7 @@ export function Avatar({ name, image }: { name: string; image?: string }) {
     .map((w) => w[0]!.toUpperCase())
     .join("");
   return image ? (
-    <img className="ui-avatar" src={image} alt={name} />
+    <img className="ui-avatar" src={image} alt={name} onError={onImageError} />
   ) : (
     <span className="ui-avatar ui-avatar--initials" aria-hidden>
       {short}

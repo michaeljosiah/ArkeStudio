@@ -1,5 +1,8 @@
+import { STAGE_CAMERA_NEAR, stageSpeedWarnings, sampleStageCamera, stageObjectAt, stageKeyOffset, stageWorldPoint, stageFigureAt, stagingFocalForFov, stagingFov, type StagePerformance, type StageObjectMotion, type StageInspectionFrame, type StageReferenceFrame, stageReferenceFrames } from "@arke-studio/contracts";
 import {
   BoxGeometry,
+  Color,
+  CylinderGeometry,
   BufferAttribute,
   BufferGeometry,
   CapsuleGeometry,
@@ -23,7 +26,7 @@ import {
   Object3D,
   OctahedronGeometry,
   OrthographicCamera,
-  PCFSoftShadowMap,
+  PCFShadowMap,
   PerspectiveCamera,
   PlaneGeometry,
   Raycaster,
@@ -37,11 +40,10 @@ import {
   Vector3,
   WebGLRenderer,
   Box3,
-  CatmullRomCurve3,
 } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
-import { STAGE_FRAME_RATE, stageFrameCount, stageRigOffset, stagingEase, type StageRig, type StagingKey, type StagingSet } from "@arke-studio/contracts";
+import { STAGE_FRAME_RATE, stageFrameCount, stageRigOffset, stageCameraScalar, type StageRig, type StagingKey, type StagingSet } from "@arke-studio/contracts";
 
 /**
  * The Stage viewport: one canvas, one renderer, two cameras, and the greybox previs of a shot
@@ -64,12 +66,18 @@ export interface StageFigureData {
   x: number;
   z: number;
   pose: "sit" | "lie" | null;
+  facing?: number;
+  y?: number;
+  height?: number;
+  parent?: string;
   to: readonly [number, number] | null;
   /** The previous shot's continuity ghost, drawn translucent and untouchable. */
   ghost: readonly [number, number] | null;
 }
 
 export interface StageData {
+  performances?: readonly StagePerformance[];
+  objectMotions?: readonly StageObjectMotion[];
   cast: readonly StageFigureData[];
   sets: readonly StagingSet[];
   keys: readonly StagingKey[];
@@ -93,6 +101,8 @@ export type StageSelection =
   | { kind: "aim" }
   | { kind: "cast"; sheetId: string }
   | { kind: "walkend"; sheetId: string }
+  /** A set, by its position in the staging's list (turn 144: the inspector's list and the viewport hold one selection). */
+  | { kind: "set"; index: number }
   | null;
 
 export interface StageFrameSink {
@@ -118,35 +128,10 @@ export function figureColour(index: number): number {
   return PALETTE[index % PALETTE.length]!;
 }
 
-/** One arc-length-mapped point on a centripetal spline leg. */
-export function stagePathPoint(
-  points: readonly (readonly [number, number, number])[],
-  leg: number,
-  along: number,
-): [number, number, number] {
-  const vectors = points.map(v3);
-  const start = vectors[Math.max(0, Math.min(vectors.length - 1, leg))];
-  const end = vectors[Math.max(0, Math.min(vectors.length - 1, leg + 1))];
-  if (start === undefined || end === undefined) return [0, 0, 0];
-  if (vectors.length < 3) {
-    const point = start.clone().lerp(end, Math.max(0, Math.min(1, along)));
-    return [point.x, point.y, point.z];
-  }
-  const curve = new CatmullRomCurve3(vectors, false, "centripetal");
-  const samplesPerLeg = 32;
-  const divisions = (vectors.length - 1) * samplesPerLeg;
-  curve.arcLengthDivisions = divisions;
-  const lengths = curve.getLengths(divisions);
-  const first = lengths[Math.max(0, Math.min(lengths.length - 1, leg * samplesPerLeg))]!;
-  const last = lengths[Math.max(0, Math.min(lengths.length - 1, (leg + 1) * samplesPerLeg))]!;
-  const distance = first + (last - first) * Math.max(0, Math.min(1, along));
-  const total = lengths.at(-1) ?? 0;
-  const point = curve.getPointAt(total === 0 ? 0 : distance / total);
-  return [point.x, point.y, point.z];
-}
-
 const INK = 0x0a0a0a;
 const aimMatrix = new Matrix4();
+export { stagePathPoint } from "@arke-studio/contracts";
+
 /** Orient a Group the way a CAMERA would: -Z toward the target. `Object3D.lookAt` aims +Z. */
 function aimAt(group: Object3D, target: Vector3): void {
   aimMatrix.lookAt(group.position, target, Object3D.DEFAULT_UP);
@@ -276,9 +261,16 @@ function aimMarker(): Group {
   return group;
 }
 
+function selectionOf(tag: PickTag): StageSelection {
+  if (tag.pick === "rig" || tag.pick === "aim") return { kind: tag.pick };
+  if (tag.pick === "set") return { kind: "set", index: tag.index! };
+  return { kind: tag.pick, sheetId: tag.sheetId! };
+}
+
 interface PickTag {
-  pick: "rig" | "aim" | "cast" | "walkend";
+  pick: "rig" | "aim" | "cast" | "walkend" | "set";
   sheetId?: string;
+  index?: number;
 }
 
 interface CamRefs {
@@ -302,7 +294,7 @@ export class StageViewport {
   private readonly events: StageEvents;
   private readonly scene = new Scene();
   private readonly renderer: WebGLRenderer;
-  private readonly view = new PerspectiveCamera(38, 1, 0.1, 200);
+  private readonly view = new PerspectiveCamera(38, 1, STAGE_CAMERA_NEAR, 200);
   private readonly shot: PerspectiveCamera;
   private readonly controls: OrbitControls;
   private readonly transform: TransformControls;
@@ -322,11 +314,13 @@ export class StageViewport {
   private walkers: Group[] = [];
   private aids: Object3D[] = [];
   private setMeshes: Mesh[] = [];
+  private objectGroups = new Map<string, Group>();
   private cam: CamRefs | null = null;
   private aim: AimRefs | null = null;
   private path: Line | null = null;
   private marks: Array<{ index: number; mesh: Mesh }> = [];
   private data: StageData;
+  private samplingKeys: StagingKey[] = [];
   private structure = "";
   private selection: StageSelection = null;
   private framed = false;
@@ -342,19 +336,21 @@ export class StageViewport {
     this.host = host;
     this.events = events;
     this.data = data;
-    host.style.position = "relative";
+    // Preserve the workspace's absolute fill; making it relative lets the canvas's intrinsic
+    // aspect grow the host with window width and clip the camera view (issue 1064).
+    if (window.getComputedStyle(host).position === "static") host.style.position = "relative";
     host.style.cursor = "grab";
 
     const renderer = new WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = PCFSoftShadowMap;
+    renderer.shadowMap.type = PCFShadowMap;
     renderer.domElement.style.cssText = "display:block;width:100%;height:100%";
     host.appendChild(renderer.domElement);
     this.renderer = renderer;
 
     this.view.position.set(4.4, 3.1, 6.4);
-    this.shot = new PerspectiveCamera(data.fov, data.aspect, 0.1, 200);
+    this.shot = new PerspectiveCamera(data.fov, data.aspect, STAGE_CAMERA_NEAR, 200);
 
     const controls = new OrbitControls(this.view, renderer.domElement);
     // LEFT must be null, not a preference: with LEFT bound to ROTATE, OrbitControls takes pointer
@@ -447,7 +443,9 @@ export class StageViewport {
     this.transform.dispose();
     this.controls.dispose();
     this.renderer.dispose();
+    this.renderer.forceContextLoss();
     this.gizmo.renderer.dispose();
+    this.gizmo.renderer.forceContextLoss();
     this.host.replaceChildren();
   }
 
@@ -537,6 +535,7 @@ export class StageViewport {
     this.clear(this.setGroup);
     this.clear(this.rigGroup);
     this.setMeshes = [];
+    this.objectGroups.clear();
     this.walkers = [];
     this.aids = [];
     this.marks = [];
@@ -544,28 +543,57 @@ export class StageViewport {
     this.aim = null;
     this.path = null;
 
-    for (const set of data.sets) {
+    for (const [index, set] of data.sets.entries()) {
+      const picked = this.selection?.kind === "set" && this.selection.index === index;
+      let parent = this.setGroup;
+      if (set.group) {
+        let group = this.objectGroups.get(set.group);
+        if (!group) { group = new Group(); this.objectGroups.set(set.group,group); this.setGroup.add(group); }
+        parent = group;
+      }
+      let geometry: BufferGeometry = set.shape === "sphere" ? new SphereGeometry(0.5,16,12) : set.shape === "cylinder" ? new CylinderGeometry(0.5,0.5,1,16) : new BoxGeometry(1,1,1);
+      if (set.shape === "mesh" && set.vertices && set.triangles) {
+        geometry.dispose();
+        geometry = new BufferGeometry();
+        geometry.setAttribute("position",new Float32BufferAttribute(set.vertices.flat(),3));
+        geometry.setIndex(set.triangles);
+        geometry.computeVertexNormals();
+      }
       const box = new Mesh(
-        new BoxGeometry(set.w, set.h, set.d),
-        new MeshStandardMaterial({ color: 0xa79e93, roughness: 0.95, transparent: true, opacity: 0.22 }),
+        geometry,
+        new MeshStandardMaterial({ color: 0xa79e93, roughness: 0.95, side: DoubleSide, transparent: true, opacity: set.solid ? 1 : 0.22 }),
       );
-      box.position.set(set.x, set.h / 2, set.z);
+      box.scale.set(set.w, set.h, set.d);
+      box.position.set(set.x, (set.y ?? 0) + set.h / 2, set.z);
+      if (set.rotation) box.rotation.set(...set.rotation.map(v => v * Math.PI / 180) as [number, number, number]);
       box.receiveShadow = true;
-      box.userData = { label: set.name, up: set.h / 2 + 0.28 };
-      this.setGroup.add(box);
+      box.castShadow = set.solid ?? false;
+      box.userData = { label: set.name, up: set.h / 2 + 0.28, pick: "set", index } satisfies PickTag & Record<string, unknown>;
+      parent.add(box);
       this.setMeshes.push(box);
+      // The selected set is drawn in ink, as a selected figure's ring is: the list and the floor agree.
       const edges = new LineSegments(
         new EdgesGeometry(box.geometry),
-        new LineBasicMaterial({ color: 0x9a9187, transparent: true, opacity: 0.6 }),
+        new LineBasicMaterial({ color: picked ? INK : 0x9a9187, transparent: true, opacity: picked ? 1 : 0.6 }),
       );
+      edges.raycast = noPick;
       edges.position.copy(box.position);
-      this.setGroup.add(edges);
+      edges.rotation.copy(box.rotation);
+      edges.scale.copy(box.scale);
+      parent.add(edges);
     }
 
     for (const member of data.cast) {
-      const from = new Vector3(member.x, 0, member.z);
+      const from = new Vector3(member.x, member.y ?? 0, member.z);
       const to = member.to === null ? null : new Vector3(member.to[0], 0, member.to[1]);
-      const walker = figure(member.colour, false, member.pose);
+      const walker = new Group();
+      for (const pose of [null, "sit", "lie"] as const) {
+        const body = figure(member.colour, false, pose);
+        body.userData["pose"] = pose ?? "stand";
+        body.visible = pose === member.pose;
+        walker.add(body);
+      }
+      walker.scale.setScalar((member.height ?? 1.8) / 1.8);
       walker.position.copy(from);
       walker.userData = { pick: "cast", sheetId: member.sheetId, name: member.name, from: from.clone(), to: to?.clone() ?? null } satisfies PickTag & Record<string, unknown>;
       this.castGroup.add(walker);
@@ -781,11 +809,11 @@ export class StageViewport {
   private probe(event: PointerEvent): StageSelection {
     this.syncPick();
     this.canvasPoint(event);
-    const hits = this.ray.intersectObjects([...this.rigGroup.children, ...this.castGroup.children], true);
+    const hits = this.ray.intersectObjects([...this.rigGroup.children, ...this.castGroup.children, ...this.setGroup.children], true);
     for (const hit of hits) {
       const tag = this.tagOf(hit.object);
       if (tag === null) continue;
-      return tag.pick === "rig" || tag.pick === "aim" ? { kind: tag.pick } : { kind: tag.pick, sheetId: tag.sheetId! };
+      return selectionOf(tag);
     }
     return null;
   }
@@ -793,7 +821,9 @@ export class StageViewport {
   private isSelected(candidate: StageSelection): boolean {
     const current = this.selection;
     if (current === null || candidate === null || current.kind !== candidate.kind) return false;
-    return current.kind === "rig" || current.kind === "aim" || (current as { sheetId: string }).sheetId === (candidate as { sheetId: string }).sheetId;
+    if (current.kind === "rig" || current.kind === "aim") return true;
+    if (current.kind === "set") return current.index === (candidate as { index: number }).index;
+    return current.sheetId === (candidate as { sheetId: string }).sheetId;
   }
 
   private down(event: PointerEvent): void {
@@ -817,14 +847,19 @@ export class StageViewport {
       }
       return null;
     };
-    const tag = first(rigHits, "aim") ?? first(rigHits) ?? first(this.ray.intersectObjects(this.castGroup.children, true));
+    // Figures win over the set they stand in; a set is picked where nothing else is.
+    const tag = first(rigHits, "aim") ?? first(rigHits) ?? first(this.ray.intersectObjects(this.castGroup.children, true))
+      ?? first(this.ray.intersectObjects(this.setGroup.children, true));
     if (tag === null) {
       this.orbitDrag(event);
       return;
     }
-    this.selection = tag.pick === "rig" || tag.pick === "aim" ? { kind: tag.pick } : { kind: tag.pick, sheetId: tag.sheetId! };
+    this.selection = selectionOf(tag);
     this.events.selchange(this.selection);
     this.build();
+    // A set has no gizmo to drag, and a room's massing can cover most of the view: the press picks
+    // it, and the same press moved orbits, as it did before sets could be picked at all.
+    if (tag.pick === "set") this.orbitDrag(event);
   }
 
   /** A left drag on empty space orbits — by hand, since the left button is off OrbitControls. */
@@ -924,6 +959,7 @@ export class StageViewport {
     let position: Vector3 | null = null;
     if (selection.kind === "rig") position = this.sampleCam(at, at);
     else if (selection.kind === "aim") position = this.sampleAim(at, at);
+    else if (selection.kind === "set") position = null; // a set is placed from its fields; there is no gizmo on it
     else {
       const walker = this.walkers.find((candidate) => candidate.userData["sheetId"] === selection.sheetId);
       if (walker !== undefined) {
@@ -975,7 +1011,9 @@ export class StageViewport {
     const p = this.proxy.position.clone();
     const rounded = (value: number) => Math.round(value * 100) / 100;
     if (selection.kind === "cast") {
-      this.events.castchange(selection.sheetId, rounded(p.x), rounded(p.z));
+      const member = this.data.cast.find(f=>f.sheetId===selection.sheetId);
+      const local = member?.parent ? stageWorldPoint(p.toArray(),stageObjectAt(this.data.objectMotions,member.parent,at)) : p.toArray();
+      this.events.castchange(selection.sheetId, rounded(local[0]), rounded(local[2]));
       return;
     }
     if (selection.kind === "walkend") {
@@ -989,13 +1027,7 @@ export class StageViewport {
 
   /** A world point expressed the way the key at `at` stores it: an offset, when anchored. */
   private relative(point: Vector3, at: number): [number, number, number] {
-    const key = this.keyAt(at);
-    const p = point.clone();
-    if (key.anchor !== undefined) {
-      const subject = this.subjectAt(key.anchor, at);
-      if (subject !== null) p.sub(subject);
-    }
-    return [Math.round(p.x * 100) / 100, Math.round(p.y * 100) / 100, Math.round(p.z * 100) / 100];
+    return stageKeyOffset(this.resolved(),this.keyAt(at),point.toArray(),at,this.data.durationSec).map(v=>Math.round(v*100)/100) as [number,number,number];
   }
 
   private label(text: string, strong: boolean): HTMLDivElement {
@@ -1066,48 +1098,34 @@ export class StageViewport {
   }
 
   /** Camera position at path time `s`, with anchored subjects evaluated at `clock`. */
-  private sampleCam(s: number, clock: number): Vector3 {
-    const { a, b, index, k } = this.span(s);
-    const along = stagingEase(a, b, k);
-    const points = this.data.keys.map((key) => {
-      const point = this.keyWorld(key, clock);
-      return [point.x, point.y, point.z] as [number, number, number];
-    });
-    return v3(stagePathPoint(points, index, along));
+  private sampleCam(s: number, clock: number): Vector3 { return new Vector3(...this.sampleCamera(s, clock).p); }
+  private sampleAim(s: number, clock: number): Vector3 { return new Vector3(...this.sampleCamera(s, clock).l); }
+  private resolved() {
+    // The evaluator caches spatial curves by key-array identity. Keep that identity through
+    // refresh/path/export samples, while accepting replaced keys and in-place key edits.
+    if (this.samplingKeys.length !== this.data.keys.length || this.samplingKeys.some((key, i) => key !== this.data.keys[i])) {
+      this.samplingKeys = [...this.data.keys];
+    }
+    return { version: 1, keys: this.samplingKeys, sets: [...this.data.sets], cast: this.data.cast.map(f => ({ ...f, pose: f.pose ?? undefined, to: f.to ? [...f.to] as [number,number] : undefined })), ...(this.data.performances ? { performances: [...this.data.performances] } : {}), ...(this.data.objectMotions ? { objectMotions: [...this.data.objectMotions] } : {}) };
   }
-
-  private sampleAim(s: number, clock: number): Vector3 {
-    const { a, b, k } = this.span(s);
-    const along = stagingEase(a, b, k);
-    const smooth = along * along * (3 - 2 * along);
-    return this.keyLook(a, clock).lerp(this.keyLook(b, clock), smooth);
+  private sampleCamera(at: number, clock: number) {
+    return sampleStageCamera(this.resolved(),at,this.data.durationSec,clock);
   }
 
   private subjectAt(sheetId: string, at: number): Vector3 | null {
     const walker = this.walkers.find((candidate) => candidate.userData["sheetId"] === sheetId);
-    if (walker === undefined) return null;
-    const from = walker.userData["from"] as Vector3;
-    const to = walker.userData["to"] as Vector3 | null;
-    if (to === null) return from.clone();
-    return from.clone().lerp(to, this.data.durationSec === 0 ? 0 : Math.max(0, Math.min(1, at / this.data.durationSec)));
+    if (walker === undefined) return this.objectGroups.has(sheetId) ? new Vector3(...stageObjectAt(this.data.objectMotions,sheetId,at).p) : null;
+    const member = this.data.cast.find(f => f.sheetId === sheetId)!;
+    const state = stageFigureAt({ ...member, pose: member.pose ?? undefined, to: member.to ? [...member.to] : undefined }, this.data.performances, at, this.data.durationSec, this.data.objectMotions);
+    return new Vector3(state.x, state.y, state.z);
   }
 
   private keyWorld(key: StagingKey, at: number): Vector3 {
-    const p = v3(key.p);
-    if (key.anchor === undefined) return p;
-    const subject = this.subjectAt(key.anchor, at);
-    return subject === null ? p : p.add(subject);
+    return new Vector3(...sampleStageCamera({...this.resolved(),keys:[key]},at,this.data.durationSec).p);
   }
 
   private keyLook(key: StagingKey, at: number): Vector3 {
-    if (key.track !== undefined) {
-      const subject = this.subjectAt(key.track, at);
-      if (subject !== null) return subject.setY(key.l[1]);
-    }
-    const l = v3(key.l);
-    if (key.anchor === undefined) return l;
-    const subject = this.subjectAt(key.anchor, at);
-    return subject === null ? l : l.add(subject);
+    return new Vector3(...sampleStageCamera({...this.resolved(),keys:[key]},at,this.data.durationSec).l);
   }
 
   /** The true animated path: anchored keys curve around their subject rather than joining dots. */
@@ -1128,15 +1146,19 @@ export class StageViewport {
   /** Per-frame: move what exists. No geometry is created here. */
   private refresh(at: number): void {
     if (this.proxyLive) return;
+    for (const [name,group] of this.objectGroups) {
+      const transform = stageObjectAt(this.data.objectMotions,name,at);
+      group.position.set(...transform.p);
+      group.rotation.set(...transform.rotation.map(v=>v*Math.PI/180) as [number,number,number]);
+    }
     for (const walker of this.walkers) {
-      const from = walker.userData["from"] as Vector3;
-      const to = walker.userData["to"] as Vector3 | null;
-      if (to === null) continue;
-      walker.position.copy(from).lerp(to, this.data.durationSec === 0 ? 0 : at / this.data.durationSec);
+      const member = this.data.cast.find(f => f.sheetId === walker.userData["sheetId"])!;
+      const state = stageFigureAt({ ...member, pose: member.pose ?? undefined, to: member.to ? [...member.to] : undefined }, this.data.performances, at, this.data.durationSec, this.data.objectMotions);
+      walker.position.set(state.x, state.y, state.z);
+      walker.rotation.y = state.facing * Math.PI / 180;
+      for (const body of walker.children) body.visible = body.userData["pose"] === state.pose;
       const ring = walker.userData["ring"] as Mesh | undefined;
-      ring?.position.set(walker.position.x, 0.015, walker.position.z);
-      const direction = to.clone().sub(from);
-      if (direction.lengthSq() > 0.0025) walker.rotation.y = Math.atan2(direction.x, direction.z);
+      ring?.position.set(state.x, 0.015, state.z);
     }
     if (this.cam !== null && this.data.keys.length > 0) {
       const position = this.sampleCam(at, at);
@@ -1147,7 +1169,13 @@ export class StageViewport {
       aimAt(this.cam.rig, look);
       this.cam.rig.rotateX(motion.rotation[0]);
       this.cam.rig.rotateY(motion.rotation[1]);
-      this.cam.rig.rotateZ(motion.rotation[2]);
+      const span = this.span(at);
+
+      this.cam.rig.rotateZ(motion.rotation[2] + stageCameraScalar(this.data.keys, this.data.keys.map(key => key.roll ?? 0), at) * Math.PI / 180);
+      const defaultFocal = stagingFocalForFov(this.data.fov,this.data.aspect);
+      const focal = span.a.focalMm === undefined && span.b.focalMm === undefined ? null : stageCameraScalar(this.data.keys, this.data.keys.map(key => key.focalMm ?? defaultFocal), at);
+      this.shot.fov = focal === null ? this.data.fov : stagingFov(`${focal}mm`, `${this.data.aspect}:1`);
+      this.shot.updateProjectionMatrix();
       segment(this.cam.stem, new Vector3(position.x, 0, position.z), position);
       this.cam.foot.position.set(position.x, 0.01, position.z);
       this.cam.ring?.position.set(position.x, 0.015, position.z);
@@ -1184,7 +1212,8 @@ export class StageViewport {
     }
   }
 
-  private hideStaging(hidden: boolean): void {
+  private hideStaging(hidden: boolean, capture = this.recordingAt !== null): void {
+    this.host.parentElement?.toggleAttribute("data-stage-capture", capture);
     this.rigGroup.visible = !hidden;
     for (const aid of this.aids) aid.visible = !hidden;
     this.transformHelper.visible = !hidden && this.transform.object !== undefined;
@@ -1264,12 +1293,118 @@ export class StageViewport {
     this.gizmo.renderer.render(this.gizmo.scene, this.gizmo.camera);
   }
 
+  /** A stable plan view, independent of the person's orbit camera and current selection. */
+  private overview(renderer: WebGLRenderer): HTMLCanvasElement {
+    this.refresh(0);
+    this.hideStaging(false);
+    this.transformHelper.visible = false;
+    this.scene.updateMatrixWorld(true);
+    const bounds = new Box3();
+    for (const object of [...this.setMeshes, ...this.walkers]) bounds.expandByObject(object);
+    const path = Array.from({ length: PATH_POINTS }, (_, index) => {
+      const at = index / (PATH_POINTS - 1) * this.data.durationSec;
+      const point = this.sampleCam(at, at);
+      bounds.expandByPoint(point);
+      return point;
+    });
+    if (bounds.isEmpty()) bounds.set(new Vector3(-2, 0, -2), new Vector3(2, 2, 2));
+    const center = bounds.getCenter(new Vector3());
+    const size = bounds.getSize(new Vector3());
+    const aspect = renderer.domElement.width / renderer.domElement.height;
+    const halfHeight = Math.max(2, size.z / 2 + 1, (size.x / 2 + 1) / aspect);
+    const camera = new OrthographicCamera(-halfHeight * aspect, halfHeight * aspect, halfHeight, -halfHeight, .1, size.y + 100);
+    camera.position.set(center.x, bounds.max.y + 50, center.z);
+    camera.up.set(0, 0, -1);
+    camera.lookAt(center);
+    camera.updateMatrixWorld(true);
+    renderer.render(this.scene, camera);
+    // Canvas strokes remain legible at any scene scale and cannot disappear behind set geometry.
+    const canvas = document.createElement("canvas");
+    canvas.width = renderer.domElement.width;
+    canvas.height = renderer.domElement.height;
+    const context = canvas.getContext("2d")!;
+    context.drawImage(renderer.domElement, 0, 0);
+    const project = (point: Vector3) => {
+      const screen = point.clone().project(camera);
+      return [(screen.x + 1) * canvas.width / 2, (1 - screen.y) * canvas.height / 2] as const;
+    };
+    context.strokeStyle = new Color(PALETTE[2]!).getStyle();
+    context.lineWidth = Math.max(3, canvas.width / 320);
+    context.beginPath();
+    path.forEach((point, index) => { const [x, y] = project(point); if (index === 0) context.moveTo(x, y); else context.lineTo(x, y); });
+    context.stroke();
+    context.font = `${Math.max(12, canvas.width / 80)}px sans-serif`;
+    for (const walker of this.walkers) {
+      const [x, y] = project(walker.getWorldPosition(new Vector3()));
+      context.fillStyle = renderer.getClearColor(new Color()).getStyle();
+      context.beginPath(); context.arc(x, y, 7, 0, Math.PI * 2); context.fill(); context.stroke();
+      context.fillStyle = new Color(INK).getStyle();
+      context.fillText(String(walker.userData["name"]), x + 11, y - 9);
+    }
+    return canvas;
+  }
+
+  /** Samples the actual lens and an overview for the constructing model, without filing media. */
+  async inspectFrames(requested: readonly number[] = []): Promise<StageInspectionFrame[]> {
+    const canvas = document.createElement("canvas");
+    const renderer = new WebGLRenderer({ canvas, antialias: true, alpha: false, preserveDrawingBuffer: true });
+    const width = 640, height = Math.round(width / this.data.aspect);
+    renderer.setSize(width, height, false);
+    renderer.setClearColor(0xe6e3dd, 1);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = PCFShadowMap;
+    const times = [...new Set([0,this.data.durationSec/2,Math.max(0,this.data.durationSec-1/30),this.data.durationSec,...this.data.keys.map(k=>k.t),...(this.data.performances??[]).flatMap(p=>p.keys.map(k=>k.t)),...(this.data.objectMotions??[]).flatMap(p=>p.keys.map(k=>k.t))])].sort((a,b)=>a-b);
+    const essential = [...new Set([0,this.data.durationSec,Math.max(0,this.data.durationSec-1/30),...requested.filter(t=>t>=0&&t<=this.data.durationSec)])];
+    const slots = 7-essential.length;
+    const interior = times.filter(t=>!essential.includes(t));
+    const samples = [...essential,...(interior.length<=slots?interior:Array.from({length:slots},(_,i)=>interior[Math.floor((i+.5)*interior.length/slots)]!))].sort((a,b)=>a-b);
+    const result: StageInspectionFrame[] = [];
+    try {
+      for (const at of samples) {
+        this.refresh(at);
+        this.hideStaging(true, true);
+        renderer.render(this.scene, this.shot);
+        const observations: string[] = [];
+        const eye=this.shot.getWorldPosition(new Vector3());
+        observations.push(`Camera position ${eye.toArray().map(v=>v.toFixed(2)).join(", ")}m; vertical field of view ${this.shot.fov.toFixed(1)} degrees; near clip ${this.shot.near}m.`);
+        for(const walker of this.walkers) {
+          const target=walker.getWorldPosition(new Vector3()).add(new Vector3(0,(this.data.cast.find(f=>f.sheetId===walker.userData["sheetId"])?.height??1.8)*.65,0));
+          const projected=target.clone().project(this.shot);
+          const member=this.data.cast.find(f=>f.sheetId===walker.userData["sheetId"])!;
+          const state=stageFigureAt({...member,pose:member.pose??undefined,to:member.to?[...member.to]:undefined},this.data.performances,at,this.data.durationSec,this.data.objectMotions);
+          const head=walker.getWorldPosition(new Vector3()).add(new Vector3(0,(state.pose==="sit"?1.28:state.pose==="lie"?.18:1.62)*(member.height??1.8)/1.8,0));
+          const headScreen=head.clone().project(this.shot);
+          const headRay=new Raycaster(eye,head.clone().sub(eye).normalize(),0,eye.distanceTo(head)-.1);
+          const headBlocked=headRay.intersectObjects(this.setMeshes.filter(mesh=>(mesh.material as MeshStandardMaterial).opacity===1),false)[0];
+          observations.push(`${member.sheetId} head: screen (${headScreen.x.toFixed(2)}, ${headScreen.y.toFixed(2)})${headBlocked?`; sightline intersects ${headBlocked.object.userData["label"]}`:""}.`);
+          const distance=eye.distanceTo(target);
+          const ray=new Raycaster(eye,target.clone().sub(eye).normalize(),0,distance-.15);
+          const blocked=ray.intersectObjects(this.setMeshes.filter(mesh=>(mesh.material as MeshStandardMaterial).opacity===1),false)[0];
+          observations.push(`${walker.userData["sheetId"]}: screen (${projected.x.toFixed(2)}, ${projected.y.toFixed(2)}) where -1..1 is inside frame, distance ${distance.toFixed(2)}m${Math.abs(projected.x)>1||Math.abs(projected.y)>1||projected.z>1?"; outside frame":""}${blocked?`; sightline intersects ${blocked.object.userData["label"]}`:""}.`);
+        }
+        observations.push(...stageSpeedWarnings({
+          cast: this.data.cast.map(member => ({ ...member, pose: member.pose ?? undefined, to: member.to ? [...member.to] : undefined })),
+          performances: this.data.performances, objectMotions: this.data.objectMotions,
+        }, id => this.data.cast.find(member => member.sheetId === id)?.name ?? id, this.data.durationSec));
+        for(const mesh of this.setMeshes) if(new Box3().setFromObject(mesh).containsPoint(eye)) observations.push(`Camera intersects the bounds of ${mesh.userData["label"]}; inspect for intentional placement or clipping.`);
+        result.push({ at, view: "camera", observations:observations.slice(0,40), png: canvas.toDataURL("image/png").split(",")[1]! });
+      }
+      const overview = this.overview(renderer);
+      result.push({ at: 0, view: "overview", png: overview.toDataURL("image/png").split(",")[1]! });
+      return result;
+    } finally {
+      this.hideStaging(this.data.mode === "camera");
+      this.refresh(this.data.at);
+      renderer.dispose();
+      renderer.forceContextLoss();
+    }
+  }
+
   /**
-   * The playblast and its exact opening frame. A second renderer draws the same scene off screen
-   * at the production aspect so both files are the lens and nothing else — no gizmo, no path,
-   * no labels — while the on-screen view plays along so the person can see what is being written.
+   * Render the playblast and lens stills at export resolution, then a plan view with staging aids.
+   * PNG capture stays outside the fixed-frame encoder loop (SPEC-036 R-35; issue 1043).
    */
-  async record(sink: StageFrameSink, onProgress: (fraction: number) => void): Promise<{ jobId: string; openingFrame: Blob }> {
+  async record(sink: StageFrameSink, onProgress: (fraction: number) => void): Promise<{ jobId: string; openingFrame: Blob; referenceFrames: Array<StageReferenceFrame & { png: Blob }> }> {
     const width = 1280;
     const height = Math.max(2, Math.round((width / this.data.aspect) / 2) * 2);
     const frameCount = stageFrameCount(this.data.durationSec);
@@ -1281,7 +1416,7 @@ export class StageViewport {
     renderer.setSize(width, height, false);
     renderer.setClearColor(0xe6e3dd, 1);
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = PCFSoftShadowMap;
+    renderer.shadowMap.type = PCFShadowMap;
     let jobId: string | null = null;
     let complete = false;
     let gizmoDetached = false;
@@ -1302,13 +1437,11 @@ export class StageViewport {
           this.hideStaging(this.data.mode === "camera");
         }
       };
-      renderAt(0);
-      const openingFrame = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob((blob) => {
-          if (blob === null) reject(new Error("the opening frame could not be captured"));
-          else resolve(blob);
-        }, "image/png");
+      const capture = (source: HTMLCanvasElement) => new Promise<Blob>((resolve, reject) => {
+        source.toBlob(blob => blob ? resolve(blob) : reject(new Error("the Stage frame could not be captured")), "image/png");
       });
+      renderAt(0);
+      const openingFrame = await capture(canvas);
       const gl = renderer.getContext();
       const pixels = new Uint8Array(width * height * 4);
       for (let index = 0; index < frameCount; index += 1) {
@@ -1318,10 +1451,18 @@ export class StageViewport {
         await sink.write(jobId, index, pixels.slice());
         onProgress((index + 1) / frameCount);
       }
+      const referenceFrames: Array<StageReferenceFrame & { png: Blob }> = [];
+      for (const frame of stageReferenceFrames(this.data.keys, this.data.durationSec)) {
+        if (this.disposed) throw new Error("export stopped — the shot changed");
+        renderAt(frame.at);
+        const source = frame.kind === "overview" ? this.overview(renderer) : canvas;
+        referenceFrames.push({ ...frame, png: await capture(source) });
+      }
       complete = true;
-      return { jobId, openingFrame };
+      return { jobId, openingFrame, referenceFrames };
     } finally {
       this.recordingAt = null;
+      this.hideStaging(this.data.mode === "camera");
       if (jobId !== null && !complete) await sink.cancel(jobId).catch(() => {});
       const pending = this.pendingData;
       this.pendingData = null;
@@ -1330,6 +1471,7 @@ export class StageViewport {
         else if (gizmoDetached) this.attachGizmo();
       }
       renderer.dispose();
+      renderer.forceContextLoss();
     }
   }
 }

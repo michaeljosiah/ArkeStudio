@@ -3,12 +3,12 @@ import { spawn } from "node:child_process";
 import { cp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { agentForPurpose, skillFor, ROSTER } from "@arke-studio/contracts";
+import { agentForPurpose, skillFor, ROSTER, effectiveHarnessEngine } from "@arke-studio/contracts";
 import { createProviderClients, SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { KOKORO_PRESETS, localCandidates } from "@arke-studio/voice";
 import { AppSettingsFile } from "./app-settings.js";
 import { ChildLedger } from "./child-ledger.js";
-import { Coordinator } from "./coordinator.js";
+import { createStudioHost } from "./application/studio-host.js";
 import { devCipher } from "./credentials/dev-cipher.js";
 import { ProviderCallStore } from "./providers/call-store.js";
 import { SecretRegistry } from "./redact.js";
@@ -16,7 +16,7 @@ import { registerExitBackstop } from "./supervisor.js";
 import { nodeSetupDeps } from "./setup/node-deps.js";
 import { FsWorldProvider } from "./world/provider.js";
 import { harnessTrace } from "./harness/trace.js";
-import { assembleHarness, describeClaudeAvailability } from "./harness/v2-launch.js";
+import { assembleHarness, describeClaudeAvailability, describeCodexAvailability } from "./harness/v2-launch.js";
 
 /**
  * Dev entry: run the coordinator standalone over a real on-disk app root (SPEC-002) so the
@@ -75,26 +75,32 @@ if (swept.reaped.length > 0) {
 // Read before assembly: the stored choice decides which lane launches.
 const storedHarness =
   (await new AppSettingsFile(join(devRoot, "settings.json")).load().catch(() => null))?.harness ?? null;
-const chosenHarness = storedHarness?.engine ?? "opencode";
+const chosenHarness = effectiveHarnessEngine(storedHarness?.engine ?? "opencode", process.env["ARKE_HARNESS"]);
 
 const wiring = await assembleHarness({
   appRoot: devRoot,
+  engine: chosenHarness,
   deps: { ledger },
   preferV1: process.env["ARKE_OPENCODE_GENERATION"] === "v1",
   claude: {
     // Settings decides; ARKE_HARNESS remains a developer override and wins where both are set.
-    enabled: process.env["ARKE_HARNESS"] === "claude" || chosenHarness === "claude",
+    enabled: chosenHarness === "claude",
     ...(process.env["ARKE_CLAUDE_CMD"]
       ? { configuredPath: process.env["ARKE_CLAUDE_CMD"] }
       : storedHarness?.claudePath
         ? { configuredPath: storedHarness.claudePath }
         : {}),
   },
+  codex: {
+    enabled: chosenHarness === "codex",
+    ...(process.env["ARKE_CODEX_CMD"] ?? storedHarness?.codexPath
+      ? { configuredPath: process.env["ARKE_CODEX_CMD"] ?? storedHarness!.codexPath! } : {}),
+  },
   onTrace: harnessTrace(devRoot),
 });
 const opencodeSupervisor = wiring.supervisor;
 const adapter = wiring.adapter;
-registerExitBackstop(opencodeSupervisor);
+if (opencodeSupervisor) registerExitBackstop(opencodeSupervisor);
 for (const line of wiring.logLines) console.log(`[arke-studio] ${line}`);
 
 // Generation works in dev (issue #227). Three things were missing, and any one of them alone
@@ -125,7 +131,7 @@ const transportToken = randomBytes(32).toString("hex");
 const devOrigins = process.env["ARKE_DEV_ORIGIN"]
   ? [new URL(process.env["ARKE_DEV_ORIGIN"]).origin]
   : ["http://localhost:5173", "http://127.0.0.1:5173"];
-const coordinator = new Coordinator({
+const { coordinator, server } = createStudioHost({
   transportAuth: { token: transportToken, allowedOrigins: devOrigins },
   provider,
   adapter,
@@ -137,13 +143,17 @@ const coordinator = new Coordinator({
   dispatchClients: providerClients,
   manifest: SHIPPED_MANIFEST,
   // Only the harnesses that can be absent — OpenCode ships beside the app.
-  detectHarnesses: async (configuredPath) => [
+  detectHarnesses: async (configuredPath, codexPath) => [
     await describeClaudeAvailability(
       process.env["ARKE_CLAUDE_CMD"]
         ? { configuredPath: process.env["ARKE_CLAUDE_CMD"] }
         : configuredPath
           ? { configuredPath }
           : {},
+    ),
+    await describeCodexAvailability(
+      process.env["ARKE_CODEX_CMD"] ?? codexPath
+        ? { configuredPath: process.env["ARKE_CODEX_CMD"] ?? codexPath! } : {},
     ),
   ],
   changeLogPath: join(devRoot, "logs", "coordinator.jsonl"),
@@ -157,6 +167,9 @@ const coordinator = new Coordinator({
   setup: nodeSetupDeps(),
   authoring: { agentForPurpose, roster: ROSTER, skillFor },
   ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
+  harnessLaunchEngine: chosenHarness,
+  ...(wiring.unavailableReason ? { harnessUnavailableReason: wiring.unavailableReason } : {}),
+  ...(process.env["ARKE_HARNESS"] === chosenHarness ? { harnessEngineOverride: chosenHarness } : {}),
   relaunchHarness: wiring.relaunchHarness,
   // SPEC-030 R-6: no Electron shell here, so the platform opener carries the vendor's page.
   openExternal: (url) => {
@@ -179,9 +192,9 @@ const coordinator = new Coordinator({
   // providers contribute nothing anyway, and dev should never reach for one.
   voice: { sidecar: null, localPresets: localCandidates(KOKORO_PRESETS), cloudSources: [] },
 });
-coordinator.superviseAs("harness", opencodeSupervisor);
+if (opencodeSupervisor) coordinator.superviseAs("harness", opencodeSupervisor);
 
-const { port } = await coordinator.start(DEV_PORT);
+const { port } = await server.start(DEV_PORT);
 // Browser development has no isolated preload. Vite reads this gitignored launch record
 // to print a private sign-in link in the terminal; the packaged renderer never uses this handoff or sees a token.
 const sessionDir = join(repoRoot, ".dev");
@@ -194,6 +207,6 @@ console.log("[arke-studio] provider keys: stored for this run only — the dev c
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
-    void coordinator.stop().then(() => process.exit(0));
+    void server.stop().then(() => process.exit(0));
   });
 }

@@ -54,7 +54,7 @@ describe("the agents panel (behind Advanced on Who does what)", () => {
   it("says plainly when an agent is left to the harness, rather than showing a blank", () => {
     __setStateForTest(withAgents());
     const html = render();
-    assert.ok(html.includes("whatever OpenCode is set to"));
+    assert.ok(html.includes("Ask the harness"));
   });
 
   it("marks an edited brief so the shipped one is never mistaken for it", () => {
@@ -63,10 +63,12 @@ describe("the agents panel (behind Advanced on Who does what)", () => {
     assert.ok(html.includes("Brief · edited"), "the edited agent says so");
   });
 
-  it("offers no model list at all when the harness is not running, and says why", () => {
+  it("retains a saved model and the reset when the harness is not running, and says why", () => {
     const state = withAgents();
     __setStateForTest({ ...state, app: { ...state.app, harnessModels: [] } });
     const html = render();
-    assert.ok(html.includes("ask the harness — it is not running"));
+    assert.ok(html.includes("OpenCode is not configured"));
+    assert.ok(html.includes("github-copilot/claude-sonnet-4.6"));
+    assert.ok(html.includes("Ask the harness"));
   });
 });

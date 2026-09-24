@@ -1,10 +1,14 @@
+import { normalizePrompt, worldImageReferences, type WorldBundle, type ManifestModel } from "@arke-studio/contracts";
+import { ReferencePickerBody } from "./reference-picker.js";
 import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { CharacterImageWorkflow, SizeTier } from "@arke-studio/contracts";
 import { Button, Textarea } from "./ui.js";
 import { DispatchBar } from "./dispatch-bar.js";
+import { ResolvedPromptCapabilityNotices } from "./prompt-review.js";
 import { Loading } from "./loading.js";
 import { Portrait } from "./portrait.js";
 import { ImageDownload } from "./image-actions.js";
+import { StagedReferencePicker } from "./staged-reference-picker.js";
 import { Plus, X } from "./icons.js";
 
 /**
@@ -58,6 +62,7 @@ export function GenerationDialog({
   onPrompt,
   promptLabel = "Prompt",
   promptHint,
+  promptMetadata,
   promptPlaceholder,
   onResetPrompt,
   resetTitle,
@@ -68,7 +73,9 @@ export function GenerationDialog({
   reference,
   referenceLabel = "Reference image",
   referenceHint,
+  referenceDropped,
   onAttachReference,
+  worldReferences,
   onClearReference,
   workflow,
   capability = "image",
@@ -92,6 +99,7 @@ export function GenerationDialog({
   commit,
   panel,
   onPanelClose,
+  referenceTarget,
 }: {
   open: boolean;
   /** Called for every way out — Esc, the backdrop, Cancel, and a submit that went through. */
@@ -104,6 +112,8 @@ export function GenerationDialog({
   promptLabel?: string;
   /** What the app will do to these words before they are sent, said rather than left to trust. */
   promptHint?: ReactNode;
+  /** Key-art constraints and an optional assembled baseline once a comparison exists. */
+  promptMetadata?: { constraints: string; baseline?: string };
   /** Shown in an empty box — only useful where empty is a state the surface allows. */
   promptPlaceholder?: string;
   /**
@@ -148,7 +158,13 @@ export function GenerationDialog({
   reference?: string | null;
   referenceLabel?: string;
   referenceHint?: ReactNode;
+  /**
+   * Why the staged reference will not ride, when it will not. Absent means it rides — this is a
+   * refusal, so it is present only when there is one (design turn 69).
+   */
+  referenceDropped?: string;
   onAttachReference?: () => void;
+  worldReferences?: { world: WorldBundle; model: ManifestModel | null; onChoose: (file: string) => void };
   onClearReference?: () => void;
   /** Which kind of work this is, for the estimate the bar shows. */
   workflow: CharacterImageWorkflow;
@@ -200,8 +216,14 @@ export function GenerationDialog({
     label: string;
     onCommit: () => void;
     disabled?: boolean;
-    /** One line under the previews — the consequence, or the reason it just failed. */
+    /** One line under the previews: the reason it just failed, and nothing else (design turn 137). */
     note?: ReactNode;
+    /**
+     * What pressing leaves behind, when a person must know it first — on the control itself, as
+     * its tooltip, never as a line on the surface (design turn 137). Drawn on hover and on
+     * focus alike; see `Button`'s own `hint` for why one of the two is not enough.
+     */
+    hint?: string;
     /**
      * The other answer, where saying no is a decision rather than an absence — rejecting a take,
      * throwing a set away. It sits beside the primary as a quiet button rather than hiding in the
@@ -219,10 +241,35 @@ export function GenerationDialog({
    */
   panel?: ReactNode;
   onPanelClose?: () => void;
+  referenceTarget?: { worldId: string; key: string; origin?: string | undefined };
 }) {
+  const [pickingReference, setPickingReference] = useState(false);
+  if (referenceTarget?.origin) referenceHint = <>from {referenceTarget.origin}{referenceHint && <><br />{referenceHint}</>}</>;
+  useEffect(() => { if (!open) setPickingReference(false); }, [open]);
+  if (pickingReference && worldReferences && referenceTarget) {
+    panel = <StagedReferencePicker worldId={referenceTarget.worldId} referenceKey={referenceTarget.key} model={worldReferences.model}
+      onClose={() => setPickingReference(false)} onUpload={() => { onAttachReference?.(); setPickingReference(false); }} />;
+    onPanelClose = () => setPickingReference(false);
+  } else if (pickingReference && worldReferences) {
+    panel = <ReferencePickerBody
+      mode="slot" only="image" title="Choose one reference image"
+      worldSlug={worldSlug} model={worldReferences.model} carried={[]} session={[]}
+      world={worldImageReferences(worldReferences.world).map((source) => ({
+        key: source.file, kind: "image", name: source.name, imagePath: source.file,
+        meta: source.role, group: source.group, durationSec: 0,
+        pick: { source: "world-file", path: source.file },
+      }))}
+      onChoose={(pick) => { if (pick.source === "world-file") worldReferences.onChoose(pick.path); setPickingReference(false); }}
+      onUpload={() => { onAttachReference?.(); setPickingReference(false); }}
+      onClose={() => setPickingReference(false)}
+    />;
+    onPanelClose = () => setPickingReference(false);
+  }
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const promptId = useId();
+  const normalizedPrompt=normalizePrompt(prompt),promptCharacters=Array.from(normalizedPrompt).length;
+  const promptDelta=promptMetadata?.baseline===undefined?undefined:promptCharacters-Array.from(normalizePrompt(promptMetadata.baseline)).length;
   /*
    * The press itself, said back immediately.
    *
@@ -243,7 +290,7 @@ export function GenerationDialog({
   }, [pressed]);
   // A dialog reopened after an answer must not still be mid-press from the last one.
   useEffect(() => {
-    if (!open) setPressed(false);
+    if (!open) { setPressed(false); setPickingReference(false); }
   }, [open]);
 
   /*
@@ -304,18 +351,17 @@ export function GenerationDialog({
 
         <div className="fy-gendialog__columns">
         <div className="fy-gendialog__compose">
-        <label className="fy-gendialog__label" htmlFor={promptId}>
-          {promptLabel}
-        </label>
-        <div className="fy-gendialog__promptbox">
-          <Textarea
-            id={promptId}
-            className="fy-gendialog__prompt"
-            value={prompt}
-            rows={6}
-            {...(promptPlaceholder !== undefined ? { placeholder: promptPlaceholder } : {})}
-            onChange={(event) => onPrompt(event.target.value)}
-          />
+        {/*
+          Reset sits on the label row, not on the writing surface (issue 1007). Floated at the
+          textarea's bottom-right it sat on top of the prompt's own last line — and the prompts
+          this dialog opens with are written from the sheet, so the overlap was the default
+          state of the screen rather than an edge case somebody typed their way into.
+        */}
+        <div className="fy-gendialog__labelrow">
+          <label className="fy-gendialog__label" htmlFor={promptId}>
+            {promptLabel}
+            {promptMetadata&&<span className="fy-gendialog__info" tabIndex={0} role="img" aria-label={`Fixed constraints: ${promptMetadata.constraints}`} title={`Fixed constraints: ${promptMetadata.constraints}`}>ⓘ</span>}
+          </label>
           {onResetPrompt && (
             <button
               type="button"
@@ -327,7 +373,21 @@ export function GenerationDialog({
             </button>
           )}
         </div>
+        <div className={`fy-gendialog__promptbox${promptMetadata?" fy-gendialog__promptbox--counted":""}`}>
+          <Textarea
+            id={promptId}
+            className="fy-gendialog__prompt"
+            value={prompt}
+            rows={6}
+            {...(promptPlaceholder !== undefined ? { placeholder: promptPlaceholder } : {})}
+            onChange={(event) => onPrompt(event.target.value)}
+          />
+          {promptMetadata&&<span className="fy-gendialog__count" title={`${promptCharacters} Unicode characters · ${new TextEncoder().encode(normalizedPrompt).length} UTF-8 bytes`}>
+            {promptCharacters}{promptDelta!==undefined&&<> · {promptDelta>=0?"+":""}{promptDelta}</>}
+          </span>}
+        </div>
         {promptHint && <p className="fy-gendialog__hint">{promptHint}</p>}
+        <ResolvedPromptCapabilityNotices text={prompt} capability={capability} modelId={choice.modelId} />
         {extra}
 
         {/*
@@ -337,10 +397,10 @@ export function GenerationDialog({
         */}
         {reference !== undefined && (
           <>
-            <div className="fy-gendialog__label">{referenceLabel}</div>
+            <div className="fy-gendialog__label">{referenceLabel}{worldReferences && " · one optional image"}</div>
             <div className="fy-gendialog__reference">
               {reference === null ? (
-                <button type="button" className="fy-gendialog__slot" onClick={onAttachReference}>
+                <button type="button" className="fy-gendialog__slot" onClick={worldReferences ? () => setPickingReference(true) : onAttachReference}>
                   <Plus size={16} />
                   <span>Add a reference image</span>
                 </button>
@@ -349,10 +409,24 @@ export function GenerationDialog({
                   <span className="fy-gendialog__thumb">
                     <Portrait worldSlug={worldSlug} path={reference} label="Reference image" radius={7} />
                   </span>
+                  {worldReferences && <span>{(() => {
+                    const source = worldImageReferences(worldReferences.world).find((image) => image.file === reference);
+                    return source ? `${source.name} · ${source.role}` : "Uploaded reference · style";
+                  })()}</span>}
                   <button type="button" className="fy-gendialog__remove" onClick={onClearReference}>
                     Remove
                   </button>
                 </div>
+              )}
+              {/*
+                The one clause this slot owes, on the slot itself and only when it is true
+                (design turn 69, issue 1008 and the codex round after it): identity is never
+                displaced, so on a model with room for one image the staged reference does not
+                ride. It used to be a standing sentence in the hint, said whether or not it
+                applied; a refusal that is always on screen is not read when it is.
+              */}
+              {reference !== null && referenceDropped && (
+                <p className="fy-gendialog__dropped" role="status">{referenceDropped}</p>
               )}
               {referenceHint && <p className="fy-gendialog__hint">{referenceHint}</p>}
             </div>
@@ -470,6 +544,7 @@ export function GenerationDialog({
                   variant="primary"
                   disabled={commit.disabled === true || selected === null}
                   onClick={commit.onCommit}
+                  {...(commit.hint === undefined ? {} : { hint: commit.hint })}
                 >
                   {commit.label}
                 </Button>

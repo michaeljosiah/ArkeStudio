@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { newId, PropSchema, ProvenanceSchema } from "../src/index.js";
+import { checkPropName, mentionSpans, newId, parseMentions, PropSchema, ProvenanceSchema, withoutMention } from "../src/index.js";
 
 /** Prop identity and the five provenance fields (design turn 105, Option C; issue 534). */
 describe("props", () => {
@@ -31,5 +31,39 @@ describe("props", () => {
       () => ProvenanceSchema.parse({ canonRevision: 3, sheets: {}, propStates: [{ propId: prop.id, resolutionSource: "shot" }] }),
       "absence is written down, never left out",
     );
+  });
+
+  it("a prop uncited by its chip loses its mention by the parser's own grammar, wherever it sits (SPEC-036 R-10)", () => {
+    // `@car` is never the start of `@carter`, and punctuation is as good a boundary as a space.
+    assert.equal(withoutMention("@car and @carter, (@car) again", "car"), "and @carter, () again");
+    assert.equal(withoutMention("@carter only", "car"), "@carter only");
+    assert.equal(withoutMention("The @the-vigil at dusk", "the-vigil"), "The at dusk");
+    for (const text of ["(@car)", "@car, then", "then @car"]) {
+      assert.ok(parseMentions(text).includes("car"), `${text} cites the prop`);
+      assert.ok(!parseMentions(withoutMention(text, "car")).includes("car"), `${text} no longer does`);
+    }
+  });
+
+  it("a prop's name must leave its slug free: not another prop's, not a sheet's id, not empty (issue 1116)", () => {
+    const props = [{ id: "prop_1", name: "Tea cup" }, { id: "prop_2", name: "Polaroid" }];
+    const sheets = [{ id: "maren-kest", name: "Maren Kest" }];
+    assert.deepEqual(checkPropName("Ledger", props, sheets), { ok: true, slug: "ledger" });
+    assert.deepEqual(checkPropName("Tea-cup", props, sheets), { ok: false, slug: "tea-cup", reason: "prop", holder: { id: "prop_1", name: "Tea cup" } });
+    assert.deepEqual(checkPropName("  TEA CUP ", props, sheets), { ok: false, slug: "tea-cup", reason: "prop", holder: { id: "prop_1", name: "Tea cup" } });
+    assert.deepEqual(checkPropName("Maren Kest", props, sheets), { ok: false, slug: "maren-kest", reason: "sheet", holder: { id: "maren-kest", name: "Maren Kest" } });
+    assert.deepEqual(checkPropName("!!!", props, sheets), { ok: false, slug: "", reason: "empty" });
+    // A rename against itself is not a collision.
+    assert.deepEqual(checkPropName("Tea Cup", props, sheets, "prop_1"), { ok: true, slug: "tea-cup" });
+  });
+
+  it("the spans a screen draws are the mentions the parser reads, in place (issue 1114)", () => {
+    const text = "(@car) beside @the-vigil, @car again; @Car and @ never";
+    assert.deepEqual(mentionSpans(text), [
+      { slug: "car", start: 1, end: 5 },
+      { slug: "the-vigil", start: 14, end: 24 },
+      { slug: "car", start: 26, end: 30 },
+    ]);
+    assert.deepEqual(parseMentions(text), ["car", "the-vigil"]);
+    assert.deepEqual(mentionSpans("no mention here"), []);
   });
 });

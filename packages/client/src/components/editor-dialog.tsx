@@ -3,7 +3,9 @@ import { useEffect, useRef, type ReactNode } from "react";
 /**
  * A sheet over the editor (SPEC-039 R-5): mounted above the app frame, focus held inside it,
  * closed by Escape or the scrim, and focus handed back to the control that opened it. The
- * keyboard reference and the export sheet both use it; neither invents a second dialog.
+ * keyboard reference and the export sheet both use it; neither invents a second dialog — and
+ * nor does Settings (design turn 150), which is this sheet at 95% of the window with no head of
+ * its own, because its rail already says what it is.
  */
 export function EditorDialog({
   open,
@@ -12,15 +14,20 @@ export function EditorDialog({
   onClose,
   children,
   width = 430,
+  height,
   labelledBy,
+  panelClassName,
 }: {
   open: boolean;
-  title: string;
+  /** The head's title. Absent, the sheet draws no head and `labelledBy` names it instead. */
+  title?: string;
   subtitle?: string;
   onClose: () => void;
   children: ReactNode;
-  width?: number;
+  width?: number | string;
+  height?: string;
   labelledBy?: string;
+  panelClassName?: string;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const opener = useRef<Element | null>(null);
@@ -72,20 +79,22 @@ export function EditorDialog({
     <div className="fy-editordialog" onClick={onClose} role="presentation">
       <div
         ref={panel}
-        className="fy-editordialog__panel"
-        style={{ width }}
+        className={panelClassName === undefined ? "fy-editordialog__panel" : `fy-editordialog__panel ${panelClassName}`}
+        style={height === undefined ? { width } : { width, height }}
         role="dialog"
         aria-modal="true"
         aria-labelledby={heading}
         tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="fy-editordialog__head">
-          <span className="fy-editordialog__title" id={heading}>
-            {title}
-          </span>
-          {subtitle !== undefined && <span className="fy-editordialog__sub">{subtitle}</span>}
-        </div>
+        {title !== undefined && (
+          <div className="fy-editordialog__head">
+            <span className="fy-editordialog__title" id={heading}>
+              {title}
+            </span>
+            {subtitle !== undefined && <span className="fy-editordialog__sub">{subtitle}</span>}
+          </div>
+        )}
         {children}
       </div>
     </div>

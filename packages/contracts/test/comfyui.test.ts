@@ -31,6 +31,7 @@ describe("the comfyui provider row", () => {
       // voice-clone — cloning is what the app does to a recording, not something it asks an
       // engine for, and a capability probe claiming otherwise is what sank the indextts row.
       capabilities: ["image", "video", "voice-tts"],
+      mapsReferenceKinds: ["image", "video", "audio"],
       local: true,
       credential: "none",
     });

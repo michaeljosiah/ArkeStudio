@@ -1,16 +1,20 @@
-import { mkdir, readdir, rm, stat } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { mkdir, readdir, rm, stat, realpath } from "node:fs/promises";
+import { basename, join, relative, isAbsolute, sep } from "node:path";
 import {
   BIBLE_PATH,
   DEFAULT_AUDIO_POLICY,
   ulid,
   unattendedProposalsOf,
   worldSheets,
+  worldImageReferences,
+  type WorldImageReference,
   type ArtDirectionRecord,
+  type Capability,
   type WorldBundle,
   type WorldSummary,
 } from "@arke-studio/contracts";
 import { ProposalManager } from "../gate/proposals.js";
+import { WORLD_MODELS_SCHEMA_VERSION } from "./commit.js";
 import { AppIndex } from "../index-db/app-index.js";
 import type { DatabaseCtor } from "../index-db/sqlite.js";
 import type { WorldProvider } from "../world-provider.js";
@@ -19,7 +23,7 @@ import { initialBible } from "./bible.js";
 import { appendChanges } from "./change-writer.js";
 import { checkPathBudget, fromPortable, toExtendedLength, type PathBudget } from "./paths.js";
 import { installSampleWorld } from "./sample-world.js";
-import { findKeyArt, readWorldMeta, scanWorld, WorldOpenError } from "./scan.js";
+import { findKeyArt, hashMedia, readWorldMeta, scanWorld, WorldOpenError } from "./scan.js";
 import { uniqueSlug } from "./slug.js";
 import { WorldStore } from "./store.js";
 
@@ -38,6 +42,8 @@ export interface CreateWorldInput {
   artDirection?: string;
   /** The through-line the founding conversation wrote. Absent means the world has no bible yet. */
   bible?: string;
+  /** The models chosen on the genesis card (design turn 153). Absent entries follow Settings. */
+  models?: Partial<Record<Capability, string>>;
 }
 
 /** Codes a held handle produces. The rename has already retried through them (issue 288). */
@@ -54,7 +60,9 @@ export interface FsWorldProviderOptions {
 export class FsWorldProvider implements WorldProvider {
   private store: WorldStore | null = null;
   private closing = false;
-  private readonly scopedOperations = new Set<Promise<unknown>>();
+  private closeEpoch = 0;
+  private closeAttempt: Promise<void> | null = null;
+  private worldAccessTail: Promise<void> = Promise.resolve();
   private onAdoptedCb: ((worldId: string) => void) | null = null;
   private onLockErrorCb: ((worldId: string, message: string, consecutive: number) => void) | null = null;
   private appIndex: AppIndex | null = null;
@@ -76,6 +84,37 @@ export class FsWorldProvider implements WorldProvider {
 
   private worldsDir(): string {
     return join(this.appRoot, "worlds");
+  }
+
+  async assertWritingScratch(path: string): Promise<void> {
+    const scratch = await realpath(path);
+    const exclude = (root: string) => {
+      const contained = (rel: string) => !rel || (rel !== ".." && !rel.startsWith(".." + sep) && !isAbsolute(rel));
+      if (contained(relative(root, scratch)) || contained(relative(scratch, root))) {
+        throw new Error("The writing scratch directory must be outside all managed worlds.");
+      }
+    };
+    const rejectNestedAliases = async (dir: string): Promise<void> => {
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
+        if (entry.isSymbolicLink()) throw new Error("Writing requires managed world trees without nested filesystem aliases.");
+        if (entry.isFile() && (await stat(join(dir, entry.name))).nlink > 1) {
+          throw new Error("Writing requires managed world files without hard links.");
+        }
+        if (entry.isDirectory()) await rejectNestedAliases(join(dir, entry.name));
+      }
+    };
+    for (const root of [this.worldsDir(), join(this.appRoot, "archive")]) {
+      let canonical: string;
+      try { canonical = await realpath(root); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; throw error; }
+      exclude(canonical);
+      // A world may be reached through a directory junction outside the library's physical root.
+      for (const entry of await readdir(root)) {
+        const target = await realpath(join(root, entry));
+        exclude(target);
+        if ((await stat(target)).isDirectory()) await rejectNestedAliases(target);
+      }
+    }
   }
 
   /** Create the app root and its skeleton on first run, without prompting (R-1). */
@@ -263,11 +302,13 @@ export class FsWorldProvider implements WorldProvider {
       // Worlds are born at the oldest schema they satisfy, not the newest this build knows
       // (SPEC-023 R-23): a fresh world has no conversations and no new-model entities, so
       // older builds may open it; the first write that needs the boundary raises it.
-      schemaVersion: 1,
+      // A world founded with its own models is born past their boundary (design turn 153).
+      schemaVersion: input.models && Object.keys(input.models).length > 0 ? WORLD_MODELS_SCHEMA_VERSION : 1,
       name: input.name,
       ...(input.logline ? { logline: input.logline } : {}),
       ...(input.tone ? { tone: input.tone } : {}),
       ...(input.genre ? { genre: input.genre } : {}),
+      ...(input.models && Object.keys(input.models).length > 0 ? { models: input.models } : {}),
       canonRevision: 0,
       nextCanonId: 1,
       created: at,
@@ -349,8 +390,23 @@ export class FsWorldProvider implements WorldProvider {
     throw new Error(`no world with id ${worldId}`);
   }
 
+  /** Local store lifetimes and selection changes share one queue; callbacks retain their owner. */
+  private accessWorld<T>(action: () => Promise<T>): Promise<T> {
+    const operation = this.worldAccessTail.then(action);
+    this.worldAccessTail = operation.then(() => {}, () => {});
+    return operation;
+  }
+
   /** Open for read-write: recovery, lock, scan, index, watcher. Closes any previous world. */
   async loadWorld(worldId: string): Promise<WorldBundle> {
+    if (this.closing) throw new Error("the world provider is closing");
+    return this.accessWorld(() => {
+      if (this.closing) throw new Error("the world provider is closing");
+      return this.loadWorldOnce(worldId);
+    });
+  }
+
+  private async loadWorldOnce(worldId: string): Promise<WorldBundle> {
     const dir = await this.findWorldDir(worldId);
     if (this.store) {
       if (this.store.worldId === worldId) {
@@ -438,7 +494,7 @@ export class FsWorldProvider implements WorldProvider {
 
   async withWorldStore<T>(worldId: string, fn: (store: WorldStore) => Promise<T>): Promise<T> {
     if (this.closing) throw new Error("the world provider is closing");
-    const operation = (async () => {
+    return this.accessWorld(async () => {
       if (this.store?.worldId === worldId) return fn(this.store);
       const dir = await this.findWorldDir(worldId);
       const scoped = await WorldStore.open(dir, {
@@ -452,13 +508,7 @@ export class FsWorldProvider implements WorldProvider {
         this.refreshRegistry(scoped.getBundle());
         await scoped.close();
       }
-    })();
-    this.scopedOperations.add(operation);
-    try {
-      return await operation;
-    } finally {
-      this.scopedOperations.delete(operation);
-    }
+    });
   }
 
   /**
@@ -481,9 +531,12 @@ export class FsWorldProvider implements WorldProvider {
    * strand the screen on a world nothing has open.
    */
   async archiveWorld(worldId: string): Promise<{ folder: string }> {
+    const epoch = this.closeEpoch;
     const dir = await this.findWorldDir(worldId);
     const wasOpen = this.store?.worldId === worldId;
-    if (wasOpen) await this.closeStore();
+    if (wasOpen) await this.accessWorld(async () => {
+      if (this.store?.worldId === worldId) await this.closeStore();
+    });
     try {
       const target = await this.moveToArchive(dir);
       this.appIndex?.removeWorld(worldId);
@@ -503,7 +556,10 @@ export class FsWorldProvider implements WorldProvider {
       // back on top of it would close the world the screen has just been told about and leave
       // the provider serving one nobody selected, which is a worse version of the strand this
       // reopen exists to prevent.
-      if (wasOpen && !this.closing && this.store === null) await this.loadWorld(worldId).catch(() => {});
+      if (wasOpen) await this.accessWorld(async () => {
+        // Check inside the selection queue, including a close that already finished.
+        if (epoch === this.closeEpoch && !this.closing && this.store === null) await this.loadWorldOnce(worldId);
+      }).catch(() => {});
       throw err;
     }
   }
@@ -584,6 +640,10 @@ export class FsWorldProvider implements WorldProvider {
     const ext = portable.slice(portable.lastIndexOf(".")).toLowerCase();
     const media = FsWorldProvider.MEDIA_TYPES[ext];
     if (media !== undefined) return media;
+    if (portable.startsWith("exports/")) {
+      if (ext === ".docx") return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      if (ext === ".epub") return "application/epub+zip";
+    }
     const text = FsWorldProvider.TEXT_TYPES[ext];
     if (text === undefined) return undefined;
     return portable.startsWith("artifacts/") ? text : undefined;
@@ -606,6 +666,30 @@ export class FsWorldProvider implements WorldProvider {
     await rm(toExtendedLength(join(this.appRoot, ".genesis", genesisId)), { recursive: true, force: true });
   }
 
+  async listReferenceImages(slug: string): Promise<WorldImageReference[]> {
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) return [];
+    const bundle = this.store?.getBundle().meta.slug === slug
+      ? this.store.getBundle() : (await scanWorld(join(this.worldsDir(), slug))).bundle;
+    const images: WorldImageReference[] = [];
+    const available = new Map<string, string>();
+    for (const image of worldImageReferences(bundle)) {
+      const media = await this.serveMedia(slug, image.file);
+      if (media) { images.push(image); available.set(image.file, media.path); }
+    }
+    const aliases = new Set<string>();
+    for (const artifact of bundle.artifacts) {
+      if (artifact.generation?.source !== "character-reference") continue;
+      const file = `artifacts/${artifact.file}`;
+      const source = available.get(artifact.generation.sourceFile), copy = available.get(file);
+      if (!source || !copy) continue;
+      // A source path can be regenerated, removed or externally edited. Suppress its filed
+      // copy only when both current files still match the artifact's recorded identity.
+      const [sourceHash, copyHash] = await Promise.all([hashMedia(source), hashMedia(copy)]);
+      if (sourceHash && sourceHash === copyHash && sourceHash.startsWith(artifact.hash)) aliases.add(file);
+    }
+    return images.filter(image => !aliases.has(image.file));
+  }
+
   async serveMedia(slug: string, relPath: string): Promise<{ path: string; contentType: string } | null> {
     if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) return null;
     const portable = relPath.replace(/\\/g, "/");
@@ -614,6 +698,10 @@ export class FsWorldProvider implements WorldProvider {
     if (contentType === undefined) return null;
     const abs = join(this.worldsDir(), slug, fromPortable(portable));
     try {
+      const root = await realpath(toExtendedLength(join(this.worldsDir(), slug)));
+      const target = await realpath(toExtendedLength(abs));
+      const rel = relative(root, target);
+      if (rel.startsWith("..") || isAbsolute(rel)) return null;
       const info = await stat(toExtendedLength(abs));
       if (!info.isFile()) return null;
     } catch {
@@ -653,10 +741,12 @@ export class FsWorldProvider implements WorldProvider {
     return this.store!.getBundle();
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    if (this.closeAttempt) return this.closeAttempt;
     this.closing = true;
-    try {
-      await Promise.all(this.scopedOperations);
+    this.closeEpoch++;
+    this.closeAttempt = (async () => {
+      await this.worldAccessTail;
       await this.closeStore();
       try {
         this.appIndex?.close();
@@ -665,10 +755,12 @@ export class FsWorldProvider implements WorldProvider {
       }
       this.appIndex = null;
       this.appIndexReady = false;
-    } catch (error) {
+    })().finally(() => {
+      // A later explicit load may reuse the provider, but overlapping closes share this drain.
       this.closing = false;
-      throw error;
-    }
+      this.closeAttempt = null;
+    });
+    return this.closeAttempt;
   }
 
   /** Read-only scan of an arbitrary world directory — the corpus/tests entry point. */

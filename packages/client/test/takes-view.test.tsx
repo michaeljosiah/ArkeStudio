@@ -6,7 +6,10 @@ import { renderToString } from "react-dom/server";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { ClientState } from "@arke-studio/contracts";
-import { episodeThumbnailPath, filterTakeEpisodes, GenerateScreen, takeMediaView } from "../src/screens/production.js";
+import { episodeThumbnailPath } from "../src/screens/production-episode-picker.js";
+import { filterTakeEpisodes } from "../src/screens/production-episode-picker.js";
+import { GenerateScreen } from "../src/screens/production-generate.js";
+import { takeMediaView } from "../src/lib/take-presentation.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -218,7 +221,7 @@ describe("the takes, watched (turn 102c)", () => {
     assert.ok(html.includes("Reject"), "and teach");
     assert.ok(html.includes("Contact sheet") && html.includes("Advanced"), "the other lenses are doors, not tabs");
     assert.ok(html.includes("<video"), "a clip is playable where it is reviewed");
-    assert.ok(!html.includes('class="fy-playbtn"'), "the grid promises no inert play control");
+    assert.ok(html.includes('aria-label="Play Take 1"'), "video has an accessible play control");
   });
 
   it("shows each take's duration and falls back to the shot's planned duration (#782)", () => {
@@ -226,14 +229,31 @@ describe("the takes, watched (turn 102c)", () => {
       ...production,
       takes: production.takes.map((take, index) => ({
         ...take,
-        params: index === 0 ? { ...take.params, durationSec: 2 } : take.params,
+        params: index === 0 ? { ...take.params, durationSec: 2.4583333333333335 } : take.params,
       })),
       selections: {},
     }));
     const page = parseHTML(render(state, GENERATE)).document;
     const labels = [...page.querySelectorAll(".fy-take__foot")].map((foot) => foot.textContent?.replace(/\s/g, ""));
 
-    assert.deepEqual(labels, ["Take12s", "Take24s"]);
+    assert.deepEqual(labels, ["Take12.5s", "Take24s"]);
+  });
+
+  it("names contact-sheet frames by their shot and marks an accepted frame as done", () => {
+    const state = withSaltlight((production) => ({
+      ...production,
+      takes: production.takes.map((take) => ({ ...take, kind: "frame", media: "fr_generated-step-0.png" })),
+    }));
+    const page = parseHTML(render(state, `${GENERATE}?view=stills`)).document;
+    const cards = [...page.querySelectorAll(".fy-shotcard")];
+    assert.ok(cards.length > 0);
+    assert.ok(cards.every((card) => !card.querySelector(".fy-shotcard__title")!.textContent!.includes(".png")));
+    const accepted = cards.find((card) => card.textContent?.includes(" · accepted"))!;
+    assert.ok(accepted);
+    const accept = accepted.querySelector(".fy-shotcard__actions button")!;
+    assert.equal(accept.textContent, "Accepted");
+    assert.ok(accept.hasAttribute("disabled"));
+    assert.equal(accepted.querySelector(".fy-shotcard__title")!.getAttribute("title"), "fr_generated-step-0.png");
   });
 
   it("plays video media with real controls while still frames remain pictures (#729)", async () => {
@@ -241,16 +261,38 @@ describe("the takes, watched (turn 102c)", () => {
     const video = mounted.container.querySelector<HTMLVideoElement>(".fy-take video")!;
     assert.ok(video.getAttribute("src")?.endsWith("/productions/saltlight/takes/tk_01J8F0000000000000000000B2/clip.mp4"));
     assert.ok(video.getAttribute("poster")?.endsWith("/productions/saltlight/takes/tk_01J8F0000000000000000000B2/frame.png"));
-    assert.equal(video.getAttribute("controls"), "");
+    assert.equal(video.hasAttribute("controls"), false, "review cards use the designed transport");
     assert.equal(video.getAttribute("preload"), "metadata");
     assert.ok(video.getAttributeNames().some((name) => name.toLowerCase() === "playsinline"));
     assert.equal(video.hasAttribute("autoplay"), false, "opening Takes never starts sound");
-    assert.equal(video.closest("button"), null, "native media controls are never nested in the selection control");
+    assert.equal(video.closest("button"), null, "media is separate from the selection control");
+
+    const transport = mounted.container.querySelector<HTMLButtonElement>(".fy-take__play")!;
+    let playing = false;
+    Object.defineProperty(video, "paused", { get: () => !playing });
+    video.play = async () => {
+      playing = true;
+      video.dispatchEvent(new dom.window.Event("play"));
+    };
+    video.pause = () => {
+      playing = false;
+      video.dispatchEvent(new dom.window.Event("pause"));
+    };
+    await act(async () => transport.click());
+    assert.equal(playing, true);
+    assert.equal(transport.getAttribute("aria-label"), "Pause Take 1");
+    await act(async () => transport.click());
+    assert.equal(playing, false);
+    assert.equal(transport.getAttribute("aria-label"), "Play Take 1");
+    await act(async () => transport.click());
+    await act(async () => video.dispatchEvent(new dom.window.Event("ended")));
+    assert.equal(transport.getAttribute("aria-label"), "Play Take 1", "completion restores replay");
 
     const cards = mounted.container.querySelectorAll<HTMLElement>(".fy-take");
     assert.equal(cards.length, 2);
     assert.ok(cards[1]!.querySelector("img"), "a frame take stays an image");
     assert.equal(cards[1]!.querySelector("video"), null);
+    assert.equal(cards[1]!.querySelector(".fy-take__play"), null, "stills have no inert transport");
     const choices = mounted.container.querySelectorAll<HTMLButtonElement>(".fy-take__pick");
     assert.equal(choices.length, 2);
     assert.equal(choices[0]!.getAttribute("aria-pressed"), "true", "the accepted take is initially picked");
@@ -277,6 +319,23 @@ describe("the takes, watched (turn 102c)", () => {
     assert.ok(challenger.textContent?.includes("Could not play video"));
     assert.ok(challenger.querySelector("img"), "the poster remains when playback fails");
     assert.ok(challenger.querySelector(".fy-take__pick"), "failure does not strand selection or acceptance");
+  });
+
+  it("keeps interrupted playback retryable and a failed play request reviewable", async () => {
+    const mounted = await mount(FIXTURE_STATE);
+    const video = mounted.container.querySelector<HTMLVideoElement>(".fy-take video")!;
+    const transport = mounted.container.querySelector<HTMLButtonElement>(".fy-take__play")!;
+    Object.defineProperty(video, "paused", { value: true });
+    video.play = async () => { throw new DOMException("Interrupted", "AbortError"); };
+    await act(async () => transport.click());
+    assert.ok(mounted.container.contains(video), "an interrupted request can be retried");
+    video.play = async () => { throw new DOMException("Unsupported media", "NotSupportedError"); };
+    await act(async () => transport.click());
+    const card = mounted.container.querySelector(".fy-take")!;
+    assert.ok(card.textContent?.includes("Could not play video"));
+    assert.ok(card.querySelector("img"));
+    assert.ok(card.querySelector(".fy-take__pick"));
+    assert.equal(card.querySelector(".fy-take__play"), null);
   });
 
   it("plays a selectable pass segment from its backing media and inside its authored range", async () => {
@@ -454,3 +513,51 @@ describe("the takes, watched (turn 102c)", () => {
     );
   });
 });
+
+describe("Advanced, on the bench's wall (design 142a)", () => {
+  const ADVANCED = `${GENERATE}?view=bench`;
+
+  it("keeps an interrupted play quiet and says so when the clip cannot play", async () => {
+    const mounted = await mount(FIXTURE_STATE, ADVANCED);
+    const wall = mounted.container.querySelector(".fy-bench__media")!;
+    const video = wall.querySelector<HTMLVideoElement>("video")!;
+    const disc = wall.querySelector<HTMLButtonElement>(".fy-bench__playdisc")!;
+    Object.defineProperty(video, "paused", { value: true });
+    video.play = async () => { throw new DOMException("Interrupted", "AbortError"); };
+    await act(async () => disc.click());
+    assert.equal(wall.querySelector(".fy-bench__playfail"), null, "switching takes is not a failure");
+    video.play = async () => { throw new DOMException("Unsupported media", "NotSupportedError"); };
+    await act(async () => wall.querySelector<HTMLButtonElement>(".fy-bench__playdisc")!.click());
+    assert.ok(wall.textContent?.includes("Could not play video"));
+    assert.equal(wall.querySelector('[data-testid="bench-transport"]'), null, "no transport for a clip that cannot play");
+  });
+
+  it("shows a still that did not arrive as a labelled frame, never a broken image", async () => {
+    const state = withSaltlight((p) => ({ ...p, takes: p.takes.map((take) => ({ ...take, media: "take.png" })) }));
+    const mounted = await mount(state, ADVANCED);
+    const wall = mounted.container.querySelector(".fy-bench__media")!;
+    const still = wall.querySelector("img.fy-portrait")!;
+    await act(async () => still.dispatchEvent(new dom.window.Event("error")));
+    assert.ok(wall.querySelector(".fy-portrait--fallback"));
+    assert.equal(wall.querySelector("img"), null);
+  });
+
+  it("lets the frozen prop provenance wrap rather than clip it", () => {
+    const state = withSaltlight((p) => ({
+      ...p,
+      takes: p.takes.map((take) => ({
+        ...take,
+        provenance: {
+          ...take.provenance,
+          propStates: [
+            { propId: "tide-clock", stateId: null, referenceId: null, resolutionSource: "unresolved", overrideSource: null },
+          ],
+        },
+      })),
+    }));
+    const html = render(state, ADVANCED);
+    assert.match(html, /class="fy-gen__provenance fy-mono" data-testid="take-prop-provenance"/);
+    assert.doesNotMatch(html, /fy-bench__briefline[^"]*" data-testid="take-prop-provenance"/);
+  });
+});
+

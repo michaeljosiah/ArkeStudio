@@ -7,6 +7,68 @@ tour of the architecture. Start with [AGENTS.md](AGENTS.md) and the
 This file is the shared operational reference for all coding agents; keep these rules here
 rather than duplicating them in package guides.
 
+## The specs are not in this repository
+
+The code is public under AGPL. The specification set is not: the master spec, the capability
+specs, the ADRs and one internal architecture note are a **private git repository of their own**,
+`github.com/michaeljosiah/arke-studio-specs`, cloned beside this one:
+
+```
+C:\Users\mjosi\source\repos\arke-studio-specs        # or wherever ARKE_PRIVATE_DOCS points
+  specification.md                                   # the master spec
+  specifications/NNN.<slug>.md                       # SPEC-001…
+  decisions/                                         # ADRs
+  architecture/character-audio-foundation.md         # the one private architecture note
+```
+
+The line is *design record* versus *explanation of what is built*, not "internal" versus
+"external". `docs/architecture/` is public and stays in this repository — those guides describe
+the shipped product to a reader without a background in code, and the open source is less useful
+without them. Its one exception is `character-audio-foundation.md`, integration and recovery
+notes for a half-built subsystem, which lives with the specs.
+
+**Nothing links the set into a checkout.** Read a spec from the sibling repository by path;
+cite it in code, commits, issues and PRs by id — `SPEC-020 R-13` — never by a repository path,
+which resolves for nobody. `node scripts/private-docs.mjs` prints where the set is, its HEAD and
+whether it holds uncommitted edits; `--check` is the guard that nothing sits at the old linked
+paths (`docs/specifications/`, `docs/decisions/`, `docs/specification.md`,
+`docs/architecture/character-audio-foundation.md`) in a checkout that does not track them. Those
+paths stay gitignored so a stray copy can never commit.
+
+**An amendment is a commit in the private repository**, made in the same session as the code it
+belongs to, with a message that names the PR. That is the whole discipline, and it buys what the
+old arrangement lacked: `git log` answers who changed a spec, `git diff` shows a session's
+amendments, a deleted file is `git checkout -- <file>` rather than a recovery, and a design-turn
+collision is a merge rather than a mystery. Run `node scripts/private-docs.mjs` after a session
+that amended a spec; an uncommitted edit there is exactly as fragile as the folder used to be.
+
+Why there are no links any more, so nobody reintroduces them: from 2026-09-09 to 2026-09-13 the
+set was a OneDrive folder junctioned and hard-linked into every checkout. Git reaches through a
+junction, so a checkout moved onto a pre-2026-09-09 commit wrote its tracked specs over the
+private set — twice — and the recovery from the first time regressed eleven specs to older
+tracked copies; a `del 044.*` during a renumbering deleted SPEC-044, which no history held; and
+every fresh worktree started with dead links. Everything was restored on 2026-09-13 from a
+readiness-audit snapshot and session transcripts (the first commit of the private repository
+says what came from where), and seven lines added to SPEC-044 between 2026-09-10 12:30 and
+2026-09-11 04:26 are the one thing not recovered.
+
+**This removes the specs from the tree, not from history.** Every version up to 2026-09-09 is
+still reachable in a normal clone (`git show <commit>^:docs/specification.md`), and a fork taken
+before that date holds a complete copy that no change here can reclaim. Rewriting 1,766 commits
+would break every clone and all 47 published releases and still would not reach that fork, so
+the history is deliberately left alone. What the arrangement buys is that everything from
+2026-09-09 forward is private — which for documents still being written is where the value is.
+Do not repeat the claim that the specs "were never public"; say they are no longer published.
+
+Checkouts on branches from before 2026-09-09 still track the old spec files; they are stale
+copies, not the set, and nothing reads them. Never check such a branch out in a checkout that
+has any link into the private set — there are none now, and `--check` is how to be sure.
+
+Do not resolve a `SPEC-nnn` citation by guessing when the specs are absent. Roughly two thousand
+of those citations sit in `packages/`, they are the only record of why a great deal of this code
+is shaped as it is, and a confident reconstruction of a spec you cannot read is worse than
+saying you cannot read it.
+
 ## Never hand-roll branch or worktree deletion
 
 Use `/cleanup`, or `node scripts/prune-merged.mjs` directly. Dry run is the default.
@@ -31,6 +93,11 @@ nothing):
 ```powershell
 New-Item -ItemType Junction -Path "$wt\node_modules\@arke-studio\<pkg>" -Target "$wt\packages\<pkg>"
 ```
+
+That junction is also why `git worktree remove` fails on a worktree that has one: git deletes the
+target first, cannot read the dangling link, and stops with the tree deregistered but ~330 MB of
+`node_modules` still on disk — a folder that now resolves to `main`. `prune-merged.mjs` finishes
+those off; do not reach for `Remove-Item` yourself.
 
 **Eviction is silent.** If another session removes your worktree mid-task, nothing errors: the
 `.git` file vanishes, git walks up, finds the main checkout, and every later command operates on
@@ -83,7 +150,7 @@ Shared audio contracts live in `packages/contracts/src/audio.ts`; local preparat
 transcript comparison and clearance live in coordinator `src/audio/`. Reuse them for #255/#111;
 do not introduce performance persistence as a prerequisite for a character sample. Desktop audio
 and video QC share the bounded process runner. Consumer UI and automatic route transport are
-separate work. Read [the integration/recovery notes](docs/architecture/character-audio-foundation.md)
+separate work. Read the integration/recovery notes (`architecture/character-audio-foundation.md` in the private set)
 before adding a consumer, particularly frozen candidates, current rights and conservative cleanup.
 
 ## Harness dependencies (issue #828)
@@ -99,8 +166,8 @@ dependencies. See SPEC-005 §1.1; do not remove these dependencies based on the 
 World ownership (issue #827): preserve the disk identity checks in WorldStore/Committer and the
 three-failure heartbeat cutoff. Ownership loss disables writes until reopen; do not retry under
 the old claim or remove a successor's lock. These checks are not an atomic fence. See
-[ADR-002's desktop decision](docs/decisions/002-ownership-is-a-revision.md#desktop-decision--issue-827-2026-09-05)
-and SPEC-002 §2.9 for the retained stale-reclaim policy and local-filesystem support limits.
+ADR-002's desktop decision (issue 827, 2026-09-05) and SPEC-002 §2.9 for the retained
+stale-reclaim policy and local-filesystem support limits.
 
 ## Journal flush boundaries (issue #826)
 
@@ -108,7 +175,7 @@ JobJournal, LedgerFile and ProviderCallStore use `appendFlushed` inside their ex
 write, file sync, close, then acknowledge. Preserve this order before external side effects.
 Repair/compaction replacements must also sync their file. Never retry an uncertain append or
 infer that a rejected write proves no charge occurred. ChangeLog is unflushed diagnostics.
-See [SPEC-009 §2.2.1](docs/specifications/009.the-job-queue-and-dispatch.md#221-supported-crash-model)
+See SPEC-009 §2.2.1 (supported crash model)
 for the crash model, directory-persistence limits and measured cost before considering batching.
 
 ## The coordinator session is authenticated (issue #825)

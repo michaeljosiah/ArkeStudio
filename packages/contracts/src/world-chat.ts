@@ -1,4 +1,6 @@
+import { valueSchema } from "./value-schema.js";
 import { z } from "zod";
+import { ProductionSetupStateSchema, ProductionSetupUpdateSchema } from "./production-setup.js";
 import {
   ArtifactIdSchema,
   CandidateGroupIdSchema,
@@ -29,6 +31,7 @@ import {
   ModelEditorRequestSchema,
   ModelSceneEditSchema,
   SCENE_EDIT_BOUNDS,
+  WorldChatSubjectSchema,
   type ModelEditorRequest,
   type ModelSceneEdit,
 } from "./editor-request.js";
@@ -105,6 +108,7 @@ export type WorldChatDeletionBlock = z.infer<typeof WorldChatDeletionBlockSchema
 
 /** What the conversation was opened about. Focus can change without losing what came before. */
 export const WorldChatContextSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("production-setup"), setupId: ConversationIdSchema }).strict(),
   z.object({ kind: z.literal("world") }).strict(),
   z
     .object({
@@ -235,6 +239,22 @@ export const WorldChatMessageSchema = z
   })
   .strict();
 export type WorldChatMessage = z.infer<typeof WorldChatMessageSchema>;
+
+/**
+ * What a line was said under (turn 128): the passage selected while it was said, and whether it
+ * asked for a reply only. Its own event beside `turn.started` rather than fields on the message,
+ * because the message is strict and durable: a build older than the constraints skips a line it
+ * cannot read, and skipping this one loses the guard while keeping the words, where fields on the
+ * message would have lost the words themselves (codex on PR 903).
+ */
+export const WorldChatTurnConstraintsSchema = z
+  .object({
+    turnId: TurnIdSchema,
+    subject: WorldChatSubjectSchema.optional(),
+    replyOnly: z.boolean().optional(),
+  })
+  .strict();
+export type WorldChatTurnConstraints = z.infer<typeof WorldChatTurnConstraintsSchema>;
 
 export const WorldChatRunStatusSchema = z.enum([
   "running",
@@ -831,8 +851,8 @@ const DevelopmentSceneScriptPayload = {
  * how long it runs, how it should feel. What is deliberately absent is everything that is not a
  * creative decision — `id` and `number` are identity and position, minted once and moved only by
  * the storyboard's drag; `covers` is a digest computed at citation time; and `promptOverride` is
- * production output whose whole meaning is that a person typed it in the sheet, so a proposition
- * writing one would forge that provenance.
+ * saved separately through set-prompt-override so a shot amendment never silently replaces
+ * the approved image/video prompt.
  */
 const ShotDraftSchema = z
   .object({
@@ -1063,7 +1083,8 @@ export type FrameRunOutcomeReport = z.infer<typeof FrameRunOutcomeReportSchema>;
  * record. Splitting them would let a crash persist a reply that refers to propositions which
  * never landed, and the panel would then describe changes that do not exist.
  */
-export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
+export const WorldChatStoredEventSchema = valueSchema(z.discriminatedUnion("type", [
+  z.object({ type: z.literal("production-setup.updated"), state: ProductionSetupStateSchema }).strict(),
   z
     .object({
       type: z.literal("conversation.created"),
@@ -1098,6 +1119,8 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   z.object({ type: z.literal("run.retry-started"), run: WorldChatRunSchema }).strict(),
+  /** Appended right after `turn.started` when the line was said under a passage or a reply-only promise (turn 128). */
+  z.object({ type: z.literal("turn.constraints"), constraints: WorldChatTurnConstraintsSchema }).strict(),
   z
     .object({
       type: z.literal("run.session-created"),
@@ -1109,6 +1132,7 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
   z
     .object({
       type: z.literal("turn.completed"),
+      productionSetup: ProductionSetupStateSchema.optional(),
       message: WorldChatMessageSchema,
       run: WorldChatRunSchema,
       receipts: z.array(WorldChatCheckReceiptSchema),
@@ -1326,11 +1350,11 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
       undo: ConversationActionUndoLinkSchema,
     })
     .strict(),
-]);
+]));
 export type WorldChatStoredEvent = z.infer<typeof WorldChatStoredEventSchema>;
 
 /** One line of `events.jsonl`. The sequence is monotonic per conversation. */
-export const WorldChatEventEnvelopeSchema = z
+export const WorldChatEventEnvelopeSchema = valueSchema(z
   .object({
     schemaVersion: z.literal(1),
     seq: z.number().int().min(1),
@@ -1340,7 +1364,7 @@ export const WorldChatEventEnvelopeSchema = z
     requestId: z.string().min(1).optional(),
     event: WorldChatStoredEventSchema,
   })
-  .strict();
+  .strict());
 export type WorldChatEventEnvelope = z.infer<typeof WorldChatEventEnvelopeSchema>;
 
 // ---------------------------------------------------------------------------
@@ -1356,6 +1380,7 @@ export type WorldChatEventEnvelope = z.infer<typeof WorldChatEventEnvelopeSchema
  */
 export const WorldChatSummarySchema = z
   .object({
+    setupStatus: ProductionSetupStateSchema.shape.status.optional(),
     id: ConversationIdSchema,
     title: z.string().min(1).max(200),
     status: WorldChatStatusSchema,
@@ -1400,6 +1425,7 @@ export type WorldChatProblem = z.infer<typeof WorldChatProblemSchema>;
 /** The whole workspace for one conversation, folded from its events. */
 export const WorldChatLoadedSchema = z
   .object({
+    productionSetup: ProductionSetupStateSchema.optional(),
     id: ConversationIdSchema,
     title: z.string().min(1).max(200),
     status: WorldChatStatusSchema,
@@ -1473,13 +1499,14 @@ export type WorldChatLoaded = z.infer<typeof WorldChatLoadedSchema>;
  * is distrusted whenever its sequence runs past the complete tail of the log it claims to
  * summarise.
  */
-export const WorldChatCheckpointSchema = z
+export const WorldChatCheckpointSchema = valueSchema(z
   .object({
-    schemaVersion: z.literal(1),
+    // Derived projections from the old fold kept terminal interruptions active (#1030).
+    schemaVersion: z.literal(2),
     throughSeq: z.number().int().min(0),
     view: WorldChatLoadedSchema,
   })
-  .strict();
+  .strict());
 export type WorldChatCheckpoint = z.infer<typeof WorldChatCheckpointSchema>;
 
 // ---------------------------------------------------------------------------
@@ -1649,8 +1676,9 @@ export const TURN_RESULT_BOUNDS = {
   actions: 12,
 } as const;
 
-export const WorldChatTurnResultSchema = z
+export const WorldChatTurnResultSchema = valueSchema(z
   .object({
+    setupUpdate: ProductionSetupUpdateSchema.optional(),
     reply: z.string().max(TURN_RESULT_BOUNDS.reply),
     candidateOperations: z.array(ModelCandidateOperationSchema).max(TURN_RESULT_BOUNDS.candidateOperations),
     groupOperations: z.array(ModelGroupOperationSchema).max(TURN_RESULT_BOUNDS.groupOperations),
@@ -1680,7 +1708,7 @@ export const WorldChatTurnResultSchema = z
     /** Exact world-authoring operations prepared as permission cards; none writes during the turn. */
     actions: z.array(ModelWorldChatActionSchema).max(TURN_RESULT_BOUNDS.actions).default([]),
   })
-  .strict();
+  .strict());
 export type WorldChatTurnResult = z.infer<typeof WorldChatTurnResultSchema>;
 
 // ---------------------------------------------------------------------------
@@ -1780,6 +1808,7 @@ export type WorldChatTranscriptMessage = z.infer<typeof WorldChatTranscriptMessa
  */
 export const WorldChatWorkspaceSchema = z
   .object({
+    productionSetup: ProductionSetupStateSchema.optional(),
     conversationId: ConversationIdSchema,
     status: WorldChatStatusSchema,
     initiative: WorldChatInitiativeSchema.default("collaborate"),
@@ -2213,6 +2242,7 @@ const exampleWorldActions = {
       audio: { music: "environmental-only", subtitles: "never" },
       failureModes: ["Hands stay whole and countable."],
       keyArtIntent: {
+        prompt: "Maren Kest stands beneath the slack-water bells of The Vigil, salt-stained coat lit by a low amber lamp. Close framing, dark sea beyond, painterly salt-air naturalism.",
         subject: "Maren beneath the slack-water bells",
         characters: ["Maren Kest"],
         location: "The Vigil",
@@ -2406,6 +2436,12 @@ const exampleWorldActions = {
     changes: { logline: "The drowned bell rings one night early." },
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  "production-prose-style": {
+    kind: "production-prose-style",
+    productionId: "saltlight",
+    changes: { pov: "close third", tense: "past", voice: "Short declaratives. Weather and stone before feeling." },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
   "production-season": {
     kind: "production-season",
     productionId: "bell-watch-season-1",
@@ -2486,7 +2522,7 @@ const exampleWorldActions = {
     kind: "production-scene-command",
     productionId: "saltlight",
     sceneId: "sc_04",
-    command: { kind: "set-prompt-override", shotId: "sh_001", text: "Salt-lit close-up of the missing page." },
+    command: { kind: "set-prompt-override", shotId: "sh_001", capability: "video", text: "Close on the missing page under a salt-stained amber lamp. Over six seconds the camera pushes slowly toward the torn edge; the loose paper trembles in a draught. A distant bell sounds once, then only the soft rustle of paper." },
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
   "production-board-compile": {
@@ -2533,6 +2569,7 @@ const exampleWorldActions = {
     trimInSec: 0.5,
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  "production-stage-construct": { kind: "production-stage-construct", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_001", instruction: "Construct this shot from its script and inspect the camera views.", preserve: "blocking", checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "production-stage-playblast": {
     kind: "production-stage-playblast",
     productionId: "saltlight",

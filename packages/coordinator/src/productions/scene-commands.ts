@@ -1,3 +1,4 @@
+import { sameVoiceAssignment, stageProblems, resolvedShotStaging } from "@arke-studio/contracts";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -21,11 +22,14 @@ import {
   type GraphScene,
   type SceneRecord,
   type SceneBlocking,
+  type SceneCastMember,
   type Shot,
   type ShotAnchor,
   type ShotStageEdit,
 } from "@arke-studio/contracts";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
+import { sceneLookReleases } from "../references/kit.js";
+import { currentPerformanceTarget } from "../audio/performances.js";
 import { sha256 } from "../world/text-files.js";
 import { parseSceneRecord } from "./scene-record.js";
 import type { CommitFileInput } from "../world/commit.js";
@@ -44,13 +48,19 @@ import type { WorldStore } from "./../world/store.js";
  */
 
 export type SceneCommand =
-  | { kind: "edit-scene"; title?: string; synopsis?: string | null }
+  | {
+      kind: "edit-scene";
+      title?: string;
+      synopsis?: string | null;
+      inherits?: { location?: string | null; timeOfDay?: string | null; tone?: string | null };
+      cast?: Record<string, SceneCastMember | null>;
+    }
   | { kind: "edit-stage"; shotId: string; blocking?: Omit<SceneBlocking, "version"> | null; staging?: ShotStageEdit | null }
   | { kind: "insert-shot"; at: ShotAnchor; shot: Omit<Shot, "id" | "number"> }
   | { kind: "move-shot"; shotId: string; to: ShotAnchor }
   | { kind: "duplicate-shot"; shotId: string }
   | { kind: "edit-shot"; shotId: string; change: Partial<Omit<Shot, "id" | "number" | "staging">> }
-  | { kind: "set-prompt-override"; shotId: string; text: string | null }
+  | { kind: "set-prompt-override"; shotId: string; text: string | null; capability?: "image" | "video" }
   | { kind: "delete-shot"; shotId: string }
   | { kind: "set-board-override"; shotId: string; override: "split" | "merge" }
   | { kind: "clear-board-override"; shotId: string; override: "split" | "merge" }
@@ -272,13 +282,57 @@ async function candidateFor(
     case "edit-scene": {
       // A command that names nothing is refused rather than committed as a version cut over
       // an unchanged record — the schema cannot say "at least one", so this is where it is said.
-      if (command.title === undefined && command.synopsis === undefined) {
-        throw new SceneCommandRefused(["this edit names neither a title nor a synopsis"]);
+      if (command.title === undefined && command.synopsis === undefined && command.inherits === undefined && command.cast === undefined) {
+        throw new SceneCommandRefused(["this edit names neither a title, a synopsis, the inherited context nor the cast"]);
+      }
+      // The place must be a location this world holds (SPEC-044 R-19) — the same refusal Arke's
+      // proposal path makes, so a picker and a proposal cannot disagree about what a place is.
+      const location = command.inherits?.location;
+      if (location && !store.getBundle().sheets.some((sheet) => sheet.id === location && sheet.type === "location")) {
+        throw new SceneCommandRefused([`location ${location} is not in this world`]);
+      }
+      // A read chosen for the cast must be this production's, accepted, the bytes the pointer
+      // names, and current for its line (codex round 1): the reducer takes any pointer, and a
+      // stale one would land here only to be refused at dispatch, the sample riding in its place
+      // with nothing on the page saying so.
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === input.productionId);
+      for (const [sheetId, member] of Object.entries(command.cast ?? {})) {
+        if (member === null) continue;
+        // A member is a character this world holds (R-7; codex round 2): the reducer takes any
+        // key, and a place or a slug nobody has would be drawn as a member of the cast.
+        if (!store.getBundle().sheets.some((sheet) => sheet.id === sheetId && sheet.type === "character" && !sheet.retired)) {
+          throw new SceneCommandRefused([`${sheetId} is not a character in this world`]);
+        }
+        const voice = member.voice;
+        if (voice?.kind !== "performance") continue;
+        const read = production?.performances.find((candidate) => candidate.id === voice.performanceId);
+        if (read === undefined) throw new SceneCommandRefused([`${sheetId}: read ${voice.performanceId} is not in this production`]);
+        if (read.target.sceneId !== input.sceneId || read.target.speakerSheetId !== sheetId) throw new SceneCommandRefused([`${sheetId}: that read is another line's`]);
+        if (read.provenance.outputHash !== voice.hash) throw new SceneCommandRefused([`${sheetId}: that read changed`]);
+        if (production?.performanceReview.reviews.filter((review) => review.performanceId === read.id).at(-1)?.decision !== "accept") {
+          throw new SceneCommandRefused([`${sheetId}: that read is not accepted`]);
+        }
+        if (read.kind !== "scratch" && !sameVoiceAssignment(store.getBundle().sheets.find((sheet) => sheet.id === sheetId)?.voice, read.voiceAssignment)) {
+          throw new SceneCommandRefused([`${sheetId}: that read is an earlier voice's`]);
+        }
+        if (!currentPerformanceTarget(store, read.target)) throw new SceneCommandRefused([`${sheetId}: that read no longer matches its line`]);
+      }
+      // The kit writes that release this scene's claims ride in this commit (codex round 1): a
+      // member removed, or the place changed, with its look still attached is a claim nobody can
+      // see, and a second commit is a gap a crash can fall into that no retry repairs.
+      for (const [sheetId, member] of Object.entries(command.cast ?? {})) {
+        if (member === null) files.push(...(await sceneLookReleases(store, sheetId, { productionId: input.productionId, sceneId: input.sceneId })));
+      }
+      const previousLocation = record.inherits?.location;
+      if (typeof previousLocation === "string" && command.inherits?.location !== undefined && command.inherits.location !== previousLocation) {
+        files.push(...(await sceneLookReleases(store, previousLocation, { productionId: input.productionId, sceneId: input.sceneId })));
       }
       return editScene(record, {
         ...(command.title !== undefined ? { title: command.title } : {}),
         // Null on the wire is the clear; the operation reads present-with-undefined as the clear.
         ...(command.synopsis !== undefined ? { synopsis: command.synopsis ?? undefined } : {}),
+        ...(command.inherits !== undefined ? { inherits: command.inherits } : {}),
+        ...(command.cast !== undefined ? { cast: command.cast } : {}),
       });
     }
     case "edit-stage": {
@@ -297,7 +351,11 @@ async function candidateFor(
             : { ...command.blocking, version: (record.blocking?.version ?? 0) + 1 },
         });
       }
-      return command.staging === undefined
+      if (command.staging) {
+        const problems = stageProblems(resolvedShotStaging(next, { ...command.staging, version: 1 }), current.durationSec ?? 4);
+        if (problems.length) throw new SceneCommandRefused(problems);
+      }
+      next = command.staging === undefined
         ? next
         : editShot(next, {
           shotId: command.shotId,
@@ -311,6 +369,14 @@ async function candidateFor(
               },
           },
         });
+      if (command.blocking !== undefined) {
+        for (const shot of orderedShots(next)) {
+          if (!shot.staging || (shot.staging.cast !== undefined && shot.staging.sets !== undefined)) continue;
+          const problems = stageProblems(resolvedShotStaging(next, shot.staging), shot.durationSec ?? 4);
+          if (problems.length) throw new SceneCommandRefused(problems.map(problem => `Shot ${shot.number}: ${problem}`));
+        }
+      }
+      return next;
     }
     case "insert-shot": {
       const production = productionOrThrow(store, input.productionId);
@@ -339,7 +405,7 @@ async function candidateFor(
       // is what marks a playblast recorded at the old length stale.
       const current = orderedShots(record).find((candidate) => candidate.id === command.shotId);
       const retimed = command.change.durationSec !== undefined && current?.staging !== undefined
-        ? stagingRetimed(current.staging, command.change.durationSec)
+        ? stagingRetimed(current.staging, command.change.durationSec, current.durationSec ?? 4)
         : undefined;
       const change = retimed === undefined || retimed === current?.staging
         ? command.change
@@ -353,13 +419,13 @@ async function candidateFor(
         return editShot(record, { shotId: command.shotId, change: { promptOverride: undefined } });
       }
       const sheetVersions: Record<string, number> = {};
-      for (const slug of parseMentions(shot.description)) {
+      for (const slug of new Set([...parseMentions(shot.description), ...(record.inherits?.location ? [record.inherits.location] : [])])) {
         const sheet = store.getBundle().sheets.find((candidate) => candidate.id === slug);
         if (sheet !== undefined) sheetVersions[slug] = sheet.version;
       }
       return editShot(record, {
         shotId: command.shotId,
-        change: { promptOverride: { text: command.text, sheetVersions } },
+        change: { promptOverride: { text: command.text, sheetVersions, ...(command.capability ? { capability: command.capability } : {}) } },
       });
     }
     case "delete-shot": {
@@ -437,4 +503,10 @@ export function stemOrThrow(sceneFile: string): string {
   return sceneFile;
 }
 
+/**
+ * Removing a member takes its scene look with it (SPEC-044 R-9): the look stays on the kit, and
+ * only the attachment that made it ride here goes. One detach per character — clearing a look
+ * empties the scope it held (design 67), so a look-by-look loop rewrote the kit for nothing.
+ * Called after the scene write landed, by every arm that applies the wire command.
+ */
 export { SceneOperationRefused };

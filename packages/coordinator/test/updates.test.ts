@@ -25,6 +25,8 @@ describe("retained update state", () => {
       progressPercent: 100,
       flow: null,
       detail: null,
+      releaseName: null,
+      releaseNotes: null,
     });
   });
 });

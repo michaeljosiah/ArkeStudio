@@ -35,6 +35,8 @@ const EPISODE_RUN = 8;
  */
 export function describeEntryContext(context: WorldChatContext, bundle: WorldBundle): string {
   switch (context.kind) {
+    case "production-setup":
+      return "This is production setup in the selected existing world. Discuss and update only the private outline. Do not propose world changes or media actions.";
     case "world":
       return "";
     case "canon-question": {
@@ -77,6 +79,12 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
         lines.push(
           `The season is v${production.season.version}${production.season.question ? ` — question: "${clip(production.season.question)}"` : ""}${production.season.ending ? `; ending: "${clip(production.season.ending)}"` : ""}.`,
         );
+      }
+      if (production && productionShape(production.meta).medium === "video" && !productionShape(production.meta).isEpisodic) {
+        lines.push("Film arc writing belongs to the optional narrative record, edited by the author in Overview. Do not propose a prose story overview for a film.");
+      }
+      if (production?.narrative) {
+        lines.push(`Film narrative v${production.narrative.version}: ${JSON.stringify(production.narrative)}. This authored record is available whole through get_production. The author edits it in Overview; do not write a film arc into the prose story overview.`);
       }
       if (production && production.episodes.length > 0) {
         lines.push(
@@ -176,7 +184,7 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
          * the workspace stopped being the conversation.
          */
         lines.push(
-          "A shot itself can be settled here: propose development.shot naming the shot to amend, or leaving the shot out to add one at the end. Carry only the fields that change. A shot's id and its number are not yours to set, and reordering is the storyboard's drag, not a proposition.",
+          "Author shot prompts through scene-command / set-prompt-override after reading the scene, shot, cited characters, location and effective art direction. Set the image/video capability, and translate the look into this shot instead of repeating it. Video says what moves and is heard; an image holds one instant. A shot itself can be settled here: propose development.shot naming the shot to amend, or leaving the shot out to add one at the end. Carry a specified shot name in draft.title and its length in draft.durationSec (seconds), including when adding a shot; a candidate title labels the change and does not name the shot. Carry only the fields that change. A shot's id and its number are not yours to set, and reordering is the storyboard's drag, not a proposition.",
         );
       }
       const timeline = describeTimeline(production);
@@ -259,6 +267,7 @@ function describeTimeline(production: ProductionBundle | undefined): string | nu
  */
 function describeShape(production: ProductionBundle | undefined, writesTheSeason = false): string | null {
   if (!production) return null;
+  if (production.meta.format === "story") return "This is a story production — one continuous piece, with chapters beneath its overview. Develop the overview's logline, spine, dramatic question, ending and target length through production-overview. When the author asks to lay out the book, use production-chapter with operation outline and an ordered chapters list of title, synopsis, optional viewpointCharacter and when. viewpointCharacter names a character sheet id (lowercase kebab-case): read list_sheets completely and cite its receipt whenever supplying a viewpoint character; choose from the active world cast or this production's guests, never guess from a remembered blueprint slug. An unambiguous character name is accepted; omit it when unknown. Narrative perspective such as close third belongs in production-prose-style.pov. Unmatched optional characters are left unset and named on the proposal: one card appends planned chapters, no prose yet. A single production-chapter create with body empty and a synopsis is also a planned chapter. Read get_story and list_chapters completely and cite their receipts before proposing.";
   const shape = productionShape(production.meta);
   const bits: string[] = [];
   const defaults = production.season?.defaults;

@@ -1,21 +1,24 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  stageFigureAt, sampleStageCamera, stageProblems,
   ClientMessageSchema,
   effectiveStageBlocking,
   ShotSchema,
   ShotStagingSchema,
   MAX_STAGE_WALK_SPEED_MPS,
-  STAGE_FRAME_RATE,
+  STAGE_FRAME_RATE, STAGE_CAMERA_NEAR, STAGE_CAMERA_EVALUATOR_VERSION,
   stageRigOffset,
   stageRigSeed,
   stageShot,
   stageWalkSpeed,
   stagingEase,
   stageFrameCount,
+  stageReferenceFrames,
   stagePlayblastIsStale,
   stagingBeats,
   stagingFov,
+  stagingMotionWord,
   stagingMoveWord,
   stagingPromptClause,
   stagingRetimed,
@@ -34,6 +37,16 @@ const shot = (extra: Partial<Shot>): Shot => ({
 });
 
 describe("the Stage's arithmetic", () => {
+  it("scales the aim for short figures and keeps wide-lens first passes beyond the near plane (#1047)", () => {
+    const small = stageShot(shot({ framing: { size: "close-up", lens: "24mm" } }), { cast: ["maren-kest"], sets: [], durationSec: 4, subjectHeight: 1 });
+    assert.ok(Math.abs(small.keys[0]!.l[1] - 1.25 / 1.8) < .01);
+    assert.equal(small.keys[0]!.p[1], 1.55, "the angle height table remains unchanged");
+    const wide = stageShot(shot({ framing: { size: "extreme close-up", lens: "1mm", movement: "push in" } }), { cast: ["maren-kest"], sets: [], durationSec: 4 });
+    assert.ok(wide.keys.every(key => Math.hypot(key.p[0] - key.l[0], key.p[2] - key.l[2]) >= STAGE_CAMERA_NEAR + 1.8 / 4));
+    const push = stageShot(shot({ framing: { size: "extreme close-up", lens: "24mm", movement: "push in" } }), { cast: ["maren-kest"], sets: [], durationSec: 4 });
+    assert.ok(push.keys.at(-1)!.p[2] < push.keys[0]!.p[2], "the former one-metre clamp must not turn a short push into a pull");
+  });
+
   it("stages a shot deterministically from its cast, sets and framing words", () => {
     const first = stageShot(shot({ camera: "MCU · slow push-in" }), { cast: ["maren-kest"], sets: ["The Vigil", "Quay", "Harbour"], durationSec: 4 });
     const again = stageShot(shot({ camera: "MCU · slow push-in" }), { cast: ["maren-kest"], sets: ["The Vigil", "Quay", "Harbour"], durationSec: 4 });
@@ -44,8 +57,8 @@ describe("the Stage's arithmetic", () => {
     assert.equal(first.sets.length, 3, "named set massing is not capped at two boxes");
     assert.equal(new Set(first.sets.map((set) => set.x)).size, 3, "later boxes do not stack on one mark");
     assert.equal(first.keys.length, 2);
-    assert.equal(first.keys[0]?.anchor, "maren-kest");
-    assert.equal(first.keys[0]?.track, "maren-kest");
+    assert.equal(first.keys[0]?.anchor, undefined);
+    assert.equal(first.keys[0]?.track, undefined);
     assert.equal(first.keys[1]?.t, 4);
     assert.equal(first.keys[0]?.easeOut, 0.25);
     assert.equal(first.keys[1]?.easeIn, 0.25);
@@ -121,8 +134,15 @@ describe("the Stage's arithmetic", () => {
     assert.equal(stagingMoveWord(orbit.keys), "orbit");
     const crane = stageShot(shot({ framing: { movement: "Crane up" } }), { cast: ["maren-kest"], sets: [], durationSec: 5 });
     assert.equal(stagingMoveWord(crane.keys), "crane");
-    const truck = stageShot(shot({ framing: { movement: "Tracking" } }), { cast: ["maren-kest"], sets: [], durationSec: 5 });
+    // A truck is lateral travel; a tracking shot rides its subject at a held offset (issue 886).
+    // The two shared one branch and "Tracking" came out as a truck that also drifted with the walker.
+    const truck = stageShot(shot({ framing: { movement: "Truck right" } }), { cast: ["maren-kest"], sets: [], durationSec: 5 });
     assert.equal(stagingMoveWord(truck.keys), "truck");
+    assert.equal(truck.keys[0]?.anchor, undefined, "a truck does not ride");
+    const tracking = stageShot(shot({ framing: { movement: "Tracking" }, description: "@maren-kest walks to the door." }), { cast: ["maren-kest"], sets: [], durationSec: 5 });
+    assert.equal(tracking.keys[0]?.anchor, "maren-kest", "a tracking shot rides");
+    assert.deepEqual(tracking.keys[0]?.p, tracking.keys[1]?.p, "at a held offset");
+    assert.match(stagingMotionWord(tracking, 5), /tracking/);
   });
 
   it("derives an unclamped lens cone from a Super 35 gate cropped to the production aspect", () => {
@@ -131,6 +151,18 @@ describe("the Stage's arithmetic", () => {
     assert.deepEqual([24, 35, 50, 85, 135].map((mm) => rounded(`${mm}mm`, "9:16")), [42.5, 29.9, 21.1, 12.5, 7.9]);
     assert.equal(stagingFov(undefined, "16:9"), 34);
     assert.ok(stagingFov("1mm", "16:9") > 160, "a valid extreme lens is not clamped");
+  });
+
+  it("keeps each first-pass framed height consistent at 24, 35 and 85mm (#1047)", () => {
+    for (const [size, fraction] of [["ECU", .3], ["CU", .55], ["Medium", .9], ["Wide", 1.5], ["EWS", 2.5]] as const) {
+      for (const mm of [24, 35, 85]) {
+        const staged = stageShot(shot({ framing: { size, lens: `${mm}mm` } }), { cast: ["maren-kest"], sets: [], durationSec: 4, aspect: "16:9" });
+        const depth = staged.keys[0]!.p[2] - staged.cast[0]!.z;
+        assert.ok(Math.abs(2 * depth * Math.tan(stagingFov(`${mm}mm`, "16:9") * Math.PI / 360) - 1.8 * fraction) < .006, `${size} at ${mm}mm`);
+      }
+    }
+    const portrait = stageShot(shot({ framing: { size: "CU", lens: "85mm" } }), { cast: ["maren-kest"], sets: [], durationSec: 4, aspect: "9:16", subjectHeight: 2.2 });
+    assert.ok(Math.abs(2 * portrait.keys[0]!.p[2] * Math.tan(stagingFov("85mm", "9:16") * Math.PI / 360) - 2.2 * .55) < .006);
   });
 
   it("plans a fixed-rate, half-open playblast timeline", () => {
@@ -161,7 +193,7 @@ describe("the Stage's arithmetic", () => {
     assert.match(beats[2]!, /above Maren/);
     assert.match(beats[3]!, /in front of Maren/);
     const clause = stagingPromptClause(staging, (id) => (id === "maren-kest" ? "Maren" : id), 15);
-    assert.match(clause, /^Camera move, orbit, blocked out on the stage \(4 keys\)\. Maren walks through the shot\./);
+    assert.match(clause, /Camera move, orbit, blocked out on the stage \(4 keys\)\. Maren walks through the shot\./);
     assert.ok(clause.includes(beats[3]!));
   });
 
@@ -263,6 +295,7 @@ describe("the Stage's arithmetic", () => {
 
   it("makes inherited playblasts stale when shared blocking moves", () => {
     const pin = {
+      evaluatorVersion: STAGE_CAMERA_EVALUATOR_VERSION,
       artifactId: "ar_01J8G0000000000000000000A1",
       version: 1,
       blocking: { owner: "scene" as const, version: 2 },
@@ -272,7 +305,7 @@ describe("the Stage's arithmetic", () => {
     assert.equal(stagePlayblastIsStale({ blocking: { version: 2, cast: [], sets: [] } }, staging, shown), false);
     assert.equal(stagePlayblastIsStale({ blocking: { version: 3, cast: [], sets: [] } }, staging, shown), true);
     const legacyLocal = { ...staging, cast: [], sets: [], playblast: { artifactId: pin.artifactId, version: 1 } };
-    assert.equal(stagePlayblastIsStale({ blocking: { version: 9, cast: [], sets: [] } }, legacyLocal, shown), false);
+    assert.equal(stagePlayblastIsStale({ blocking: { version: 9, cast: [], sets: [] } }, legacyLocal, shown), true, "legacy renders require re-export under the continuous camera evaluator");
     const rigged = { ...staging, rig: "handheld" as const, seed: 42, rigIntensity: 1, playblast: { ...pin, rig: "handheld" as const, seed: 42, rigIntensity: 1 } };
     assert.equal(stagePlayblastIsStale({ blocking: { version: 2, cast: [], sets: [] } }, rigged, shown), false);
     assert.equal(stagePlayblastIsStale({ blocking: { version: 2, cast: [], sets: [] } }, { ...rigged, seed: 43 }, shown), true);
@@ -300,7 +333,7 @@ describe("the Stage's arithmetic", () => {
     }).success, false);
   });
 
-  it("requires both files in a Stage export", () => {
+  it("requires the opening and additional reference frames in a Stage export", () => {
     const message = {
       kind: "stage-playblast",
       worldId: "01J8G0000000000000000000W1",
@@ -314,9 +347,39 @@ describe("the Stage's arithmetic", () => {
       aspect: "16:9",
       sourcePath: "C:/spool/playblast.mp4",
       openingFrameSourcePath: "C:/spool/opening-frame.png",
+      referenceFrames: stageReferenceFrames([{ t: 0 }, { t: 4 }], 4).map(frame => ({ ...frame, sourcePath: "C:/spool/still.png" })),
     };
     assert.deepEqual(ClientMessageSchema.parse(message), message);
     const { openingFrameSourcePath: _openingFrameSourcePath, ...withoutFrame } = message;
     assert.equal(ClientMessageSchema.safeParse(withoutFrame).success, false);
   });
+});
+
+
+it("keeps pan, tilt and a locked camera distinct from actor movement", () => {
+  for (const [movement, axis, direction] of [["pan right",0,1],["pan left",0,-1],["tilt up",1,1],["tilt down",1,-1]] as const) {
+    const staged = stageShot(shot({camera:movement,description:"@maren-kest walks across the room"}),{cast:["maren-kest"],sets:[],durationSec:4});
+    assert.deepEqual(staged.keys[0]!.p,staged.keys[1]!.p);
+    assert.ok((staged.keys[1]!.l[axis]-staged.keys[0]!.l[axis])*direction>0);
+    assert.match(stagingMoveWord(staged.keys),new RegExp(movement.split(" ")[0]!));
+  }
+  const fixed=stageShot(shot({camera:"static",description:"@maren-kest walks across the room"}),{cast:["maren-kest"],sets:[],durationSec:4});
+  assert.deepEqual(sampleStageCamera(fixed,0,4),sampleStageCamera(fixed,3,4));
+  const tracking=stageShot(shot({camera:"follow",description:"@maren-kest walks across the room"}),{cast:["maren-kest"],sets:[],durationSec:4});
+  assert.notDeepEqual(sampleStageCamera(tracking,0,4).p,sampleStageCamera(tracking,3,4).p);
+});
+it("holds before a move, evaluates shot-local turns and sitting, and catches invalid anchors", () => {
+  const staged: ResolvedShotStaging={version:1,cast:[{sheetId:"maren-kest",x:0,z:0}],sets:[],keys:[{t:0,p:[0,1.5,4],l:[0,1,0]},{t:2,p:[0,1.5,4],l:[0,1,0]},{t:4,p:[0,1.5,2],l:[0,1,0]}],performances:[{sheetId:"maren-kest",keys:[{t:0,x:0,z:0},{t:1,x:0,z:0},{t:3,x:2,z:0,facing:90},{t:4,x:2,z:0,facing:90,pose:"sit"}]}]};
+  assert.deepEqual(sampleStageCamera(staged,1,4).p,[0,1.5,4]);
+  assert.equal(stageFigureAt(staged.cast[0]!,staged.performances,0.5,4).x,0);
+  assert.equal(stageFigureAt(staged.cast[0]!,staged.performances,2,4).x,1);
+  assert.equal(stageFigureAt(staged.cast[0]!,staged.performances,4,4).pose,"sit");
+  assert.deepEqual(stageProblems(staged,4),[]);
+  assert.match(stageProblems({...staged,keys:staged.keys.map(k=>({...k,anchor:"missing"}))},4).join(" "),/missing figure/);
+});
+
+it("samples the last encoded time and exact interior camera marks for reference exports", () => {
+  assert.deepEqual(stageReferenceFrames([{ t: 0 }, { t: .021 }, { t: .05 }], .05), [
+    { kind: "last", at: 1 / 30 }, { kind: "key", at: .021 }, { kind: "overview", at: 0 },
+  ]);
 });

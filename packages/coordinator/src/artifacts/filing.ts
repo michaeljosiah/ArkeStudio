@@ -3,18 +3,22 @@ import { lstat, readdir, readFile, realpath, stat, statfs } from "node:fs/promis
 import { basename, extname, join, sep } from "node:path";
 import {
   ArtifactSidecarSchema,
+  audioSourceOf,
   pickableArtifacts,
   ulid,
+  type ArtifactAudiobookGeneration,
   type ArtifactGeneration,
   type ArtifactKind,
   type ArtifactSidecar,
   type MediaInfo,
+  type WorldBundle,
 } from "@arke-studio/contracts";
 import { measureMediaInfo, type MediaProbe } from "../media/probe.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import type { CommitInput } from "../world/commit.js";
 import { toExtendedLength } from "../world/paths.js";
 import { slugify } from "../world/slug.js";
+import { hashMedia } from "../world/scan.js";
 import { sha256 } from "../world/text-files.js";
 import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
 
@@ -55,6 +59,40 @@ const KIND_BY_EXT: Record<string, ArtifactKind> = {
 
 export function kindForFile(name: string): ArtifactKind {
   return KIND_BY_EXT[extname(name).toLowerCase()] ?? "other";
+}
+
+/**
+ * What a media artifact is once it has been measured. The extension decides at filing time
+ * because nothing has read the bytes yet, and `.mp4` is a container as happy holding a song as a
+ * film. A measured file with sound and no picture stream is audio: it belongs on a sound lane,
+ * where gain and role live, and placed as picture it is a black clip the render plan refuses.
+ * Decided only on a measured `false` — a record that never said is left as filed, and so is a
+ * file with neither, which the cut cannot use either way.
+ */
+export function measuredKind(kind: ArtifactKind, info: MediaInfo): ArtifactKind {
+  return kind === "video" && info.hasVideo === false && info.hasAudio ? "audio" : kind;
+}
+
+/**
+ * Whether anything in the world plays this artifact: a timeline clip, a legacy cut placement or
+ * lane entry, or a spine's master track. A kind may follow its measurement only while nothing
+ * does — a Picture clip citing something that became audio is a render plan refused. Library
+ * membership is not a citation: relabelling a Library row's lane is the point of measuring.
+ */
+export function artifactCited(bundle: WorldBundle, artifactId: string): boolean {
+  return bundle.productions.some((production) => {
+    if (production.spine?.trackArtifactId === artifactId) return true;
+    if (production.cut.overlays.some((overlay) => overlay.artifactId === artifactId)) return true;
+    const inLane = production.cut.audio.some((lane) =>
+      lane.entries.some((entry) => {
+        const source = audioSourceOf(entry);
+        return source?.kind === "artifact" && source.artifactId === artifactId;
+      }),
+    );
+    if (inLane) return true;
+    const timeline = production.timeline?.status === "ready" ? production.timeline.timeline : null;
+    return timeline !== null && timeline.tracks.some((track) => track.clips.some((clip) => clip.source.kind === "artifact" && clip.source.artifactId === artifactId));
+  });
 }
 
 /**
@@ -133,6 +171,35 @@ async function currentSidecar(
   }
 }
 
+/** Retirement changes only shelf membership; every reference still resolves to the same bytes. */
+export async function retireArtifact(store: WorldStore, artifactId: string): Promise<void> {
+  await setArtifactRetired(store, artifactId, true);
+}
+
+export async function restoreArtifact(store: WorldStore, artifactId: string): Promise<void> {
+  await setArtifactRetired(store, artifactId, false);
+}
+
+async function setArtifactRetired(store: WorldStore, artifactId: string, retired: boolean): Promise<void> {
+  await store.gateOp(async () => {
+    const artifact = store.getBundle().artifacts.find(a => a.id === artifactId);
+    if (!artifact) throw new Error("This artifact is no longer in the world.");
+    if (basename(artifact.file) !== artifact.file || artifact.file === "..") throw new Error("Invalid artifact file.");
+    const current = await currentSidecar(store, artifact);
+    if (!current?.raw || current.sidecar.id !== artifactId || current.sidecar.file !== artifact.file) {
+      throw new Error("The artifact record changed or is unreadable. Reopen the world before trying again.");
+    }
+    if ((current.sidecar.retiredAt !== undefined) === retired) return;
+    if (!retired && !(await artifactMediaMatches(store, current.sidecar, current.sidecar.hash))) {
+      throw new Error("The retained artifact file is missing or changed. Restore the original bytes before restoring it to the shelf.");
+    }
+    const next = { ...current.sidecar };
+    if (retired) next.retiredAt = new Date().toISOString();
+    else delete next.retiredAt;
+    await writeSidecar(store, next, current.raw);
+  });
+}
+
 /** A dedup candidate is reusable only while its media still has the hash its metadata claims. */
 async function artifactMediaMatches(
   store: WorldStore,
@@ -143,11 +210,9 @@ async function artifactMediaMatches(
   const path = join(store.dir, "artifacts", artifact.file);
   const info = await lstat(toExtendedLength(path)).catch(() => null);
   if (!info?.isFile() || info.isSymbolicLink()) return false;
-  const bytes = await readFile(toExtendedLength(path)).catch(() => null);
-  return (
-    bytes !== null &&
-    `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}` === expectedHash
-  );
+  // Retained audio and video can be gigabytes; reuse the scanner's bounded streaming hash.
+  const hash = await hashMedia(path);
+  return hash !== null && hash.slice(0, "sha256:".length + 16) === expectedHash;
 }
 
 /** Merge links into an existing artifact — dedupe keeps one copy, many uses (R-4, D9). */
@@ -245,6 +310,19 @@ export interface FileInput {
    * exercising the escape hatch (§2.5) and must not be read as having no opinion.
    */
   production?: string | null;
+  /**
+   * Whether a stated `production` also re-owns bytes the world already holds.
+   *
+   * Off unless the caller is making that decision, and it has to be off by default. Dedup is by
+   * content hash across the whole world, so an ordinary import of a file the world already has
+   * would otherwise take that artifact off the world's shelf — or out of another production,
+   * whose placements then fail scope validation — as a side effect of adding it here. Nobody
+   * asked for a transfer; they asked for a copy, and the answer is "already held".
+   *
+   * The re-file *is* the transfer (§2.5's escape hatch), so `file-artifact` and the picker say
+   * yes. A plain import says nothing and the existing owner stands.
+   */
+  reownOnDuplicate?: boolean;
   /** Correlation and stale guard supplied by a conversation action; direct controls omit them. */
   mutation?: ArtifactMutationOptions;
 }
@@ -290,6 +368,11 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
     // Dedup and allocation happen after this filing owns the same world mutation gate as clone
     // provenance. Neither writer may choose from a bundle that predates the other's media copy.
     const candidates = store.getBundle().artifacts.filter((artifact) => artifact.hash === hash);
+    // Generated occurrences may share bytes while keeping distinct provenance. Restore the
+    // retired filename the user chose before falling back to another occurrence of those bytes.
+    const restorationRank = (artifact: ArtifactSidecar) => artifact.retiredAt === undefined ? 0
+      : artifact.file === original || artifact.file === `${stem}${ext}` ? 2 : 1;
+    candidates.sort((a, b) => restorationRank(b) - restorationRank(a));
     for (const existing of candidates) {
       const current = await currentSidecar(store, existing);
       if (
@@ -303,7 +386,13 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
         const links = [...new Set([...current.sidecar.links, ...(input.links ?? [])])];
         const next = { ...current.sidecar, links };
         let changed = links.length !== current.sidecar.links.length;
-        if (input.production !== undefined && (current.sidecar.production ?? null) !== input.production) {
+        // An explicit re-import restores the same record instead of copying its media again.
+        if (next.retiredAt !== undefined) { delete next.retiredAt; changed = true; }
+        if (
+          input.reownOnDuplicate === true &&
+          input.production !== undefined &&
+          (current.sidecar.production ?? null) !== input.production
+        ) {
           changed = true;
           if (input.production === null) delete next.production;
           else next.production = input.production as ArtifactSidecar["production"];
@@ -361,6 +450,12 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
   if ((outcome.outcome === "filed" || outcome.outcome === "deduplicated") &&
       outcome.artifact.mediaInfo === undefined && (outcome.artifact.kind === "audio" || outcome.artifact.kind === "video")) {
     await measureInto(store, outcome.artifact.file, input.mediaProbe ?? null, input.abandoned);
+    // Re-read after any attempt, not only a recorded one: the measurement may have re-kinded the
+    // sidecar, and a competing filing of the same bytes may have landed it first. Either way every
+    // filing surface reports what is on disk now, not the record from before the probe (codex on
+    // PR 944).
+    const measured = store.getBundle().artifacts.find((artifact) => artifact.id === outcome.artifact.id);
+    if (measured !== undefined) return { ...outcome, artifact: measured };
   }
   return outcome;
 }
@@ -402,6 +497,35 @@ function generatedIdentity(
       links: [],
     };
   }
+  if (generation.source === "audiobook") {
+    // One take per block per run: the same block read again is a new take with a new job, so
+    // the identity is the job when there is one and the block's words, voice and direction
+    // when a local take was made without the queue — a run that ended after the file landed
+    // and before the record took it finds the take it already made, never a second copy. The
+    // direction is in it (issue 1190): a block directed since its take is another reading of
+    // the same words, and the undirected take is not the one to hand back for it. So is the
+    // take a remake stands beside (SPEC-047 R-4): a block made again while the record holds a
+    // take names that take, which makes it another artifact than the one on the shelf and
+    // still the same one on a retry — and a retired selection, named, cannot be answered by
+    // an older take of the same words (codex on PR 1193).
+    const local = (g: ArtifactAudiobookGeneration) => `${g.textHash}/${g.provider}/${g.model}/${g.voiceId}/${g.directionHash ?? ""}/${g.remakeOf ?? ""}`;
+    const made = generation.jobId ?? local(generation);
+    return {
+      producedBy: "audiobook",
+      isSame: (artifact) =>
+        artifact.generation?.source === "audiobook" &&
+        // The production too (codex on PR 1180): two books in one world can each hold a
+        // `neap` with the same words in the same voice, and neither may own the other's take.
+        artifact.generation.productionId === generation.productionId &&
+        artifact.generation.chapterId === generation.chapterId &&
+        artifact.generation.block === generation.block &&
+        (artifact.generation.jobId ?? local(artifact.generation)) === made,
+      // The chapter and the block, then a short tail so two takes of one block are two files.
+      stem: `${slugify(generation.chapterId).slice(0, 40) || "chapter"}-${generation.block.replace(/[^a-z0-9]+/gi, "-")}-${generation.textHash.slice(-6)}`,
+      // The chapter it belongs to, and the speaker when a sheet's voice read it.
+      links: [generation.chapterId, ...(generation.sheetId !== undefined ? [generation.sheetId] : [])],
+    };
+  }
   return {
     producedBy: "character-reference",
     // The job, not the take: the legacy tile path records no take at all, and one succeeded job
@@ -438,6 +562,12 @@ export async function fileGeneratedArtifact(
     generation: ArtifactGeneration;
     mediaProbe?: MediaProbe | null;
     abandoned?: () => boolean;
+    /**
+     * The production that owns the file (SPEC-020 R-11). An audiobook take is production media
+     * (SPEC-047 R-3): it is that book's, listed under it, and goes with it; a bench take and a
+     * character's reference stay the world's, as they were.
+     */
+    production?: string;
   },
 ): Promise<ArtifactSidecar> {
   const bytes = await readFile(toExtendedLength(input.sourcePath));
@@ -448,8 +578,27 @@ export async function fileGeneratedArtifact(
   const identity = generatedIdentity(input.generation, basename(original, extname(original)));
   const kind = kindForFile(original);
   const filed = await store.gateOp(async () => {
-    const existing = store.getBundle().artifacts.find(identity.isSame);
-    if (existing) return { artifact: existing, created: false };
+    // A retired artifact is off the shelf by the person's word: the same identity made again
+    // is a new artifact beside it, never the retired one handed back.
+    const existing = store.getBundle().artifacts.find((artifact) => identity.isSame(artifact) && artifact.retiredAt === undefined);
+    if (existing) {
+      // The same take filed again is the take already on the shelf — unless its media is gone,
+      // as a world carried by hand can lose it: then the file is restored under the sidecar it
+      // always had, so the id every record names stays true and the block is made rather than
+      // handed its dead take back (codex on PR 1180). The hash and the making are the new
+      // file's; the id, the links and the owner are the old one's. "Gone" is judged as the
+      // audiobook's own presence check judges it — a regular file, not any entry at the path
+      // (codex on PR 1183) — and the old measurement goes with the old bytes, or the probe
+      // would skip the restored file and its duration would be the last file's.
+      const media = join(store.dir, "artifacts", existing.file);
+      if (await stat(toExtendedLength(media)).then((s) => s.isFile(), () => false)) return { artifact: existing, created: false };
+      await atomicWriteFile(media, bytes);
+      const current = await currentSidecar(store, existing);
+      const { mediaInfo: _measured, ...kept } = current?.sidecar ?? existing;
+      const restored: ArtifactSidecar = { ...kept, hash: hash as ArtifactSidecar["hash"], generation: input.generation };
+      await writeSidecar(store, restored, current?.raw ?? null);
+      return { artifact: restored, created: true };
+    }
 
     const taken = new Set(store.getBundle().artifacts.map((artifact) => artifact.file));
     let file = `${identity.stem}${ext}`;
@@ -470,8 +619,9 @@ export async function fileGeneratedArtifact(
       hash: hash as ArtifactSidecar["hash"],
       origin: { by: "system", producedBy: identity.producedBy },
       links: identity.links,
-      // No `production` key: the world owns it (SPEC-020 R-13). Neither the bench nor a
-      // character's reference shelf belongs to one.
+      // No `production` key unless the producer names one (SPEC-020 R-13): the world owns a
+      // bench take and a character's reference; an audiobook take is its production's.
+      ...(input.production !== undefined ? { production: input.production } : {}),
       generation: input.generation,
       created: store.now(),
     };
@@ -481,6 +631,7 @@ export async function fileGeneratedArtifact(
   });
   if (filed.created && (kind === "audio" || kind === "video")) {
     await measureInto(store, filed.artifact.file, input.mediaProbe ?? null, input.abandoned);
+    return store.getBundle().artifacts.find((artifact) => artifact.id === filed.artifact.id) ?? filed.artifact;
   }
   return filed.artifact;
 }
@@ -568,6 +719,11 @@ export async function importFolder(
  * `hasAudio: false`, which is the right conservative reading for a decision made in the moment
  * and the wrong thing to write down: stored, it cannot be told from a measured silence, and spine
  * export would refuse a real audio track on a machine that could have measured it properly.
+ *
+ * The measurement may change the artifact's kind only while nothing in the world cites it
+ * (`artifactCited`), and that is read inside the gate rather than decided by the caller: two
+ * imports of the same new file both probe outside the gate, and whichever lands first has to
+ * reach the same answer as the one that copied the bytes in (codex on PR 944).
  */
 async function measureInto(
   store: WorldStore,
@@ -590,7 +746,10 @@ async function measureInto(
       // malformed sidecars without rewriting them, and this has no better claim to overwrite one.
       const parsed = ArtifactSidecarSchema.safeParse(JSON.parse(raw));
       if (!parsed.success || parsed.data.mediaInfo !== undefined) return false;
-      await writeSidecar(store, { ...parsed.data, mediaInfo: info }, raw);
+      // The first measurement is the only one, so this is the one moment the kind can follow it —
+      // and only while nothing plays the artifact yet.
+      const kind = artifactCited(store.getBundle(), parsed.data.id) ? parsed.data.kind : measuredKind(parsed.data.kind, info);
+      await writeSidecar(store, { ...parsed.data, kind, mediaInfo: info }, raw);
       return true;
     })
     .catch(() => false);
@@ -768,6 +927,9 @@ export async function backfillMediaInfo(
             continue;
           }
           if (current.mediaInfo !== undefined) continue;
+          // The kind stays as filed here, unlike at filing time: this world may already cut with
+          // the artifact, and a Picture clip citing something that has become audio turns its
+          // working render plan into a refusal on the next open.
           files.push({
             path: `artifacts/${file}.json`,
             action: "replace",

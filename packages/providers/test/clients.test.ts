@@ -25,6 +25,39 @@ function fakeFetch(routes: Array<{ match: RegExp; status: number; body?: unknown
   };
 }
 
+it("Ollama unload queries actual loaded models and awaits keep_alive=0 for each", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  const client = new OllamaClient(async (url, init) => {
+    assert.ok(init?.signal, "handover requests are bounded");
+    if (url.endsWith("/api/ps")) return Response.json({ models: [{ name: "writing-a" }, { name: "writing-b" }] });
+    requests.push(JSON.parse(String(init?.body)));
+    return Response.json({ done: true });
+  });
+  await client.unload();
+  assert.deepEqual(requests, [
+    { model: "writing-a", keep_alive: 0, stream: false },
+    { model: "writing-b", keep_alive: 0, stream: false },
+  ]);
+  await assert.rejects(new OllamaClient(async () => Response.json({})).unload(), /loaded models/);
+});
+
+it("Ollama residency retries late reports and distinguishes processor fallback from missing data", async () => {
+  for (const [first, second, expected] of [
+    [0, 100, "gpu"], [0, 0, "cpu"], [undefined, undefined, "unknown"],
+  ] as const) {
+    let reads = 0;
+    let pauses = 0;
+    const client = new OllamaClient(async () => Response.json({ models: [
+      { name: "gemma4:12b", size: 100, size_vram: reads++ === 0 ? first : second },
+    ] }), "http://127.0.0.1:11434", async () => { pauses += 1; });
+    assert.equal((await client.residency())[0]?.state, expected);
+    assert.equal(reads, 2);
+    assert.equal(pauses, 1);
+  }
+  const client = new OllamaClient(async () => Response.json({ models: [{ name: "gemma4:12b", size: 100, size_vram: 40 }] }));
+  assert.equal((await client.residency())[0]?.state, "mixed");
+});
+
 describe("provider HTTP failures preserve the provider's reason", () => {
   it("reads a 403 JSON detail before raising the provider fault", async () => {
     const detail = "User is locked. Reason: Exhausted balance. Top up at fal.ai/dashboard/billing.";
@@ -723,7 +756,7 @@ describe("fal motion references ride in the field the row names (issue 852)", ()
     // Seedance has a reference route and publishes video seconds, but names no field for the
     // clip — the exact row the budget's field gate exists for.
     await assert.rejects(
-      () => submit({ model: "seedance-2.0", params: { prompt: "x", references: [], durationSec: 5 } }),
+      () => submit({ model: "wan-2.7", params: { prompt: "x", references: [], durationSec: 5 } }),
       /names no field for a video reference/,
     );
     await assert.rejects(
@@ -1762,5 +1795,42 @@ describe("the provider table and the registry cannot drift apart (issue 462)", (
     const artifacts = await clients.higgsfield!.fetchArtifacts("", "job-1");
     assert.equal(artifacts[0]?.contentType, "image/png");
     assert.deepEqual(scopes, [{ provider: "higgsfield", operation: "fetch-artifacts" }]);
+  });
+});
+
+describe("openai names what a 4xx said (issue 906)", () => {
+  // Read from a real founding build: the hub reported "image generation failed (HTTP 400)"
+  // about a safety refusal the author could have recomposed around, had anything said so.
+  const submit = (body: unknown) =>
+    new OpenAiClient(async () => new Response(JSON.stringify(body), { status: 400 })).submit("k", {
+      model: "gpt-image-2",
+      capability: "image",
+      params: { prompt: "x", references: ["references/a.png"] },
+      imageReferences: [{ name: "a.png", contentType: "image/png", data: Uint8Array.from([1]) }],
+    });
+
+  it("reports a moderation refusal as one, with the stage and what to do", async () => {
+    const refusal = {
+      error: {
+        message: "Your request was rejected by the safety system...",
+        type: "image_generation_user_error",
+        code: "moderation_blocked",
+        moderation_details: { moderation_stage: "output", categories: ["other"] },
+      },
+    };
+    await assert.rejects(submit(refusal), (error: Error & { submissionRejected?: boolean }) => {
+      assert.equal(error.submissionRejected, true, "still a witnessed rejection, never retried");
+      assert.match(error.message, /safety system refused the picture it made/);
+      assert.match(error.message, /recompose/);
+      assert.ok(!error.message.includes("HTTP 400"));
+      return true;
+    });
+  });
+
+  it("carries OpenAI's own message for any other rejection", async () => {
+    await assert.rejects(submit({ error: { message: "Unknown parameter: 'references'.", type: "invalid_request_error" } }), {
+      message: "openai: image generation failed (HTTP 400): Unknown parameter: 'references'.",
+    });
+    await assert.rejects(submit({ error: "rejected" }), { message: "openai: image generation failed (HTTP 400)" });
   });
 });

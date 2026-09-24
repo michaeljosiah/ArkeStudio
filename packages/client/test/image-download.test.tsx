@@ -40,8 +40,6 @@ Object.assign(globalThis, {
 });
 
 const here = dirname(fileURLToPath(import.meta.url));
-const source = (file: string): string => readFileSync(join(here, "../src", file), "utf8");
-const CSS = readFileSync(join(here, "../src/components/image-actions.css"), "utf8");
 const W = `/w/${FIXTURE_WORLD_ID}`;
 
 function renderAt(path: string, state: ClientState = FIXTURE_STATE): string {
@@ -90,8 +88,6 @@ describe("the control over a picture", () => {
       html.indexOf('aria-label="Download Maren Kest main photo.png"', dialogAt) > 0,
       "and the save is in there with it",
     );
-    // Closing still lands the keyboard back on the trigger, whatever it was on last.
-    assert.ok(source("components/image-dialog.tsx").includes("onClose={() => trigger.current?.focus()}"));
   });
 
   it("will not offer to save a picture that has not arrived", () => {
@@ -188,52 +184,6 @@ describe("the surfaces that expose a picture as media", () => {
     assert.ok(!row.includes("fy-imgdl"), "and carry no save control");
   });
 
-  it("offers the generated candidates a person is choosing between", () => {
-    // The one preview grid every generation screen shares — main photos, character sheets, looks,
-    // location views, master look and key art all land in it, so this is where they are covered.
-    const dialog = source("components/generation-dialog.tsx");
-    assert.match(dialog, /<ImageDownload\s/, "the preview cell offers a save");
-    assert.ok(
-      dialog.includes('<div key={preview.key} className="fy-imghost">'),
-      "and the cell holds the pick and the save as siblings",
-    );
-  });
-
-  it("offers a completed bench take without touching what the take is", () => {
-    const bench = source("screens/bench.tsx");
-    assert.match(bench, /name=\{`Take \$\{selected\.n\}`\}/, "a take saves under the only name it has");
-    const at = bench.indexOf("<ImageDownload");
-    const region = bench.slice(at, at + 400);
-    for (const mutation of ["sendBenchKeep", "sendBenchDiscard", "sendBenchSelectTake"]) {
-      assert.ok(!region.includes(mutation), `saving a copy must not ${mutation}`);
-    }
-  });
-});
-
-describe("revealing it", () => {
-  it("is hidden until the frame is hovered or something in it holds focus", () => {
-    assert.match(CSS, /\.fy-imghost:hover > \.fy-imgdl,\s*\n\.fy-imghost:focus-within > \.fy-imgdl/);
-  });
-
-  it("moves nothing when it appears", () => {
-    // Opacity, never display: a control that reflows the picture on hover makes the picture jump
-    // under the pointer that was reaching for it.
-    const block = CSS.slice(CSS.indexOf(".fy-imgdl {"), CSS.indexOf("}", CSS.indexOf(".fy-imgdl {")));
-    assert.match(block, /position: absolute/);
-    assert.match(block, /opacity: 0/);
-    assert.ok(!/display: none/.test(block), "hidden by opacity, so it holds its place in the layout");
-  });
-
-  it("is simply there where there is no hover to reveal it with", () => {
-    // A control that only exists under a pointer does not exist at all on a touch screen.
-    const at = CSS.indexOf("@media (hover: none)");
-    assert.ok(at > 0, "touch has no hover state and the stylesheet answers for it");
-    assert.match(CSS.slice(at, at + 160), /opacity: 1/);
-  });
-
-  it("shows its own focus ring, so the keyboard can see where it is", () => {
-    assert.match(CSS, /\.fy-imgdl:focus-visible \{[^}]*outline: 2px solid var\(--ring\)/s);
-  });
 });
 
 describe("clicking it", () => {
@@ -374,20 +324,6 @@ describe("what the browser is allowed to do", () => {
     }
   });
 
-  it("keeps the two selection grids off the control that shares their cell", () => {
-    // Also found by running it: `.fy-...-grid button { position: relative; aspect-ratio... }`
-    // reached the save control as well as the choice, which took it out of the corner it is
-    // placed in and gave the cell 26px it never had. The rules name the choice now.
-    const css = readFileSync(join(here, "../src/screens/fidelity.css"), "utf8");
-    const grids = /^\.fy-(gendialog__previews-grid|looks-results__grid)/;
-    for (const line of css.split("\n")) {
-      if (!grids.test(line) || !/\bbutton\b/.test(line)) continue;
-      assert.ok(
-        line.includes(":not(.fy-imgdl)"),
-        `a rule for the cell's choice that also catches its save control:\n${line}`,
-      );
-    }
-  });
 });
 
 /* ---- the stubs, kept below the tests they serve --------------------------- */

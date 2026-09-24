@@ -70,6 +70,7 @@ also creates the lock and derived index files described below.
 | Operation | Creates, changes, or removes |
 |---|---|
 | Open read-write | Recovers `W\.commit\`, creates `W\world.lock`, creates or replaces `W\.index\scan-state.json`, and opens `W\.index\world.db`. The lock timestamp is refreshed while open. |
+| Backfill artifact posters | Draws video posters under `W\.index\posters\` and atomically replaces `W\.index\poster-backfill.cursor` after each attempt, including failures. The deletable cursor lets later videos have the next open's full extraction budget. |
 | Close | Replaces `W\.index\scan-state.json`, closes SQLite, and removes `W\world.lock`. |
 | Delete index manually | Deleting `W\.index\` or anything under `R\.index\` removes caches only. The next open or checkpoint verification rebuilds them from durable files. |
 | Reconcile external edit | Recommits, versions, snapshots, and logs changed versioned files. Logs unversioned changes. A file deleted outside the app remains deleted and gains a `deleted: true` change line. |
@@ -149,12 +150,49 @@ Implemented landing directories include:
 | Render production | Encodes to `W\.cache\exports\ex_<id>.mp4`, then renames the complete file to `W\exports\<name>.mp4`. Cancel or failure removes the staged file. |
 | Export whole world | Recursively copies to `R\exports\<world>-<timestamp>\`. Includes `.history`; excludes `.index`, `.commit`, `.proposals`, `.staging`, `.cache`, `world.lock`, and temporary files. The whole copy is not atomic, so failure can leave a partial export directory. |
 
+## Publication foundation
+
+Publication foundation services (SPEC-048, issue #1228) are not yet exposed as export commands.
+`capturePublicationInputs` checks declared dependencies under the world's ownership/read gate and
+copies media into a unique `arke-publication-*` child of a host-provided scratch directory. It
+does not edit authored sources or create a completed edition. Cancellation/failure removes that
+child; successful callers own its `dispose()` cleanup. Abrupt process exit can leave scratch files;
+there is no automatic scratch sweep yet. `verifyPublicationDirectory` is read-only
+and checks a portable directory independently of an open world. See the
+[service boundaries](development/publications.md) for ownership, limits and remaining work.
+
+`compileVideoPublication` now discovers and revalidates sources through capture's trusted
+preparation callback, then renders from the copies after releasing the world gate. It writes
+`movie.mp4`, selected `text-N.vtt` sidecars and `publication.json` into a separate unique
+`arke-video-publication-*` scratch child. It syncs output files and verifies the package before
+returning it, removes the captured inputs, and gives the caller a package `dispose()` function.
+Cancel, world close or failure removes only these operation-owned temporary directories. This
+does not promote a destination, record durable completion or reconcile retries; abrupt exit can
+leave scratch output and it must not be presented as a completed export.
+
+`publishVideoPublication` wraps that compiler in local delivery. Under a host-owned output root it
+creates an operation UUID directory with immutable request, prepared and completed JSON receipts.
+Unique attempts hold copied/flushed/verified package bytes on the same filesystem. Directory
+promotion renames inside the chosen attempt; ZIP promotion uses a no-replace hard link. Receipt
+installation also uses exclusive hard links after file sync. Retry validates the recorded output
+and completes interrupted promotion without recompiling it. Existing conflicting/damaged output
+is preserved and refused. Failures before preparation remove only the current attempt; after
+preparation it is retained for retry. Crashes before preparation can leave orphan attempts.
+
+`writePublicationZip` streams inventoried files into a new ZIP. `extractPublicationZip` allocates
+an owned scratch child, pins the input archive, validates its bounded inventory, then extracts and
+verifies the package there. Its `dispose()` removes both temporary forms, never the source ZIP.
+Only the returned portable package path is a delivery artifact; adjacent operation receipts are
+internal state. These services assume trusted local storage and do not promise arbitrary power-loss
+recovery or an atomic fence against hostile external filesystem mutation.
+
 ## Artifacts and extraction
 
 | Operation | Creates, changes, or removes |
 |---|---|
 | File artifact | Copies the source to `W\artifacts\<safe-name>` and creates `<safe-name>.json`. The source is untouched. If identical bytes already exist, no binary is copied and the existing sidecar may be replaced to merge links. |
 | Supersede artifact | Creates a new binary and sidecar. The old binary, sidecar, and existing links remain. |
+| Remove artifact from shelf | Replaces the existing sidecar through the world commit path to record `retiredAt`. Keeps the binary, identity, provenance and citations. Re-importing identical bytes clears retirement on the same sidecar without copying another binary (SPEC-015 R-19). |
 | Import folder | Files each visible file separately and flattens the source hierarchy into `W\artifacts\`. The original relative directory is retained in sidecar provenance. Hidden and system files are skipped. |
 | Extract facts | Creates scratch work under `R\.extract\extract-<id>\` and replaces the artifact sidecar as candidates are recorded, accepted, or rejected. Accepted facts additionally create canon or sheet proposals. |
 
@@ -192,5 +230,6 @@ Verified against coordinator, provider and desktop code on 2026-08-27.
 
 ## Character audio foundation (issue 117)
 
-The shared local audio foundation and the #255/#111 consumer boundaries are documented in
-[the integration notes](architecture/character-audio-foundation.md).
+The shared local audio foundation and the #255/#111 consumer boundaries are documented in the
+integration notes `architecture/character-audio-foundation.md` in the private document set (a
+sibling repository), not in this repository.

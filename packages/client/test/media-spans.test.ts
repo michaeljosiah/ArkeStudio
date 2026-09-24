@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mediaSpans, spanAt } from "../src/lib/cut-playback.js";
-import { runtimeSeconds } from "../src/lib/format.js";
+import { runtimeSeconds, seconds } from "../src/lib/format.js";
 
 /**
  * What plays, and how long it says it runs, for a production with no story (issue 453).
@@ -67,6 +67,11 @@ describe("what plays when there is no story", () => {
 });
 
 describe("a runtime measured off the timeline", () => {
+  it("keeps measured take labels to one decimal without padding whole seconds", () => {
+    assert.equal(seconds(2.4583333333333335), "2.5s");
+    assert.equal(seconds(4), "4s");
+    assert.equal(seconds(undefined), "—");
+  });
   it("reads whole seconds, because a placed length is not an authored one", () => {
     assert.equal(runtimeSeconds(15), "15s");
     assert.equal(runtimeSeconds(14.776), "15s", "not a measurement in a header");

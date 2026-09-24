@@ -3,8 +3,11 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   clonedVoiceCandidates,
+  cloudReaderCandidates,
+  firstReadNotice,
   normalizeSpeechText,
   KOKORO_VOICE_MODEL,
+  billableCharacters,
   estimateMicroUsd,
   extractVoiceAttributes,
   previewLineFor,
@@ -12,6 +15,7 @@ import {
   isGraphScene,
   splitBible,
   type ClonedVoice,
+  type Delivery,
   type DomainEvent,
   type ManifestModel,
   type ModelManifest,
@@ -29,7 +33,7 @@ import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
-import { flacProblem, verifyArtifact } from "../queue/verify.js";
+import { flacProblem, mp3AudioSpan, verifyArtifact } from "../queue/verify.js";
 
 /**
  * The voice service (SPEC-011): a unified catalogue over local presets and cloud voices
@@ -65,6 +69,14 @@ export interface VoiceServiceDeps {
   sidecar: SidecarLike | null;
   localPresets: VoiceCandidate[];
   cloudSources: CloudVoiceSource[];
+  /**
+   * The hosted readers of the world's cloned voices (SPEC-046 R-10): a keyed one offers every
+   * library voice as a candidate of its own — the same id, its provider and row — beside the
+   * recipe's. Unkeyed, it offers nothing, like an unkeyed cloud catalogue.
+   */
+  hostedReaders?: Array<{ provider: string; model: string }>;
+  /** Why a keyed reader cannot read now — a rejected key, a fault — carried onto its candidates. */
+  readerAvailability?: (provider: string) => { unavailableReason?: string };
   getKey: (provider: string) => Promise<string | null>;
   emit: (event: DomainEvent) => void;
   clock?: () => string;
@@ -173,6 +185,38 @@ export function concatWav(parts: readonly Uint8Array[]): Uint8Array {
 }
 
 /**
+ * MP3 frames concatenate; what each part carries around them does not (SPEC-047 R-5). A later
+ * part's ID3v2 tag — footer included, when its flags say it has one — is dropped, and so is
+ * every part's Xing/Info/VBRI frame (codex on PR 1210): that frame is silence describing the
+ * stream behind it, and the first part's would declare the joined file's length as the first
+ * piece's, which this package's own verifier rightly reads as a truncation and the cache
+ * would then never hit. An ID3v1 trailer is kept only on the last part, where the verifier
+ * allows the one there is. Without a declaration a player reads the stream as the constant
+ * rate it is, which is what a reader returns.
+ */
+export function concatMp3(parts: readonly Uint8Array[]): Uint8Array {
+  const kept = parts.map((part, index) => {
+    const { tagEnd, audioStart, audioEnd } = mp3AudioSpan(part);
+    const end = index === parts.length - 1 ? part.length : audioEnd;
+    return index === 0
+      ? Buffer.concat([Buffer.from(part.subarray(0, tagEnd)), Buffer.from(part.subarray(audioStart, end))])
+      : Buffer.from(part.subarray(audioStart, end));
+  });
+  return new Uint8Array(Buffer.concat(kept));
+}
+
+/**
+ * The pieces of a read as one file, by the format the reader returned. There is no flac join —
+ * the audiobook flags such a block and the page read sends it whole (`piecesFor`) — so asking
+ * for one is a programming error rather than a case.
+ */
+export function joinSpeech(parts: readonly Uint8Array[], format: VoiceAudioFormat): Uint8Array {
+  if (format === "wav") return concatWav(parts);
+  if (format === "mp3") return concatMp3(parts);
+  throw new Error("flac parts cannot be joined");
+}
+
+/**
  * The words of a readable section — and only the words.
  *
  * It used to resolve the voice too, from `sheet.voice`, which read prose *about* a character in
@@ -211,7 +255,7 @@ export function authoritativeSheetSpeech(sheet: Sheet, heading: string): { text:
  */
 export function authoritativeProseSpeech(
   bundle: WorldBundle,
-  source: Exclude<ProseReadSource, { of: "reply" } | { of: "chapter" }>,
+  source: Exclude<ProseReadSource, { of: "reply" } | { of: "chapter" } | { of: "chapter-voiced" }>,
 ): { text: string; heading: string; version: number; subjectId: string } {
   const production = (id: string) => {
     const found = bundle.productions.find((candidate) => candidate.meta.id === id);
@@ -253,6 +297,19 @@ export function authoritativeProseSpeech(
       if (source.field === "treatment") {
         return spoken(found.treatment ?? undefined, "Treatment", story?.version ?? 1, subjectId);
       }
+      // The style's two readable pieces (turn 128) carry the style record's own version.
+      if (source.field === "voice") {
+        return spoken(found.proseStyle?.voice, "Voice", found.proseStyle?.version ?? 1, subjectId);
+      }
+      if (source.field === "samples") {
+        const samples = found.proseStyle?.samples ?? [];
+        // One sample when one is named (codex on turn 128): read whole, six at their bound
+        // outrun a narrator's prompt cap; the Overview reads them one block at a time.
+        if (source.sample !== undefined) {
+          return spoken(samples[source.sample], `Sample ${source.sample + 1}`, found.proseStyle?.version ?? 1, `${subjectId}/${source.sample}`);
+        }
+        return spoken(samples.join(" "), "Samples", found.proseStyle?.version ?? 1, subjectId);
+      }
       if (!story) throw new Error("Nothing has been settled about this production yet.");
       if (source.field === "acts") {
         const acts = (story.acts ?? [])
@@ -260,7 +317,7 @@ export function authoritativeProseSpeech(
           .join(". ");
         return spoken(acts, "Acts", story.version, subjectId);
       }
-      return spoken(story[source.field], source.field === "logline" ? "Logline" : "Spine", story.version, subjectId);
+      return spoken(story[source.field], ({ logline: "Logline", spine: "Spine", question: "Dramatic question", ending: "Ending" })[source.field], story.version, subjectId);
     }
     case "season": {
       const season = production(source.productionId).season;
@@ -444,7 +501,7 @@ export class VoiceService {
       const health = await this.deps.sidecar.health().catch(() => null);
       const speechEngine = health === null ? "unknown" : health.engineStatus.kokoro.ready ? "ready" : "down";
       if (speechEngine === "down") {
-        return [...(await this.cloudVoices()), ...clonedVoiceCandidates(clonedVoices, clonedAvailability)];
+        return [...(await this.cloudVoices()), ...clonedVoiceCandidates(clonedVoices, clonedAvailability), ...(await this.hostedReaderCandidates(clonedVoices))];
       }
       const live = await this.deps.sidecar.listVoices().catch(() => []);
       if (live.length > 0) {
@@ -462,7 +519,17 @@ export class VoiceService {
         }));
       }
     }
-    return [...(await this.cloudVoices()), ...local, ...clonedVoiceCandidates(clonedVoices, clonedAvailability)];
+    return [...(await this.cloudVoices()), ...local, ...clonedVoiceCandidates(clonedVoices, clonedAvailability), ...(await this.hostedReaderCandidates(clonedVoices))];
+  }
+
+  /** The library's voices through each keyed hosted reader (SPEC-046 R-10). */
+  private async hostedReaderCandidates(clonedVoices: readonly ClonedVoice[]): Promise<VoiceCandidate[]> {
+    const out: VoiceCandidate[] = [];
+    for (const reader of this.deps.hostedReaders ?? []) {
+      if ((await this.deps.getKey(reader.provider)) === null) continue;
+      out.push(...cloudReaderCandidates(clonedVoices, reader, this.deps.readerAvailability?.(reader.provider) ?? {}));
+    }
+    return out;
   }
 
   /** The keyed cloud catalogues, which are unaffected by whatever the local engine is doing. */
@@ -497,8 +564,17 @@ export class VoiceService {
             entry.capability === "voice-tts",
         );
         return model
-          ? [[voiceTargetKey(candidate), estimateMicroUsd(model, { characters: line.text.length })]]
+          ? [[voiceTargetKey(candidate), estimateMicroUsd(model, { characters: billableCharacters(model, line.text) })]]
           : [];
+      }),
+    );
+    // What a first read through a slot-keeping reader adds, on the row before the circle that
+    // would incur it (SPEC-046 R-14, R-34): once the library records the slot, nothing.
+    const notices = Object.fromEntries(
+      ranked.flatMap(({ candidate }): Array<[string, string]> => {
+        const clone = candidate.readsClone === undefined ? undefined : bundle.clonedVoices.find((voice) => voice.id === candidate.readsClone);
+        const notice = clone === undefined ? null : firstReadNotice(clone, candidate.provider);
+        return notice === null ? [] : [[voiceTargetKey(candidate), notice]];
       }),
     );
     this.deps.emit({
@@ -509,6 +585,7 @@ export class VoiceService {
       extracted,
       ranked,
       previewLine: line,
+      notices,
       // Stated before any preview that will incur a charge (R-10): per-line cloud cost.
       // Legacy clients read one aggregate figure. Use it only when every priced candidate agrees;
       // otherwise null is safer than quoting one sibling model for another.
@@ -534,20 +611,25 @@ export class VoiceService {
      * that does not want to think about parts should not have to.
      */
     onPart?: (part: { file: string; index: number; total: number }) => void,
-  ): Promise<{ file: string; cached: boolean }> {
+    options: { signal?: AbortSignal } = {},
+  ): Promise<{ file: string; cached: boolean; parts: number }> {
     const normalized = normalizeSpeechText(text);
     if (normalized.length === 0) throw new Error("Nothing to read yet.");
     const rel = speechCacheFile({ provider: "kokoro", model: KOKORO_VOICE_MODEL, voiceId, text: normalized, format: "wav" });
     const abs = join(store.dir, rel);
+    // The chunks the text splits into name the parts a file was made from, cached or not: the
+    // split is a function of the text, so a hit was made from the same ones (codex on PR 1180).
+    const chunks = splitForSpeech(normalized);
     try {
       const bytes = await readFile(toExtendedLength(abs));
       if (cachedVoiceAudioLooksRight(bytes, "wav")) {
-        return { file: rel, cached: true };
+        return { file: rel, cached: true, parts: chunks.length };
       }
     } catch {
       /* miss → synthesise */
     }
-    if (!this.deps.sidecar) throw new Error("Voxa is not running — local voice is off; cloud voice still works");
+    const sidecar = this.deps.sidecar;
+    if (!sidecar) throw new Error("Voxa is not running — local voice is off; cloud voice still works");
     /*
      * One request per chunk, in order, rather than one request for everything.
      *
@@ -555,48 +637,114 @@ export class VoiceService {
      * unavailable for the rest of the process — so the whole app lost voice because one section
      * of a bible was long. Sequential rather than parallel on purpose: this is one small model on
      * the user's own machine, and several concurrent syntheses is the other way to fell it.
+     *
+     * A caller with a signal — an audiobook run stopped, or the world closing under it — ends
+     * the read at the next chunk and cancels the one in flight, rather than finishing a
+     * paragraph nobody is waiting for past the desktop's shutdown deadline (codex on PR 1180).
      */
-    const chunks = splitForSpeech(normalized);
-    const rendered: Uint8Array[] = [];
-    for (const [index, chunk] of chunks.entries()) {
-      const part = await this.deps.sidecar.synthesize({ voiceId, text: chunk });
-      if (!cachedVoiceAudioLooksRight(part, "wav")) {
-        throw new Error("Voxa returned invalid audio.");
+    return this.oneAtATime(options.signal, () => new Error("stopped"), async () => {
+      const rendered: Uint8Array[] = [];
+      for (const [index, chunk] of chunks.entries()) {
+        if (options.signal?.aborted) throw new Error("stopped");
+        const part = await sidecar.synthesize({ voiceId, text: chunk }, options.signal !== undefined ? { signal: options.signal } : {});
+        if (!cachedVoiceAudioLooksRight(part, "wav")) {
+          throw new Error("Voxa returned invalid audio.");
+        }
+        rendered.push(part);
+        /*
+         * Hand each piece over the moment it exists, so listening can begin on the first one while
+         * the rest are still being made. A ten-minute section takes about ten minutes to render on
+         * this machine; waiting for all of it before the first word is a wait nobody should sit
+         * through, and the pieces are already separate files.
+         */
+        if (onPart) {
+          const partRel = speechCacheFile({ provider: "kokoro", model: KOKORO_VOICE_MODEL, voiceId, text: chunk, format: "wav" });
+          await store.gateOp(async () => {
+            await atomicWriteFile(join(store.dir, partRel), part);
+          });
+          onPart({ file: partRel, index, total: chunks.length });
+        }
       }
-      rendered.push(part);
-      /*
-       * Hand each piece over the moment it exists, so listening can begin on the first one while
-       * the rest are still being made. A ten-minute section takes about ten minutes to render on
-       * this machine; waiting for all of it before the first word is a wait nobody should sit
-       * through, and the pieces are already separate files.
-       */
-      if (onPart) {
-        const partRel = speechCacheFile({ provider: "kokoro", model: KOKORO_VOICE_MODEL, voiceId, text: chunk, format: "wav" });
-        await store.gateOp(async () => {
-          await atomicWriteFile(join(store.dir, partRel), part);
-        });
-        onPart({ file: partRel, index, total: chunks.length });
-      }
-    }
-    const audio = concatWav(rendered);
-    await store.gateOp(async () => {
-      await atomicWriteFile(abs, audio);
+      const audio = concatWav(rendered);
+      await store.gateOp(async () => {
+        await atomicWriteFile(abs, audio);
+      });
+      return { file: rel, cached: false, parts: chunks.length };
     });
-    return { file: rel, cached: false };
+  }
+
+  /**
+   * The engine takes one request at a time, whoever asks (codex on PR 1180). The chunks of a
+   * read were always sequential; what was not bounded was two readers at once — an audiobook
+   * run on one chapter and another on the next, a page read pressed while a run is going, a
+   * performance beside either — and several syntheses at once is the documented way to leave
+   * Kokoro unavailable for the rest of the process. So every synthesis queues here, and a cache
+   * hit never does (it is answered above without touching the engine). A caller whose signal
+   * fires while it waits its turn leaves the queue then and there, in its own words (codex on PR
+   * 1183): a run stopped behind a long page read would otherwise say `reading…` until that read
+   * was done, and the coordinator's stop would wait on it. Its slot still opens only after the
+   * turn ahead of it, so leaving early never lets two syntheses run.
+   */
+  private sidecarLane: Promise<void> = Promise.resolve();
+  private oneAtATime<T>(signal: AbortSignal | undefined, cancelled: () => Error, work: () => Promise<T>): Promise<T> {
+    const ahead = this.sidecarLane;
+    let release!: () => void;
+    const slot = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.sidecarLane = ahead.then(() => slot);
+    return (async () => {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          if (signal?.aborted) {
+            reject(cancelled());
+            return;
+          }
+          const onAbort = () => reject(cancelled());
+          signal?.addEventListener("abort", onAbort, { once: true });
+          void ahead.then(() => {
+            signal?.removeEventListener("abort", onAbort);
+            resolve();
+          });
+        });
+        return await work();
+      } finally {
+        release();
+      }
+    })();
+  }
+
+  /** One request straight to the engine, through the lane: the runtime's Test control (codex on PR 1183). */
+  async synthesizeOnce(input: { voiceId: string; text: string }): Promise<Uint8Array> {
+    const sidecar = this.deps.sidecar;
+    if (!sidecar) throw new Error("Voxa is unavailable");
+    return this.oneAtATime(undefined, () => new Error("stopped"), () => sidecar.synthesize(input, {}));
   }
 
   /** A deliberate performance is always a fresh synthesis; preview caches are not take authority. */
   async synthesizePerformance(voiceId: string, text: string, params: Record<string, number>, signal: AbortSignal): Promise<Uint8Array> {
-    if (!this.deps.sidecar) throw new Error("Local synthesis is unavailable.");
-    const rendered: Uint8Array[] = [];
-    for (const chunk of splitForSpeech(normalizeSpeechText(text))) {
-      if (signal.aborted) throw new Error("Performance generation cancelled.");
-      const bytes = await this.deps.sidecar.synthesize({ voiceId, text: chunk, params }, { signal });
-      if (!cachedVoiceAudioLooksRight(bytes, "wav")) throw new Error("Local synthesis returned invalid audio.");
-      rendered.push(bytes);
-    }
-    if (!rendered.length) throw new Error("This line has no spoken text.");
-    return concatWav(rendered);
+    return (await this.synthesizeDirected(voiceId, text, params, signal)).audio;
+  }
+
+  /**
+   * The same fresh synthesis, with how many requests made it (SPEC-047 R-5; codex on PR 1186):
+   * a directed audiobook block over the engine's chunk is joined from several, and its take
+   * records that number rather than claiming one.
+   */
+  async synthesizeDirected(voiceId: string, text: string, params: Record<string, number>, signal: AbortSignal): Promise<{ audio: Uint8Array; parts: number }> {
+    const sidecar = this.deps.sidecar;
+    if (!sidecar) throw new Error("Local synthesis is unavailable.");
+    return this.oneAtATime(signal, () => new Error("Performance generation cancelled."), async () => {
+      const rendered: Uint8Array[] = [];
+      for (const chunk of splitForSpeech(normalizeSpeechText(text))) {
+        if (signal.aborted) throw new Error("Performance generation cancelled.");
+        const bytes = await sidecar.synthesize({ voiceId, text: chunk, params }, { signal });
+        if (!cachedVoiceAudioLooksRight(bytes, "wav")) throw new Error("Local synthesis returned invalid audio.");
+        rendered.push(bytes);
+      }
+      if (!rendered.length) throw new Error("This line has no spoken text.");
+      return { audio: concatWav(rendered), parts: rendered.length };
+    });
   }
 
   async localPreview(store: WorldStore, _sheet: Sheet, voiceId: string, line: PreviewLine): Promise<string> {
@@ -665,7 +813,7 @@ export class VoiceService {
         ...(voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor } : {}),
         // Unmetered rows estimate at zero, so a local preview states no price where a cloud one
         // states an exact figure (turn 70). No branch needed — the manifest already says which.
-        estimatedMicroUsd: estimateMicroUsd(model, { characters: normalized.length }),
+        estimatedMicroUsd: estimateMicroUsd(model, { characters: billableCharacters(model, normalized) }),
         // Landed under its cache key, so reopening the picker replays without a call (R-10).
         landing: { dir: PREVIEW_CACHE_DIR, name },
       },
@@ -716,6 +864,10 @@ export function voiceLineRequest(input: {
   shotId: string;
   sheet: Sheet;
   text: string;
+  /** The delivery's name, for a reader that takes direction as words as well as numbers (SPEC-046 R-22). */
+  delivery?: Delivery;
+  /** The line's language when stated (ISO 639-1); nothing states one yet (issue 1163), and the estimate follows R-23 without it. */
+  language?: string;
   deliveryParams: Record<string, number> | null;
   deliveryNotice: string | null;
   model: ManifestModel;
@@ -739,10 +891,12 @@ export function voiceLineRequest(input: {
       voiceId: voice.voiceId,
       text: input.text,
       audioFormat: voiceFormatForModel(input.model),
+      ...(input.delivery !== undefined ? { delivery: input.delivery } : {}),
+      ...(input.language !== undefined ? { language: input.language } : {}),
       ...(input.deliveryParams !== null ? { voiceSettings: input.deliveryParams } : {}),
       ...(input.deliveryNotice !== null ? { deliveryNotice: input.deliveryNotice } : {}),
     },
-    estimatedMicroUsd: estimateMicroUsd(input.model, { characters: input.text.length }),
+    estimatedMicroUsd: estimateMicroUsd(input.model, { characters: billableCharacters(input.model, input.text, input.delivery, input.language) }),
     landing: { dir: `productions/${input.productionId}/audio` },
     ...(input.voiceReference === true ? { voiceReference: true } : {}),
     ...(input.voiceUploadConfirmedFor !== undefined

@@ -3,8 +3,52 @@ import type { Job } from "./job.js";
 import type { LedgerEntry } from "./job.js";
 import { isReplayableFinalization } from "./job.js";
 import { PROVIDERS } from "./provider.js";
+import { formatMicroUsd } from "./money.js";
 import { unattendedProposalsOf } from "./proposal.js";
 import type { Take } from "./take.js";
+import { orderedShots } from "./scene-flow.js";
+import { PerformanceTargetSchema } from "./performance.js";
+
+/** The same names for running and completed work, resolved only inside its owning world (#1005). */
+export function activityJobLabels(
+  state: ClientState | null | undefined,
+  job: Job,
+): { target: string; model: string; place: string } {
+  const world = state?.world?.meta.worldId === job.worldId ? state.world : null;
+  const worldName = world?.meta.name ?? state?.worlds.find((candidate) => candidate.worldId === job.worldId)?.name;
+  const targetParts = job.target.id?.split("/") ?? [];
+  const targetId = targetParts[0];
+  const prose = job.target.kind === "voice-preview" && job.params.purpose === "prose";
+  const proseProductions = prose ? world?.productions.filter((candidate) => candidate.meta.id === targetId || candidate.scenes.some((scene) => orderedShots(scene).some((shot) => shot.id === targetId))) ?? [] : [];
+  const production = world?.productions.find((candidate) => candidate.meta.id === job.productionId) ?? (proseProductions.length === 1 ? proseProductions[0] : undefined);
+  const performanceInput = (job.target.kind === "performance-generation" ? job.params.performanceGeneration : job.target.kind === "performance-conversion" ? job.params.performanceConversion : undefined) as { target?: unknown } | undefined;
+  const parsedTarget = PerformanceTargetSchema.safeParse(performanceInput?.target);
+  const performance = parsedTarget.success && parsedTarget.data.productionId === job.productionId ? parsedTarget.data : undefined;
+  const tableRead = job.target.kind === "table-read-cache";
+  const sceneId = performance?.sceneId ?? (tableRead && typeof job.params.tableReadSceneId === "string" ? job.params.tableReadSceneId : undefined);
+  const shotId = performance?.shotId ?? job.target.coversShots?.[0] ?? targetId;
+  const scene = production?.scenes.find((candidate) => sceneId ? candidate.id === sceneId : candidate.id === targetId || orderedShots(candidate).some((shot) => shot.id === shotId));
+  const shot = scene ? orderedShots(scene).find((candidate) => candidate.id === shotId) : undefined;
+  const sheet = REFERENCE_ORIGINS[job.target.kind] ? world?.sheets.find((candidate) => candidate.id === targetId) : undefined;
+  const bench = job.target.kind === "bench-take" ? world?.benchSessions.find((session) => session.id === targetId) : undefined;
+  const kind = job.target.kind === "shot" ? "clip" : job.target.kind.replaceAll("-", " ");
+  const sceneWide = job.target.kind === "scene-pass" || job.target.kind === "storyboard";
+  const speakerId = performance?.speakerSheetId ?? (tableRead ? job.params.tableReadSpeakerSheetId : undefined);
+  const speaker = world?.sheets.find((candidate) => candidate.id === speakerId && candidate.type === "character");
+  const proseName = prose ? world?.canon.find((candidate) => candidate.id === targetId)?.title
+    ?? world?.series.find((candidate) => candidate.id === targetId)?.title
+    ?? (production && !shot && typeof job.params.sectionHeading === "string" ? job.params.sectionHeading : undefined) : undefined;
+  const bible = job.target.kind === "voice-preview" && job.params.purpose === "bible-section";
+  const chapterName = prose && targetParts[1] === "chapters" ? production?.chapters.find((chapter) => chapter.id === targetParts[2]?.split("#")[0])?.title : undefined;
+  const subject = [speaker?.name, chapterName ?? proseName ?? (bible ? `Bible${typeof job.params.sectionHeading === "string" ? ` · ${job.params.sectionHeading}` : ""}` : undefined)
+    ?? sheet?.name ?? bench?.title ?? (sceneWide ? scene?.title : shot ? `Shot ${shot.number} · ${shot.title}` : scene?.title)].filter(Boolean).join(" · ");
+  const target = [subject ? `${subject} · ${kind}` : kind[0]!.toUpperCase() + kind.slice(1), production?.meta.title, worldName, scene && (shot || sceneId) ? `Scene ${scene.number}` : null].filter(Boolean).join(" · ");
+  const model = state?.app.manifest?.models.find((candidate) => candidate.id === job.model && candidate.provider === job.provider)?.displayName ?? job.model;
+  // The path alone — production, world, scene — for a row whose title already names the subject
+  // the receipt's way (design turn 79) and still owes R-19 the place.
+  const place = [production?.meta.title, worldName, scene && (shot || sceneId) ? `Scene ${scene.number}` : null].filter(Boolean).join(" · ");
+  return { target, model, place };
+}
 
 /**
  * The Activity read model (SPEC-014): nothing is added to the needs-you queue — every entry is
@@ -28,7 +72,8 @@ export type NeedsYouAction =
   | "review"
   | "open-proposal"
   | "open-world"
-  | "review-extraction";
+  | "review-extraction"
+  | "spend";
 
 export interface NeedsYouEntry {
   urgency: NeedsYouClass;
@@ -36,6 +81,7 @@ export interface NeedsYouEntry {
     | "job-needs-reconciliation"
     | "job-finalization-failed"
     | "provider-paused"
+    | "spend-over-threshold"
     | "external-edits"
     | "unreviewed-take"
     | "open-proposal"
@@ -122,6 +168,23 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
       at: "9999-12-31T00:00:00Z", // pauses have no timestamp; they sort newest within class
       actions: ["settings"],
       ref: queue.provider,
+    });
+  }
+
+  // Class 2 — the user's own line, crossed (design turn 136, R-23). It blocks nothing, so it sits
+  // beside blocked work rather than above it. Derived from the last evaluation like everything
+  // here: it leaves when the rolling total falls back under the line or the line moves. A zero
+  // threshold is off and never alerts (SPEC-008 R-19), so the flag alone is the test.
+  const spend = state.app.spend;
+  if (spend?.alerted && spend.settings.thresholdMicroUsd > 0) {
+    entries.push({
+      urgency: 2,
+      kind: "spend-over-threshold",
+      title: "Over the spend alert",
+      detail: `${formatMicroUsd(spend.rollingMicroUsd)} against ${formatMicroUsd(spend.settings.thresholdMicroUsd)} / ${spend.settings.periodDays}d`,
+      at: "9999-12-31T00:00:00Z", // the status carries no instant; newest within class, like a pause
+      actions: ["spend"],
+      ref: "spend-threshold",
     });
   }
 
@@ -245,6 +308,8 @@ export interface RunningEntry {
   kind: "job" | "model-download" | "export";
   title: string;
   detail: string;
+  /** Exact identities for a diagnostic tooltip, separate from the human title. */
+  diagnostic?: string;
   /** 0..100 where known; null where the work reports none. */
   percent: number | null;
   ref: string;
@@ -266,10 +331,12 @@ export function computeRunning(
   for (const job of state.app.jobs) {
     const finalizing = job.status === "succeeded" && job.finalization?.status === "pending";
     if (!RUNNING_JOB.has(job.status) && !finalizing) continue;
+    const labels = activityJobLabels(state, job);
     entries.push({
       kind: "job",
-      title: `${job.model} · ${job.target.kind}${job.target.id !== undefined ? ` ${job.target.id}` : ""}`,
-      detail: finalizing ? `${job.provider} · generated · preparing result` : `${job.provider} · ${job.status}`,
+      title: labels.target,
+      detail: `${labels.model} · ${finalizing ? "generated · preparing result" : job.status}`,
+      diagnostic: [job.id, job.target.id, `${job.provider}/${job.model}`].filter(Boolean).join(" · "),
       percent: null,
       ref: job.id,
       worldId: job.worldId,
@@ -312,7 +379,22 @@ export type JobAction = "watch" | "cancel" | "retry" | "resolve" | "delete";
  * a pending one is still working and a failed one is a class-1 needs-you item with a retry on it.
  * Deleting either would remove an entry the user still has a decision to make about (D1, D10).
  */
+const ARRIVED = new Set<Job["status"]>(["succeeded", "failed", "cancelled"]);
+
+/**
+ * Whether work came back after the Inbox was last opened — the bell's foreground dot (design
+ * turn 136, R-24). Never opened counts as never seen, so a first look lights for any history at
+ * all; the coordinator stamps the instant with the clock that stamps `updatedAt`.
+ */
+export function arrivedSince(jobs: readonly Job[], seenAt: string | null): boolean {
+  return jobs.some(
+    (job) => ARRIVED.has(job.status) && job.deletedAt === undefined && (seenAt === null || job.updatedAt > seenAt),
+  );
+}
+
 export function canDeleteJob(job: Job): boolean {
+  // These rows are also durable source/settlement records for the public engine.
+  if (job.target.kind === "story-page-illustration" || job.target.kind === "story-chapter-narration") return false;
   if (job.status !== "succeeded" && job.status !== "failed" && job.status !== "cancelled") return false;
   if (typeof job.params["frameRun"] === "string") return false;
   return job.finalization?.status !== "pending" && job.finalization?.status !== "failed";
@@ -389,6 +471,14 @@ export function jobOrigin(job: Job): JobOrigin | null {
    * voice screen for `CANON-004`, which is the dead end that rule exists to avoid.
    */
   if (job.target.kind === "voice-preview" && job.params["purpose"] === "prose") return null;
+  // An audiobook take (turn 146) is asked for from its chapter's Audiobook view, and that is
+  // where a flagged block is read again; the job froze the chapter it belongs to.
+  if (job.target.kind === "voice-preview" && job.params["purpose"] === "audiobook") {
+    const productionId = job.productionId ?? String(job.params["productionId"] ?? "");
+    const chapterId = String(job.params["chapterId"] ?? "");
+    if (productionId.length === 0 || chapterId.length === 0) return null;
+    return { path: `/w/${job.worldId}/p/${productionId}/story/chapters/${chapterId}?view=audiobook`, label: "Audiobook", where: "the chapter's Audiobook view" };
+  }
   const reference = REFERENCE_ORIGINS[job.target.kind];
   if (reference) {
     // Every reference target id is the sheet's slug followed by whatever distinguishes this

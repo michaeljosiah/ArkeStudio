@@ -60,6 +60,13 @@ export class MarkdownFile implements MarkdownDoc {
     this.dirty = true;
   }
 
+  /** Remove one frontmatter key, when it is there; the rest is preserved untouched (R-6). */
+  dropData(key: string): void {
+    if (!(key in this.data)) return;
+    this.data = Object.fromEntries(Object.entries(this.data).filter(([name]) => name !== key));
+    this.dirty = true;
+  }
+
   sections(): BodySection[] {
     return splitSections(this.body);
   }

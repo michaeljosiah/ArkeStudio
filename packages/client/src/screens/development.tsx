@@ -15,13 +15,15 @@ import {
 import { mediaUrl } from "../lib/media.js";
 import { Pin } from "../components/icons.js";
 import { EmptyState } from "../components/layout.js";
+import { Loading } from "../components/loading.js";
 import { Badge } from "../components/ui.js";
+import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES } from "../components/models-card.js";
 import { ReadAloud } from "../components/read-aloud.js";
 import { PageReadControl, useProsePageRead, type PageReadBlock } from "../components/page-read.js";
-import { useProduction } from "../lib/selectors.js";
+import { nextEpisodeOrder, pendingEpisodes, useProduction } from "../lib/selectors.js";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
 import { SingleActFeedback, useSingleAct } from "../components/single-act.js";
-import { createEpisode, proposeEpisode, reorderEpisodes } from "../lib/store.js";
+import { createEpisode, proposeEpisode, reorderEpisodes, setProductionModel, useStore } from "../lib/store.js";
 import { useBlockDigests } from "./storyboard.js";
 import { sceneIsComplete } from "./scene-workspace/completion.js";
 
@@ -209,6 +211,7 @@ function SeasonTile({
 
 export function DevelopmentWorkspace() {
   const { worldId, prodId } = useParams();
+  const { state } = useStore();
   const { world, production } = useProduction(worldId, prodId);
   const series = world?.series.find((s) => prodId !== undefined && s.seasons.includes(prodId)) ?? null;
   /*
@@ -253,34 +256,17 @@ export function DevelopmentWorkspace() {
   }
   const season = production.season ?? null;
   const episodes = production.episodes;
-  const defaults = season?.defaults;
-  // The season promises a number of episodes on the day it is made (turn 87), so the board is
-  // that many wide from the start — never however many happen to exist.
-  const declared = Math.max(defaults?.episodeCount ?? 0, episodes.length);
-  const written = episodes.filter((e) => e.promise?.opens || e.promise?.closes).length;
   return (
     <div className="fy-arkewrap">
     <div className="fy-prodmain" data-screen="development">
-      {/*
-        The counts were six outlined pills repeating what the rail and the board already say
-        (turn 120). What survives is a seven-segment meter in episode order — the rack's own
-        shape at header size — filled for written and amber for staged.
-      */}
       <div className="fy-h1row">
         <h1 className="fy-h1">{production.meta.title}</h1>
         {/* Page scale (issue 859): the three cards below read through, in the order drawn. The
             speaker on each of them still reads that one alone. */}
         {pageBlocks.length > 1 && <PageReadControl read={pageRead} label="Read the season" />}
         <span style={{ flex: 1 }} />
-        <span style={{ textAlign: "right" }}>
-          <span className="fy-seasonmeter" aria-hidden="true">
-            {Array.from({ length: declared }, (_, i) => (
-              <span key={i} {...(i < written ? { "data-state": "written" } : {})} />
-            ))}
-          </span>
-          <span className="fy-h1row__meta" style={{ display: "block", marginTop: 6 }}>
-            {written} of {declared} written
-          </span>
+        <span className="fy-h1row__meta">
+          {episodes.length} episode{episodes.length === 1 ? "" : "s"}
         </span>
       </div>
       {/* The season record itself, in the header rather than behind a tab of its own (turn 91).
@@ -336,6 +322,15 @@ export function DevelopmentWorkspace() {
         says what is missing; the panel is what to do about it.
       */}
       <EpisodesBoard />
+      {worldId !== undefined && prodId !== undefined && (
+        <ModelsCard
+          state={state}
+          capabilities={PRODUCTION_MODEL_CAPABILITIES}
+          choices={production.meta.models}
+          scopeWord="this production"
+          onChange={(capability, modelId) => setProductionModel(worldId, prodId, capability, modelId)}
+        />
+      )}
     </div>
       <ArkeEdge>{(putAway) => <SeasonDock onPutAway={putAway} />}</ArkeEdge>
     </div>
@@ -373,7 +368,6 @@ function SeasonDock({ onPutAway }: { onPutAway: () => void }) {
                 worldId={worldId}
                 subject="the season"
                 staged={staged}
-                writes="nothing else changes"
               />
             ),
           }
@@ -402,7 +396,7 @@ function EpisodeDock({ episode, onPutAway }: { episode: Episode; onPutAway: () =
       entry={{ kind: "episode", productionId: prodId ?? "", episodeId: episode.id }}
       dock={{ title: `Arke · Episode ${pad(episode.order)}`, subject: `${episode.title} · v${episode.version}`, onPutAway }}
       openingNote="opening…"
-      emptyLine={`Nothing written for ${episode.title} yet. Say how it opens, where it turns and how it closes — the scenes it needs come with it.`}
+      emptyLine={`Develop ${episode.title} here — how it opens, where it turns, how it closes, and the scenes it needs.`}
       placeholder="Ask about the episode"
       {...(staged
         ? {
@@ -411,7 +405,6 @@ function EpisodeDock({ episode, onPutAway }: { episode: Episode; onPutAway: () =
                 worldId={worldId}
                 subject={`episode ${pad(episode.order)}`}
                 staged={staged}
-                writes="the scenes come with it · nothing else changes"
               />
             ),
           }
@@ -427,51 +420,16 @@ function EpisodeDock({ episode, onPutAway }: { episode: Episode; onPutAway: () =
 function EpisodesBoard() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
-  /*
-   * The press is answered before the round trip is. Staging goes to the coordinator and comes
-   * back as a proposal a moment later; until it does, the tile that was pressed says so itself
-   * rather than leaving the board looking untouched (turn 92).
-   */
-  const [starting, setStarting] = useState<Set<number>>(() => new Set());
   const episodes = production?.episodes ?? [];
-  /* A pressed tile yields to the episode it became (review 2026-08-22): nothing removed a
-     number from `starting` once the proposal was accepted, so a phantom STARTING tile stood
-     beside the real episode forever. */
-  const startingOpen = new Set([...starting].filter((n) => !episodes.some((e) => e.order === n)));
   const findings = production ? seasonFindings(production, world?.sheets ?? []) : [];
-  const declared = Math.max(production?.season?.defaults?.episodeCount ?? 0, episodes.length);
   /*
-   * Episodes that have been started and are waiting on the gate (turn 92). A staged proposal
-   * against a file that is not yet an episode on disk is a started one: it has a name and an
-   * order and no record, so it belongs on the board between the written and the untouched.
-   * Without this the press that staged it changed nothing anybody could see.
+   * Episodes that have been started and are waiting on the gate (turn 92): a staged proposal
+   * against a file that is not yet an episode on disk. It belongs on the board between the
+   * written and the untouched — without this the press that staged it changed nothing anybody
+   * could see.
    */
-  const stems = new Set(Object.values(production?.episodeFiles ?? {}));
-  const startedByPress = starting;
-  const started = (world?.proposals ?? []).flatMap((sp) =>
-    sp.proposal.targets.flatMap((t) => {
-      // Prefix and suffix rather than a built pattern: a production id interpolated into a
-      // regular expression is a pattern the caller did not write, and `\.` inside a template
-      // literal is just a dot, so the escape that looked like it was there never was.
-      const prefix = `productions/${prodId}/episodes/`;
-      if (!t.path.startsWith(prefix) || !t.path.endsWith(".json")) return [];
-      const stem = t.path.slice(prefix.length, -".json".length);
-      if (stem.length === 0 || stem.includes("/") || stems.has(stem)) return [];
-      // The gate labels its review fields for reading — "Title", "Order" — so they are matched
-      // case-insensitively rather than by the record's own key names.
-      const fields = sp.review?.targets.flatMap((rt) => rt.fields) ?? [];
-      const field = (name: string) => fields.find((f) => f.field.toLowerCase() === name)?.proposed;
-      const title = field("title") ?? sp.proposal.summary;
-      const order = Number(field("order") ?? Number.NaN);
-      return [{ id: sp.proposal.id, title, order: Number.isFinite(order) ? order : null }];
-    }),
-  );
-  /** The episodes the season promised and nobody has started (turn 87). */
-  const untouched = Math.max(0, declared - episodes.length - started.length);
-  const firstBlank = episodes.length + started.length + 1;
-  const blanks = Array.from({ length: untouched }, (_, i) => firstBlank + i).filter(
-    (order) => !startedByPress.has(order),
-  );
+  const started = pendingEpisodes(world, prodId, production);
+  const nextOrder = nextEpisodeOrder(world, prodId, production);
   const move = (index: number, delta: number) => {
     if (!worldId || !prodId) return;
     const ids = episodes.map((e) => e.id);
@@ -512,36 +470,18 @@ function EpisodesBoard() {
         {started.map((one) => (
           <SeasonTile key={one.id} number={one.order} title={one.title} state="staged" />
         ))}
-        {[...startingOpen]
-          .filter((order) => !started.some((one) => one.order === order))
-          .map((order) => (
-            <SeasonTile key={`starting-${order}`} number={order} title={`Episode ${pad(order)}`} state="staged" />
-          ))}
-        {/*
-          Making an episode happens in the rack, where the others already are (turn 87): no screen
-          asks for a title before there is anything to title, so opening a blank frame stages the
-          episode under its number and the conversation is what names it. The tile writes it live
-          (issue 728): the press is the decision, and a proposal here waited on a screen elsewhere.
-        */}
-        {blanks.map((order) => (
-          <SeasonTile
-            key={`blank-${order}`}
-            number={order}
-            state="blank"
-            onOpen={() => {
-              if (!worldId || !prodId) return;
-              createEpisode(worldId, prodId, { title: `Episode ${pad(order)}`, order });
-              setStarting((prev) => new Set(prev).add(order));
-            }}
-          />
-        ))}
+        <button
+          type="button"
+          className="fy-linkbtn"
+          onClick={() => {
+            if (worldId && prodId) createEpisode(worldId, prodId, { title: `Episode ${pad(nextOrder)}`, order: nextOrder });
+          }}
+        >
+          {episodes.length === 0 && started.length === 0 ? "Create the first episode" : "Add episode"}
+        </button>
       </div>
-      {(blanks.length > 0 || started.length > 0) && (
-        <div className="fy-mono">
-          {started.length > 0 &&
-            `${started.length} started and waiting on the gate — accept them in Proposals · `}
-          {blanks.length} of {declared} promised by the season and not started · starting one stages it for the gate
-        </div>
+      {started.length > 0 && (
+        <div className="fy-mono">{started.length} started and waiting on the gate — accept them in Proposals</div>
       )}
       <FindingsPanel findings={findings} />
     </div>
@@ -707,7 +647,7 @@ export function EpisodeChatScreen() {
         openingNote={`Episode Chat · ${pad(episode.order)} · opening…`}
         eyebrow={`EPISODE CHAT · ${pad(episode.order)}`}
         heading="What happens in this one?"
-        emptyLine={`Nothing written for ${episode.title} yet. Say how it opens, where it turns and how it closes — the scenes it needs come with it.`}
+        emptyLine={`Develop ${episode.title} here — how it opens, where it turns, how it closes, and the scenes it needs.`}
         placeholder="Keep shaping the episode…"
         {...(staged
           ? {
@@ -716,7 +656,6 @@ export function EpisodeChatScreen() {
                   worldId={worldId}
                   subject={`episode ${pad(episode.order)}`}
                   staged={staged}
-                  writes="the scenes come with it · nothing else changes"
                   onAccepted={() => navigate(`/w/${worldId}/p/${prodId}/episodes/${episode.id}`)}
                 />
               ),
@@ -745,10 +684,18 @@ export function EpisodeDetailScreen() {
   const navigate = useNavigate();
   const edit = useSingleAct();
   const episode: Episode | undefined = production?.episodes.find((e) => e.id === episodeId);
+  if (!world) {
+    return <div className="fy-prodmain" data-screen="episode-detail"><Loading label="Opening episode…" /></div>;
+  }
   if (!production || !episode) {
     return (
       <div className="fy-prodmain" data-screen="episode-detail">
-        <EmptyState title="Opening episode…" />
+        <EmptyState
+          title={production ? "Episode not found" : "Production not found"}
+          hint={production ? "This episode is not in the production." : "This production is not in the world."}
+          action={<NavLink to={production ? `/w/${worldId}/p/${prodId}/season` : `/w/${worldId}/productions`}
+            className="fy-linkbtn">{production ? "Back to episodes" : "Back to productions"}</NavLink>}
+        />
       </div>
     );
   }
@@ -875,8 +822,8 @@ function EpisodeSceneCard({
           {scene.title}
         </button>
       </div>
-      <div className="fy-mono" style={{ marginTop: 8 }}>
-        {scene.id} · {complete ? "done" : "in progress"}
+      <div className="fy-mono" style={{ marginTop: 8 }} title={scene.id}>
+        Scene {scene.number} · {complete ? "done" : "in progress"}
       </div>
     </div>
   );

@@ -60,6 +60,7 @@ export class FakeProvider implements DispatchClient {
   /** Which wire position the predecessor's clip took (issue 852): the footage extended, or a reference. */
   submittedVideoSource: { contentType: string; data: Uint8Array } | null = null;
   submittedVideoReferences: Array<{ contentType: string; data: Uint8Array }> = [];
+  submittedMediaAudioReferences: Array<{ contentType: string; data: Uint8Array }> = [];
   inlineArtifacts: DispatchArtifact[] | null = null;
 
   /** Scripting hooks. */
@@ -105,6 +106,7 @@ export class FakeProvider implements DispatchClient {
       voiceReference?: { name: string; contentType: string; data: Uint8Array };
       videoSource?: { contentType: string; data: Uint8Array };
       videoReferences?: Array<{ contentType: string; data: Uint8Array }>;
+      mediaAudioReferences?: Array<{ contentType: string; data: Uint8Array }>;
       idempotencyKey?: string;
     },
   ): Promise<{ remoteId: string; artifacts?: DispatchArtifact[] }> {
@@ -115,6 +117,7 @@ export class FakeProvider implements DispatchClient {
     this.submittedVoiceReference = request.voiceReference ?? null;
     this.submittedVideoSource = request.videoSource ?? null;
     this.submittedVideoReferences = request.videoReferences ?? [];
+    this.submittedMediaAudioReferences = request.mediaAudioReferences ?? [];
     this.inFlightNow += 1;
     this.maxObservedConcurrent = Math.max(this.maxObservedConcurrent, this.inFlightNow);
     try {

@@ -144,6 +144,7 @@ function readyRemoteService(token: string): ComfyUiEngineService {
     waitUntilReady: async () => true,
     modelsDir: () => null,
     baseUrl: () => "https://voice-box.example:8188",
+    baseUrls: () => ["https://voice-box.example:8188"],
     applySettings: async () => {},
     subscribe: () => () => {},
     dispose: async () => {},

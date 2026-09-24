@@ -3,7 +3,7 @@
 // happily claim the old number if it wasn't. It now comes from this package's package.json,
 // the same file electron-builder reads, so they cannot disagree.
 import { build } from "esbuild";
-import { readFileSync } from "node:fs";
+import { cpSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -55,4 +55,6 @@ await build({
   define: { __APP_VERSION__: JSON.stringify(version) },
 });
 
-console.log(`[build] main.cjs + preload.cjs at ${version}`);
+// import.meta.url resolves beside main.cjs in the bundle, so session preparation reads here.
+cpSync(join(root, "../../packages/coordinator/src/harness/skills"), join(root, "dist/skills"), { recursive: true });
+console.log(`[build] main.cjs + preload.cjs and authoring skills at ${version}`);

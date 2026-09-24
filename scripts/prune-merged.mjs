@@ -23,6 +23,12 @@
  * A branch is deleted only when it is an ancestor of the base ref, is not protected, and is not
  * checked out in any worktree that survived the pass above.
  *
+ * An orphan — a directory under .claude/worktrees that git no longer lists — is removed only when
+ * it has no `.git` file AND every file in it is either ignored or already in git's object store,
+ * which is what a `worktree remove` that passed the gates above and gave up partway through the
+ * delete leaves behind. Anything else — a `.git` file, a file nobody committed — is named and
+ * left alone.
+ *
  * Dry run is the DEFAULT, which is a deliberate break from `clean-temp.mjs` next door: that one
  * sweeps scratch directories, this one deletes work. Nothing is removed without `--apply`.
  *
@@ -33,6 +39,7 @@
  *   node scripts/prune-merged.mjs --no-fetch       # trust the local base ref as-is
  */
 import { spawnSync } from "node:child_process";
+import { existsSync, readdirSync, rmSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 
@@ -54,10 +61,20 @@ const base = valueOf("--base", "origin/main");
  */
 const PROTECTED = new Set(["main", "master", "HEAD"]);
 
+/**
+ * What git last said on stderr when it failed. The removal loop prints it, because on 2026-09-11
+ * eleven `worktree remove`s failed in a row and this script reported nothing but "left in place" —
+ * the cause (below, in `finishRemoval`) took a separate investigation to find.
+ */
+let lastGitError = "";
+
 /** Run git and return trimmed stdout, or null when it fails — callers decide what a failure means. */
 function git(args, cwd = process.cwd()) {
   const run = spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true });
-  if (run.status !== 0) return null;
+  if (run.status !== 0) {
+    lastGitError = (run.stderr ?? "").trim();
+    return null;
+  }
   return run.stdout.trim();
 }
 
@@ -85,6 +102,12 @@ const mainCheckout = resolve(repoRoot, "..");
 const here = resolve(gitOrDie(["rev-parse", "--show-toplevel"]));
 /** Where Claude's worktrees live. Outside it, a worktree is someone's own and is left alone. */
 const managedRoot = resolve(mainCheckout, ".claude", "worktrees");
+/**
+ * Paths for set membership. `git worktree list` prints a path in whatever case it was registered
+ * with; `readdir` prints the case on disk. On Windows those name the same directory, and a
+ * case-sensitive comparison would report a live worktree as an orphan — and remove it.
+ */
+const pathKey = (path) => (process.platform === "win32" ? resolve(path).toLowerCase() : resolve(path));
 
 if (!has("--no-fetch")) {
   const remote = base.includes("/") ? base.split("/")[0] : "origin";
@@ -195,6 +218,115 @@ if (keepWorktrees) {
   }
 }
 
+// Orphans: directories under .claude/worktrees that git no longer lists. Not gated by
+// --keep-worktrees: that flag protects work, and these hold none. Every one found on
+// 2026-09-11 (twelve of them, ~330 MB each) was the tail of a `git worktree remove` that got
+// as far as deleting the `.git` file and the tracked tree, then failed inside node_modules and
+// left the rest standing — the failed removal below is exactly how they are made. They are
+// worse than clutter: with no `.git` file, a shell inside one resolves upward to the MAIN
+// checkout, which is the eviction trap this whole script exists to avoid.
+//
+// A missing `.git` is necessary but not proof: a session can make a directory here and never
+// register it, and the first draft of this pass would have deleted a lone `draft.txt` on the
+// strength of the folder's address (Codex, PR #1100). So the contents are examined the way
+// `dirty()` examines a live worktree, for a tree git can no longer read: every file must be
+// either ignored by the repo's own rules or have contents git has already recorded somewhere.
+// Residue from a guarded `worktree remove` passes — ignored tails and untouched copies of
+// tracked files. A file nobody ever committed has a blob hash the repository has never seen,
+// and the folder is refused with a count, exactly as a dirty worktree is. A `.git` that is still
+// there while git does not list the tree is the opposite case: a checkout that lost its
+// registration with its contents intact. That one is refused by name so a person can look.
+if (existsSync(managedRoot)) {
+  const registered = new Set(worktrees().map((tree) => pathKey(tree.path)));
+  for (const entry of readdirSync(managedRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const path = join(managedRoot, entry.name);
+    if (registered.has(pathKey(path)) || pathKey(path) === pathKey(here)) continue;
+    if (existsSync(join(path, ".git"))) {
+      kept.push([path, entry.name, "git no longer lists it but it still has a .git file; inspect it by hand"]);
+      continue;
+    }
+    const unvouched = unvouchedFiles(path);
+    if (unvouched) {
+      kept.push([path, entry.name, unvouched]);
+      continue;
+    }
+    removals.push({ kind: "orphan", path });
+  }
+}
+
+/**
+ * The reason an orphan must stay, or null when every file in it is either ignored or already in
+ * git's object store. Walks level by level so one `check-ignore` per depth prunes `node_modules`
+ * and `dist` before they are entered — hashing a full install would take minutes. Paths are
+ * given to git relative to the orphan and evaluated from the main checkout, so the repo's own
+ * `.gitignore` files apply as they would to a checkout (the orphan's own copy is usually gone by
+ * now, deleted as a tracked file). Junctions and symlinks are never entered: in a live tree they
+ * point at the main checkout's packages.
+ */
+function unvouchedFiles(root) {
+  const files = [];
+  let level = [""];
+  while (level.length > 0) {
+    const candidates = [];
+    for (const rel of level) {
+      for (const entry of readdirSync(join(root, rel), { withFileTypes: true })) {
+        if (entry.isSymbolicLink()) continue;
+        const relPath = rel === "" ? entry.name : `${rel}/${entry.name}`;
+        if (entry.isDirectory()) candidates.push({ rel: relPath, dir: true });
+        else if (entry.isFile()) candidates.push({ rel: relPath, dir: false });
+      }
+    }
+    if (candidates.length === 0) break;
+    // `--non-matching` echoes every path; an ignored one carries its rule's source, an unignored
+    // one starts with `::`. Both are asked for in one call, directories with the trailing slash
+    // that makes a `node_modules/` pattern match them.
+    const ask = spawnSync("git", ["check-ignore", "--stdin", "--verbose", "--non-matching"], {
+      cwd: mainCheckout,
+      input: candidates.map((c) => (c.dir ? `${c.rel}/` : c.rel)).join("\n") + "\n",
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    if (ask.status !== 0 && ask.status !== 1) return "its contents could not be checked against .gitignore";
+    const ignored = new Set(
+      ask.stdout
+        .split("\n")
+        .filter((line) => line !== "" && !line.startsWith("::"))
+        .map((line) => line.slice(line.lastIndexOf("\t") + 1).replace(/\/$/, "")),
+    );
+    level = [];
+    for (const c of candidates) {
+      if (ignored.has(c.rel)) continue;
+      if (c.dir) level.push(c.rel);
+      else files.push(c.rel);
+    }
+  }
+  if (files.length === 0) return null;
+  // Absolute paths, and not by choice: `--stdin-paths` reads its paths AFTER git has changed
+  // directory to the repository root, ignoring the prefix it applies to command-line paths. With
+  // paths relative to the orphan, `README.md` quietly hashed the main checkout's README and
+  // `draft.txt` was "not found" — the check passed the wrong file and failed the right one.
+  const hashed = spawnSync("git", ["hash-object", "--stdin-paths"], {
+    cwd: root,
+    input: files.map((rel) => join(root, rel)).join("\n") + "\n",
+    encoding: "utf8",
+    windowsHide: true,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (hashed.status !== 0) return "its contents could not be hashed";
+  const known = spawnSync("git", ["cat-file", "--batch-check"], {
+    cwd: mainCheckout,
+    input: hashed.stdout,
+    encoding: "utf8",
+    windowsHide: true,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (known.status !== 0) return "its contents could not be looked up";
+  const missing = known.stdout.split("\n").filter((line) => line.endsWith(" missing")).length;
+  if (missing > 0) return `${missing} file${missing === 1 ? "" : "s"} whose contents git has never recorded`;
+  return null;
+}
+
 // Re-read after the worktree pass: a branch still checked out somewhere must not be deleted, and
 // which trees survive is only known now. Ordering matters — computing this earlier would let a
 // branch whose worktree was just removed look occupied, and it would never be collected.
@@ -221,12 +353,14 @@ for (const raw of branchLines.split("\n")) {
 }
 
 const worktreeRemovals = removals.filter((r) => r.kind === "worktree");
+const orphanRemovals = removals.filter((r) => r.kind === "orphan");
 const branchRemovals = removals.filter((r) => r.kind === "branch");
 
 for (const [path, label, why] of kept) console.log(`keep    ${label}  —  ${why}\n        ${path}`);
 for (const [name, why] of keptBranches) console.log(`keep    branch   ${name}  —  ${why}`);
 if (kept.length + keptBranches.length > 0) console.log("");
 for (const r of worktreeRemovals) console.log(`${apply ? "remove" : "would"}  worktree ${r.path}  (${r.branch})`);
+for (const r of orphanRemovals) console.log(`${apply ? "remove" : "would"}  orphan   ${r.path}  (no .git; git does not list it)`);
 for (const r of branchRemovals) console.log(`${apply ? "delete" : "would"}  branch   ${r.name}  ${r.sha.slice(0, 8)}`);
 
 if (removals.length === 0) {
@@ -236,7 +370,7 @@ if (removals.length === 0) {
 
 if (!apply) {
   console.log(
-    `\n${worktreeRemovals.length} worktree(s) and ${branchRemovals.length} branch(es) would go. Re-run with --apply.`,
+    `\n${worktreeRemovals.length} worktree(s), ${orphanRemovals.length} orphan folder(s) and ${branchRemovals.length} branch(es) would go. Re-run with --apply.`,
   );
   process.exit(0);
 }
@@ -251,6 +385,9 @@ const manifest = [
   `# Restore a worktree with: git worktree add <path> <branch>`,
   ...branchRemovals.map((r) => `branch    ${r.name.padEnd(52)} ${r.sha}`),
   ...worktreeRemovals.map((r) => `worktree  ${r.branch.padEnd(52)} ${r.sha}  ${r.path}`),
+  // No SHA to record: an orphan has no branch and no .git, so there is nothing to restore it
+  // to. The line is a record that the folder existed and was taken on purpose.
+  ...orphanRemovals.map((r) => `orphan    ${"".padEnd(52)} ${"".padEnd(40)}  ${r.path}`),
   "",
 ].join("\n");
 const manifestPath = join(mainCheckout, ".claude", `pruned-${stamp.slice(0, 10)}.txt`);
@@ -263,25 +400,75 @@ await writeFile(manifestPath, manifest, "utf8");
 // nobody can trust afterwards, which is the whole reason this file exists.
 let failed = 0;
 let worktreesGone = 0;
+let orphansGone = 0;
 let branchesGone = 0;
+
+/**
+ * Delete a directory git has already let go of. `rmSync` treats a junction as the link it is —
+ * removes the entry, never enters the target — which was checked on Node 24 against both a live
+ * junction and a dangling one before this was trusted with anything, because the junctions in
+ * these folders point at `packages/` directories and in a live worktree would point at the main
+ * checkout's. Returns the error message on failure, null on success.
+ */
+function removeDirectory(path) {
+  try {
+    rmSync(path, { recursive: true, force: true, maxRetries: 3 });
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+/**
+ * `git worktree remove` on Windows can deregister the tree and delete `.git` and the tracked
+ * files, then fail on the ignored tail and report the whole thing as a failure. The usual cause
+ * is the worktree-local junction CLAUDE.md tells sessions to create — `node_modules/@arke-studio/
+ * desktop -> <worktree>/apps/desktop` — which git leaves dangling by deleting `apps/` first and
+ * then cannot read. Eleven removals failed that way on 2026-09-11, each leaving ~330 MB and a
+ * folder that resolves to `main`. When git has genuinely let go — no `.git`, not listed — the
+ * remainder is safe to take by other means; when git still holds it, the refusal stands and its
+ * reason is printed.
+ */
+function finishRemoval(path) {
+  const stillRegistered = worktrees().some((tree) => pathKey(tree.path) === pathKey(path));
+  if (stillRegistered || existsSync(join(path, ".git"))) return `git: ${lastGitError || "no reason given"}`;
+  return removeDirectory(path);
+}
+
 for (const r of worktreeRemovals) {
   if (git(["worktree", "remove", r.path], mainCheckout) === null) {
-    console.error(`failed  worktree ${r.path} — left in place`);
+    const why = finishRemoval(r.path);
+    if (why !== null) {
+      console.error(`failed  worktree ${r.path} — left in place (${why})`);
+      failed += 1;
+      continue;
+    }
+  }
+  worktreesGone += 1;
+}
+for (const r of orphanRemovals) {
+  // Checked again at the moment of deletion, not just at listing: a session could have written
+  // into the folder between the two, and the scan above is what the manifest was written from.
+  const why = unvouchedFiles(r.path) ?? removeDirectory(r.path);
+  if (why !== null) {
+    console.error(`failed  orphan   ${r.path} — left in place (${why})`);
     failed += 1;
-  } else worktreesGone += 1;
+  } else orphansGone += 1;
 }
 for (const r of branchRemovals) {
   // `-D`, not `-d`: `-d` measures against the CURRENT HEAD, which is routinely behind origin/main
   // and would refuse branches this script has already proved are contained in the base ref. The
   // ancestor test above is the real gate; the manifest is the undo.
   if (git(["branch", "-D", r.name], mainCheckout) === null) {
-    console.error(`failed  branch   ${r.name} — left in place`);
+    console.error(`failed  branch   ${r.name} — left in place (git: ${lastGitError || "no reason given"})`);
     failed += 1;
   } else branchesGone += 1;
 }
 git(["worktree", "prune"], mainCheckout);
 
-console.log(`\nRemoved ${worktreesGone} worktree(s), deleted ${branchesGone} branch(es).`);
+console.log(
+  `\nRemoved ${worktreesGone} worktree(s) and ${orphansGone} orphan folder(s), deleted ${branchesGone} branch(es).`,
+);
 console.log(`Manifest: ${manifestPath}`);
 if (failed > 0) {
   console.error(`${failed} removal(s) failed and were left alone.`);

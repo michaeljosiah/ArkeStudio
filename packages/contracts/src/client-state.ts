@@ -1,9 +1,16 @@
+import { valueSchema } from "./value-schema.js";
+import { BorrowedImageOriginSchema } from "./take.js";
 import { TakeDialogueFeedbackSchema } from "./take-feedback.js";
 import { RehearsalSessionSchema } from "./rehearsal.js";
 import { PerformanceBibleStateSchema } from "./performance-bible.js";
 import { PerformanceRecordSchema, PerformanceReviewStateSchema, emptyPerformanceReviewState } from "./performance.js";
 import { z } from "zod";
+import { ModelResidencySchema } from "./local-ai.js";
+import { ProductionNarrativeSchema } from "./production-narrative.js";
+import { AudiobookBookSchema } from "./audiobook.js";
 import { HarnessStatusSchema } from "./harness.js";
+import { ModelInfoSchema } from "./adapter.js";
+import { HarnessModelStatusSchema } from "./harness-models.js";
 import { ProductionSpineSchema } from "./spine.js";
 import { TakeMediaInfoRecordSchema } from "./media.js";
 import { ProposalIdSchema, TakeIdSchema } from "./ids.js";
@@ -20,6 +27,7 @@ import { ComfyUiStatusSchema } from "./comfyui.js";
 import { FoundingBuildStateSchema } from "./founding-build.js";
 import { FrameRunStateSchema } from "./frame-run.js";
 import { HealthStatusSchema } from "./events.js";
+import { AccountStateSchema, SIGNED_OUT } from "./account.js";
 import { GenesisIdSchema, IsoDateTimeSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { JobSchema, LedgerEntrySchema, QueueStatusSchema } from "./job.js";
 import { ModelManifestSchema } from "./manifest.js";
@@ -34,7 +42,9 @@ import { ProviderStatusSchema, ProviderToolStatusSchema } from "./provider.js";
 import {
   LocalRuntimeStatusSchema,
   AppearanceSettingsSchema,
+  ActivitySeenSchema,
   BackgroundNotificationPreferenceSchema,
+  NOTHING_SEEN,
   ManifestDriftSchema,
   RoutingDefaultsSchema,
   ModelAvailabilitySchema,
@@ -59,6 +69,8 @@ import {
   ChapterSummarySchema,
   EpisodeSchema,
   ProductionSchema,
+  ProseStyleSchema,
+  StoryProgressSchema,
   SeasonSchema,
   SeriesSchema,
   SheetSchema,
@@ -141,6 +153,15 @@ export const ProductionBundleSchema = z
     performanceReview: PerformanceReviewStateSchema.default(emptyPerformanceReviewState),
     meta: ProductionSchema,
     story: StoryOverviewSchema.nullable(),
+    narrative: ProductionNarrativeSchema.nullable().optional(),
+    /**
+     * prose-style.json — the style the book is written in, or null when none (turn 128).
+     * Optional rather than defaulted so a bundle from before it existed still types as one.
+     */
+    proseStyle: ProseStyleSchema.nullable().optional(),
+    progress: z.union([StoryProgressSchema, z.object({ unreadable: z.literal(true) }).strict()]).optional(),
+    /** `.audiobook/book.json` — the book's reading, narrator or cast (turn 146, SPEC-047 R-11); absent means the narrator's. */
+    audiobook: AudiobookBookSchema.optional(),
     /** season.json — the season beside its production, or null when none (SPEC-023 R-10). */
     season: SeasonSchema.nullable().default(null),
     /** routing.json — Interactive video's one graph authority, or null (epic #401, brief §2). */
@@ -230,11 +251,17 @@ export const StagedProposalSchema = z
   .strict();
 export type StagedProposal = z.infer<typeof StagedProposalSchema>;
 
-/** A file that failed to parse — the world still opens; the failure is named (SPEC-002 R-2). */
+/**
+ * A file that failed to parse — the world still opens; the failure is named (SPEC-002 R-2). A
+ * `conflict` is the other kind: a record that loaded and stands, but says the same word as
+ * another (two props answering to one mention, issue 1116), for a person to rename — never
+ * skipped, so never described as unreadable.
+ */
 export const WorldProblemSchema = z
   .object({
     path: z.string().min(1),
     message: z.string().min(1),
+    kind: z.enum(["unreadable", "conflict"]).optional(),
   })
   .strict();
 export type WorldProblem = z.infer<typeof WorldProblemSchema>;
@@ -250,7 +277,7 @@ export const ExternalEditSchema = z
 export type ExternalEdit = z.infer<typeof ExternalEditSchema>;
 
 /** The open world, in full — a world is small enough to send whole (SPEC-001 D4). */
-export const WorldBundleSchema = z
+export const WorldBundleSchema = valueSchema(z
   .object({
     meta: WorldMetaSchema,
     artDirection: ResolvedArtDirectionSchema,
@@ -346,13 +373,15 @@ export const WorldBundleSchema = z
      * at, so every surface it serves needs somewhere to keep one.
      */
     stagedReferences: z.record(z.string(), z.string()).default({}),
+    /** Descriptive origin of copied pictures, keyed by their local file; never a foreign link. */
+    stagedReferenceOrigins: z.record(z.string(), BorrowedImageOriginSchema).default({}),
     /** Closed-world edits awaiting reconciliation (SPEC-002 R-28). */
     externalEdits: z.array(ExternalEditSchema).default([]),
   })
-  .strict();
+  .strict());
 export type WorldBundle = z.infer<typeof WorldBundleSchema>;
 
-export const ClientStateSchema = z
+export const ClientStateSchema = valueSchema(z
   .object({
     app: z
       .object({
@@ -431,18 +460,8 @@ export const ClientStateSchema = z
           )
           .default([]),
         /** What the harness says it can run, when it has been asked. Empty until then. */
-        harnessModels: z
-          .array(
-            z
-              .object({
-                id: z.string(),
-                provider: z.string(),
-                displayName: z.string().optional(),
-                isDefault: z.boolean().optional(),
-              })
-              .strict(),
-          )
-          .default([]),
+        harnessModels: z.array(ModelInfoSchema).default([]),
+        harnessModelStatus: HarnessModelStatusSchema.default({ status: "idle" }),
         /**
          * Which harness is wired, from launch-time discovery (issue 327 §9): name, source,
          * version, and — when a v2 binary was found but failed the build gate — the rejected
@@ -455,7 +474,7 @@ export const ClientStateSchema = z
          */
         harnessInfo: z
           .object({
-            generation: z.enum(["v2", "v1", "claude"]),
+            generation: z.enum(["v2", "v1", "claude", "codex"]),
             source: z.enum(["configured", "path", "bundled"]),
             version: z.string().nullable(),
             beta: z.boolean(),
@@ -466,12 +485,20 @@ export const ClientStateSchema = z
           .default(null),
         spend: SpendStatusSchema.nullable().default(null),
         backgroundNotifications: BackgroundNotificationPreferenceSchema.default("issues-only"),
+        /** What Activity's panel remembers (SPEC-014 R-25); the bell's foreground dot reads it. */
+        activitySeen: ActivitySeenSchema.default(NOTHING_SEEN),
+        /**
+         * The Arke account (design turn 151). Signed out until there is a cloud to sign in to;
+         * defaulted so payloads from before the field parse, and read as signed out.
+         */
+        account: AccountStateSchema.default(SIGNED_OUT),
         /** Whether the Studio may read a page online when a conversation asks it to (SPEC-005 R-10). */
         research: z.object({ web: z.boolean() }).strict().default({ web: false }),
         appearance: AppearanceSettingsSchema.default({ theme: "system" }),
         /** Who reads the app's prose aloud. Null is the shipped local voice, and free. */
         narrator: NarratorSettingsSchema.default(null),
         runtime: LocalRuntimeStatusSchema.nullable().default(null),
+        residency: z.array(ModelResidencySchema).optional(),
         /**
          * Which engines this machine has, and which is chosen (SPEC-005 R-1). Null until the
          * screen asks — detection costs a subprocess, so it is not done on every boot for a
@@ -570,6 +597,16 @@ export const ClientStateSchema = z
       sceneId: z.string().min(1),
       shotId: z.string().min(1),
     }).strict()).optional(),
+    stageConstructionRequests: z.array(z.object({
+      worldId: z.string().min(1),
+      conversationId: z.string().min(1),
+      actionId: z.string().min(1),
+      productionId: z.string().min(1),
+      sceneId: z.string().min(1),
+      shotId: z.string().min(1),
+      instruction: z.string(),
+      preserve: z.enum(["blocking", "camera", "none"]),
+    }).strict()).optional(),
     /** The open bench session, or null. One at a time, mirroring worldChat (issue 305 §5.3). */
     bench: BenchWorkspaceSchema.nullable().default(null),
     /**
@@ -588,7 +625,7 @@ export const ClientStateSchema = z
     /** Active and completed-but-undismissed frame runs survive navigation and reconnects. */
     frameRuns: z.array(FrameRunStateSchema).default([]),
   })
-  .strict();
+  .strict());
 export type ClientState = z.infer<typeof ClientStateSchema>;
 
 // ---------------------------------------------------------------------------

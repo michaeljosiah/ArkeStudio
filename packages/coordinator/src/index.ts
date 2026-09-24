@@ -2,6 +2,10 @@ export { AppLog } from "./app-log.js";
 export { AppSettingsFile, routingFaults } from "./app-settings.js";
 export { ChangeLog, WriteQueue, type LogRecord } from "./change-log.js";
 export { Coordinator, type CoordinatorOptions } from "./coordinator.js";
+export { createStudioCoordinator, createStudioHost } from "./application/studio-host.js";
+export { StudioServer, type StudioServerApplication, type StudioEventSink } from "./studio-server.js";
+export { createNodeStudioHost, type NodeStudioHostOptions } from "./node-studio-host.js";
+export { createStudioStorage } from "./application/studio-composition.js";
 export {
   ARKE_ACTION_REGISTRY,
   ARKE_BLOCKED_AUTHORITY_SEAMS,
@@ -38,6 +42,8 @@ export {
 export { CredentialStore, type Cipher } from "./credentials/store.js";
 export {
   assembleHarness,
+  describeClaudeAvailability,
+  describeCodexAvailability,
   HarnessPasswordHolder,
   harnessInfoFrom,
   harnessProfileDir,
@@ -154,6 +160,14 @@ export {
   type TakeQcAnalyzer,
   type TakeQcUnavailableReason,
 } from "./takes/qc.js";
+export { listBorrowableArtifacts } from "./artifacts/borrow.js";
+export {
+  ARTIFACT_POSTER_DIR,
+  artifactPosterPath,
+  backfillArtifactPosters,
+  wantsArtifactPoster,
+  writeArtifactPoster,
+} from "./artifacts/poster.js";
 export {
   backfillPosters,
   createTakePosterMaker,
@@ -333,6 +347,7 @@ export {
   type ComfyUiRecipeFacts,
   type EngineServiceDeps,
 } from "./comfyui/engine.js";
+export { ProfiledComfyUiEngineService } from "./comfyui/profiled-engine.js";
 export { CUSTOM_NODE_IDENTITY_FILE, readCustomNodeRef } from "./comfyui/node-ref.js";
 export { sanitizeComfyUiMedia, type SanitizeResult } from "./comfyui/sanitize.js";
 export { GrantStore, type RememberedGrant } from "./harness/grants.js";
@@ -363,3 +378,12 @@ export * from "./audio/storage.js";
 export * from "./audio/rights.js";
 export * from "./audio/dispatch-gate.js";
 export * from "./audio/transcript-comparison.js";
+export { capturePublicationInputs, type PublicationCaptureRequest, type CapturedPublicationInputs, type PreparedPublicationCapture } from "./publications/capture.js";
+export {
+  verifyPublicationDirectory, DEFAULT_PUBLICATION_FILE_LIMITS,
+  type PublicationFileLimits, type VerifiedPublicationDirectory,
+} from "./publications/verify.js";
+export { PublicationFileError } from "./publications/files.js";
+export { compileVideoPublication, type VideoPublicationCompilerOptions, type CompiledVideoPublication } from "./publications/video.js";
+export { writePublicationZip, extractPublicationZip, type PublicationArchiveOptions, type ExtractedPublication } from "./publications/archive.js";
+export { publishPublication, publishVideoPublication, type PublicationDeliveryRequest, type PublicationPublisherOptions, type PublishedPublication } from "./publications/publish.js";

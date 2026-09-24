@@ -1,5 +1,6 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { RunQuery } from "./claude-adapter.js";
+import { discoverClaudeModels, type DiscoverClaudeModels } from "./model-discovery.js";
 
 /**
  * The Agent SDK behind {@link RunQuery} — the adapter's entire coupling to it, in one place.
@@ -14,3 +15,6 @@ import type { RunQuery } from "./claude-adapter.js";
  */
 export const sdkQuery: RunQuery = ({ prompt, options }) =>
   query({ prompt: prompt as never, options: options as never });
+
+export const sdkModels: DiscoverClaudeModels = (input) => discoverClaudeModels(input, ({ prompt, options }) =>
+  query({ prompt: prompt as never, options: options as never }));

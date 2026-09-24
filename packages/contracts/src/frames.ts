@@ -1,8 +1,14 @@
+import { valueSchema } from "./value-schema.js";
+import { AccountPageSchema } from "./account.js";
+import { StageReferenceFrameSchema } from "./scene.js";
+import { isManuscriptLanguage } from "./manuscript.js";
+import { AudiobookDirectionInputSchema, AudiobookReadingSchema } from "./audiobook.js";
+import { StageInspectionFrameSchema } from "./stage-construction.js";
 import { DialogueFailureTagSchema } from "./take-feedback.js";
 import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
 import { MasterAudioBindingSchema, MasterAudioRequestSchema, PerformanceAudioRequestSchema } from "./audio-reference.js";
 import { DialogueTimingIntentSchema } from "./cut.js";
-import { AudioRangeSchema, FullSha256Schema } from "./audio.js";
+import { AudioAttestationSchema, AudioRangeSchema, FullSha256Schema } from "./audio.js";
 import { RehearsalIdSchema } from "./rehearsal.js";
 import { PerformanceReferenceRoleSchema } from "./performance-bible.js";
 import { PerformanceDeliverySchema } from "./voice.js";
@@ -29,14 +35,16 @@ import { PropIdSchema, PropStateIdSchema } from "./prop.js";
 import { ProseReadSourceSchema } from "./prose.js";
 import { SceneCommandSchema } from "./scene-operations.js";
 import { SizeTierSchema } from "./manifest.js";
-import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
+import { CapabilitySchema, ModelChoicesSchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
 import { HarnessEngineSchema } from "./harness.js";
 import { BackgroundNotificationPreferenceSchema, NarratorSettingsSchema, ThemePreferenceSchema } from "./settings.js";
 import { MAX_IMAGE_PREVIEWS, STAGED_REFERENCE_KEY } from "./planning.js";
-import { CHARACTER_ROLE_MAX, FrameRateSchema, ProductionFormatSchema, ProductionMediumSchema } from "./world.js";
+import { CHARACTER_ROLE_MAX, FrameRateSchema, ProductionFormatSchema, ProductionMediumSchema, ChapterImpliesWriteSchema } from "./world.js";
 import { DeliverySchema } from "./voice.js";
 import { WorldChatContextSchema, WorldChatInitiativeSchema } from "./world-chat.js";
+import { ProductionSetupCommandSchema } from "./production-setup.js";
+import { NarrativeFieldsSchema } from "./production-narrative.js";
 import { SingleActOperationSchema, SingleActUndoSchema } from "./single-act.js";
 import { DecideConversationActionSchema } from "./arke-actions.js";
 
@@ -46,17 +54,49 @@ import { DecideConversationActionSchema } from "./arke-actions.js";
  * receives a fresh snapshot — partial replay is deliberately not offered (D4).
  */
 
-export const FrameSchema = z.discriminatedUnion("kind", [
+/**
+ * The bounds on a partial accept's frame (PR 1232), shared so a screen can decline a keep the
+ * transport would drop: a frame past them is refused without an answer, and a screen holding its
+ * controls for one would wait for ever.
+ */
+export const PASSAGE_SPAN_MAX = 20_000;
+export const PASSAGE_KEPT_MAX = 2_400;
+
+export const FrameSchema = valueSchema(z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("snapshot"), seq: z.number().int().min(1), state: ClientStateSchema }).strict(),
   z.object({ kind: z.literal("event"), seq: z.number().int().min(1), event: DomainEventSchema }).strict(),
-]);
+]));
 export type Frame = z.infer<typeof FrameSchema>;
 
 /** What a client may send up. Commands arrive with their owning specs. */
 /** A staged-reference key, as strictly as the coordinator needs it to be — it becomes a folder. */
 const StagedReferenceKeySchema = z.string().min(1).max(120).regex(STAGED_REFERENCE_KEY);
 
+/**
+ * Where the editor's import lands and what fences it (SPEC-043 R-1, R-3). A bare frame is the
+ * base Picture track; a named lane or the new-lane strip carry the frame with them (issue 1035).
+ * See `MediaDestination`.
+ */
+export const EditorImportSchema = z.object({
+  productionId: SlugSchema, baseRevision: z.number().int().nonnegative().nullable(),
+  sourceFingerprint: TimelineSourceFingerprintSchema,
+  destination: z.union([
+    z.enum(["library", "append"]),
+    z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    z.object({ trackId: TimelineTrackIdSchema, frame: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) }).strict(),
+    z.object({ newTrack: z.literal(true), frame: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) }).strict(),
+  ]),
+}).strict();
+export type EditorImport = z.infer<typeof EditorImportSchema>;
+
 export const ClientMessageSchema = z.discriminatedUnion("kind", [
+  ProductionSetupCommandSchema,
+  z.object({ kind: z.literal("save-production-narrative"), worldId: UlidSchema, productionId: SlugSchema,
+    requestId: UlidSchema, expectedVersion: z.number().int().min(1).nullable(), narrative: NarrativeFieldsSchema }).strict(),
+  z.object({ kind: z.literal("stage-construct"), conversationId: z.string().optional(), actionId: z.string().optional(), worldId: z.string(), productionId: z.string(), sceneId: z.string(), shotId: z.string(), requestId: z.string().uuid(), instruction: z.string().max(4000), preserve: z.enum(["blocking", "camera", "none"]), baseVersion: z.number().int().positive() }).strict(),
+  z.object({ kind: z.literal("stage-inspection"), worldId: z.string(), requestId: z.string().uuid(), round: z.number().int().min(1).max(2), frames: z.array(StageInspectionFrameSchema).min(3).max(8) }).strict(),
+  z.object({ kind: z.literal("stage-construct-cancel"), worldId: z.string(), requestId: z.string().uuid() }).strict(),
+
   z.object({ kind: z.literal("hello"), lastSeq: z.number().int().min(0).optional(), token: z.string().max(64).optional() }).strict(),
   z.object({ kind: z.literal("open-world"), worldId: UlidSchema }).strict(),
   /** SPEC-002: create a world folder under the app root. */
@@ -89,6 +129,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        * the sandbox, and handing something over would have meant nothing.
        */
       genesisId: GenesisIdSchema.optional(),
+      /**
+       * The models chosen on the genesis card (design turn 153). Held by the screen until the
+       * world exists, and sent with every frame that spends or founds, so the preview, the
+       * review's prices and the press all read the same choice. Absent entries follow Settings.
+       */
+      models: ModelChoicesSchema.optional(),
     })
     .strict(),
   z
@@ -210,6 +256,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        */
       sources: z.array(ProseReadSourceSchema).min(1).max(1000),
       confirmationToken: z.string().min(1).optional(),
+      /** A cloned voice on a voiced page (turn 130): the remote engine its recording may go to. */
+      voiceUploadConfirmedFor: z.string().min(1).optional(),
     })
     .strict(),
   /**
@@ -332,11 +380,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("pick-staged-reference"),
+      image: z.object({ slug: SlugSchema, path: z.string().min(1) }).strict().optional(),
+      worldFile: z.string().min(1).max(1024).optional(),
       worldId: UlidSchema,
       requestId: UlidSchema,
       key: StagedReferenceKeySchema,
     })
     .strict(),
+  z.object({ kind: z.literal("browse-reference-images"), requestId: UlidSchema, slug: SlugSchema }).strict(),
   /** Unstage it. That generation goes back to being made from words alone. */
   z
     .object({ kind: z.literal("clear-staged-reference"), worldId: UlidSchema, key: StagedReferenceKeySchema })
@@ -433,6 +484,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       proposalId: z.string().min(1),
       confirmRipples: z.string().optional(),
+      /**
+       * The draft revision the person decided on. Present, a proposal that has moved past it is
+       * refused as stale rather than accepted — an accept a screen sends on the author's behalf
+       * (the part of a passage kept, then accepted) must land on the revision it observed.
+       */
+      expectedDraftRevision: z.number().int().min(1).optional(),
+      /** Echoed on a refusal, so the screen that pressed knows the answer is its own (PR 1232). */
+      requestId: z.string().min(1).optional(),
     })
     .strict(),
   z
@@ -490,6 +549,32 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
+   * Keep part of a staged passage revision (turn 128): which of the revision's edits the reviewer
+   * kept, by their index in `passageDiff` of the span. The gate finds the span itself, from the
+   * base the chapter was staged against and the staged chapter, takes the same edits apart and
+   * composes the passage from the ones named — so what lands can only be the reviewed edits, and
+   * the rest of the chapter cannot be touched from here. `before` and `after` are the span as the
+   * screen drew it, refused when they are not what the gate finds, so choices made among the edits
+   * of a different passage are never applied to this one. The revision fence and the idempotent
+   * retry are `proposal-update-field`'s.
+   */
+  z
+    .object({
+      kind: z.literal("proposal-update-passage"),
+      worldId: UlidSchema,
+      requestId: z.string().min(1),
+      proposalId: z.string().min(1),
+      path: z.string().min(1),
+      // The span as drawn is the replacement widened to whole words at both ends, so it can run
+      // past the 2,400 the model's replacement is held to (codex on PR 1232); the gate compares
+      // it with the span it finds, so the bound is only there to keep the frame sane.
+      before: z.string().max(PASSAGE_SPAN_MAX),
+      after: z.string().max(PASSAGE_SPAN_MAX),
+      kept: z.array(z.number().int().min(0)).max(PASSAGE_KEPT_MAX),
+      expectedDraftRevision: z.number().int().min(1),
+    })
+    .strict(),
+  /**
    * #70: open one conversation's workspace, or close the open one.
    *
    * A null id closes it. The client holds one conversation at a time, so leaving a screen should
@@ -521,6 +606,25 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       modelId: z.string().min(1).optional(),
       /** What is selected on the timeline while they talk (SPEC-039 R-26); the subject of "this". */
       subject: WorldChatSubjectSchema.optional(),
+      /**
+       * A line that asks for a reply and nothing else (turn 128): findings, not a proposal. The
+       * coordinator refuses any authored action the turn comes back with, so a quick ask that
+       * promises to stage nothing cannot be talked into staging something.
+       */
+      replyOnly: z.boolean().optional(),
+    })
+    .strict(),
+  /**
+   * Where a sent line stands, asked again after a rejoin that may have lost its answer (PR 1232).
+   * Answered with `world-chat.send-result`: taken, or not known to be taken — declined, or never
+   * received. A line still being taken is answered when it is, as it would have been anyway.
+   */
+  z
+    .object({
+      kind: z.literal("world-chat-send-status"),
+      worldId: UlidSchema,
+      requestId: z.string().min(1),
+      conversationId: ConversationIdSchema,
     })
     .strict(),
   /**
@@ -789,6 +893,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        * founded on, so a preview the author then rewrote is named as lost, not as carried.
        */
       look: z.string().trim().max(2000).optional(),
+      models: ModelChoicesSchema.optional(),
     })
     .strict(),
   /**
@@ -809,6 +914,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        * staleness test reads (R-54).
        */
       look: z.string().trim().max(2000).optional(),
+      /** Written into world.json as the world is created, and read by the build's image route. */
+      models: ModelChoicesSchema.optional(),
     })
     .strict(),
   /** The author's Stop — the only halt a run has (SPEC-031 R-35). */
@@ -828,7 +935,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * if the look it was made from is the look the world is founded on (R-53, R-54).
    */
   z
-    .object({ kind: z.literal("generate-look-preview"), genesisId: GenesisIdSchema, requestId: UlidSchema })
+    .object({
+      kind: z.literal("generate-look-preview"),
+      genesisId: GenesisIdSchema,
+      requestId: UlidSchema,
+      models: ModelChoicesSchema.optional(),
+    })
     .strict(),
   /**
    * Run one build item — or, with no key, everything runnable that has not landed, which is
@@ -1181,6 +1293,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   /** Point Arke at a Claude Code the PATH does not carry. The host owns the file dialog. */
   z.object({ kind: z.literal("choose-claude-executable") }).strict(),
   z.object({ kind: z.literal("clear-claude-executable") }).strict(),
+  z.object({ kind: z.literal("choose-codex-executable") }).strict(),
+  z.object({ kind: z.literal("clear-codex-executable") }).strict(),
   /** Voxa configuration stays host-owned: none of these messages contains a filesystem path. */
   z.object({ kind: z.literal("choose-voxa-executable") }).strict(),
   z.object({ kind: z.literal("clear-voxa-executable") }).strict(),
@@ -1227,6 +1341,21 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       preference: BackgroundNotificationPreferenceSchema,
     })
     .strict(),
+  /** The Inbox was opened: the instant the bell's foreground dot measures against (SPEC-014 R-25). */
+  z.object({ kind: z.literal("mark-inbox-seen") }).strict(),
+  /** What's new was read up to this bundled release (SPEC-014 R-25). */
+  z.object({ kind: z.literal("mark-whats-new-seen"), version: z.string().min(1) }).strict(),
+  /**
+   * The Arke account (design turn 151). Sign-in and creation are a browser handoff, as vendor
+   * sign-in is; the app never carries a password. Cancel takes back a handoff still waiting on
+   * the browser, or clears the refusal a rejected one left. Open puts one of the account's own
+   * pages in the system browser — the app draws no billing and no profile form.
+   */
+  z.object({ kind: z.literal("account-sign-in") }).strict(),
+  z.object({ kind: z.literal("account-create") }).strict(),
+  z.object({ kind: z.literal("account-cancel-sign-in") }).strict(),
+  z.object({ kind: z.literal("account-sign-out") }).strict(),
+  z.object({ kind: z.literal("account-open"), page: AccountPageSchema }).strict(),
   z
     .object({
       kind: z.literal("set-appearance-theme"),
@@ -1456,7 +1585,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     productionId: SlugSchema, sceneId: SceneIdSchema, shotId: ShotIdSchema, blockId: z.string().min(1).optional(),
     expectedSceneVersion: z.number().int().positive(), expectedVoiceId: z.string().min(1), modelId: z.string().min(1), cadencePlan: CadencePlanSchema }).strict(),
   z.object({ kind: z.literal("generate-performance"), requestId: UlidSchema, worldId: UlidSchema,
-    operationId: z.string().uuid(), confirmedMicroUsd: z.number().int().nonnegative() }).strict(),
+    operationId: z.string().uuid(), confirmedMicroUsd: z.number().int().nonnegative(),
+    // A cloned voice through a hosted reader asks the vendor's question here, as the voice-line
+    // does (SPEC-046 R-16, issue 1149): the token the confirmation frame handed back.
+    voiceUploadConfirmedFor: z.string().min(1).optional() }).strict(),
   z.object({ kind: z.literal("cancel-performance-generation"), worldId: UlidSchema, operationId: z.string().uuid() }).strict(),
   z.object({ kind: z.literal("propose-performance-duration"), requestId: UlidSchema, worldId: UlidSchema,
     productionId: SlugSchema, performanceId: PerformanceIdSchema, expectedSceneVersion: z.number().int().positive(),
@@ -1470,13 +1602,21 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     productionId: SlugSchema, lineKey: z.string().min(1).max(300), expectedSelectionHash: z.string().nullable() }).strict(),
   z.object({ kind: z.literal("review-performance"), requestId: UlidSchema, worldId: UlidSchema,
     productionId: SlugSchema, performanceId: PerformanceIdSchema, decision: z.enum(["accept", "reject"]), note: z.string().max(1000).optional(),
-    expectedReviewHash: z.string().nullable(), expectedSelectionHash: z.string().nullable() }).strict(),
+    expectedReviewHash: z.string().nullable(), expectedSelectionHash: z.string().nullable(),
+    // An accept from the character dialog also chooses the read for the scene (SPEC-044 R-15):
+    // a generated line arrives unreviewed and one press accepts, selects and chooses.
+    select: z.boolean().optional(), expectedSceneVersion: z.number().int().positive().optional() }).strict(),
   z.object({ kind: z.literal("purge-performance"), requestId: UlidSchema, worldId: UlidSchema,
     productionId: SlugSchema, performanceId: PerformanceIdSchema }).strict(),
   z.object({ kind: z.literal("keep-performance-recording"), requestId: UlidSchema, worldId: UlidSchema,
     productionId: SlugSchema, sceneId: SceneIdSchema, shotId: ShotIdSchema, blockId: z.string().min(1).optional(),
     expectedSceneVersion: z.number().int().positive(), spoolId: z.string().uuid(),
-    captureBasis: z.enum(["self", "authorized", "licensed"]) }).strict(),
+    captureBasis: z.enum(["self", "authorized", "licensed"]),
+    // Keep selects (SPEC-044 R-15): accept, select the line and choose it as the character's
+    // voice in one request. Attestations and the cloud basis are said here, once (R-14).
+    select: z.boolean().optional(),
+    attestations: z.array(AudioAttestationSchema.shape.kind).optional(),
+    cloudBasis: z.enum(["self", "authorized", "licensed"]).optional() }).strict(),
   z.object({ kind: z.literal("resume-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
     sheetId: SlugSchema, operationId: z.string().uuid() }).strict(),
   z.object({ kind: z.literal("prepare-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
@@ -1952,6 +2092,31 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       baseHash: z.string().min(1).optional(),
     })
     .strict(),
+  z.object({ kind: z.literal("retire-chapter"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("restore-chapter-retired"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
+  /**
+   * The plan on the chapter (turn 127): title, synopsis, point of view, story-time and the facts
+   * it implies, saved in place as the prose is — no proposal, no version cut. `null` clears a
+   * field. The sizes here are the writer's; the read path has none.
+   */
+  z
+    .object({
+      kind: z.literal("edit-chapter-plan"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      changes: z
+        .object({
+          title: z.string().trim().min(1).max(200).optional(),
+          synopsis: z.string().trim().max(600).nullable().optional(),
+          pov: SlugSchema.nullable().optional(),
+          when: z.string().trim().max(80).nullable().optional(),
+          implies: ChapterImpliesWriteSchema.nullable().optional(),
+        })
+        .strict()
+        .refine((changes) => Object.keys(changes).length > 0, "a plan edit must change at least one field"),
+    })
+    .strict(),
   /** Undo for a chapter (turn 126): v<n> comes back as a new version, nothing between is lost. */
   z
     .object({
@@ -1994,16 +2159,6 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       version: z.number().int().min(0),
     })
     .strict(),
-  /** SPEC-012 R-5: agent drafts arrive as proposals and cut a version on acceptance. */
-  z
-    .object({
-      kind: z.literal("draft-chapter"),
-      worldId: UlidSchema,
-      productionId: SlugSchema,
-      chapterFile: z.string().min(1),
-      instruction: z.string().min(1).max(2000),
-    })
-    .strict(),
   /** SPEC-012 R-4: reorder via frontmatter — no file renamed, no history path moved. */
   z
     .object({
@@ -2029,6 +2184,18 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       productionId: SlugSchema,
       aspect: z.string().min(1).max(20),
+    })
+    .strict(),
+  /**
+   * Which model this world's own work reaches for (design turn 153). `null` clears it, which is
+   * how the world goes back to following Settings — never by writing the default's id.
+   */
+  z
+    .object({
+      kind: z.literal("set-world-model"),
+      worldId: UlidSchema,
+      capability: CapabilitySchema,
+      modelId: z.string().min(1).nullable(),
     })
     .strict(),
   /**
@@ -2334,7 +2501,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /**
    * File the playblast and opening frame the Stage rendered onto its shot. The bytes arrive the
-   * way a pasted picture does — spooled by the host, which appends their paths — and both
+   * way a pasted picture does — spooled by the host, which appends their paths — and all
    * artifacts are pinned through one versioned scene write, so a stale scene refuses them by
    * name rather than pinning a move onto keys that have since changed.
    */
@@ -2355,6 +2522,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       lens: z.string().max(80).optional(),
       sourcePath: z.string().min(1),
       openingFrameSourcePath: z.string().min(1),
+      referenceFrames: z.array(StageReferenceFrameSchema.extend({ sourcePath: z.string().min(1) })).min(2),
     })
     .strict(),
   /** Renderer completion for an approved World Chat Stage action; private spool paths never enter the card. */
@@ -2377,6 +2545,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       lens: z.string().max(80).optional(),
       sourcePath: z.string().min(1).optional(),
       openingFrameSourcePath: z.string().min(1).optional(),
+      referenceFrames: z.array(StageReferenceFrameSchema.extend({ sourcePath: z.string().min(1) })).min(2).optional(),
     })
     .strict(),
   /** SPEC-013 R-10: rejection requires the cited sheet and field; selection untouched. */
@@ -2482,18 +2651,37 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * 82a: file new artifacts into the world from the artifact panel.
    *
    * The host opens the picker and the renderer never sees the bytes, the same arrangement key art
-   * has. They land on the **world's** shelf, not the production's: an artifact laid over one cut
-   * is still the world's, and the panel says so by being the world's.
+   * has. They land on the **world's** shelf by default, not the production's: an artifact laid
+   * over one cut is still the world's, and the panel beside the cut says so by being the world's.
+   *
+   * `production` is the exception, and the only one (design 134): a production's own artifacts
+   * page files into that production, because it is the page that shows what a production owns and
+   * a surface that shows a scope has to be able to add to it. Absent means the world, so every
+   * existing caller is unchanged; the three states are `file-artifact`'s.
    */
   z.object({
     kind: z.literal("upload-artifacts"), worldId: UlidSchema, requestId: UlidSchema,
     // Null preserves the original position of a dropped File without a native path.
     sourcePaths: z.array(z.string().min(1).nullable()).min(1).max(16).optional(),
-    editor: z.object({
-      productionId: SlugSchema, baseRevision: z.number().int().nonnegative().nullable(),
-      sourceFingerprint: TimelineSourceFingerprintSchema,
-      destination: z.union([z.enum(["library", "append"]), z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)]),
-    }).strict().optional(),
+    production: SlugSchema.nullable().optional(),
+    editor: EditorImportSchema.optional(),
+  }).strict(),
+  /**
+   * Another world's placeable files, for the Cut's Library to browse (issue 1033): names, kinds,
+   * lengths and pictures, never paths. Answered by `world.artifacts`.
+   */
+  z.object({ kind: z.literal("browse-world-artifacts"), requestId: UlidSchema, slug: SlugSchema }).strict(),
+  /**
+   * Copy files from another world into this one and file them here (issue 1033), the way the
+   * reference picker borrows an image (#972): the coordinator resolves the world and the file,
+   * copies the bytes through ordinary filing with `importedFrom: world:<slug>` as provenance,
+   * and then places or lists them exactly as an upload would. No host path crosses the wire.
+   */
+  z.object({
+    kind: z.literal("borrow-artifacts"), worldId: UlidSchema, requestId: UlidSchema, slug: SlugSchema,
+    /** Artifact file names within the source world's `artifacts/`. */
+    files: z.array(z.string().min(1)).min(1).max(16),
+    editor: EditorImportSchema,
   }).strict(),
   /**
    * 82a: place an artifact over the picture for a window.
@@ -2608,6 +2796,15 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("cancel-export"), worldId: UlidSchema, exportId: z.string().min(1) }).strict(),
   /** SPEC-013 R-22: a folder that reopens identically elsewhere — history kept, caches dropped. */
   z.object({ kind: z.literal("export-world"), worldId: UlidSchema }).strict(),
+  /** SPEC-015 R-19: remove shelf membership while retaining bytes and provenance. */
+  z
+    .object({
+      kind: z.literal("retire-artifact"),
+      worldId: UlidSchema,
+      artifactId: ArtifactIdSchema,
+    })
+    .strict(),
+  z.object({ kind: z.literal("restore-artifact"), worldId: UlidSchema, artifactId: ArtifactIdSchema }).strict(),
   /** SPEC-015 R-1/R-6: file one artifact; large files come back needing stated-size consent. */
   z
     .object({
@@ -2679,6 +2876,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       name: z.string().min(1),
       description: z.string().min(1),
       consent: z.literal(true),
+      /** The recording's language (ISO 639-1), for the reader that saves the voice under one (issue 1163); English when not said. */
+      language: z.string().regex(/^[a-z]{2}$/).optional(),
       /** The sheet this was cloned while casting — a link for provenance, never ownership. */
       sheetId: SlugSchema.optional(),
     })
@@ -2713,6 +2912,13 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** Let a staged clip go: the dialog was cancelled, and the temp file should not outlive it. */
   z.object({ kind: z.literal("discard-voice-clip"), clipId: z.string().min(1) }).strict(),
+  /**
+   * Delete a cloned voice (SPEC-046 R-15, issue 1162): the clip and the library entry go in one
+   * commit, then every copy a hosted reader keeps on its account, best-effort. Refused while a
+   * character's sheet still names the voice — the assignment is cleared on the sheet, never
+   * silently here — and the provenance artifact stays: it records that a recording existed.
+   */
+  z.object({ kind: z.literal("delete-voice"), requestId: UlidSchema, worldId: UlidSchema, voiceId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("import-folder"), worldId: UlidSchema, sourcePath: z.string().min(1) }).strict(),
   /** SPEC-015 R-12..R-14: stage two — grounded extraction into a pending batch. */
   z
@@ -2722,6 +2928,128 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("stop-extraction"), worldId: UlidSchema, artifactId: z.string().min(1) })
     .strict(),
+  /**
+   * Continuity after a chapter (turn 129): derived by a press, never by a save, one run per
+   * chapter at a time, stoppable the way extraction is.
+   */
+  z
+    .object({ kind: z.literal("derive-continuity"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
+    .strict(),
+  z
+    .object({ kind: z.literal("stop-continuity"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
+    .strict(),
+  /** The cast of lines (turn 130): cast by a press, never by a save, one run per chapter at a time, stoppable. */
+  z
+    .object({ kind: z.literal("cast-voices"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
+    .strict(),
+  z
+    .object({ kind: z.literal("stop-voices"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
+    .strict(),
+  /**
+   * The audiobook (design turn 146, SPEC-047): read a chapter into kept takes — every block
+   * that is not made, in reading order, priced once and confirmed by token when any of it is a
+   * cloud voice — stop the run, leaving the takes made so far standing, and choose the book's
+   * reading. One run per chapter at a time, keyed like the cast's.
+   */
+  z
+    .object({
+      kind: z.literal("read-audiobook-chapter"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      confirmationToken: z.string().min(1).optional(),
+      /** A cloned voice among the readers: the remote engine its recording may go to (SPEC-022, SPEC-046). */
+      voiceUploadConfirmedFor: z.string().min(1).optional(),
+      /** These blocks alone, made again whatever their state — the panel's `Make again` (SPEC-047 R-30). */
+      blocks: z.array(z.string().min(1)).min(1).max(400).optional(),
+    })
+    .strict(),
+  z
+    .object({ kind: z.literal("stop-audiobook"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
+    .strict(),
+  z
+    .object({ kind: z.literal("set-audiobook-reading"), worldId: UlidSchema, productionId: SlugSchema, reading: AudiobookReadingSchema })
+    .strict(),
+  /**
+   * Direction beside the prose (SPEC-047 R-6..R-10): one block's plan set by hand, or cleared;
+   * a chapter directed by the model — a derivation in the cast's discipline whose result is a
+   * card accepted whole or discarded; and the acceptance, which writes the record and nothing
+   * else. The coordinator supplies every hash from the block's words and refuses a control the
+   * block's reader declares unsupported, so nothing reaches a run that could only flag it.
+   */
+  z
+    .object({
+      kind: z.literal("set-audiobook-block"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      block: z.string().min(1),
+      direction: AudiobookDirectionInputSchema.nullable(),
+      /** Echoed on the record's answer, so a window can tell its own write's answer from another's. */
+      requestId: UlidSchema.optional(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("direct-chapter"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
+  /**
+   * The door (SPEC-047 R-29): a row a chapter with its counts, the voices and the price, answered
+   * as `audiobook.door`; and the book read as one run (R-16, R-17) — every chapter with prose in
+   * order, priced once, stopped and resumed like a chapter's.
+   */
+  z.object({ kind: z.literal("open-audiobook"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("read-audiobook-book"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      confirmationToken: z.string().min(1).optional(),
+      voiceUploadConfirmedFor: z.string().min(1).optional(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("stop-audiobook-book"), worldId: UlidSchema, productionId: SlugSchema }).strict(),
+  /** The card put away: the coordinator holds a proposal until it is accepted or discarded, so a window that reconnects sees it again. */
+  z.object({ kind: z.literal("discard-direction"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
+  z
+    .object({
+      kind: z.literal("accept-direction"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      /** The card's acceptance, named, so its answer — the record, or the refusal — is this one's and no other write's (codex on PR 1186). */
+      requestId: UlidSchema,
+      /** The prose the directions were made for: a chapter that moved since refuses them. */
+      hash: z.string().min(1),
+      directions: z.record(z.string().min(1), AudiobookDirectionInputSchema),
+    })
+    .strict(),
+  /**
+   * A manuscript out and a manuscript in (turn 131, SPEC-012 §2.4.3). The export lands under
+   * the world's `exports/` and reports through `export.progress`; the import is read by the host
+   * and shown before anything is written, then appended in one commit.
+   */
+  z
+    .object({
+      kind: z.literal("export-manuscript"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      format: z.enum(["docx", "epub"]),
+      /** The EPUB's language, as the sheet named it — a BCP 47 tag in full shape (codex on PR 916); the world records none. */
+      language: z.string().refine(isManuscriptLanguage, "expected a BCP-47 language tag").optional(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("open-exports-folder"), worldId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("pick-manuscript"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("import-manuscript"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  /** The same file read again at the level the person chose (turn 131): the held document, nothing written. */
+  z
+    .object({
+      kind: z.literal("reread-manuscript"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      headingLevel: z.enum(["title", "subtitle", "heading1", "heading2", "document"]),
+    })
+    .strict(),
+  z.object({ kind: z.literal("cancel-manuscript"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
   /** SPEC-015 R-15: per-candidate resolution; accepts commit individually, rejects leave no trace. */
   z
     .object({

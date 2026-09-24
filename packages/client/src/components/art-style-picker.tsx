@@ -34,10 +34,8 @@ export function ArtStyleGrid({
           onClick={() => onSelect(preset)}
         >
           {/*
-           * The same harbour, nine treatments. The preview is the control here — a name and a
-           * sentence describe a look, but only seeing one scene rendered nine ways lets you
-           * compare the treatment instead of the subject, which is the whole reason this step
-           * is a grid rather than a dropdown.
+           * A neutral study of forms, nine treatments. Shared composition makes the material,
+           * edges and light comparable without importing a sample world's setting.
            */}
           <span className="fy-styles__frame">
             {/* Relative, not absolute: the packaged app loads from file://, where a leading

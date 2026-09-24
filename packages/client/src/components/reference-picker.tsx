@@ -20,7 +20,7 @@ import { Button, cx } from "./ui.js";
 import { generatedOriginLabel } from "../lib/format.js";
 import { Portrait } from "./portrait.js";
 import { Search, Upload } from "./icons.js";
-import { Wave } from "../screens/production.js";
+import { Wave } from "./wave.js";
 
 /**
  * One reference picker for every surface that asks for one (issue 305 §4, design 69).
@@ -40,6 +40,7 @@ export interface PickerSource {
   /** World-relative image path for the thumbnail, where there is one. */
   imagePath?: string;
   meta: string;
+  group?: string;
   durationSec: number | null;
   /** The token this source already carries in the session, active or not. */
   existingToken?: string;
@@ -248,6 +249,7 @@ export function ReferencePickerBody({
   carried,
   world,
   session,
+  sessionLabel = "This session",
   characters,
   onAdd,
   onChoose,
@@ -257,9 +259,11 @@ export function ReferencePickerBody({
   note,
   only,
   budget = "model",
+  worldChoices,
 }: {
   /** "bench": ordered multi-pick with tokens. "slot": exactly one, no token namespace. */
   mode: "bench" | "slot";
+  worldChoices?: React.ReactNode;
   /** The dialog's own words, where the default headline is not the ask (keyframes). */
   title?: string;
   note?: string;
@@ -274,6 +278,7 @@ export function ReferencePickerBody({
   carried: readonly MultimediaReference[];
   world: PickerSource[];
   session: PickerSource[];
+  sessionLabel?: string;
   /** Everything under the world's characters. Absent where the picker has no world to read. */
   characters?: PickerSource[];
   /** Bench: the checked set, committed together and in order — one message, not N races. */
@@ -286,6 +291,7 @@ export function ReferencePickerBody({
   const [lane, setLane] = useState<"world" | "characters" | "session">("world");
   const [kindFilter, setKindFilter] = useState<PickerSource["kind"] | null>(null);
   const [search, setSearch] = useState("");
+  const [group, setGroup] = useState<string | null>(null);
   /** The checked set, in pick order — committed together by Add (design 69a). */
   const [picks, setPicks] = useState<StagedPick[]>([]);
   /** The image tile waiting on "which token gives way" at the ceiling. */
@@ -296,6 +302,7 @@ export function ReferencePickerBody({
   const searched = search.trim().toLowerCase();
   const visible = sources.filter(
     (s) =>
+      (group === null || s.group === group) &&
       (kindFilter === null || s.kind === kindFilter) &&
       (searched.length === 0 || s.name.toLowerCase().includes(searched) || s.meta.toLowerCase().includes(searched)),
   );
@@ -324,8 +331,8 @@ export function ReferencePickerBody({
     if (source.active || staged(source)) return null; // a state, not a refusal
     if (source.kind === "document") return "a document cannot be sent";
     if (source.kind === "other") return "this file cannot be sent";
-    if (!model) return "choose a model first";
     if (budget === "none") return null;
+    if (!model) return "choose a model first";
     const verdict = admitReference({ kind: source.kind, durationSec: source.durationSec }, effectiveCarried, model);
     if (verdict.ok) return null;
     // At the image ceiling in bench mode the tile stays pickable — picking asks which token
@@ -429,10 +436,11 @@ export function ReferencePickerBody({
         </button>
       </div>
 
+      {worldChoices}
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div className="fy-refpicker__lanes" role="group" aria-label="Where from">
           <button type="button" aria-pressed={lane === "world"} onClick={() => setLane("world")}>
-            {`World artifacts ${offered(world).length}`}
+            {`${worldChoices || world.some((source) => source.group) ? "World images" : "World artifacts"} ${offered(world).length}`}
           </button>
           {offered(characters ?? []).length > 0 && (
             <button
@@ -446,7 +454,7 @@ export function ReferencePickerBody({
           )}
           {offered(session).length > 0 && (
             <button type="button" aria-pressed={lane === "session"} onClick={() => setLane("session")}>
-              {`This session ${offered(session).length}`}
+              {`${sessionLabel} ${offered(session).length}`}
             </button>
           )}
           <button type="button" aria-pressed={false} onClick={onUpload}>
@@ -458,7 +466,7 @@ export function ReferencePickerBody({
           <Search size={13} />
           <input
             className="fy-refpicker__search"
-            placeholder="Search artifacts"
+            placeholder={world.some((source) => source.group) ? "Search images" : "Search artifacts"}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -486,6 +494,14 @@ export function ReferencePickerBody({
         <span style={{ flex: 1 }} />
         {capacityChip}
       </div>
+
+      {sources.some((source) => source.group) && (
+        <div className="fy-refpicker__lanes" role="group" aria-label="Image category">
+          {[null, ...new Set(sources.map((source) => source.group).filter((value): value is string => !!value))].map((value) => (
+            <button type="button" key={value ?? "all"} aria-pressed={group === value} onClick={() => setGroup(value)}>{value ?? "All images"}</button>
+          ))}
+        </div>
+      )}
 
       {searched.length > 0 && (
         <div

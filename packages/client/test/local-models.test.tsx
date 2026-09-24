@@ -183,6 +183,17 @@ const renderPane = (state: ClientState, engine: EngineId): string =>
 /** SSR splits a text node at every interpolation, so a rendered string is checked without them. */
 const plain = (html: string): string => html.replace(/<!-- -->/g, "").replace(/<[^>]+>/g, " ");
 
+it("shows processor residency as a warning while the local model remains installed", () => {
+  const state = stateWith({ residency: [{ provider: "ollama", model: GEMMA.id, state: "cpu", vramBytes: 0 }] });
+  state.app.setup!.components.find((item) => item.id === "ollama-gemma4-12b")!.state = "ready";
+  const html = plain(renderEngine(state, "ollama"));
+  assert.match(html, /Running on the processor; this will be slow/);
+  assert.match(html, /installed/);
+  assert.doesNotMatch(html, /needs attention/);
+  state.app.residency = [];
+  assert.doesNotMatch(plain(renderEngine(state, "ollama")), /Running on the processor/);
+});
+
 /**
  * One model's row, from the `fy-set__row` that opens it to the one that opens the next.
  *
@@ -586,6 +597,19 @@ describe("Voxa states three readable voice lines, once (R-48, rows 18, 19)", () 
 });
 
 describe("a recipe is ComfyUI's model, listed once (SPEC-034 R-7, SPEC-033 R-6)", () => {
+  it("shows multimedia capacities and one recipe download without inventing first-frame support", () => {
+    const model: ManifestModel = { ...DRAFT_VIDEO, id: "comfyui-h3-reference-video", displayName: "Local · H3 Reference Video",
+      accepts: { referenceImages: 9, referenceVideos: 3, referenceAudio: 3, startFrame: false, endFrame: false },
+      limits: { maxDurationSec: 5 }, requires: { vramMb: 10000 } };
+    const state = stateWith();
+    state.app.manifest!.models.push(model);
+    state.app.runtime!.models.push({ modelId: model.id, provider: "comfyui", displayName: model.displayName, capability: "video", locality: "local", fit: "runs-slowly" });
+    state.app.setup!.components.push(component({ id: comfyUiWeightsComponentId(model.id), state: "available", sizeMb: 42371 }));
+    const html = plain(tileFor(renderEngine(state, "comfyui"), model.displayName));
+    assert.match(html, /refs ×9.*video refs ×3.*audio refs ×3.*5s/);
+    assert.doesNotMatch(html, /start frame/);
+    assert.match(html, /Install/);
+  });
   /** The engine has answered for Draft video, so the recipe list is where it belongs. */
   const answered = (over: Partial<RecipeReadiness> = {}): ClientState =>
     stateWith({
@@ -613,6 +637,16 @@ describe("a recipe is ComfyUI's model, listed once (SPEC-034 R-7, SPEC-033 R-6)"
         checkedAt: "2026-08-27T12:00:00.000Z",
       },
     });
+
+  it("counts unchecked recipes separately and states when they can run (#975)", () => {
+    const state = answered({ state: "unknown", reason: "VRAM could not be measured." });
+    state.app.runtime = runtime({ models: runtime().models.map((m) =>
+      m.provider === "comfyui" ? { ...m, fit: "unknown" as const } : m) });
+    const text = plain(renderEngine(state, "comfyui"));
+    assert.match(text, /0 ready \u00b7 1 unchecked/);
+    assert.match(text, /Generation is allowed/);
+    assert.doesNotMatch(text, /0 of .* ready/);
+  });
 
   it("draws it from the recipe's own facts once the engine has answered, and only once", () => {
     // The two projections partition rather than overlap. Drawn from both, one fetch would carry

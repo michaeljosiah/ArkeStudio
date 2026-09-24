@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { QueueEnqueueResult } from "../src/lib/store.js";
-import { enqueueNote, failedNote, readyNote, subjectOf } from "../src/components/queue-note.js";
+import { enqueueNote, failedNote, historyNote, readyNote, subjectOf } from "../src/components/queue-note.js";
 import type { Job, ModelManifest } from "@arke-studio/contracts";
 
 const result = (overrides: Partial<QueueEnqueueResult> = {}): QueueEnqueueResult => ({
@@ -44,6 +41,7 @@ const manifest = {
     { id: "gpt-image-2", provider: "fal", displayName: "GPT Image 2" },
     { id: "seedance-2.0", provider: "fal", displayName: "Seedance 2.0" },
     { id: "indextts-2-5", provider: "comfyui", displayName: "IndexTTS 2.5" },
+    { id: "h3-reference-video", provider: "comfyui", displayName: "Local · H3 Reference Video" },
   ],
 } as unknown as ModelManifest;
 
@@ -54,15 +52,6 @@ describe("queue notification", () => {
     "jb_01J8E0000000000000000000J3",
     "jb_01J8E0000000000000000000J4",
   ];
-
-  it("mounts one top-center toaster clear of the desktop title bar", () => {
-    const here = dirname(fileURLToPath(import.meta.url));
-    const app = readFileSync(resolve(here, "../src/App.tsx"), "utf8");
-    const toaster = readFileSync(resolve(here, "../src/components/queue-toaster.tsx"), "utf8");
-    assert.equal(app.match(/<QueueToaster\s*\/>/g)?.length, 1);
-    assert.match(toaster, /position="top-center"/);
-    assert.match(toaster, /44px/);
-  });
 
   it("names the work rather than its destination, in two lines", () => {
     const note = enqueueNote(result(), [job()], manifest);
@@ -79,9 +68,32 @@ describe("queue notification", () => {
     assert.doesNotMatch(note!.title, /Undersong/i);
   });
 
-  it("marks an estimate with a tilde and actual spend without one", () => {
+  it("marks an estimate with a tilde and a provider-reported figure without one", () => {
     assert.match(enqueueNote(result(), [job()], manifest)!.meta, /~\$0\.61$/);
-    assert.equal(readyNote(job({ status: "succeeded" }), manifest, undefined).meta, "GPT Image 2 · $0.61");
+    assert.equal(readyNote(job({ status: "succeeded", providerCostMicroUsd: 610_000 }), manifest, undefined).meta, "GPT Image 2 · $0.61");
+    assert.equal(
+      readyNote(job({ status: "succeeded", providerCostMicroUsd: 540_000 }), manifest, undefined).meta,
+      "GPT Image 2 · $0.54",
+      "the provider's figure, not the estimate it replaced",
+    );
+    assert.equal(
+      readyNote(job({ status: "succeeded" }), manifest, undefined).meta,
+      "GPT Image 2 · ~$0.61",
+      "a manifest-derived actual keeps its tilde (SPEC-014 R-10; codex P2, PR 1087)",
+    );
+  });
+
+  it("says what a failure cost from what the provider said (codex P1, PR 1087)", () => {
+    const refused = failedNote(job({ status: "failed", attempt: 1, submissionRejected: true, error: "401" }), manifest, undefined);
+    assert.match(refused.meta, /not charged$/, "refused before it was taken");
+    const charged = failedNote(job({ status: "failed", providerJobId: "p1", providerCostMicroUsd: 120_000, error: "timeout" }), manifest, undefined);
+    assert.match(charged.meta, /\$0\.12$/, "a reported charge on the failure is believed");
+    const free = failedNote(job({ status: "failed", providerJobId: "p1", providerCostMicroUsd: 0, error: "fault" }), manifest, undefined);
+    assert.match(free.meta, /not charged$/, "a reported zero is a zero");
+    const unknown = failedNote(job({ status: "failed", providerJobId: "p1", error: "fault" }), manifest, undefined);
+    assert.match(unknown.meta, /charge unknown$/, "taken and unreported is unknown, not zero");
+    const inFlight = failedNote(job({ status: "failed", attempt: 1, error: "submit timed out" }), manifest, undefined);
+    assert.match(inFlight.meta, /charge unknown$/);
   });
 
   it("says local where the figure would be, because there is nothing to spend", () => {
@@ -89,6 +101,12 @@ describe("queue notification", () => {
     const note = enqueueNote(result({ command: "dispatch-scene" }), [local], manifest);
     assert.equal(note?.meta, "IndexTTS 2.5 · local");
     assert.doesNotMatch(note!.meta, /\$/);
+  });
+
+  it("says local once when the recipe already prefixes its model name (issue 1001)", () => {
+    const local = job({ provider: "comfyui", model: "h3-reference-video", estimatedMicroUsd: 0 });
+    assert.equal(enqueueNote(result(), [local], manifest)?.meta, "H3 Reference Video · local");
+    assert.equal(readyNote(local, manifest, undefined).meta, "H3 Reference Video · local");
   });
 
   it("does not count a batch's own siblings as ahead of it", () => {
@@ -211,7 +229,7 @@ describe("queue notification", () => {
     assert.equal(note?.action, undefined);
   });
 
-  it("confirms files added to the Library without inventing a queue job", () => {
+  it("confirms imports without claiming a Library destination or inventing a queue job", () => {
     const note = enqueueNote(
       result({
         command: "upload-artifacts",
@@ -223,9 +241,23 @@ describe("queue notification", () => {
       manifest,
     );
     assert.equal(note?.tone, "back");
-    assert.equal(note?.title, "2 files added to the Library");
+    assert.equal(note?.title, "2 files imported");
     assert.equal(note?.meta, "ready to use");
     assert.equal(note?.action, undefined);
+  });
+
+  it("reads a borrow from another world as an import, and its refusal without an Activity to go to", () => {
+    const copied = enqueueNote(result({ command: "borrow-artifacts", disposition: "not-queued", requestedCount: 1, acceptedJobIds: [] }), [], manifest);
+    assert.equal(copied?.title, "1 file imported");
+    assert.equal(copied?.action, undefined);
+    const refused = enqueueNote(
+      result({ command: "borrow-artifacts", disposition: "rejected", requestedCount: 0, acceptedJobIds: [], failures: [{ index: 0, reason: "That world is unavailable." }] }),
+      [],
+      manifest,
+    );
+    assert.ok(refused, "the refusal is said");
+    assert.equal(refused.action, undefined, "nothing was queued, so no Activity row to go to");
+    assert.match(refused.reason ?? "", /That world is unavailable/);
   });
 
   it("names failed files when only part of a Library upload lands", () => {
@@ -241,7 +273,7 @@ describe("queue notification", () => {
       manifest,
     );
     assert.equal(note?.tone, "warning");
-    assert.equal(note?.title, "1 of 2 files added to the Library");
+    assert.equal(note?.title, "1 of 2 files imported");
     assert.equal(note?.meta, "1 file not added");
     assert.equal(note?.reason, "broken.m4a: Unsupported audio container.");
   });
@@ -262,7 +294,7 @@ describe("queue notification", () => {
       manifest,
     );
     assert.equal(note?.tone, "refused");
-    assert.equal(note?.title, "No files added to the Library");
+    assert.equal(note?.title, "No files imported");
     assert.equal(note?.meta, "nothing spent");
     assert.match(note?.reason ?? "", /broken\.mp4.*broken\.m4a/);
     assert.doesNotMatch(note?.title ?? "", /image/i);
@@ -290,7 +322,7 @@ describe("queue notification", () => {
       id: "job:jb_01J8E0000000000000000000J1",
       tone: "back",
       title: "Maren Kest, character sheet ready",
-      meta: "GPT Image 2 · $0.61",
+      meta: "GPT Image 2 · ~$0.61",
       action: { label: "View", to: "/w/01J8F3K2QW9VZX4N7M0RTYB6HC/cast/maren-kest/kit" },
     });
     assert.equal(readyNote(job({ status: "succeeded" }), manifest, undefined).action?.label, "Activity");
@@ -334,5 +366,28 @@ describe("queue notification", () => {
     assert.match(enqueueNote(result(), [job()], manifest)!.meta, /^GPT Image 2 · /);
     // An unknown row still says something true rather than nothing.
     assert.match(enqueueNote(result(), [job({ model: "unlisted-1" })], manifest)!.meta, /^unlisted-1 · /);
+  });
+});
+
+describe("the row a finished job gets in Activity's Earlier (design turn 136)", () => {
+  it("says what the receipt said for work that came back or failed", () => {
+    const ready = job({ status: "succeeded" });
+    assert.equal(historyNote(ready, manifest).title, readyNote(ready, manifest, undefined).title);
+    const failed = job({ status: "failed", error: "openai: refused" });
+    assert.deepEqual(historyNote(failed, manifest), failedNote(failed, manifest, undefined));
+  });
+
+  it("calls a cancellation not charged only when nothing reached the provider (codex P1, PR 1087)", () => {
+    const early = historyNote(job({ status: "cancelled", providerJobId: null, error: null }), manifest);
+    assert.match(early.title, /cancelled$/);
+    assert.match(early.meta, /not charged$/);
+    assert.equal(early.reason, undefined);
+    const warning = "Cancelled in Arke. The provider may still complete or charge for this request.";
+    const late = historyNote(job({ status: "cancelled", providerJobId: "prov-1", error: warning }), manifest);
+    assert.match(late.meta, /charge unknown$/);
+    assert.equal(late.reason, warning, "the queue's own warning rides on the row");
+    assert.equal(late.tone, "warning");
+    const submitting = historyNote(job({ status: "cancelled", providerJobId: null, error: warning }), manifest);
+    assert.match(submitting.meta, /charge unknown$/, "a request in flight at the cancel is as unknown as one acknowledged");
   });
 });

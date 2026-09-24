@@ -150,7 +150,7 @@ Navigation and manipulation are separated the way Blender separates them:
 
 ### 3.1 Getting in
 
-Select a shot in the storyboard and open the **Stage** tab. If the shot has never been staged, one button: **Stage the shot**. Arke reads the script and the filed frame, places the cast, puts down set massing, and creates a starting camera move.
+Select a shot in the storyboard and open the **Stage** tab. If the shot has never been staged there are two ways in. **Quick layout** is a deterministic first pass — cast in a line facing the lens, one massing box per named location, a camera move read off the framing words — so staging the same shot twice gives the same result, and re-staging is a reset rather than a surprise. **Build with Arke** hands the script, timing, framing, sheets and references to the configured Stage designer model, which constructs a draft, inspects rendered camera views of it and revises; it never falls back to Quick layout silently, and it names the model that did the work (SPEC-036 §1.13, #886).
 
 The header then reads something like `v1 · 2 keys · dolly`.
 
@@ -257,9 +257,9 @@ The playblast is what makes the Stage worth using: the generator receives an act
 ## Part 4 · Deliberate limits
 
 - **One camera per shot.** No A/B camera setups. Cutting between angles is what separate shots are for. If multi-camera is wanted it's a real feature, not a tweak.
-- **Greybox only.** No texturing, no lighting design, no props beyond massing. The moment it starts looking like a render, people will judge it as one.
-- **No inverse kinematics or character animation.** Figures translate and turn. Performance is the generator's job.
-- **Interpolation is linear between keys.** The `ease` field is recorded and passed to the prompt but does not shape the previs curve.
+- **Greybox only.** No texturing and no lighting design. Sets are primitives, bounded meshes and named rigid groups; props are silhouettes with real dimensions, not models. The moment it starts looking like a render, people will judge it as one.
+- **No skeletal animation.** Figures translate, turn and change posture at marks (standing, seated, lying); a figure can ride a moving group. Performance is the generator's job.
+- **Camera positions follow a centripetal curved path between keys, arc-length mapped per leg, and `easeIn` / `easeOut` shape the timing along each leg.** Preview, export and the prompt's beats all sample the same evaluator, so what the previs shows is what the generator is told. (SPEC-036 R-32; this replaced the original linear-with-ease-as-a-word-only behaviour, #757.)
 
 ---
 

@@ -184,13 +184,17 @@ describe("the approvals screen head", () => {
     assert.match(html, /The world now/);
   });
 
-  it("describes the empty screen as an exception queue, not a hand-written-change queue", () => {
+  /*
+   * The empty screen used to enumerate what an exception queue holds — orphaned drafts,
+   * unattended rebase reviews, future unattended actors — which is the architecture read out
+   * loud (turn 101, issue 1008). "Nothing waiting" is the whole label.
+   */
+  it("says nothing is waiting, and nothing else", () => {
     const html = render(stateWith([]));
-    assert.match(html, /orphaned drafts/);
-    assert.match(html, /unanswered choices/);
-    assert.match(html, /rebase reviews or conflicts/);
-    assert.match(html, /outside the app/);
-    assert.doesNotMatch(html, /anything written by hand/);
+    assert.match(html, /Nothing waiting/);
+    for (const architecture of [/orphaned drafts/, /rebase/, /unattended/, /reconciled/]) {
+      assert.doesNotMatch(html, architecture);
+    }
   });
 });
 

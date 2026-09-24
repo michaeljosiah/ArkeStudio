@@ -13,6 +13,7 @@ import {
   type RecipeParamValues,
 } from "../comfyui/recipes.js";
 import { scrubPaths } from "../comfyui/redact.js";
+import { multimediaInputs } from "../comfyui/reference-inputs.js";
 import { jsonRequest } from "./http.js";
 import type {
   FetchedArtifact,
@@ -26,7 +27,7 @@ import type {
 import { ProviderBusyError, ProviderRequestRejectedError } from "../types.js";
 
 /** Where the engine is listening right now, or null when none is configured and healthy. */
-export type EngineBaseUrl = () => string | null;
+export type EngineBaseUrl = (model?: string) => string | null;
 export type EngineLocality = () => "local" | "remote";
 
 /**
@@ -75,7 +76,8 @@ function isRedirect(status: number): boolean {
  * positionally (`reference-01.png`), which two characters would collide on within a minute.
  */
 function contentAddressedName(data: Uint8Array, contentType: string): string {
-  const extension = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
+  const extension = ({ "image/png": "png", "image/webp": "webp", "image/jpeg": "jpg", "video/mp4": "mp4", "audio/wav": "wav", "audio/mpeg": "mp3" } as Record<string, string>)[contentType];
+  if (!extension) throw new ProviderRequestRejectedError("comfyui: unsupported reference media format");
   return `${createHash("sha256").update(data).digest("hex")}.${extension}`;
 }
 
@@ -90,11 +92,12 @@ function referenceInputs(recipe: ComfyUiRecipe): NonNullable<ComfyUiRecipe["refe
   return recipe.referenceImages ?? (recipe.referenceFrame === undefined ? [] : [recipe.referenceFrame]);
 }
 
-function dropUnusedReferences(recipe: ComfyUiRecipe, graph: RecipeGraph, count: number): RecipeGraph {
-  for (const attachment of referenceInputs(recipe).slice(count)) {
+function dropUnusedReferences(recipe: ComfyUiRecipe, graph: RecipeGraph, count: number, videos = 0, audio = 0): RecipeGraph {
+  for (const attachment of [...referenceInputs(recipe).slice(count), ...(recipe.referenceVideos ?? []).slice(videos), ...(recipe.referenceAudio ?? []).slice(audio)]) {
     const [nodeId, inputKey] = attachment.slot;
     const consumer = graph[nodeId];
     if (consumer) delete consumer.inputs[inputKey];
+    for (const [node, slot] of attachment.extraSlots ?? []) if (graph[node]) delete graph[node]!.inputs[slot];
     for (const carrier of attachment.nodes) delete graph[carrier];
   }
   if (count === 0 && recipe.referenceConditioning !== undefined) {
@@ -139,6 +142,9 @@ const INTERNAL_PARAMS = new Set([
   "characterCount",
   "audioFormat",
   "references",
+  "videoReferences",
+  "audioReferences",
+  "referenceMedia",
   "referenceRoles",
   "artDirection",
   "provenance",
@@ -240,7 +246,7 @@ export class ComfyUiClient implements ProviderClient {
      * the game holding the other 3 GB. Asking the device is the only honest answer, and the
      * device is the host's to ask.
      */
-    private readonly freeVramMb?: () => Promise<number | null>,
+    private readonly freeVramMb?: (model?: string) => Promise<number | null>,
     /**
      * How much system memory is free RIGHT NOW, in MB, or null where that cannot be asked
      * (issue 846). The resource offloading spends: a streaming video recipe bottoms out in RAM,
@@ -266,6 +272,8 @@ export class ComfyUiClient implements ProviderClient {
         else signal?.addEventListener("abort", finish, { once: true });
       }),
     private readonly now: () => number = Date.now,
+    private readonly allBaseUrls?: () => readonly string[],
+    private readonly isEndpointGone?: (url: string) => boolean,
   ) {}
 
   /** Latest step count per prompt, fed by the engine's socket and read by `poll`. */
@@ -275,6 +283,7 @@ export class ComfyUiClient implements ProviderClient {
   private socket: ProgressSocket | null = null;
   private socketBase: string | null = null;
   private disposed = false;
+  private readonly promptModels = new Map<string, string>();
 
   private closeSocket(): void {
     const socket = this.socket;
@@ -344,10 +353,12 @@ export class ComfyUiClient implements ProviderClient {
 
   dispose(): void {
     this.disposed = true;
+    this.promptModels.clear();
     this.closeSocket();
   }
 
   resetTransport(): void {
+    this.promptModels.clear();
     this.closeSocket();
   }
 
@@ -368,8 +379,8 @@ export class ComfyUiClient implements ProviderClient {
     return base.replace(/\/+$/, "");
   }
 
-  private require(): string {
-    const base = this.baseUrl();
+  private require(model?: string): string {
+    const base = this.baseUrl(model);
     if (base === null) {
       throw new Error("comfyui: no engine is running — point Settings at an install, or download the managed one");
     }
@@ -384,8 +395,8 @@ export class ComfyUiClient implements ProviderClient {
   private engineVersionSeen: string | null = null;
 
   /** One reading of `/system_stats`' version, or null when the engine cannot be asked right now. */
-  private async engineVersion(signal?: AbortSignal): Promise<string | null> {
-    const raw = this.baseUrl();
+  private async engineVersion(signal?: AbortSignal, model?: string): Promise<string | null> {
+    const raw = this.baseUrl(model);
     const base = raw === null ? null : ComfyUiClient.origin(raw);
     if (base === null) return null;
     try {
@@ -409,7 +420,7 @@ export class ComfyUiClient implements ProviderClient {
     const capabilities = ["image", "video", "voice-tts"] as const;
     // Not `require()`: this one answers rather than throws when nothing is configured, so it
     // reads the base itself — and therefore has to normalise it itself.
-    const raw = this.baseUrl();
+    const raw = this.baseUrl() ?? this.allBaseUrls?.()[0] ?? null;
     const base = raw === null ? null : ComfyUiClient.origin(raw);
     if (base === null) {
       return capabilities.map((capability) => ({
@@ -565,7 +576,7 @@ export class ComfyUiClient implements ProviderClient {
     what: string,
     signal?: AbortSignal,
   ): Promise<string> {
-    if (!/^[0-9a-f]{64}\.(wav|mp3|png|jpg|webp)$/.test(file.name)) {
+    if (!/^[0-9a-f]{64}\.(wav|mp3|png|jpg|webp|mp4)$/.test(file.name)) {
       throw new ProviderRequestRejectedError(`comfyui: the ${what} has no safe content-addressed name`);
     }
     const form = new FormData();
@@ -600,9 +611,51 @@ export class ComfyUiClient implements ProviderClient {
   }
 
   /** The engine's own reclaim: unload every model it holds and hand the memory back. */
+  async unload(signal?: AbortSignal): Promise<void> {
+    if (this.engineLocality() === "remote") return;
+    const primary = this.baseUrl() ?? this.allBaseUrls?.()[0] ?? null;
+    for (const base of this.allBaseUrls?.() ?? (primary === null ? [] : [primary])) {
+      try {
+        const response = await this.fetchImpl(`${base}/free`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, redirect: "manual",
+          body: JSON.stringify({ unload_models: true, free_memory: true }),
+          signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(15_000)]),
+        });
+        if (!response.ok) throw new Error("ComfyUI could not release its models. Check the ComfyUI engine and try again.");
+      } catch (error) {
+        // A supervised process that has exited no longer holds any GPU allocations. A
+        // still-advertised endpoint's failure is not evidence that its models were released.
+        if (!signal?.aborted && this.isEndpointGone?.(base) === true) continue;
+        throw error;
+      }
+    }
+  }
+
+  async residency(signal?: AbortSignal): Promise<import("@arke-studio/contracts").ModelResidency[]> {
+    const base = this.baseUrl() ?? this.allBaseUrls?.()[0] ?? null;
+    if (base === null || this.engineLocality() === "remote") return [];
+    const readings = await Promise.all((this.allBaseUrls?.() ?? [base]).map(async endpoint => {
+      const response = await jsonRequest(this.fetchImpl, this.id, `${endpoint}/system_stats`, {
+        signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(3_000)]), redirect: "manual",
+      });
+      if (response.status !== 200) return null;
+      const device = (response.body as { devices?: Array<{ type?: string; torch_vram_total?: number }> } | null)?.devices?.[0];
+      const vram = device?.torch_vram_total;
+      const measured = typeof vram === "number" && Number.isFinite(vram) && vram >= 0;
+      // A zero CUDA reservation can mean unloaded or offloading, not processor-only inference.
+      return { state: device?.type === "cpu" ? "cpu" : measured && vram > 0 ? "gpu" : "unknown", vram: measured ? vram : null };
+    }));
+    if (readings.every(reading => reading === null)) return [];
+    const state = readings.some(reading => reading?.state === "gpu") ? "gpu" : readings.every(reading => reading?.state === "cpu") ? "cpu" : "unknown";
+    return [{ provider: "comfyui", model: "*", state,
+      ...(readings.every(reading => reading?.vram != null) ? { vramBytes: readings.reduce((sum, reading) => sum + reading!.vram!, 0) } : {}) }];
+  }
+
   private async askToUnload(base: string): Promise<void> {
     await this.fetchImpl(`${base}/free`, {
       method: "POST",
+      redirect: "manual",
+      signal: AbortSignal.timeout(15_000),
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ unload_models: true, free_memory: true }),
     }).catch(() => undefined);
@@ -641,7 +694,7 @@ export class ComfyUiClient implements ProviderClient {
     type Room = { what: string; need: number; probe: () => Promise<number | null>; free: number | null };
     const rooms: Room[] = [];
     if (this.freeVramMb && recipe.hardware.minFreeVramMb > 0) {
-      rooms.push({ what: "graphics memory", need: recipe.hardware.minFreeVramMb, probe: this.freeVramMb, free: null });
+      rooms.push({ what: "graphics memory", need: recipe.hardware.minFreeVramMb, probe: () => this.freeVramMb!(recipe.id), free: null });
     }
     if (this.freeMemMb && (recipe.hardware.minFreeMemMb ?? 0) > 0) {
       rooms.push({ what: "memory", need: recipe.hardware.minFreeMemMb!, probe: this.freeMemMb, free: null });
@@ -696,6 +749,7 @@ export class ComfyUiClient implements ProviderClient {
    */
   async release(model: string, _context?: ProviderCallContext): Promise<void> {
     if (this.disposed) return;
+    if ((this.allBaseUrls?.().length ?? 0) > 1) { await this.unload(); return; }
     const recipe = comfyUiRecipeById(model);
     if (!recipe || recipe.capability !== "video" || this.engineLocality() === "remote") return;
     const base = this.baseUrl();
@@ -736,7 +790,7 @@ export class ComfyUiClient implements ProviderClient {
      * failure after submission can say which engine it happened on.
      */
     if (frozen?.engineVersion !== undefined) {
-      const live = await this.engineVersion(request.signal);
+      const live = await this.engineVersion(request.signal, recipe.id);
       if (live !== null) {
         this.engineVersionSeen = live;
         if (compareComfyUiVersions(live, frozen.engineVersion) !== 0) {
@@ -778,12 +832,21 @@ export class ComfyUiClient implements ProviderClient {
         `comfyui: ${recipe.displayName} was asked to carry a reference image that never arrived`,
       );
     }
+    const media = multimediaInputs(recipe, request, this.engineLocality());
     const values = this.valuesFor(recipe, request);
+    // Validate scalar bounds before uploading any reference bytes. Filenames are optional
+    // internal bindings and will be filled only after the engine accepts the corresponding file.
+    substituteRecipeParams(recipe, values);
     // The last check before the wire (§2.5, R-16): a checkpoint replaced since the picker
     // rendered is refused here, before any request reaches the engine.
     const verified = await this.preflight(recipe.id);
     if (!verified.ok) throw new ProviderRequestRejectedError(verified.reason);
-    const base = this.require();
+    const base = this.require(recipe.id);
+    // The dispatcher serializes the ComfyUI lane. An idle sibling must relinquish cached
+    // weights before the selected recipe's independent process measures free memory.
+    if (this.engineLocality() === "local") for (const other of this.allBaseUrls?.() ?? []) {
+      if (ComfyUiClient.origin(other) !== base) await this.askToUnload(other);
+    }
     await this.ensureRoom(base, recipe, request.signal);
     // The file becomes a name the engine knows. Done after preflight so a job that was going to
     // be refused never puts a file on the engine, and before the graph is built because the
@@ -802,7 +865,15 @@ export class ComfyUiClient implements ProviderClient {
     }
     // Substitute first, then drop: the size params bind into the scaler as well as the canvas,
     // and a graph pruned before substitution would refuse its own bindings.
-    const graph = dropUnusedReferences(recipe, substituteRecipeParams(recipe, values), prepared.length);
+    for (const [index, video] of media.videos.entries()) {
+      values[recipe.referenceVideos![index]!.param] = await this.uploadInput(base,
+        { ...video, name: contentAddressedName(video.data, video.contentType) }, "reference video", request.signal);
+    }
+    for (const [index, audio] of media.audio.entries()) {
+      values[recipe.referenceAudio![index]!.param] = await this.uploadInput(base,
+        { ...audio, name: contentAddressedName(audio.data, audio.contentType) }, "reference audio", request.signal);
+    }
+    const graph = dropUnusedReferences(recipe, substituteRecipeParams(recipe, values), prepared.length, media.videos.length, media.audio.length);
     const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${base}/prompt`, {
       method: "POST",
       redirect: "manual",
@@ -825,6 +896,7 @@ export class ComfyUiClient implements ProviderClient {
       // A 4xx from /prompt proves the engine rejected the graph before queueing anything.
       throw new ProviderRequestRejectedError(`comfyui: the engine rejected the prompt (HTTP ${status})${named}${this.onEngine()}`);
     }
+    this.promptModels.set(promptId, recipe.id);
     // What this prompt is doing, in the recipe's own words. Recorded here because `poll` knows
     // only a prompt id, and the alternative — the node id the socket sends — is exactly what R-1
     // keeps away from a user.
@@ -840,7 +912,7 @@ export class ComfyUiClient implements ProviderClient {
    */
   async poll(_key: string, remoteId: string, _context?: ProviderCallContext): Promise<PollResult> {
     if (this.disposed) throw new Error("comfyui: the provider client is disposed");
-    const base = this.require();
+    const base = this.require(_context?.model ?? this.promptModels.get(remoteId));
     this.listen(base);
     const queue = await jsonRequest(this.fetchImpl, this.id, `${base}/queue`, {});
     if (queue.status < 400) {
@@ -894,7 +966,7 @@ export class ComfyUiClient implements ProviderClient {
     if (!recipe) {
       throw new Error("comfyui: cannot select the authoritative output without the recipe id");
     }
-    const base = this.require();
+    const base = this.require(model);
     const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${base}/history/${remoteId}`, {
       redirect: "manual",
     });
@@ -966,23 +1038,29 @@ export class ComfyUiClient implements ProviderClient {
    * work on a shared engine, or a prompt already terminal — is left exactly alone.
    */
   async cancel(_key: string, remoteId: string, _context?: ProviderCallContext): Promise<void> {
-    if (this.disposed) return;
-    const base = this.require();
+    if (this.disposed) throw new Error("comfyui: the client is disposed; cancellation was not acknowledged");
+    const base = this.require(_context?.model ?? this.promptModels.get(remoteId));
     const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${base}/queue`, {});
-    if (status >= 400) throw new Error(`comfyui: the engine answered HTTP ${status} to /queue`);
+    if (status < 200 || status >= 300) throw new Error(`comfyui: the engine answered HTTP ${status} to /queue`);
     const parsed = body as { queue_running?: QueueEntryish[]; queue_pending?: QueueEntryish[] } | null;
+    if (!Array.isArray(parsed?.queue_running) || !Array.isArray(parsed?.queue_pending) ||
+      ![...parsed.queue_running, ...parsed.queue_pending].every(entry => Array.isArray(entry) && typeof entry[1] === "string")) {
+      throw new Error("comfyui: the engine returned an invalid queue; cancellation was not acknowledged");
+    }
     const pending = (parsed?.queue_pending ?? []).some((e) => Array.isArray(e) && e[1] === remoteId);
     if (pending) {
-      await jsonRequest(this.fetchImpl, this.id, `${base}/queue`, {
+      const result = await jsonRequest(this.fetchImpl, this.id, `${base}/queue`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ delete: [remoteId] }),
       });
+      if (result.status < 200 || result.status >= 300) throw new Error(`comfyui: the engine answered HTTP ${result.status} to queue deletion`);
       return;
     }
     const runningOurs = (parsed?.queue_running ?? []).some((e) => Array.isArray(e) && e[1] === remoteId);
     if (runningOurs) {
-      await jsonRequest(this.fetchImpl, this.id, `${base}/interrupt`, { method: "POST" });
+      const result = await jsonRequest(this.fetchImpl, this.id, `${base}/interrupt`, { method: "POST" });
+      if (result.status < 200 || result.status >= 300) throw new Error(`comfyui: the engine answered HTTP ${result.status} to /interrupt`);
     }
     // Neither pending nor ours-running: terminal, or another user's work. Nothing to touch.
   }

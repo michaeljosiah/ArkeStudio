@@ -2,16 +2,28 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_SHOT_SEC,
   deriveCut,
+  deriveRehearsalLines,
+  effectiveFraming,
+  formatMicroUsd,
+  pickableArtifacts,
+  productionAspect,
+  stagePlayblastIsStale,
+  stageSourceFingerprintInput,
   hasOwnFrame,
   orderedShots,
   type ArtifactSidecar,
   type PackedBoard,
   type ProductionBundle,
   type SceneRecord,
+  type Sheet,
   type Shot,
+  type TableReadPlan,
 } from "@arke-studio/contracts";
 import { ImageMark, PauseSolid, PlaySolid, RotateCcw } from "../../components/icons.js";
+import { artifactsForProduction } from "../../lib/artifact-view.js";
+import { loadPlaylist, playPlaylistLine, setPlaylistRate, setPlaylistSolo, type PlaylistState } from "../../lib/audio.js";
 import { mediaUrl } from "../../lib/media.js";
+import { planTableRead, prepareTableRead, subscribeRehearsalResults, useStore } from "../../lib/store.js";
 import { posterize } from "../../lib/poster.js";
 import { onMediaReady, syncMediaElement, useTransport } from "../../lib/playback-engine.js";
 import { ShotLightbox, shotFramePath } from "./lightbox.js";
@@ -25,6 +37,7 @@ interface PreviewSpan {
   clipInSec: number;
   framePath: string | null;
   framed: boolean;
+  blockout: boolean;
   boardStart: boolean;
 }
 
@@ -40,6 +53,7 @@ export function scenePreviewSpans(
   scene: SceneRecord,
   artifacts: readonly ArtifactSidecar[],
   boards: readonly PackedBoard[],
+  fingerprints: ReadonlyMap<string, string> = new Map(),
 ): PreviewSpan[] {
   const entries = new Map(
     deriveCut(production).entries
@@ -47,20 +61,31 @@ export function scenePreviewSpans(
       .map((entry) => [entry.shot.id, entry]),
   );
   const boardStarts = new Set(boards.slice(1).map((board) => board.memberShotIds[0]));
+  const shelf = pickableArtifacts(artifactsForProduction(artifacts, production.meta.id));
+  const aspect = productionAspect(production.meta);
   let at = 0;
   return orderedShots(scene).map((shot) => {
     const durationSec = shot.durationSec ?? DEFAULT_SHOT_SEC;
     const entry = entries.get(shot.id);
-    const clipPath = entry?.take?.kind === "clip" ? (entry.media?.path ?? null) : null;
-    const frame = shotFramePath(production, artifacts, shot.id) ?? (clipPath === null ? null : posterize(clipPath));
+    const staging = shot.staging;
+    const pin = staging?.playblast;
+    const fresh = !entry?.take && staging && pin &&
+      !stagePlayblastIsStale(scene, staging, { durationSec, aspect, lens: effectiveFraming(scene, shot).lens }) &&
+      (pin.sourceFingerprint === undefined || fingerprints.get(stageSourceFingerprintInput(scene, shot, aspect)) === pin.sourceFingerprint);
+    const playblast = fresh ? shelf.find(artifact => artifact.id === pin.artifactId && artifact.kind === "video") : undefined;
+    const opening = playblast ? shelf.find(artifact => artifact.id === pin!.openingFrameArtifactId && artifact.kind === "image") : undefined;
+    const clipPath = entry?.take?.kind === "clip" ? (entry.media?.path ?? null) : playblast ? `artifacts/${playblast.file}` : null;
+    const frame = opening ? `artifacts/${opening.file}`
+      : shotFramePath(production, artifacts, shot.id) ?? (playblast || clipPath === null ? null : posterize(clipPath));
     const span: PreviewSpan = {
       shot,
       startSec: at,
       endSec: at + durationSec,
       clipPath,
-      clipInSec: entry?.media?.inSec ?? 0,
+      clipInSec: playblast ? 0 : entry?.media?.inSec ?? 0,
+      blockout: playblast !== undefined,
       framePath: frame,
-      framed: hasOwnFrame(production.selections[shot.id], artifacts) ||
+      framed: opening !== undefined || hasOwnFrame(production.selections[shot.id], artifacts) ||
         production.takes.some((take) =>
           take.id === production.selections[shot.id]?.acceptedTakeId &&
           (take.kind === "frame" || take.kind === "still"),
@@ -82,29 +107,105 @@ export function ScenePreview({
   scene,
   artifacts,
   boards,
+  worldId,
   worldSlug,
+  sheets,
   aspect,
   onEditShot,
   onOpenShotInGenerator,
+  startShotId,
 }: {
   production: ProductionBundle;
   scene: SceneRecord;
   artifacts: readonly ArtifactSidecar[];
   boards: readonly PackedBoard[];
+  worldId: string;
   worldSlug: string | undefined;
+  sheets: readonly Sheet[];
   aspect: string;
   // The lightbox's Advanced and Generate frame hand off to the workspace; optional only so a
   // caller that has not wired them yet still compiles, in which case those two buttons just close.
   onEditShot?: (shotId: string) => void;
   onOpenShotInGenerator?: (shotId: string) => void;
+  /** Play from here (turn 145): the clock opens at this shot's start rather than the scene's. */
+  startShotId?: string;
 }) {
+  const fingerprintInputs = useMemo(() => [...new Set(orderedShots(scene)
+    .filter(shot => shot.staging?.playblast?.sourceFingerprint !== undefined)
+    .map(shot => stageSourceFingerprintInput(scene, shot, productionAspect(production.meta))))], [scene, production.meta]);
+  const [fingerprints, setFingerprints] = useState<ReadonlyMap<string, string>>(() => new Map());
+  useEffect(() => {
+    let current = true;
+    void Promise.all(fingerprintInputs.map(async input => {
+      const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+      return [input, Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("")] as const;
+    })).then(values => { if (current) setFingerprints(new Map(values)); }).catch(() => {
+      if (current) setFingerprints(new Map()); // Unverified playblasts stay absent.
+    });
+    return () => { current = false; };
+  }, [fingerprintInputs]);
   const spans = useMemo(
-    () => scenePreviewSpans(production, scene, artifacts, boards),
-    [production, scene, artifacts, boards],
+    () => scenePreviewSpans(production, scene, artifacts, boards, fingerprints),
+    [production, scene, artifacts, boards, fingerprints],
   );
   const totalSec = spans.at(-1)?.endSec ?? 0;
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
+
+  // Play lines (SPEC-044 R-33): the scene's spoken lines that have a read — a selected one, or the
+  // table-read cache — in shot order through the one player; the rest are counted, not played, and
+  // a dashed door prepares them at the cost the plan quoted. The plan is asked for when the lines,
+  // the reviews or the cache's jobs change, so the door's count and price are current before a press.
+  const { state, connection } = useStore();
+  const lines = useMemo(() => deriveRehearsalLines(scene, sheets).filter((line) => line.reason === undefined), [scene, sheets]);
+  const [plan, setPlan] = useState<TableReadPlan | null>(null);
+  const [linesNotice, setLinesNotice] = useState("");
+  const [preparing, setPreparing] = useState(false);
+  const [solo, setSolo] = useState<string | null>(null);
+  const [rate, setRate] = useState<PlaylistState["rate"]>(1);
+  const planRequest = useRef<string | null>(null);
+  const prepareRequest = useRef<string | null>(null);
+  const requestPlan = useCallback(() => { planRequest.current = planTableRead(worldId, production.meta.id, scene.id); }, [worldId, production.meta.id, scene.id]);
+  useEffect(() => subscribeRehearsalResults((result) => {
+    if (result.requestId !== planRequest.current && result.requestId !== prepareRequest.current) return;
+    if (result.requestId === prepareRequest.current) {
+      prepareRequest.current = null; setPreparing(false);
+      // A preparation that went through whole says itself through the refreshed plan; what did
+      // not — a refusal, or lines the queue or the local engine would not take — is said in the
+      // result's own words (codex round 3). A refusal's token is spent, so the plan is asked again.
+      setLinesNotice(result.status === "refused" || /could not be prepared|not queued/.test(result.reason) ? result.reason : "");
+      if (result.status === "refused") requestPlan();
+    } else planRequest.current = null;
+    if (result.plan) setPlan(result.plan);
+    else if (result.status === "refused") setLinesNotice(result.reason);
+  }), [requestPlan]);
+  const cacheJobs = state?.app.jobs.filter((job) => job.target.kind === "table-read-cache" && job.worldId === worldId).map((job) => `${job.id}:${job.status}`).join("|") ?? "";
+  // Asked again when the connection comes back: a request that found no studio was never sent.
+  useEffect(() => { if (lines.length > 0 && connection === "open") requestPlan(); }, [lines.length, scene.version, production.performanceReview.reviewHash, production.performanceReview.selectionHash, cacheJobs, connection, requestPlan]);
+  const playable = plan?.items.filter((item) => item.file !== undefined) ?? [];
+  const missing = plan?.items.filter((item) => item.route === "local" || item.route === "cloud") ?? [];
+  const playLines = () => {
+    if (plan === null || worldSlug === undefined) return;
+    const items = plan.items.flatMap((item) => {
+      const line = lines.find((candidate) => candidate.id === item.lineId);
+      if (item.file === undefined || line?.speakerSheetId === undefined) return [];
+      const name = sheets.find((sheet) => sheet.id === line.speakerSheetId)?.name ?? line.speakerSheetId;
+      return [{ id: `table/${line.id}`, lineId: line.id, speakerSheetId: line.speakerSheetId, url: mediaUrl(worldSlug, item.file), title: `${name}: ${line.text}` }];
+    });
+    loadPlaylist(items);
+    setPlaylistRate(rate);
+    // Soloing a speaker other than the first line's starts the read at their line itself.
+    setPlaylistSolo(solo);
+    if (solo === null || items[0]?.speakerSheetId === solo) void playPlaylistLine();
+  };
+  const prepareLines = () => {
+    if (plan === null) return;
+    setLinesNotice("");
+    setPreparing(true);
+    prepareRequest.current = prepareTableRead(worldId, production.meta.id, scene.id, plan.confirmationToken, plan.totalEstimatedMicroUsd);
+    if (prepareRequest.current === null) { setPreparing(false); setLinesNotice("The studio is disconnected."); }
+  };
+  const speakers = [...new Set(lines.flatMap((line) => (line.speakerSheetId === undefined ? [] : [line.speakerSheetId])))];
   const [lightboxShotId, setLightboxShotId] = useState<string | null>(null);
   const [stageSize, setStageSize] = useState<{ width: number; height: number } | null>(null);
   const [failedClips, setFailedClips] = useState<ReadonlySet<string>>(() => new Set());
@@ -126,6 +227,16 @@ export function ScenePreview({
     setPosition(next);
     setTime(next);
   }, [setPosition, totalSec]);
+  // The named shot's span is known once the spans are; seek there once, through the transport
+  // so play starts where the clock reads, and never again — a later step is the person's.
+  const sought = useRef(false);
+  useEffect(() => {
+    if (sought.current || startShotId === undefined) return;
+    const span = spans.find((candidate) => candidate.shot.id === startShotId);
+    if (span === undefined) return;
+    sought.current = true;
+    seek(span.startSec);
+  }, [seek, spans, startShotId]);
 
   // The end holds (R-29), so play pressed there goes back to the top rather than doing nothing.
   const play = () => {
@@ -239,7 +350,8 @@ export function ScenePreview({
             ref={video}
             playsInline
             muted
-            aria-label="Rendered scene preview"
+            aria-label="Scene preview"
+            poster={currentFrameSrc ?? undefined}
             onError={(event) => {
               const failed = event.currentTarget.currentSrc || event.currentTarget.getAttribute("src");
               if (failed === null || failed === "") return;
@@ -283,13 +395,13 @@ export function ScenePreview({
             <>
               <span className="fy-swpreview__badges">
                 <span className="fy-swpreview__shot">shot {current.shot.number}</span>
-                <span className="fy-swpreview__kind">{currentHasPlayableClip ? "motion · rendered" : "still · animatic"}</span>
+                <span className="fy-swpreview__kind">{current.blockout ? `${currentHasPlayableClip ? "motion" : "still"} · blockout` : currentHasPlayableClip ? "motion · rendered" : "still · animatic"}</span>
               </span>
               <span className="fy-swpreview__caption">
                 <strong>{current.shot.title}</strong>
                 <span>{current.shot.framing?.size ?? "shot"}{current.shot.framing?.lens === undefined ? "" : ` · ${current.shot.framing.lens}`} · {(current.endSec - current.startSec).toFixed(1)}s</span>
               </span>
-              <button type="button" className="fy-swpreview__larger" onClick={() => setLightboxShotId(current.shot.id)}>Larger</button>
+              {current.blockout ? null : <button type="button" className="fy-swpreview__larger" onClick={() => setLightboxShotId(current.shot.id)}>Larger</button>}
             </>
           )}
           {playing || totalSec === 0 ? null : (
@@ -342,6 +454,31 @@ export function ScenePreview({
           </div>
           <span className="fy-swpreview__progress"><span style={{ width: `${totalSec === 0 ? 0 : (time / totalSec) * 100}%` }} /></span>
         </div>
+        {lines.length === 0 ? null : (
+          <div className="fy-swpreview__lines" aria-label="Lines">
+            <button type="button" className="fy-swpreview__lines-play" disabled={playable.length === 0 || worldSlug === undefined} onClick={playLines}>
+              <PlaySolid size={10} />Play lines
+            </button>
+            <label>solo
+              <select value={solo ?? ""} onChange={(event) => { const next = event.target.value || null; setSolo(next); setPlaylistSolo(next); }}>
+                <option value="">all</option>
+                {speakers.map((sheetId) => <option key={sheetId} value={sheetId}>{sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId}</option>)}
+              </select>
+            </label>
+            <label>rate
+              <select value={rate} onChange={(event) => { const next = Number(event.target.value) as PlaylistState["rate"]; setRate(next); setPlaylistRate(next); }}>
+                {[0.75, 1, 1.25, 1.5].map((stop) => <option key={stop} value={stop}>{stop}×</option>)}
+              </select>
+            </label>
+            {plan === null ? null : <span className="fy-swpreview__lines-count">{playable.length} of {lines.length} line{lines.length === 1 ? "" : "s"} {lines.length === 1 ? "has" : "have"} a read</span>}
+            {plan === null || missing.length === 0 ? null : (
+              <button type="button" className="fy-swpreview__lines-door" disabled={preparing} onClick={prepareLines}>
+                Prepare {missing.length} line{missing.length === 1 ? "" : "s"} · {formatMicroUsd(plan.totalEstimatedMicroUsd)}
+              </button>
+            )}
+            {linesNotice === "" ? null : <span role="status" className="fy-swpreview__lines-notice">{linesNotice}</span>}
+          </div>
+        )}
       </div>
       <p className="fy-swpreview__script">{current?.shot.description ?? ""}</p>
       <ShotLightbox

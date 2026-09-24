@@ -82,7 +82,7 @@ export async function readCheckpoint(dir: string, tailSeq: number): Promise<Chec
  */
 export async function writeCheckpoint(dir: string, view: WorldChatLoaded): Promise<void> {
   const checkpoint = WorldChatCheckpointSchema.parse({
-    schemaVersion: 1,
+    schemaVersion: 2,
     throughSeq: view.seq,
     view,
   });

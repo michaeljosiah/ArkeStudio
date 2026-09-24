@@ -1,3 +1,4 @@
+import { shippedSkillBodies } from "../../contracts/test/skill-fixture.js";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
@@ -285,7 +286,7 @@ describe("the session lifecycle", () => {
     await adapter.dispose();
   });
 
-  it("declares only what it can do — no permissions to relay, no model catalogue", () => {
+  it("does not declare a catalog without an SDK discovery implementation", () => {
     const adapter = new ClaudeAdapter({ command: "claude" });
     assert.deepEqual([...adapter.capabilities()], ["events"]);
     assert.equal(adapter.knownInputTokenLimit(), null, "the model is the user's, and unknown until a turn reports it");
@@ -413,6 +414,93 @@ describe("the session lifecycle", () => {
   });
 });
 
+describe("captured Claude agent overrides", () => {
+  it("keeps concurrent prepared models and briefs independent and does not reuse a token", async () => {
+    const captured: Record<string, unknown>[] = [];
+    const adapter = new ClaudeAdapter({
+      command: "claude",
+      agents: { "stage-designer": { model: "anthropic/old", brief: "Obsolete constructor brief." } },
+      runQuery: ({ prompt, options }) => {
+        captured.push(options);
+        return (async function* () {
+          await prompt[Symbol.asyncIterator]().next();
+          yield result();
+        })();
+      },
+    });
+    const firstAgents = { "stage-designer": { model: "anthropic/first[1m]", brief: "First captured brief." } };
+    adapter.prepareSession({ preparationId: "one", agents: firstAgents });
+    assert.throws(() => adapter.prepareSession({ preparationId: "one", model: "anthropic/replacement" }), /already in use/);
+    adapter.prepareSession({ preparationId: "two", agents: { "world-builder": { model: "anthropic/second", brief: "Second captured brief." } } });
+    firstAgents["stage-designer"].model = "anthropic/changed-after-preparation";
+    firstAgents["stage-designer"].brief = "Changed after preparation.";
+    try {
+      const [first, second] = await Promise.all([
+        adapter.createSession({ purpose: "authoring", agent: "stage-designer", cwd: CWD, preparationId: "one" }),
+        adapter.createSession({ purpose: "world-chat", agent: "world-builder", cwd: CWD, preparationId: "two" }),
+      ]);
+      await Promise.all([first, second].map(({ sessionId }) => adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] })));
+      const a = captured.find((options) => options["model"] === "first[1m]");
+      const b = captured.find((options) => options["model"] === "second");
+      assert.ok(a && b);
+      assert.match(String(a["systemPrompt"]), /First captured brief/);
+      assert.doesNotMatch(String(a["systemPrompt"]), /Second captured|Obsolete constructor|Changed after/);
+      assert.match(String(b["systemPrompt"]), /Second captured brief/);
+      assert.doesNotMatch(String(b["systemPrompt"]), /First captured/);
+      await assert.rejects(adapter.createSession({ purpose: "authoring", agent: "stage-designer", cwd: CWD, preparationId: "one" }), /already consumed/);
+    } finally {
+      await adapter.dispose();
+    }
+  });
+
+  it("honors clearing instead of reviving constructor settings or an old world lease", async () => {
+    const fake = fakeQuery([result()]);
+    const adapter = new ClaudeAdapter({
+      command: "claude", runQuery: fake.run,
+      agents: { "sheet-editor": { model: "anthropic/old", brief: "Obsolete brief." } },
+      worldQueryUrl: "http://127.0.0.1:9/old-world",
+    });
+    adapter.prepareSession({ preparationId: "cleared", agents: {} });
+    try {
+      const { sessionId } = await adapter.createSession({ purpose: "authoring", agent: "sheet-editor", cwd: CWD, preparationId: "cleared" });
+      await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
+      assert.equal(fake.options()["model"], undefined);
+      assert.doesNotMatch(String(fake.options()["systemPrompt"]), /Obsolete brief/);
+      assert.equal(fake.options()["mcpServers"], undefined);
+    } finally {
+      await adapter.dispose();
+    }
+  });
+
+  it("lets an explicit dispatch model override the captured agent model, retaining its brief", async () => {
+    const fake = fakeQuery([result()]);
+    const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
+    adapter.prepareSession({ preparationId: "explicit", model: "anthropic/turn", agents: {
+      "stage-designer": { model: "anthropic/agent", brief: "The captured Stage brief." },
+    } });
+    try {
+      const { sessionId } = await adapter.createSession({ purpose: "authoring", agent: "stage-designer", cwd: CWD, preparationId: "explicit" });
+      await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
+      assert.equal(fake.options()["model"], "turn");
+      assert.match(String(fake.options()["systemPrompt"]), /The captured Stage brief/);
+    } finally {
+      await adapter.dispose();
+    }
+  });
+
+  it("consumes failed preparations and rejects cancelled creation without publishing a session", async () => {
+    const adapter = new ClaudeAdapter({ command: "claude", runQuery: fakeQuery([]).run });
+    adapter.prepareSession({ preparationId: "invalid", agents: { "sheet-editor": { model: "openai/wrong" } } });
+    await assert.rejects(adapter.createSession({ purpose: "authoring", agent: "sheet-editor", cwd: CWD, preparationId: "invalid" }), /not available/);
+    await assert.rejects(adapter.createSession({ purpose: "authoring", agent: "sheet-editor", cwd: CWD, preparationId: "invalid" }), /already consumed/);
+    adapter.prepareSession({ preparationId: "cancelled" });
+    await assert.rejects(adapter.createSession({ purpose: "authoring", cwd: CWD, preparationId: "cancelled", signal: AbortSignal.abort() }), /abort/i);
+    adapter.abandonSessionPreparation("cancelled");
+    await assert.rejects(adapter.createSession({ purpose: "authoring", cwd: CWD, preparationId: "cancelled" }), /preparation is missing/);
+    await adapter.dispose();
+  });
+});
+
 /**
  * The Claude lane reads the session it was prepared with (codex, 2026-08-23).
  *
@@ -452,7 +540,7 @@ describe("the skill a Claude session drafts under", () => {
     const fake = fakeQuery([result()]);
     // v2-launch builds the adapter with neither value; prepareSession is how the session is told.
     const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
-    adapter.prepareSession?.({ preparationId: "prep_skill", skillFamily: "seedance", skillModelId: "seedance-2.5" });
+    adapter.prepareSession?.({ preparationId: "prep_skill", skillBodies: shippedSkillBodies, skillFamily: "seedance", skillModelId: "seedance-2.5" });
     const { sessionId } = await adapter.createSession({
       purpose: "authoring",
       cwd: CWD,
@@ -467,7 +555,7 @@ describe("the skill a Claude session drafts under", () => {
 
   it("still honours the constructor options when a caller passes them", async () => {
     const fake = fakeQuery([result()]);
-    const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run, skillFamily: "seedance" });
+    const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run, skillBodies: shippedSkillBodies, skillFamily: "seedance" });
     const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "scene-writer" });
     await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
     const prompt = String(fake.options()["systemPrompt"]);

@@ -54,6 +54,7 @@ async function makeHarness(
     readVoiceReference?: JobQueueOptions["readVoiceReference"];
     readVideoSource?: JobQueueOptions["readVideoSource"];
     readVideoReferences?: JobQueueOptions["readVideoReferences"];
+    prepareReferences?: JobQueueOptions["prepareReferences"];
     admit?: JobQueueOptions["admit"];
     backoffBaseMs?: number;
     backoffCapMs?: number;
@@ -81,6 +82,7 @@ function build(
     readVoiceReference?: JobQueueOptions["readVoiceReference"];
     readVideoSource?: JobQueueOptions["readVideoSource"];
     readVideoReferences?: JobQueueOptions["readVideoReferences"];
+    prepareReferences?: JobQueueOptions["prepareReferences"];
     admit?: JobQueueOptions["admit"];
     backoffBaseMs?: number;
     backoffCapMs?: number;
@@ -125,6 +127,7 @@ function build(
     ...(opts.readVoiceReference ? { readVoiceReference: opts.readVoiceReference } : {}),
     ...(opts.readVideoSource ? { readVideoSource: opts.readVideoSource } : {}),
     ...(opts.readVideoReferences ? { readVideoReferences: opts.readVideoReferences } : {}),
+    ...(opts.prepareReferences ? { prepareReferences: opts.prepareReferences } : {}),
     ...(opts.admit ? { admit: opts.admit } : {}),
     maxAttempts: 3,
     backoffBaseMs: 5,
@@ -1835,6 +1838,31 @@ describe("retry classification (R-7, R-9, D5)", () => {
     h.queue.dispose();
   });
 
+  it("a witnessed busy answer from a cloud client with no idempotency key is retried, not held (codex on PR 1153)", async () => {
+    // A hosted reader's 429: transient by its own declaration, and the response proves nothing
+    // was synthesised. Without `submissionRejected` that combination fell into the uncertainty
+    // branch and sat in needs-reconciliation for a full generation pool.
+    const fake = new FakeProvider();
+    fake.submitError = Object.assign(new Error("breezeblue: pool full — retry after 3s (HTTP 429)"), { failureClass: "transient" });
+    fake.submissionRejected = true;
+    fake.submitErrorTimes = 2;
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the busy answers to be retried through", FOLD_MS);
+    assert.equal(fake.submitCount, 3);
+    h.queue.dispose();
+    // The same class without the proof is still the queue's uncertainty: held, not retried.
+    const unwitnessed = new FakeProvider();
+    unwitnessed.submitError = Object.assign(new Error("breezeblue: interrupted (HTTP 503)"), { failureClass: "transient" });
+    const h2 = await makeHarness({ fake: unwitnessed });
+    await h2.queue.start();
+    const held = await h2.queue.enqueue(INPUT);
+    await until(() => foldedJob(h2, held.id)?.status === "needs-reconciliation", "the unwitnessed answer to hold", FOLD_MS);
+    assert.equal(unwitnessed.submitCount, 1);
+    h2.queue.dispose();
+  });
+
   it("an error that declares itself transient is backed off, and the class survives giving up", async () => {
     // A local engine whose card has no room for the recipe (#692). Its message matches no
     // pattern, so only the class the client declared makes it a retry — and the failed row has
@@ -1878,7 +1906,12 @@ describe("retry classification (R-7, R-9, D5)", () => {
     fake.submitError = new Error("HTTP 503 unavailable");
     fake.submitErrorTimes = 1;
     fake.submitDelayMs = 10;
-    const h = await makeHarness({ fake }, { baseConcurrency: 1, backoffBaseMs: 300, backoffCapMs: 300, rng: () => 1 });
+    // Same clock as the two tests below: the sibling has to be enqueued before the retry's
+    // backoff runs out, and every transition between the failure and that enqueue is an fsync'd
+    // journal append. At 300 ms a loaded windows-latest shard ran the backoff out first and sent
+    // the first job again ahead of the sibling (CI run 34441542230, once three more real-store
+    // suites landed on the same shard), so the backoff is widened to dwarf that latency.
+    const h = await makeHarness({ fake }, { baseConcurrency: 1, backoffBaseMs: 1500, backoffCapMs: 1500, rng: () => 1 });
     await h.queue.start();
     const first = await h.queue.enqueue(INPUT);
     await until(
@@ -1893,7 +1926,7 @@ describe("retry classification (R-7, R-9, D5)", () => {
     assert.notEqual(b, a, "the sibling went out while the first job waited");
     assert.equal(aAgain, a, "the first job went out last, after its backoff");
     const held = fake.submitStartedAt[2]! - fake.submitStartedAt[0]!;
-    assert.ok(held >= 300, `the retry waited ${held} ms; the backoff is 300 ms`);
+    assert.ok(held >= 1500, `the retry waited ${held} ms; the backoff is 1500 ms`);
     h.queue.dispose();
   });
 
@@ -1906,7 +1939,18 @@ describe("retry classification (R-7, R-9, D5)", () => {
     fake.submitError = new Error("HTTP 503 unavailable");
     fake.submitErrorTimes = 1;
     fake.submitDelayMs = 40;
-    const h = await makeHarness({ fake }, { baseConcurrency: 1, baseIntervalMs: 150, backoffBaseMs: 1200, backoffCapMs: 1200, rng: () => 1 });
+    // The same clock as the queue-position tests below: between the failed attempt and the
+    // second sibling's submit sit the 200 ms wait, two enqueues and the dispatches, every
+    // transition an fsync'd journal append. At 1200 ms a loaded Windows runner ran the retry's
+    // backoff out inside that stretch and sent the retry among the siblings (CI runs
+    // 34415278836, 34416898303), so the backoff is widened to dwarf the latency while the
+    // 150 ms interval the siblings ride stays where it was; the gap they must fit inside is
+    // widened with it, still a third of the backoff, so what is asserted does not change.
+    // At 6000/2000 a Windows runner took 2228 ms between the two siblings' submits — the
+    // retry still waited, so the claim held and only the gap's tolerance did not (CI run
+    // 35210484083, after a new test file moved this one to another shard); widened again at
+    // the same ratio, still well inside FOLD_MS.
+    const h = await makeHarness({ fake }, { baseConcurrency: 1, baseIntervalMs: 150, backoffBaseMs: 9000, backoffCapMs: 9000, rng: () => 1 });
     await h.queue.start();
     const first = await h.queue.enqueue(INPUT);
     await until(
@@ -1922,7 +1966,7 @@ describe("retry classification (R-7, R-9, D5)", () => {
     const [a, b, c] = fake.submittedKeys;
     assert.ok(b !== a && c !== a && c !== b, "the two siblings went out while the first job waited");
     const gap = fake.submitStartedAt[2]! - fake.submitStartedAt[1]!;
-    assert.ok(gap < 600, `the third job went out ${gap} ms after the second; it rides the 150 ms interval, not the 1200 ms backoff`);
+    assert.ok(gap < 3000, `the third job went out ${gap} ms after the second; it rides the 150 ms interval, not the 9000 ms backoff`);
     await until(() => foldedJob(h, first.id)?.status === "succeeded", "the retry to succeed", FOLD_MS);
     h.queue.dispose();
   });
@@ -1964,7 +2008,9 @@ describe("retry classification (R-7, R-9, D5)", () => {
     // both sides. At 600/900 a loaded runner passed the first gate before the enqueue and
     // dispatched the second job outright (CI run 34024294005), so the gates are widened to
     // dwarf the fsync'd appends between the failure and the read, keeping the same ratio.
-    const h = await makeHarness({ fake }, { baseConcurrency: 1, baseIntervalMs: 2000, backoffBaseMs: 3000, backoffCapMs: 3000, rng: () => 1 });
+    // At 2000/3000 a Windows runner still passed the first gate before the enqueue (CI run
+    // 34415278836); doubled, at the same ratio, and still well inside FOLD_MS.
+    const h = await makeHarness({ fake }, { baseConcurrency: 1, baseIntervalMs: 4000, backoffBaseMs: 6000, backoffCapMs: 6000, rng: () => 1 });
     await h.queue.start();
     const first = await h.queue.enqueue(INPUT);
     await until(
@@ -2232,6 +2278,84 @@ describe("artifact verification (R-12, R-13, D12)", () => {
 });
 
 describe("cancellation (R-14, R-15, D10)", () => {
+  it("a revoked key met in the clip read pauses the lane and keeps the job queued, like a submit's credential fault (codex on PR 1156)", async () => {
+    const fake = new FakeProvider({});
+    const h = await makeHarness({ fake }, {
+      readVoiceReference: async () => { throw Object.assign(new Error("breezeblue: the credential was rejected — Authentication required. (HTTP 401)"), { submissionRejected: true }); },
+    });
+    await h.queue.start();
+    const job = await h.queue.enqueue({ ...INPUT, capability: "voice-tts", params: { voiceId: "harbour", text: "A line." }, voiceReference: true });
+    await until(() => h.queue.queueStatus("fake").paused, "the lane to pause on the credential fault", FOLD_MS);
+    assert.equal(foldedJob(h, job.id)?.status, "queued", "the job waits for the key, it is not failed");
+    assert.equal(foldedJob(h, job.id)?.failureClass, "provider-fault");
+    assert.equal(h.faults.length, 1, "the fault is published once");
+    assert.equal(fake.submitCount, 0);
+    h.queue.dispose();
+  });
+
+  it("a busy vendor met in the clip read is retried on bounded backoff, not failed on the spot (codex on PR 1153)", async () => {
+    const fake = new FakeProvider({});
+    fake.inlineArtifacts = [{ name: "speech.wav", contentType: "audio/wav", data: Uint8Array.from([0x52, 0x49, 0x46, 0x46, 38, 0, 0, 0, 0x57, 0x41, 0x56, 0x45, 0x66, 0x6d, 0x74, 0x20, 16, 0, 0, 0, 1, 0, 1, 0, 0x44, 0xac, 0, 0, 0x88, 0x58, 1, 0, 2, 0, 16, 0, 0x64, 0x61, 0x74, 0x61, 2, 0, 0, 0, 0, 0]) }];
+    let reads = 0;
+    const h = await makeHarness({ fake }, {
+      readVoiceReference: async () => {
+        reads += 1;
+        // The listing answers 429 twice — the pool is full — then the slot is there.
+        if (reads <= 2) throw Object.assign(new Error("breezeblue: Rate limit exceeded. — retry after 1s (HTTP 429)"), { failureClass: "transient", submissionRejected: true });
+        return { name: "harbour.wav", contentType: "audio/wav" as const, data: Uint8Array.from([1, 2, 3]), remoteVoiceId: "voc_1" };
+      },
+    });
+    await h.queue.start();
+    const job = await h.queue.enqueue({ ...INPUT, capability: "voice-tts", params: { voiceId: "harbour", text: "A line." }, voiceReference: true });
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the read to come round after the pool clears", FOLD_MS);
+    assert.equal(reads, 3);
+    assert.equal(fake.submitCount, 1);
+    assert.equal(foldedJob(h, job.id)?.attempt, 3, "each preparation retry counts as an attempt, so the bound holds");
+    h.queue.dispose();
+    // And the bound: a vendor that never clears fails with the class kept, after the attempts.
+    const stuck = new FakeProvider({});
+    const h2 = await makeHarness({ fake: stuck }, {
+      readVoiceReference: async () => { throw Object.assign(new Error("breezeblue: pool full (HTTP 429)"), { failureClass: "transient", submissionRejected: true }); },
+    });
+    await h2.queue.start();
+    const job2 = await h2.queue.enqueue({ ...INPUT, capability: "voice-tts", params: { voiceId: "harbour", text: "A line." }, voiceReference: true });
+    await until(() => foldedJob(h2, job2.id)?.status === "failed", "the read to give up", FOLD_MS);
+    assert.match(foldedJob(h2, job2.id)?.error ?? "", /^gave up after 3 attempts/);
+    assert.equal(foldedJob(h2, job2.id)?.failureClass, "transient");
+    assert.equal(stuck.submitCount, 0);
+    h2.queue.dispose();
+  });
+
+  it("cancels a clip read in flight: the read gets the job's signal and a cancel ends as cancelled, not failed (codex on PR 1153)", async () => {
+    // A hosted reader's clip read can save a slot on the vendor's account, so it must take the
+    // cancellation like reference preparation does — before, no controller was registered
+    // until submit, and a cancelled job could still upload the recording and bill a slot.
+    const fake = new FakeProvider({});
+    let reading: AbortSignal | undefined;
+    let reads = 0;
+    const h = await makeHarness({ fake }, {
+      readVoiceReference: (_worldId, _provider, _model, _voiceId, signal) => new Promise((_resolve, reject) => {
+        reads += 1;
+        reading = signal;
+        signal?.addEventListener("abort", () => reject(signal.reason ?? new Error("aborted")), { once: true });
+      }),
+    });
+    await h.queue.start();
+    const job = await h.queue.enqueue({ ...INPUT, capability: "voice-tts", params: { voiceId: "harbour", text: "A line." }, voiceReference: true });
+    await until(() => reading !== undefined, "the clip read to start", FOLD_MS);
+    await h.queue.cancel(job.id);
+    assert.equal(reading?.aborted, true, "the read was told to stop");
+    await until(() => foldedJob(h, job.id)?.status === "cancelled", "the job to fold to cancelled", FOLD_MS);
+    assert.equal(foldedJob(h, job.id)?.error, null);
+    assert.equal(fake.submitCount, 0);
+    // The aborted run must not put the job back for a second read: between the abort and the
+    // cancel's terminal write the job is still "queued", and a requeue there dispatched it again
+    // with nobody left to abort the second run.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(reads, 1, "one read, aborted; never a second");
+    h.queue.dispose();
+  });
+
   it("does not warn about a charge when queued remote work never reached the provider", async () => {
     const fake = new FakeProvider({});
     fake.pollState = "running";
@@ -2552,6 +2676,53 @@ describe("a result fetch the provider refuses is not re-fetched (#630)", () => {
     // Several backoff caps' worth of quiet: a poller still orphaned from its job would fetch again.
     await new Promise((resolve) => setTimeout(resolve, 120));
     assert.equal(fetches, settled, "a cancelled job's poller stops");
+    h.queue.dispose();
+  });
+});
+
+describe("multimedia preparation stays before the submission boundary", () => {
+  it("carries prepared audio ephemerally without writing it to the journal", async () => {
+    const fake = new FakeProvider({});
+    const data = Uint8Array.from(Buffer.from("private-reference-audio"));
+    const h = await makeHarness({ fake }, { prepareReferences: async (_job, videos) => ({ videos,
+      audio: [{ name: "tone.wav", contentType: "audio/wav", data, durationSec: 2 }] }) });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "prepared reference to land", FOLD_MS);
+    assert.deepEqual(fake.submittedMediaAudioReferences[0]!.data, data);
+    const log = await readFile(h.journalPath, "utf8");
+    assert.equal(log.includes("private-reference-audio"), false);
+    assert.equal(log.includes("mediaAudioReferences"), false);
+    h.queue.dispose();
+  });
+  it("does not journal or submit media bytes when preparation fails", async () => {
+    const fake = new FakeProvider({});
+    const h = await makeHarness({ fake }, { prepareReferences: async () => { throw new Error("reference changed since review"); } });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, job.id)?.status === "failed", "preparation failure", FOLD_MS);
+    assert.equal(fake.submitCount, 0);
+    const log = await readFile(h.journalPath, "utf8");
+    assert.equal(log.includes('"status":"submitting"'), false);
+    assert.match(foldedJob(h, job.id)?.error ?? "", /changed since review/);
+    h.queue.dispose();
+  });
+
+  it("cancels an in-progress preparation without submitting or misclassifying it as failed", async () => {
+    const fake = new FakeProvider({});
+    let started = false, aborted = false;
+    const h = await makeHarness({ fake }, { prepareReferences: async (_job, videos, signal) => {
+      started = true;
+      await new Promise<void>((_resolve, reject) => signal.addEventListener("abort", () => { aborted = true; reject(new Error("cancelled")); }, { once: true }));
+      return { videos, audio: [] };
+    } });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => started, "preparation to begin", FOLD_MS);
+    await h.queue.cancel(job.id);
+    await until(() => foldedJob(h, job.id)?.status === "cancelled", "cancelled preparation", FOLD_MS);
+    assert.equal(aborted, true);
+    assert.equal(fake.submitCount, 0);
     h.queue.dispose();
   });
 });

@@ -134,7 +134,8 @@ describe("startup recovery", () => {
     const view = foldConversation(meta!.id, meta!.createdAt, (await store.read()).events).view;
     assert.equal(view.messages.length, 1);
     assert.equal(view.messages[0]!.text, "her aunt");
-    assert.equal(view.activeRun?.status, "interrupted", "and it is honestly described, not still spinning");
+    assert.equal(view.activeRun, null, "the recovered run no longer blocks new work");
+    assert.equal(view.lastFailedRun?.status, "interrupted", "the unanswered turn offers a retry");
   });
 
   it("sweeps the tombstone a deletion left behind", async () => {

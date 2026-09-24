@@ -38,6 +38,8 @@ export interface SessionConfigInput {
    * shaped a draft is worth nothing if it names a document the drafting never saw.
    */
   skillModelId?: string;
+  /** Shipped guidance captured by the coordinator at session construction, keyed by skill id. */
+  skillBodies?: Readonly<Record<string, string>>;
   /**
    * Settings' `research.web`: whether this session may go online (2026-08-23).
    *
@@ -62,4 +64,13 @@ const SKILLED_AGENTS: Record<string, Parameters<typeof skillFor>[0]> = {
 export function skillForAgent(agentName: string, family: string | undefined, modelId?: string): Skill | null {
   const purpose = SKILLED_AGENTS[agentName];
   return purpose === undefined ? null : skillFor(purpose, family, modelId);
+}
+
+/** Resolve the same recorded metadata and require its prepared text; never silently omit it. */
+export function sessionSkillForAgent(agentName: string, input: Pick<SessionConfigInput, "skillFamily" | "skillModelId" | "skillBodies">): (Skill & {body: string}) | null {
+  const skill = skillForAgent(agentName, input.skillFamily, input.skillModelId);
+  if (!skill) return null;
+  const body = input.skillBodies?.[skill.id];
+  if (!body?.trim()) throw new Error(`Authoring skill ${skill.id}@v${skill.version} was not loaded for this session.`);
+  return {...skill, body};
 }

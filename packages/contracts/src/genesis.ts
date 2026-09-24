@@ -58,7 +58,7 @@ export type GenesisKeyArtBrief = z.infer<typeof GenesisKeyArtBriefSchema>;
 
 /** A key-art brief that settles nothing is no brief: the item is not dispatched (R-5). */
 export function keyArtBriefSettled(brief: GenesisKeyArtBrief | undefined): boolean {
-  return brief !== undefined && (brief.subject !== undefined || brief.moment !== undefined);
+  return brief !== undefined && (brief.prompt !== undefined || brief.subject !== undefined || brief.moment !== undefined);
 }
 
 /**
@@ -94,12 +94,16 @@ export function locationBriefProse(brief: GenesisLocationBrief | undefined): str
 }
 
 export function keyArtBriefProse(brief: GenesisKeyArtBrief): string {
+  if (brief.prompt !== undefined) return brief.prompt;
   return [
     brief.subject,
     brief.moment !== undefined ? `The moment: ${brief.moment}` : null,
     brief.stakes !== undefined ? `At stake: ${brief.stakes}` : null,
   ]
     .filter((clause): clause is string => clause !== null && clause !== undefined)
+    // Each clause is a sentence of its own; one that arrived with its full stop would
+    // otherwise read `beds.. The moment` once joined (issue 906).
+    .map((clause) => clause.trim().replace(/\.+$/, ""))
     .join(". ");
 }
 
@@ -169,7 +173,7 @@ const entityFileBase = {
 };
 
 export const GenesisCharacterFileSchema = z
-  .object({ ...entityFileBase, brief: GenesisCharacterBriefSchema.optional() })
+  .object({ ...entityFileBase, neverDepicted: z.boolean().optional(), brief: GenesisCharacterBriefSchema.optional() })
   .strip();
 export type GenesisCharacterFile = z.infer<typeof GenesisCharacterFileSchema>;
 
@@ -192,6 +196,7 @@ export const BlueprintCharacterSchema = z
     name: z.string().min(1).max(120),
     line: z.string().min(1).max(300).optional(),
     description: z.string().min(1).max(4000).optional(),
+    neverDepicted: z.boolean().optional(),
     brief: GenesisCharacterBriefSchema.optional(),
   })
   .strict();

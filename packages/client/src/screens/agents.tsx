@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Textarea, cx } from "../components/ui.js";
 import { listHarnessModels, setAgentConfig, useStore } from "../lib/store.js";
+import { HarnessModelOptions, HarnessModelStatus } from "../components/harness-models.js";
 
 /**
  * The writing agents, behind Advanced on Harness (design 54b — this was a settings tab
@@ -16,60 +17,54 @@ import { listHarnessModels, setAgentConfig, useStore } from "../lib/store.js";
  * restate canon, never stamp versions. The accept gate assumes them, so an agent talked out of
  * them fails in ways that look like application bugs rather than like a changed setting.
  */
-export function AgentsPanel() {
+export function AgentsPanel({ focusAgent }: { focusAgent?: string } = {}) {
   const { state } = useStore();
   const agents = state?.app.agents ?? [];
-  const models = state?.app.harnessModels ?? [];
   const harnessReady = state?.app.health.harness.status === "healthy";
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const focusTarget = useRef<HTMLSelectElement | null>(null);
+  const focusedAgent = useRef<string | undefined>(undefined);
+  const catalogStatus = state?.app.harnessModelStatus?.status;
 
   // Ask once when the screen opens: the list is the harness's, and it can change under us.
   useEffect(() => {
     if (harnessReady) listHarnessModels();
-  }, [harnessReady]);
+  }, [harnessReady, state?.app.harnessInfo?.generation]);
 
-  // Grouped by provider, and inside each group the provider's own default first and named as
-  // such. Forty-odd models across three providers is a lot to read; the one they would have
-  // picked themselves is the one worth finding without reading.
-  const byProvider = new Map<string, typeof models>();
-  for (const m of models) byProvider.set(m.provider, [...(byProvider.get(m.provider) ?? []), m]);
-  for (const [provider, list] of byProvider) {
-    byProvider.set(provider, [...list].sort((a, b) => Number(b.isDefault ?? false) - Number(a.isDefault ?? false)));
-  }
+  useEffect(() => {
+    if (focusAgent === undefined) { focusedAgent.current = undefined; return; }
+    if (focusedAgent.current === focusAgent || catalogStatus !== "ready" && catalogStatus !== "error") return;
+    if (!focusTarget.current) return;
+    focusedAgent.current = focusAgent;
+    focusTarget.current.focus({ preventScroll: true });
+    focusTarget.current.scrollIntoView({ block: "nearest" });
+  }, [focusAgent, catalogStatus, agents.length]);
 
   return (
     <>
+      <HarnessModelStatus state={state} />
       {agents.map((a) => {
         const open = editing === a.name;
         return (
           <div key={a.name} className="fy-set__row fy-set__row--stack">
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
               <div className="fy-set__name fy-set__name--wide">
                 <div className="fy-set__title">{a.name}</div>
                 <div className="fy-set__caps">{a.description}</div>
               </div>
               <select
                 className="fy-set__pill"
+                ref={a.name === focusAgent ? focusTarget : undefined}
+                style={{ minWidth: 0, maxWidth: "100%", flex: "1 1 180px" }}
                 aria-label={`Model for ${a.name}`}
+                title="A running session keeps the model it started with; the next one picks this up"
                 value={a.model ?? ""}
-                disabled={models.length === 0}
                 onChange={(e) => setAgentConfig(a.name, { model: e.target.value === "" ? null : e.target.value })}
               >
                 {/* Empty is a real answer, not a missing one: it means the harness decides. */}
-                <option value="">
-                  {models.length === 0 ? "ask the harness — it is not running" : "whatever OpenCode is set to"}
-                </option>
-                {[...byProvider.entries()].map(([provider, list]) => (
-                  <optgroup key={provider} label={provider}>
-                    {list.map((m) => (
-                      <option key={`${provider}/${m.id}`} value={`${provider}/${m.id}`}>
-                        {m.displayName ?? m.id}
-                        {m.isDefault ? " · this provider's default" : ""}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
+                <option value="">Ask the harness</option>
+                <HarnessModelOptions state={state} selected={a.model} needsImages={a.name === "stage-designer"} />
               </select>
               <button
                 type="button"
@@ -90,12 +85,8 @@ export function AgentsPanel() {
                   onChange={(e) => setDraft(e.target.value)}
                   style={{ minHeight: 160, font: "400 12px/1.6 var(--font-mono)" }}
                   aria-label={`What ${a.name} is for`}
+                  title="A running session keeps the brief it started with; the next one picks this up"
                 />
-                <div className="fy-set__note" style={{ marginTop: 8 }}>
-                  This is what the agent is for. The rules that keep it inside its folder, off
-                  the version fields and away from restating canon are not editable — they are
-                  what the accept gate assumes.
-                </div>
                 <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
                   <Button
                     disabled={draft.trim().length === 0 || draft === a.brief}
@@ -124,10 +115,6 @@ export function AgentsPanel() {
           </div>
         );
       })}
-      <div className="fy-set__note">
-        a session already running keeps the settings it started with · the next one picks these
-        up{models.length > 0 ? ` · ${models.length} models offered by the harness` : ""}
-      </div>
     </>
   );
 }

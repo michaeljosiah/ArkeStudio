@@ -5,8 +5,6 @@ import "@fontsource/geist-sans/400.css";
 import "@fontsource/geist-sans/500.css";
 import "@fontsource/geist-sans/600.css";
 import "@fontsource/geist-sans/700.css";
-import "@fontsource/geist-mono/400.css";
-import "@fontsource/geist-mono/500.css";
 // The launch screen wordmark only (--font-wordmark). Two weights, because the lockup is two
 // lines: the mark at 200 and the tagline at 300. Nothing else in the app uses this face.
 import "@fontsource/jost/200.css";
@@ -17,6 +15,7 @@ import "./theme/tokens/spacing.css";
 import "./theme/tokens/effects.css";
 import "./theme/tokens/launch.css";
 import "./theme/globals.css";
+import "./screens/production-setup.css";
 // Component styles are gathered here (not in component modules) so the node test runner can
 // import the component graph without a CSS loader.
 import "./components/ui.css";
@@ -28,6 +27,12 @@ import "./components/editor/editor.css";
 import "./domain/domain.css";
 import "./screens/screens.css";
 import "./screens/fidelity.css";
+import "./screens/scene-workspace/workspace.css";
+import "./screens/scene-workspace/shot-page.css";
+// After fidelity.css: the panel re-dresses the provider-call inspector with a rule of equal
+// specificity, and the later sheet wins.
+import "./components/activity-panel.css";
+import "./components/account-menu.css";
 import { App } from "./App.js";
 import { initStore } from "./lib/store.js";
 import { initializeTheme } from "./lib/theme.js";

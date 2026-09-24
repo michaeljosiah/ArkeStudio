@@ -393,6 +393,7 @@ export function projectWorkspace(
 ): WorldChatWorkspace {
   return {
     conversationId: loaded.id,
+    ...(loaded.productionSetup ? { productionSetup: loaded.productionSetup } : {}),
     status: loaded.status,
     // The mode changes initiative, never acceptance authority (SPEC-023 R-21).
     initiative: loaded.initiative ?? "collaborate",

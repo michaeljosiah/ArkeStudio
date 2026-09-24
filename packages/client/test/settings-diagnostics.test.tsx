@@ -238,6 +238,31 @@ describe("Settings · Diagnostics (R-36, R-37, turn 111)", () => {
     assert.match(selected, /ElevenLabs/);
   });
 
+  it("the unmeasured hardware remedy reaches the machine's measuring control (#992)", () => {
+    const finding = badDay().findings.find((f) => f.kind === "hardware-unmeasured")!;
+    assert.ok(finding.remedy);
+    __setStateForTest(FIXTURE_STATE, { diagnostics: null });
+    const html = renderToString(
+      <MemoryRouter initialEntries={[controlHref(finding.remedy)]}><App /></MemoryRouter>,
+    );
+    const selected = /aria-selected="true"[^>]*>([\s\S]*?)<\/button>/.exec(html)?.[1] ?? "";
+    assert.match(selected, /Ollama/);
+    assert.match(html, /data-testid="machine-header"[^>]*>not measured/);
+    assert.match(plain(html), /THIS MACHINE[\s\S]*Measure/);
+  });
+
+  it("displays the spend rise in dollars while retaining the exact measured amount (#992)", () => {
+    const snapshot = derived({ ledger: [...FIXTURE_STATE.app.ledger, {
+      ...FIXTURE_STATE.app.ledger[0]!, ts: NOW, model: "seedance-2.0-fast",
+      estimatedMicroUsd: 16_949_630, actualMicroUsd: 16_949_630,
+    }] });
+    const finding = snapshot.findings.find((f) => f.kind === "spend-above-previous")!;
+    assert.equal(finding.facts.find((f) => f.name === "rise-micro-usd")?.value, 16_949_630);
+    const text = plain(render(snapshot));
+    assert.match(text, /spend rose \$16\.95 over the seven days before; seedance-2\.0-fast accounts for the largest share/);
+    assert.doesNotMatch(text, /microUSD|16949630/);
+  });
+
   it("before the first snapshot arrives, the pane states that rather than claiming a result", () => {
     const text = plain(render(null));
     assert.match(text, /not derived yet/);

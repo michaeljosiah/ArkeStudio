@@ -1,9 +1,12 @@
-import { useLocation, useNavigate } from "react-router";
-import { ActivityIcon, ChevronLeft, Cog, Inbox } from "./icons.js";
+import { useNavigate } from "react-router";
+import { Bell, ChevronLeft, Cog, Inbox } from "./icons.js";
+import { AccountControl } from "./account-menu.js";
 import { cx } from "./ui.js";
 import { useStore } from "../lib/store.js";
-import { rememberSettingsReturn, settingsReturnPath } from "../lib/settings-return.js";
-import { computeNeedsYou, unattendedProposalsOf } from "@arke-studio/contracts";
+import { closeActivityPanel, openActivityPanel, useActivityPanel, waitingUpdate } from "../lib/activity-panel.js";
+import { bundledReleases } from "../lib/releases.js";
+import { unreadCount } from "../lib/release-notes.js";
+import { arrivedSince, computeNeedsYou, unattendedProposalsOf } from "@arke-studio/contracts";
 
 /**
  * The app's chrome: one bar, drawn the same way on every screen.
@@ -25,6 +28,10 @@ import { computeNeedsYou, unattendedProposalsOf } from "@arke-studio/contracts";
  * that pair's order is the settlement above and splitting it would reopen it. It is the only one
  * of the three that is world-scoped, so it is also the only one that can be absent.
  *
+ * The Arke account (design turn 151) went *after* settings, last of all: it is the one thing in
+ * the bar about the person rather than the screen, and every product puts that at the end. The
+ * pair stays a pair. Pressed, it opens a menu over this screen, as the bell does, never a page.
+ *
  * This disagrees with the prototype on home, which drew the lockup left. Consistency across
  * forty-one screens is worth more than the one composition it came from.
  */
@@ -32,6 +39,7 @@ export function AppChrome({
   back,
   context,
   menu,
+  aside,
   controls = true,
   current,
   divided = true,
@@ -41,17 +49,31 @@ export function AppChrome({
   context?: { label: string; to?: string };
   /** Rendered after the context — the bench's session switcher lives here (design 68b). */
   menu?: React.ReactNode;
+  /**
+   * Rendered at the right, before the app's own icons — the Bench's subject and its session
+   * spend as pills (design 142a). Facts about the screen, not controls, so they sit apart from
+   * the buttons rather than among them.
+   */
+  aside?: React.ReactNode;
   /** Launch is the one screen without them: nothing is set up yet and nothing has happened. */
   controls?: boolean;
-  current?: "proposals" | "activity" | "settings";
+  current?: "proposals" | "activity";
   divided?: boolean;
 }) {
   const navigate = useNavigate();
-  const location = useLocation();
   const { state } = useStore();
   // Same derivation as Activity: rare unattended proposals must light this from every screen,
   // alongside reconciliation, paused providers, external edits and paid work awaiting review.
   const attention = state ? computeNeedsYou(state).length > 0 : false;
+  // The second dot (design turn 136, R-24): something to read rather than decide — work that came
+  // back since the Inbox was last opened, a release not yet read, or one the updater has found
+  // and the person does not have yet. Warning wins when both apply.
+  const seen = state?.app.activitySeen ?? { inboxSeenAt: null, whatsNewSeenVersion: null };
+  const fresh = state
+    ? arrivedSince(state.app.jobs, seen.inboxSeenAt) ||
+      unreadCount(bundledReleases(), seen.whatsNewSeenVersion, waitingUpdate(state.app.update)?.targetVersion ?? null) > 0
+    : false;
+  const panel = useActivityPanel();
   // Proposals are world-scoped, so the icon only exists while a world is open — the same rule the
   // world navigation follows. Its dot means the same thing as activity's: something wants you.
   const openWorldId = state?.world?.meta.worldId;
@@ -87,6 +109,7 @@ export function AppChrome({
         <span className="fy-brand__studio">Studio</span>
       </button>
       <div className="fy-titlebar__side fy-titlebar__side--right">
+        {aside}
         {controls && (
           <>
             {/* Proposals sits before activity: AppChrome's own settlement is that activity and
@@ -108,37 +131,39 @@ export function AppChrome({
                 {waiting > 0 && <span className="fy-iconbtn__dot" />}
               </button>
             )}
+            {/* The bell opens Activity over this screen rather than leaving it (design turn 136,
+                R-20): Inbox while anything needs you, What's new otherwise (R-21). Pressed again,
+                it closes; the panel's own outside-press rule leaves the bell alone for that. */}
             <button
               type="button"
-              className={cx("fy-iconbtn", current === "activity" && "fy-iconbtn--current")}
-              title={attention ? "Activity — something needs you" : "Activity"}
+              className={cx("fy-iconbtn", (current === "activity" || panel.open) && "fy-iconbtn--current")}
+              title={attention ? "Activity — something needs you" : fresh ? "Activity — something new" : "Activity"}
               aria-label="Activity"
-              aria-current={current === "activity" ? "page" : undefined}
-              onClick={() => navigate("/activity")}
+              aria-expanded={panel.open}
+              data-activity-bell=""
+              onClick={() => (panel.open ? closeActivityPanel() : openActivityPanel(attention ? "inbox" : "new"))}
             >
-              <ActivityIcon size={13} />
-              {attention && <span className="fy-iconbtn__dot" />}
+              <Bell size={13} />
+              {attention ? (
+                <span className="fy-iconbtn__dot" />
+              ) : fresh ? (
+                <span className="fy-iconbtn__dot fy-iconbtn__dot--new" />
+              ) : null}
             </button>
             <button
               type="button"
-              className={cx("fy-iconbtn", current === "settings" && "fy-iconbtn--current")}
-              title={current === "settings" ? "Leave Settings" : "Settings"}
-              aria-label={current === "settings" ? "Leave Settings" : "Settings"}
-              aria-current={current === "settings" ? "page" : undefined}
-              // On a Settings surface the gear is the way back (SPEC-042 R-6): Settings is a page
-              // with no close of its own, and the route it returns to is the one this control
-              // was pressed from — not /worlds, which is where the old panel's close always went.
-              onClick={() => {
-                if (current === "settings") {
-                  navigate(settingsReturnPath());
-                  return;
-                }
-                rememberSettingsReturn(location.pathname + location.search);
-                navigate("/settings/providers");
-              }}
+              className="fy-iconbtn"
+              title="Settings"
+              aria-label="Settings"
+              // Where it was pressed from is what renders behind the Settings sheet and where the
+              // sheet returns you (SPEC-042 R-6, design turn 150) — remembered by the app on every
+              // change of address, so a remedy's button into Settings counts the same as this one.
+              // The sheet carries its own close; no surface under it ever shows a gear to leave by.
+              onClick={() => navigate("/settings/providers")}
             >
               <Cog size={13} />
             </button>
+            <AccountControl />
           </>
         )}
       </div>

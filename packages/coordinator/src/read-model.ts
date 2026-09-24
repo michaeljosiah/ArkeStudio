@@ -1,5 +1,6 @@
 import {
   IDLE_UPDATE_STATE,
+  SIGNED_OUT,
   vendorAuthUnavailable,
   type AppHealth,
   type ClientState,
@@ -40,6 +41,8 @@ export class ReadModel {
         presets: [],
         spend: null,
         backgroundNotifications: "issues-only",
+        activitySeen: { inboxSeenAt: null, whatsNewSeenVersion: null },
+        account: SIGNED_OUT,
         research: { web: false },
         narrator: null,
         appearance: { theme: "system" },
@@ -50,6 +53,7 @@ export class ReadModel {
         drift: [],
         agents: [],
         harnessModels: [],
+        harnessModelStatus: { status: "idle" },
         harnessInfo: null,
         queues: [],
         setup: null,
@@ -82,6 +86,8 @@ export class ReadModel {
         | "presets"
         | "spend"
         | "backgroundNotifications"
+        | "activitySeen"
+        | "account"
         | "research"
         | "appearance"
         | "narrator"
@@ -115,8 +121,11 @@ export class ReadModel {
     this.state = { ...this.state, app: { ...this.state.app, agents } };
   }
 
-  setHarnessModels(harnessModels: ClientState["app"]["harnessModels"]): void {
-    this.state = { ...this.state, app: { ...this.state.app, harnessModels } };
+  setHarnessModels(
+    harnessModels: ClientState["app"]["harnessModels"],
+    harnessModelStatus: ClientState["app"]["harnessModelStatus"] = { status: "ready" },
+  ): void {
+    this.state = { ...this.state, app: { ...this.state.app, harnessModels, harnessModelStatus } };
   }
 
   getState(): ClientState {
@@ -151,6 +160,7 @@ export class ReadModel {
       worldChat: world === null ? null : this.state.worldChat,
       bench: world === null ? null : this.state.bench,
       frameRuns: sameWorld ? this.state.frameRuns : [],
+      stageConstructionRequests: sameWorld ? this.state.stageConstructionRequests : [],
       stagePlayblastRequests: sameWorld ? this.state.stagePlayblastRequests : [],
     };
   }
@@ -184,6 +194,9 @@ export class ReadModel {
     this.state = { ...this.state, worldChat };
   }
 
+  setStageConstructionRequests(requests: NonNullable<ClientState["stageConstructionRequests"]>): void {
+    this.state = { ...this.state, stageConstructionRequests: requests.filter(request => request.worldId === this.state.world?.meta.worldId) };
+  }
   setStagePlayblastRequests(requests: NonNullable<ClientState["stagePlayblastRequests"]>): void {
     this.state = { ...this.state, stagePlayblastRequests: requests.filter((request) => request.worldId === this.state.world?.meta.worldId) };
   }
@@ -318,6 +331,14 @@ export class ReadModel {
         this.state = { ...this.state, app: { ...this.state.app, backgroundNotifications: event.preference } };
         return;
       }
+      case "activity.seen": {
+        this.state = { ...this.state, app: { ...this.state.app, activitySeen: event.seen } };
+        return;
+      }
+      case "account.changed": {
+        this.state = { ...this.state, app: { ...this.state.app, account: event.account } };
+        return;
+      }
       case "narrator.changed": {
         this.state = { ...this.state, app: { ...this.state.app, narrator: event.voice } };
         return;
@@ -328,6 +349,10 @@ export class ReadModel {
       }
       case "runtime.status": {
         this.state = { ...this.state, app: { ...this.state.app, runtime: event.runtime } };
+        return;
+      }
+      case "local-ai.residency": {
+        this.state = { ...this.state, app: { ...this.state.app, residency: event.residency } };
         return;
       }
       case "harness.status": {

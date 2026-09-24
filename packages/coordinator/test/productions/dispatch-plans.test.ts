@@ -370,7 +370,7 @@ describe("durable scene-dispatch plans (SPEC-024; issue 402)", () => {
    */
   it("persists a plan for a scene that carries references, look and all", async () => {
     const fixture = await open();
-    const scene: Scene = { ...fixture.scene, shots: [shot(1, 6, "@maren-kest at the rail")] };
+    const scene: Scene = { ...fixture.scene, shots: [shot(1, 6, "@maren-kest at the rail"), shot(2, 6, "@maren-kest turns from @the-vigil")] };
     const kits = fixture.bundle.referenceKits.map((kit) =>
       kit.sheetId === "maren-kest"
         ? {
@@ -418,6 +418,23 @@ describe("durable scene-dispatch plans (SPEC-024; issue 402)", () => {
     assert.equal(maren.mode, "scoped-look");
     assert.ok(maren.file.includes("council-coat"));
 
+    // The pass summary (SPEC-044 §2.3), recorded from the compiled passes: the first pass sends
+    // the look and the place; the chained second opens on a frame and sends neither, each said
+    // with its reason — and nothing about a voice, because nobody speaks.
+    assert.equal(plan.passes.length, 2, "6s + 6s against a 10s cap is two passes");
+    assert.deepEqual(plan.passes[0]!.carries, {
+      shots: [{ shotId: "sh_1", number: 1 }],
+      place: { sheetId: "the-vigil", name: "The Vigil", rides: false, reason: "no plate" },
+      cast: [{ sheetId: "maren-kest", name: "Maren Kest", voice: "none", look: "rides" }],
+    });
+    assert.deepEqual(plan.passes[1]!.carries, {
+      shots: [{ shotId: "sh_2", number: 2 }],
+      frame: { shotId: "sh_2", number: 2 },
+      place: { sheetId: "the-vigil", name: "The Vigil", rides: false, reason: "no plate" },
+      cast: [{ sheetId: "maren-kest", name: "Maren Kest", voice: "none", look: "not-sent", reason: "this model takes one image" }],
+    });
+    assert.equal(foldPlan(plan, [], []).passes[1]!.carries?.frame?.shotId, "sh_2", "the fold hands the summary to the card");
+
     // And it survives the round trip the reader takes, which is a second strict parse.
     const plans = await listPlans(fixture.store, fixture.production.meta.id);
     const reread = plans.find((candidate) => candidate.planId === plan.planId);
@@ -426,6 +443,86 @@ describe("durable scene-dispatch plans (SPEC-024; issue 402)", () => {
       reread!.passes.flatMap((pass) => pass.compiled.references).find((r) => r.sheetId === "maren-kest")!.mode,
       "scoped-look",
     );
+  });
+
+  /*
+   * Issue 1085: nothing on this path measured the words that travel. A body at the cap composed
+   * a durable plan and a queued job, and the recipe's own limit refused it at generation — a
+   * terminal failure after the authorization said yes.
+   */
+  it("names the wire prompt over the model's cap, per shot and per pass (issue 1085)", async () => {
+    const fixture = await open();
+    const planWith = (model: ManifestModel, mode: "per-shot" | "whole-scene") =>
+      planScene(
+        {
+          world: fixture.bundle.meta,
+          productionId: fixture.production.meta.id,
+          sheets: fixture.bundle.sheets,
+          kits: fixture.bundle.referenceKits,
+          scene: fixture.scene,
+          selections: {},
+          model,
+        },
+        mode,
+      );
+    const create = (model: ManifestModel, mode: "per-shot" | "whole-scene", requestId: string) =>
+      createDispatchPlan(fixture.store, {
+        worldId: WORLD_ID,
+        productionId: fixture.production.meta.id,
+        scene: fixture.scene,
+        plan: planWith(model, mode),
+        model,
+        world: fixture.bundle,
+        policy: "review-gated",
+        requestId,
+        clock: CLOCK,
+      });
+    // The cap a body would never trip: the longest authored body, exactly. Planning never reads
+    // the cap, so the same parts compose either way — what travels is longer, because the
+    // preamble, the pass's structure line and the derived negatives all ride outside the body.
+    const bodies = planWith(CHAINING, "per-shot").shots.map((entry) => entry.parts.body.length);
+    const cap = Math.max(...bodies);
+    const capped: ManifestModel = { ...CHAINING, limits: { ...CHAINING.limits, maxPromptChars: cap } };
+
+    for (const [mode, requestId] of [["per-shot", "01J8E0000000000000000000P1"], ["whole-scene", "01J8E0000000000000000000P2"]] as const) {
+      const plan = await create(capped, mode, requestId);
+      for (const pass of plan.passes) {
+        const wire = String(pass.compiled.params["prompt"]);
+        assert.ok(wire.length > cap, `${mode} pass ${pass.passIndex}: the composed prompt really is over`);
+        assert.deepEqual(
+          pass.carries?.promptOverCap,
+          { chars: wire.length, limit: cap },
+          `${mode} pass ${pass.passIndex}: the number named is the wire prompt's, not the body's`,
+        );
+      }
+    }
+
+    // And a model with room says nothing — a warning that fires on a prompt the model takes is
+    // a warning nobody reads.
+    const roomy = await create({ ...CHAINING, limits: { ...CHAINING.limits, maxPromptChars: 100_000 } }, "whole-scene", "01J8E0000000000000000000P3");
+    assert.deepEqual(roomy.passes.map((pass) => pass.carries?.promptOverCap), [undefined, undefined]);
+  });
+
+  it("files a timing clause with the pass it changes, and a shot packing left out with the nearest earlier pass (SPEC-044 R-25)", async () => {
+    const fixture = await open();
+    const scene: Scene = { ...fixture.scene, shots: [shot(1, 6, "the pier"), shot(2, 6, "the bell"), shot(3, 6, "the rail")] };
+    const spine = (anchors: Record<string, { startSec: number; endSec: number }>) => ({
+      schemaVersion: 1 as const, revision: 1, trackArtifactId: "ar_01J8E0000000000000000000A1", markers: [], updatedAt: CLOCK(),
+      anchors: Object.fromEntries(Object.entries(anchors).map(([id, span]) => [id, { ...span, clipAudio: { mode: "mute" as const } }])),
+    });
+    const planWith = async (anchors: Record<string, { startSec: number; endSec: number }>, requestId: string) =>
+      createDispatchPlan(fixture.store, {
+        worldId: WORLD_ID, productionId: fixture.production.meta.id, scene, model: CHAINING, world: fixture.bundle, policy: "review-gated", requestId, clock: CLOCK,
+        plan: planScene({ world: fixture.bundle.meta, productionId: fixture.production.meta.id, sheets: fixture.bundle.sheets, kits: fixture.bundle.referenceKits,
+          scene, selections: {}, model: CHAINING, timingProduction: { ...fixture.production, spine: spine(anchors) } }, "whole-scene"),
+      });
+    // Shot 2 sits between two packed shots: its clause files with the pass carrying shot 1.
+    const between = await planWith({ sh_1: { startSec: 0, endSec: 6 }, sh_3: { startSec: 6, endSec: 12 } }, "01J8E0000000000000000000T1");
+    assert.deepEqual(between.passes.map((pass) => pass.compiled.target.coversShots), [["sh_1"], ["sh_3"]]);
+    assert.deepEqual(between.passes.map((pass) => pass.carries?.timing), [[{ shotId: "sh_2", number: 2, kind: "unanchored", durationSec: 6 }], undefined]);
+    // Shot 1 sits before every packed shot: nothing earlier carries it, so the first pass does.
+    const before = await planWith({ sh_2: { startSec: 0, endSec: 6 }, sh_3: { startSec: 6, endSec: 12 } }, "01J8E0000000000000000000T2");
+    assert.deepEqual(before.passes.map((pass) => pass.carries?.timing), [[{ shotId: "sh_1", number: 1, kind: "unanchored", durationSec: 6 }], undefined]);
   });
 
   /* Plans outlive the build that wrote them. Requiring the fields an older build never wrote

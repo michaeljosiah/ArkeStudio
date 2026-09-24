@@ -19,8 +19,21 @@ export const UpdateStateSchema = z
     ]),
     targetVersion: z.string().min(1).nullable(),
     progressPercent: z.number().min(0).max(100).nullable(),
+    /**
+     * How the install will happen. `on-close` is published from the press on when "Next start"
+     * is taken before the download exists (design turn 152), so a download can say what it is
+     * for; `restart` is set only once the install-and-restart is under way.
+     */
     flow: z.enum(["restart", "on-close"]).nullable(),
     detail: z.string().nullable(),
+    /**
+     * The waiting update's release name and notes, as plain text, from the check that found it
+     * (SPEC-016 R-19). The updater fetches them with every check and used to drop them; What's
+     * new shows them on the card for the update, so a person can read what they are getting
+     * before pressing Download. Defaulted: a state published by an older desktop still parses.
+     */
+    releaseName: z.string().nullable().default(null),
+    releaseNotes: z.string().nullable().default(null),
   })
   .strict();
 export type UpdateState = z.infer<typeof UpdateStateSchema>;
@@ -31,4 +44,6 @@ export const IDLE_UPDATE_STATE: UpdateState = {
   progressPercent: null,
   flow: null,
   detail: null,
+  releaseName: null,
+  releaseNotes: null,
 };

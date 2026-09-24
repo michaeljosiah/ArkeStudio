@@ -15,6 +15,7 @@ import { fileArtifact } from "../../src/artifacts/filing.js";
 import { assembleTimelineScene, applyTimelineCommand } from "../../src/productions/timeline.js";
 import { createProduction } from "../../src/productions/ops.js";
 import { WorldStore } from "../../src/world/store.js";
+import { MEDIA_HAS_VIDEO_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { makeTempWorld } from "../world/helpers.js";
 import type { MediaProbe } from "../../src/media/probe.js";
 
@@ -47,8 +48,10 @@ it("imports a zero-scene film, detaches a trimmed video's sound, edits it indepe
     kind: "commands", commands, baseRevision: saved(production()).revision, sourceFingerprint: storyTimelineFingerprint(production()),
   });
   await write([{ kind: "trim", clipId: picture.clips[0]!.id, edge: "start", deltaFrames: 12 }]);
-  await write([{ kind: "detach-audio", clipId: picture.clips[0]!.id, newClipId: "cl_detached" }]);
+  await write([{ kind: "add-track", trackId: "tr_reserved", trackKind: "audio", name: "Reserved", defaultRole: "music" }]);
+  await write([{ kind: "detach-audio", clipId: picture.clips[0]!.id, newClipId: "cl_detached", newTrack: true }]);
   timeline = saved(production());
+  assert.equal(timeline.tracks.find(track => track.id === "tr_reserved")!.clips.length, 0);
   const detached = timeline.tracks.flatMap(track => track.clips).find(clip => clip.id === "cl_detached")!;
   assert.deepEqual([detached.startFrame, detached.sourceInFrames, detached.durationFrames, detached.role], [12, 12, 60, "unspecified"]);
   assert.equal(timeline.tracks[0]!.clips[0]!.audio, "mute");
@@ -73,6 +76,73 @@ it("imports a zero-scene film, detaches a trimmed video's sound, edits it indepe
   assert.deepEqual(saved(production()), beforeClose);
   await applyTimelineCommand(store, id, { kind: "undo", baseRevision: saved(production()).revision });
   assert.equal(saved(production()).tracks.flatMap(track => track.clips).find(clip => clip.id === "cl_sound-right")!.startFrame, 36);
+});
+
+it("files an mp4 that carries only sound as audio, so Import media lands it on a sound lane", async t => {
+  const dir = await makeTempWorld();
+  const store = await WorldStore.open(dir); t.after(() => store.close());
+  const id = await createProduction(store, { title: "A song and a film", medium: "video", frameRate: 24 });
+  const production = () => store.getBundle().productions.find(p => p.meta.id === id)!;
+  const song = join(dir, "song.mp4"), film = join(dir, "film.mp4");
+  await writeFile(song, "aac in an mp4 box"); await writeFile(film, "a real film");
+  // The container says video for both; only the probe can tell them apart. (Matched on the
+  // filename: the fixture world's own path contains "song".)
+  const byStream: MediaProbe = {
+    async durationSec() { return 3; },
+    async info(path) { return { durationSec: 3, hasAudio: true, hasVideo: !path.endsWith("song.mp4") }; },
+  };
+  assert.deepEqual(await importEditorMedia(store, [song, film], {
+    productionId: id, baseRevision: null, sourceFingerprint: storyTimelineFingerprint(production()), destination: "append",
+  }, { mediaProbe: byStream, abandoned: () => false }), []);
+  const kinds = Object.fromEntries(store.getBundle().artifacts.filter(a => a.file.endsWith(".mp4")).map(a => [a.file, a.kind]));
+  assert.deepEqual(kinds, { "song.mp4": "audio", "film.mp4": "video" });
+  const timeline = saved(production());
+  const picture = timeline.tracks.find(track => track.id === "tr_picture")!;
+  const sound = timeline.tracks.find(track => track.kind === "audio")!;
+  assert.deepEqual(picture.clips.map(clip => clip.source.label), ["film.mp4"], "the film is the picture");
+  assert.deepEqual(sound.clips.map(clip => [clip.source.label, clip.startFrame, clip.durationFrames, clip.gainDb]), [["song.mp4", 0, 72, 0]]);
+  // Dropped at a frame on the Picture track, the same song is refused as sound rather than placed as a black picture.
+  const dropped = await importEditorMedia(store, [song], {
+    productionId: id, baseRevision: timeline.revision, sourceFingerprint: storyTimelineFingerprint(production()), destination: 12,
+  }, { mediaProbe: byStream, abandoned: () => false });
+  assert.equal(dropped.length, 1);
+  assert.match(dropped[0]!.reason, /has no picture/);
+  assert.equal(saved(production()).revision, timeline.revision, "a refused drop writes nothing");
+  // The measurement is a strict field an older build cannot parse, so the world is fenced past it.
+  assert.equal(store.getBundle().meta.schemaVersion, MEDIA_HAS_VIDEO_SCHEMA_VERSION, "hasVideo fences the world");
+  // An artifact filed before anyone could measure it follows a later measurement only while
+  // nothing plays it. Placed on a Picture track, its kind stands: a Picture clip citing something
+  // that became audio is a render plan refused. In the Library alone, it follows the measurement.
+  const narrow: MediaProbe = { async durationSec() { return 3; } };
+  const shelve = async (name: string, probe: MediaProbe) => {
+    const path = join(dir, name);
+    await writeFile(path, `filed as ${name}`);
+    assert.deepEqual(await importEditorMedia(store, [path], {
+      productionId: id, baseRevision: saved(production()).revision, sourceFingerprint: storyTimelineFingerprint(production()), destination: "library",
+    }, { mediaProbe: probe, abandoned: () => false }), []);
+    return store.getBundle().artifacts.find(a => a.file === name)!;
+  };
+  const placed = await shelve("old-song.mp4", narrow), loose = await shelve("loose-song.mp4", narrow);
+  assert.deepEqual([placed.kind, placed.mediaInfo, loose.kind, loose.mediaInfo], ["video", undefined, "video", undefined]);
+  await applyTimelineCommand(store, id, {
+    kind: "commands", baseRevision: saved(production()).revision, sourceFingerprint: storyTimelineFingerprint(production()),
+    commands: [{ kind: "place", trackId: "tr_picture", clip: {
+      id: "cl_old", startFrame: 72, durationFrames: 48, sourceInFrames: 0, audio: "keep",
+      source: { kind: "artifact", artifactId: placed.id, label: "old-song.mp4" },
+    } }],
+  });
+  await shelve("old-song.mp4", byStream); await shelve("loose-song.mp4", byStream);
+  const after = (name: string) => { const a = store.getBundle().artifacts.find(a => a.file === name)!; return [a.kind, a.mediaInfo?.hasVideo]; };
+  assert.deepEqual(after("old-song.mp4"), ["video", false], "measured on re-filing, but placed, so the kind it was filed with stands");
+  assert.deepEqual(after("loose-song.mp4"), ["audio", false], "measured on re-filing and played by nothing, so the kind follows");
+  // Filing itself hands back the measured record, so a surface that never re-reads the bundle
+  // (the attach chip, a folder import's report) still says what is on disk.
+  const direct = join(dir, "another-song.mp4");
+  await writeFile(direct, "a third song");
+  const filed = await fileArtifact(store, { sourcePath: direct, production: null, mediaProbe: byStream, abandoned: () => false });
+  assert.equal(filed.outcome, "filed");
+  if (filed.outcome !== "filed") throw new Error("unreachable");
+  assert.deepEqual([filed.artifact.kind, filed.artifact.mediaInfo?.hasVideo], ["audio", false]);
 });
 
 it("preserves filed media on a stale import and reports partial filing without changing prior clips", async t => {

@@ -5,12 +5,14 @@ import { AUDIO_ANALYZER_VERSION, AUDIO_POLICY_VERSION, audioHash } from "./qc.js
 
 /** Route transport/budget validation remains #111. This gate checks the exact bytes and
  * current reusable evidence; a queued clearance is a snapshot, never permission by itself. */
-export function clearAudioDispatch(input: {
+interface AudioEvidenceInput {
   bytes: Uint8Array; hash: string; report: AudioQcReport; scope: AudioRightsScope;
   rights: readonly AudioRightsEvent[]; warningCodes: readonly string[]; attestations: readonly AudioAttestation[];
   requiredAttestations: readonly AudioAttestation["kind"][]; statementVersion: number;
   acknowledgementId?: string;
-}): AudioDispatchClearance {
+}
+
+export function checkAudioDispatchEvidence(input: AudioEvidenceInput) {
   const report = AudioQcReportSchema.parse(input.report);
   if (audioHash(input.bytes) !== input.hash || report.sourceHash !== input.hash) throw new Error("audio-source-changed");
   if (report.analyzer.version !== AUDIO_ANALYZER_VERSION || report.analyzer.policyVersion !== AUDIO_POLICY_VERSION) {
@@ -28,6 +30,11 @@ export function clearAudioDispatch(input: {
   if (input.requiredAttestations.some(kind => !attestations.some(a => a.kind === kind))) {
     throw new Error("audio-attestation-required");
   }
+  return { report, warnings, attestations };
+}
+
+export function clearAudioDispatch(input: AudioEvidenceInput): AudioDispatchClearance {
+  const { report, warnings, attestations } = checkAudioDispatchEvidence(input);
   const rights = effectiveAudioRights(input.rights, input.hash, input.scope).find(event =>
     event.statementVersion === input.statementVersion && (input.acknowledgementId === undefined || event.id === input.acknowledgementId));
   if (!rights) throw new Error("audio-rights-required");

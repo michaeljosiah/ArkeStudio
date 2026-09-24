@@ -356,7 +356,7 @@ the watch. Six columns since 1747…</div>
           <dd>
             <code>01-neap.md</code> is a convenience, never a fact. If order came from the
             filename, reordering would rename files — and renaming moves a file's version history,
-            so dragging chapter four above three would break the history of a chapter nobody
+            so moving chapter four above three would break the history of a chapter nobody
             touched.
           </dd>
           <dt>words · status · version</dt>
@@ -371,6 +371,37 @@ the watch. Six columns since 1747…</div>
             tell you which chapters were written against it.
           </dd>
         </dl>
+
+        <h4>A chapter at work</h4>
+        <p>
+          The chapter list is an outline: each title carries its synopsis, point of view and
+          story-time. Opening a row fetches the prose from disk. The workspace saves against the
+          hash it read, so a draft accepted elsewhere cannot be overwritten by an older editor.
+          Earlier versions restores a saved snapshot as a new version, keeping the history.
+        </p>
+        <p>
+          Arke is docked on the production conversation. A draft arrives on its decision card and
+          stands in the manuscript's place until accepted or discarded. The coordinator records
+          the overview version it drafted against as <code>draftedAgainst</code>. If that overview
+          moves, the chapter shows both versions. The plan lives in frontmatter; facts the prose
+          implies live under <code>implies</code>, with an id and a state. Propose asks for a separate
+          canon or sheet change, while Dismiss removes an open item. Accepting the prose never
+          establishes those facts in the world.
+        </p>
+        <p>
+          Read aloud reads the saved chapter in paragraphs, after pending saves finish, and Stop
+          prevents further paragraphs from being synthesised. A chapter draft is guided by a brief
+          assembled through the same receipts Arke's other reads produce: the plan, the previous
+          chapter's ending, the sheets and canon it draws on, and the book's prose style.
+        </p>
+        <p>
+          Chapters can be retired and restored without moving their files or history, and moved
+          up or down in the outline. Develop can propose several planned chapters on one card;
+          the overview also carries the dramatic question and ending. The dashboard opens the
+          chapter in hand and shows words today. That count is kept in <code>progress.json</code>,
+          committed with each successful direct save; it counts positive word-count increases,
+          never refused saves, and is not reconstructed from history.
+        </p>
 
         <h4>Something filmed</h4>
         <p>

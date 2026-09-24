@@ -7,6 +7,7 @@ import {
   type ModelEditorRequest,
   type ModelSceneEdit,
   type ModelWorldChatAction,
+  type ProductionSetupUpdate,
   type CandidateChecks,
   type CandidateEvidence,
   type CandidateGroup,
@@ -51,6 +52,7 @@ export interface TurnProblem {
 }
 
 export interface ValidateInput {
+  draftOnly?: boolean;
   /** The assistant's entire completed message. */
   raw: string;
   conversationId: ConversationId;
@@ -87,6 +89,7 @@ export interface AcceptedTurn {
   sceneEdits: readonly ModelSceneEdit[];
   /** Exact authored operations this turn described, still unprepared. */
   actions: readonly ModelWorldChatAction[];
+  setupUpdate?: ProductionSetupUpdate;
 }
 
 export type ValidationOutcome =
@@ -229,6 +232,15 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
   const parsed = parseTurnResult(input.raw);
   if (!parsed.ok) return parsed;
   const result = parsed.value;
+  if (input.draftOnly && (
+    result.candidateOperations.length || result.groupOperations.length || result.actions.length ||
+    result.bibleEdits.length || result.editorRequests.length || result.sceneEdits.length
+  )) return { ok: false, problems: [problem("setup-authority", "Production setup only accepts conversation and setupUpdate. Keep new world entities as openQuestions; return empty action and candidate lists.")] };
+  // Which model spends on this production is the person's choice on the setup card (design turn
+  // 153), not the conversation's: a reply that could pick a model could pick a price.
+  if (result.setupUpdate?.fields?.models !== undefined) {
+    return { ok: false, problems: [problem("setup-authority", "Production setup does not choose models. Leave setupUpdate.fields.models out; the author picks them on the Models card.")] };
+  }
 
   const problems: TurnProblem[] = [];
   const byId = new Map(input.existing.map((c) => [c.id, c]));
@@ -450,6 +462,7 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
       editorRequests: result.editorRequests,
       sceneEdits: result.sceneEdits,
       actions: result.actions,
+      ...(result.setupUpdate ? { setupUpdate: result.setupUpdate } : {}),
     },
   };
 }

@@ -12,6 +12,29 @@ import {
 } from "../types.js";
 
 /**
+ * What a 4xx actually said. The body names the cause, and one cause — a moderation refusal —
+ * is common, distinct and recoverable by writing a different prompt, so it gets a sentence of
+ * its own instead of hiding behind "HTTP 400": a founding build lost its key art to one and
+ * the hub could only report the status code (issue 906). Anything else carries OpenAI's own
+ * message, which is at least something a person can act on.
+ */
+function rejected(what: "image generation" | "completion", status: number, body: unknown): ProviderRequestRejectedError {
+  const error = (body as { error?: unknown } | null)?.error;
+  const detail =
+    typeof error === "object" && error !== null
+      ? (error as { message?: unknown; code?: unknown; moderation_details?: { moderation_stage?: unknown } })
+      : undefined;
+  if (detail?.code === "moderation_blocked") {
+    const where = detail.moderation_details?.moderation_stage === "output" ? "the picture it made" : "the prompt";
+    return new ProviderRequestRejectedError(
+      `openai: the safety system refused ${where} (moderation blocked) — recompose the prompt away from what it flagged and try again`,
+    );
+  }
+  const message = typeof detail?.message === "string" && detail.message.trim() !== "" ? `: ${detail.message.trim()}` : "";
+  return new ProviderRequestRejectedError(`openai: ${what} failed (HTTP ${status})${message}`);
+}
+
+/**
  * OpenAI — direct provider for llm and image. Both APIs answer synchronously. Image artifacts
  * return directly from submit; LLM completions retain the small in-memory poll seam. Declarations: no
  * idempotency keys on completions or images, no job listing; token usage comes back but never
@@ -144,7 +167,7 @@ export class OpenAiClient implements ProviderClient {
         body = response.body;
       }
       if (status >= 500) throw new Error(`openai: image generation failed (HTTP ${status})`);
-      if (status >= 400) throw new ProviderRequestRejectedError(`openai: image generation failed (HTTP ${status})`);
+      if (status >= 400) throw rejected("image generation", status, body);
       const response = body as { data?: Array<{ b64_json?: string }>; output_format?: string } | null;
       const images = response?.data ?? [];
       if (images.length === 0 || images.some((image) => typeof image.b64_json !== "string")) {
@@ -166,7 +189,7 @@ export class OpenAiClient implements ProviderClient {
       ...(request.signal !== undefined ? { signal: request.signal } : {}),
     });
     if (status >= 500) throw new Error(`openai: completion failed (HTTP ${status})`);
-    if (status >= 400) throw new ProviderRequestRejectedError(`openai: completion failed (HTTP ${status})`);
+    if (status >= 400) throw rejected("completion", status, body);
     const text = (body as { choices?: Array<{ message?: { content?: string } }> } | null)?.choices?.[0]?.message?.content ?? "";
     this.completed.set(remoteId, {
       artifacts: [{ name: "completion.txt", contentType: "text/plain", data: new TextEncoder().encode(text) }],

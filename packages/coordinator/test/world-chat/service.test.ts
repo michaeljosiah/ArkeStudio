@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { readdir } from "node:fs/promises";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { newId, type ConversationId } from "@arke-studio/contracts";
+import { CHECKPOINT_EVERY_EVENTS, checkpointPath } from "../../src/world-chat/checkpoint.js";
 import { ConversationInUseError, WorldChatService } from "../../src/world-chat/service.js";
-import { conversationsDir, WorldChatStore } from "../../src/world-chat/store.js";
+import { conversationDir, conversationsDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { discoverConversations } from "../../src/world-chat/discover.js";
 import { recoverConversations } from "../../src/world-chat/recovery.js";
 import { tempDir } from "../tmp.js";
@@ -256,6 +257,29 @@ describe("conversation lifecycle", () => {
     await svc.delete(id, "op-1");
     await svc.delete(id, "op-1");
     assert.equal(await svc.load(id), null);
+  });
+
+  it("serves a current checkpoint as it stands, and folds past a stale one (§19)", async () => {
+    // A mutation sample found the equality untested: with `throughSeq === tailSeq` inverted, a
+    // current checkpoint was rebuilt every open and a stale one was served, and nothing noticed.
+    // The checkpoint file is edited by hand so that being served from it is visible.
+    const svc = await service();
+    const { id } = await svc.create({ title: "long" });
+    for (let n = 0; n < CHECKPOINT_EVERY_EVENTS; n++) await svc.rename(id, `rename ${n}`);
+    const first = await svc.load(id);
+    assert.equal(first?.title, `rename ${CHECKPOINT_EVERY_EVENTS - 1}`);
+    const path = checkpointPath(conversationDir(svc.worldPath, id));
+    const saved = JSON.parse(await readFile(path, "utf8")) as { throughSeq: number; view: { title: string } };
+    assert.equal(saved.throughSeq, first!.seq, "enough happened for a checkpoint, written through the tail");
+    // Current: the checkpoint is what is served, so a mark left in it comes back.
+    saved.view.title = "from the checkpoint";
+    await writeFile(path, JSON.stringify(saved), "utf8");
+    assert.equal((await svc.load(id))?.title, "from the checkpoint", "a checkpoint exactly at the tail is served as it stands");
+    // Stale: one more event, and the log is folded again — the mark is gone, the newest title stands.
+    await svc.rename(id, "newest");
+    const after = await svc.load(id);
+    assert.equal(after?.title, "newest", "a checkpoint behind the tail is not served");
+    assert.equal((await svc.load(id, { messageLimit: 1 }))?.title, "newest", "and a paged read never consults it");
   });
 
   it("keeps a paged read out of the checkpoint, which only holds the default window", async () => {

@@ -7,24 +7,29 @@ import {
   ArtDirectionRecordSchema,
   BIBLE_PATH,
   WorldAuthoredFieldChangesSchema,
+  type Capability,
   type ExternalEdit,
   type WorldAuthoredFieldChanges,
   type WorldBundle,
 } from "@arke-studio/contracts";
+import { describeCoordinatorError } from "../errors/user-message.js";
+import { completesFoundingLook } from "../references/master-look.js";
 import { WorldIndex } from "../index-db/world-index.js";
 import type { DatabaseCtor } from "../index-db/sqlite.js";
 import { restoredSceneContent } from "../productions/scene-record.js";
-import { atomicWriteFile } from "./atomic.js";
+import { atomicWriteFile, serializeFileMutation } from "./atomic.js";
 import { readBible } from "./bible.js";
 import { readChanges } from "./change-writer.js";
 import {
   CommitPlanError,
   Committer,
+  PROSE_STYLE_SCHEMA_VERSION,
   classify,
   type CommitHooks,
   type CommitInput,
   type CommitResult,
   type PendingCommit,
+  WORLD_MODELS_SCHEMA_VERSION,
 } from "./commit.js";
 import { WorldLock, type WorldLockOptions } from "./lock.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
@@ -160,7 +165,8 @@ export class WorldStore {
           })),
         ];
       }
-      let scanState = opts.readOnly ? null : await readScanState(dir);
+      let scanState = await readScanState(dir);
+      const seedMissingHistory = scanState === null;
       if (!opts.readOnly && scanState === null) scanState = await reconstructScanState(dir, scan);
       else if (scanState !== null) scanState = await advanceCommittedScanState(dir, scanState);
       if (scanState) for (const path of recoveredPerformances) {
@@ -168,7 +174,7 @@ export class WorldStore {
         if (hash === undefined) delete scanState.manifest[path];
         else scanState.manifest[path] = hash;
       }
-      const externalEdits = scanState === null ? [] : detectExternalEdits(scan, scanState);
+      const externalEdits = opts.readOnly || scanState === null ? [] : detectExternalEdits(scan, scanState);
       store = new WorldStore(
         dir,
         lock,
@@ -180,8 +186,9 @@ export class WorldStore {
         opts.clock ?? (() => new Date().toISOString()),
       );
       if (!opts.readOnly) {
+        await store.checkCurrentHistorySnapshots(true, seedMissingHistory);
         await store.adoptBibleIfMoved();
-        await store.ensureCurrentHistorySnapshots();
+        await store.adoptProseStyleBoundary();
         await store.saveScanState();
         store.startWatcher();
         try {
@@ -189,7 +196,7 @@ export class WorldStore {
         } catch {
           store.index = null;
         }
-      }
+      } else await store.checkCurrentHistorySnapshots();
       return store;
     } catch (err) {
       store?.watcher?.stop();
@@ -257,6 +264,20 @@ export class WorldStore {
     });
   }
 
+  /**
+   * Read-only capture uses the same ownership/serialization boundary as managed writes.
+   * It never edits the world, so suppressing watcher events and rescanning afterward would
+   * only lose outside edits and make a cancelled capture wait for another unabortable scan.
+   * Watcher work queues normally behind this read; callers must not recursively enter the gate.
+   */
+  async ownedRead<T>(fn: () => Promise<T>): Promise<T> {
+    this.assertWritable();
+    return this.serialise(async () => {
+      await this.verifyOwnership();
+      return fn();
+    });
+  }
+
   /** The committer's clock — gate records share the world's notion of now. */
   now(): string {
     return this.clockFn();
@@ -291,6 +312,12 @@ export class WorldStore {
    */
   get closingSignal(): AbortSignal {
     return this.closingController.signal;
+  }
+
+  /** Recheck disk ownership before acknowledging a long operation already under the gate. */
+  async assertOwnership(): Promise<void> {
+    this.assertWritable();
+    await this.verifyOwnership();
   }
 
   /**
@@ -380,6 +407,31 @@ export class WorldStore {
     );
   }
 
+  /**
+   * Which model this world's own work reaches for, per capability (design turn 153). `null`
+   * clears it, and clearing the last one removes the key: an empty map reads as a choice made
+   * and then emptied, which is not the same as never having chosen.
+   */
+  async setWorldModel(capability: Capability, modelId: string | null, source = "form"): Promise<CommitResult> {
+    // Read and commit as one step. The map is built from the live bundle, so two rows changed in
+    // one breath would each copy the same map and the second commit would erase the first
+    // capability — the same race the production's choice closes on production.json.
+    return serializeFileMutation(join(this.dir, "world.json"), async () => {
+      const current: Partial<Record<Capability, string>> = { ...this.getBundle().meta.models };
+      delete current[capability];
+      if (modelId !== null) current[capability] = modelId;
+      return this.commit({
+        kind: "world-metadata-edit",
+        source,
+        files: [],
+        worldFields: { models: Object.keys(current).length > 0 ? current : null },
+        // Raised with the bytes that need it, never ahead of them: a world that only ever
+        // clears stays openable by the builds before the field.
+        ...(modelId !== null ? { raiseSchemaVersion: WORLD_MODELS_SCHEMA_VERSION } : {}),
+      });
+    });
+  }
+
   /** Retire, never delete (R-26): the entity stays on disk, marked, still resolving. */
   async retire(
     portablePath: string,
@@ -430,7 +482,7 @@ export class WorldStore {
     // (commit.ts keeps one per version on the chapter track), so "Earlier versions" can put one
     // back exactly as the bible does. A direct save preserves the version and refreshes the
     // current snapshot, which is why only accepted drafts appear in that list.
-    const restorable = new Set(["sheet", "canon", "bible", "scene", "story", "season", "episode", "art-direction", "chapter"]);
+    const restorable = new Set(["sheet", "canon", "bible", "scene", "story", "prose-style", "season", "episode", "art-direction", "chapter"]);
     const historyPath = restorable.has(kind.track) ? historyPathForVersion(portablePath, version) : null;
     if (historyPath === null) {
       throw new CommitPlanError(
@@ -536,11 +588,13 @@ export class WorldStore {
         if (live !== null && committedHash === sha256(live)) {
           this.externalEdits = this.externalEdits.filter((candidate) => candidate.path !== portablePath);
           await this.rescan();
+          await this.afterExternalEditsCleared();
           return;
         }
         if (live === null && committedHash === undefined) {
           this.externalEdits = this.externalEdits.filter((candidate) => candidate.path !== portablePath);
           await this.rescan();
+          await this.afterExternalEditsCleared();
           return;
         }
 
@@ -566,9 +620,13 @@ export class WorldStore {
         });
         this.externalEdits = this.externalEdits.filter((e) => e.path !== portablePath);
         await this.rescan();
-        if (this.externalEdits.length === 0) await this.adoptBibleIfMoved();
+        await this.afterExternalEditsCleared();
       } catch (err) {
-        const refusal = (err instanceof Error ? err.message : String(err)).slice(0, 300);
+        // Bounded to ExternalEditSchema's 300-char `refusal` field (D2): most caught errors are
+        // already a short plain sentence, but an unclassified one — a ZodError enumerating many
+        // issues, say — can run well past that, and an oversized refusal fails the snapshot's
+        // own schema on broadcast rather than reaching the screen.
+        const refusal = describeCoordinatorError(err).slice(0, 300);
         this.externalEdits = this.externalEdits.map((candidate) =>
           candidate.path === portablePath
             ? { path: candidate.path, kind: candidate.kind, refusal }
@@ -587,10 +645,55 @@ export class WorldStore {
       await this.verifyOwnership();
       this.scan = await scanWorld(this.dir);
       this.externalEdits = detectExternalEdits(this.scan, this.scanState);
+      await this.checkCurrentHistorySnapshots();
       await this.saveScanState();
-      if (this.externalEdits.length === 0) await this.adoptBibleIfMoved();
+      await this.afterExternalEditsCleared();
     });
     return this.getBundle();
+  }
+
+  /**
+   * What waited on the last external edit clearing (codex on PR 903, rounds two and three): the
+   * Bible adopted if it moved, and the style's boundary. A world that opened with edits waiting
+   * skipped both, and every path that empties the set comes through here — an edit committed,
+   * an edit found put back or already gone, a reload — because the moment they clear is the
+   * moment adoption can happen, whichever way they cleared.
+   */
+  private async afterExternalEditsCleared(): Promise<void> {
+    if (this.externalEdits.length > 0) return;
+    await this.adoptBibleIfMoved();
+    try {
+      await this.adoptProseStyleBoundary();
+    } catch (err) {
+      // Adoption that fails — the style's base moved under it, say — must not leave the world
+      // writable below the style's boundary (codex on PR 903, round six): a downgrade could open
+      // it and ignore the style. The style goes back among the edits awaiting reconciliation,
+      // with the refusal, so writes stay gated until a reconcile lands it through the funnel
+      // that raises the boundary; a world with no style to adopt has nothing to gate.
+      const styled = this.scan.bundle.productions.find((production) => production.proseStyle);
+      if (styled === undefined) throw err;
+      this.externalEdits = [
+        {
+          path: `productions/${styled.meta.id}/prose-style.json`,
+          kind: "modified",
+          // Bounded to ExternalEditSchema's 300-char field — see the sibling catch above.
+          refusal: describeCoordinatorError(err).slice(0, 300),
+        },
+      ];
+    }
+  }
+
+  /**
+   * Fence the world at a boundary a feature needs with no file of its own to carry it (codex on
+   * PR 903): a World Chat turn held to a passage or to a reply is recorded as an event a build
+   * older than the constraints reads as corruption, so the world is raised first and that build
+   * refuses it by name instead. Only ever raises; a world already there is left alone, and a
+   * world with external edits waiting is refused like any other write.
+   */
+  async raiseSchemaBoundary(version: number, kind: string): Promise<void> {
+    const current = (this.scan.bundle.meta as { schemaVersion?: number }).schemaVersion ?? 1;
+    if (current >= version) return;
+    await this.commit({ kind, source: "app", files: [], raiseSchemaVersion: version });
   }
 
   close(): Promise<void> {
@@ -673,6 +776,7 @@ export class WorldStore {
    */
   private async rescan(changedPaths?: string[]): Promise<void> {
     this.scan = await scanWorld(this.dir);
+    await this.checkCurrentHistorySnapshots();
     await this.saveScanState();
     try {
       if (this.index && changedPaths) this.index.applyCommit(changedPaths, this.scan.bundle);
@@ -700,6 +804,7 @@ export class WorldStore {
   private async saveScanState(): Promise<void> {
     await this.verifyOwnership();
     const unresolved = new Set(this.externalEdits.map((edit) => edit.path));
+    if (this.scan.bundle.problems.some((problem) => problem.path.startsWith(".history/bible/"))) unresolved.add(BIBLE_PATH);
     const manifest = { ...this.scanState.manifest };
 
     for (const [path, hash] of Object.entries(this.scan.manifest)) {
@@ -719,24 +824,51 @@ export class WorldStore {
     );
   }
 
-  /** Seed the current committed snapshot when adopting a world that predates history tracking. */
-  private async ensureCurrentHistorySnapshots(): Promise<void> {
-    const unresolved = new Set(this.externalEdits.map((edit) => edit.path));
-    const seeds = Object.entries(this.scan.manifest)
-      .filter(([portablePath]) => !unresolved.has(portablePath) && historyDirectory(portablePath) !== null)
-      .map(async ([portablePath, hash]) => {
+  /** History damage costs a snapshot, not access to the world's committed work (issue 979). */
+  private async checkCurrentHistorySnapshots(repair = false, seedMissing = false): Promise<void> {
+    const hasBaseline = Object.keys(this.scanState.manifest).length > 0;
+    const paths = new Set([...Object.keys(this.scan.manifest), ...Object.keys(this.scanState.manifest)]);
+    const seeds = [...paths]
+      .filter((path) => historyDirectory(path) !== null)
+      .map(async (portablePath) => {
+        const directory = historyDirectory(portablePath)!;
+        this.scan.bundle.problems = this.scan.bundle.problems.filter((problem) => !problem.path.startsWith(`${directory}/`));
+        const receipt = this.scan.historyCommits[portablePath];
+        const baseline = this.scanState.manifest[portablePath];
+        const expected = receipt && (baseline === undefined || receipt.changeCount > (this.scanState.changeCount ?? 0))
+          ? receipt.hash : baseline ?? (hasBaseline ? undefined : this.scan.manifest[portablePath]);
+        // An outside create has no committed version yet; a committed deletion has no current one.
+        if (expected === undefined || expected === null) return;
         const content = await this.readEntity(portablePath);
-        if (content === null || sha256(content) !== hash) return;
-        const snapshot = historySnapshot(portablePath, content);
-        if (snapshot === null) return;
-        const existing = await this.readEntity(snapshot.path);
-        if (existing === null) {
+        const liveMatches = content !== null && sha256(content) === expected;
+        let snapshot = receipt?.hash === expected && receipt.version !== undefined
+          ? { version: receipt.version, path: historyPathForVersion(portablePath, receipt.version)! }
+          : null;
+        if (snapshot === null) {
+          // Pending edits may change or remove even the live version stamp. Find the committed
+          // bytes by their saved hash instead of treating those edits as damaged history.
+          const committed = liveMatches ? content : await this.readLastCommittedEntity(portablePath, expected).catch(() => null);
+          if (committed !== null) snapshot = historySnapshot(portablePath, committed) ??
+            (portablePath === BIBLE_PATH ? { version: 1, path: ".history/bible/v1.md" } : null);
+        }
+        // The scanner already reports malformed records that have no history version to check.
+        if (snapshot === null && liveMatches) return;
+        const report = () => this.scan.bundle.problems.push({ path: snapshot?.path ?? `${directory}/`,
+          message: `History for ${portablePath === ART_DIRECTION_PATH ? "art direction" : portablePath === BIBLE_PATH ? "the Bible" : portablePath}${snapshot ? `, version ${snapshot.version},` : ""} is unavailable. Restore its snapshot from a backup to use its history.` });
+        if (snapshot === null) { report(); return; }
+        let existing: string | null;
+        try { existing = await this.readEntity(snapshot.path); }
+        catch { report(); return; }
+        // Old founding builds added only the approved image after the initial snapshot.
+        // Require the committed baseline to match and every existing field to be unchanged.
+        const canRepair = existing !== null && content !== null && portablePath === ART_DIRECTION_PATH && completesFoundingLook(existing, content);
+        const canSeed = existing === null && seedMissing && receipt === undefined;
+        if (repair && liveMatches && content !== null && (canSeed || canRepair)) {
           await this.verifyOwnership();
-          await atomicWriteFile(join(this.dir, fromPortable(snapshot.path)), content);
+          try { await atomicWriteFile(join(this.dir, fromPortable(snapshot.path)), content); }
+          catch { await this.verifyOwnership(); report(); }
         }
-        else if (existing !== content) {
-          throw new CommitPlanError(`${snapshot.path}: history snapshot conflicts with the committed version`);
-        }
+        else if (existing === null || sha256(existing) !== expected) report();
       });
     // A failed open must not release the world lock while another seed is still writing.
     const results = await Promise.allSettled(seeds);
@@ -746,8 +878,7 @@ export class WorldStore {
     }
   }
 
-  private async readLastCommittedEntity(portablePath: string): Promise<string> {
-    const expected = this.scanState.manifest[portablePath];
+  private async readLastCommittedEntity(portablePath: string, expected = this.scanState.manifest[portablePath]): Promise<string> {
     if (expected === undefined) {
       throw new CommitPlanError(`${portablePath}: last committed version is unavailable`);
     }
@@ -786,8 +917,8 @@ export class WorldStore {
    * Hot-reload the Bible instead of accusing anybody of editing it (R-BIBLE-6).
    *
    * `bible.md` is the one authored file the product invites the user to open in a text editor, so
-   * a hand-edit to it is the feature working, not an anomaly. It is absent from the manifests for
-   * that reason — R-23's staleness and R-28's reconciliation both exist to protect *gated* files,
+   * a hand-edit to it is the feature working, not an anomaly. It is excluded from reconciliation
+   * for that reason — R-23's staleness and R-28's reconciliation both exist to protect *gated* files,
    * and applying either here would answer an edit the app asked for with "this world changed
    * outside Arke Studio", or with a reconciliation prompt for prose nobody needs to approve.
    *
@@ -795,6 +926,8 @@ export class WorldStore {
    */
   private async adoptBibleIfMoved(): Promise<void> {
     if (this.closed || this.externalEdits.length > 0) return;
+    await this.checkCurrentHistorySnapshots();
+    if (this.scan.bundle.problems.some((problem) => problem.path.startsWith(".history/bible/"))) return;
     const live = await this.readEntity(BIBLE_PATH);
     if (live === null) return;
     const committed = await latestHistoryContent(this.dir, BIBLE_PATH);
@@ -831,6 +964,46 @@ export class WorldStore {
             baseHash: sha256(live),
             committedBase: committed,
             committedBaseHash: sha256(committed),
+          },
+        ],
+      });
+      await this.rescan();
+      this.events.onAdopted?.();
+    } finally {
+      this.watcher?.unsuppress();
+    }
+  }
+
+  /**
+   * A prose style written by hand into a world below its boundary (turn 128, codex on PR 897):
+   * the record is adopted through the committer — the one funnel that raises the schema when
+   * style bytes land — so a build older than the style refuses the world rather than drafting
+   * without a style the author plainly meant. Nothing in the record changes; adoption bumps its
+   * version and stamps it, as every external edit's does. Skipped while other external edits
+   * wait, since those gate every write until they are reconciled.
+   */
+  private async adoptProseStyleBoundary(): Promise<void> {
+    if (this.closed || this.externalEdits.length > 0) return;
+    const schemaVersion = (this.scan.bundle.meta as { schemaVersion?: number }).schemaVersion ?? 1;
+    if (schemaVersion >= PROSE_STYLE_SCHEMA_VERSION) return;
+    const styled = this.scan.bundle.productions.find((production) => production.proseStyle);
+    if (styled === undefined) return;
+    const path = `productions/${styled.meta.id}/prose-style.json`;
+    const live = await this.readEntity(path);
+    if (live === null) return;
+    const committed = await latestHistoryContent(this.dir, path);
+    this.watcher?.suppress();
+    try {
+      await this.committer.commit({
+        kind: "prose-style-adopted",
+        source: "external-edit",
+        files: [
+          {
+            path,
+            action: "replace",
+            content: live,
+            baseHash: sha256(live),
+            ...(committed !== null ? { committedBase: committed, committedBaseHash: sha256(committed) } : { committedBaseHash: null }),
           },
         ],
       });
@@ -886,10 +1059,12 @@ function historySnapshot(portablePath: string, content: string): { path: string;
 async function reconstructScanState(dir: string, scan: ScanResult): Promise<ScanState> {
   const manifest = { ...scan.manifest };
   for (const portablePath of Object.keys(manifest)) {
-    if (historyDirectory(portablePath) === null) continue;
+    if (portablePath === BIBLE_PATH || historyDirectory(portablePath) === null) continue;
     const committed = await latestHistoryContent(dir, portablePath);
     if (committed !== null) manifest[portablePath] = sha256(committed);
   }
+  const bibleHash = scan.historyCommits[BIBLE_PATH]?.hash;
+  if (typeof bibleHash === "string") manifest[BIBLE_PATH] = bibleHash;
   return { manifest, changeCount: scan.changeCount };
 }
 
@@ -942,7 +1117,7 @@ function historyDirectory(portablePath: string): string | null {
   if (kind.track === "canon") return `.history/canon/${kind.id}`;
   if (kind.track === "chapter") return `.history/productions/${kind.production}/chapters/${kind.file}`;
   if (kind.track === "scene") return `.history/productions/${kind.production}/scenes/${kind.file}`;
-  if (kind.track === "story" || kind.track === "routing" || kind.track === "season") {
+  if (kind.track === "story" || kind.track === "prose-style" || kind.track === "routing" || kind.track === "season" || kind.track === "narrative") {
     return `.history/productions/${kind.production}/${kind.track}`;
   }
   if (kind.track === "episode") return `.history/productions/${kind.production}/episodes/${kind.file}`;
@@ -964,7 +1139,7 @@ function detectExternalEdits(scan: ScanResult, previous: ScanState): ExternalEdi
   }
   // world.json changing outside the app is real, but reporting it as an entity edit would be
   // noise — schema migration and clone detection own that file's lifecycle.
-  return edits.filter((e) => e.path !== "world.json");
+  return edits.filter((e) => e.path !== "world.json" && e.path !== BIBLE_PATH);
 }
 
 /** Remove the derived scan-state (used by tests proving `.index/` is safe to delete). */

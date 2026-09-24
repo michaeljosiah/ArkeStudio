@@ -1,3 +1,4 @@
+import { stageSourceFingerprint } from "../productions/stage-playblast.js";
 import {
   DEFAULT_SHOT_SEC,
   admitReference,
@@ -229,8 +230,7 @@ async function voiceTokens(
 
 /**
  * The filed playblast as a reference tile: the artifact the Stage exported, named for what it
- * is. `when-supported`, because no route today maps a video reference — the tile stays visible
- * and says it is not riding, while the beats in the brief carry the move regardless.
+ * is. Only current output may ride; compatible routes carry the video alongside the beats.
  */
 function playblastToken(
   staging: ShotStaging,
@@ -246,13 +246,13 @@ function playblastToken(
   // The recording baked in a staging, a length, an aspect and a lens; any of them moving on
   // makes it a file of a shot that no longer exists this way, and the tile says so.
   const moved = stagePlayblastIsStale(scene, staging, shown);
-  const stale = moved ? " · stale" : "";
+  if (moved) return null;
   return {
     token: benchTokenFor("video", 1),
     kind: "video",
     source: { source: "artifact", artifactId: artifact.id, hash: artifact.hash },
     label: `Staging · Playblast v${pinned.version}`,
-    detail: `${staging.keys.length} keys · ${stagingMoveWord(staging.keys, resolved.cast, staging.rig)}${stale}`,
+    detail: `${staging.keys.length} keys · ${stagingMoveWord(staging.keys, resolved.cast, staging.rig)}`,
     ...(artifact.mediaInfo !== undefined ? { durationSec: artifact.mediaInfo.durationSec } : {}),
     ride: "when-supported",
     subjectRole: "reference",
@@ -308,13 +308,19 @@ export function subjectReferenceRouting(
   if (model === null) return { activeTokens: [], keyframeTokens: [] };
   const frames = references.filter((reference) => reference.subjectRole === "board-frame");
   const ordinary = references.filter((reference) => reference.subjectRole !== "board-frame");
+  // Stage motion is the primary structural reference on routes that can receive it.
+  const motion = ordinary.filter(reference=>reference.kind === "video");
+  const motionTokens = admittedTokens([...motion,...(subject.kind === "shot" ? references : [...ordinary,...frames]).filter(reference=>reference.kind!=="video")],model);
+  if(subject.kind === "shot" && motion.some(reference=>motionTokens.includes(reference.token))) return {activeTokens:motionTokens,keyframeTokens:[]};
   if (
     subject.kind === "shot" &&
     model.capability === "video" &&
-    frames.length === 1 &&
-    supportsMode(model, "first-frame")
+    frames.length > 0
   ) {
-    return { activeTokens: [], keyframeTokens: [frames[0]!.token] };
+    if (frames.length === 2 && supportsMode(model, "first-and-last-frame")) {
+      return { activeTokens: [], keyframeTokens: frames.map(frame => frame.token) };
+    }
+    if (supportsMode(model, "first-frame")) return { activeTokens: [], keyframeTokens: [frames[0]!.token] };
   }
   // A complete frame sequence is structural guidance, not a bag of optional references. Keep it
   // intact in the keyframe lane even when this model cannot carry it, so dispatch refuses by name
@@ -323,7 +329,7 @@ export function subjectReferenceRouting(
     return { activeTokens: [], keyframeTokens: frames.map((reference) => reference.token) };
   }
   return {
-    activeTokens: admittedTokens([...ordinary, ...frames], model),
+    activeTokens: admittedTokens(subject.kind === "shot" ? references : [...ordinary, ...frames], model),
     keyframeTokens: [],
   };
 }
@@ -436,7 +442,8 @@ export async function prepareBenchSubject(
       aspect,
       lens: effectiveFraming(scene, shot).lens,
     };
-    const openingFrame = staging === undefined
+    const fingerprintCurrent = !staging?.playblast?.sourceFingerprint || staging.playblast.sourceFingerprint === stageSourceFingerprint(scene,shot,aspect);
+    const openingFrame = staging === undefined || !fingerprintCurrent
       ? null
       : stageOpeningFrameToken(staging, scene, world, shown, references.length + 1);
     const selection = production.selections[shot.id];
@@ -446,6 +453,17 @@ export async function prepareBenchSubject(
       : world.artifacts.find((candidate) => candidate.id === frameArtifactId);
     if (openingFrame !== null) {
       references.push(openingFrame);
+      for (const frame of staging?.playblast?.referenceFrames ?? []) {
+        const artifact = world.artifacts.find(candidate => candidate.id === frame.artifactId);
+        if (artifact?.kind !== "image") continue;
+        references.push({
+          token: benchTokenFor("image", references.length + 1), kind: "image",
+          source: { source: "artifact", artifactId: artifact.id, hash: artifact.hash },
+          label: `Staging · ${frame.kind === "last" ? "last frame" : frame.kind === "key" ? "camera key" : "overview"} · ${frame.at.toFixed(2)}s`,
+          detail: frame.kind === "overview" ? "top-down camera path and cast marks" : `camera composition at ${frame.at.toFixed(2)}s`,
+          ride: "when-supported", subjectRole: frame.kind === "last" ? "board-frame" : "reference",
+        });
+      }
     } else if (hasOwnFrame(selection, world.artifacts) && frameArtifact?.kind === "image") {
       references.push({
         token: benchTokenFor("image", references.length + 1),
@@ -459,18 +477,19 @@ export async function prepareBenchSubject(
     }
     // The clip is where the move matters: its exact opening view can ride every image-capable
     // route, the playblast rides where video is carried, and the beats ride in the words everywhere.
-    const playblast = staging === undefined
+    const playblast = staging === undefined || !fingerprintCurrent
       ? null
       : playblastToken(staging, scene, world, shown);
     if (playblast !== null) references.push(playblast);
     const nameOf = (sheetId: string) => world.sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId;
-    const prompt = promptFor(world.meta, world.sheets, scene, shot, style, undefined, mode).text;
+    const plannedPrompt = promptFor(world.meta, world.sheets, scene, shot, style, undefined, mode);
+    const prompt = plannedPrompt.text;
     const brief = staging === undefined
       ? prompt
       : `${prompt}\n\n${stagingPromptClause(resolvedShotStaging(scene, staging), nameOf, shown.durationSec)}`;
-    const promptSheetVersions = shot.promptOverride === undefined
+    const promptSheetVersions = !plannedPrompt.overridden
       ? assembledPromptSheetVersions([shot], scene, world)
-      : { ...shot.promptOverride.sheetVersions };
+      : { ...shot.promptOverride!.sheetVersions };
     const subject: BenchSubject = {
       kind: "shot",
       ...subjectContext(production, scene),

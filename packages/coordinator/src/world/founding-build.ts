@@ -16,6 +16,7 @@ import {
   ulid,
   type AppSettings,
   type BuildItem,
+  type Capability,
   type BuildJournalEntry,
   type BuildJobFacts,
   type BuildReview,
@@ -31,12 +32,14 @@ import {
   type Sheet,
 } from "@arke-studio/contracts";
 import type { EnqueueInput } from "../queue/dispatcher.js";
+import { describeCoordinatorError } from "../errors/user-message.js";
 import { acceptDecided, type ProposalManager } from "../gate/proposals.js";
 import type { WorldStore } from "./store.js";
 import { atomicWriteFile } from "./atomic.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { foldBlueprint } from "../harness/blueprint.js";
 import { openThread } from "../canon/authoring.js";
+import { MarkdownFile, sha256 } from "./text-files.js";
 import { createSheetFromSentence } from "../sheets/authoring.js";
 import {
   characterSheetRequest,
@@ -87,6 +90,7 @@ export interface FoundingBuildPorts {
     genre?: string;
     artDirection?: string;
     bible?: string;
+    models?: Partial<Record<Capability, string>>;
   }): Promise<{ worldId: string }>;
   openWorld(worldId: string): Promise<void>;
   openStore(): WorldStore | null;
@@ -200,15 +204,27 @@ export class FoundingBuildService {
   // Preconditions and the review (R-10..R-12)
   // -------------------------------------------------------------------------
 
+  /**
+   * The models a world's build reads (design turn 153): the world's own once it exists. Read
+   * through the open store only when it is this world's — another world's choices are not this
+   * one's, and a closed world falls back to Settings exactly as it did before it had any.
+   */
+  private worldModels(worldId: string): Partial<Record<Capability, string>> | undefined {
+    const store = this.ports.openStore();
+    return store && store.worldId === worldId ? store.getBundle().meta.models : undefined;
+  }
+
   /** The frozen image route, or null with the reasons a text-only build is offered (R-11). */
-  private async resolveImageRoute(): Promise<{ route: ImageRoute | null; notes: string[] }> {
+  private async resolveImageRoute(
+    models: Partial<Record<Capability, string>> | undefined,
+  ): Promise<{ route: ImageRoute | null; notes: string[] }> {
     const notes: string[] = [];
     const manifest = this.ports.manifest;
     if (!manifest) {
       notes.push("No model manifest is loaded — every file and sheet will be written, and no images will be made.");
       return { route: null, notes };
     }
-    const model = imageModelFor(await this.ports.loadSettings(), manifest);
+    const model = imageModelFor(await this.ports.loadSettings(), manifest, undefined, models);
     if (!model) {
       notes.push(
         "No image model resolves — every file and sheet will be written, and no images will be made. The images stay runnable in one press once a provider is set up.",
@@ -268,7 +284,12 @@ export class FoundingBuildService {
       : "No look preview was made — this world will be founded without a master look.";
   }
 
-  async plan(genesisId: string, requestId: string, look?: string): Promise<void> {
+  async plan(
+    genesisId: string,
+    requestId: string,
+    look?: string,
+    models?: Partial<Record<Capability, string>>,
+  ): Promise<void> {
     const refuse = (reason: string) =>
       this.ports.emit({
         at: this.ports.nowIso(),
@@ -289,7 +310,10 @@ export class FoundingBuildService {
       refuse("the world has no name yet — settle one in the conversation first");
       return;
     }
-    const { route, notes } = await this.resolveImageRoute();
+    const { route, notes } = await this.resolveImageRoute(models);
+    for (const character of blueprint.characters) {
+      if (character.neverDepicted === true) notes.push(`${character.name} — never depicted`);
+    }
     if (!this.ports.harnessReady()) {
       notes.push("OpenCode is not running — sheets will hold their one-line summaries until authored later.");
     }
@@ -305,6 +329,9 @@ export class FoundingBuildService {
       );
     }
     const items = compileBuildItems(blueprint, route === null ? null : { model: route.model, referenceImages: route.referenceImages });
+    if (keyArtBriefSettled(blueprint.keyArt) && !items.some((item) => item.kind === "key-art")) {
+      notes.push("Key art names a character who is never depicted — key art will not be made.");
+    }
     const generations = items.filter((item) => item.authorized && item.idempotencyKey !== undefined).length;
     const estimateMicroUsd = items.filter((item) => item.authorized).reduce((sum, item) => sum + item.estimatedMicroUsd, 0);
     const plan: BuildReview = BuildReviewSchema.parse({
@@ -330,16 +357,26 @@ export class FoundingBuildService {
   // The press (R-13, R-16, R-17)
   // -------------------------------------------------------------------------
 
-  async begin(genesisId: string, requestId: string, look?: string): Promise<void> {
+  async begin(
+    genesisId: string,
+    requestId: string,
+    look?: string,
+    models?: Partial<Record<Capability, string>>,
+  ): Promise<void> {
     // Two presses in one tick are one run (row 8): the second joins the first's promise.
     const inFlight = this.beginning.get(genesisId);
     if (inFlight) return inFlight;
-    const work = this.beginWork(genesisId, requestId, look).finally(() => this.beginning.delete(genesisId));
+    const work = this.beginWork(genesisId, requestId, look, models).finally(() => this.beginning.delete(genesisId));
     this.beginning.set(genesisId, work);
     return work;
   }
 
-  private async beginWork(genesisId: string, requestId: string, look?: string): Promise<void> {
+  private async beginWork(
+    genesisId: string,
+    requestId: string,
+    look?: string,
+    models?: Partial<Record<Capability, string>>,
+  ): Promise<void> {
     const sandbox = await this.ports.genesisDir(genesisId);
     const markerPath = join(sandbox, BEGUN_MARKER);
     const marker = await readFile(toExtendedLength(markerPath), "utf8")
@@ -379,7 +416,7 @@ export class FoundingBuildService {
       });
       return;
     }
-    const { route } = await this.resolveImageRoute();
+    const { route } = await this.resolveImageRoute(models);
     const items = compileBuildItems(
       blueprint,
       route === null ? null : { model: route.model, referenceImages: route.referenceImages },
@@ -400,6 +437,7 @@ export class FoundingBuildService {
         ...(blueprint.genre !== undefined ? { genre: blueprint.genre.toLowerCase() } : {}),
         ...(blueprint.look !== undefined ? { artDirection: blueprint.look } : {}),
         ...(blueprint.bible !== undefined ? { bible: blueprint.bible } : {}),
+        ...(models !== undefined ? { models } : {}),
       });
       worldId = created.worldId;
       await atomicWriteFile(markerPath, JSON.stringify({ worldId, requestId }) + "\n");
@@ -536,7 +574,7 @@ export class FoundingBuildService {
       // An intent with a journalled key and no job id: the crash window between the append
       // and the enqueue. Re-enqueueing the same key joins the existing job when one was
       // made, and is the first dispatch when none was (row 22).
-      const { route } = await this.resolveImageRoute();
+      const { route } = await this.resolveImageRoute(this.worldModels(active.record.worldId));
       const jobId = await this.dispatchOne(active, item, route?.model ?? null).catch(() => null);
       await this.settleDispatched(active, item, jobId).catch(() => {});
       settledAny = true;
@@ -627,7 +665,7 @@ export class FoundingBuildService {
     if (keys.length === 0) return;
     // An unauthorized item runs only when a route resolves NOW — the reason it was refused
     // may have been fixed, which is the whole point of the press (R-11).
-    const { route } = await this.resolveImageRoute();
+    const { route } = await this.resolveImageRoute(this.worldModels(worldId));
     for (const key of keys) {
       const item = active.record.items.find((candidate) => candidate.key === key);
       if (!item) continue;
@@ -810,12 +848,22 @@ export class FoundingBuildService {
         at: this.ports.nowIso(),
       });
     } catch (err) {
-      // The item fails alone; the run continues to the end (R-23).
+      // The item fails alone; the run continues to the end (R-23). This catch always resolves
+      // normally, so `runItemsWork`'s own `.catch(... this.ports.log(...))` around the call never
+      // fires for a local item — the journal's `detail` used to carry the raw message anyway, but
+      // now that it carries the translated sentence instead, the diagnostic has to be logged here
+      // or it is gone everywhere, not just off the screen.
+      this.ports.log({
+        kind: "build.item-failed",
+        worldId: active.record.worldId,
+        key: item.key,
+        message: err instanceof Error ? err.message : String(err),
+      });
       await this.append(active, {
         kind: "terminal",
         key: item.key,
         outcome: "failed",
-        detail: err instanceof Error ? err.message : String(err),
+        detail: describeCoordinatorError(err),
         at: this.ports.nowIso(),
       });
     }
@@ -895,12 +943,19 @@ export class FoundingBuildService {
     const destination = masterLookFile(active.record.artDirectionVersion, extension);
     await store.gateOp(async () => {
       await copyFile(toExtendedLength(image), toExtendedLength(join(store.dir, fromPortable(destination))));
-      // Still v1, written before anything has read it: the record the world was founded
-      // with simply gains the picture the author already approved in conversation.
+      // The store already seeded v1 on open. Complete the record and its snapshot in one
+      // recoverable commit so a restart cannot mistake our own preview for damaged history.
       const recordPath = join(store.dir, fromPortable(ART_DIRECTION_PATH));
-      const parsed = JSON.parse(await readFile(toExtendedLength(recordPath), "utf8")) as Record<string, unknown>;
+      const raw = await readFile(toExtendedLength(recordPath), "utf8");
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      if (parsed["masterLook"] === destination) return;
       parsed["masterLook"] = destination;
-      await atomicWriteFile(recordPath, JSON.stringify(parsed, null, 2) + "\n");
+      await store.commitUnserialised({
+        kind: "founding-look-preview",
+        source: "founding-build",
+        files: [{ path: ART_DIRECTION_PATH, action: "replace", content: JSON.stringify(parsed, null, 2) + "\n",
+          baseHash: sha256(raw), preserveVersion: true }],
+      });
     });
     await this.ports.refreshWorldSnapshot(active.record.worldId).catch(() => {});
   }
@@ -925,6 +980,7 @@ export class FoundingBuildService {
     if (bundle.sheets.some((sheet) => sheet.type === item.sheetType && sheet.name === entity.name)) {
       return undefined;
     }
+    const neverDepicted = item.sheetType === "character" && "neverDepicted" in entity && entity.neverDepicted === true;
     const seed = entity.line ?? entity.description ?? entity.name;
     const draft = await createSheetFromSentence(store, gate, {
       sheetType: item.sheetType,
@@ -957,13 +1013,30 @@ export class FoundingBuildService {
           scope: draft.scope,
           sheetType: item.sheetType,
           name: entity.name,
-          seed: `${seed}${description}${facts}`,
+          seed: `${seed}${description}${facts}${neverDepicted ? "\nThis character is never depicted. Preserve this rule; do not invent a visible appearance." : ""}`,
         })
         .then(
           () => undefined,
           (err: unknown) =>
-            `authored from its one-line seed — the drafting agent failed (${err instanceof Error ? err.message : String(err)})`,
+            `authored from its one-line seed — the drafting agent failed (${describeCoordinatorError(err)})`,
         );
+    }
+    // The conversation's rule survives even a drafting agent that omits or contradicts it.
+    // Use the gate's recoverable draft edit before acceptance, so no unflagged sheet lands.
+    if (neverDepicted) {
+      const current = await gate.readManifest(draft.proposal.id);
+      const changed = await gate.mergeFormEdit({
+        proposalId: draft.proposal.id,
+        requestId: `never-depicted:${draft.proposal.id}`,
+        path: draft.path,
+        expectedDraftRevision: current.draftRevision,
+        edit(content) {
+          const doc = MarkdownFile.parse(content);
+          doc.setData({ neverDepicted: true });
+          return { content: doc.serialize() };
+        },
+      });
+      if (changed.status !== "updated") throw new Error("the character's depiction rule could not be saved");
     }
     // The gate is pre-authorized, not bypassed (§2.4): the proposal is accepted under the
     // press's authorization. A refusal discards it — nothing may rest in Needs you (R-25).
@@ -1061,12 +1134,20 @@ export class FoundingBuildService {
     try {
       input = await this.compileDispatch(active, item, store, model);
     } catch (err) {
+      // Same as runOne's catch: this resolves normally, so the journal's translated `detail` is
+      // the failure's only trace unless the raw diagnostic is logged here too.
+      this.ports.log({
+        kind: "build.item-failed",
+        worldId: active.record.worldId,
+        key: item.key,
+        message: err instanceof Error ? err.message : String(err),
+      });
       await this.append(active, { kind: "intent", key: item.key, at: this.ports.nowIso() });
       await this.append(active, {
         kind: "terminal",
         key: item.key,
         outcome: item.kind === "sheet-image" && err instanceof AnchorMissing ? "skipped" : "failed",
-        detail: err instanceof Error ? err.message : String(err),
+        detail: describeCoordinatorError(err),
         at: this.ports.nowIso(),
       });
       return null;
@@ -1089,7 +1170,11 @@ export class FoundingBuildService {
     } else {
       const retried = active.entries.some((entry) => entry.kind === "terminal" && entry.key === item.key);
       idempotencyKey = retried ? ulid() : (item.idempotencyKey ?? ulid());
-      await this.append(active, { kind: "intent", key: item.key, idempotencyKey, at: this.ports.nowIso() });
+      const dropped = input.params["droppedReferences"] as Array<{ name: string; reason: string }> | undefined;
+      const detail = dropped?.length
+        ? `Key art will be made without references for: ${dropped.map(({ name, reason }) => `${name} (${reason})`).join("; ")}.`
+        : undefined;
+      await this.append(active, { kind: "intent", key: item.key, idempotencyKey, ...(detail ? { detail } : {}), at: this.ports.nowIso() });
     }
     this.publish(active);
     try {
@@ -1101,11 +1186,17 @@ export class FoundingBuildService {
       this.publish(active);
       return job.id;
     } catch (err) {
+      this.ports.log({
+        kind: "build.item-failed",
+        worldId: active.record.worldId,
+        key: item.key,
+        message: err instanceof Error ? err.message : String(err),
+      });
       await this.append(active, {
         kind: "terminal",
         key: item.key,
         outcome: "failed",
-        detail: err instanceof Error ? err.message : String(err),
+        detail: describeCoordinatorError(err),
         at: this.ports.nowIso(),
       });
       return null;
@@ -1225,11 +1316,17 @@ export class FoundingBuildService {
         await this.landItem(active, item, jobId);
         await this.append(active, { kind: "terminal", key: item.key, outcome: "landed", at: this.ports.nowIso() });
       } catch (err) {
+        this.ports.log({
+          kind: "build.item-failed",
+          worldId: active.record.worldId,
+          key: item.key,
+          message: err instanceof Error ? err.message : String(err),
+        });
         await this.append(active, {
           kind: "terminal",
           key: item.key,
           outcome: "failed",
-          detail: err instanceof Error ? err.message : String(err),
+          detail: describeCoordinatorError(err),
           at: this.ports.nowIso(),
         });
       }

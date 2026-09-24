@@ -2,6 +2,7 @@ import { lookup } from "node:dns/promises";
 import { request as requestHttp } from "node:http";
 import { request as requestHttps } from "node:https";
 import { BlockList, isIP, type LookupFunction } from "node:net";
+import { describeCoordinatorError } from "../errors/user-message.js";
 
 export interface ResolvedWebAddress {
   address: string;
@@ -175,7 +176,7 @@ async function resolvePublic(url: URL, resolveHost: ResolveWebHost): Promise<Res
       ? await resolveHost(hostname)
       : [{ address: hostname, family: literalFamily as 4 | 6 }];
   } catch (error) {
-    throw new SafeWebError(`that page could not be reached: ${error instanceof Error ? error.message : "no address"}`);
+    throw new SafeWebError(`that page could not be reached: ${describeCoordinatorError(error)}`);
   }
   if (addresses.length === 0) throw new SafeWebError("that page could not be reached: no address");
   if (addresses.some(({ address }) => !isPublicWebAddress(address))) {
@@ -203,7 +204,7 @@ export async function safeWebGet(
       response = await request(current, address, maxBytes);
     } catch (error) {
       if (error instanceof SafeWebError) throw error;
-      throw new SafeWebError(`that page could not be reached: ${error instanceof Error ? error.message : "no answer"}`);
+      throw new SafeWebError(`that page could not be reached: ${describeCoordinatorError(error)}`);
     }
     if (!REDIRECT_STATUS.has(response.status)) {
       if (response.bytes.byteLength > maxBytes) throw new SafeWebError("that page is larger than this will keep.");

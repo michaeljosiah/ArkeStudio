@@ -1,12 +1,11 @@
 import { imageConstraintSuffix, type WorldBundle } from "@arke-studio/contracts";
-import { bibleExcerpt } from "./key-art-references.js";
 import { normalizePrompt, promptHash, reviewPrompt, PromptDispatchProvenanceSchema, type PromptSourceSnapshot, type ManifestModel } from "@arke-studio/contracts";
 import { randomUUID } from "node:crypto";
 
 export function keyArtCreativeBody(composed:string):string {
   return normalizePrompt(composed).replace(/ No text, no logos(?:, no character portraits)?\.$/,"");
 }
-export type KeyArtPromptContext={worldId:string;model:Pick<ManifestModel,"id"|"provider">;base:string;fixed:string;sources:PromptSourceSnapshot[];references:unknown};
+export type KeyArtPromptContext={worldId:string;model:Pick<ManifestModel,"id"|"provider"|"displayName"|"accepts"|"limits"|"unverified">;base:string;fixed:string;sources:PromptSourceSnapshot[];references:unknown};
 type Session=KeyArtPromptContext&{id:string;createdAt:number;candidate?:string;contextHash:string};
 /** Unapproved creative work lives only in this coordinator session and never becomes world canon. */
 export class KeyArtPromptReviews {
@@ -30,7 +29,7 @@ export class KeyArtPromptReviews {
     if(reviewId&&(!session||session.id!==reviewId||Date.now()-session.createdAt>3600000||session.contextHash!==await this.fingerprint(context)))throw new Error("The key-art prompt, sources, references or model changed. Prepare and review the current plan again.");
     const approved=normalizePrompt(body??context.base);
     if(!approved.trim())throw new Error("Write a nonempty creative prompt before generation.");
-    const review=await reviewPrompt(context.base,approved,context.sources);
+    const review=await reviewPrompt(context.base,approved,context.sources,"world-key-art",context.model);
     const approvedFrom=approved===context.base?"assembled":session?.candidate===approved?"candidate":"edited";
     const finalPrompt=`${approved}${context.fixed}`;
     const provenance=PromptDispatchProvenanceSchema.parse({schemaVersion:1,workflow:"world-key-art",assembledHash:review.base.hash,
@@ -46,8 +45,11 @@ export function keyArtReviewContext(bundle:WorldBundle,model:ManifestModel,base:
   const add=(ref:string,text:string|undefined,kind:PromptSourceSnapshot["kind"]="accepted-world")=>{if(text?.trim())sources.push({kind,ref,text});};
   add("world/name",bundle.meta.name);add("world/logline",bundle.meta.logline);add("world/tone",bundle.meta.tone);add("world/genre",bundle.meta.genre);
   add("art-direction",bundle.artDirection.description);
-  if(bundle.bible.present)add("bible/excerpt",bibleExcerpt(bundle.bible.text));
+  if(bundle.bible.present)add("bible",bundle.bible.text);
   for(const canon of bundle.canon.filter(c=>c.status!=="open").slice(0,6))add(`canon/${canon.id}`,canon.title);
+  for(const sheet of bundle.sheets.filter(s=>s.type==="character"||s.type==="location")){
+    add(`sheet/${sheet.id}`, [sheet.name,sheet.role,...sheet.sections.map(section=>section.body)].filter(Boolean).join("\n\n"));
+  }
   add("key-art/brief",briefText,"user-instruction");
   return {worldId:bundle.meta.worldId,model,base:keyArtCreativeBody(base),sources,references,
     fixed:` No text, no logos${hasCast?"":", no character portraits"}.${imageConstraintSuffix(bundle.artDirection)}`};

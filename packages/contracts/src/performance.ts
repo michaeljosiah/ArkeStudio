@@ -4,6 +4,7 @@ import { prefixedIdSchema, SlugSchema, SceneIdSchema, ShotIdSchema, IsoDateTimeS
 import { AudioAssetProvenanceSchema, AudioTranscriptComparisonSchema, AudioAttestationSchema, FullSha256Schema } from "./audio.js";
 import { TakeCostSchema } from "./take.js";
 import { VoiceAssignmentSchema } from "./world.js";
+import { VoiceAudioFormatSchema } from "./voice.js";
 import { orderedShots, type SceneRecord } from "./scene-flow.js";
 
 export const PerformanceIdSchema = prefixedIdSchema("pf");
@@ -17,6 +18,10 @@ export const PerformanceRecordBaseSchema = z.object({
   createdAt: IsoDateTimeSchema,
   captureAcknowledgement: z.object({ basis: z.enum(["self", "authorized", "licensed"]), statementVersion: z.literal(1), at: IsoDateTimeSchema }).strict().optional(),
   transcript: AudioTranscriptComparisonSchema.optional(), wordingConfirmedAt: IsoDateTimeSchema.optional(),
+  // Said once, at Keep (SPEC-044 R-14): what a dispatch needs attested about this audio, and the
+  // permission to send it, so no surface asks again per dispatch.
+  attestations: z.array(AudioAttestationSchema).optional(),
+  cloudBasis: z.enum(["self", "authorized", "licensed"]).optional(),
 }).strict();
 export const ScratchPerformanceSchema = PerformanceRecordBaseSchema.extend({ captureAcknowledgement: PerformanceRecordBaseSchema.shape.captureAcknowledgement.unwrap(), kind: z.literal("scratch"), recordedAt: IsoDateTimeSchema }).strict();
 export const SpeechToSpeechPerformanceSchema = PerformanceRecordBaseSchema.extend({
@@ -41,6 +46,8 @@ export const PerformanceConversionInputSchema = z.object({
   target: PerformanceTargetSchema, voiceAssignment: VoiceAssignmentSchema,
   acknowledgementId: z.string().min(1), warningCodes: z.array(z.string()), attestations: z.array(AudioAttestationSchema),
   wordingConfirmedAt: IsoDateTimeSchema, retention: z.enum(["provider-history", "zero-retention"]),
+  /** Said at the request (SPEC-044 R-14) and carried to the record; optional because queued jobs predate it. */
+  cloudBasis: z.enum(["self", "authorized", "licensed"]).optional(),
 }).strict();
 
 /** Stable script blocks win when coverage exists. Multiple lines require an explicit block choice. */
@@ -94,5 +101,11 @@ export const PerformanceGenerationQuoteSchema = z.object({
   voiceAssignment: VoiceAssignmentSchema, cadencePlan: CadencePlanSchema, cadencePlanHash: FullSha256Schema,
   mapping: CadenceMappingSchema, modelHash: FullSha256Schema, estimatedMicroUsd: z.number().int().nonnegative(),
   local: z.boolean(), createdAt: IsoDateTimeSchema,
+  // The container the row delivers (issue 1149): the hosted readers answer WAV where ElevenLabs
+  // answered MP3, and the landing name and the kept file follow the row. MP3 for a quote written
+  // before this was recorded — every such quote was ElevenLabs' or a local one.
+  audioFormat: VoiceAudioFormatSchema.default("mp3"),
+  /** The cloned voice's language (ISO 639-1), when the voice is one: it decides the R-23 tag and rides the job. */
+  language: z.string().optional(),
 }).strict();
 export type PerformanceGenerationQuote = z.infer<typeof PerformanceGenerationQuoteSchema>;

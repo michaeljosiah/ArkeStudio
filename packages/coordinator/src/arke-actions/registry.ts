@@ -1,3 +1,4 @@
+import { WorldChatProductionStageConstructActionSchema } from "@arke-studio/contracts";
 import {
   ClientMessageSchema,
   BenchGenerationModelActionSchema,
@@ -25,6 +26,7 @@ import {
   WorldChatProductionMetadataActionSchema,
   WorldChatProductionModelActionSchema,
   WorldChatProductionOverviewActionSchema,
+  WorldChatProductionProseStyleActionSchema,
   WorldChatProductionSceneActionSchema,
   WorldChatProductionSceneDeleteActionSchema,
   WorldChatProductionSceneOrderActionSchema,
@@ -191,6 +193,8 @@ const CLIENT_COMMAND_METADATA = {
   "use-world-image": action("world", "authored-diff", "world-store", "authored-change", ["world-metadata", "references"], { preparation: MEDIA_TARGET }),
   "discard-world-image": action("world", "destructive", "world-store", "destructive-change", ["world-metadata", "references"]),
   "generate-master-look": action("world", "generation", "job-queue", "spend-and-compute", ["art-direction", "references"], { preparation: GENERATION_QUOTE }),
+  "browse-reference-images": readOnly("Lists image files without opening another world."),
+  "browse-world-artifacts": readOnly("Lists another world's placeable files without opening it."),
   "pick-staged-reference": action("world", "host-action", "host", "host-file-access", ["references"]),
   "clear-staged-reference": action("world", "command", "world-store", "destructive-change", ["references"]),
   "upload-master-look": action("world", "host-action", "host", "host-file-access", ["art-direction"]),
@@ -210,9 +214,13 @@ const CLIENT_COMMAND_METADATA = {
   "proposal-mark-seen": humanOnly(HUMAN_DECISION),
   "proposal-resolve-choice": humanOnly(HUMAN_DECISION),
   "proposal-update-field": humanOnly(HUMAN_DECISION),
+  "proposal-update-passage": humanOnly(HUMAN_DECISION),
   "world-chat-open": readOnly("Selects a conversation projection; it does not mutate creative state."),
   "conversation-action-decide": humanOnly("Only the local person may approve or deny a prepared conversation action."),
   "world-chat-send": humanOnly("Only the person may add a user message; Arke cannot converse with or prompt itself."),
+  "world-chat-send-status": readOnly("Asks whether a sent line was taken; it changes nothing."),
+  "production-setup": humanOnly("The setup lifecycle belongs to the author; setup turns can update only their draft."),
+  "save-production-narrative": humanOnly("The film narrative editor saves the author's reviewed text against its version."),
   "world-chat-wrap-up": humanOnly(HUMAN_DECISION),
   "world-chat-save-point": humanOnly(HUMAN_DECISION),
   "world-chat-reject-point": humanOnly(HUMAN_DECISION),
@@ -263,6 +271,7 @@ const CLIENT_COMMAND_METADATA = {
   "duplicate-sheet": action("world", "authored-diff", "proposal-manager", "authored-change", ["sheets"], { preparation: SHEET_TARGET, execution: SHEET_TARGET }),
   "set-sheet-status": action("world", "authored-diff", "proposal-manager", "authored-change", ["sheets"], { preparation: SHEET_TARGET, execution: SHEET_TARGET }),
   "rename-world": action("world", "authored-diff", "world-store", "authored-change", ["world-metadata"]),
+  "set-world-model": action("world", "setting", "world-store", "authored-change", ["world-metadata"]),
   "rename-sheet": action("world", "authored-diff", "proposal-manager", "authored-change", ["sheets"], { preparation: SHEET_TARGET, execution: SHEET_TARGET }),
   "assign-voice": action("world", "setting", "proposal-manager", "authored-change", ["sheets", "voices"], { preparation: SHEET_TARGET, execution: SHEET_TARGET }),
   "sheet-refs": readOnly(QUERY),
@@ -290,6 +299,8 @@ const CLIENT_COMMAND_METADATA = {
   "set-harness-engine": globalOnly(GLOBAL_OPERATION),
   "choose-claude-executable": globalOnly(GLOBAL_OPERATION),
   "clear-claude-executable": globalOnly(GLOBAL_OPERATION),
+  "choose-codex-executable": globalOnly(GLOBAL_OPERATION),
+  "clear-codex-executable": globalOnly(GLOBAL_OPERATION),
   "choose-voxa-executable": globalOnly(GLOBAL_OPERATION),
   "clear-voxa-executable": globalOnly(GLOBAL_OPERATION),
   "use-bundled-voxa": globalOnly(GLOBAL_OPERATION),
@@ -311,6 +322,13 @@ const CLIENT_COMMAND_METADATA = {
   "open-engine-log": globalOnly(GLOBAL_OPERATION),
   "test-local-voice": readOnly("Produces a transient local test read and does not change a creative target."),
   "set-background-notifications": globalOnly(GLOBAL_OPERATION),
+  "mark-inbox-seen": globalOnly(GLOBAL_OPERATION),
+  "mark-whats-new-seen": globalOnly(GLOBAL_OPERATION),
+  "account-sign-in": globalOnly(GLOBAL_OPERATION),
+  "account-create": globalOnly(GLOBAL_OPERATION),
+  "account-cancel-sign-in": globalOnly(GLOBAL_OPERATION),
+  "account-sign-out": globalOnly(GLOBAL_OPERATION),
+  "account-open": globalOnly(GLOBAL_OPERATION),
   "set-appearance-theme": globalOnly(GLOBAL_OPERATION),
   "set-narrator": globalOnly(GLOBAL_OPERATION),
   "create-prop": humanOnly("Prop authoring has no registered Arke action adapter."),
@@ -367,9 +385,11 @@ const CLIENT_COMMAND_METADATA = {
   // The chapter workspace's own commands (turn 126): a read, and an undo shaped like the bible's.
   "open-chapter": readOnly(QUERY),
   "restore-chapter": action("production", "authored-diff", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
+  "retire-chapter": action("production", "command", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
+  "restore-chapter-retired": action("production", "command", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
+  "edit-chapter-plan": action("production", "authored-diff", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
   "save-bible": action("world", "authored-diff", "bible", "authored-change", ["bible"]),
   "restore-bible": action("world", "authored-diff", "bible", "authored-change", ["bible"]),
-  "draft-chapter": humanOnly(RECURSIVE_AGENT),
   "reorder-chapters": action("production", "command", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
   "reorder-scenes": action("production", "command", "production-store", "authored-change", ["scenes", "episodes"]),
   "set-production-aspect": action("production", "setting", "production-store", "authored-change", ["production-metadata"]),
@@ -405,6 +425,9 @@ const CLIENT_COMMAND_METADATA = {
   "accept-take": action("production", "take-review", "take-review", "authored-change", ["takes", "shots", "scenes"]),
   "import-shot-frame": action("production", "host-action", "host", "host-file-access", ["shots", "takes"]),
   "clear-shot-frame": action("production", "command", "take-review", "authored-change", ["shots", "takes"]),
+  "stage-construct": humanOnly("Construction starts from the Stage review surface."),
+  "stage-inspection": humanOnly("Only the renderer supplies construction inspection frames."),
+  "stage-construct-cancel": humanOnly("The person can stop Stage construction."),
   "stage-playblast": action("production", "host-action", "scene-store", "host-file-access", ["scenes", "shots", "stage"], { preparation: ARTIFACT_SOURCE }),
   "conversation-action-stage-playblast-complete": humanOnly("Only the renderer may complete an approved Stage recording handoff."),
   "reject-take": action("production", "take-review", "take-review", "authored-change", ["takes", "shots", "sheets"]),
@@ -418,6 +441,9 @@ const CLIENT_COMMAND_METADATA = {
     execution: blocked(["typed-audio-command"], "The audio cut has no semantic command seam for an action adapter."),
   }),
   "upload-artifacts": action("world", "host-action", "host", "host-file-access", ["artifacts"]),
+  "borrow-artifacts": action("world", "host-action", "host", "host-file-access", ["artifacts"]),
+  "restore-artifact": humanOnly("Restore artifacts from the shelf Retired filter."),
+  "retire-artifact": humanOnly("Retire artifacts from the shelf's current-use confirmation."),
   "place-overlay": action("production", "command", "timeline", "authored-change", ["timeline", "artifacts"], { reads: COMPLETE_TIMELINE_READ }),
   "move-overlay": action("production", "command", "timeline", "authored-change", ["timeline", "artifacts"], { reads: COMPLETE_TIMELINE_READ }),
   "split-overlay-audio": action("production", "command", "timeline", "authored-change", ["timeline", "artifacts", "audio"], { reads: COMPLETE_TIMELINE_READ }),
@@ -435,9 +461,41 @@ const CLIENT_COMMAND_METADATA = {
   "clone-voice": action("world", "generation", "voice", "privacy-sensitive", ["voices", "sheets", "artifacts"]),
   "stage-voice-clip": action("world", "host-action", "voice", "privacy-sensitive", ["voices"]),
   "discard-voice-clip": humanOnly("Discarding a temporary clip is part of the person's host recording workflow."),
+  "delete-voice": humanOnly("Deleting a cloned voice removes its recording here and its copies on vendor accounts; that is the person's decision (SPEC-046 R-15)."),
   "import-folder": action("world", "host-action", "artifact-store", "host-file-access", ["artifacts"], { preparation: ARTIFACT_SOURCE }),
   "extract-artifact": action("world", "generation", "extraction", "external-network-action", ["artifacts", "canon", "sheets"]),
   "stop-extraction": action("world", "command", "extraction", "external-network-action", ["artifacts", "jobs"]),
+  // Continuity (turn 129): a derivation over a chapter's prose in extraction's discipline, kept
+  // beside the chapter and never written into the world's authored files.
+  "derive-continuity": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),
+  "stop-continuity": action("production", "command", "extraction", "external-network-action", ["chapters"]),
+  // The cast of lines (turn 130): the same discipline, turned on speech.
+  "cast-voices": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),
+  "stop-voices": action("production", "command", "extraction", "external-network-action", ["chapters"]),
+  // The audiobook (design turn 146, SPEC-047): a chapter read into kept takes is a generation
+  // that may leave the machine; stopping it and choosing the reading are commands on the record.
+  "read-audiobook-chapter": action("production", "generation", "voice", "external-network-action", ["chapters", "sheets"]),
+  "stop-audiobook": action("production", "command", "voice", "external-network-action", ["chapters"]),
+  "set-audiobook-reading": action("production", "command", "voice", "external-network-action", ["chapters"]),
+  // Direction beside the prose (SPEC-047 R-6..R-10): a block's plan set by hand and a card
+  // accepted whole are commands on the record; directing a chapter is the cast's derivation
+  // turned on performance — a model run over the prose that writes nothing.
+  "set-audiobook-block": action("production", "command", "voice", "external-network-action", ["chapters"]),
+  "direct-chapter": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),
+  "discard-direction": action("production", "command", "extraction", "external-network-action", ["chapters"]),
+  // The door and the book (SPEC-047 R-29, R-16): a read of every chapter's state, and the
+  // chapter's run over the whole book.
+  "open-audiobook": readOnly(QUERY),
+  "read-audiobook-book": action("production", "generation", "voice", "external-network-action", ["chapters", "sheets"]),
+  "stop-audiobook-book": action("production", "command", "voice", "external-network-action", ["chapters"]),
+  "accept-direction": action("production", "command", "voice", "external-network-action", ["chapters"]),
+  // A manuscript out and in (turn 131): a file the host writes, a file the host picks.
+  "export-manuscript": action("production", "host-action", "export", "export", ["chapters", "exports"]),
+  "open-exports-folder": globalOnly(GLOBAL_OPERATION),
+  "pick-manuscript": humanOnly("Opening the manuscript picker is a human evidence-control gesture."),
+  "import-manuscript": action("production", "host-action", "artifact-store", "host-file-access", ["chapters"]),
+  "reread-manuscript": action("production", "command", "artifact-store", "host-file-access", ["chapters"]),
+  "cancel-manuscript": action("production", "command", "artifact-store", "host-file-access", ["chapters"]),
   "resolve-extraction": action("world", "take-review", "proposal-manager", "authored-change", ["artifacts", "canon", "sheets"]),
   "check-updates": readOnly(QUERY),
   "download-update": globalOnly(GLOBAL_OPERATION),
@@ -750,6 +808,11 @@ const WORLD_CHAT_ACTION_REGISTRY = {
     schema: WorldChatProductionOverviewActionSchema,
     ...action("production", "authored-diff", "proposal-manager", "authored-change", ["story"]),
   },
+  "world-chat-production-prose-style": {
+    kind: "world-chat-production-prose-style",
+    schema: WorldChatProductionProseStyleActionSchema,
+    ...action("production", "authored-diff", "proposal-manager", "authored-change", ["story"]),
+  },
   "world-chat-production-season": {
     kind: "world-chat-production-season",
     schema: WorldChatProductionSeasonActionSchema,
@@ -763,7 +826,7 @@ const WORLD_CHAT_ACTION_REGISTRY = {
   "world-chat-production-chapter": {
     kind: "world-chat-production-chapter",
     schema: WorldChatProductionChapterActionSchema,
-    ...action("production", "authored-diff", "proposal-manager", "authored-change", ["chapters"]),
+    ...action("production", "authored-diff", "proposal-manager", "authored-change", ["chapters", "story"]),
   },
   "world-chat-production-scene": {
     kind: "world-chat-production-scene",
@@ -829,6 +892,10 @@ const WORLD_CHAT_ACTION_REGISTRY = {
     kind: "world-chat-production-take-trim",
     schema: WorldChatProductionTakeTrimActionSchema,
     ...action("production", "command", "take-review", "authored-change", ["takes"]),
+  },
+  "world-chat-production-stage-construct": {
+    kind: "world-chat-production-stage-construct", schema: WorldChatProductionStageConstructActionSchema,
+    ...action("production", "host-action", "scene-store", "authored-change", ["scenes"]),
   },
   "world-chat-production-stage-playblast": {
     kind: "world-chat-production-stage-playblast",

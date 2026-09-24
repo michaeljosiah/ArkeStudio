@@ -23,9 +23,10 @@ import {
   type ReconcileAction,
 } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
+import { describeCoordinatorError } from "../errors/user-message.js";
 import { backoffMs, classifyError, isRateLimit, type FailureClass } from "./classify.js";
-import { JobJournal } from "./journal.js";
-import { imageFormatOf, verifyArtifact } from "./verify.js";
+import { JobJournal, type JobStateStore } from "./journal.js";
+import { audioFormatOf, imageFormatOf, verifyArtifact } from "./verify.js";
 import { atomicWriteFile } from "../world/atomic.js";
 
 /**
@@ -52,10 +53,14 @@ export interface DispatchVoiceReference {
   name: string;
   contentType: "audio/wav" | "audio/mpeg";
   data: Uint8Array;
+  /** For a hosted reader that keeps the clip on its account: the id it keeps it under (SPEC-046 R-13). */
+  remoteVoiceId?: string;
 }
 
 /** The footage a continuation extends (SPEC-019 R-50), resolved immediately before submit. */
 export interface DispatchVideoSource {
+  durationSec?: number;
+  referenceVideo24fps?: true;
   contentType: "video/mp4" | "video/quicktime" | "video/webm";
   data: Uint8Array;
 }
@@ -64,6 +69,8 @@ export interface DispatchClient {
   readonly declarations: ClientDeclarations;
   /** Drop source-bound optional transports while keeping the client reusable. */
   resetTransport?(): void;
+  unload?(signal?: AbortSignal): Promise<void>;
+  residency?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").ModelResidency[]>;
   /** Release optional long-lived transports when the queue shuts down. */
   dispose?(): void;
   submit(
@@ -75,6 +82,7 @@ export interface DispatchClient {
       params: Record<string, unknown>;
       imageReferences?: DispatchImageReference[];
       audioReferences?: DispatchVoiceReference[];
+      mediaAudioReferences?: Array<DispatchVoiceReference & { durationSec: number }>;
       audioInputs?: PreparedAudioInput[];
       voiceReference?: DispatchVoiceReference;
       videoSource?: DispatchVideoSource;
@@ -135,9 +143,11 @@ export interface EnqueueInput {
 }
 
 export interface JobQueueOptions {
+  /** The host owns durability; journalPath still locates disposable inline-artifact staging. */
+  journal?: JobStateStore;
   journalPath: string;
   clients: Record<string, DispatchClient>;
-  getKey: (provider: string) => Promise<string | null>;
+  getKey: (provider: string, job: Job) => Promise<string | null>;
   emit: (event: DomainEvent) => void;
   /**
    * The idempotency seam (R-16): startup snapshots once; runtime checks the live ledger.
@@ -160,9 +170,12 @@ export interface JobQueueOptions {
   /** Resolve durable portable paths into ephemeral verified bytes before paid provider I/O. */
   readAudioInputs?: (job: Job) => Promise<PreparedAudioInput[]>;
   readAudioReferences?: (job: Job) => Promise<DispatchVoiceReference[]>;
+  prepareReferences?: (job: Job, videos: DispatchVideoSource[], signal: AbortSignal) => Promise<{
+    videos: DispatchVideoSource[]; audio: Array<DispatchVoiceReference & { durationSec: number }>;
+  }>;
   readImageReferences?: (worldId: string, paths: readonly string[]) => Promise<DispatchImageReference[]>;
   /** Resolve a durable voice id into ephemeral confined bytes immediately before provider I/O. */
-  readVoiceReference?: (worldId: string, provider: string, model: string, voiceId: string) => Promise<DispatchVoiceReference>;
+  readVoiceReference?: (worldId: string, provider: string, model: string, voiceId: string, signal?: AbortSignal) => Promise<DispatchVoiceReference>;
   /**
    * Resolve the footage a continuation extends into bytes, cutting a pass segment out of its
    * backing file first where the predecessor is one (SPEC-019 R-50, T-32).
@@ -216,8 +229,12 @@ export interface JobQueueOptions {
   baseConcurrency?: number;
   /** Provider-specific safe caps. A local GPU runtime normally supplies one here. */
   providerConcurrency?: Readonly<Record<string, number>>;
+  /** Held across local inference; waiting stays on the queued side of the outbox. */
+  acquireLocalGpu?: (job: Job, signal: AbortSignal, waiting: (reason: string | null) => void) => Promise<(() => void) | undefined>;
   /** Recovered work for this provider is not pumped until the runtime has settled. */
   awaitRecoveryReady?: (provider: string) => Promise<boolean>;
+  /** Keep a restarting model queued while healthy siblings may use the same provider lane. */
+  runtimeReady?: (job: Job) => boolean;
   baseIntervalMs?: number;
 }
 
@@ -252,6 +269,7 @@ const FORMAT_PRESERVING_IMAGE_TARGETS = new Set([
   "character-sheet",
   "character-look",
   "reference-tile",
+  "story-page-illustration",
   // The look preview may be promoted to the master look (SPEC-031 R-54); a JPEG under a
   // .png name would then be carried under a name its bytes contradict.
   "look-preview",
@@ -265,7 +283,7 @@ const FOLLOW_ON_TARGETS = new Set([
   "voice-line",
   "voice-preview",
 ]);
-const COORDINATOR_ONLY_PARAMS = new Set(["frameRun", "frameRunStep", "landing", "request"]);
+const COORDINATOR_ONLY_PARAMS = new Set(["frameRun", "frameRunStep", "landing", "request", "engineOperation"]);
 
 function providerParams(params: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(params).filter(([key]) => !COORDINATOR_ONLY_PARAMS.has(key) && (key !== "audioReferences" || (Array.isArray((params.audioReferences as { references?: unknown })?.references) && ((params.audioReferences as { references: unknown[] }).references.length > 0)))));
@@ -310,7 +328,7 @@ function landedName(job: Job, artifact: DispatchArtifact, index: number): string
 }
 
 export class JobQueue {
-  private readonly journal: JobJournal;
+  private readonly journal: JobStateStore;
   private readonly jobs = new Map<string, Job>();
   private readonly lanes = new Map<string, Lane>();
   private readonly clock: () => string;
@@ -333,6 +351,10 @@ export class JobQueue {
   private readonly retryTimers = new Set<NodeJS.Timeout>();
   /** Submits without a remote id can still be interrupted, notably queue-backed local speech. */
   private readonly submitAborts = new Map<string, AbortController>();
+  /** A poll fault pauses observation, not the engine's work. Retain its card until settled. */
+  private readonly gpuReservations = new Map<string, () => void>();
+  /** Recovery may already own the card while waiting for the other engine to unload. */
+  private readonly pendingGpuReservations = new Set<string>();
   /**
    * Jobs whose cancellation is underway, held from the moment the abort fires until the terminal
    * row is written. The abort makes the in-flight submit reject, and that rejection reaches the
@@ -348,7 +370,7 @@ export class JobQueue {
   private readonly retiredEngineRuns = new Set<string>();
 
   constructor(private readonly opts: JobQueueOptions) {
-    this.journal = new JobJournal(opts.journalPath);
+    this.journal = opts.journal ?? new JobJournal(opts.journalPath);
     this.clock = opts.clock ?? (() => new Date().toISOString());
     this.rng = opts.rng ?? Math.random;
     this.maxAttempts = opts.maxAttempts ?? 4;
@@ -401,6 +423,7 @@ export class JobQueue {
   /** Durable transition: journal first, then memory, then the event (D1). */
   private async transition(job: Job): Promise<boolean> {
     if (this.disposed) return false;
+    job = { ...job, waitingFor: undefined };
     await this.journal.append(job);
     if (this.disposed) return true; // killed mid-write: the journal decides on recovery
     this.jobs.set(job.id, job);
@@ -590,6 +613,8 @@ export class JobQueue {
    */
   private releaseLane(lane: Lane, last: Job): void {
     if (this.disposed) return;
+    // The shared owner unloads before a handover. A late courtesy /free could race the next job.
+    if (this.opts.acquireLocalGpu && (lane.provider === "comfyui" || lane.provider === "ollama")) return;
     const client = this.opts.clients[lane.provider];
     if (!client?.release) return;
     void client.release(last.model, { jobId: last.id, attempt: last.attempt, model: last.model }).catch(() => undefined);
@@ -615,7 +640,10 @@ export class JobQueue {
         lane.inFlight.delete(runKey);
         this.retiredEngineRuns.delete(this.engineRunKey(job));
         const current = this.jobs.get(job.id);
-        if (current?.status === "queued" && !lane.fifo.includes(job.id)) lane.fifo.push(job.id);
+        // A job whose pre-submit phase was aborted by a cancel is still "queued" for the tick
+        // between the abort and the cancel's terminal write; putting it back would dispatch it
+        // again with nobody left to abort the second run (the clip read found this).
+        if (current?.status === "queued" && !this.cancelling.has(job.id) && !lane.fifo.includes(job.id)) lane.fifo.push(job.id);
         this.pump(provider);
         // Read after the pump, not before: a job the pump just started is in flight, and a retry
         // sitting out its backoff is still in the FIFO. Only a lane with nothing running and
@@ -658,6 +686,7 @@ export class JobQueue {
         continue;
       }
       const at = lane.notBefore.get(jobId) ?? 0;
+      if (this.opts.runtimeReady?.(job) === false) continue;
       if (at <= now) {
         lane.fifo.splice(i, 1);
         lane.notBefore.delete(jobId);
@@ -754,13 +783,42 @@ export class JobQueue {
   // ---- the outbox protocol (§2.3) ------------------------------------------
 
   private async runJob(job: Job): Promise<void> {
-    if (this.disposed) return;
+    if (!this.opts.acquireLocalGpu) return this.runQueuedJob(job);
+    const waiting = new AbortController();
+    this.submitAborts.set(job.id, waiting);
+    let release: (() => void) | undefined;
+    try {
+      release = await this.opts.acquireLocalGpu(job, waiting.signal, (reason) => {
+        const current = this.jobs.get(job.id);
+        if (!this.disposed && current?.status === "queued") {
+          const updated = { ...current, waitingFor: reason ?? undefined };
+          this.jobs.set(job.id, updated);
+          this.opts.emit({ at: this.clock(), type: "job.updated", job: updated });
+        }
+      });
+      if (release) this.gpuReservations.set(this.engineRunKey(job), release);
+      if (waiting.signal.aborted || this.disposed || !this.stillQueued(job)) return;
+      this.submitAborts.delete(job.id);
+      await this.runQueuedJob(job);
+    } catch (error) {
+      if (!waiting.signal.aborted && !this.disposed && this.stillQueued(job)) {
+        await this.terminalize(job, "failed", describeCoordinatorError(error));
+      }
+    } finally {
+      if (this.submitAborts.get(job.id) === waiting) this.submitAborts.delete(job.id);
+      const current = this.jobs.get(job.id);
+      if (release && (this.disposed || current?.status !== "running" || this.engineRunKey(current) !== this.engineRunKey(job))) this.releaseGpu(job);
+    }
+  }
+
+  private async runQueuedJob(job: Job): Promise<void> {
+    if (this.disposed || this.opts.runtimeReady?.(job) === false) return;
     const client = this.opts.clients[job.provider];
     if (!client) {
       await this.terminalize({ ...job, attempt: job.attempt }, "failed", `no client for provider "${job.provider}"`);
       return;
     }
-    const key = await this.keyFor(job.provider);
+    const key = await this.keyFor(job);
     if (key === null) {
       // Not the job's fault: hold the lane, keep the job queued (R-8 posture).
       await this.transition({ ...job, status: "queued", updatedAt: this.clock() });
@@ -772,6 +830,7 @@ export class JobQueue {
 
     let audioInputs: PreparedAudioInput[] | undefined;
     let audioReferences: DispatchVoiceReference[] | undefined;
+    let mediaAudioReferences: Array<DispatchVoiceReference & { durationSec: number }> | undefined;
     let imageReferences: DispatchImageReference[] | undefined;
     let voiceReference: DispatchVoiceReference | undefined;
     let videoSource: DispatchVideoSource | undefined;
@@ -792,7 +851,7 @@ export class JobQueue {
         await this.terminalize(
           job,
           "failed",
-          error instanceof Error ? error.message : "image references could not be prepared",
+          describeCoordinatorError(error),
         );
         return;
       }
@@ -821,7 +880,7 @@ export class JobQueue {
         await this.terminalize(
           job,
           "failed",
-          error instanceof Error ? error.message : "video references could not be prepared",
+          describeCoordinatorError(error),
         );
         return;
       }
@@ -848,16 +907,51 @@ export class JobQueue {
         await this.terminalize(job, "failed", "voice reference transport is not configured");
         return;
       }
+      // A hosted reader's clip read can create a slot on the vendor's account (SPEC-046 R-13),
+      // so it takes the job's cancellation like reference preparation does: a cancel or a
+      // shutdown while the save is pending aborts the call rather than letting the recording
+      // leave and a slot bill after the person said stop (codex on PR 1153).
+      const reading = new AbortController();
+      this.submitAborts.set(job.id, reading);
       try {
-        voiceReference = await this.opts.readVoiceReference(job.worldId, job.provider, job.model, voiceId);
+        voiceReference = await this.opts.readVoiceReference(job.worldId, job.provider, job.model, voiceId, reading.signal);
       } catch (error) {
-        await this.terminalize(
-          job,
-          "failed",
-          error instanceof Error ? error.message : "the voice's recording could not be prepared",
-        );
+        if (!this.disposed && !this.cancelling.has(job.id) && this.stillQueued(job)) {
+          const message = describeCoordinatorError(error);
+          // A hosted reader's clip read talks to the vendor before submit, so a revoked key
+          // shows up here first: the job was never wrong, the credential was (R-8). Back to
+          // queued behind a paused lane, as a submit's credential fault is — not a failed job
+          // per queued read (codex on PR 1156).
+          const klass = classifyError(error);
+          if (klass === "provider-fault") {
+            await this.transition({ ...job, status: "queued", failureClass: "provider-fault", error: message, updatedAt: this.clock() });
+            this.lane(job.provider).fifo.unshift(job.id);
+            this.pauseLane(job.provider, "fault", message);
+            return;
+          }
+          // A busy vendor met before submit — a full pool on the listing, the slot save the probe
+          // saw answer 429 — is the same bounded backoff a submit gets. The retry counts as an
+          // attempt so the bound holds; nothing was sent, so nothing is held for reconciliation.
+          if (klass === "transient") {
+            if (isRateLimit(error)) this.noteRateLimit(job.provider);
+            const attempt = job.attempt + 1;
+            if (attempt >= this.maxAttempts) {
+              await this.terminalize(job, "failed", `gave up after ${attempt} attempts: ${message}`, undefined, klass);
+              return;
+            }
+            await this.transition({ ...job, status: "queued", attempt, failureClass: klass, error: message, updatedAt: this.clock() });
+            const lane = this.lane(job.provider);
+            lane.notBefore.set(job.id, Date.now() + backoffMs(attempt, this.backoffBaseMs, this.backoffCapMs, this.rng));
+            lane.fifo.push(job.id);
+            return;
+          }
+          await this.terminalize(job, "failed", message);
+        }
         return;
+      } finally {
+        if (this.submitAborts.get(job.id) === reading) this.submitAborts.delete(job.id);
       }
+      if (this.disposed || !this.stillQueued(job)) return;
     }
     // The footage a continuation extends, resolved last of the three (SPEC-019 R-50). A failure
     // here is terminal rather than a lane pause: the predecessor is named on the job and cannot
@@ -880,7 +974,7 @@ export class JobQueue {
         await this.terminalize(
           job,
           "failed",
-          error instanceof Error ? error.message : "the footage being extended could not be prepared",
+          describeCoordinatorError(error),
         );
         return;
       }
@@ -892,7 +986,7 @@ export class JobQueue {
         if (!this.opts.readAudioReferences) throw new Error("Audio reference transport is not configured.");
         audioReferences = await this.opts.readAudioReferences(job);
       } catch (error) {
-        await this.terminalize(job, "failed", error instanceof Error ? error.message : "Audio references are not cleared for upload.");
+        await this.terminalize(job, "failed", describeCoordinatorError(error));
         return;
       }
       if (!this.stillQueued(job)) return;
@@ -903,11 +997,32 @@ export class JobQueue {
         if (!this.opts.readAudioInputs) throw new Error("Performance conversion input transport is not configured.");
         audioInputs = await this.opts.readAudioInputs(job);
       } catch (error) {
-        await this.terminalize(job, "failed", error instanceof Error ? error.message : "Performance is not cleared for conversion.");
+        await this.terminalize(job, "failed", describeCoordinatorError(error));
         return;
       }
       if (!this.stillQueued(job)) return;
     }
+
+    // Host preparation has no provider side effect. Keep it on the queued side of the outbox
+    // boundary, and let cancellation terminate its bounded encoder before any submission.
+    if (this.opts.prepareReferences) {
+      const preparing = new AbortController();
+      this.submitAborts.set(job.id, preparing);
+      try {
+        const prepared = await this.opts.prepareReferences(job, videoReferences ?? [], preparing.signal);
+        videoReferences = prepared.videos;
+        mediaAudioReferences = prepared.audio;
+      } catch (error) {
+        if (!this.disposed && !this.cancelling.has(job.id) && this.stillQueued(job)) await this.terminalize(job, "failed", error instanceof Error ? error.message : "Reference preparation failed.");
+        return;
+      } finally { if (this.submitAborts.get(job.id) === preparing) this.submitAborts.delete(job.id); }
+      if (this.disposed || !this.stillQueued(job)) return;
+    } else if (job.params.referenceMedia !== undefined) {
+      await this.terminalize(job, "failed", "Multimedia reference preparation is unavailable.");
+      return;
+    }
+
+    if (this.disposed || !this.stillQueued(job) || this.opts.runtimeReady?.(job) === false) return;
 
     // Persist the physical call before I/O. A crash may overcount one authorized call, but the
     // journal can never undercount requests that may have reached a paid provider.
@@ -939,6 +1054,7 @@ export class JobQueue {
           params: providerParams(job.params),
           ...(imageReferences ? { imageReferences } : {}),
           ...(audioReferences ? { audioReferences } : {}),
+          ...(mediaAudioReferences ? { mediaAudioReferences } : {}),
           ...(audioInputs ? { audioInputs } : {}),
           ...(voiceReference ? { voiceReference } : {}),
           ...(videoSource ? { videoSource } : {}),
@@ -968,7 +1084,7 @@ export class JobQueue {
           await this.terminalize(
             submitting,
             "failed",
-            `the provider completed, but its artifact could not be made durable: ${error instanceof Error ? error.message : String(error)}`,
+            `the provider completed, but its artifact could not be made durable: ${describeCoordinatorError(error)}`,
           );
           return;
         }
@@ -984,7 +1100,7 @@ export class JobQueue {
       const running: Job = { ...submitting, status: "running", providerJobId: accepted.remoteId, updatedAt: this.clock() };
       await this.transition(running);
       this.noteSuccess(job.provider);
-      await this.pollToTerminal(running, client, key);
+      await this.pollToTerminal(running, client, key, true);
     } catch (err) {
       if (this.disposed) return;
       // Cancelled by the user, or being cancelled right now: the abort IS the error, and `cancel()`
@@ -998,7 +1114,7 @@ export class JobQueue {
   }
 
   private async handleSubmitError(job: Job, client: DispatchClient, err: unknown): Promise<void> {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = describeCoordinatorError(err);
     const klass: FailureClass = classifyError(err);
     if (isRateLimit(err)) this.noteRateLimit(job.provider);
     const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[job.provider]?.local === true;
@@ -1082,7 +1198,25 @@ export class JobQueue {
     }
   }
 
-  private async pollToTerminal(job: Job, client: DispatchClient, key: string): Promise<void> {
+  private async pollToTerminal(job: Job, client: DispatchClient, key: string, reserved = false): Promise<void> {
+    if (!reserved && this.opts.acquireLocalGpu) {
+      const abort = new AbortController();
+      const runKey = this.engineRunKey(job);
+      this.submitAborts.set(job.id, abort);
+      this.pendingGpuReservations.add(runKey);
+      let release: (() => void) | undefined;
+      try {
+        release = this.gpuReservations.get(runKey) ?? await this.opts.acquireLocalGpu(job, abort.signal, () => {});
+        if (release) this.gpuReservations.set(runKey, release);
+        this.pendingGpuReservations.delete(runKey);
+        if (!abort.signal.aborted && !this.disposed) await this.pollToTerminal(job, client, key, true);
+      } finally {
+        this.pendingGpuReservations.delete(runKey);
+        if (this.submitAborts.get(job.id) === abort) this.submitAborts.delete(job.id);
+        if (release && (this.disposed || !this.stillPolling(job))) this.releaseGpu(job);
+      }
+      return;
+    }
     let current = job;
     for (;;) {
       if (this.disposed) return;
@@ -1095,7 +1229,7 @@ export class JobQueue {
         const klass = classifyError(err);
         if (klass === "provider-fault") {
           // Keep the job running (the remote work exists); pause the lane for new work.
-          const message = err instanceof Error ? err.message : String(err);
+          const message = describeCoordinatorError(err);
           current = { ...current, failureClass: klass, error: message, updatedAt: this.clock() };
           await this.transition(current);
           this.pauseLane(job.provider, "fault", message);
@@ -1125,7 +1259,7 @@ export class JobQueue {
         return;
       }
       if (poll.state === "cancelled") {
-        await this.terminalize(current, "cancelled", null, poll.costMicroUsd);
+        await this.terminalize({...current, cancellationUncertain: false}, "cancelled", null, poll.costMicroUsd);
         return;
       }
       // Only when it actually moved: a poll that sees the same step as the last one is not news,
@@ -1145,6 +1279,30 @@ export class JobQueue {
       current.providerJobId === job.providerJobId &&
       current.attempt === job.attempt &&
       this.engineRunKey(current) === this.engineRunKey(job);
+  }
+
+  private releaseGpu(job: Job): void {
+    const key = this.engineRunKey(job);
+    const release = this.gpuReservations.get(key);
+    this.gpuReservations.delete(key);
+    release?.();
+  }
+
+  private async reserveHeldGpu(job: Job): Promise<void> {
+    if (!this.opts.acquireLocalGpu || !this.stillPolling(job)) return;
+    const abort = new AbortController();
+    const runKey = this.engineRunKey(job);
+    this.submitAborts.set(job.id, abort);
+    this.pendingGpuReservations.add(runKey);
+    try {
+      const release = await this.opts.acquireLocalGpu(job, abort.signal, () => {});
+      if (!release) return;
+      if (this.disposed || !this.stillPolling(job)) release();
+      else this.gpuReservations.set(runKey, release);
+    } finally {
+      this.pendingGpuReservations.delete(runKey);
+      if (this.submitAborts.get(job.id) === abort) this.submitAborts.delete(job.id);
+    }
   }
 
   // ---- artifacts (§2.9) ----------------------------------------------------
@@ -1242,7 +1400,7 @@ export class JobQueue {
         // An interrupted download restarts the fetch (R-12); nothing partial exists yet.
         const klass = classifyError(err);
         if (klass === "terminal") {
-          await this.terminalize(job, "failed", `artifact fetch failed: ${err instanceof Error ? err.message : String(err)}`);
+          await this.terminalize(job, "failed", `artifact fetch failed: ${describeCoordinatorError(err)}`);
         } else {
           // Bounded backoff (R-9) rather than the poll cadence, and the job re-checked before every
           // re-fetch. A cancelled job kept re-fetching every 1.5s for as long as the app ran, its
@@ -1270,16 +1428,36 @@ export class JobQueue {
         }
         artifacts = prepared;
       }
+      if (job.target.kind === "story-page-illustration" && artifacts.length === 0) {
+        await this.terminalize(job, "failed", "Page illustration returned no artifacts.", costMicroUsd, "transient");
+        return;
+      }
+      if (job.target.kind === "story-chapter-narration" && artifacts.length !== 1) {
+        await this.terminalize(job, "failed", "Chapter narration requires exactly one complete audio artifact.", costMicroUsd, "transient");
+        return;
+      }
+      if (job.target.kind === "story-page-illustration" || job.target.kind === "story-chapter-narration") {
+        const names = artifacts.map((artifact, index) => landedName(job, artifact, index).toLowerCase());
+        const problem = new Set(names).size !== names.length ? "Story artifacts have colliding output names."
+          : artifacts.some(artifact => artifact.data.length > 32 * 1024 * 1024) ? "Story artifact exceeds the engine media read limit." : null;
+        if (problem) {
+          await this.terminalize(job, "failed", problem, costMicroUsd, "transient");
+          return;
+        }
+      }
       // Verify everything before anything lands (R-13): all-or-nothing.
       for (const artifact of artifacts) {
         const verified = verifyArtifact(artifact);
         const problem =
           verified ??
+          (job.target.kind === "story-chapter-narration" && audioFormatOf(artifact.data) !== job.params.audioFormat
+            ? "narration format differs from the requested audio format"
+            : null) ??
           (job.capability === "image" && imageFormatOf(artifact.data) === null
             ? "not a supported PNG, JPEG, or WebP image"
             : null);
         if (problem !== null) {
-          await this.terminalize(job, "failed", `artifact "${artifact.name}" failed verification: ${problem}`, undefined, "transient");
+          await this.terminalize(job, "failed", `artifact "${artifact.name}" failed verification: ${problem}`, costMicroUsd, "transient");
           return;
         }
       }
@@ -1363,6 +1541,7 @@ export class JobQueue {
       updatedAt: this.clock(),
     };
     await this.transition(terminal);
+    this.releaseGpu(job);
     if (this.disposed) return;
     // An append that landed this pass is proof enough; asking the file again could only be
     // wrong. A lock arriving in that window (a scanner opening the file we just wrote) used to
@@ -1464,28 +1643,42 @@ export class JobQueue {
     lane.fifo = lane.fifo.filter((id) => id !== jobId);
     lane.notBefore.delete(jobId);
     const submitAbort = this.submitAborts.get(jobId);
+    const runKey = this.engineRunKey(job);
+    const recoveringGpu = this.pendingGpuReservations.has(runKey) && this.stillPolling(job);
     // Claimed before the abort, not after: the rejection it causes races this method, and the
     // submit's error path has to be able to tell a cancellation from a transport failure.
     this.cancelling.add(jobId);
-    submitAbort?.abort();
-    if (submitAbort !== undefined) await Promise.resolve();
+    // A recovered running job may already be executing in its engine. Keep its pending
+    // reservation alive until the engine acknowledges cancellation.
+    if (!recoveringGpu) {
+      submitAbort?.abort();
+      if (submitAbort !== undefined) await Promise.resolve();
+    }
     if (TERMINAL.has(this.jobs.get(jobId)?.status ?? "")) return;
     // Attempt the remote cancel where there is remote work to cancel; best-effort.
     if (job.providerJobId) {
       const client = this.opts.clients[job.provider];
-      const key = await this.keyFor(job.provider);
+      const key = await this.keyFor(job);
       // `key !== null`, not a truthiness test: keyFor returns the EMPTY STRING for every
       // provider whose credential is not ours to hold — every local runtime, and Higgsfield,
       // whose credential lives in its own CLI. An empty string is falsy, so the truthiness
       // test skipped the remote cancel for all of them: a Higgsfield job kept running after
       // the user cancelled it, and SPEC-021 R-17's targeted cancellation was unreachable.
       // Only a genuinely missing in-app credential (null) means there is nobody to ask.
+      let acknowledged = false;
       if (client && key !== null) {
-        await client
+        acknowledged = await client
           .cancel(key, job.providerJobId, { jobId: job.id, attempt: job.attempt, model: job.model })
-          .catch(() => {});
+          .then(() => true, () => false);
+      }
+      if (!acknowledged && (this.gpuReservations.has(runKey) || this.pendingGpuReservations.has(runKey)) && this.stillPolling(job)) {
+        const error = "Cancellation was not acknowledged; the local engine may still be running. Retry cancellation or resume checking its result.";
+        await this.transition({ ...job, failureClass: "provider-fault", error, updatedAt: this.clock() });
+        this.pauseLane(job.provider, "fault", error);
+        return;
       }
     }
+    if (recoveringGpu) submitAbort?.abort();
     // A local abort ends our wait, not necessarily the provider's work. Preserve that distinction
     // without turning a deliberate cancellation into a reconciliation hold.
     const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[job.provider]?.local === true;
@@ -1498,7 +1691,7 @@ export class JobQueue {
       ? "Cancelled in Arke. The provider may still complete or charge for this request."
       : null;
     // A cancelled job still writes a ledger entry (R-15, D10).
-    await this.terminalize(job, "cancelled", reason);
+    await this.terminalize({...job, cancellationUncertain: outcomeMayBeRemote}, "cancelled", reason);
     this.emitQueueStatus(job.provider);
   }
 
@@ -1653,17 +1846,21 @@ export class JobQueue {
         continue;
       }
       if (job.status === "running") {
-        if (job.failureClass === "provider-fault") {
-          this.pauseLane(job.provider, "fault", job.error ?? "the provider requires attention");
-          report.push({ jobId: job.id, action: "held-for-user", detail: job.error ?? "provider fault" });
-          continue;
-        }
         // A local engine's job first consults the per-source policy (SPEC-021 §2.11): a spawned
         // engine's old prompt id means nothing, and an old id is never polled against a
         // different engine. Cloud jobs keep the standing behaviour untouched.
         const decision = this.opts.recoverLocal?.(job, prior) ?? null;
         if (decision !== null && decision.action !== "resume") {
           report.push(await this.applyLocalRecovery(job, decision));
+          continue;
+        }
+        if (job.failureClass === "provider-fault") {
+          this.pauseLane(job.provider, "fault", job.error ?? "the provider requires attention");
+          const lane = this.lane(job.provider), runKey = this.engineRunKey(job);
+          lane.inFlight.add(runKey);
+          this.trackRun(this.runAfterRecoveryGate(job.provider, () => this.reserveHeldGpu(job))
+            .finally(() => lane.inFlight.delete(runKey)));
+          report.push({ jobId: job.id, action: "held-for-user", detail: job.error ?? "provider fault" });
           continue;
         }
         // R-5: a recorded remote id resumes by polling, never by resubmitting.
@@ -1705,7 +1902,7 @@ export class JobQueue {
   private async resumePolling(job: Job): Promise<void> {
     if (!this.stillPolling(job)) return;
     const client = this.opts.clients[job.provider];
-    const key = await this.keyFor(job.provider);
+    const key = await this.keyFor(job);
     if (!client || key === null) {
       this.pauseLane(job.provider, "credential", "no credential stored for this provider");
       return;
@@ -1728,7 +1925,6 @@ export class JobQueue {
   /** A runtime that became ready after a failed startup releases its recovered work. */
   releaseRecovery(provider: string): void {
     const lane = this.lane(provider);
-    if (!lane.recoveryBlocked) return;
     lane.recoveryBlocked = false;
     const deferred = lane.deferredRecovery.splice(0);
     for (const work of deferred) this.trackRun(work());
@@ -1738,7 +1934,7 @@ export class JobQueue {
   /** The unwitnessed-submission window (§2.4 rows ②→③ and ④): observe, never guess (D2). */
   private async reconcileSubmitting(job: Job): Promise<ReconcileAction> {
     const client = this.opts.clients[job.provider];
-    const key = client ? await this.keyFor(job.provider) : null;
+    const key = client ? await this.keyFor(job) : null;
     if (!client || key === null) {
       this.pauseLane(job.provider, "credential", "no credential stored for this provider");
       return { jobId: job.id, action: "held-for-user", detail: "no credential to reconcile with" };
@@ -1952,6 +2148,7 @@ export class JobQueue {
       if (replacement !== null) {
         const retiredRun = this.engineRunKey(job);
         this.retiredEngineRuns.add(retiredRun);
+        this.releaseGpu(job);
         lane.inFlight.delete(retiredRun);
         this.submitAborts.get(job.id)?.abort();
         const requeued: Job = {
@@ -2039,12 +2236,13 @@ export class JobQueue {
 
   // ---- misc -----------------------------------------------------------------
 
-  private async keyFor(provider: string): Promise<string | null> {
+  private async keyFor(job: Job): Promise<string | null> {
+    const provider = job.provider;
     // Only an in-app credential is ours to hand over. A local runtime takes none, and an
     // external one is held by the tool the client drives — both dispatch with an empty key
     // rather than being held for a credential that was never going to be in `credentials.dat`.
     if (credentialKindOf(provider) !== "in-app") return "";
-    return this.opts.getKey(provider);
+    return this.opts.getKey(provider, job);
   }
 
   private concurrencyFor(provider: string): number {
@@ -2095,6 +2293,9 @@ export class JobQueue {
     for (const client of new Set(Object.values(this.opts.clients))) client.dispose?.();
     for (const controller of this.submitAborts.values()) controller.abort();
     this.submitAborts.clear();
+    for (const release of this.gpuReservations.values()) release();
+    this.gpuReservations.clear();
+    this.pendingGpuReservations.clear();
     for (const lane of this.lanes.values()) {
       if (lane.timer) clearTimeout(lane.timer);
       lane.timer = null;

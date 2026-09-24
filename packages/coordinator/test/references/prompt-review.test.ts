@@ -1,8 +1,18 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { KeyArtPromptReviews, keyArtCreativeBody, type KeyArtPromptContext } from "../../src/references/prompt-review.js";
+import { KeyArtPromptReviews, keyArtCreativeBody, keyArtReviewContext, type KeyArtPromptContext } from "../../src/references/prompt-review.js";
+import { scanWorld } from "../../src/world/scan.js";
+import { FIXTURE_WORLD } from "../world/helpers.js";
 import { promptHash } from "@arke-studio/contracts";
-const context:KeyArtPromptContext={worldId:"world",model:{id:"model",provider:"fal"},base:"A quiet harbour.",fixed:" No text, no logos.",sources:[{kind:"accepted-world",ref:"world/tone",text:"quiet"}],references:[]};
+const context:KeyArtPromptContext={worldId:"world",model:{id:"model",provider:"fal",displayName:"Test model",accepts:{referenceImages:0,startFrame:false,endFrame:false},limits:{}},base:"A quiet harbour.",fixed:" No text, no logos.",sources:[{kind:"accepted-world",ref:"world/tone",text:"quiet"}],references:[]};
+it("supplies authored sheet prose without serialized metadata",async()=>{
+  const {bundle}=await scanWorld(FIXTURE_WORLD);
+  const sheet=bundle.sheets.find(s=>s.type==="character")!;
+  sheet.role="Self-made Lagos man";
+  sheet.sections=[{heading:"Appearance",body:"A long silver coat."}];
+  const result=keyArtReviewContext(bundle, {id:"model",provider:"fal"} as Parameters<typeof keyArtReviewContext>[1],"A place.",[],true);
+  assert.equal(result.sources.find(s=>s.ref===`sheet/${sheet.id}`)?.text,`${sheet.name}\n\nSelf-made Lagos man\n\nA long silver coat.`);
+});
 it("draft review is session-only and approval freezes exact body plus fixed constraints",async()=>{
   const reviews=new KeyArtPromptReviews(),session=await reviews.begin(context);
   await reviews.candidate(context.worldId,session.id,"A neon harbour.");
@@ -16,4 +26,7 @@ it("draft review is session-only and approval freezes exact body plus fixed cons
   reviews.cancel(context.worldId);await assert.rejects(reviews.approve(context,session.id,context.base),/changed/);
   assert.equal((await new KeyArtPromptReviews().approve(context,undefined,undefined)).prompt,"A quiet harbour. No text, no logos.","legacy dispatch uses assembled text without hidden drafting");
   assert.equal(keyArtCreativeBody("A place. No text, no logos, no character portraits."),"A place.");
+  const advisory=await new KeyArtPromptReviews().approve(context,undefined,"The first frame holds the locked door.");
+  assert.match(advisory.review.capabilityWarnings!.join(" "),/Test model has no first-frame input/);
+  assert.match(advisory.prompt,/first frame holds/);
 });

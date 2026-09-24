@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   SHEET_SHAPES,
+  ArtifactSidecarSchema,
+  propSlugs,
   sheetDir,
   type ArtifactSidecar,
   type ExtractionCandidate,
@@ -160,11 +162,13 @@ async function updateSidecar(
 ): Promise<void> {
   const path = `artifacts/${artifact.file}.json`;
   const raw = await readFile(toExtendedLength(join(store.dir, path)), "utf8");
+  const current = ArtifactSidecarSchema.parse(JSON.parse(raw));
+  if (current.id !== artifact.id || current.file !== artifact.file) throw new Error("The artifact record changed.");
   await store.commit(
     {
       kind: "artifact-extraction",
       source: options.source ?? "import",
-      files: [{ path, action: "replace", content: JSON.stringify(next, null, 2) + "\n", baseHash: sha256(raw) }],
+      files: [{ path, action: "replace", content: JSON.stringify({ ...current, extraction: next.extraction }, null, 2) + "\n", baseHash: sha256(raw) }],
       ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
     },
     undefined,
@@ -225,7 +229,8 @@ export async function resolveCandidate(
       if (outcome.status !== "accepted") throw new Error(`canon candidate did not land: ${outcome.status}`);
     } else {
       const kind = candidate.kind as SheetKind;
-      const slug = uniqueSlug(candidate.name, kind, store.getBundle().sheets.map((s) => s.id));
+      // Past every sheet's id and every prop's slug: a mention cites one thing (issue 1116).
+      const slug = uniqueSlug(candidate.name, kind, [...store.getBundle().sheets.map((s) => s.id), ...propSlugs(store.getBundle().props)]);
       const shape = SHEET_SHAPES[kind];
       const section = candidate.section ?? shape.sections[0]!.heading;
       const content = buildSheetContent({

@@ -115,6 +115,10 @@ function ensureAudio(): AudioLike {
 /** Load and play a clip, replacing whatever was sounding. Re-playing the current clip resumes. */
 export async function playClip(clip: Clip, playlistOwned = false): Promise<void> {
   if (!playlistOwned && playlist) { playlist = null; publish({ ...state }); }
+  // A clip played under a queued read's id that is not one of its pieces is the joined whole,
+  // replayed (issue 1208): it supersedes the queue, or `ended` would walk on from the queue's
+  // old position and play the tail of the passage a second time (codex on PR 1210).
+  if (queue && queue.id === clip.id && !queue.parts.some((part) => part?.url === clip.url)) queue = null;
   const generation = ++playGeneration;
   const element = ensureAudio();
   element.playbackRate = playlistOwned ? playlist?.rate ?? 1 : 1;

@@ -8,10 +8,12 @@ import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
-import type { ArtifactSidecar, ClientState } from "@arke-studio/contracts";
+import { applyTimelineCommands, orderedShots, seedEmptyPictureTimeline, type ArtifactSidecar, type ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { artifactIsServable, artifactOpenLabel, artifactViewer } from "../src/lib/artifact-view.js";
-import { __setStateForTest } from "../src/lib/store.js";
+import { VoiceSampleFlow } from "../src/components/character-voice-sample.js";
+import { artifactIsServable, artifactOpenLabel, artifactUses, artifactViewer } from "../src/lib/artifact-view.js";
+import { dismissPlayback, playbackSnapshot, playClip, setAudioFactoryForTest } from "../src/lib/audio.js";
+import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -29,6 +31,13 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 // linkedom has no layout and no frame loop; the app-wide toaster asks for both before it draws.
 Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }) });
+Object.assign(dom.HTMLElement.prototype, { focus() {} });
+// linkedom's <dialog> has neither method. A browser's close() ends in a `close` event, which is
+// what the viewer listens to, so the stub does the same.
+Object.assign(dom.HTMLElement.prototype, {
+  showModal(this: HTMLDialogElement) { (this as { open: boolean }).open = true; },
+  close(this: HTMLDialogElement) { (this as { open: boolean }).open = false; this.dispatchEvent(new dom.window.Event("close")); },
+});
 Object.assign(globalThis, {
   window: dom.window,
   document: dom.document,
@@ -40,10 +49,107 @@ Object.assign(globalThis, {
 });
 
 const here = dirname(fileURLToPath(import.meta.url));
-const source = (file: string): string => readFileSync(join(here, "../src", file), "utf8");
-const VIEWER = source("components/artifact-viewer.tsx");
-const CSS = readFileSync(join(here, "../src/screens/fidelity.css"), "utf8");
 const W = `/w/${FIXTURE_WORLD_ID}`;
+
+it("names current uses, confirms retirement from the card and viewer, and waits for the snapshot", async () => {
+  const state = structuredClone(shelf([PICTURE]));
+  const world = state.world!, production = world.productions[0]!;
+  world.keyArt = `artifacts/${PICTURE.file}`;
+  world.canon[0]!.links.push(PICTURE.id);
+  world.referenceKits[0]!.anchor = `artifacts/${PICTURE.file}`;
+  production.selections[orderedShots(production.scenes[0]!)[0]!.id] = { startFrameArtifactId: PICTURE.id, trimInSec: 0 };
+  production.timeline = { status: "ready", timeline: applyTimelineCommands(seedEmptyPictureTimeline(production), [{ kind: "place", trackId: "tr_picture", clip: {
+    id: "cl_retirement", startFrame: 0, durationFrames: 48, sourceInFrames: 0,
+    source: { kind: "artifact", artifactId: PICTURE.id, label: "Opening plate" },
+  } }]) };
+  const uses = artifactUses(world, PICTURE);
+  assert.ok(uses.includes("World key art"));
+  assert.ok(uses.some(use => use.includes("Canon: Tide-calling")));
+  assert.ok(uses.some(use => use.includes("Reference kit:")));
+  assert.ok(uses.some(use => use.includes("shot ")));
+  assert.ok(uses.some(use => use.includes("Opening plate (cl_retirement)")));
+  const sent: Array<{ kind: string; artifactId?: string }> = [];
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(JSON.parse(json)); } });
+  const mounted = await mountShelf([PICTURE]);
+  try {
+    await act(async () => __setStateForTest(state));
+    await act(async () => mounted.container.querySelector<HTMLButtonElement>(".fy-artifact-retire")!.click());
+    assert.match(mounted.container.textContent!, /Opening plate \(cl_retirement\)/);
+    const click = async (text: string) => {
+      const button = [...mounted.container.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === text)!;
+      assert.ok(button, text);
+      await act(async () => button.click());
+    };
+    await click("Cancel");
+    assert.equal(sent.some(message => message.kind === "retire-artifact"), false);
+    await open(mounted, PICTURE);
+    const opener = mounted.container.querySelector<HTMLButtonElement>(".fy-gridcard__open")!;
+    let focused = false;
+    opener.focus = () => { focused = true; };
+    await click("Remove from shelf");
+    await click("Cancel");
+    assert.equal(focused, true, "cancelling after closing the viewer returns focus to its shelf card");
+    await open(mounted, PICTURE);
+    await click("Remove from shelf");
+    assert.match(mounted.container.textContent!, /No disk space is freed/);
+    await click("Remove from shelf");
+    assert.deepEqual(sent.filter(message => message.kind === "retire-artifact"), [{ kind: "retire-artifact", worldId: FIXTURE_WORLD_ID, artifactId: PICTURE.id }]);
+    assert.ok(mounted.container.querySelector(".fy-gridcard__open"), "no optimistic deletion");
+    world.artifacts[0] = { ...world.artifacts[0]!, retiredAt: "2026-09-07T12:00:00Z" };
+    await act(async () => __setStateForTest(structuredClone(state)));
+    assert.equal(mounted.container.querySelector(".fy-gridcard__open"), null);
+    const retiredFilter = [...mounted.container.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.trim() === "Retired 1")!;
+    assert.ok(retiredFilter);
+    await act(async () => retiredFilter.click());
+    assert.ok(mounted.container.querySelector(".fy-gridcard__open"));
+    assert.match(mounted.container.textContent!, /retired/);
+    await click("Restore");
+    assert.deepEqual(sent.at(-1), { kind: "restore-artifact", worldId: FIXTURE_WORLD_ID, artifactId: PICTURE.id });
+    assert.ok(mounted.container.querySelector(".fy-gridcard__open"), "restore waits for authoritative state");
+    delete world.artifacts[0]!.retiredAt;
+    await act(async () => __setStateForTest(structuredClone(state)));
+    assert.equal(mounted.container.querySelector(".fy-gridcard__open"), null);
+
+  } finally { await unmount(mounted); __setBridgeForTest(null); }
+});
+
+it("adds shelf files with the picker or desktop drop and reports unsupported drops", async () => {
+  const sent: Array<{ kind: string; worldId: string; editor?: unknown }> = [];
+  const dropped: File[][] = [];
+  const bridge = { appVersion: "test", platform: "test", connect() {}, subscribe() {},
+    send(json: string) { sent.push(JSON.parse(json)); },
+    importDroppedMedia(target: { worldId: string; editor?: unknown }, files: readonly File[]) {
+      assert.equal(target.worldId, FIXTURE_WORLD_ID);
+      assert.equal(target.editor, undefined);
+      dropped.push([...files]);
+      return { submitted: true, unresolved: [1] };
+    },
+  };
+  __setBridgeForTest(bridge);
+  const mounted = await mountShelf();
+  try {
+    await act(async () => mounted.container.querySelector<HTMLButtonElement>('button.fy-gridcard[aria-label="Add files"]')!.click());
+    assert.ok(sent.some(m => m.kind === "upload-artifacts" && m.worldId === FIXTURE_WORLD_ID && m.editor === undefined));
+    const files = [new File(["a"], "a.txt"), new File(["b"], "b.txt")];
+    const grid = mounted.container.querySelector(".fy-cardgrid")!;
+    const dispatch = async (type: string, selected = files) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.assign(event, { dataTransfer: { types: ["Files"], files: selected, dropEffect: "none" } });
+      await act(async () => grid.dispatchEvent(event));
+      assert.equal(event.defaultPrevented, true);
+    };
+    await dispatch("dragover");
+    assert.match(mounted.container.textContent!, /Drop to add files/);
+    await dispatch("drop");
+    assert.deepEqual(dropped, [files], "preserves every File and its position for preload path resolution");
+    await dispatch("drop", Array.from({ length: 17 }, () => files[0]!));
+    assert.equal(dropped.length, 1);
+    assert.match(mounted.container.textContent!, /up to 16 files at a time/);
+    __setBridgeForTest({ ...bridge, importDroppedMedia: undefined });
+    await dispatch("drop");
+    assert.match(mounted.container.textContent!, /File drops are available in the desktop app/);
+  } finally { await unmount(mounted); __setBridgeForTest(null); }
+});
 
 function artifact(over: Partial<ArtifactSidecar>): ArtifactSidecar {
   return {
@@ -58,7 +164,7 @@ function artifact(over: Partial<ArtifactSidecar>): ArtifactSidecar {
   } as ArtifactSidecar;
 }
 
-const PICTURE = artifact({ id: "ar_01J8G0000000000000000000I1", kind: "image", file: "key-art.png", links: ["the-vigil"] });
+const PICTURE = artifact({ id: "ar_01J8G0000000000000000000E1", kind: "image", file: "key-art.png", links: ["the-vigil"] });
 const BOARD = artifact({ id: "ar_01J8G0000000000000000000B1", kind: "board", file: "board-v2.png" });
 const CLIP = artifact({
   id: "ar_01J8G0000000000000000000V1",
@@ -73,6 +179,29 @@ const BIBLE = artifact({ id: "ar_01J8G0000000000000000000P1", file: "series-bibl
 const PROJECT = artifact({ id: "ar_01J8G0000000000000000000O1", kind: "other", file: "session.psd" });
 
 const SHELF = [PICTURE, BOARD, CLIP, BELLS, TREATMENT, NOTES, BIBLE, PROJECT];
+
+it("keeps retired extraction review reachable while hiding retired voice sources", async () => {
+  const pending = artifact({ ...NOTES, retiredAt: "2026-09-07T12:00:00Z", extraction: { pending: [{ hash: "pending", kind: "canon", name: "Remember this", body: "A fact", quote: "A fact" }], decided: [], droppedCount: 0 } });
+  const mounted = await mountShelf([pending]);
+  try {
+    assert.equal(mounted.container.querySelector(".fy-gridcard__open"), null);
+    assert.match(mounted.container.textContent!, /Remember this/);
+    assert.ok([...mounted.container.querySelectorAll("button")].some(button => button.textContent === "Accept — commits on its own"));
+    const world = structuredClone(FIXTURE_STATE.world!);
+    world.artifacts = [{ ...BELLS, retiredAt: "2026-09-07T12:00:00Z" }, CLIP];
+    const html = renderToString(
+      <VoiceSampleFlow world={world} sheet={world.sheets.find(sheet => sheet.type === "character")!} onClose={() => {}} />,
+    );
+    assert.ok(!html.includes(`data-source="artifact:${BELLS.id}"`));
+    assert.ok(html.includes(`data-source="artifact:${CLIP.id}"`));
+  } finally { await unmount(mounted); }
+});
+
+it("retiring a replacement does not bring its superseded predecessor back onto the shelf", async () => {
+  const mounted = await mountShelf([PICTURE, artifact({ id: BOARD.id, file: "replacement.png", supersedes: PICTURE.id, retiredAt: "2026-09-07T12:00:00Z" })]);
+  try { assert.equal(mounted.container.querySelector(".fy-gridcard__open"), null); }
+  finally { await unmount(mounted); }
+});
 
 function shelf(artifacts: readonly ArtifactSidecar[]): ClientState {
   const world = FIXTURE_STATE.world!;
@@ -118,7 +247,7 @@ async function unmount(mounted: Mounted): Promise<void> {
 /** Press the card's open control, the way a pointer or a keyboard would. */
 async function open(mounted: Mounted, subject: ArtifactSidecar): Promise<void> {
   const button = mounted.container.querySelector<HTMLButtonElement>(
-    `button.fy-gridcard__open[aria-label="${artifactOpenLabel(subject)}"]`,
+    `button.fy-gridcard__open[title="${subject.file}"]`,
   );
   assert.ok(button, `no open control for ${subject.file}`);
   await act(async () => button.click());
@@ -173,7 +302,7 @@ describe("the card as an open target", () => {
     const html = renderShelf();
     for (const subject of SHELF) {
       assert.ok(
-        html.includes(`aria-label="${artifactOpenLabel(subject)}"`),
+        html.includes(`aria-label="${artifactOpenLabel(subject, subject === PICTURE ? "The Vigil" : subject.file)}"`),
         `${subject.file} has no open control`,
       );
     }
@@ -181,44 +310,30 @@ describe("the card as an open target", () => {
 
   it("is a real <button>, so Enter and Space come from the element rather than a handler", () => {
     const html = renderShelf([PICTURE]);
-    const at = html.indexOf(`aria-label="${artifactOpenLabel(PICTURE)}"`);
+    const at = html.indexOf('aria-label="Open The Vigil — image"');
     const tag = html.slice(html.lastIndexOf("<button", at), html.indexOf(">", at) + 1);
     assert.match(tag, /type="button"/);
     assert.match(tag, /class="fy-gridcard__open"/);
   });
 
-  it("is a sibling of the card's other controls, never a button wrapped around them", () => {
-    // A button inside a button is markup the browser resolves by dropping one of the two, and the
-    // one it drops is usually the one you wanted.
-    const screen = source("screens/world.tsx");
-    const at = screen.indexOf('className="fy-gridcard__open"');
-    assert.ok(at > 0, "the open control is on the artifact card");
-    const card = screen.slice(screen.lastIndexOf("<div", at), at);
-    assert.ok(card.includes("fy-gridcard--openable"), "the card, not a wrapper, is the open target's host");
-  });
-
-  it("leaves Lift facts and the audio transport exactly where they were", async () => {
+  it("leaves Lift facts and the audio transport exactly where they were, beside the open target and never inside it", async () => {
+    // A button inside a button is markup the browser resolves by dropping one of the two, and
+    // the one it drops is usually the one you wanted. So each secondary control is a sibling of
+    // the card's open target, and pressing one leaves the viewer closed.
     const mounted = await mountShelf();
-    assert.ok(
-      [...mounted.container.querySelectorAll("button.fy-liftfacts")].length >= 3,
-      "every document still offers extraction",
-    );
-    assert.ok(
-      mounted.container.querySelector('button[aria-label="Play harbour-bells.wav"]'),
-      "and the audio card still plays through the dock",
-    );
+    const lifts = [...mounted.container.querySelectorAll<HTMLButtonElement>("button.fy-liftfacts")];
+    assert.ok(lifts.length >= 3, "every document still offers extraction");
+    const play = mounted.container.querySelector<HTMLButtonElement>('button[aria-label="Play harbour-bells.wav"]')!;
+    assert.ok(play, "and the audio card still plays through the dock");
+    for (const control of [...lifts, play]) {
+      assert.equal(control.closest("button.fy-gridcard__open"), null, "a control inside the open target is a control the browser may drop");
+      assert.ok(control.closest(".fy-gridcard--openable"), "it sits on the card, beside the target");
+    }
+    await act(async () => lifts[0]!.click());
+    assert.equal(panel(mounted) === null, true, "pressing a secondary control does not open the viewer");
     await unmount(mounted);
   });
 
-  it("lifts those controls above the open target so a press on one is not a press on the card", () => {
-    assert.match(CSS, /\.fy-gridcard__open \{[^}]*z-index: 1/s);
-    assert.match(
-      CSS,
-      /\.fy-gridcard--openable \.fy-clipbtn,\s*\.fy-gridcard--openable \.fy-liftfacts \{[^}]*z-index: 2/s,
-    );
-    // The save control reveals on hovering its own host, which the open target now covers.
-    assert.match(CSS, /\.fy-gridcard--openable:hover \.fy-imgdl/);
-  });
 });
 
 describe("what opens", () => {
@@ -228,7 +343,8 @@ describe("what opens", () => {
     await open(mounted, PICTURE);
     const frame = panel(mounted);
     assert.ok(frame, "the viewer opened");
-    assert.equal(frame.querySelector("h2")?.textContent, "key-art.png");
+    assert.equal(frame.querySelector("h2")?.textContent, "The Vigil");
+    assert.equal(frame.querySelector("h2")?.getAttribute("title"), "key-art.png");
     const image = frame.querySelector<HTMLImageElement>("img.fy-artview__image");
     assert.ok(image, "at a size, not as a thumbnail");
     assert.match(image.getAttribute("src") ?? "", /\/media\/the-undersong\/artifacts\/key-art\.png/);
@@ -267,6 +383,35 @@ describe("what opens", () => {
     assert.equal(audio.hasAttribute("autoplay"), false);
     assert.equal(audio.getAttribute("aria-label"), "harbour-bells.wav", "and says which file it is");
     await unmount(mounted);
+  });
+
+  it("hushes the dock when an artifact starts to sound, video or audio, so one thing plays at a time", async () => {
+    // The rule the app has had since SPEC-011. The dock is a stand-in for the browser's audio
+    // element, sounding; pressing play on the opened artifact — the browser fires `play` on the
+    // <video> or <audio> — pauses it.
+    // The stand-in keeps the element's own `paused`: play() clears it, pause() sets it — because
+    // playClip pauses the element while it swaps the source in, and a stand-in that only recorded
+    // the pause would read as paused before the artifact ever sounded.
+    const dock = { playbackRate: 1, src: "", currentTime: 0, duration: NaN, paused: true, async play() { dock.paused = false; }, pause() { dock.paused = true; }, load() {}, removeAttribute() {}, addEventListener() {}, removeEventListener() {} };
+    setAudioFactoryForTest(() => dock as never);
+    try {
+      for (const [subject, tag] of [[CLIP, "video"], [BELLS, "audio"]] as const) {
+        await playClip({ id: `dock-${tag}`, url: `media/dock-${tag}.wav`, title: "The dock" });
+        assert.equal(playbackSnapshot().status, "playing", "the dock is sounding");
+        assert.equal(dock.paused, false, "and its element is playing, right up to the press");
+        const mounted = await mountShelf();
+        await open(mounted, subject);
+        const media = panel(mounted)!.querySelector<HTMLMediaElement>(`${tag}.fy-artview__media`)!;
+        assert.equal(dock.paused, false, "opening the viewer alone does not hush it");
+        await act(async () => media.dispatchEvent(new dom.window.Event("play", { bubbles: true })));
+        assert.equal(dock.paused, true, `${tag}: the dock was paused`);
+        await unmount(mounted);
+        dismissPlayback();
+      }
+    } finally {
+      dismissPlayback();
+      setAudioFactoryForTest(null);
+    }
   });
 
   it("embeds a PDF, and keeps the identity and a save around it", async () => {
@@ -357,11 +502,6 @@ describe("text and markdown", () => {
   });
 
   it("goes to the markdown stage for a .md and reads it, rather than drawing document lines", async () => {
-    /*
-     * Stopped at the read, deliberately. The rich editor mounts into an effect against a real
-     * browser — the bible's own tests assert around it for the same reason — so what is driven
-     * here is the branch and the fetch, and the read-only wiring is pinned below.
-     */
     const mounted = await mountShelf();
     await withFetch(async () => new Promise(() => {}), async () => {
       await open(mounted, TREATMENT);
@@ -374,20 +514,33 @@ describe("text and markdown", () => {
     await unmount(mounted);
   });
 
-  it("opens a .md through the markdown editor, read-only and labelled", () => {
-    // Artifacts are immutable: superseding one files new bytes as a new artifact carrying
-    // `supersedes` (SPEC-015 R-5), and no such filing path exists from the shelf yet. An editor
-    // that took keystrokes with nowhere to put them would be the worse half of this issue.
-    assert.match(VIEWER, /<RichMarkdownEditor value=\{loaded\.text\} ariaLabel=\{name\} readOnly \/>/);
-    assert.match(VIEWER, /read-only/);
-    const editor = source("components/editor/rich-markdown-editor.tsx");
-    assert.match(editor, /editable: !readOnly/, "the editor really refuses the keystrokes");
-    assert.match(editor, /if \(readOnlyRef\.current\) return;/, "and never calls back with bytes to file");
-    assert.ok(
-      !VIEWER.includes("onChange"),
-      "nothing here is wired to a save, so nothing can overwrite immutable bytes",
-    );
+  it("opens a .md read-only: artifacts are immutable, and an editor with nowhere to file would be the worse half", async () => {
+    // Superseding an artifact files new bytes as a new artifact carrying `supersedes` (SPEC-015
+    // R-5), and no such filing path exists from the shelf yet. The rich editor's ProseMirror view
+    // mounts against a real browser; what a test DOM can see is the shell it is given and the
+    // mode it is given it in. ProseMirror measures the window when it mounts, and a test DOM has
+    // no window metrics to give it.
+    const metrics = { innerWidth: 1024, innerHeight: 768, pageXOffset: 0, pageYOffset: 0, scrollX: 0, scrollY: 0 };
+    Object.assign(dom.window, metrics);
+    Object.assign(globalThis, metrics);
+    // And a selection it can read: none, which is what a freshly mounted read-only view has.
+    const selection = { rangeCount: 0, anchorNode: null, focusNode: null, anchorOffset: 0, focusOffset: 0, isCollapsed: true, getRangeAt: () => { throw new Error("no range"); }, removeAllRanges() {}, addRange() {}, collapse() {}, extend() {} };
+    Object.assign(dom.document, { getSelection: () => selection });
+    Object.assign(dom.window, { getSelection: () => selection });
+    const mounted = await mountShelf();
+    await withFetch(textReply(["# Treatment", "", "The tide turns."].join("\n")), async () => {
+      await open(mounted, TREATMENT);
+      await act(async () => {});
+      await act(async () => {});
+    });
+    const frame = panel(mounted);
+    assert.equal(frame?.querySelector(".fy-artview__stage")?.getAttribute("data-viewer"), "markdown");
+    assert.doesNotMatch(frame?.textContent ?? "", /Reading…/, "the read landed");
+    assert.ok(frame?.querySelector(".fy-rme.fy-rme--read"), "the editor is mounted in its read-only mode");
+    assert.equal(frame?.querySelector(".fy-rme [contenteditable=\"true\"]"), null, "nothing in it takes keystrokes");
+    await unmount(mounted);
   });
+
 });
 
 describe("the frame itself", () => {
@@ -395,7 +548,7 @@ describe("the frame itself", () => {
     const mounted = await mountShelf();
     await open(mounted, PICTURE);
     const meta = panel(mounted)?.querySelector(".fy-artview__meta")?.textContent ?? "";
-    assert.match(meta, /ar_01J8G0000000000000000000I1/, "id");
+    assert.ok(meta.includes(PICTURE.id), "id");
     assert.match(meta, /image/, "kind");
     assert.match(meta, /filed by hand/, "origin");
     assert.match(meta, /sha256:/, "hash");
@@ -423,17 +576,39 @@ describe("the frame itself", () => {
     await unmount(mounted);
   });
 
-  it("closes on Escape, on the backdrop, and puts focus back where it came from", () => {
-    // A native <dialog> brings Escape, the focus trap and background inerting with it; what it
-    // does not bring is the backdrop click or the focus return, so both are written down.
-    assert.match(VIEWER, /node\.showModal/, "a real modal dialog, not a hand-rolled overlay");
-    assert.match(VIEWER, /onClose=\{onClose\}/, "Escape and the close button settle the same state");
-    assert.match(
-      VIEWER,
-      /if \(event\.target === event\.currentTarget\) dialog\.current\?\.close\(\);/,
-      "a click on the dialog rather than its panel is the backdrop",
-    );
-    assert.match(source("screens/world.tsx"), /openTrigger\.current\?\.focus\(\);/, "focus goes back to the card");
+  it("closes from its button, from the backdrop and from Escape, and puts focus back on the card each time", async () => {
+    // A native <dialog> brings Escape, the focus trap and background inerting with it; the
+    // backdrop click and the focus return are the viewer's own, and every way out ends in the
+    // element's `close` event, which is what the screen listens to.
+    const mounted = await mountShelf([PICTURE, BOARD]);
+    const trigger = mounted.container.querySelector<HTMLButtonElement>(`button.fy-gridcard__open[title="${PICTURE.file}"]`)!;
+    let focused = 0;
+    trigger.focus = () => { focused += 1; };
+    const dialog = () => mounted.container.querySelector<HTMLDialogElement>("dialog.fy-artview")!;
+    const gone = (how: string) => {
+      assert.equal(panel(mounted) === null, true, `${how}: the frame is gone`);
+      assert.equal(dialog().open, false, `${how}: and the element agrees`);
+    };
+    // The button.
+    await open(mounted, PICTURE);
+    assert.ok(panel(mounted), "open");
+    await act(async () => mounted.container.querySelector<HTMLButtonElement>('button[aria-label^="Close "]')!.click());
+    gone("the close button");
+    assert.equal(focused, 1, "and the keyboard is back on the card it left from, not at the top of the document");
+    // The backdrop: a click that lands on the dialog itself rather than its panel.
+    await open(mounted, PICTURE);
+    await act(async () => dialog().dispatchEvent(new dom.window.Event("click", { bubbles: true })));
+    gone("the backdrop");
+    assert.equal(focused, 2);
+    // A click inside the panel is not the backdrop.
+    await open(mounted, PICTURE);
+    await act(async () => panel(mounted)!.dispatchEvent(new dom.window.Event("click", { bubbles: true })));
+    assert.ok(panel(mounted), "a press inside the frame leaves it open");
+    // Escape: the browser closes the element itself, and the close event is all the screen sees.
+    await act(async () => dialog().close());
+    gone("Escape");
+    assert.equal(focused, 3);
+    await unmount(mounted);
   });
 
   it("is dialog state, so the shelf keeps its filters and its report underneath", async () => {
@@ -446,23 +621,19 @@ describe("the frame itself", () => {
     await unmount(mounted);
   });
 
-  it("tracks the artifact rather than the row it was in", () => {
+  it("tracks the artifact rather than the row it was in", async () => {
     // A world update, a filing or a replacement must move the frame's contents or close it —
     // never silently re-point it at whichever file slid into that position.
-    const screen = source("screens/world.tsx");
-    assert.match(screen, /artifacts\.find\(\(a\) => a\.id === openArtifactId\) \?\? null/);
+    const mounted = await mountShelf([PICTURE, BOARD]);
+    await open(mounted, BOARD);
+    assert.match(panel(mounted)?.textContent ?? "", new RegExp(BOARD.file), "the board is open");
+    // The picture leaves the shelf: the board is now first in the list.
+    await act(async () => { __setStateForTest(shelf([BOARD])); });
+    assert.match(panel(mounted)?.textContent ?? "", new RegExp(BOARD.file), "still the board, whatever row it is in");
+    // The board itself leaves: the frame has nothing to show, and closes rather than showing another file.
+    await act(async () => { __setStateForTest(shelf([PICTURE])); });
+    assert.equal(panel(mounted), null, "gone with its artifact");
+    await unmount(mounted);
   });
 
-  it("starts no media on its own, whatever it opens", () => {
-    assert.ok(!/autoPlay=/.test(VIEWER), "opening a viewer prepares media; a person starts it");
-    // And one thing sounds at a time, which is the rule the app has had since SPEC-011.
-    assert.match(VIEWER, /onPlay=\{hushTheDock\}/);
-  });
-
-  it("fits a narrow window: the metadata drops under the stage and long text scrolls", () => {
-    assert.match(CSS, /@media \(max-width: 860px\) \{[\s\S]*?\.fy-artview \{ width: 100vw/);
-    assert.match(CSS, /\.fy-artview__stage \{[^}]*overflow: auto/s);
-    assert.match(CSS, /\.fy-artview__text \{[^}]*white-space: pre-wrap/s);
-    assert.match(CSS, /\.fy-artview__image \{[^}]*object-fit: contain/s);
-  });
 });

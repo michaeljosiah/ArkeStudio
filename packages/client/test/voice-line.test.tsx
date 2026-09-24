@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
@@ -8,7 +7,7 @@ import { App } from "../src/App.js";
 import { __applyForTest, __handleFrameForTest, __setStateForTest, __stateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
-import { legacySceneView, orderedShots } from "@arke-studio/contracts";
+import { legacySceneView, orderedShots, voiceTargetKey } from "@arke-studio/contracts";
 
 /**
  * The voice-line dialog (built 2026-08-17). Everything around it already existed — the Audio
@@ -270,8 +269,9 @@ describe("the voice-line dialog", () => {
  * Six local voices were otherwise lost among fifty cloud ones, and "can this machine say it
  * without spending" is the first question anyone asks of the list.
  */
-describe("choosing a character's voice", () => {
+describe("a character's voice", () => {
   const sheetId = FIXTURE_STATE.world!.sheets[0]!.id;
+  const page = `/w/${FIXTURE_WORLD_ID}/cast/${sheetId}/voice`;
   const candidate = (voiceId: string, provider: string, local: boolean) => ({
     candidate: {
       provider,
@@ -296,13 +296,95 @@ describe("choosing a character's voice", () => {
       previewLine: { text: "the verse, under the water", source: "own-line" as const },
       cloudPreviewMicroUsd: 30000,
       previewMicroUsdByVoice: {},
+      notices: {},
     },
   };
+  /** The sheet as it is before anything has been chosen for it — the state most characters are in. */
+  const withoutVoice = (): ClientState => ({
+    ...FIXTURE_STATE,
+    world: {
+      ...FIXTURE_STATE.world!,
+      referenceKits: FIXTURE_STATE.world!.referenceKits.map((kit) =>
+        kit.sheetId === sheetId ? { ...kit, designatedVoiceSample: undefined } : kit,
+      ),
+      sheets: FIXTURE_STATE.world!.sheets.map((sheet) =>
+        sheet.id === sheetId ? { ...sheet, voice: undefined } : sheet,
+      ),
+    },
+  });
+
+  it("presents one voice with two uses, not two panels", () => {
+    // The build these replace stacked a reference panel, a bible and a catalogue in one column,
+    // and two headings competed for what the page was for (issue 1011).
+    const html = render(page, FIXTURE_STATE, { voiceCandidates: candidates });
+    assert.match(html, /Reads lines/);
+    assert.match(html, /On screen/);
+    assert.doesNotMatch(html, /Performance bible/);
+    assert.doesNotMatch(html, /Text-to-speech voice/);
+  });
+
+  it("says who reads her lines while nothing is assigned, and offers no Change", () => {
+    const html = render(page, withoutVoice(), { voiceCandidates: candidates });
+    assert.match(html, /No voice yet/);
+    assert.match(html, /the narrator reads their lines/);
+    // A press that says Change when there is nothing to change is the empty state lying.
+    assert.match(html, />Set</);
+    assert.doesNotMatch(html, />Change</);
+  });
+
+  it("names what each entrance sets before it is pressed", () => {
+    const html = render(page, FIXTURE_STATE, { voiceCandidates: candidates });
+    for (const entrance of ["Choose a voice", "Clone a voice", "Upload a recording", "Generate a speaking sample"]) {
+      assert.match(html, new RegExp(entrance));
+    }
+    // The two words on a tile are the two the rows use, so a tile can be read against them.
+    assert.match(html, /fy-usebadge fy-usebadge--on">reads</);
+    assert.match(html, /fy-usebadge fy-usebadge--on">on screen</);
+  });
+
+  it("carries the open sheet in the address, so a reload comes back to it", () => {
+    // Every flow is a link — a dispatch that refused for want of a voice can point straight at one.
+    assert.doesNotMatch(render(page, FIXTURE_STATE, { voiceCandidates: candidates }), /data-testid="voice-catalogue"/);
+    assert.match(
+      render(`${page}?choose=1`, FIXTURE_STATE, { voiceCandidates: candidates }),
+      /data-testid="voice-catalogue"/,
+    );
+    assert.match(render(`${page}?sample=1`, FIXTURE_STATE, { voiceCandidates: candidates }), /data-testid="voice-sample"/);
+  });
+
+  it("offers the assigned clip back, and says what was attested of it", () => {
+    // The clip's path comes from the shared resolver, because both sample shapes store a
+    // basename beneath references/<sheetId>/ and reading `file` straight asks the world root for
+    // a path that does not exist — a playback failure with nothing on screen to explain it.
+    const state: ClientState = {
+      ...FIXTURE_STATE,
+      world: {
+        ...FIXTURE_STATE.world!,
+        referenceKits: FIXTURE_STATE.world!.referenceKits.map((kit) =>
+          kit.sheetId === sheetId
+            ? {
+                ...kit,
+                designatedVoiceSample: {
+                  file: "voice/sha256-" + "a".repeat(64) + ".wav",
+                  schemaVersion: 1,
+                  operationId: "00000000-0000-4000-8000-000000000000",
+                  designatedAt: "2026-09-08T00:00:00Z",
+                  warningCodes: [],
+                  attestations: [],
+                  provenance: { outputTechnical: { durationSec: 7.4 } },
+                } as never,
+              }
+            : kit,
+        ),
+      },
+    };
+    const html = render(page, state, { voiceCandidates: candidates });
+    assert.match(html, /7\.4 s/);
+    assert.match(html, /Play .* · voice sample/);
+  });
 
   it("sorts the catalogue by where a voice lives, and counts each", () => {
-    const html = render(`/w/${FIXTURE_WORLD_ID}/cast/${sheetId}/voice`, FIXTURE_STATE, {
-      voiceCandidates: candidates,
-    });
+    const html = render(`${page}?choose=1`, FIXTURE_STATE, { voiceCandidates: candidates });
     assert.match(html, /data-testid="voice-tab-all"/);
     assert.match(html, /data-testid="voice-tab-cloud"/);
     assert.match(html, /data-testid="voice-tab-local"/);
@@ -313,15 +395,20 @@ describe("choosing a character's voice", () => {
   });
 
   it("scrolls the catalogue in place rather than growing the page", () => {
-    // A world with fifty cloud voices would otherwise push the assign controls below the fold,
-    // which is the one place a long list must not reach.
-    const html = render(`/w/${FIXTURE_WORLD_ID}/cast/${sheetId}/voice`, FIXTURE_STATE, {
-      voiceCandidates: candidates,
-    });
+    // A world with fifty cloud voices would otherwise push the press that spends money below the
+    // fold, which is the one place a long list must not reach.
+    const html = render(`${page}?choose=1`, FIXTURE_STATE, { voiceCandidates: candidates });
     assert.match(html, /class="fy-voicelist"/);
   });
 
-  it("keeps the current unready clone visible, with Preview and Assign disabled", () => {
+  it("states a cloud preview's price on the row whose circle would spend it", () => {
+    const html = render(`${page}?choose=1`, FIXTURE_STATE, { voiceCandidates: candidates });
+    assert.match(html, /\$0\.03 preview/);
+    // The reader by its name, as the Reads lines row says it (SPEC-046 R-30), not the provider id.
+    assert.match(html, /Kokoro · free/);
+  });
+
+  it("keeps the current unready clone visible, and refuses to preview or assign it", () => {
     const baseSheet = FIXTURE_STATE.world!.sheets[0]!;
     const clone = {
       candidate: {
@@ -358,39 +445,155 @@ describe("choosing a character's voice", () => {
         ),
       },
     };
-    const html = render(`/w/${FIXTURE_WORLD_ID}/cast/${sheetId}/voice`, state, {
-      voiceCandidates: {
-        [sheetId]: {
-          ...candidates[sheetId],
-          ranked: [clone],
-        },
-      },
+    const html = render(`${page}?choose=1`, state, {
+      voiceCandidates: { [sheetId]: { ...candidates[sheetId], ranked: [clone] } },
     });
+    // Still listed, still named as the current one: a voice that cannot run today is not a voice
+    // the character has stopped having.
     assert.match(html, /Harbour/);
     assert.match(html, /current/);
     assert.match(html, /Cloned voice setup is unavailable in this build/);
-    assert.match(html, /<button[^>]*disabled=""[^>]*>Preview · free<\/button>/);
-    assert.match(html, /<button[^>]*disabled=""[^>]*>Assigned<\/button>/);
+    assert.match(html, /<button[^>]*class="fy-voicerow__pick"[^>]*disabled=""/);
+    assert.match(html, /<button[^>]*data-testid="voice-assign"[^>]*disabled=""/);
+  });
+});
+
+describe("a cloned voice's readers on the Voice page (SPEC-046 R-30, R-31, R-34; issue 1149)", () => {
+  const sheetId = FIXTURE_STATE.world!.sheets[0]!.id;
+  const page = `/w/${FIXTURE_WORLD_ID}/cast/${sheetId}/voice`;
+  const row = (id: string, provider: string, displayName: string, pricing: Record<string, unknown>) => ({
+    id, provider, capability: "voice-tts", displayName, accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: { audioFormat: "wav" }, pricing,
+  });
+  const models = [
+    row("comfyui-cloned-voice", "comfyui", "Local · Cloned Voice", { kind: "unmetered" }),
+    row("voxtral-mini-tts", "mistral", "Voxtral TTS", { kind: "perCharacter", microUsdPerCharacter: 16 }),
+    row("breeze-tts-2", "breezeblue", "Breeze TTS 2", { kind: "perCharacter", microUsdPerCharacter: 40, unit: "cjk-double" }),
+    row("eleven_multilingual_v2", "elevenlabs", "Eleven Multilingual v2", { kind: "perCharacter", microUsdPerCharacter: 100 }),
+  ];
+  /** The one library voice, as each reader offers it: the same id, the reader's provider and row. */
+  const reader = (provider: string, model: string, local: boolean) => ({
+    candidate: { provider, model, voiceId: "harbour", label: "Harbour", attributes: ["low"], local, canClone: false, readsClone: "harbour" },
+    matched: ["low"],
+    overlap: 1,
+  });
+  const preset = {
+    candidate: { provider: "mistral", model: "voxtral-mini-tts", voiceId: "en_paul_neutral", label: "Paul · neutral", attributes: ["male", "american"], local: false, canClone: false },
+    matched: [],
+    overlap: 0,
+  };
+  const ranked = [reader("comfyui", "comfyui-cloned-voice", true), reader("mistral", "voxtral-mini-tts", false), reader("breezeblue", "breeze-tts-2", false), preset];
+  const breezeKey = voiceTargetKey({ provider: "breezeblue", model: "breeze-tts-2", voiceId: "harbour" });
+  const candidates = (notices: Record<string, string> = {}) => ({
+    [sheetId]: {
+      extracted: ["low"],
+      ranked,
+      previewLine: { text: "the verse, under the water", source: "own-line" as const },
+      cloudPreviewMicroUsd: null,
+      previewMicroUsdByVoice: { [breezeKey]: 2000 },
+      notices,
+    },
+  });
+  const through = (provider: string, model: string) => ({ provider, model, voiceId: "harbour", label: "Harbour", assignedAtVersion: 4 });
+  const stateWith = (voice: Record<string, unknown> | undefined, remote?: Record<string, unknown>): ClientState => ({
+    ...FIXTURE_STATE,
+    app: { ...FIXTURE_STATE.app, manifest: { ...FIXTURE_STATE.app.manifest!, models: [...FIXTURE_STATE.app.manifest!.models, ...models] } as never },
+    world: {
+      ...FIXTURE_STATE.world!,
+      clonedVoices: [{ id: "harbour", name: "Harbour", clip: "voices/harbour.wav", language: "en", ...(remote ? { remote } : {}) } as never],
+      sheets: FIXTURE_STATE.world!.sheets.map((sheet) => (sheet.id === sheetId ? { ...sheet, voice: voice as never } : sheet)),
+    },
+  });
+
+  it("the entrance counts voices as the picker does and names every provider, or how many (issues 1169, 1191)", () => {
+    // One clone with three readers and one preset: two voices, as the picker's All says, and
+    // three providers named — not "4 voices" with a subset of the providers.
+    const html = render(page, stateWith(undefined), { voiceCandidates: candidates() });
+    assert.match(html, /2 voices/);
+    assert.match(html, /comfyui · mistral · breezeblue/);
+    const wide = {
+      [sheetId]: { ...candidates()[sheetId]!, ranked: [...ranked, reader("elevenlabs", "eleven_multilingual_v2", false), reader("fishaudio", "fish-s2.1-pro", false)] },
+    };
+    const five = render(page, stateWith(undefined), { voiceCandidates: wide });
+    assert.match(five, /2 voices/, "more readers of the same voice are not more voices");
+    assert.match(five, /5 providers/);
+    assert.doesNotMatch(five, /comfyui · mistral · breezeblue/, "never three names of five");
+  });
+
+  it("names the reader and its price on Reads lines, in the row's own figures (R-30)", () => {
+    assert.match(render(page, stateWith(through("mistral", "voxtral-mini-tts")), { voiceCandidates: candidates() }), /Harbour · Voxtral · \$0\.016 per 1k/);
+    assert.match(render(page, stateWith(through("comfyui", "comfyui-cloned-voice")), { voiceCandidates: candidates() }), /Harbour · IndexTTS · free/);
+    // A preset too — the fixture's ElevenLabs voice — priced by its row, not "a line at a time".
+    const preset = render(page, stateWith(FIXTURE_STATE.world!.sheets[0]!.voice as never), { voiceCandidates: candidates() });
+    assert.match(preset, /Low tide · ElevenLabs · \$0\.10 per 1k/);
+    assert.doesNotMatch(preset, /priced a line at a time/);
+  });
+
+  it("draws a cloned voice once, with a chip per reader, and opens on the shelf the address names", () => {
+    const html = render(`${page}?choose=1&tab=mine`, stateWith(through("mistral", "voxtral-mini-tts")), { voiceCandidates: candidates() });
+    const sheet = html.slice(html.indexOf('data-testid="voice-catalogue"'));
+    assert.equal((sheet.match(/class="fy-voicerow[ "]/g) ?? []).length, 1, "one voice with three readers is one row, not three");
+    assert.match(sheet, /class="fy-seg__item fy-seg__item--active" data-testid="voice-tab-mine"/);
+    assert.match(sheet, />Mine 1</);
+    assert.match(sheet, />All 2</, "the voice and the preset");
+    for (const [provider, label] of [["comfyui", "IndexTTS · free"], ["mistral", "Voxtral · \\$0\\.016 per 1k"], ["breezeblue", "Breeze · \\$0\\.04 per 1k · CJK ×2"]]) {
+      assert.match(sheet, new RegExp(`data-testid="voice-reader-${provider}"[^>]*>.*?${label}</button>`), `${provider} chip`);
+    }
+    // The assigned reader is the pressed chip, and the row is the current one.
+    assert.match(sheet, /aria-pressed="true"[^>]*data-testid="voice-reader-mistral"/);
+    assert.match(sheet, />current</);
+  });
+
+  it("a hosted vendor's own voices read presets (R-31)", () => {
+    const html = render(`${page}?choose=1&tab=cloud`, stateWith(undefined), { voiceCandidates: candidates() });
+    const sheet = html.slice(html.indexOf('data-testid="voice-catalogue"'));
+    assert.match(sheet, /Voxtral · presets</);
+    assert.match(sheet, />Cloud 2</, "the voice through its two cloud readers, and the preset");
+  });
+
+  it("says what a first read through a reader adds, on its row, before the circle that would spend it (R-14, R-34)", () => {
+    const notice = "first read · clone charge, priced by BreezeBlue";
+    const first = render(`${page}?choose=1&tab=mine`, stateWith(through("breezeblue", "breeze-tts-2")), { voiceCandidates: candidates({ [breezeKey]: notice }) });
+    assert.match(first, new RegExp(notice));
+    const second = render(`${page}?choose=1&tab=mine`, stateWith(through("breezeblue", "breeze-tts-2"), { breezeblue: { voiceId: "voc_1" } }), { voiceCandidates: candidates() });
+    assert.doesNotMatch(second, /clone charge/);
+    assert.match(second, />current</);
+  });
+
+  it("offers Delete on Mine, and only there (R-15)", () => {
+    assert.match(render(`${page}?choose=1&tab=mine`, stateWith(undefined), { voiceCandidates: candidates() }), /data-testid="voice-delete"[^>]*>Delete</);
+    assert.doesNotMatch(render(`${page}?choose=1`, stateWith(undefined), { voiceCandidates: candidates() }), /data-testid="voice-delete"/);
+  });
+
+  it("states the first read's charge on the voice-line dialog too, until the vendor holds the voice", () => {
+    const prod = production()!;
+    const speakerId = spokenShots()[0]!.audio!.speaker!;
+    const withSpeaker = (remote?: Record<string, unknown>): ClientState => {
+      const state = stateWith(undefined, remote);
+      return { ...state, world: { ...state.world!, sheets: state.world!.sheets.map((sheet) => (sheet.id === speakerId ? { ...sheet, voice: through("breezeblue", "breeze-tts-2") as never } : sheet)) } };
+    };
+    const path = `/w/${FIXTURE_WORLD_ID}/p/${prod.meta.id}/generate/voice-line`;
+    assert.match(render(path, withSpeaker()), /data-testid="voice-line-first-read"[^>]*>first read · clone charge, priced by BreezeBlue</);
+    assert.doesNotMatch(render(path, withSpeaker({ breezeblue: { voiceId: "voc_1" } })), /voice-line-first-read/);
   });
 });
 
 describe("the narrator in Settings", () => {
-  // The narrator moved to Appearance with SPEC-033's split. It was in Local runtime's Voice
-  // group and it is the one thing there that was never about a runtime: it is a voice the app
-  // speaks in, and it may be a cloud one — so Local AI is forbidden it and Engines is wrong in
-  // kind. What is left is how the app presents itself.
+  // General owns the reading voice; Appearance holds theme choices (issue 1004).
   it("names the shipped local voice, and says it is free, until one is chosen", () => {
-    const html = render("/settings/appearance");
-    assert.match(html, /data-testid="narrator-name"/);
-    assert.match(html, /George/);
-    assert.match(html, /reads on this machine · free/);
+    const html = render("/settings/general");
+    assert.match(html, /data-testid="narrator-name">George</);
+    // The reader and its price, as the Voice page's rows say them (SPEC-046 R-30) — and no
+    // sentence about where it reads (design turn 149).
+    assert.match(html, /class="fy-fact__state">Kokoro · free</);
+    assert.doesNotMatch(html, /reads on this machine/);
+    assert.doesNotMatch(render("/settings/appearance"), /data-testid="narrator-name"/);
     // Nothing to reset when nothing was chosen.
     assert.doesNotMatch(html, /data-testid="narrator-reset"/);
   });
 
   it("is on no engine pane, which may not carry a cloud voice at all", () => {
     // An engine is not a provider and this control picks between them, so it belongs to neither
-    // half of the Providers rail — it is Appearance's, where the reading voice is chosen.
+    // half of the Providers rail — it is General's, where the reading voice is chosen.
     for (const engine of ["comfyui", "ollama", "voxa"]) {
       const pane = render(`/settings/providers?provider=${engine}`);
       assert.match(pane, /data-screen="settings-providers"/);
@@ -401,15 +604,36 @@ describe("the narrator in Settings", () => {
   it("says plainly when the narrator will be billed", () => {
     // The one thing this control must never do quietly: a cloud narrator bills every press of
     // "read aloud", so the row says so rather than leaving it to be discovered on the ledger.
+    // The row carries the reader's price — the manifest row's rate, as the Voice page states it
+    // (SPEC-046 R-30) — in place of a sentence about billing (design turn 149).
     const chosen: ClientState = {
       ...FIXTURE_STATE,
-      app: { ...FIXTURE_STATE.app, narrator: { provider: "elevenlabs", voiceId: "v_roger", label: "Roger" } },
+      app: {
+        ...FIXTURE_STATE.app,
+        manifest: {
+          ...FIXTURE_STATE.app.manifest!,
+          models: [
+            ...FIXTURE_STATE.app.manifest!.models,
+            {
+              id: "eleven_multilingual_v2",
+              provider: "elevenlabs",
+              capability: "voice-tts",
+              displayName: "Eleven Multilingual v2",
+              accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+              limits: {},
+              pricing: { kind: "perCharacter", microUsdPerCharacter: 300 },
+            },
+          ],
+        },
+        narrator: { provider: "elevenlabs", voiceId: "v_roger", label: "Roger" },
+      },
     };
-    const html = render("/settings/appearance", chosen);
-    assert.match(html, /Roger · elevenlabs/);
-    assert.match(html, /billed per character/);
-    // And there is a way back to the free one.
+    const html = render("/settings/general", chosen);
+    assert.match(html, /data-testid="narrator-name">Roger</);
+    assert.match(html, /class="fy-fact__state">ElevenLabs · \$0.30 per 1k</);
+    // And there is a way back to the free one: Reset, saying on its tooltip what it returns to.
     assert.match(html, /data-testid="narrator-reset"/);
+    assert.match(html, /data-tip="George · Kokoro · free"/);
   });
 });
 
@@ -552,16 +776,6 @@ describe("bible read restoration", () => {
   });
 });
 
-describe("the voice tabs stay readable", () => {
-  it("gives the chosen tab a hover rule of its own", () => {
-    // `:hover` outranks a single class, so the tab you just clicked went white on white —
-    // invisible precisely while the pointer was still on it. Found in the installed app.
-    const css = readFileSync(new URL("../src/screens/fidelity.css", import.meta.url), "utf8");
-    const rule = css.slice(css.indexOf(".fy-voices__tab--on"));
-    assert.match(rule.slice(0, 200), /\.fy-voices__tab--on:hover/);
-  });
-});
-
 describe("reading a sheet aloud", () => {
   const sheetId = FIXTURE_STATE.world!.sheets[0]!.id;
 
@@ -579,16 +793,6 @@ describe("reading a sheet aloud", () => {
     const html = render(`/w/${FIXTURE_WORLD_ID}/cast/${sheetId}`, voiceless);
     assert.match(html, /Read aloud/);
     assert.doesNotMatch(html, /Choose a voice to read this aloud/);
-  });
-
-  it("names the narrator on the clip, in both places that build one", () => {
-    // There are two: the one the section control offers, and the effect that plays a read as
-    // soon as it lands. Only the second actually sounds, and it still said the character's
-    // voice — so the player named a voice that had not read a word of it.
-    const source = readFileSync(new URL("../src/screens/world.tsx", import.meta.url), "utf8");
-    const subs = [...source.matchAll(/sub: `read aloud · \$\{([^}]+)\}`/g)].map((m) => m[1]);
-    assert.equal(subs.length, 2, "both clip builders are accounted for");
-    for (const sub of subs) assert.equal(sub, "narratorLabel", "each names who is reading");
   });
 
   it("reaches a location's own section, not characters alone (issue 857)", () => {

@@ -1,0 +1,329 @@
+import assert from "node:assert/strict";
+import { it } from "node:test";
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
+import {
+  orderedShots,
+  stageShot,
+  type HarnessAdapter,
+  type HarnessEvent,
+  type StageConstructionDraft,
+  type ClientMessage,
+  type DomainEvent,
+} from "@arke-studio/contracts";
+import { StageConstructor } from "../../src/productions/stage-construction.js";
+import { WorldStore } from "../../src/world/store.js";
+import { makeTempWorld } from "../world/helpers.js";
+import { encodePng, solidImage } from "../../src/references/png.js";
+
+it("constructs, inspects, revises and returns an editable draft without writing the scene", async () => {
+  const dir = await makeTempWorld();
+  const store = await WorldStore.open(dir);
+  try {
+    const production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+    const scene = production.scenes.find((s) => s.id === "sc_04")!;
+    const shot = orderedShots(scene).find((s) => s.id === "sh_12")!;
+    const fresh = stageShot(shot, { cast: ["maren-kest"], sets: [], durationSec: 4 });
+    const second = store.getBundle().sheets.find(sheet => sheet.id !== "maren-kest")!.id;
+    fresh.cast = [{ sheetId: "maren-kest", x: -1, z: 0, to: [-1, 1] }, { sheetId: second, x: 1, z: 0 }];
+    const template = store.getBundle().sheets[0]!;
+    for (let i = 0; i < 6; i++) {
+      const id = `extra-${i}`;
+      store.getBundle().sheets.push({ ...structuredClone(template), id, name: `Extra ${i}` });
+      fresh.cast.push({ sheetId: id, x: -.75 + i * .25, z: 0 });
+    }
+    fresh.keys = [{ t: 0, p: [0, 1.5, 4], l: [0, 1, 0] }, { t: 4, p: [0, 1.5, -4], l: [0, 1, 0] }];
+    scene.blocking = { version: 1, cast: fresh.cast, sets: [] };
+    const { version: _v, cast, sets, ...staging } = fresh;
+    const draft: StageConstructionDraft = {
+      staging,
+      cast,
+      sets,
+      assumptions: ["Camera is at eye height."],
+      assessment: "Initial composition.",
+      inspected: [],
+    };
+    let deliver: ((events: HarnessEvent[]) => void) | undefined;
+    let calls = 0;
+    const prompts: string[] = [];
+    const adapter: HarnessAdapter = {
+      id: "test",
+      readiness: () => ({ ready: true }),
+      capabilities: () => new Set(["events"]),
+      createSession: async () => ({ sessionId: "stage-test" }),
+      sendMessage: async () => ({ sessionId: "stage-test", correlationId: "unused" }),
+      async *streamEvents(signal) {
+        const events = await new Promise<HarnessEvent[]>((resolve, reject) => {
+          deliver = resolve;
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+        for (const event of events) yield event;
+      },
+      dispatchAsync: async (input) => {
+        calls++;
+        const prompt = input.parts.map((p) => p.text).join(" ");
+        prompts.push(prompt);
+        const names = [
+          ...new Set(
+            prompt.match(/(?:round-\d-\d-(?:camera|overview)|source-\d+)\.(?:png|jpg|jpeg|webp)/g) ?? [],
+          ),
+        ];
+        if (calls === 2)
+          draft.staging.keys = draft.staging.keys.map((key) => ({
+            ...key,
+            p: [key.p[0], key.p[1] + 0.2, key.p[2]],
+          }));
+        draft.inspected = names;
+        draft.assessment = calls === 1 ? "Initial" : "Reviewed the camera framing and corrected height.";
+        deliver!([
+          { type: "tool.refused", sessionId: "stage-test", tool: "Read", summary: "outside: /dev/null" },
+          ...names.map((name) => ({
+            type: "tool.activity" as const,
+            sessionId: "stage-test",
+            tool: "read",
+            summary: name,
+          })),
+          { type: "message.completed", sessionId: "stage-test", text: JSON.stringify(draft) },
+        ]);
+        return { sessionId: "stage-test", correlationId: String(calls) };
+      },
+    };
+    const constructor = new StageConstructor();
+    const events: Array<Extract<DomainEvent, { type: "stage.construction" }>> = [];
+    const request: Extract<ClientMessage, { kind: "stage-construct" }> = {
+      kind: "stage-construct",
+      worldId: store.worldId,
+      productionId: "saltlight",
+      sceneId: scene.id,
+      shotId: shot.id,
+      baseVersion: scene.version,
+      requestId: randomUUID(),
+      instruction: "Hold the rail composition; inspect it.",
+      preserve: "none",
+    };
+    const png = Buffer.from(encodePng(solidImage(64, 36, [20, 30, 40, 255]))).toString("base64");
+    await constructor.run(store, request, {
+      adapter,
+      sessionInput: (input) => input,
+      model: "test/vision",
+      scratchRoot: join(dir, ".scratch"),
+      current: () => true,
+      emit: (event) => {
+        events.push(event);
+        if (event.status === "inspect")
+          constructor.inspect(store.worldId, request.requestId, event.round, [
+            { at: 0, view: "camera", png, observations: Array.from({ length: 40 }, (_, index) => `frame-observation-${index}`) },
+            { at: 3.99, view: "camera", png },
+            { at: 0, view: "overview", png },
+          ]);
+      },
+    });
+    assert.equal(calls, 3);
+    assert.equal(events.at(-1)?.status, "ready", events.at(-1)?.detail);
+    assert.equal(events.at(-1)?.draft?.staging.authorship?.model, "test/vision");
+    assert.equal(events.at(-1)?.draft?.staging.authorship?.inspectedFrames, 6);
+    assert.match(prompts[0]!, /head tilted/);
+    assert.match(prompts[0]!, /verse, under the water/);
+    assert.match(prompts[1]!, /round-1-0-camera.png/);
+    assert.match(prompts[1]!, /180° line: Shot .* crosses/, "inspection feedback includes the draft's screen-direction finding");
+    assert.match(prompts[0]!, /Interior camera keys are passing waypoints/);
+    assert.ok(Number(/"screenDirection":\{"total":(\d+)/.exec(prompts[1]!)?.[1]) > 12, "the crowded scene exceeds the old shared warning budget");
+    assert.match(prompts[1]!, /Camera approaches moving @maren-kest/, "inspection receives whole-path standoff findings");
+    assert.match(prompts[1]!, /frame-observation-39/, "line warnings must not displace any measured frame observations");
+    assert.equal(
+      store
+        .getBundle()
+        .productions.find((p) => p.meta.id === "saltlight")!
+        .scenes.find((s) => s.id === scene.id)!.version,
+      scene.version,
+    );
+    assert.equal(orderedShots(scene).find((s) => s.id === shot.id)!.staging, undefined);
+  } finally {
+    await store.close();
+  }
+});
+
+for (const ending of ["cancel", "timeout", "stale-timeout"] as const)
+it(`${ending} while awaiting inspection preserves the partial draft and never writes`, async (t) => {
+  const dir = await makeTempWorld();
+  const store = await WorldStore.open(dir);
+  try {
+    const scene = store
+      .getBundle()
+      .productions.find((p) => p.meta.id === "saltlight")!
+      .scenes.find((s) => s.id === "sc_04")!;
+    const original = store.getBundle.bind(store);
+    store.getBundle = () => ({ ...original(), referenceKits: [] });
+    const shot = orderedShots(scene)[0]!;
+    const fresh = stageShot(shot, { cast: [], sets: [], durationSec: 4 });
+    let deliver: ((text: string) => void) | undefined;
+    const adapter: HarnessAdapter = {
+      id: "test",
+      readiness: () => ({ ready: true }),
+      capabilities: () => new Set(["events"]),
+      createSession: async () => ({ sessionId: "test" }),
+      sendMessage: async () => ({ sessionId: "test", correlationId: "1" }),
+      dispatchAsync: async () => {
+        deliver!(
+          JSON.stringify({
+            staging: { keys: fresh.keys },
+            cast: [],
+            sets: [],
+            assumptions: [],
+            assessment: "Draft",
+            inspected: [],
+          }),
+        );
+        return { sessionId: "test", correlationId: "1" };
+      },
+      async *streamEvents() {
+        const text = await new Promise<string>((r) => (deliver = r));
+        yield { type: "message.completed", sessionId: "test", text };
+      },
+    };
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const constructor = new StageConstructor();
+    let terminal: Extract<DomainEvent, { type: "stage.construction" }> | undefined;
+    await constructor.run(
+      store,
+      {
+        kind: "stage-construct",
+        worldId: store.worldId,
+        productionId: "saltlight",
+        sceneId: scene.id,
+        shotId: shot.id,
+        baseVersion: scene.version,
+        requestId: randomUUID(),
+        instruction: "",
+        preserve: "none",
+      },
+      {
+        adapter,
+        sessionInput: (i) => i,
+        model: "test/vision",
+        scratchRoot: join(dir, ".scratch"),
+        current: () => true,
+        emit: (event) => {
+          if (event.status === "inspect") {
+            if (ending === "cancel") constructor.cancel();
+            else {
+              if (ending === "stale-timeout") scene.version++;
+              t.mock.timers.tick(300_000);
+            }
+          }
+          if (event.status === "failed" || event.status === "ready") terminal = event;
+        },
+      },
+    );
+    assert.equal(terminal?.status, ending === "timeout" ? "ready" : "failed");
+    assert.match(terminal?.detail ?? "", ending === "cancel" ? /stopped/ : /limit/);
+    if (ending === "timeout") {
+      assert.match(terminal?.draft?.assessment ?? "", /Inspection incomplete/);
+      assert.equal(terminal?.draft?.staging.authorship?.inspectedFrames, 0);
+      assert.equal(terminal?.draft?.staging.authorship?.model, "test/vision");
+      assert.match(terminal?.draft?.staging.authorship?.assessment ?? "", /incomplete/);
+    }
+    assert.ok(terminal?.draft);
+    assert.equal(shot.staging, undefined);
+  } finally {
+    await store.close();
+  }
+});
+
+for (const mode of ["protected-blocking", "source-changed", "unread-images", "refused-images"] as const)
+  it(`refuses ${mode} without applying a model draft`, async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir);
+    try {
+      const bundle = structuredClone(store.getBundle());
+      bundle.referenceKits = [];
+      const scene = bundle.productions
+        .find((p) => p.meta.id === "saltlight")!
+        .scenes.find((s) => s.id === "sc_04")!;
+      const shot = orderedShots(scene)[0]!;
+      shot.durationSec = 4;
+      const fresh = stageShot(shot, { cast: ["maren-kest"], sets: [], durationSec: 4 });
+      shot.staging = structuredClone(fresh);
+      store.getBundle = () => bundle;
+      const { version: _version, cast, sets, ...staging } = fresh;
+      const draft: StageConstructionDraft = {
+        staging,
+        cast,
+        sets,
+        assumptions: [],
+        assessment: "Draft",
+        inspected: [],
+      };
+      if (mode === "protected-blocking") draft.cast[0]!.x += 5;
+      let deliver: ((events: HarnessEvent[]) => void) | undefined;
+      const adapter: HarnessAdapter = {
+        id: "test",
+        readiness: () => ({ ready: true }),
+        capabilities: () => new Set(["events"]),
+        createSession: async () => ({ sessionId: "test" }),
+        sendMessage: async () => ({ sessionId: "test", correlationId: "1" }),
+        async *streamEvents() {
+          for (const event of await new Promise<HarnessEvent[]>((resolve) => (deliver = resolve)))
+            yield event;
+        },
+        dispatchAsync: async (input) => {
+          draft.inspected = input.parts.flatMap(
+            (p) => p.text?.match(/round-\d-\d-(?:camera|overview)\.png/g) ?? [],
+          );
+          deliver!([
+            ...(mode === "refused-images" ? [
+              ...draft.inspected.map(summary => ({ type: "tool.activity" as const, sessionId: "test", tool: "Read", summary })),
+              { type: "tool.refused" as const, sessionId: "test", tool: "Read", summary: "outside the working directory" },
+            ] : []),
+            { type: "message.completed", sessionId: "test", text: JSON.stringify(draft) },
+          ]);
+          return { sessionId: "test", correlationId: "1" };
+        },
+      };
+      const constructor = new StageConstructor();
+      const request: Extract<ClientMessage, { kind: "stage-construct" }> = {
+        kind: "stage-construct",
+        worldId: store.worldId,
+        productionId: "saltlight",
+        sceneId: scene.id,
+        shotId: shot.id,
+        baseVersion: scene.version,
+        requestId: randomUUID(),
+        instruction: "Improve framing",
+        preserve: "blocking",
+      };
+      const original = JSON.stringify(shot.staging);
+      const png = Buffer.from(encodePng(solidImage(64, 36, [20, 30, 40, 255]))).toString("base64");
+      let terminal: Extract<DomainEvent, { type: "stage.construction" }> | undefined;
+      await constructor.run(store, request, {
+        adapter,
+        sessionInput: (i) => i,
+        model: "test/vision",
+        scratchRoot: join(dir, ".scratch"),
+        current: () => true,
+        emit: (event) => {
+          if (event.status === "inspect") {
+            if (mode === "source-changed") scene.version++;
+            constructor.inspect(store.worldId, request.requestId, event.round, [
+              { at: 0, view: "camera", png },
+              { at: 4, view: "camera", png },
+              { at: 0, view: "overview", png },
+            ]);
+          }
+          if (event.status === "failed" || event.status === "ready") terminal = event;
+        },
+      });
+      assert.equal(terminal?.status, "failed");
+      assert.match(
+        terminal?.detail ?? "",
+        mode === "protected-blocking"
+          ? /protected blocking/
+          : mode === "source-changed"
+            ? /source scene changed/
+            : /without reading/,
+      );
+      assert.equal(JSON.stringify(shot.staging), original);
+    } finally {
+      await store.close();
+    }
+  });

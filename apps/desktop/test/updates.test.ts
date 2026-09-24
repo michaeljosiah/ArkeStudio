@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { UpdateState } from "@arke-studio/contracts";
-import { UpdateController, type PendingUpdate, type UpdateMarker, type UpdaterLike } from "../src/updates.js";
+import { plainReleaseNotes, UpdateController, type PendingUpdate, type UpdateMarker, type UpdaterLike } from "../src/updates.js";
 
 class FakeUpdater implements UpdaterLike {
   autoDownload = true;
@@ -88,7 +88,37 @@ describe("desktop update controller", () => {
       progressPercent: 100,
       flow: null,
       detail: null,
+      releaseName: null,
+      releaseNotes: null,
     });
+  });
+
+  it("carries the waiting update's release name and notes as plain text, and drops them with the update (SPEC-016 R-19)", async () => {
+    const { controller, updater, states } = setup();
+    updater.checkResult = {
+      isUpdateAvailable: true,
+      updateInfo: {
+        version: "1.1.0",
+        releaseName: " v1.1.0 — the cut hears itself ",
+        releaseNotes: "<p>The Cut plays its own audio back, <b>lane by lane</b>.</p><ul><li>One &amp; two</li></ul><p>Tom&#39;s &quot;plate&quot;</p>",
+      },
+    };
+    await controller.check();
+    const available = states.at(-1)!;
+    assert.equal(available.status, "available");
+    assert.equal(available.releaseName, "v1.1.0 — the cut hears itself");
+    assert.equal(available.releaseNotes, "The Cut plays its own audio back, lane by lane.\n\nOne & two\n\nTom's \"plate\"");
+    // The download's info says nothing about the release; what the check found stays on the state.
+    updater.emit("update-downloaded", { version: "1.1.0" });
+    assert.equal(states.at(-1)?.releaseNotes, available.releaseNotes);
+    // Per-version rows, as the provider sometimes hands them over, join as paragraphs.
+    assert.equal(plainReleaseNotes([{ version: "1.1.0", note: "<p>New</p>" }, { version: "1.0.1", note: null }]), "New");
+    assert.equal(plainReleaseNotes("   "), null);
+    assert.equal(plainReleaseNotes("x".repeat(5000))?.length, 4000, "bounded, with an ellipsis at the cut");
+    // A check that finds nothing leaves no stale notes behind.
+    updater.checkResult = { isUpdateAvailable: false, updateInfo: { version: "1.1.0" } };
+    await controller.check();
+    assert.equal(states.at(-1)?.releaseNotes, null);
   });
 
   it("hands off exactly once and only after clean shutdown", async () => {
@@ -141,6 +171,73 @@ describe("desktop update controller", () => {
     assert.deepEqual(updater.quitCalls, [[true, false]]);
     assert.equal(handoffs(), 1);
     assert.deepEqual(marker.value, { targetVersion: "1.1.0", flow: "on-close" });
+  });
+
+  it("takes Next start before the download exists: downloads, then arms when it lands (design turn 152)", async () => {
+    const { controller, updater, marker, states } = setup();
+    updater.checkResult = { isUpdateAvailable: true, updateInfo: { version: "1.1.0" } };
+    await controller.check();
+    assert.equal(states.at(-1)?.status, "available");
+
+    await controller.installOnClose();
+    const seen = states.map((state) => `${state.status}/${state.flow}`);
+    // The download is announced as the on-close flow from the press on, so What's new can say
+    // what it is for; the install is armed only once the download has landed.
+    assert.ok(seen.includes("downloading/on-close"), seen.join(" "));
+    assert.equal(states.at(-1)?.status, "install-on-close");
+    assert.equal(controller.isInstallOnCloseArmed(), true);
+    assert.equal(updater.autoInstallOnAppQuit, false);
+
+    assert.equal(await controller.prepareInstallOnClose(), true);
+    assert.deepEqual(updater.quitCalls, [[true, false]]);
+    assert.deepEqual(marker.value, { targetVersion: "1.1.0", flow: "on-close" });
+  });
+
+  it("takes Next start while a download already runs, and arms when that download lands", async () => {
+    let finishDownload!: () => void;
+    const { controller, updater, states } = setup();
+    updater.downloadUpdate = () => new Promise<void>((resolve) => { finishDownload = resolve; });
+    updater.emit("update-available", { version: "1.1.0" });
+    const download = controller.download();
+    assert.equal(states.at(-1)?.status, "downloading");
+
+    const armed = controller.installOnClose();
+    assert.equal(states.at(-1)?.flow, "on-close");
+    assert.equal(controller.isInstallOnCloseArmed(), false, "nothing is armed before the download lands");
+    finishDownload();
+    await Promise.all([download, armed]);
+    assert.equal(states.at(-1)?.status, "install-on-close");
+    assert.equal(controller.isInstallOnCloseArmed(), true);
+  });
+
+  it("drops the Next start intent when the download fails, and a later download is only ready", async () => {
+    const { controller, updater, states } = setup();
+    updater.downloadUpdate = () => Promise.reject(new Error("offline"));
+    updater.emit("update-available", { version: "1.1.0" });
+    await controller.installOnClose();
+    assert.equal(states.at(-1)?.status, "error");
+    assert.equal(states.at(-1)?.flow, null);
+    assert.equal(controller.isInstallOnCloseArmed(), false);
+
+    updater.downloadUpdate = async () => {};
+    await controller.download();
+    assert.equal(states.at(-1)?.status, "ready", "the intent died with the failure; nothing arms on its own");
+    assert.equal(controller.isInstallOnCloseArmed(), false);
+  });
+
+  it("drops the Next start intent on a fresh check", async () => {
+    let finishDownload!: () => void;
+    const { controller, updater, states } = setup();
+    updater.downloadUpdate = () => new Promise<void>((resolve) => { finishDownload = resolve; });
+    updater.checkResult = { isUpdateAvailable: true, updateInfo: { version: "1.1.0" } };
+    await controller.check();
+    const armed = controller.installOnClose();
+    await controller.check();
+    finishDownload();
+    updater.emit("update-downloaded", { version: "1.1.0" });
+    await armed;
+    assert.equal(states.at(-1)?.status, "ready");
+    assert.equal(controller.isInstallOnCloseArmed(), false);
   });
 
   it("confirms only a matching installed version and clears the marker", async () => {

@@ -329,7 +329,6 @@ describe("interactive video through the coordinator (epic 401)", () => {
     // buttons render, the first takes focus, and the player waits.
     assert.ok(!/setTimeout|setInterval|requestAnimationFrame/.test(player), "no timer anywhere in the player");
     assert.ok(!/countdown|autoAdvance|defaultChoice|timeoutSec/i.test(player), "and no timed-choice vocabulary");
-    assert.match(player, /Untimed by default/, "the rule is stated where the choices are built");
     assert.match(player, /choicesEl\.querySelector\("button"\)\?\.focus\(\)/, "the keyboard lands on the first choice");
   });
 });

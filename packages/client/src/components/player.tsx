@@ -1,7 +1,7 @@
-import { useCallback, type ReactNode } from "react";
-import { Copy, PauseSolid, PlaySolid, Speaker, X } from "./icons.js";
+import { useCallback, useRef, useState, type ReactNode } from "react";
+import { ChevronLeft, ChevronRight, Copy, PauseSolid, PlaySolid, RotateCcw, Speaker, X } from "./icons.js";
 import { cx } from "./ui.js";
-import { dismissPlayback, playClip, seekTo, togglePlayback, usePlayback, type Clip } from "../lib/audio.js";
+import { dismissPlayback, nextPlaylistLine, playClip, restartPlaylistLine, seekTo, togglePlayback, usePlayback, usePlaylist, type Clip } from "../lib/audio.js";
 
 /** "0:03", "1:07" — the dock's own clock, tabular so it does not jitter as it counts. */
 export function clock(seconds: number): string {
@@ -16,6 +16,9 @@ export function clock(seconds: number): string {
  */
 export function PlayerDock() {
   const playback = usePlayback();
+  // A read of the scene's lines (SPEC-044 R-33) is a playlist on this one player, so its
+  // Previous, Skip and Restart live here, where the read goes on sounding after Preview is left.
+  const playlist = usePlaylist();
   const { clip, status, currentTime, duration } = playback;
 
   const scrub = useCallback(
@@ -73,6 +76,14 @@ export function PlayerDock() {
           </div>
         )}
       </div>
+      {playlist === null ? null : (
+        <span className="fy-dock__lines">
+          <button type="button" className="fy-dock__line" aria-label="Previous line" onClick={() => nextPlaylistLine(-1)}><ChevronLeft size={12} /></button>
+          <button type="button" className="fy-dock__line" aria-label="Restart line" onClick={restartPlaylistLine}><RotateCcw size={11} /></button>
+          <button type="button" className="fy-dock__line" aria-label="Skip line" onClick={() => nextPlaylistLine()}><ChevronRight size={12} /></button>
+          <span className="fy-dock__linecount">{playlist.index + 1} of {playlist.items.length}</span>
+        </span>
+      )}
       {status === "error" ? (
         <div className="fy-dock__error">{playback.error}</div>
       ) : (
@@ -131,7 +142,10 @@ export function ClipPlayButton({
 }) {
   const playback = usePlayback();
   if (!clip && !busy && !onStart) return null;
-  const current = clip !== null && playback.clip?.id === clip.id;
+  // By url as well as id (codex on PR 1210): a chunked read's joined whole arrives under the
+  // same id as the pieces it follows, and a press on it must load it rather than toggle the
+  // piece that happens to be sounding.
+  const current = clip !== null && playback.clip?.id === clip.id && playback.clip?.url === clip.url;
   const playing = current && playback.status === "playing";
   const name = clip ? (playing ? `Pause ${clip.title}` : `Play ${clip.title}`) : busy ? "Preparing audio" : (label ?? "Play");
   return (
@@ -152,6 +166,62 @@ export function ClipPlayButton({
     >
       {playing ? <PauseSolid /> : <PlaySolid />}
     </button>
+  );
+}
+
+/**
+ * A picture you can watch, without the browser's own player (issue 1010, U2).
+ *
+ * `<video controls>` paints the platform's chrome — play, scrubber, 0:00/0:04, mute, fullscreen
+ * and a kebab — inside a card that is otherwise entirely ours, and at a wide window that strip
+ * is the loudest thing on the screen. The take tiles already answered this: the poster is the
+ * card, and one drawn button over it starts and stops the picture.
+ */
+export function PosterVideo({
+  src,
+  poster,
+  label,
+  className,
+  muted,
+}: {
+  src: string;
+  poster?: string;
+  label: string;
+  /** The video element's own class — each surface keeps its own frame. */
+  className?: string;
+  muted?: boolean;
+}) {
+  const video = useRef<HTMLVideoElement>(null);
+  const [playing, setPlaying] = useState(false);
+  return (
+    <span className="fy-posterplayer">
+      <video
+        ref={video}
+        className={className}
+        src={src}
+        preload="metadata"
+        playsInline
+        muted={muted === true}
+        aria-label={label}
+        {...(poster === undefined ? {} : { poster })}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => setPlaying(false)}
+      />
+      <button
+        type="button"
+        className="fy-playbtn fy-posterplay"
+        aria-label={`${playing ? "Pause" : "Play"} ${label}`}
+        onClick={() => {
+          const element = video.current;
+          if (element === null) return;
+          if (element.paused) void element.play().catch(() => setPlaying(false));
+          else element.pause();
+        }}
+      >
+        {playing ? <PauseSolid size={15} /> : <PlaySolid size={15} />}
+      </button>
+    </span>
   );
 }
 

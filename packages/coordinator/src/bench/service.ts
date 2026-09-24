@@ -1,4 +1,5 @@
-import { planSubjectCharacterAudio, characterAudioInstructions } from "@arke-studio/contracts";
+import { stageArtifactProblem } from "../productions/stage-playblast.js";
+import { planSubjectCharacterAudio, characterAudioInstructions, referencePrompt, referenceInputProblem, type FrozenPerformanceAudio } from "@arke-studio/contracts";
 import { readdir } from "node:fs/promises";
 import {
   DEFAULT_SHOT_SEC,
@@ -12,6 +13,7 @@ import {
   briefForProvider,
   dispatchDuration,
   durationLimitsFor,
+  billableCharacters,
   estimateMicroUsd,
   imageOutputFor,
   keyframeAddable,
@@ -322,6 +324,8 @@ export function resolveTokenEntry(
   const source = entry.source;
   if (source.source === "artifact") {
     const artifact = bundle.artifacts.find((a) => a.id === source.artifactId);
+    const problem = artifact ? stageArtifactProblem(bundle,artifact) : null;
+    if(problem) return {refused:problem};
     return artifact ? resolveArtifactSource(artifact) : { refused: "that artifact is no longer in the world" };
   }
   if (source.source === "world-file") return resolveWorldFileSource(source);
@@ -396,6 +400,10 @@ export async function addBenchReference(
   // The model gates admission. No model chosen yet admits nothing — the composer cannot
   // offer capacity it cannot state.
   if (model === null) return { outcome: "refused", reason: "choose a model first" };
+
+  if (resolved.kind === "video" && model.limits.referenceSyntax === "seedance" && !/\.(mp4|m4v|mov)$/i.test(resolved.path)) {
+    return { outcome: "refused", reason: "Seedance video references must be MP4 or MOV." };
+  }
 
   if (lane === "keyframe") {
     // Frames are not budgeted references — the lane's ceiling is the frame task modes' own,
@@ -635,6 +643,8 @@ export function planBenchDispatch(
     at: string;
     /** Re-run: dispatch this take's immutable snapshot instead of the live composer. */
     fromTake?: BenchTake | undefined;
+    /** The scene cast's reads, resolved by the caller (SPEC-044 R-29): the plan card and the Bench say the same. */
+    performanceReferences?: readonly FrozenPerformanceAudio[] | undefined;
     /**
      * The shipped version of a local recipe, when the chosen model is one (SPEC-021 R-13, R-15).
      * Injected because the recipe catalogue lives in @arke-studio/providers, which this package
@@ -744,6 +754,10 @@ export function planBenchDispatch(
   // be refused at dispatch as a picture that is not one.
   const referencePaths = resolvedRefs.filter(({ resolved }) => resolved.kind === "image").map(({ resolved }) => resolved.path);
   const videoPaths = resolvedRefs.filter(({ resolved }) => resolved.kind === "video").map(({ resolved }) => resolved.path);
+  const mediaReferences = (model.limits.referenceSyntax === "minimax-h3" || model.limits.referenceSyntax === "seedance") ? resolvedRefs.filter(({ resolved }) => resolved.kind !== "image").map(({ resolved }) => ({
+    kind: resolved.kind, file: resolved.path, hash: resolved.source.hash, durationSec: resolved.durationSec,
+  })) : [];
+  const standaloneAudioCount = mediaReferences.filter(ref => ref.kind === "audio").length;
 
   const filingPlan = session.subject === undefined ? null : productionFilingFor(session, bundle, composer.mode);
   if (filingPlan !== null && !filingPlan.ok) return filingPlan;
@@ -829,15 +843,45 @@ export function planBenchDispatch(
   }
   const preamble = session.subject === undefined || frame !== null ? null : bindingPreamble(bound);
   const resolvedAudio = params.kind === "video" && session.subject ? (options.fromTake ? options.fromTake.request.audioReferences : planSubjectCharacterAudio({
-    world: bundle, subject: session.subject, model, imageCount: frame?.paths.length ?? referencePaths.length,
-    taskMode, disabled: params.audioReferencesDisabled })) : undefined;
+    world: bundle, subject: session.subject, model, imageCount: frame?.paths.length ?? referencePaths.length, videoCount: videoPaths.length,
+    taskMode, disabled: params.audioReferencesDisabled,
+    ...(options.performanceReferences?.length ? { performanceReferences: options.performanceReferences } : {}) })) : undefined;
   const audioReferences = resolvedAudio && (resolvedAudio.disabled || resolvedAudio.references.length || resolvedAudio.problems.length) ? resolvedAudio : undefined;
   if (audioReferences?.problems.length) return { ok: false, reason: audioReferences.problems.join(" ") };
-  const wirePrompt = [preamble, body, audioReferences ? characterAudioInstructions(audioReferences) : null].filter(Boolean).join("\n\n");
+  const referenceProblem = referenceInputProblem(model, { references: referencePaths, videoReferences: videoPaths, referenceMedia: mediaReferences, audioReferences });
+  if (referenceProblem) return { ok: false, reason: referenceProblem };
+  const motionBindings = model.limits.referenceSyntax === "seedance"
+    ? videoPaths.map((_, index) => `Use @Video${index + 1} as a motion reference.`).join("\n") : "";
+  const wirePrompt = [motionBindings || null, preamble ? referencePrompt(preamble, model, videoPaths.length, 0, true) : null,
+    referencePrompt(body, model, videoPaths.length),
+    audioReferences ? referencePrompt(characterAudioInstructions(audioReferences), model, videoPaths.length, standaloneAudioCount) : null].filter(Boolean).join("\n\n");
+  // The cap was held against the brief, which is what the author can shorten; the words that
+  // travel can be longer, because naming a reference the way this model reads it grows the
+  // mention ("@Image 1" becomes "Picture 1", or H3's "<Picture 1>") and a subject's preamble
+  // rides ahead of it. Over the cap here, the take would be reserved and then refused by the
+  // recipe's own limit (raised on review, issue 1083).
+  if (cap !== undefined && wirePrompt.length > cap) {
+    return {
+      ok: false,
+      reason: `With its references named, the prompt is ${wirePrompt.length} characters; ${model.displayName} takes ${cap}.`,
+    };
+  }
 
   // A re-run dispatches the take's own snapshot (R-15): the version it was made with is what
   // that take means, so it is carried forward rather than re-resolved against today's catalogue.
-  const recipeVersion = options.fromTake?.request.recipeVersion ?? options.recipeVersionOf?.(model.id);
+  // When the catalogue no longer holds that version, nothing can run it: dispatching would run
+  // today's recipe and file the take under the old number, the provenance lie R-13 exists to
+  // prevent (raised on review, issue 1083 — Krea 2's picture labels changed what the recipe
+  // sends without touching its graph). Refused by name, the way older timing is below.
+  const current = options.recipeVersionOf?.(model.id);
+  const frozen = options.fromTake?.request.recipeVersion;
+  if (frozen !== undefined && current !== undefined && current !== frozen) {
+    return {
+      ok: false,
+      reason: `This take was made with another version of ${model.displayName}. Generate a current take instead.`,
+    };
+  }
+  const recipeVersion = frozen ?? current;
   const snapshotBase: Omit<BenchRequestSnapshot, "params"> = {
     ...(audioReferences ? { audioReferences } : {}),
     mode: composer.mode,
@@ -1003,6 +1047,7 @@ export function planBenchDispatch(
         params: {
           prompt: wirePrompt,
           ...(audioReferences ? { audioReferences } : {}),
+          ...(mediaReferences.length ? { referenceMedia: mediaReferences } : {}),
           ...(choice.kind === "asked" ? { duration: choice.wire } : {}),
           // A frame mode sends the size fields its route leaves unlocked (SPEC-019 R-33);
           // plain generation sends what was chosen. The frames travel as `references` so the
@@ -1064,12 +1109,16 @@ export function planBenchDispatch(
           audioFormat: voiceFormatForModel(model),
           ...(params.voiceId !== undefined ? { voiceId: params.voiceId } : {}),
           // The delivery is sent in the provider's own vocabulary, or not at all — a row that
-          // cannot express one says so rather than having a neighbour's settings guessed at.
-          ...(voiceSettings !== null ? { voiceSettings } : {}),
+          // cannot express one says so rather than having a neighbour's settings guessed at. Its
+          // name rides too, for a reader whose vocabulary is words (SPEC-046 R-22).
+          ...(voiceSettings !== null ? { voiceSettings, delivery: params.delivery } : {}),
+          // A cloned voice's recording language is the line's (issue 1163): the reader routes and
+          // tags by it, and the estimate counts the tag it would put in.
+          ...(voiceSource.kind === "cloned" ? { language: voiceSource.voice.language } : {}),
           // No container control: the concrete model declares its format and every downstream
           // layer consumes that same value.
         },
-        estimatedMicroUsd: estimateMicroUsd(model, { characters: composer.brief.length }),
+        estimatedMicroUsd: estimateMicroUsd(model, { characters: billableCharacters(model, composer.brief, voiceSettings !== null ? params.delivery : undefined, voiceSource.kind === "cloned" ? voiceSource.voice.language : undefined) }),
         landing: { dir: sessionMediaDir(session.id, takeId) },
         ...(voiceSource.kind === "cloned" ? { voiceReference: true } : {}),
       });

@@ -7,7 +7,7 @@ import {
 } from "@arke-studio/contracts";
 import { Button, cx } from "../components/ui.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
-import { setupCancel, setupRemove, setupRepair, setupRetry, setupSkip, useSetup } from "../lib/store.js";
+import { setupCancel, setupRemove, setupRepair, setupRetry, setupSkip, useSetup, useStore } from "../lib/store.js";
 import { RuntimeHead, RuntimeSection, RuntimeStatus, sizeMb } from "./settings-parts.js";
 
 /**
@@ -37,16 +37,19 @@ function needsAttention(component: SetupComponent): boolean {
   return component.state === "failed" || component.state === "blocked";
 }
 
-function ProgressRow({ component, progress }: { component: SetupComponent; progress: TransferProgress }) {
+function ProgressRow({ component, progress, sizeLabel }: { component: SetupComponent; progress: TransferProgress; sizeLabel?: string }) {
+  const { state } = useStore();
+  const engine = component.id === "comfyui-runtime" ? state?.app.comfyui?.engine : undefined;
+  const address = engine?.source === "user-url" ? engine.location : null;
   return (
     <div className="fy-set__row fy-set__row--stack" data-testid="download-row">
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <div className="fy-set__name fy-set__name--wide">
           <div className="fy-set__title">{component.displayName}</div>
           <div className="fy-set__caps">
-            {component.purpose} · {sizeMb(component.sizeMb)}
+            {sizeLabel ?? `${component.purpose} · ${sizeMb(component.sizeMb)}`}
           </div>
-          <div className="fy-set__caps">Location · {component.installLocation ?? "Unavailable"}</div>
+          <div className="fy-set__caps">{address ? `Address · ${address}` : `Location · ${component.installLocation ?? "Not reported"}`}</div>
         </div>
         <RuntimeStatus tone={needsAttention(component) ? "warn" : componentIsSettled(component.state) ? "ok" : "idle"}>
           {component.state === "paused"
@@ -127,7 +130,31 @@ export function SettingsDownloadsScreen() {
     (c) => (c.leftovers?.length ?? 0) > 0 && !needsAttention(c) && !isMoving(c) && !componentIsSettled(c.state),
   );
   const installed = components.filter((c) => componentIsSettled(c.state));
-  const remaining = moving.reduce((sum, c) => sum + Math.max(0, c.sizeMb - transferProgress(c).doneMb), 0);
+  const visible = [...moving, ...attention, ...leftovers, ...installed];
+  const owners = new Map<string, SetupComponent>();
+  const shared = new Set<string>();
+  for (const component of visible) for (const file of component.files ?? []) {
+    if (owners.has(file.key)) shared.add(file.key);
+    else owners.set(file.key, component);
+  }
+  const sizeLabel = (component: SetupComponent) => {
+    if (!component.files?.length) return undefined;
+    const ownSize = component.files.filter((file) => owners.get(file.key)?.id === component.id).reduce((sum, file) => sum + file.sizeMb, 0);
+    const others = [...new Set(component.files.map((file) => owners.get(file.key)).filter((owner) => owner && owner.id !== component.id).map((owner) => owner!.displayName))];
+    if (ownSize === 0 && others.length) return `Shared weights · ${others.join(", ")}`;
+    return `${component.purpose} · ${sizeMb(ownSize)}${others.length ? ` additional · shared weights with ${others.join(", ")}` : component.files.some((file) => shared.has(file.key)) ? " · includes shared weights" : ""}`;
+  };
+  const doneByFile = new Map<string, number>();
+  for (const component of components) for (const file of component.files ?? []) {
+    doneByFile.set(file.key, Math.max(doneByFile.get(file.key) ?? 0, file.bytesDone));
+  }
+  const remainingByFiles = new Map<string, number>();
+  for (const component of moving) {
+    if (component.files?.length) {
+      for (const file of component.files) remainingByFiles.set(file.key, Math.max(0, file.sizeMb - (doneByFile.get(file.key) ?? 0) / (1024 * 1024)));
+    } else remainingByFiles.set(`component:${component.id}`, Math.max(0, component.sizeMb - transferProgress(component).doneMb));
+  }
+  const remaining = [...remainingByFiles.values()].reduce((sum, size) => sum + size, 0);
 
   return (
     <div data-screen="settings-downloads" className="fy-set">
@@ -145,7 +172,7 @@ export function SettingsDownloadsScreen() {
             </button>
           </RuntimeSection>
           {moving.map((c) => (
-            <ProgressRow key={c.id} component={c} progress={transferProgress(c)} />
+            <ProgressRow key={c.id} component={c} progress={transferProgress(c)} sizeLabel={sizeLabel(c)} />
           ))}
         </>
       )}
@@ -153,7 +180,7 @@ export function SettingsDownloadsScreen() {
         <>
           <RuntimeSection label="NEEDS ATTENTION" />
           {attention.map((c) => (
-            <ProgressRow key={c.id} component={c} progress={transferProgress(c)} />
+            <ProgressRow key={c.id} component={c} progress={transferProgress(c)} sizeLabel={sizeLabel(c)} />
           ))}
         </>
       )}
@@ -161,7 +188,7 @@ export function SettingsDownloadsScreen() {
         <>
           <RuntimeSection label="LEFT BEHIND" />
           {leftovers.map((c) => (
-            <ProgressRow key={c.id} component={c} progress={transferProgress(c)} />
+            <ProgressRow key={c.id} component={c} progress={transferProgress(c)} sizeLabel={sizeLabel(c)} />
           ))}
         </>
       )}
@@ -169,7 +196,7 @@ export function SettingsDownloadsScreen() {
         <span className="fy-rt__count">{installed.length}</span>
       </RuntimeSection>
       {installed.map((c) => (
-        <ProgressRow key={c.id} component={c} progress={transferProgress(c)} />
+        <ProgressRow key={c.id} component={c} progress={transferProgress(c)} sizeLabel={sizeLabel(c)} />
       ))}
       {/* Reached from Providers and owned by it no more than it was owned by the two screens
           Providers absorbed (SPEC-034 R-25). One way back, because there is now one place to

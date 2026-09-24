@@ -467,6 +467,11 @@ export function WorldChatScreen() {
 
   const world = state?.world;
   const row = world?.conversations.find((c) => c.id === conversationId);
+  useEffect(() => {
+    if (row?.entryContext?.kind === "production-setup") {
+      void navigate(`/w/${worldId}/productions/setup/${row.id}`, { replace: true });
+    }
+  }, [row?.entryContext?.kind, row?.id, worldId, navigate]);
 
   // Ask for the workspace on arrival and release it on the way out, so a session that visits
   // twenty conversations still holds one. A new conversation has none to ask for.
@@ -842,9 +847,7 @@ export function WorldChatScreen() {
               }
             />
             {/* Stop lives on the working line in the transcript now, beside what it would stop. */}
-            <div className="fy-chat__composernote">
-              world author · talking changes nothing until you save
-            </div>
+            <div className="fy-chat__composernote">world author</div>
           </div>
         </div>
 
@@ -856,17 +859,12 @@ export function WorldChatScreen() {
                 {carried} of {points.length} ready
               </div>
             </div>
-            <div className="fy-panel__note">
-              Save writes a line to the world. If one is wrong, say so and it changes — or reject it.
-            </div>
             {mediaRefusal && <div className="fy-panel__mediawhy" role="status">{mediaRefusal}</div>}
           </div>
 
           <div className="fy-panel__body">
             {points.length === 0 ? (
-              <div className="fy-panel__empty">
-                Nothing understood yet. Say what you know about this world and it lands here.
-              </div>
+              <div className="fy-panel__empty">Nothing understood yet.</div>
             ) : (
               <>
                 {groups.map((group) => (

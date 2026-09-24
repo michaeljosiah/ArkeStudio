@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, readlink } from "node:fs/promises";
+import { basename } from "node:path";
 import { atomicWriteFile } from "./world/atomic.js";
 
 /**
@@ -20,8 +21,12 @@ import { atomicWriteFile } from "./world/atomic.js";
 export interface ChildRecord {
   /** The supervised child's pid. */
   pid: number;
-  /** Child image name (exe basename, lowercased) — the identity guard before any kill. */
+  /** Child image name; executable-kind Linux identities preserve filename case. */
   image: string;
+  /** New Linux stdio children use the full /proc executable name, not truncated ps comm. */
+  imageKind?: "executable";
+  /** Only application-owned, detached Linux stdio roots set this. */
+  processGroupLeader?: true;
   /** Supervisor id ("opencode", "voxa") for reporting. */
   id: string;
   ownerPid: number;
@@ -40,6 +45,9 @@ export interface ProcessInfo {
   pid: number;
   /** Image/command name as the OS reports it, lowercased. */
   image: string;
+  /** Linux's full executed basename; absent when the OS cannot establish it. */
+  executableImage?: string;
+  processGroup?: number;
   /** Start time (epoch ms), or null when the OS would not say. */
   startedAt: number | null;
 }
@@ -50,11 +58,11 @@ export type ProcessProbe = (pids: number[]) => Promise<Map<number, ProcessInfo>>
 export interface ReapReport {
   /** Records whose child was verified ours and killed. */
   reaped: ChildRecord[];
-  /** Records kept because their owner is still alive. */
+  /** Records kept because their owner is alive or cleanup could not be completed. */
   kept: number;
   /** Records dropped without a kill: the child was already gone or its pid was reused. */
   cleared: number;
-  /** Set when the sweep could not probe processes and therefore touched nothing. */
+  /** Set when process inspection failed or one or more kills failed; affected records remain. */
   skipped?: string;
 }
 
@@ -74,15 +82,27 @@ export function ownerStamp(): { ownerPid: number; ownerStartedAt: number } {
 const validPids = (pids: number[]): number[] =>
   [...new Set(pids)].filter((p) => Number.isSafeInteger(p) && p > 0);
 
+/** Fixed OS modules only: unqualified first-use discovery can stall a fresh Windows host. */
+export function windowsProcessPreamble(includeManagement = false): string {
+  // CimCmdlets' OS manifest uses Utility's Set-Alias while loading.
+  const modules = ["Microsoft.PowerShell.Utility", "CimCmdlets", ...(includeManagement ? ["Microsoft.PowerShell.Management"] : [])];
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    "$PSModuleAutoLoadingPreference = 'None'",
+    "$ProgressPreference = 'SilentlyContinue'",
+    ...modules.map(name => `Microsoft.PowerShell.Core\\Import-Module -Name ([IO.Path]::Combine($PSHOME, 'Modules\\${name}\\${name}.psd1')) -ErrorAction Stop`),
+  ].join("\n");
+}
+
 /** One CIM query for the whole batch; name and creation time back the pid-reuse guards. */
 async function probeWin32(pids: number[]): Promise<Map<number, ProcessInfo>> {
   const filter = pids.map((p) => `ProcessId=${p}`).join(" OR ");
   const script = [
-    "$ErrorActionPreference = 'Stop'",
-    `$rows = @(Get-CimInstance Win32_Process -Filter '${filter}' | ForEach-Object {`,
-    "  [pscustomobject]@{ p = [int]$_.ProcessId; n = [string]$_.Name; s = if ($_.CreationDate) { ([System.DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() } else { $null } }",
+    windowsProcessPreamble(),
+    `$rows = @(foreach ($row in @(CimCmdlets\\Get-CimInstance Win32_Process -Filter '${filter}')) {`,
+    "  [pscustomobject]@{ p = [int]$row.ProcessId; n = [string]$row.Name; s = if ($row.CreationDate) { ([System.DateTimeOffset]$row.CreationDate).ToUnixTimeMilliseconds() } else { $null } }",
     "})",
-    "ConvertTo-Json -Compress -InputObject $rows",
+    "Microsoft.PowerShell.Utility\\ConvertTo-Json -Compress -InputObject $rows",
   ].join("\n");
   const stdout = await runCollect(
     powershellPath(),
@@ -96,14 +116,28 @@ async function probeWin32(pids: number[]): Promise<Map<number, ProcessInfo>> {
 async function probePosix(pids: number[]): Promise<Map<number, ProcessInfo>> {
   const now = Date.now();
   // ps exits non-zero when any pid is absent; absence is an answer here, not a failure.
-  const stdout = await runCollect("ps", ["-o", "pid=,etimes=,comm=", "-p", pids.join(",")], { okCodes: [0, 1] });
+  const linux = process.platform === "linux";
+  const stdout = await runCollect("ps", ["-o", linux ? "pid=,etimes=,pgid=,comm=" : "pid=,etimes=,comm=", "-p", pids.join(",")], { okCodes: [0, 1] });
   const map = new Map<number, ProcessInfo>();
   for (const line of stdout.split("\n")) {
-    const m = /^\s*(\d+)\s+(\d+)\s+(.+)$/.exec(line);
+    const m = (linux ? /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.+)$/ : /^\s*(\d+)\s+(\d+)\s+(.+)$/).exec(line);
     if (!m) continue;
-    const comm = m[3]!.trim();
+    const comm = m[linux ? 4 : 3]!.trim();
     const base = comm.slice(comm.lastIndexOf("/") + 1).toLowerCase();
-    map.set(Number(m[1]), { pid: Number(m[1]), image: base, startedAt: now - Number(m[2]) * 1000 });
+    const pid = Number(m[1]);
+    let executableImage: string | undefined;
+    if (process.platform === "linux") {
+      // comm is limited to 15 bytes and procps also escapes broken Unicode. /proc/exe
+      // retains the full identity; unreadable identity is unknown, never a prefix match.
+      try {
+        const target = await readlink(`/proc/${pid}/exe`);
+        // Linux decorates unlinked executables with this ambiguous suffix. Preserve the
+        // record rather than stripping a possibly literal filename or declaring a stranger.
+        if (!target.endsWith(" (deleted)")) executableImage = basename(target);
+      }
+      catch { /* Legacy comm callers remain usable; executable records must be retained. */ }
+    }
+    map.set(pid, { pid, image: base, startedAt: now - Number(m[2]) * 1000, ...(linux ? { processGroup: Number(m[3]) } : {}), ...(executableImage ? { executableImage } : {}) });
   }
   return map;
 }
@@ -113,22 +147,44 @@ function powershellPath(): string {
   return `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
 }
 
-function runCollect(
+/** Bounded process inspection; aborting also terminates the owned inspection helper. */
+export function runCollect(
   command: string,
   args: string[],
-  opts: { okCodes?: number[] } = {},
+  opts: { okCodes?: number[]; signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<string> {
   const okCodes = opts.okCodes ?? [0];
   return new Promise((resolve, reject) => {
+    opts.signal?.throwIfAborted();
     const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     let out = "";
     let err = "";
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      opts.signal?.removeEventListener("abort", abort);
+      if (error) reject(error);
+      else resolve(out);
+    };
+    const stop = (error: Error) => {
+      // Inspection helpers never own application work. A timed out PowerShell must not
+      // remain alive after the caller gives up waiting for its CIM query.
+      try { child.kill("SIGKILL"); } catch { /* already gone */ }
+      finish(error);
+    };
+    const abort = () => stop(new Error("Process inspection was cancelled."));
+    // A loaded Windows runner can spend ten seconds starting PowerShell before CIM answers.
+    // Individual startup callers can impose a shorter cancellable budget of their own.
+    const timer = setTimeout(() => stop(new Error("Process inspection timed out.")), opts.timeoutMs ?? 30_000);
+    opts.signal?.addEventListener("abort", abort, { once: true });
     child.stdout?.on("data", (c: Buffer) => (out += c.toString()));
     child.stderr?.on("data", (c: Buffer) => (err += c.toString()));
-    child.once("error", (e) => reject(e));
+    child.once("error", (e) => finish(e));
     child.once("exit", (code) => {
-      if (code !== null && okCodes.includes(code)) resolve(out);
-      else reject(new Error(`${command} exited ${code}${err ? `: ${err.trim().split("\n", 1)[0]}` : ""}`));
+      if (code !== null && okCodes.includes(code)) finish();
+      else finish(new Error(`${command} exited ${code}${err ? `: ${err.trim().split("\n", 1)[0]}` : ""}`));
     });
   });
 }
@@ -143,30 +199,45 @@ export interface DescendantInfo extends ProcessInfo {
   parentPid: number;
 }
 
+export interface DescendantQuery {
+  /** Exact identity captured while the owned root was still alive. */
+  root?: ProcessInfo;
+  rootExitedAt?: number;
+  onRoot?: (root: ProcessInfo) => void;
+}
+
 /**
  * Live descendants of `rootPid`, transitively. taskkill /T can only walk a tree whose root
  * is still alive; this snapshot is what lets a stop or sweep reach the grandchildren after
  * the wrapper between them has died. Windows-only — elsewhere there is no shell shim and no
  * wrapper, so the answer is always empty. Throws when the process table cannot be read.
  */
-export async function listDescendants(rootPid: number): Promise<DescendantInfo[]> {
+export async function listDescendants(rootPid: number, signal?: AbortSignal, query: DescendantQuery = {}): Promise<DescendantInfo[]> {
   if (process.platform !== "win32") return [];
   if (!Number.isSafeInteger(rootPid) || rootPid <= 0) return [];
   // One query for the whole table; ParentProcessId is not filterable transitively in CIM,
   // so the tree walk happens here. Dead parents keep their pid in ParentProcessId, which is
   // exactly what makes orphaned grandchildren findable.
   const script = [
-    "$ErrorActionPreference = 'Stop'",
-    "$rows = @(Get-CimInstance Win32_Process | ForEach-Object {",
-    "  [pscustomobject]@{ p = [int]$_.ProcessId; pp = [int]$_.ParentProcessId; n = [string]$_.Name; s = if ($_.CreationDate) { ([System.DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() } else { $null } }",
+    windowsProcessPreamble(),
+    "$rows = @(foreach ($row in @(CimCmdlets\\Get-CimInstance Win32_Process)) {",
+    "  [pscustomobject]@{ p = [int]$row.ProcessId; pp = [int]$row.ParentProcessId; n = [string]$row.Name; s = if ($row.CreationDate) { ([System.DateTimeOffset]$row.CreationDate).ToUnixTimeMilliseconds() } else { $null } }",
     "})",
-    "ConvertTo-Json -Compress -InputObject $rows",
+    "Microsoft.PowerShell.Utility\\ConvertTo-Json -Compress -InputObject $rows",
   ].join("\n");
   const stdout = await runCollect(
     powershellPath(),
     ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
+    { signal },
   );
   const rows = JSON.parse(stdout.trim() === "" ? "[]" : stdout) as { p: number; pp: number; n: string; s: number | null }[];
+  const observed = rows.find(row => row.p === rootPid);
+  const currentRoot = observed ? { pid: observed.p, image: observed.n.toLowerCase(), startedAt: observed.s } : undefined;
+  const root = query.root ?? currentRoot;
+  if (query.root && (query.root.pid !== rootPid || query.root.startedAt === null)) return [];
+  if (query.root && currentRoot && (currentRoot.image !== query.root.image || currentRoot.startedAt !== query.root.startedAt)) return [];
+  signal?.throwIfAborted();
+  if (currentRoot) query.onRoot?.(currentRoot);
   const byParent = new Map<number, typeof rows>();
   for (const row of rows) {
     const siblings = byParent.get(row.pp);
@@ -175,15 +246,20 @@ export async function listDescendants(rootPid: number): Promise<DescendantInfo[]
   }
   const found: DescendantInfo[] = [];
   const visited = new Set<number>([rootPid]);
-  const queue = [rootPid];
+  // Legacy supervisor callers may query a dead root without a captured identity. Owned
+  // stdio cleanup always supplies its exact root; preserve the older caller contract.
+  const queue = [{ pid: rootPid, startedAt: root?.startedAt ?? null }];
   // Recycled pids can make the parent graph cyclic; the visited set keeps the walk finite.
   while (queue.length > 0) {
-    const pid = queue.shift()!;
+    const { pid, startedAt } = queue.shift()!;
     for (const row of byParent.get(pid) ?? []) {
       if (visited.has(row.p)) continue;
+      // ParentProcessId survives parent exit and PID reuse. Creation order establishes
+      // which lifetime a link can belong to; an unknown timestamp cannot authorize a kill.
+      if (row.s === null || (startedAt !== null && row.s < startedAt) || (pid === rootPid && query.rootExitedAt !== undefined && row.s > query.rootExitedAt)) continue;
       visited.add(row.p);
       found.push({ pid: row.p, parentPid: row.pp, image: row.n.toLowerCase(), startedAt: row.s ?? null });
-      queue.push(row.p);
+      queue.push({ pid: row.p, startedAt: row.s });
     }
   }
   return found;
@@ -192,7 +268,7 @@ export async function listDescendants(rootPid: number): Promise<DescendantInfo[]
 /** Force-kill the whole tree under `pid` — grandchildren orphan on Windows otherwise. */
 export async function killTree(pid: number): Promise<void> {
   if (process.platform === "win32") {
-    await runCollect("taskkill", ["/pid", String(pid), "/T", "/F"], { okCodes: [0, 128, 255, 1] }).catch(() => "");
+    await runCollect("taskkill", ["/pid", String(pid), "/T", "/F"], { okCodes: [0, 128, 255, 1] });
   } else {
     try {
       process.kill(pid, "SIGKILL");
@@ -210,6 +286,7 @@ export interface ChildLedgerDeps {
 export class ChildLedger {
   private readonly probe: ProcessProbe;
   private readonly kill: (pid: number) => Promise<void>;
+  private readonly killGroup: (pid: number) => Promise<void>;
   /** All file access is funnelled through one chain — two supervisors share one ledger. */
   private tail: Promise<unknown> = Promise.resolve();
 
@@ -219,6 +296,10 @@ export class ChildLedger {
   ) {
     this.probe = deps.probe ?? platformProbe;
     this.kill = deps.kill ?? killTree;
+    this.killGroup = deps.kill ?? (async pid => {
+      try { process.kill(-pid, "SIGKILL"); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
+    });
   }
 
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {
@@ -284,6 +365,7 @@ export class ChildLedger {
       }
       const keep: ChildRecord[] = [];
       const reaped: ChildRecord[] = [];
+      let failedKills = 0;
       for (const rec of records) {
         const owner = probed.get(rec.ownerPid);
         const ownerAlive =
@@ -295,19 +377,35 @@ export class ChildLedger {
           continue;
         }
         const child = probed.get(rec.pid);
+        if (child && rec.imageKind === "executable" && (child.executableImage === undefined || child.startedAt === null)) {
+          keep.push(rec);
+          continue;
+        }
+        const image = rec.imageKind === "executable" ? child?.executableImage : child?.image;
         const isOurs =
           child !== undefined &&
-          child.image === rec.image.toLowerCase() &&
+          image === (rec.imageKind === "executable" ? rec.image : rec.image.toLowerCase()) &&
           (child.startedAt === null ||
             Math.abs(child.startedAt - rec.recordedAt) <= CHILD_START_TOLERANCE_MS);
         if (isOurs) {
-          await this.kill(rec.pid);
+          const group = process.platform === "linux" && rec.imageKind === "executable" && rec.processGroupLeader === true;
+          if (group && child.processGroup !== rec.pid) { keep.push(rec); continue; }
+          try { await (group ? this.killGroup : this.kill)(rec.pid); }
+          catch {
+            // A bounded taskkill timeout or spawn failure is a failed cleanup, not a
+            // failed application startup. Keep this identity for a later sweep and
+            // continue checking the other records without claiming this child was reaped.
+            keep.push(rec); failedKills++;
+            continue;
+          }
           reaped.push(rec);
         }
         // Not ours (gone, or the pid now belongs to a stranger): drop the record, touch nothing.
       }
       await this.write(keep);
-      return { reaped, kept: keep.length, cleared: records.length - keep.length - reaped.length };
+      return { reaped, kept: keep.length, cleared: records.length - keep.length - reaped.length,
+        ...(failedKills ? { skipped: `Could not stop ${failedKills} recorded child process${failedKills === 1 ? "" : "es"}; ownership retained for a later sweep.` } : {}),
+      };
     });
   }
 }

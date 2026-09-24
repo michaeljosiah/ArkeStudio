@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import type { CreateSessionInput, HarnessAdapter, SessionConfigInput, SessionRef } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
+import { loadSkillBodies } from "./skills.js";
 
 const setupByDir = new Map<string, Promise<void>>();
 
@@ -42,7 +43,7 @@ export async function writeSessionFiles(
   input: SessionConfigInput = {},
 ): Promise<string> {
   const preparationId = randomUUID();
-  const prepared = { ...input, preparationId };
+  const prepared = { ...input, preparationId, skillBodies: await loadSkillBodies(input) };
   // Both seams, always. A harness takes its settings as files or as call options, and a
   // caller offering only one silently configures nothing for the harnesses using the other.
   try {

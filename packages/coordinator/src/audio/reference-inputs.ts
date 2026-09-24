@@ -4,14 +4,14 @@ import { readFile } from "node:fs/promises";
 import { PreparedPerformanceAudioReviewSchema, PreparedReferenceAudioSchema, type ClientMessage, type PerformanceRecord } from "@arke-studio/contracts";
 import { prepareAudio, acceptPreparedAudio, type PreparedAudioCandidate } from "./storage.js";
 import type { AudioMediaTools } from "./media-tools.js";
-import { type FrozenPerformanceAudio, type PerformanceAudioRequest } from "@arke-studio/contracts";
+import { castVoiceRequests, sameVoiceAssignment, type CastVoiceNotSent, type FrozenPerformanceAudio, type PerformanceAudioRequest, type ProductionBundle, type SceneRecord } from "@arke-studio/contracts";
 import { readPerformance, currentPerformanceTarget } from "./performances.js";
-import { CharacterAudioPlanSchema, characterAudioRoute, referenceAudioAsset, type Job } from "@arke-studio/contracts";
+import { CharacterAudioPlanSchema, characterAudioRoute, characterAudioReferenceProblem, referenceAudioAsset, type Job } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { audioWorldPath } from "./storage.js";
 import { readAudioBytes } from "./media-tools.js";
 import { appendAudioRights, readAudioRights } from "./rights.js";
-import { clearAudioDispatch } from "./dispatch-gate.js";
+import { clearAudioDispatch, checkAudioDispatchEvidence } from "./dispatch-gate.js";
 
 /** Read frozen samples, never the character's possibly replaced current designation. */
 export async function readCharacterAudioInputs(store: WorldStore, job: Pick<Job, "model" | "provider" | "params">, requireCurrent = false) {
@@ -26,7 +26,10 @@ export async function readCharacterAudioInputs(store: WorldStore, job: Pick<Job,
   const route = characterAudioRoute({ id: job.model, provider: job.provider }, typeof job.params.taskMode === "string" ? job.params.taskMode : "generate");
   if (!route || route.endpoint !== plan.route || (job.params.route !== undefined && job.params.route !== route.endpoint)) throw new Error("The selected route cannot carry these audio references.");
   const images = Array.isArray(job.params.references) ? job.params.references.length : 0;
-  if (!images || images > route.maxImages || images + plan.references.length > route.maxCombinedReferences) throw new Error("The complete reference set exceeds the route budget or lacks imagery.");
+  const videos = (Array.isArray(job.params.videoReferences) ? job.params.videoReferences.length : 0) + (job.params.continuedFrom ? 1 : 0);
+  const visualProblem = characterAudioReferenceProblem(route, images, videos, plan.references.length);
+  if (visualProblem) throw new Error(visualProblem);
+  if (!route.supportsPerformanceSync && plan.references.some(ref => ref.intent === "performance-sync")) throw new Error("This route does not support performance synchronization.");
   const rights = await readAudioRights(store);
   let seconds = 0;
   const result = [];
@@ -50,8 +53,9 @@ export async function readCharacterAudioInputs(store: WorldStore, job: Pick<Job,
       : `productions/${ref.performance.target.productionId}/performances/${ref.performance.id}/${sample.file}`;
     const bytes = await readAudioBytes(await audioWorldPath(store.dir, file), store.closingSignal, route.maxBytesPerFile);
     seconds += sample.provenance.outputTechnical.durationSec ?? Infinity;
+    if ((sample.provenance.outputTechnical.durationSec ?? Infinity) > route.maxFileDurationSec) throw new Error("Audio reference exceeds the per-file duration limit.");
     if (seconds > route.maxTotalDurationSec) throw new Error("Audio references exceed the combined duration limit.");
-    clearAudioDispatch({ bytes, hash: sample.provenance.outputHash, report: sample.provenance.qualityReport,
+    (route.local ? checkAudioDispatchEvidence : clearAudioDispatch)({ bytes, hash: sample.provenance.outputHash, report: sample.provenance.qualityReport,
       rights, scope: "cloud-reference-upload", warningCodes: sample.warningCodes, attestations: sample.attestations,
       requiredAttestations: "master" in ref ? [] : ["single-speaker", "no-music"], statementVersion: 1, acknowledgementId: sample.acknowledgementId });
     const mp3 = sample.file.endsWith(".mp3");
@@ -62,7 +66,7 @@ export async function readCharacterAudioInputs(store: WorldStore, job: Pick<Job,
 
 /** Explicit full-performance references reuse immutable media; no parallel asset store or preparation job. */
 export async function resolvePerformanceAudioReferences(store: WorldStore, productionId: string, sceneId: string,
-  requests: readonly PerformanceAudioRequest[], requestId: string): Promise<FrozenPerformanceAudio[]> {
+  requests: readonly PerformanceAudioRequest[], requestId: string, local = false): Promise<FrozenPerformanceAudio[]> {
   const references: FrozenPerformanceAudio[] = [];
   for (const [index, request] of requests.entries()) {
     const performance = await readPerformance(store, productionId, request.performanceId);
@@ -74,29 +78,86 @@ export async function resolvePerformanceAudioReferences(store: WorldStore, produ
       throw new Error("The reviewed performance changed. Choose a currently accepted performance for this scene.");
     }
     if (requests.slice(0, index).some(r => r.performanceId === request.performanceId)) throw new Error("A performance reference was selected twice.");
-    if (performance.kind !== "scratch" && (!sheet.voice || sheet.voice.provider !== performance.voiceAssignment.provider ||
-      sheet.voice.voiceId !== performance.voiceAssignment.voiceId || sheet.voice.model !== performance.voiceAssignment.model ||
-      sheet.voice.assignedAtVersion !== performance.voiceAssignment.assignedAtVersion)) throw new Error("The performance uses an earlier character voice assignment.");
+    if (performance.kind !== "scratch" && !sameVoiceAssignment(sheet.voice, performance.voiceAssignment)) throw new Error("The performance uses an earlier character voice assignment.");
     const prepared = request.prepared ? await acceptPerformanceAudioRange(store, performance, request.prepared, requestId) : undefined;
     const asset = prepared ?? performance;
     const dispatchHash = asset.provenance.outputHash;
-    const acknowledgementId = `performance-reference/${requestId}/${index}`;
-    const prior = (await readAudioRights(store)).find(r => r.action === "acknowledge" && r.id === acknowledgementId);
+    // A local route sends no bytes anywhere (SPEC-028): the read is checked as evidence and no
+    // cloud-upload right is written or required for it (codex round 3). A cloud route needs the
+    // basis the read was kept under; the cast authority never asks for one without it, and the
+    // per-dispatch path is told rather than trusted.
+    const acknowledgementId = local ? undefined : `performance-reference/${requestId}/${index}`;
+    const prior = acknowledgementId === undefined ? undefined : (await readAudioRights(store)).find(r => r.action === "acknowledge" && r.id === acknowledgementId);
     const at = prior?.at ?? store.now();
     const attestations = (["single-speaker", "no-music"] as const).map(kind => ({ kind, audioHash: dispatchHash,
       statementVersion: 1, acknowledgedAt: at }));
     if (!request.singleSpeaker || !request.noMusic) throw new Error("Confirm a single speaker and no music.");
-    await appendAudioRights(store, { schemaVersion: 1, action: "acknowledge", id: acknowledgementId, audioHash: dispatchHash,
-      basis: request.cloudBasis, scopes: ["cloud-reference-upload"], statementVersion: 1, at });
+    if (acknowledgementId !== undefined) {
+      if (request.cloudBasis === undefined) throw new Error("Confirm the read may be sent to cloud models.");
+      await appendAudioRights(store, { schemaVersion: 1, action: "acknowledge", id: acknowledgementId, audioHash: dispatchHash,
+        basis: request.cloudBasis, scopes: ["cloud-reference-upload"], statementVersion: 1, at });
+    }
     const bytes = await readAudioBytes(await audioWorldPath(store.dir,
       prepared ? `productions/${productionId}/${prepared.file}` : `productions/${productionId}/performances/${performance.id}/${performance.file}`), store.closingSignal, 15_000_000);
-    clearAudioDispatch({ bytes, hash: dispatchHash, report: asset.provenance.qualityReport,
-      rights: await readAudioRights(store), scope: "cloud-reference-upload", acknowledgementId,
-      warningCodes: request.warningCodes, attestations, requiredAttestations: ["single-speaker", "no-music"], statementVersion: 1 });
+    const evidence = { bytes, hash: dispatchHash, report: asset.provenance.qualityReport, rights: await readAudioRights(store), scope: "cloud-reference-upload" as const,
+      warningCodes: request.warningCodes, attestations, requiredAttestations: ["single-speaker", "no-music"] as const, statementVersion: 1 };
+    if (acknowledgementId === undefined) checkAudioDispatchEvidence(evidence);
+    else clearAudioDispatch({ ...evidence, acknowledgementId });
     references.push({ intent: request.intent, sheetId: sheet.id, characterName: sheet.name, label: "@Audio1", performance, ...(prepared ? { prepared } : {}),
-      acceptedReviewAt: review.ts, warningCodes: request.warningCodes, attestations, acknowledgementId });
+      acceptedReviewAt: review.ts, warningCodes: request.warningCodes, attestations, ...(acknowledgementId === undefined ? {} : { acknowledgementId }),
+      ...(request.source ? { source: request.source } : {}) });
   }
   return references;
+}
+
+/** What a clearance failure is called on a card: the gate's codes and sentences, as labels. */
+function clearanceLabel(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.startsWith("audio-source-changed") || message.startsWith("The reviewed performance changed")) return "read changed";
+  if (message.startsWith("audio-qc-")) return "QC stale";
+  if (message.startsWith("audio-warning-")) return "QC warnings not acknowledged";
+  if (message.startsWith("audio-attestation-")) return "attest one speaker and no music";
+  if (message.startsWith("audio-rights-")) return "rights missing";
+  if (message.startsWith("The performance uses an earlier character voice")) return "voice changed";
+  return "not cleared";
+}
+
+/**
+ * Resolve the cast's reads one at a time (SPEC-044 R-28): a read that fails clearance becomes a
+ * clause and the sample rides, where a per-dispatch request would have refused the whole plan.
+ * `notSent` is what the record itself rules out — the same words the Bench reads off the bundle —
+ * and `refused` what only the bytes and the rights ledger could. Each read acknowledges rights
+ * under its own id, so two reads under one request never share one.
+ */
+export async function resolveCastVoices(store: WorldStore, production: ProductionBundle, scene: SceneRecord, requestId: string, shotIds?: readonly string[], local = false):
+  Promise<{ references: FrozenPerformanceAudio[]; notSent: CastVoiceNotSent[]; refused: CastVoiceNotSent[] }> {
+  const { requests, notSent } = castVoiceRequests(store.getBundle().sheets, production, scene, shotIds, local);
+  const references: FrozenPerformanceAudio[] = [], refused: CastVoiceNotSent[] = [];
+  for (const request of requests) {
+    const sheetId = production.performances.find(p => p.id === request.performanceId)!.target.speakerSheetId;
+    try {
+      references.push(...await resolvePerformanceAudioReferences(store, production.meta.id, scene.id, [request], `${requestId}/cast-${sheetId}`, local));
+    } catch (error) {
+      refused.push({ sheetId, name: store.getBundle().sheets.find(s => s.id === sheetId)?.name ?? sheetId, reason: clearanceLabel(error) });
+    }
+  }
+  return { references, notSent, refused };
+}
+
+/**
+ * The same resolution for a Bench subject (SPEC-044 R-29), found from its scene and narrowed to
+ * the shots the subject covers (codex round 2): a member who speaks elsewhere in the scene is
+ * not cleared, not refused and not acknowledged for a pass that will not carry the read. None
+ * when the scene is gone.
+ */
+export async function resolveSubjectCastVoices(store: WorldStore,
+  subject: { productionId: string; sceneId: string; shotId?: string; members?: readonly { shotId: string }[] }, requestId: string, local = false):
+  Promise<{ references: FrozenPerformanceAudio[]; notSent: CastVoiceNotSent[]; refused: CastVoiceNotSent[] }> {
+  const production = store.getBundle().productions.find(p => p.meta.id === subject.productionId);
+  const scene = production?.scenes.find(s => s.id === subject.sceneId);
+  if (!production || !scene) return { references: [], notSent: [], refused: [] };
+  const shotIds = subject.shotId !== undefined ? [subject.shotId] : subject.members?.map(m => m.shotId);
+  return resolveCastVoices(store, production, scene, requestId, shotIds, local);
 }
 
 export async function preparePerformanceAudioRange(store: WorldStore, tools: AudioMediaTools,

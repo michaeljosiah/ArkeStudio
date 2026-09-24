@@ -1,18 +1,12 @@
-import { DialogueGuidance } from "../../components/dialogue-guidance.js";
-import { MasterAudioPicker } from "../../components/master-audio-picker.js";
-import { PerformanceAudioPicker } from "../../components/performance-audio-picker.js";
-import { type MasterAudioChoice, type PerformanceAudioChoice } from "../../lib/scene-plan.js";
-import { TableReadPanel } from "../../components/table-read-panel.js";
-import { PerformancePanel } from "../../components/performance-panel.js";
-import { planForScene } from "../../lib/scene-plan.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import {
   DEFAULT_SHOT_SEC,
+  seasonFindings,
   orderedShots,
   legacySceneView,
-  type ClientMessage,
   type ArtifactSidecar,
+  type ClientMessage,
   type FrameRunState,
   type PackedBoard,
   type ProductionBundle,
@@ -21,17 +15,15 @@ import {
   type WorldChatSubject,
 } from "@arke-studio/contracts";
 import { productionModel, resolveModel } from "../../components/dispatch-bar.js";
-import { seconds } from "../../lib/format.js";
+import { initials, seconds } from "../../lib/format.js";
 import { mediaUrl } from "../../lib/media.js";
 import { acceptedTakeId, takesForShot } from "../../lib/selectors.js";
 import {
   frameRunCommand,
   dispatchScenePlanned,
-  sceneCommand,
   sendBenchOpenSubject,
   subscribeBenchSubjectOpened,
   subscribePlanResults,
-  subscribeSceneRefusals,
   useClientState,
   useStore,
 } from "../../lib/store.js";
@@ -43,22 +35,24 @@ import { SelectionProvider, selectedShotId, subjectMatchesBoard, type WorkspaceS
 import { boardsForScene, shotHasFrame } from "./boards.js";
 import { FrameRunBar, FrameRunBoardFailures, GenerateFramesDialog } from "./frame-run.js";
 import { ShotLightbox } from "./lightbox.js";
+import { CastPicker, SheetPicture, sceneCast, type CastPickerMode } from "./cast-picker.js";
+import { CharacterDialog } from "./character-dialog.js";
+import { LocationDialog } from "./location-dialog.js";
 import { Button } from "../../components/ui.js";
-import { Pin } from "../../components/icons.js";
+import { Film, Grid2x2, ImageMark, ListBullet, Maximize2, Minimize2, More, Pin, Plus, Timer } from "../../components/icons.js";
 import { BoardSheet } from "./board-sheet.js";
 import { ScenePreview } from "./preview.js";
-import { SceneStage } from "./stage.js";
-import { sceneIsComplete } from "./completion.js";
 import { PlansPanel } from "./plans.js";
+import { stagedShotChanges, useSceneWriter } from "./scene-writer.js";
+import { rememberedLayout, rememberLayout } from "../../lib/storyboard-layout.js";
 
-type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
 
 /**
  * The scene authoring shell (SPEC-029 R-21..R-29), mounted for every scene detail route.
  *
- * `scene index | Storyboard or Flow | Arke` — the three columns turn 103 binds, with Storyboard
- * the default. Read-only at this step: it lands where it can be walked before it replaces the
- * horizontal strip, and every write arrives with the editing step.
+ * Storyboard is the default, with the cast and place above it and Arke beside it (design 138);
+ * the Grid is the storyboard's default (turn 145), and List and Grid share the same rows so
+ * changing the layout preserves an unfinished edit. The Stage is the shot page's (turn 145).
  *
  * The selection lives HERE, above the tabs, which is the whole of why switching views keeps it
  * (T-18). A per-view selection is unmounted with its view; that is not a bug you can patch
@@ -74,14 +68,56 @@ export function SceneWorkspace({
   scene: SceneRecord;
 }) {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   // The same digests the strip compares citations against — one hook, cached on the blocks
   // array itself, so mounting this beside anything else costs no second sweep of the script.
   const state = useClientState();
   const connection = useStore().connection;
   const digests = useBlockDigests(legacySceneView(scene));
-  const [view, setView] = useState<"storyboard" | "flow" | "stage" | "preview">("storyboard");
+  // `?view=preview` is the shot page's Play from here (turn 145): the address opens the view once
+  // and the choice stays a choice, never a bookmark.
+  const [view, setView] = useState<"storyboard" | "flow" | "preview">(() => (searchParams.get("view") === "preview" ? "preview" : "storyboard"));
+  useEffect(() => {
+    // Read once, then taken out of the address: a Back to this entry must not reopen Preview.
+    if (searchParams.get("view") !== "preview") return;
+    const params = new URLSearchParams(searchParams);
+    params.delete("view");
+    setSearchParams(params, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Full screen (SPEC-044 R-37, R-38): session state like the put-away, never written. The view
+  // stays where it is in the tree and the page around it steps aside by CSS, so Flow's positions
+  // and zoom and the Stage's draft survive the move without a remount.
+  const [full, setFull] = useState(false);
+  // Full screen belongs to Flow here (R-37; the Stage took its own to the shot page, turn 145): a
+  // Flow menu entry that moves the view to Storyboard takes the page out of it.
+  const fullscreen = full && view === "flow";
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (event: KeyboardEvent) => {
+      // A dialog above the view, or the Flow's own menu, owns its Escape; the page leaves full
+      // screen only when nothing does. The menu listens on window, after this document listener.
+      if (event.key === "Escape" && document.querySelector("dialog[open], .fy-swcanvas__menu") === null) setFull(false);
+    };
+    document.addEventListener("keydown", onKey);
+    // The production rail and the title bar sit outside this screen and under the overlay:
+    // unreachable to the pointer already, and inert so the keyboard cannot tab into what nobody
+    // can see.
+    const chrome = [...document.querySelectorAll(".fy-prodrail, .fy-titlebar")];
+    for (const element of chrome) element.setAttribute("inert", "");
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      for (const element of chrome) element.removeAttribute("inert");
+    };
+  }, [fullscreen]);
   const [showBoards, setShowBoards] = useState(false);
+  // The Grid is the storyboard's default (turn 145); the choice is remembered per person, not
+  // per scene, and never written to the world.
+  const [storyboardLayout, setStoryboardLayoutState] = useState<"list" | "grid">(rememberedLayout);
+  const setStoryboardLayout = (layout: "list" | "grid") => {
+    setStoryboardLayoutState(layout);
+    rememberLayout(layout);
+  };
   // The one lightbox: the row preview, the run bar's Review and Preview's Larger all open it,
   // and its arrows walk the scene's shots carrying the selection with them.
   const [lightboxShotId, setLightboxShotId] = useState<string | null>(null);
@@ -89,18 +125,24 @@ export function SceneWorkspace({
   const [sceneReviewOpen, setSceneReviewOpen] = useState(false);
   const [boardSheetKey, setBoardSheetKey] = useState<string | null>(null);
   const [boardSheetTrigger, setBoardSheetTrigger] = useState<HTMLElement | null>(null);
-  const [refusalVersion, setRefusalVersion] = useState(0);
-  const [commandPending, setCommandPending] = useState(false);
   const [generatorPending, setGeneratorPending] = useState(false);
   const [generatorError, setGeneratorError] = useState<string | null>(null);
-  const [dialogueAcknowledgements, setDialogueAcknowledgements] = useState<string[]>([]);
-  const [masterAudio, setMasterAudio] = useState<MasterAudioChoice[]>([]);
-  const [performanceAudio, setPerformanceAudio] = useState<PerformanceAudioChoice[]>([]);
-  const [audioReferencesDisabled, setAudioReferencesDisabled] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
-  const pendingCommand = useRef(false);
+  // The header's two doors (SPEC-044 R-1, R-2): the picker adds, the tiles and the place chip
+  // open their dialogs. Session state, like the lightbox — a door is not an address.
+  const [picker, setPicker] = useState<CastPickerMode | null>(null);
+  const [openMember, setOpenMember] = useState<string | null>(null);
+  const [openPlace, setOpenPlace] = useState<string | null>(null);
+  // A closed picker or dialog is unmounted, and a removed modal drops focus on the body; the
+  // door that opened it takes focus back, as the Generate frames dialog's does.
+  const doorFocus = useRef<HTMLElement | null>(null);
+  const closeDoor = () => { setPicker(null); setOpenMember(null); setOpenPlace(null); };
+  // Once the modal is gone, not while it still holds the top layer: a focus() under a modal
+  // dialog is ignored, and the removal then drops focus on the body.
+  useEffect(() => {
+    if (picker === null && openMember === null && openPlace === null) doorFocus.current?.focus();
+  }, [picker, openMember, openPlace]);
   const sceneKey = `${world.meta.worldId}/${production.meta.id}/${scene.id}`;
-  useEffect(() => { setPerformanceAudio([]); setMasterAudio([]); }, [sceneKey]);
   const currentSceneKey = useRef(sceneKey);
   currentSceneKey.current = sceneKey;
   const pendingGenerator = useRef<{ requestId: string; sceneKey: string } | null>(null);
@@ -137,31 +179,10 @@ export function SceneWorkspace({
     }
   }, [linkedShotId, scene]);
 
-  const sceneFile = production.sceneFiles[scene.id];
-  const scenePath = sceneFile === undefined ? null : `productions/${production.meta.id}/scenes/${sceneFile}.json`;
-  const staged = [...world.proposals]
-    .filter((entry) => scenePath !== null && entry.proposal.kind === "scene-edit" && entry.scenes?.[scenePath] !== undefined)
-    .sort((left, right) =>
-      left.proposal.created.localeCompare(right.proposal.created) || left.proposal.id.localeCompare(right.proposal.id),
-    )
-    .at(-1);
-  const workingScene = scenePath === null ? scene : (staged?.scenes?.[scenePath] ?? scene);
+  const { sceneFile, staged, workingScene, write, locked, commandPending, refusalVersion } = useSceneWriter(world, production, scene);
   const shots = orderedShots(scene);
   const workingShots = orderedShots(workingScene);
-  const acceptedById = new Map(shots.map((shot) => [shot.id, shot]));
-  const acceptedOrder = shots.map((shot) => shot.id);
-  const workingOrder = workingShots.map((shot) => shot.id);
-  const stagedShotIds = new Set(
-    workingShots
-      .filter((shot, index) => {
-        const accepted = acceptedById.get(shot.id);
-        return accepted === undefined || JSON.stringify(accepted) !== JSON.stringify(shot) || acceptedOrder[index] !== workingOrder[index];
-      })
-      .map((shot) => shot.id),
-  );
-  const newShotIds = new Set(workingShots.filter((shot) => !acceptedById.has(shot.id)).map((shot) => shot.id));
-  const workingIds = new Set(workingShots.map((shot) => shot.id));
-  const removedShots = shots.filter((shot) => !workingIds.has(shot.id));
+  const { stagedShotIds, newShotIds, removedShots } = stagedShotChanges(scene, workingScene);
   const artifacts: readonly ArtifactSidecar[] = world.artifacts;
   const aspect = production.meta.aspect ?? "16:9";
   // The cap the boards pack against, so Flow packs exactly as the rows do. Absent a model, the
@@ -188,6 +209,8 @@ export function SceneWorkspace({
   const stagedBoards =
     JSON.stringify(scene.boards) !== JSON.stringify(workingScene.boards) ||
     JSON.stringify(acceptedBoardPack) !== JSON.stringify(boardPack);
+  const episodeIds = new Set(production.episodes.filter((episode) => episode.scenes.includes(scene.id)).map((episode) => episode.id));
+  const lengthFindings = seasonFindings(production).filter((finding) => finding.kind === "cost-pattern" && episodeIds.has(finding.about));
   const totalSec = shots.reduce((sum, shot) => sum + (shot.durationSec ?? DEFAULT_SHOT_SEC), 0);
   const framed = shots.filter((shot) => shotHasFrame(production, artifacts, shot.id)).length;
   const focus = selectedShotId(subject);
@@ -198,6 +221,8 @@ export function SceneWorkspace({
     return shot === undefined ? shotId : `shot ${shot.number}`;
   };
   const talkToArke = () => {
+    // The dock sits beneath full screen; a pinned dock nobody can see is nothing.
+    setFull(false);
     setDock(true);
     requestAnimationFrame(() => {
       (document.querySelector(".fy-arke .fy-cx__editor") as HTMLElement | null)?.focus();
@@ -238,26 +263,10 @@ export function SceneWorkspace({
     ? null
     : boardPack.boards.find((board) => subjectMatchesBoard(subject, board.memberShotIds)) ?? null;
   const episode = production.episodes.find((candidate) => candidate.scenes.includes(scene.id));
-  const complete = sceneIsComplete(scene, production, artifacts, digests);
-  const locationName = scene.inherits?.location === undefined
-    ? null
-    : world.sheets.find((sheet) => sheet.id === scene.inherits?.location)?.name ?? scene.inherits.location;
-  const write = (command: Command): boolean => {
-    if (sceneFile === undefined || staged !== undefined || pendingCommand.current) return false;
-    const sent = sceneCommand({
-          worldId: world.meta.worldId,
-          productionId: production.meta.id,
-          sceneFile,
-          sceneId: scene.id,
-          baseVersion: scene.version,
-          command,
-        });
-    if (sent) {
-      pendingCommand.current = true;
-      setCommandPending(true);
-    }
-    return sent;
-  };
+  const locationSheet = scene.inherits?.location === undefined
+    ? undefined
+    : world.sheets.find((sheet) => sheet.id === scene.inherits?.location);
+  const locationName = scene.inherits?.location === undefined ? null : locationSheet?.name ?? scene.inherits.location;
   const dockTitle =
     subject.kind === "edge"
       ? `Arke · Edge ${subject.fromShotId ?? "Entry"} to ${subject.toShotId ?? "Exit"}`
@@ -295,17 +304,6 @@ export function SceneWorkspace({
 
   useEffect(
     () =>
-      subscribeSceneRefusals((event) => {
-        if (event.productionId === production.meta.id && event.sceneFile === sceneFile) {
-          pendingCommand.current = false;
-          setCommandPending(false);
-          setRefusalVersion((version) => version + 1);
-        }
-      }),
-    [production.meta.id, sceneFile],
-  );
-  useEffect(
-    () =>
       subscribePlanResults((event) => {
         if (
           event.worldId !== world.meta.worldId ||
@@ -319,10 +317,6 @@ export function SceneWorkspace({
       }),
     [world.meta.worldId, production.meta.id],
   );
-  useEffect(() => {
-    pendingCommand.current = false;
-    setCommandPending(false);
-  }, [scene.id, sceneFile, scene.version]);
   useEffect(
     () =>
       subscribeBenchSubjectOpened((event) => {
@@ -377,42 +371,31 @@ export function SceneWorkspace({
       setGeneratorError("Not connected - try again.");
     }
   };
-  // The Stage is reached from a row's menu and a Flow staging node as well as its tab: one
-  // gesture selects the shot and changes the view, so the tab opens on the shot that asked.
-  const openStage = (shotId: string) => {
-    setSubject({ kind: "shot", shotId: shotId as never });
-    setView("stage");
-  };
+  // The Stage is the shot page's second view (turn 145): a Flow staging node, and a blockout or
+  // playblast Arke was asked for in the production's chat, all open that shot's page on it.
+  const shotPage = (shotId: string, stage = false) =>
+    `/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${scene.id}/shots/${shotId}${stage ? "?view=stage" : ""}`;
+  const openStage = (shotId: string) => { void navigate(shotPage(shotId, true)); };
+  const constructionRequest = state?.stageConstructionRequests?.find(request => request.worldId === world.meta.worldId && request.productionId === production.meta.id && request.sceneId === scene.id);
   const playblastRequest = state?.stagePlayblastRequests?.find((request) =>
     request.worldId === world.meta.worldId && request.productionId === production.meta.id && request.sceneId === scene.id);
+  const requestedShot = constructionRequest?.shotId ?? playblastRequest?.shotId;
+  const requestedAction = constructionRequest?.actionId ?? playblastRequest?.actionId;
   useEffect(() => {
-    if (playblastRequest === undefined) return;
-    setSubject({ kind: "shot", shotId: playblastRequest.shotId as never });
-    setView("stage");
-  }, [playblastRequest?.actionId, playblastRequest?.shotId]);
-  const videoPlan = videoModel ? planForScene({ world, production, scene: legacySceneView(scene), model: videoModel,
-    audioReferencesDisabled, performanceAudio, masterAudio }, "whole-scene").wholeScene : null;
-  const videoAudioPlans = videoPlan?.passReferences.map(p => p.audioReferences).filter(p => p !== undefined) ?? [];
-  const videoAudioProblems = videoAudioPlans.flatMap(p => p.problems);
-  if (!audioReferencesDisabled && performanceAudio.some(request => {
-    const performance = production.performances.find(p => p.id === request.performanceId);
-    const review = production.performanceReview.reviews.filter(r => r.performanceId === request.performanceId).at(-1);
-    return !performance || performance.target.sceneId !== scene.id || performance.target.sceneVersion !== scene.version ||
-      performance.provenance.outputHash !== request.hash || review?.decision !== "accept" || review.ts !== request.acceptedReviewAt;
-  })) videoAudioProblems.push("A selected performance changed. Remove it and choose a currently accepted performance.");
-  if (!audioReferencesDisabled && masterAudio.some(r => production.timeline?.status !== "ready" || r.binding.timelineHash !== production.timeline.hash)) videoAudioProblems.push("The master playback timeline changed. Prepare the current slices again.");
+    if (requestedShot !== undefined && orderedShots(workingScene).some((shot) => shot.id === requestedShot)) openStage(requestedShot);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedAction, requestedShot]);
   const planVideo = () => {
     if (pendingPlan.current !== null || sceneFile === undefined || videoModel == null) return;
-    if (videoPlan?.timingProblems?.length) { setPlanError(videoPlan.timingProblems.join(" ")); return; }
-    if (videoAudioProblems.length) { setPlanError(videoAudioProblems.join(" ")); return; }
+    // The scene page chooses nothing per dispatch (SPEC-044 R-26): the coordinator resolves the
+    // scene's cast into references when it plans, and the Bench keeps the one per-dispatch off.
     pendingPlan.current = dispatchScenePlanned(
       world.meta.worldId,
       production.meta.id,
       sceneFile,
       "whole-scene",
       videoModel.id,
-      "review-gated", undefined, undefined, audioReferencesDisabled, audioReferencesDisabled ? [] : performanceAudio.map(({ preview: _preview, ...request }) => request),
-      audioReferencesDisabled ? [] : masterAudio.map(({ preview: _preview, ...request }) => request), dialogueAcknowledgements,
+      "review-gated",
     );
     setPlanError(null);
   };
@@ -431,12 +414,25 @@ export function SceneWorkspace({
 
   return (
     <SelectionProvider value={selection}>
-      <div className="fy-sw" data-screen="scene-detail" data-testid="scene-workspace" data-dock={dock ? "true" : "false"}>
+      <div className="fy-sw" data-screen="scene-detail" data-testid="scene-workspace" data-dock={dock ? "true" : "false"} data-full={fullscreen ? "true" : undefined}>
         <main className="fy-sw__centre">
+          {fullscreen ? (
+            <>
+              <div className="fy-sw__fullpill">
+                {production.meta.title} · {episode === undefined ? "" : `episode ${episode.order} · `}scene {scene.number}
+                <i aria-hidden="true" />
+                <b>Flow</b>
+              </div>
+              <button type="button" className="fy-sw__fullexit" title="Leave full screen" aria-label="Leave full screen" onClick={() => setFull(false)}>
+                <Minimize2 size={14} />
+              </button>
+            </>
+          ) : null}
           <header className="fy-sw__head">
+            {/* Levels part on slashes (turn 139); a dot is a name's own, as in "Scene 4 · Night". */}
             <p className="fy-sw__breadcrumb">
               {production.meta.title}
-              {episode === undefined ? ` · scene ${scene.number}` : ` · episode ${episode.order} · ${episode.title}`}
+              {episode === undefined ? ` \u00a0/\u00a0 Scene ${scene.number}` : ` \u00a0/\u00a0 Episode ${episode.order} \u00a0/\u00a0 ${episode.title}`}
             </p>
             <div className="fy-sw__headline">
               <h1 className="fy-sw__title">
@@ -461,56 +457,61 @@ export function SceneWorkspace({
                 </Button>
               </div>
             </div>
-            {(videoPlan?.timingWarnings?.length || videoPlan?.timingProblems?.length) ? <div aria-label="Generation timing">
-              {videoPlan.timingWarnings?.map((message,i)=><p key={`warning-${i}`}>{message}</p>)}
-              {videoPlan.timingProblems?.map((message,i)=><p role="alert" key={`problem-${i}`}>{message}</p>)}
-            </div> : null}
-            {/*
-              What the frame route leaves behind, said before the money moves (issue 851). The
-              planner has always computed this; nothing showed it, so a shot chained onto the
-              previous take's last frame dropped its cast sheets in silence — which is how a
-              recurring face drifts across a scene one accept at a time.
-            */}
-            {videoPlan?.warnings.framedShots.some((entry) => entry.setAside.length > 0) ? (
-              <div aria-label="Generation references">
-                {videoPlan.warnings.framedShots
-                  .filter((entry) => entry.setAside.length > 0)
-                  .map((entry) => (
-                    <p key={entry.shotId}>
-                      Shot {entry.number} opens on a frame ·{" "}
-                      {entry.setAside
-                        .map((sheetId) => world.sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId)
-                        .join(", ")}{" "}
-                      not sent
-                    </p>
-                  ))}
+            <div className="fy-sw__context" aria-label="Scene context">
+              <div className="fy-sw__cast" aria-label="Cast">
+                <span className="fy-sw__context-label">Cast</span>
+                {sceneCast(scene, world.sheets).map((sheetId) => {
+                  const sheet = world.sheets.find((candidate) => candidate.id === sheetId);
+                  const name = sheet?.name ?? sheetId;
+                  return (
+                    <button
+                      type="button"
+                      key={sheetId}
+                      className="fy-sw__tile"
+                      title={name}
+                      aria-label={name}
+                      aria-haspopup="dialog"
+                      aria-expanded={openMember === sheetId}
+                      onClick={(event) => { doorFocus.current = event.currentTarget; setOpenMember(sheetId); }}
+                    >
+                      {sheet === undefined ? <span aria-hidden="true">{initials(name).slice(0, 1)}</span> : <SheetPicture world={world} sheet={sheet} />}
+                    </button>
+                  );
+                })}
+                <button type="button" className="fy-sw__tile fy-sw__tile--add" title="Add a character" aria-label="Add a character" aria-haspopup="dialog" disabled={locked} onClick={(event) => { doorFocus.current = event.currentTarget; setPicker("character"); }}>
+                  <Plus size={16} />
+                </button>
               </div>
-            ) : null}
-            {videoPlan?.pack.ok && videoPlan.shots.some(s=>s.slot) && <p>Timeline content: {videoPlan.pack.totalSec.toFixed(3)}s in {videoPlan.pack.passes.length} passes. Provider step padding stays outside these picture slots.</p>}
-            {(world.referenceKits.some(k => k.designatedVoiceSample) || performanceAudio.length > 0 || masterAudio.length > 0 || videoAudioProblems.length > 0) && <div aria-label="Scene character audio references">
-              <label><input type="checkbox" checked={!audioReferencesDisabled} onChange={e => setAudioReferencesDisabled(!e.target.checked)} /> Use audio references for this dispatch</label>
-              {videoAudioPlans.flatMap((p, i) => p.references.map(r => <p key={`${i}/${r.label}`}>Pass {i + 1}: {r.characterName} · {r.label} · {r.intent === "performance-sync" ? "motion guidance; generated audio off; external final audio" : "voice guidance with new scene dialogue"}</p>))}
-              {videoAudioProblems.map((problem, i) => <p role="alert" key={i}>{problem}</p>)}
-            </div>}
-            <MasterAudioPicker key={`${sceneKey}/master`} world={world} production={production} sceneId={scene.id} value={masterAudio} onChange={setMasterAudio} />
-            <DialogueGuidance world={world} production={production} scene={scene} plan={videoPlan} model={videoModel ?? null} manifest={state?.app.manifest ?? null} acknowledged={dialogueAcknowledgements} onAcknowledge={setDialogueAcknowledgements} />
-            <PerformanceAudioPicker key={sceneKey} world={world} production={production} sceneId={scene.id} value={performanceAudio} onChange={setPerformanceAudio} />
-            <SceneSynopsis
-              scene={legacySceneView(scene)}
-              onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })}
-            />
-            <div className="fy-sw__context" aria-label="Scene context" title="Every shot inherits these unless it overrides them">
-              {locationName === null ? null : <span>{locationName}</span>}
-              {scene.inherits?.timeOfDay === undefined ? null : <span>{scene.inherits.timeOfDay}</span>}
-              {scene.inherits?.tone === undefined ? null : <span>{scene.inherits.tone}</span>}
-              <span>{aspect}</span>
-              <span className="fy-sw__metrics">{shots.length} shot{shots.length === 1 ? "" : "s"} · {seconds(totalSec)} · {framed} frame{framed === 1 ? "" : "s"} filed</span>
+              <div className="fy-sw__location">
+                {locationName === null ? (
+                  <button type="button" className="fy-sw__door" aria-haspopup="dialog" disabled={locked} onClick={(event) => { doorFocus.current = event.currentTarget; setPicker("location"); }}>
+                    <Plus size={15} />Add a location
+                  </button>
+                ) : (
+                  <button type="button" className="fy-sw__place" title={locationName} aria-haspopup="dialog" aria-expanded={openPlace !== null} onClick={(event) => { doorFocus.current = event.currentTarget; setOpenPlace(scene.inherits?.location ?? null); }}>
+                    <span className="fy-sw__plate" aria-hidden="true">{locationSheet === undefined ? initials(locationName).slice(0, 1) : <SheetPicture world={world} sheet={locationSheet} />}</span>
+                    <span className="fy-sw__place-name"><span className="fy-sw__context-label">Location</span><span>{locationName}</span></span>
+                  </button>
+                )}
+              </div>
+              <div className="fy-sw__metrics" aria-label="Scene metrics"><span><ImageMark size={16} />{aspect}</span><span><Film size={16} />{shots.length} shot{shots.length === 1 ? "" : "s"}</span><span><Timer size={16} />{seconds(totalSec)}</span></div>
+              <details className="fy-sw__details" onKeyDown={(event) => {
+                if (event.key !== "Escape" || event.defaultPrevented) return;
+                event.currentTarget.open = false;
+                event.currentTarget.querySelector("summary")?.focus();
+              }}>
+                <summary aria-label="Scene details" title="Scene details"><More size={18} /></summary>
+                <div className="fy-sw__detailspanel">
+                  <SceneSynopsis scene={legacySceneView(scene)} onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })} />
+                  {scene.inherits?.timeOfDay === undefined ? null : <span>{scene.inherits.timeOfDay}</span>}
+                  {scene.inherits?.tone === undefined ? null : <span>{scene.inherits.tone}</span>}
+                </div>
+              </details>
             </div>
+            {lengthFindings.map((finding) => <p key={finding.about} className="fy-mono" data-testid="episode-length-note">{finding.message}</p>)}
             {sceneReviewOpen ? <SceneReview scene={legacySceneView(scene)} onClose={() => setSceneReviewOpen(false)} /> : null}
             {generatorError === null ? null : <p role="alert" className="fy-swboards__refusal">{generatorError}</p>}
           </header>
-          <TableReadPanel key={`${world.meta.worldId}/${scene.id}/${scene.version}`} world={world} production={production} scene={scene} onRecord={shotId => setSubject({ kind: "shot", shotId: shotId as never })} />
-          {focus && <PerformancePanel key={`${world.meta.worldId}/${scene.id}/${scene.version}/${focus}`} world={world} production={production} scene={scene} shotId={focus} />}
 
           {/*
             Tabs are a mode of working, not a rendering of the same thing — so they are a
@@ -520,7 +521,7 @@ export function SceneWorkspace({
           */}
           <div className="fy-sw__toolbar">
             <div className="fy-sw__tabs" role="radiogroup" aria-label="View">
-              {(["storyboard", "flow", "stage", "preview"] as const).map((candidate) => (
+              {(["storyboard", "flow", "preview"] as const).map((candidate) => (
                 <button
                   key={candidate}
                   type="button"
@@ -530,7 +531,7 @@ export function SceneWorkspace({
                   data-on={view === candidate ? "true" : undefined}
                   onClick={() => setView(candidate)}
                 >
-                  {candidate === "storyboard" ? "Storyboard" : candidate === "flow" ? "Flow" : candidate === "stage" ? "Stage" : "Preview"}
+                  {candidate === "storyboard" ? "Storyboard" : candidate === "flow" ? "Flow" : "Preview"}
                 </button>
               ))}
             </div>
@@ -551,8 +552,8 @@ export function SceneWorkspace({
                 {...(reviewShotId === null ? {} : { onReview: () => setLightboxShotId(reviewShotId) })}
               />
             ) : shots.length === 0 ? null : (
-              <span className="fy-sw__coverage">
-                {shots.length - framed === 0 ? "every shot has a frame" : `${shots.length - framed} of ${shots.length} without a frame`}
+              <span className="fy-sw__coverage" data-ready={framed > 0 || undefined}>
+                <span aria-hidden="true" />{framed} of {shots.length} frames ready
               </span>
             )}
             {frameRun === null || frameRun.status === "completed" ? (
@@ -564,6 +565,28 @@ export function SceneWorkspace({
                 onClick={() => setShowBoards((shown) => !shown)}
               >
                 {showBoards ? "Boards on" : "Show boards"}
+              </button>
+            ) : null}
+            {view === "storyboard" ? (
+              <div className="fy-sw__layouts" role="group" aria-label="Storyboard layout">
+                {(["grid", "list"] as const).map((layout) => (
+                  <button
+                    key={layout}
+                    type="button"
+                    aria-pressed={(boardsVisible ? "list" : storyboardLayout) === layout}
+                    disabled={layout === "grid" && frameRun?.run.mode === "board"}
+                    // Moving focus would blur and commit the current editor before the layout changes.
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => { setStoryboardLayout(layout); if (layout === "grid") setShowBoards(false); }}
+                  >
+                    {layout === "list" ? <ListBullet size={14} /> : <Grid2x2 size={14} />}{layout === "list" ? "List" : "Grid"}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {view === "flow" ? (
+              <button type="button" className="fy-sw__full" title="Full screen" aria-label="Full screen" onClick={() => setFull(true)}>
+                <Maximize2 size={14} />
               </button>
             ) : null}
           </div>
@@ -578,6 +601,7 @@ export function SceneWorkspace({
 
           {view === "storyboard" ? (
             <StoryboardRows
+              layout={boardsVisible ? "list" : storyboardLayout}
               scene={workingScene}
               acceptedScene={scene}
               world={world}
@@ -608,9 +632,8 @@ export function SceneWorkspace({
                 generateReturnFocus.current = trigger;
                 setGenerateTarget({ shotId });
               }}
-              onEditShot={(shotId) => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${scene.id}/shots/${shotId}`)}
+              onEditShot={(shotId) => navigate(shotPage(shotId))}
               onOpenShotInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}
-              onStageShot={openStage}
               onPreviewShot={setLightboxShotId}
               onTalkToArke={talkToArke}
               onPlanVideo={planVideo}
@@ -618,6 +641,7 @@ export function SceneWorkspace({
             />
           ) : view === "flow" ? (
             <SceneFlow
+              fullscreen={fullscreen}
               scene={workingScene}
               production={production}
               sheets={world.sheets}
@@ -632,32 +656,20 @@ export function SceneWorkspace({
               onCommand={write}
               generatorPending={generatorPending}
               onOpenShotInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}
+              onOpenCharacter={(sheetId, trigger) => { doorFocus.current = trigger; setOpenMember(sheetId); }}
               onOpenStage={openStage}
-              onEditShot={(shotId) => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${scene.id}/shots/${shotId}`)}
+              onEditShot={(shotId) => navigate(shotPage(shotId))}
               onViewBoardSheet={(memberShotIds, trigger) => {
                 setBoardSheetTrigger(trigger);
                 setBoardSheetKey(JSON.stringify(memberShotIds));
               }}
               onShowBoards={() => {
+                setFull(false);
                 setShowBoards(true);
                 setView("storyboard");
               }}
               onRenderBoard={(memberShotIds) => openGenerator({ kind: "board", memberShotIds })}
               onTalkToArke={talkToArke}
-            />
-          ) : view === "stage" ? (
-            <SceneStage
-              scene={workingScene}
-              production={production}
-              world={world}
-              aspect={aspect}
-              sceneFile={sceneFile}
-              locked={staged !== undefined || sceneFile === undefined || commandPending}
-              generatorPending={generatorPending}
-              refusalVersion={refusalVersion}
-              onCommand={write}
-              onRenderShot={(shotId) => openGenerator({ kind: "shot", shotId }, "video")}
-              {...(playblastRequest ? { playblastRequest } : {})}
             />
           ) : (
             <ScenePreview
@@ -666,10 +678,13 @@ export function SceneWorkspace({
               scene={scene}
               artifacts={artifacts}
               boards={acceptedBoardPack.ok ? acceptedBoardPack.boards : []}
+              worldId={world.meta.worldId}
               worldSlug={world.meta.slug}
+              sheets={world.sheets}
               aspect={aspect}
-              onEditShot={(shotId) => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${scene.id}/shots/${shotId}`)}
+              onEditShot={(shotId) => navigate(shotPage(shotId))}
               onOpenShotInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}
+              {...(linkedShotId === null ? {} : { startShotId: linkedShotId })}
             />
           )}
           <PlansPanel
@@ -678,15 +693,12 @@ export function SceneWorkspace({
             sceneId={scene.id}
             refused={planError}
           />
-          {complete && episode !== undefined ? (
-            <button
-              type="button"
-              className="fy-sw__done"
-              onClick={() => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/episodes/${episode.id}`)}
-            >
-              Done · back to the episode
-            </button>
-          ) : null}
+          <footer className="fy-sw__footer">
+            <span className="fy-sw__save" role="status" data-pending={commandPending || staged !== undefined || connection !== "open" || undefined}>
+              <span aria-hidden="true" />{connection !== "open" ? "Disconnected" : commandPending ? "Saving…" : staged !== undefined ? "Changes awaiting review" : `Connected · v${scene.version}`}
+            </span>
+            {episode === undefined ? null : <button type="button" className="fy-sw__back" onClick={() => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/episodes/${episode.id}`)}>Back to episode <span aria-hidden="true">→</span></button>}
+          </footer>
         </main>
 
         {dock ? (
@@ -715,13 +727,11 @@ export function SceneWorkspace({
                 ? [...(scene.title === "Untitled" ? ["Name this scene"] : []), "What is missing from this scene?", "Which shots need a frame?"]
                 : [`Tighten shot ${focused.number}`, `What does shot ${focused.number} need?`],
               shotLabel,
-              // The one thing talking does change here (R-38), said where the default promised otherwise.
-              note: "talking can name the scene · everything else waits for your yes",
               ...(focused === undefined ? {} : { subjectPrefix: `About shot ${focused.number}:` }),
             }}
             openingNote="opening…"
             emptyLine={`Nothing written with Arke for scene ${scene.number} yet.`}
-            placeholder={`Ask about ${focused === undefined ? `scene ${scene.number}` : `shot ${focused.number}`}`}
+            placeholder={`Ask Arke about ${focused === undefined ? "this scene" : `shot ${focused.number}`}…`}
             onSelectShot={(shotId) => setSubject({ kind: "shot", shotId })}
             {...(staged === undefined
               ? { pointsEmpty: "Nothing understood yet. As you talk, what Arke takes from the scene appears here." }
@@ -732,7 +742,6 @@ export function SceneWorkspace({
                         worldId={world.meta.worldId}
                         subject={`scene ${scene.number}`}
                         staged={staged}
-                        writes="Updates this scene and its board boundaries."
                         items={[
                           ...workingShots
                             .filter((shot) => stagedShotIds.has(shot.id))
@@ -763,8 +772,50 @@ export function SceneWorkspace({
           {...(generateTarget?.shotId === undefined ? {} : { shotId: generateTarget.shotId })}
           returnFocus={generateReturnFocus}
           onClose={() => setGenerateTarget(null)}
-          onStarted={() => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/cut?assemble=${scene.id}`)}
+          onStarted={() => { if (generateTarget?.shotId === undefined) navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/cut?assemble=${scene.id}`); }}
         />
+        {openMember === null ? null : (
+          <CharacterDialog
+            key={openMember}
+            world={world}
+            production={production}
+            scene={scene}
+            sheetId={openMember}
+            locked={locked}
+            onClose={closeDoor}
+            onWrite={write}
+          />
+        )}
+        {/* Held by the place's id: a place that leaves under the dialog takes the dialog with it. */}
+        {openPlace !== null && openPlace === scene.inherits?.location ? (
+          <LocationDialog
+            world={world}
+            production={production}
+            scene={scene}
+            onClose={closeDoor}
+            // Change location is the picker in its third title (R-19); the dialog steps aside
+            // for it and the door's focus comes back when the picker closes.
+            onChangeLocation={() => { setOpenPlace(null); setPicker("change-location"); }}
+          />
+        ) : null}
+        {picker === null ? null : (
+          <CastPicker
+            world={world}
+            production={production}
+            scene={scene}
+            mode={picker}
+            onPick={(sheetId) => {
+              // A press adds and closes (R-4): a member with the time it was added, or the place.
+              // A write the page refuses — a proposal staged, a command in flight — leaves the
+              // picker open rather than closing on nothing.
+              const sent = write(picker === "character"
+                ? { kind: "edit-scene", cast: { [sheetId]: { added: new Date().toISOString() } } }
+                : { kind: "edit-scene", inherits: { location: sheetId } });
+              if (sent) closeDoor();
+            }}
+            onClose={closeDoor}
+          />
+        )}
         <ShotLightbox
           scene={scene}
           production={production}
@@ -777,7 +828,7 @@ export function SceneWorkspace({
             setLightboxShotId(shotId);
             setSubject({ kind: "shot", shotId: shotId as never });
           }}
-          onEditShot={(shotId) => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${scene.id}/shots/${shotId}`)}
+          onEditShot={(shotId) => navigate(shotPage(shotId))}
           onOpenInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}
         />
         <BoardSheet

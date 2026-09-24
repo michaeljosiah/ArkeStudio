@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { join } from "node:path";
 import {
   deriveCapabilityAvailability,
+  gateLocalRuntimes,
   PROVIDERS,
   type CapabilityProbe,
   type ClientMessage,
@@ -13,9 +14,36 @@ import {
 } from "@arke-studio/contracts";
 import type { ComfyUiEngineService } from "../../src/comfyui/engine.js";
 import { Coordinator } from "../../src/coordinator.js";
+import { ChangeLog } from "../../src/change-log.js";
 import { ProviderService } from "../../src/providers/service.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot } from "../world/helpers.js";
+import { FakeProvider } from "../queue/fake-provider.js";
+import { until } from "../wait.js";
+import type { JobQueue, DispatchClient } from "../../src/queue/dispatcher.js";
+import type { Job } from "@arke-studio/contracts";
+
+it("samples a newly running ComfyUI job after a coalesced Ollama residency probe", async () => {
+  const { root } = await makeTempRoot();
+  const provider = new FsWorldProvider(root);
+  let release!: () => void, ollamaReads=0, comfyReads=0, running=false;
+  const delayed = new Promise<void>(resolve => {release=resolve;});
+  const ollama: DispatchClient = Object.assign(new FakeProvider(), {residency:async()=>{if(++ollamaReads===1)await delayed;return [];}});
+  const comfyui: DispatchClient = Object.assign(new FakeProvider(), {residency:async()=>{comfyReads++;return [{provider:"comfyui" as const,model:"*",state:"cpu" as const,vramBytes:0}];}});
+  const coordinator = new Coordinator({provider,adapter:null,changeLogPath:join(root,"changes.jsonl"),appVersion:"test",dispatchClients:{ollama,comfyui}});
+  const seam=coordinator as unknown as {jobQueue:Pick<JobQueue,"listJobs">|null;refreshLocalResidency():Promise<void>};
+  seam.jobQueue={listJobs:()=>running?[{provider:"comfyui",status:"running",model:"comfy-model"} as Job]:[]};
+  try {
+    const first=seam.refreshLocalResidency();
+    running=true;
+    assert.equal(seam.refreshLocalResidency(),first);
+    assert.equal(seam.refreshLocalResidency(),first);
+    release();await first;
+    await until(()=>coordinator.getState().app.residency?.some(row=>row.model==="comfy-model"&&row.state==="cpu")===true,"trailing residency sample");
+    assert.equal(ollamaReads,2,"coalesced changes need one trailing pass");
+    assert.equal(comfyReads,1);
+  } finally {release();seam.jobQueue=null;await coordinator.stop();await provider.close();}
+});
 
 /**
  * Local runtimes are asked, not assumed (issue 462).
@@ -179,6 +207,7 @@ describe("the gate hears the engine, not the provider flag (SPEC-033 R-9, R-13)"
         return { engine: engineStatus(), recipes: [], checkedAt: "2026-08-27T12:00:00.000Z" };
       },
       checkNow: async () => {},
+      applySettings: async () => {},
       reverify: async () => {},
       subscribe: () => () => {},
       dispose: async () => {},
@@ -219,6 +248,8 @@ describe("the gate hears the engine, not the provider flag (SPEC-033 R-9, R-13)"
       return last.runtime;
     };
     return {
+      coordinator,
+      changeLogPath: join(root, "logs", "changes.jsonl"),
       engine,
       send,
       statuses,
@@ -229,6 +260,60 @@ describe("the gate hears the engine, not the provider flag (SPEC-033 R-9, R-13)"
       },
     };
   }
+
+  it("starts unmeasured despite a previous launch's diagnostic runtime record (#1013)", async () => {
+    const h = await harness();
+    try {
+      const runtime = gateLocalRuntimes({ manifestVersion: 1, generated: "2026-08-27", models: [MODEL] },
+        { vramMb: 1024, memMb: 4096, diskFreeMb: 8192, accelerators: ["cuda"], platform: "win32" }, "2026-08-26T12:00:00.000Z");
+      await new ChangeLog(h.changeLogPath).append({ kind: "event", event: { type: "runtime.status", at: runtime.detectedAt, runtime } });
+      await h.coordinator.start();
+      await until(() => h.engine.state.asked.length > 0, "startup recipe check");
+      assert.equal(h.coordinator.getState().app.runtime, null);
+      assert.equal(h.engine.state.asked.at(-1), null);
+      await h.send({ kind: "detect-runtimes" });
+      assert.equal(h.coordinator.getState().app.runtime!.probes.vramMb, 12 * 1024);
+      assert.deepEqual(h.engine.state.asked.at(-1), h.coordinator.getState().app.runtime!.probes);
+    } finally { await h.close(); }
+  });
+
+  it("re-gates the same published measurement that the recipe walk receives (#1013)", async () => {
+    const h = await harness();
+    try {
+      const runtime = gateLocalRuntimes({ manifestVersion: 1, generated: "2026-08-27", models: [MODEL] },
+        { vramMb: 1024, memMb: 4096, diskFreeMb: 8192, accelerators: ["cuda"], platform: "win32" }, "2026-08-26T12:00:00.000Z");
+      h.coordinator.emit({ type: "runtime.status", at: runtime.detectedAt, runtime });
+      h.engine.state.locality = "remote";
+      await h.send({ kind: "comfyui-refresh" });
+      assert.deepEqual(h.engine.state.asked.at(-1), runtime.probes);
+      assert.equal(h.latest().models[0]!.locality, "remote");
+      assert.equal(h.latest().models[0]!.fit, undefined);
+      assert.equal(h.latest().detectedAt, runtime.detectedAt);
+    } finally { await h.close(); }
+  });
+
+  it("does not let a slow unmeasured readiness walk overwrite a fresh measurement (#1013)", async () => {
+    const h = await harness();
+    let release!: () => void, waiting = false;
+    const delayed = new Promise<void>(resolve => { release = resolve; });
+    const status = h.engine.service.status.bind(h.engine.service);
+    h.engine.service.status = async probes => {
+      if (probes === null) { waiting = true; await delayed; }
+      const result = await status(probes);
+      return { ...result, recipes: [{ recipeId: MODEL.id, recipeVersion: 1, displayName: MODEL.displayName,
+        capability: "image", state: probes?.vramMb == null ? "unknown" : "disabled",
+        reason: probes?.vramMb == null ? "VRAM could not be measured." : "Not enough VRAM." }] };
+    };
+    const older = h.send({ kind: "comfyui-refresh" });
+    try {
+      await until(() => waiting, "unmeasured readiness check");
+      await h.send({ kind: "detect-runtimes" });
+      assert.equal(h.coordinator.getState().app.comfyui!.recipes[0]!.state, "disabled");
+      release(); await older;
+      assert.equal(h.coordinator.getState().app.runtime!.probes.vramMb, 12 * 1024);
+      assert.equal(h.coordinator.getState().app.comfyui!.recipes[0]!.state, "disabled");
+    } finally { release(); await older; await h.close(); }
+  });
 
   it("a managed engine's models are judged against this machine", async () => {
     const h = await harness();

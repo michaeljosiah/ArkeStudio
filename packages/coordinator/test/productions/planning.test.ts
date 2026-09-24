@@ -17,6 +17,7 @@ import {
   resolveCast,
   assembleBlocks,
   assemblePrompt,
+  UNTITLED_SHOT,
   assemblePassBlocks,
   joinBlocks,
   spatialLayoutFor,
@@ -181,7 +182,7 @@ describe("prompt assembly and overrides (R-14..R-16, D6, D7, §3.2)", () => {
       audio: { kind: "vo", speaker: "maren-kest", line: "the verse, under the water" },
     };
     const prompt = assemblePrompt(bundle.meta, bundle.sheets, makeScene([s]), s);
-    assert.match(prompt, /quiet dread/);
+    assert.ok(!prompt.includes("quiet dread"), "world tone is writer context");
     assert.match(prompt, /slow push-in/);
     assert.match(prompt, /the verse, under the water/);
     assert.ok(!prompt.includes("@maren-kest"), "mentions are expanded, never sent raw");
@@ -581,7 +582,7 @@ describe("whole-scene reference budgeting", () => {
 });
 
 describe("SPEC-017 art direction and scoped looks", () => {
-  it("uses the resolved world direction in production prompts", async () => {
+  it("keeps resolved world direction as provenance instead of pasting it into shot prompts", async () => {
     const { store } = await open();
     const bundle = store.getBundle();
     const production = bundle.productions[0]!;
@@ -599,7 +600,8 @@ describe("SPEC-017 art direction and scoped looks", () => {
       },
       "per-shot",
     );
-    assert.match(plan.shots[0]!.prompt.text, /Painterly, tidal, restrained/);
+    assert.ok(!plan.shots[0]!.prompt.text.includes(bundle.artDirection.description));
+    assert.equal(plan.effectiveStyle, bundle.artDirection.description);
     await store.close();
   });
 
@@ -630,7 +632,7 @@ describe("SPEC-017 art direction and scoped looks", () => {
       assert.equal(plan.productionStyleOverride, styleOverride);
       for (const request of requests) {
         const prompt = String(request.params["prompt"]);
-        assert.match(prompt, /Bleached documentary realism with hard noon shadows/);
+        assert.ok(!prompt.includes(styleOverride), "production direction informs the writer instead of wrapping the shot");
         assert.ok(!prompt.includes(bundle.artDirection.description), `${mode} does not re-read the world look`);
         assert.deepEqual(request.params["artDirection"], {
           version: bundle.artDirection.version,
@@ -1175,6 +1177,20 @@ describe("SPEC-019 prompt structure (R-5..R-8, D5..D7)", () => {
     await store.close();
   });
 
+  it("never splices a shot's notes into the prompt (design turn 143)", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const noted: Shot = {
+      ...shot(1, 6, "@maren-kest grips the rail"),
+      notes: "NOTE-SENTINEL make it moodier, ask about the lamp",
+    };
+    for (const capability of ["image", "video"] as const) {
+      const prompt = assemblePrompt(bundle.meta, bundle.sheets, scene([noted]), noted, undefined, undefined, capability);
+      assert.ok(!prompt.includes("NOTE-SENTINEL"), `a note is the person's; the ${capability} prompt reads the shot's named fields, not this one`);
+    }
+    await store.close();
+  });
+
   it("emits the complete location Look and an explicitly authored camera anchor for video", async () => {
     const { store } = await open();
     const bundle = store.getBundle();
@@ -1277,10 +1293,9 @@ describe("SPEC-019 prompt structure (R-5..R-8, D5..D7)", () => {
     const bundle = store.getBundle();
     const s: Shot = { ...shot(1, 6, "@maren-kest grips the rail"), camera: "MCU, slow push-in" };
     const stills = assemblePrompt(bundle.meta, bundle.sheets, scene([s]), s, undefined, undefined, "image");
-    const unplanned = assemblePrompt(bundle.meta, bundle.sheets, scene([s]), s);
-    assert.equal(stills, unplanned, "a still is byte-identical to what it was before this feature");
+
     assert.ok(!stills.includes("SPATIAL LAYOUT"));
-    assert.match(stills, /MCU, slow push-in/, "and its camera stays where it always was");
+    assert.ok(!stills.includes("slow push-in"), "a still does not instruct camera motion");
     await store.close();
   });
 
@@ -1308,7 +1323,24 @@ describe("SPEC-019 prompt structure (R-5..R-8, D5..D7)", () => {
     await store.close();
   });
 
-  it("states the art direction twice for a pass and never once per beat", async () => {
+  it("keeps art direction out of shot seeds, and an unnamed shot contributes no title (issue 942)", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const named = shot(1, 6, "@maren-kest grips the rail");
+    const unnamed: Shot = { ...named, title: UNTITLED_SHOT };
+    const look = bundle.artDirection.description;
+
+    const prompt = assemblePrompt(bundle.meta, bundle.sheets, scene([named]), named, bundle.artDirection.description);
+    assert.ok(!prompt.includes(look));
+    assert.ok(!prompt.includes("Throughout:"));
+    assert.match(prompt, /Shot 1\./, "a named shot still says its name");
+
+    const untitled = assemblePrompt(bundle.meta, bundle.sheets, scene([unnamed]), unnamed, bundle.artDirection.description);
+    assert.ok(!untitled.includes(UNTITLED_SHOT), "the birth title is not content");
+    await store.close();
+  });
+
+  it("does not paste production-wide direction into a pass", async () => {
     const { store } = await open();
     const bundle = store.getBundle();
     const production = bundle.productions[0]!;
@@ -1341,7 +1373,7 @@ describe("SPEC-019 prompt structure (R-5..R-8, D5..D7)", () => {
     const prompt = (request!.params as { prompt: string }).prompt;
     const look = bundle.artDirection.description;
     const occurrences = prompt.split(look).length - 1;
-    assert.equal(occurrences, 2, "once leading the summary, once as the standing constraint (R-6)");
+    assert.equal(occurrences, 0, "the look reaches the pass through its authored shots (issue 942)");
     assert.equal(prompt.match(/\[shot \d+ · /g)?.length, 4, "all four beats are present");
     await store.close();
   });
@@ -2104,5 +2136,70 @@ describe("the plumbed fields do not fight the rest of the prompt", () => {
       assert.ok(said.includes(already.replace(/\.$/, "")), `and is still said: ${said}`);
     }
     await store.close();
+  });
+});
+
+
+describe("authored shot prompts (issue 942)", () => {
+  it("keeps video words intact in a pass and uses a still seed for an image route", async (t) => {
+    const { store } = await open();
+    t.after(() => store.close());
+    const bundle = store.getBundle();
+    const text = "Close on Maren's hand in amber lamplight. Over six seconds the camera pushes toward the torn page. Paper rustles, then silence.";
+    const authored: Shot = {
+      ...shot(1, 6, "@maren-kest holds the page"),
+      framing: { movement: "slow push-in", lighting: "amber lamplight" },
+      audio: { kind: "dialogue", line: "Read my name", ambience: "distant bells" },
+      beats: [{ span: "0-3s", text: "The camera advances" }],
+      promptOverride: { text, capability: "video", sheetVersions: {} },
+    };
+    const record: Scene = { ...legacySceneView(bundle.productions[0]!.scenes[0]!), shots: [authored] };
+    const video = promptFor(bundle.meta, bundle.sheets, record, authored, bundle.artDirection.description, undefined, "video");
+    assert.deepEqual(video, { text, overridden: true });
+    const pass = assemblePassBlocks({ world: bundle.meta, sheets: bundle.sheets, scene: record,
+      entries: [{ shot: authored, prompt: video }], artDirection: bundle.artDirection.description, capability: "video" });
+    assert.equal(pass.beats[0]!.text, text);
+    assert.equal([pass.summary, pass.standing, pass.spatial, pass.persistent].join(""), "");
+    const still = promptFor(bundle.meta, bundle.sheets, record, authored, bundle.artDirection.description, undefined, "image");
+    assert.equal(still.overridden, false);
+    assert.match(still.text, /amber lamplight/);
+    for (const noise of ["slow push-in", "0-3s", "Read my name", "distant bells", bundle.artDirection.description]) {
+      assert.ok(!still.text.includes(noise), noise);
+    }
+    await store.close();
+  });
+});
+
+describe("structured timing (SPEC-044 §2.3, R-25)", () => {
+  const VIDEO: ManifestModel = {
+    id: "clip-like", provider: "fal", capability: "video", displayName: "Clip-like",
+    accepts: { referenceImages: 4, startFrame: false, endFrame: false },
+    limits: { maxDurationSec: 10, durations: { "5": "5", "10": "10" } },
+    pricing: { kind: "perSecond", microUsdPerSecond: 20000 },
+  };
+  const anchored = (anchors: Record<string, { startSec: number; endSec: number }>) => ({
+    schemaVersion: 1 as const, revision: 1, trackArtifactId: "ar_01J8E0000000000000000000A1", markers: [], updatedAt: CLOCK(),
+    anchors: Object.fromEntries(Object.entries(anchors).map(([id, span]) => [id, { ...span, clipAudio: { mode: "mute" as const } }])),
+  });
+
+  it("names the shots the Cut does not place with the length the fallback uses, and words a refusal by number", async (t) => {
+    const { store } = await open();
+    t.after(() => store.close());
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const scene = legacySceneView(production.scenes.find((candidate) => candidate.id === "sc_04")!);
+    const planWith = (anchors: Record<string, { startSec: number; endSec: number }>, mode: "per-shot" | "whole-scene") =>
+      planScene({ world: bundle.meta, productionId: production.meta.id, sheets: bundle.sheets, kits: bundle.referenceKits, scene,
+        selections: {}, model: VIDEO, timingProduction: { ...production, spine: anchored(anchors) } }, mode);
+    const placed = planWith({ sh_12: { startSec: 0, endSec: 4 }, sh_13: { startSec: 4, endSec: 10 } }, "per-shot");
+    assert.deepEqual(placed.timingProblems, []);
+    assert.deepEqual(placed.timing, [
+      { shotId: "sh_14", number: 14, kind: "unanchored", durationSec: 5 },
+      { shotId: "sh_15", number: 15, kind: "unanchored", durationSec: 4.5 },
+    ]);
+    assert.ok(!JSON.stringify(placed.timing).includes("unanchored;"), "no sentence rides along for a screen to print");
+    const overlapping = planWith({ sh_12: { startSec: 0, endSec: 5 }, sh_13: { startSec: 3, endSec: 9 } }, "whole-scene");
+    assert.deepEqual(overlapping.timingProblems, ["shots 12 and 13 · overlap on the Cut · fix the timing first"]);
+    assert.deepEqual(planWith({}, "whole-scene").timingProblems, ["no shot on the Cut · place one first"]);
   });
 });

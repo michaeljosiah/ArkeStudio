@@ -29,20 +29,30 @@ const failures = [];
 // MIT → AGPL and four of the five kept saying MIT, including the shipped About screen, which
 // told users they had rights they did not have. A licence claim nobody verifies is a licence
 // claim that goes stale, so it is verified here beside every other obligation.
+//
+// The master spec is the one claim that may legitimately be missing: it is not published with
+// the code, so only a machine holding the private document set can check it. Marked optional
+// below, it is still verified wherever it is present — which is every machine that edits it,
+// and therefore every machine where N-6 could drift in the first place.
 const SELF_LICENCE = "AGPL-3.0-only";
 const repoRoot = resolve(here, "../../..");
 const selfClaims = [
   ["package.json", "package.json", (t) => JSON.parse(t).license === SELF_LICENCE],
   ["THIRD-PARTY-NOTICES.md", "THIRD-PARTY-NOTICES.md", (t) => t.includes(`Arke Studio is licensed ${SELF_LICENCE}`)],
-  ["the master spec (N-6)", "docs/specification.md", (t) => t.includes(`**N-6 · Licence.** ${SELF_LICENCE}`)],
+  ["the master spec (N-6)", "docs/specification.md", (t) => t.includes(`**N-6 · Licence.** ${SELF_LICENCE}`), "optional"],
   ["the About screen", "packages/client/src/screens/shell.tsx", (t) => t.includes("AGPL-3.0 licence ·")],
 ];
-for (const [what, path, holds] of selfClaims) {
+for (const [what, path, holds, optional] of selfClaims) {
   let text;
   try {
     text = readFileSync(join(repoRoot, path), "utf8");
-  } catch {
-    failures.push(`${what}: ${path} could not be read to verify Arke's own licence`);
+  } catch (error) {
+    // Optional means "may legitimately be absent", not "may fail to read". A private spec that
+    // is present but unreadable — a link pointing at a directory, OneDrive denying access mid-sync
+    // — would otherwise pass the gate silently while the comment above promises it was verified,
+    // which is the failure this whole check exists to prevent.
+    if (optional && error?.code === "ENOENT") continue;
+    failures.push(`${what}: ${path} could not be read to verify Arke's own licence (${error?.code ?? error})`);
     continue;
   }
   let ok = false;

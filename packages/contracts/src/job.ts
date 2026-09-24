@@ -136,6 +136,8 @@ export const JobSchema = z
     /** Opaque engine instance explicitly approved for a biometric voice upload. */
     voiceUploadConfirmedFor: z.string().min(1).optional(),
     status: JobStatusSchema,
+    /** Transient local engine contention, never a failed attempt. */
+    waitingFor: z.string().optional(),
     /**
      * What the engine is counting right now (SPEC-021 D16), or null when it counts nothing.
      *
@@ -154,6 +156,8 @@ export const JobSchema = z
     attempt: z.number().int().min(0).default(0),
     /** The last submit response proved that attempt was rejected, so cancellation cannot imply a charge. */
     submissionRejected: z.boolean().optional(),
+    /** Cancellation ended local work but a provider outcome/charge may remain unresolved. */
+    cancellationUncertain: z.boolean().optional(),
     /** Where artifacts land, world-relative — the caller's meaning, not this spec's (§1.2). */
     landing: z
       .object({
@@ -193,7 +197,7 @@ export function voiceJobFormat(job: Pick<Job, "provider" | "params">): "wav" | "
 
 /** Rebuild the document identity frozen into a durable voice-preview job. */
 export function voiceJobReadIdentity(job: Pick<Job, "params">): {
-  purpose: "candidate-preview" | "sheet-section" | "sheet-page" | "bible-section" | "prose";
+  purpose: "candidate-preview" | "sheet-section" | "sheet-page" | "bible-section" | "prose" | "audiobook";
   sheetId?: string;
 } {
   const rawPurpose = job.params["purpose"];
@@ -201,12 +205,14 @@ export function voiceJobReadIdentity(job: Pick<Job, "params">): {
     rawPurpose === "sheet-section" ||
     rawPurpose === "sheet-page" ||
     rawPurpose === "bible-section" ||
-    rawPurpose === "prose"
+    rawPurpose === "prose" ||
+    rawPurpose === "audiobook"
       ? rawPurpose
       : "candidate-preview";
   // Neither belongs to a sheet: the bible is the world's, and a prose read addresses a canon
   // entry, a production record or a conversation reply (issue 857).
-  if (purpose === "bible-section" || purpose === "prose") return { purpose };
+  // An audiobook take belongs to a chapter block, not a sheet, even when a sheet's voice reads it (turn 146).
+  if (purpose === "bible-section" || purpose === "prose" || purpose === "audiobook") return { purpose };
   const sheetId = job.params["sheetId"];
   return typeof sheetId === "string" && sheetId.length > 0 ? { purpose, sheetId } : { purpose };
 }

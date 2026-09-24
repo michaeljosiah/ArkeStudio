@@ -57,11 +57,20 @@ export const TakeCostSchema = z
   .strict();
 export type TakeCost = z.infer<typeof TakeCostSchema>;
 
+/** Descriptive provenance captured on copy; no foreign identity or live dependency (issue 960). */
+export const BorrowedImageOriginSchema = z.object({
+  worldName: z.string().min(1),
+  imageName: z.string().min(1),
+  copiedAt: z.string().datetime(),
+}).strict();
+export type BorrowedImageOrigin = z.infer<typeof BorrowedImageOriginSchema>;
+
 /** What the world looked like at dispatch — the pair that makes drift computable (§2.4). */
 export const ProvenanceSchema = z
   .object({
     /** Complete local preparation evidence, frozen by audio consumers rather than a cache pointer. */
     audioAssets: z.array(AudioAssetProvenanceSchema).optional(),
+    borrowedImages: z.array(BorrowedImageOriginSchema).optional(),
     dialogueAssessments: z.record(ShotIdSchema, DialogueDispatchAssessmentSchema).optional(),
     canonRevision: z.number().int().min(0),
     sheets: z.record(SlugSchema, z.number().int().min(1)),

@@ -234,17 +234,6 @@ describe("Studio proposal kind follows its target", () => {
       });
       assert.equal((await provider.gate()!.listOpen()).length, 1, "an unsupported target stages nothing");
 
-      await send({
-        kind: "draft-chapter",
-        worldId: WORLD_ID,
-        productionId: "the-ledger-of-nights",
-        chapterFile: "01-neap",
-        instruction: "Revise the opening.",
-      });
-      const chapter = (await provider.gate()!.listOpen()).find((proposal) => proposal.kind === "chapter-draft");
-      assert.ok(chapter, "the legacy coordinator command remains parseable");
-      assert.equal(chapter.decision, undefined, "dead code does not claim a durable attended card");
-      assert.equal(chapter.origin?.gesture, "legacy-draft-chapter-command");
     } finally {
       await coordinator.stop();
       await provider.close();

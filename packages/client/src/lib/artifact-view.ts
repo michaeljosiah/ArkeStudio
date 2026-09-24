@@ -1,4 +1,79 @@
-import { mediaExtension, type ArtifactSidecar } from "@arke-studio/contracts";
+import { mediaExtension, orderedShots, type ArtifactSidecar, type WorldBundle } from "@arke-studio/contracts";
+
+/**
+ * The artifacts a production may see (SPEC-020 R-13): the world's own, plus the ones it owns.
+ *
+ * Another production's scoped material is absent — selecting audio by kind alone would put one
+ * production's scratch takes in every other production's pickers.
+ */
+export function artifactsForProduction<T extends { production?: string }>(
+  artifacts: readonly T[],
+  productionId: string | undefined,
+): T[] {
+  return artifacts.filter((a) => a.production === undefined || a.production === productionId);
+}
+
+/**
+ * What a production's artifacts page shows, and therefore what its rail row counts.
+ *
+ * The two have to be the same set or the row advertises a number no filter on the page can
+ * reach — which is exactly what the row did while it pointed at the world's shelf and counted
+ * the world's files. Superseded artifacts drop out here as they drop out of pickers (R-5), and
+ * a superseding artifact this production owns supersedes for this production alone.
+ */
+export function productionShelf(
+  artifacts: readonly ArtifactSidecar[],
+  productionId: string | undefined,
+): ArtifactSidecar[] {
+  const scoped = artifactsForProduction(artifacts, productionId);
+  const superseded = new Set(
+    scoped.map((a) => a.supersedes).filter((id): id is string => id !== undefined),
+  );
+  return scoped.filter((a) => a.retiredAt === undefined && !superseded.has(a.id));
+}
+
+/** Advisory uses from the live snapshot. Retirement never depends on this being a history index. */
+export function artifactUses(world: WorldBundle, artifact: ArtifactSidecar): string[] {
+  const identities = new Set([artifact.id, `artifacts/${artifact.file}`]);
+  if (artifact.generation?.source === "character-reference") {
+    identities.add(artifact.generation.sourceFile);
+    if (artifact.generation.takeId) identities.add(artifact.generation.takeId);
+  }
+  const cites = (value: unknown, base: string): boolean => {
+    if (typeof value === "string") {
+      const path = value.replaceAll("\\", "/");
+      return identities.has(path) || identities.has(`${base}/${path}`);
+    }
+    if (Array.isArray(value)) return value.some(item => cites(item, base));
+    return value !== null && typeof value === "object" && Object.values(value).some(item => cites(item, base));
+  };
+  const uses: string[] = [];
+  const add = (label: string, value: unknown, base = "") => { if (cites(value, base)) uses.push(label); };
+  add("World key art", world.keyArt);
+  add("Art direction", world.artDirection);
+  add("World bible", world.bible);
+  for (const link of artifact.links) uses.push(`Filed against: ${world.sheets.find(sheet => sheet.id === link)?.name ?? world.canon.find(entry => entry.id === link)?.title ?? link}`);
+  for (const sheet of world.sheets) add(`${sheet.type}: ${sheet.name}`, sheet);
+  for (const entry of world.canon) add(`Canon: ${entry.title}`, entry);
+  for (const kit of world.referenceKits) add(`Reference kit: ${world.sheets.find(sheet => sheet.id === kit.sheetId)?.name ?? kit.sheetId}`, kit, `references/${kit.sheetId}`);
+  for (const prop of world.props) add(`Prop: ${prop.name}`, prop);
+  for (const production of world.productions) {
+    const name = production.meta.title;
+    add(`${name}: key art`, production.meta);
+    add(`${name}: Library`, production.timeline?.status === "ready" ? production.timeline.timeline.library : null);
+    if (production.timeline?.status === "ready") for (const track of production.timeline.timeline.tracks) {
+      for (const clip of track.clips) add(`${name}: ${track.name} · ${clip.source.label || clip.id} (${clip.id})`, clip);
+    }
+    add(`${name}: audio and overlays`, production.cut);
+    add(`${name}: master track`, production.spine);
+    for (const scene of production.scenes) for (const shot of orderedShots(scene)) {
+      add(`${name}: ${scene.title} · shot ${shot.id}`, [shot, production.selections[shot.id]]);
+    }
+    for (const take of production.takes) add(`${name}: take ${take.id}`, take);
+  }
+  for (const other of world.artifacts) if (other.id !== artifact.id) add(`Artifact: ${other.file}`, other);
+  return [...new Set(uses)];
+}
 
 /**
  * Which viewer opens an artifact (issue 477).
@@ -69,8 +144,13 @@ const VIEWER_LABEL: Record<ArtifactViewerKind, string> = {
   details: "details",
 };
 
-/** "Open key-art.png — image". Filename and viewer, which is what the name has to carry. */
-export function artifactOpenLabel(artifact: Pick<ArtifactSidecar, "file">): string {
-  const name = artifact.file.split("/").pop() ?? artifact.file;
+/**
+ * The naming rule lives in contracts now (issue 1033): the coordinator states it too when it
+ * lists another world's shelf. Re-exported so every screen keeps importing it from here.
+ */
+export { artifactDisplayName, linkNameResolver, type LinkName } from "@arke-studio/contracts";
+
+/** The visible name and viewer are also the open button's accessible name. */
+export function artifactOpenLabel(artifact: Pick<ArtifactSidecar, "file">, name = artifact.file.split("/").pop() ?? artifact.file): string {
   return `Open ${name} — ${VIEWER_LABEL[artifactViewer(artifact)]}`;
 }

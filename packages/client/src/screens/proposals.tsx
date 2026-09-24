@@ -102,10 +102,7 @@ export function ProposalsScreen() {
   return (
     <div data-screen="proposals">
       {proposals.length === 0 ? (
-        <EmptyState
-          title="No exceptions are waiting"
-          hint="Approvals holds orphaned drafts, unanswered choices, unattended rebase reviews or conflicts, and changes reconciled from outside the app. Future unattended actors will wait here too; ordinary decisions stay where the work happened."
-        />
+        <EmptyState title="Nothing waiting" />
       ) : (
         <div className="fy-proposals">
           <div className="fy-proposals__head">

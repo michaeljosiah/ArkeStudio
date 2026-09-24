@@ -16,15 +16,12 @@ function argValue(name: string): string | null {
 const appVersion = argValue("arke-app-version") ?? "0.0.0";
 type ThemePreference = "system" | "light" | "dark";
 type ResolvedTheme = "light" | "dark";
-const rawThemePreference = argValue("arke-theme-preference");
-const rawResolvedTheme = argValue("arke-resolved-theme");
-const themePreference: ThemePreference =
-  rawThemePreference === "light" || rawThemePreference === "dark" ? rawThemePreference : "system";
-const resolvedTheme: ResolvedTheme = rawResolvedTheme === "dark" ? "dark" : "light";
-const startupTheme = {
-  preference: themePreference,
-  resolved: resolvedTheme,
-} satisfies { preference: ThemePreference; resolved: ResolvedTheme };
+// Read the host's current theme before first paint on every load. Window arguments are fixed
+// at creation and would restore an old choice when the renderer reloads (issue 990).
+const startupTheme = ipcRenderer.sendSync("arke:get-theme") as {
+  preference: ThemePreference;
+  resolved: ResolvedTheme;
+};
 let wsUrl: string | null = null;
 let httpBase: string | null = null;
 let sessionToken: string | null = null;
@@ -316,6 +313,7 @@ const bridge = {
     target: Extract<AttachTarget, { kind: "stage-playblast" | "conversation-action-stage-playblast-complete" }>,
     jobId: string,
     openingFrame: Uint8Array,
+    referenceFrames: Array<import("@arke-studio/contracts").StageReferenceFrame & { bytes: Uint8Array }>,
   ): Promise<{ ok: true } | { ok: false; reason: string }> {
     const frame = normaliseBytes(openingFrame);
     if (!frame) return { ok: false, reason: "the app could not read the Stage opening frame" };
@@ -325,12 +323,21 @@ const bridge = {
     if (!videoResult.ok) return videoResult;
     const frameResult = await spoolBytes("opening-frame.png", frame);
     if (!("path" in frameResult)) return { ok: false, reason: frameResult.reason };
+    const frames = [];
+    for (const [index, reference] of referenceFrames.entries()) {
+      const bytes = normaliseBytes(reference.bytes);
+      if (!bytes) return { ok: false, reason: "the app could not read a Stage reference frame" };
+      const result = await spoolBytes(`stage-reference-${index}.png`, bytes);
+      if (!("path" in result)) return { ok: false, reason: result.reason };
+      frames.push({ kind: reference.kind, at: reference.at, sourcePath: result.path });
+    }
     if (socket === null || socket.readyState !== WebSocket.OPEN) {
       return { ok: false, reason: "not connected to the app — try again in a moment" };
     }
     try {
       socket.send(JSON.stringify({
         ...target,
+        referenceFrames: frames,
         sourcePath: videoResult.path,
         openingFrameSourcePath: frameResult.path,
       }));

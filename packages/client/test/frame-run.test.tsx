@@ -209,6 +209,16 @@ function stateWith(options: { runs?: FrameRunState[]; allFramed?: boolean; noSho
   return state;
 }
 
+/** The world with a look attached to this scene for Maren (SPEC-044 R-30): the row must name it. */
+function stateWithSceneLook(): ClientState {
+  const state = stateWith();
+  state.world!.referenceKits.find((kit) => kit.sheetId === "maren-kest")!.looks = [{
+    id: "council-coat", file: "looks/council-coat.png", kind: "costume", prompt: "Formal council coat, storm-grey wool with a high collar",
+    acceptedAt: "2026-07-14T09:00:00Z", attachedTo: { kind: "scene", productionId: "saltlight", sceneId: "sc_04" },
+  }];
+  return state;
+}
+
 function retriedFrameState(): FrameRunState {
   const failed = frameState({
     first: { status: "failed", failureClass: "transient", error: "provider timed out", etaSec: null },
@@ -455,6 +465,13 @@ const named = (item: Mounted, text: string): HTMLElement => {
 const click = async (element: HTMLElement) => act(async () => element.click());
 
 describe("frame-run quote authorization", () => {
+  it("names the look riding for a character beside the sheet, as the kit names it", async () => {
+    const item = await mount(stateWithSceneLook(), []);
+    await click(named(item, "Generate frames"));
+    const maren = all(item, ".fy-swgen__references article").find((reference) => reference.textContent?.includes("Maren Kest"));
+    assert.match(maren?.textContent ?? "", /rides · look · Formal council coat, storm-grey wool with a hig…/, "cut where the kit's tile cuts it");
+  });
+
   it("quotes current options, displays the backend amount, and echoes the authorization on start", async () => {
     const sent: ClientMessage[] = [];
     const item = await mount(stateWith(), sent);
@@ -484,8 +501,9 @@ describe("frame-run quote authorization", () => {
     const vigil = references.find((reference) => reference.textContent?.includes("The Vigil"));
     assert.match(maren?.textContent ?? "", /rides/);
     assert.equal(maren?.dataset.riding, "true");
-    assert.match(vigil?.textContent ?? "", /citation only/);
+    assert.match(vigil?.textContent ?? "", /citation only · plate/, "the location row names its plate (SPEC-044 R-30)");
     assert.equal(vigil?.dataset.riding, "false");
+    assert.doesNotMatch(maren?.textContent ?? "", /look ·/, "a character on the kit's own portrait says nothing about a look");
     assert.equal(vigil?.querySelector("img")?.getAttribute("alt"), "", "the adjacent name leaves the thumbnail decorative");
     await click([...dialog.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Generate frames") as HTMLElement);
     assert.deepEqual(sent.at(-1), {
@@ -879,6 +897,50 @@ describe("durable run projections", () => {
 });
 
 describe("durable frame-run reports in Arke", () => {
+  for (const partial of [false, true]) it(`keeps a ${partial ? "partially generated" : "zero-output"} cancelled run terminal`, async () => {
+    const run = frameState({
+      cancelled: true,
+      first: { status: partial ? "succeeded" : "cancelled", finalization: "complete", etaSec: null },
+      second: { status: "cancelled", etaSec: null },
+      ...(partial ? { firstLanding: "filed" as const } : {}),
+    });
+    const item = await mountReport([run]);
+    const report = one(item, ".fy-chat__runsummary")!;
+    assert.equal(report.getAttribute("data-state"), "cancelled");
+    assert.equal(report.hasAttribute("open"), false);
+    assert.equal(report.querySelector("summary")?.textContent, partial ? "Cancelled · 1 frame generated" : "Cancelled");
+    assert.equal(report.querySelector(".fy-chat__runreport-retry"), null);
+  });
+
+  it("keeps entirely overtaken runs complete and names the newer frames preserved", async () => {
+    const run = frameState({
+      first: { status: "succeeded", finalization: "complete", etaSec: null },
+      second: { status: "succeeded", finalization: "complete", etaSec: null },
+      firstLanding: "superseded",
+      secondLanding: "superseded",
+    });
+    const item = await mountReport([run]);
+    const report = one(item, ".fy-chat__runsummary")!;
+    assert.equal(report.getAttribute("data-state"), "complete");
+    assert.equal(report.hasAttribute("open"), false);
+    assert.equal(report.querySelector("summary")?.textContent, "2 newer frames kept");
+    assert.equal(report.querySelector(".fy-chat__runreport-retry"), null);
+  });
+
+  it("counts filed and overtaken shots separately in a mixed run summary", async () => {
+    const run = frameState({
+      first: { status: "succeeded", finalization: "complete", etaSec: null },
+      second: { status: "succeeded", finalization: "complete", etaSec: null },
+      firstLanding: "filed",
+      secondLanding: "superseded",
+    });
+    const item = await mountReport([run]);
+    const report = one(item, ".fy-chat__runsummary")!;
+    assert.equal(report.getAttribute("data-state"), "complete");
+    assert.equal(report.hasAttribute("open"), false);
+    assert.equal(report.querySelector("summary")?.textContent, "1 frame generated · 1 newer frame kept");
+  });
+
   it("joins only the exact causal run and exposes its steps, failure, selection, and retry", async () => {
     const failed = frameState({
       first: { status: "failed", failureClass: "transient", error: "provider timed out", etaSec: null },
@@ -892,6 +954,8 @@ describe("durable frame-run reports in Arke", () => {
     const sent: ClientMessage[] = [];
     const selected: string[] = [];
     const item = await mountReport([failed], sent, selected);
+    assert.equal(one(item, ".fy-chat__runsummary")?.hasAttribute("open"), true, "unresolved failures stay expanded");
+    assert.equal(one(item, ".fy-chat__runsummary > summary")?.textContent, "1 frame generated · needs attention");
     assert.equal(all(item, '.fy-chat__runreport-row[data-kind="step"]').length, 2);
     const failure = one(item, '.fy-chat__runreport-row[data-kind="failure"]')!;
     assert.match(failure.textContent ?? "", /provider timed out/);
@@ -909,6 +973,8 @@ describe("durable frame-run reports in Arke", () => {
 
   it("keeps the original failure words after a successful retry without offering it again", async () => {
     const item = await mountReport([retriedFrameState()]);
+    assert.equal(one(item, ".fy-chat__runsummary")?.hasAttribute("open"), false, "resolved reports collapse while retaining their history");
+    assert.equal(one(item, ".fy-chat__runsummary > summary")?.textContent, "2 frames generated", "retries count each shot once");
     const failure = one(item, '.fy-chat__runreport-row[data-kind="failure"]')!;
     assert.equal(failure.getAttribute("data-state"), "complete");
     assert.match(failure.textContent ?? "", /provider timed out · retried/);

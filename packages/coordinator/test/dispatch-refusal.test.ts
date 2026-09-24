@@ -5,9 +5,55 @@ import { join } from "node:path";
 import WebSocket from "ws";
 import { FrameSchema, type Frame } from "@arke-studio/contracts";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
+import { createStudioCoordinator } from "../src/application/studio-host.js";
+import type { JobQueue } from "../src/queue/dispatcher.js";
 import { Coordinator } from "../src/coordinator.js";
 import { FsWorldProvider } from "../src/world/provider.js";
 import { makeTempRoot, WORLD_ID } from "./world/helpers.js";
+import { FakeProvider, pngBytes } from "./queue/fake-provider.js";
+import { devCipher } from "../src/credentials/dev-cipher.js";
+
+it("See the look lands a preview and answers unexpected failures (#926, #904)", async () => {
+  const { root } = await makeTempRoot();
+  const provider = new FsWorldProvider(root);
+  const genesisId = "gen-look-test";
+  const sandbox = await provider.genesisDir(genesisId);
+  await writeFile(join(sandbox, "draft.json"), JSON.stringify({ look: "salt watercolour" }));
+  const remote = new FakeProvider();
+  remote.inlineArtifacts = [{ name: "preview.png", contentType: "image/png", data: pngBytes() }];
+  const model = SHIPPED_MANIFEST.models.find((m) => m.provider === "fal" && m.capability === "image")!;
+  const coordinator = new Coordinator({ provider, adapter: null, appRoot: root,
+    cipher: devCipher(), dispatchClients: { fal: remote },
+    manifest: { ...SHIPPED_MANIFEST, models: [model] },
+    changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test" });
+  const { port, token } = await coordinator.start(0);
+  const client = new TestClient(port);
+  await client.open();
+  try {
+    client.send({ kind: "hello", token, lastSeq: 0 });
+    await client.until((f) => f.kind === "snapshot", "snapshot");
+    client.send({ kind: "set-credential", provider: "fal", key: "test-key" });
+    await client.until((f) => f.kind === "event" && f.event.type === "provider.status", "credential");
+    const requestId = "01J8E10000000000000000RF13";
+    client.send({ kind: "generate-look-preview", genesisId, requestId });
+    const result = await client.until((f) => f.kind === "event" && f.event.type === "queue.enqueue-result" && f.event.requestId === requestId, "enqueue");
+    assert.ok(result.kind === "event" && result.event.type === "queue.enqueue-result");
+    assert.equal(result.event.disposition, "accepted");
+    await client.until((f) => f.kind === "event" && f.event.type === "job.updated" && f.event.job.status === "succeeded", "picture");
+    assert.deepEqual(await readFile(join(sandbox, "previews", "look-preview.png")), Buffer.from(pngBytes()));
+    provider.genesisDir = async () => { throw new Error("private-path-and-secret"); };
+    client.send({ kind: "generate-look-preview", genesisId, requestId: "01J8E10000000000000000RF14" });
+    const failed = await client.until((f) => f.kind === "event" && f.event.type === "command.failed", "visible failure");
+    assert.ok(failed.kind === "event" && failed.event.type === "command.failed");
+    assert.equal(failed.event.requestId, "01J8E10000000000000000RF14");
+    assert.match(failed.event.reason, /didn't finish/);
+    assert.doesNotMatch(JSON.stringify(failed), /private-path-and-secret/);
+  } finally {
+    client.close();
+    await coordinator.stop();
+    await provider.close();
+  }
+});
 
 /**
  * A dispatch the coordinator cannot honour has to come back as a refusal.
@@ -132,4 +178,39 @@ describe("a dispatch the coordinator refuses (adversarial pass on #150)", () => 
       await provider.close();
     }
   });
+});
+
+
+it("Studio reports admitted portraits when a later batch admission fails", async () => {
+  const { root } = await makeTempRoot();
+  const provider = new FsWorldProvider(root);
+  await provider.loadWorld(WORLD_ID);
+  const remote = new FakeProvider();
+  const model = SHIPPED_MANIFEST.models.find(m => m.provider === "fal" && m.capability === "image")!;
+  const coordinator = createStudioCoordinator({ provider, adapter: null, appRoot: root,
+    cipher: devCipher(), dispatchClients: { fal: remote }, manifest: { ...SHIPPED_MANIFEST, models: [model] },
+    changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test" });
+  const { port, token } = await coordinator.start(0);
+  const client = new TestClient(port);
+  await client.open();
+  try {
+    client.send({ kind: "hello", token, lastSeq: 0 });
+    await client.until(frame => frame.kind === "snapshot", "snapshot");
+    // Inject the fault at admission, rather than a later provider failure after every job was accepted.
+    const queue = (coordinator as unknown as { jobQueue: JobQueue }).jobQueue;
+    const enqueue = queue.enqueue.bind(queue);
+    let calls = 0;
+    queue.enqueue = async input => { if (++calls === 2) throw new Error("Admission unavailable"); return enqueue(input); };
+    const requestId = "01J8E10000000000000000RF15";
+    client.send({ kind: "generate-main-photo", requestId, worldId: WORLD_ID, sheetId: "maren-kest",
+      modelId: model.id, prompt: "A friendly portrait", count: 3, identityReferences: [] });
+    const frame = await client.until(frame => frame.kind === "event" && frame.event.type === "queue.enqueue-result" &&
+      frame.event.requestId === requestId, "partial admission acknowledgement");
+    assert.ok(frame.kind === "event" && frame.event.type === "queue.enqueue-result");
+    assert.equal(frame.event.disposition, "partial");
+    assert.equal(frame.event.requestedCount, 3);
+    assert.deepEqual(frame.event.acceptedJobIds, queue.listJobs().map(job => job.id));
+    assert.equal(frame.event.acceptedJobIds.length, 1);
+    assert.deepEqual(frame.event.failures.map(failure => failure.index), [1, 2]);
+  } finally { client.close(); await coordinator.stop(); await provider.close(); }
 });

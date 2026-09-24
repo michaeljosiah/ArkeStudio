@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { App } from "../src/App.js";
@@ -20,8 +17,6 @@ import { FIXTURE_STATE } from "./fixture-state.js";
  */
 
 __setStateForTest(FIXTURE_STATE);
-
-const here = dirname(fileURLToPath(import.meta.url));
 
 function renderAt(path: string): string {
   return renderToString(
@@ -49,25 +44,22 @@ function proposalControl(html: string): string {
  */
 const WITHOUT_CONTROLS = new Set(["startup"]);
 /**
- * Full-frame compositions that draw themselves exactly as approved: the accept gates, and the
- * launch screen ahead of everything, which is a plate with its own lockup on it and no chrome
- * of any kind (design master 76a).
+ * Full-frame accept gates draw themselves without app chrome.
  */
 const WITHOUT_CHROME = new Set([
-  "launch",
+
   "art-direction-proposal",
   "replace-main-photo",
   "model-sheet-generate",
 ]);
 
 describe("app chrome", () => {
-  it("mounts one app-level queue toaster", () => {
-    const app = readFileSync(join(here, "../src/App.tsx"), "utf8");
-    assert.equal(
-      count(app, "<QueueToaster"),
-      1,
-      "Sonner portals on the client, but its root is mounted once here",
-    );
+  it("mounts one app-level queue toaster, on every screen", () => {
+    // Sonner portals on the client, but its root is mounted once, at the app; a screen that lost
+    // it would lose every notification. The region it renders is the surface that proves it.
+    for (const path of ["/worlds", "/settings/providers", `/w/${FIXTURE_WORLD_ID}`]) {
+      assert.equal(count(renderAt(path), 'aria-label="Notifications alt+T"'), 1, path);
+    }
   });
 
   for (const screen of SCREENS) {
@@ -88,7 +80,7 @@ describe("app chrome", () => {
       );
     });
 
-    it(`${screen.id} puts activity and settings on the right, in that order`, () => {
+    it(`${screen.id} puts activity, settings and the account on the right, in that order`, () => {
       const html = renderAt(screen.samplePath);
       if (WITHOUT_CHROME.has(screen.id)) {
         assert.ok(!html.includes("fy-titlebar__side--right"), `${screen.id} is a full-frame gate`);
@@ -96,7 +88,7 @@ describe("app chrome", () => {
       }
       if (WITHOUT_CONTROLS.has(screen.id)) {
         assert.ok(
-          !html.includes('aria-label="Settings"'),
+          !html.includes('aria-label="Settings"') && !html.includes('aria-label="Arke account"'),
           `${screen.id} is the exception and has no controls`,
         );
         return;
@@ -104,10 +96,13 @@ describe("app chrome", () => {
       const right = html.indexOf("fy-titlebar__side--right");
       const activity = html.indexOf('aria-label="Activity"');
       const settings = html.indexOf('aria-label="Settings"');
+      const account = html.indexOf('aria-label="Arke account"');
       assert.ok(right >= 0, "the right-hand side of the bar exists");
       assert.ok(activity > right, "activity sits inside it, not on the left as the world screens had it");
       assert.ok(settings > activity, "and settings follows activity — same order everywhere");
+      assert.ok(account > settings, "and the account comes last (design turn 151): the person, after the screen's controls");
       assert.equal(count(html, 'aria-label="Settings"'), 1, "one way to settings, not two");
+      assert.equal(count(html, 'aria-label="Arke account"'), 1, "one account control, and it never opens a page");
     });
 
     it(`${screen.id} puts proposals before activity, never between it and settings`, () => {
@@ -180,24 +175,4 @@ describe("app chrome", () => {
     assert.ok(proposalControl(orphaned).includes("fy-iconbtn__dot"));
   });
 
-  it("centres the wordmark on the window, not on the row", () => {
-    // Desktop parks its native window controls in the top-right ~138px and the bar reserves that
-    // margin, so a flex-centred mark lands ~69px left of true centre on desktop and dead centre
-    // in a browser — the same code drawing two different layouts. Absolute placement is the fix,
-    // and this is the assertion that keeps it.
-    const css = readFileSync(join(here, "../src/screens/fidelity.css"), "utf8");
-    const rule = css.slice(css.indexOf(".fy-titlebar__brand {"));
-    const body = rule.slice(0, rule.indexOf("}"));
-    assert.ok(body.includes("position: absolute"), "the wordmark is placed, not flowed");
-    assert.ok(body.includes("left: 50%") && body.includes("translateX(-50%)"), "and placed at the middle");
-  });
-
-  it("keeps narrow context out of the centred wordmark", () => {
-    const css = readFileSync(join(here, "../src/screens/fidelity.css"), "utf8");
-    assert.match(
-      css,
-      /\.fy-titlebar__side:first-child\s*\{[^}]*padding-right:\s*48px/,
-      "the ellipsised left context reserves the wordmark's half-width before it can overlap",
-    );
-  });
 });

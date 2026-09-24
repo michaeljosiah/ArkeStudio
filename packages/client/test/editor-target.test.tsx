@@ -15,7 +15,7 @@ import {
 } from "@arke-studio/contracts";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { ARTIFACT_DRAG_TYPE, LANE_DRAG_SOUND } from "../src/screens/editor-audio.js";
-import { CutScreen } from "../src/screens/production.js";
+import { CutScreen } from "../src/screens/cut.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -339,6 +339,21 @@ describe("the export sheet (R-24, T-5)", () => {
 });
 
 describe("spoken lines in the Library (R-1, R-8)", () => {
+  it("names the accepted take by its review number in the Library (#1005)", async () => {
+    const state = savedState();
+    const production = state.world!.productions[0]!;
+    const [shotId, selection] = Object.entries(production.selections).find(([, selected]) => selected.acceptedTakeId)!;
+    const first = production.takes.find((take) => take.id === selection.acceptedTakeId)!;
+    const second = { ...first, id: "tk_01J8G0000000000000000000V2" as typeof first.id };
+    production.takes = [first, second];
+    production.selections[shotId] = { ...selection, acceptedTakeId: second.id };
+    const screen = await mount(state, "?library=all");
+    try {
+      const row = screen.container.querySelector(`[data-library-item="shot:${shotId}"]`)!;
+      assert.match(row.textContent!, /Take 2/);
+      assert.doesNotMatch(row.textContent!, /tk_/);
+    } finally { await close(screen); }
+  });
   it("lists read lines with the Voice role and reuses the generic track for later placements", async () => {
     const state = savedState();
     const production = state.world!.productions[0]!;
@@ -391,7 +406,7 @@ describe("the picker and the keys sheet, round two", () => {
   it("unchecking an item in the Library removes it, and Cancel forgets a draft", async () => {
     const screen = await mount(savedState());
     try {
-      await act(async () => button(screen, "Add").click());
+      await act(async () => button(screen, "Add shots").click());
       const box = (): HTMLInputElement => {
         const row = [...screen.container.querySelectorAll<HTMLLabelElement>(".fy-libpick__row")].find((candidate) => candidate.textContent?.includes("SH 12"));
         const input = row?.querySelector<HTMLInputElement>("input");
@@ -401,7 +416,7 @@ describe("the picker and the keys sheet, round two", () => {
       assert.equal(box().checked, true, "a shot already in the Library shows checked");
       await act(async () => box().click());
       await act(async () => button(screen, "Cancel").click());
-      await act(async () => button(screen, "Add").click());
+      await act(async () => button(screen, "Add shots").click());
       assert.equal(box().checked, true, "Cancel forgot the unchecking");
       await act(async () => box().click());
       await act(async () => button(screen, "Update the library").click());
@@ -459,7 +474,7 @@ describe("the picker and the keys sheet, round two", () => {
   });
 });
 
-describe("the picker sees what the production sees", () => {
+describe("the Library sees what the production sees", () => {
   it("leaves another production's scoped file out of the rows", async () => {
     const state = savedState();
     state.world!.artifacts.push({
@@ -474,10 +489,15 @@ describe("the picker sees what the production sees", () => {
     } as never);
     const screen = await mount(state);
     try {
-      await act(async () => button(screen, "Add").click());
-      const rows = [...screen.container.querySelectorAll<HTMLElement>(".fy-libpick__row")].map((row) => row.textContent ?? "");
-      assert.ok(rows.some((row) => row.includes("harbour-bells.wav")), "the world's own file is offered");
-      assert.ok(!rows.some((row) => row.includes("other-scratch.wav")), "another production's scratch is not");
+      // Every file the production can see is a row without a picker (issue 1033); a file scoped
+      // to another production is not one of them (SPEC-020 R-13).
+      const rows = [...screen.container.querySelectorAll<HTMLElement>("[data-library-item]")].map((row) => row.dataset["libraryItem"]);
+      assert.ok(rows.includes(`artifact:${BELLS}`), "the world's own file is offered");
+      assert.ok(!rows.includes("artifact:ar_01J8G0000000000000000000R8"), "another production's scratch is not");
+      // The shot picker lists shots and nothing else: artifacts no longer need picking.
+      await act(async () => button(screen, "Add shots").click());
+      const picked = [...screen.container.querySelectorAll<HTMLElement>(".fy-libpick__row")].map((row) => row.textContent ?? "");
+      assert.ok(picked.length > 0 && picked.every((row) => /^SH \d+/.test(row)), "only shots are picked");
     } finally {
       await close(screen);
     }

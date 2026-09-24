@@ -203,12 +203,12 @@ describe("the dock head (design 2483-2489)", () => {
     assert.equal(q(mounted, ".fy-arke__thumb img")?.getAttribute("src"), "arke-media://frame.png");
   });
 
-  it("names the subject and keeps the slot and the line under the composer in the workspace", async () => {
+  it("names the subject and keeps the slot, with no line under the composer", async () => {
     const mounted = await mountNode(<App />);
     assert.match(q(mounted, ".fy-arke__who .fy-mono")?.textContent ?? "", /v\d+$/, "the scene and its version");
     assert.ok(q(mounted, ".fy-arke__thumb"), "the scene has no frame, and the slot is still drawn");
-    // The scene dock's line names the one thing talking does change here (SPEC-036 R-38).
-    assert.match(q(mounted, ".fy-arke__foot > .fy-mono")?.textContent ?? "", /talking can name the scene · everything else waits for your yes/);
+    // The line that explained what talking does here is gone (design turn 137): a screen labels.
+    assert.equal(q(mounted, ".fy-arke__foot > .fy-mono"), null, "no caption under the composer");
   });
 });
 

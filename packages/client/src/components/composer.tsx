@@ -28,6 +28,8 @@ export interface ComposerProps {
   /** Unavailable, with the reason stated beneath rather than a dead box. */
   disabledReason?: string;
   autoFocus?: boolean;
+  /** Each change asks for the caret here: a page handing the author a line to finish. */
+  focusRequest?: number;
   /** Present → the + button appears and asks the host to open its picker. */
   onAttach?: () => void;
   /**
@@ -111,6 +113,7 @@ export function Composer(props: ComposerProps) {
     busyLabel = "Working…",
     disabledReason,
     autoFocus = false,
+    focusRequest,
     onAttach,
     onDictate,
     onAttachFiles,
@@ -164,6 +167,27 @@ export function Composer(props: ComposerProps) {
   useEffect(() => {
     if (autoFocus && !locked) editor.current?.focus();
   }, [autoFocus, locked]);
+
+  // A request made while the box is locked waits for it to unlock (codex on PR 1232): the seeded
+  // line is still there to finish once a running turn ends or the connection comes back. Each
+  // request is honoured once, so unlocking again later does not move the caret.
+  const focusHonoured = useRef(0);
+  useEffect(() => {
+    const node = editor.current;
+    if (focusRequest === undefined || focusRequest <= focusHonoured.current || locked || !node) return;
+    focusHonoured.current = focusRequest;
+    node.focus();
+    // At the end of what is there (codex on PR 1232): a line started for the author to finish is
+    // finished after its words, and a focused box would otherwise take them at the start.
+    const range = document.createRange();
+    // A DOM without selections (the tests' linkedom) keeps the focus alone.
+    if (typeof range.collapse !== "function" || typeof window.getSelection !== "function") return;
+    range.selectNodeContents(node);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }, [focusRequest, locked]);
 
   return (
     <div

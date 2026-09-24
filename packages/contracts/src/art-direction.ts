@@ -33,9 +33,11 @@ export const DEFAULT_AUDIO_POLICY: AudioPolicy = {
  */
 export const FailureModesSchema = z.array(z.string().trim().min(1).max(300)).max(20).default([]);
 
-/** What the world's one representative image should contain, separate from how it should look. */
+/** The authored image prompt and the subjects whose references it carries. */
 export const KeyArtIntentSchema = z
   .object({
+    /** One complete visual prompt; world context informs its author, never wraps these words. */
+    prompt: z.string().trim().min(1).max(6000).optional(),
     subject: z.string().min(1).max(500).optional(),
     moment: z.string().min(1).max(500).optional(),
     stakes: z.string().min(1).max(500).optional(),

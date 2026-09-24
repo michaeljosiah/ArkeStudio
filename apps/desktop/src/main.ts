@@ -8,21 +8,25 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { createFfprobe, resolveFfprobe } from "./media-probe.js";
 import { createComfyUiFetch } from "./comfyui-transport.js";
 import { ComfyUiDigestCache } from "./comfyui-digest-cache.js";
+import { cudaFreeMemoryArgs, detectQwenCudaDevice, qwenEngineProfile } from "./comfyui-profiles.js";
 import { CloudProviderTransport } from "./provider-transport.js";
 import { appendFileSync, existsSync } from "node:fs";
 import { copyFile, readdir, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { freemem } from "node:os";
 import { join, resolve } from "node:path";
-import { describeClaudeAvailability } from "@arke-studio/adapter-claude";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, nativeTheme, Notification, safeStorage, shell } from "electron";
 import electronUpdater from "electron-updater";
 import {
   assembleHarness,
+  describeClaudeAvailability,
+  describeCodexAvailability,
   ChildLedger,
   ChildSupervisor,
-  ComfyUiEngineService,
+  ProfiledComfyUiEngineService,
   Coordinator,
+  createStudioHost,
+  type StudioServer,
   AppSettingsFile,
   defaultAppRoot,
   FsWorldProvider,
@@ -52,7 +56,11 @@ import {
   higgsfieldWorkspaces,
   probeRuntime,
   SHIPPED_MANIFEST,
+  BREEZE_MODEL,
+  FISH_MODEL,
+  VOXTRAL_MODEL,
   type VoiceCatalogueClient,
+  type VoiceSlotClient,
 } from "@arke-studio/providers";
 import {
   KOKORO_PRESETS,
@@ -79,9 +87,11 @@ import {
 } from "./voxa-runtime.js";
 import {
   agentForPurpose,
+  effectiveHarnessEngine,
   comfyUiWeightsComponentId,
   ROSTER,
   skillFor,
+  type ProviderId,
   type ThemePreference,
   type VoiceRuntimeFailure,
   type VoiceRuntimeStatus,
@@ -185,6 +195,7 @@ function fetchedHiggsfieldPath(appRoot: string): string | null {
 }
 
 let coordinator: Coordinator | null = null;
+let studioServer: StudioServer | null = null;
 let window: BrowserWindow | null = null;
 let shuttingDown = false;
 let allowQuit = false;
@@ -426,6 +437,11 @@ function registerHostIpc(): void {
       applyHostTheme(preference);
     }
   });
+  ipcMain.on("arke:get-theme", (event) => {
+    event.returnValue = window && event.sender === window.webContents
+      ? { preference: themePreference, resolved: resolvedTheme }
+      : null;
+  });
   ipcMain.on("arke:chrome-over-plate", (event, over: unknown) => {
     if (!window || event.sender !== window.webContents) return;
     chromeOverPlate = over === true;
@@ -452,10 +468,17 @@ function registerHostIpc(): void {
 }
 
 async function createWindow(): Promise<void> {
+  applyHostTheme(themePreference, false);
   const palette = themePalette(resolvedTheme);
   window = new BrowserWindow({
-    width: 1440,
-    height: 900,
+    /*
+     * Measured off a running window rather than picked: 1200 × 790 is the size the app is
+     * actually worked at. Unlike the 1440 × 900 it replaces, it also fits inside the work area
+     * of a 1920 × 1080 laptop at 125 % scaling, about 1536 × 816, so the window opens at its own
+     * default there instead of at whatever the screen cut it down to.
+     */
+    width: 1200,
+    height: 790,
     minWidth: 1024,
     minHeight: 640,
     icon: appIcon,
@@ -478,8 +501,6 @@ async function createWindow(): Promise<void> {
       plugins: true,
       additionalArguments: [
         `--arke-app-version=${__APP_VERSION__}`,
-        `--arke-theme-preference=${themePreference}`,
-        `--arke-resolved-theme=${resolvedTheme}`,
       ],
     },
   });
@@ -595,10 +616,11 @@ async function initialize(): Promise<{ port: number }> {
    */
   const hostSettings = new AppSettingsFile(join(appRoot, "settings.json"));
   const storedHarness = (await hostSettings.load().catch(() => null))?.harness ?? null;
-  const chosenHarness = storedHarness?.engine ?? "opencode";
+  const chosenHarness = effectiveHarnessEngine(storedHarness?.engine ?? "opencode", process.env["ARKE_HARNESS"]);
 
   const wiring = await assembleHarness({
     appRoot,
+    engine: chosenHarness,
     deps: { ledger: childLedger },
     preferV1: process.env["ARKE_OPENCODE_GENERATION"] === "v1",
     v1: {
@@ -614,7 +636,7 @@ async function initialize(): Promise<{ port: number }> {
     claude: {
       // Settings is the way in. ARKE_HARNESS stays as a developer override so a branch can be
       // tried without writing to somebody's real settings file, and it wins where both are set.
-      enabled: process.env["ARKE_HARNESS"] === "claude" || chosenHarness === "claude",
+      enabled: chosenHarness === "claude",
       // The chosen path is used at launch too, or Settings verifies one binary and the
       // lane runs another — the confinement probe would then have proved nothing.
       ...(process.env["ARKE_CLAUDE_CMD"]
@@ -622,6 +644,11 @@ async function initialize(): Promise<{ port: number }> {
         : storedHarness?.claudePath
           ? { configuredPath: storedHarness.claudePath }
           : {}),
+    },
+    codex: {
+      enabled: chosenHarness === "codex",
+      ...(process.env["ARKE_CODEX_CMD"] ?? storedHarness?.codexPath
+        ? { configuredPath: process.env["ARKE_CODEX_CMD"] ?? storedHarness!.codexPath! } : {}),
     },
     onTrace: harnessTrace(appRoot),
   });
@@ -679,11 +706,12 @@ async function initialize(): Promise<{ port: number }> {
    * One implementation, two readers: readiness asks it so a busy machine says so before Generate
    * is pressed, and the dispatch path asks it again after telling the engine to unload.
    */
-  const freeVramMb = (): Promise<number | null> =>
+  const qwenCudaDevice = await detectQwenCudaDevice();
+  const freeVramMb = (model?: string): Promise<number | null> =>
     new Promise((resolve) => {
       execFile(
         "nvidia-smi",
-        ["--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+        cudaFreeMemoryArgs(model === "comfyui-qwen21-image" && comfyUiEngine.engineStatus().source !== "user-url" ? qwenCudaDevice : null),
         { timeout: 5_000, windowsHide: true },
         (err, stdout) => {
           if (err) return resolve(null);
@@ -713,7 +741,8 @@ async function initialize(): Promise<{ port: number }> {
   const comfyUiFetch = createComfyUiFetch((url, init) => fetch(url, init));
   const comfyUiDigests = new ComfyUiDigestCache(appRoot);
 
-  const comfyUiEngine = new ComfyUiEngineService({
+  const qwenProfile = qwenEngineProfile(app.isPackaged ? join(process.resourcesPath, "comfyui-nodes") : join(repoRoot, "vendor", "comfyui"), qwenCudaDevice);
+  const comfyUiEngine = new ProfiledComfyUiEngineService({
     freeVramMb,
     freeMemMb,
     appRoot,
@@ -725,6 +754,7 @@ async function initialize(): Promise<{ port: number }> {
       minEngineVersion: recipe.engine.minVersion,
       exercisedThroughVersion: recipe.engine.exercisedThroughVersion,
       minVramMb: recipe.hardware.minVramMb,
+      ...(recipe.hardware.accelerator ? { accelerator: recipe.hardware.accelerator } : {}),
       minFreeVramMb: recipe.hardware.minFreeVramMb,
       ...(recipe.hardware.minMemMb !== undefined ? { minMemMb: recipe.hardware.minMemMb } : {}),
       ...(recipe.hardware.minFreeMemMb !== undefined ? { minFreeMemMb: recipe.hardware.minFreeMemMb } : {}),
@@ -764,7 +794,7 @@ async function initialize(): Promise<{ port: number }> {
     },
     registerSupervisorExitBackstop: (supervisor) => registerExitBackstop(supervisor),
     createProcessEpoch: () => randomUUID(),
-  });
+  }, qwenProfile.model, qwenProfile.launch);
   // Per-recipe weight entries for setup (SPEC-021 §2.4): derived from the provider layer's
   // recipe facts so the digests live in exactly one place, landing in the engine's own models
   // folder through the coordinator's external-dir resolver.
@@ -794,7 +824,9 @@ async function initialize(): Promise<{ port: number }> {
     voxaTranscribe: (input, options) => voxaClient.transcribe(input.audio, input.contentType, options),
     comfyui: {
       fetch: comfyUiFetch,
-      baseUrl: () => comfyUiEngine.baseUrl(),
+      baseUrl: (model) => comfyUiEngine.baseUrl(model),
+      allBaseUrls: () => comfyUiEngine.baseUrls(),
+      isEndpointGone: url => comfyUiEngine.isManagedEndpointGone(url),
       preflight: (recipeId) => comfyUiEngine.preflight(recipeId),
       locality: () => comfyUiEngine.engineStatus().locality,
       // The engine says what it is doing only on its socket (SPEC-021 D16). Node's own
@@ -937,7 +969,7 @@ async function initialize(): Promise<{ port: number }> {
     { ledger: childLedger },
   );
   voxaSupervisorRef = voxaSupervisor;
-  registerExitBackstop(opencodeSupervisor, voxaSupervisor);
+  registerExitBackstop(...(opencodeSupervisor ? [opencodeSupervisor] : []), voxaSupervisor);
   const voxaSidecar = {
     /*
      * The catalogue asks this before offering a voice (2026-08-24), so it has to be here and not
@@ -950,8 +982,11 @@ async function initialize(): Promise<{ port: number }> {
     health: () =>
       voxaSelection.command === null || !voxaRequestsEnabled ? Promise.resolve(null) : voxaClient.health(),
     listVoices: () => voxaClient.listVoices(),
-    synthesize: (input: { voiceId: string; text: string; params?: Record<string, number> }) =>
-      voxaClient.synthesize(input),
+    // The caller's signal travels with the request (codex on PR 1183): a stopped audiobook run
+    // or a cancelled performance ends the Voxa request, and the client's own waiter, rather
+    // than leaving the engine to finish a paragraph nobody is waiting for.
+    synthesize: (input: { voiceId: string; text: string; params?: Record<string, number> }, options?: { signal?: AbortSignal }) =>
+      voxaClient.synthesize(input, options ?? {}),
     transcribe: (audio: Uint8Array, contentType: string) => voxaClient.transcribe(audio, contentType),
   };
 
@@ -1104,7 +1139,7 @@ async function initialize(): Promise<{ port: number }> {
   });
 
   const transportToken = randomBytes(32).toString("hex");
-  coordinator = new Coordinator({
+  const studioHost = createStudioHost({
     transportAuth: { token: transportToken, allowedOrigins: desktopTransportOrigins(process.env.ARKE_DEV_SERVER_URL) },
     provider,
     adapter,
@@ -1120,6 +1155,9 @@ async function initialize(): Promise<{ port: number }> {
     sampleWorldPath: app.isPackaged ? join(process.resourcesPath, "sample-world") : null,
     authoring: { agentForPurpose, roster: ROSTER, skillFor },
     ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
+    harnessLaunchEngine: chosenHarness,
+    ...(wiring.unavailableReason ? { harnessUnavailableReason: wiring.unavailableReason } : {}),
+    ...(process.env["ARKE_HARNESS"] === chosenHarness ? { harnessEngineOverride: chosenHarness } : {}),
     // Stored LLM keys reach the harness as spawn environment (SPEC-005 D5) — under v2's
     // redirected profile this is the only credential path there is (issue 327 §2).
     relaunchHarness: wiring.relaunchHarness,
@@ -1164,7 +1202,20 @@ async function initialize(): Promise<{ port: number }> {
       return result.canceled ? null : (result.filePaths[0] ?? null);
     },
     // Only the harnesses that can be absent — OpenCode is in the installer beside this process.
-    detectHarnesses: async (configuredPath) => [
+    chooseCodexExecutable: async () => {
+      const parent = window;
+      if (!parent) return null;
+      const result = await dialog.showOpenDialog(parent, {
+        title: process.platform === "win32" ? "Choose the Codex executable (.exe)" : "Choose the Codex executable",
+        buttonLabel: "Use this Codex",
+        properties: ["openFile"],
+        filters: process.platform === "win32"
+          ? [{ name: "Codex executable", extensions: ["exe"] }]
+          : [{ name: "All files", extensions: ["*"] }],
+      });
+      return result.canceled ? null : (result.filePaths[0] ?? null);
+    },
+    detectHarnesses: async (configuredPath, codexPath) => [
       await describeClaudeAvailability(
         // The user's choice first; the developer override still wins where it is set.
         process.env["ARKE_CLAUDE_CMD"]
@@ -1172,6 +1223,10 @@ async function initialize(): Promise<{ port: number }> {
           : configuredPath
             ? { configuredPath }
             : {},
+      ),
+      await describeCodexAvailability(
+        process.env["ARKE_CODEX_CMD"] ?? codexPath
+          ? { configuredPath: process.env["ARKE_CODEX_CMD"] ?? codexPath! } : {},
       ),
     ],
     dispatchClients: providerClients,
@@ -1253,6 +1308,30 @@ async function initialize(): Promise<{ port: number }> {
       ...nodeSetupDeps(),
       externallyPresent: async (entryId) =>
         entryId === "comfyui-runtime" ? comfyUiEngine.externallySelected() : false,
+    },
+    // Breeze and Fish keep a cloned voice on the account — a slot, a model; the library asks for
+    // it here (SPEC-046 R-13). A reader whose client carries no slot calls keeps none.
+    hostedVoiceSlots: {
+      save: (provider, key, input, signal) => {
+        const client = providerClients[provider as ProviderId] as Partial<VoiceSlotClient> | undefined;
+        if (client?.saveVoice === undefined) return Promise.reject(new Error(`${provider} keeps no voice slots`));
+        return client.saveVoice(key, input, signal);
+      },
+      remove: (provider, key, voiceId, signal) => {
+        const client = providerClients[provider as ProviderId] as Partial<VoiceSlotClient> | undefined;
+        if (client?.deleteVoice === undefined) return Promise.resolve();
+        return client.deleteVoice(key, voiceId, signal);
+      },
+      find: (provider, key, name, signal) => {
+        const client = providerClients[provider as ProviderId] as Partial<VoiceSlotClient> | undefined;
+        if (client?.findVoice === undefined) return Promise.resolve(null);
+        return client.findVoice(key, name, signal);
+      },
+      has: (provider, key, voiceId, signal) => {
+        const client = providerClients[provider as ProviderId] as Partial<VoiceSlotClient> | undefined;
+        if (client?.hasVoice === undefined) return Promise.resolve(false);
+        return client.hasVoice(key, voiceId, signal);
+      },
     },
     comfyui: {
       service: comfyUiEngine,
@@ -1348,6 +1427,25 @@ async function initialize(): Promise<{ port: number }> {
           provider: "elevenlabs",
           list: (key: string) => (providerClients.elevenlabs as VoiceCatalogueClient).listVoicesCatalog(key),
         },
+        // The hosted readers' own presets (SPEC-046 R-32): Voxtral's thirty, Breeze's ranked first page.
+        {
+          provider: "mistral",
+          list: (key: string) => (providerClients.mistral as VoiceCatalogueClient).listVoicesCatalog(key),
+        },
+        {
+          provider: "breezeblue",
+          list: (key: string) => (providerClients.breezeblue as VoiceCatalogueClient).listVoicesCatalog(key),
+        },
+        {
+          provider: "fishaudio",
+          list: (key: string) => (providerClients.fishaudio as VoiceCatalogueClient).listVoicesCatalog(key),
+        },
+      ],
+      // And the library's own voices read through them (R-10), when keyed.
+      hostedReaders: [
+        { provider: "mistral", model: VOXTRAL_MODEL },
+        { provider: "breezeblue", model: BREEZE_MODEL },
+        { provider: "fishaudio", model: FISH_MODEL },
       ],
     },
     observeEvent: (event) => {
@@ -1355,14 +1453,16 @@ async function initialize(): Promise<{ port: number }> {
       if (event.type === "appearance.changed") applyHostTheme(event.preference);
     },
   });
+  coordinator = studioHost.coordinator;
+  studioServer = studioHost.server;
   startupProvider = null;
 
   // Both children are allowed to be absent: the app opens, browses and navigates regardless,
   // and the affected features carry a stated reason (R-6).
-  coordinator.superviseAs("harness", opencodeSupervisor);
+  if (opencodeSupervisor) coordinator.superviseAs("harness", opencodeSupervisor);
   coordinator.superviseAs("voice", voxaSupervisor);
 
-  const { port } = await coordinator.start(0);
+  const { port } = await studioServer.start(0);
   transportSession = { port, token: transportToken };
   void updateController.initialize();
   backgroundNotifications.arm(coordinator.getState());
@@ -1383,7 +1483,7 @@ async function shutdownConfirmed(): Promise<void> {
   backgroundNotifications.stop();
   const stop = (async () => {
     try {
-      await (coordinator?.stop() ?? startupProvider?.close() ?? Promise.resolve());
+      await (studioServer?.stop() ?? startupProvider?.close() ?? Promise.resolve());
     } finally {
       await closeProviderTransport();
     }
@@ -1419,9 +1519,10 @@ if (!gotLock) {
     startupController = new StartupController({
       initialize,
       cleanup: async () => {
-        const started = coordinator;
+        const started = studioServer;
         const provider = startupProvider;
         coordinator = null;
+        studioServer = null;
         startupProvider = null;
         try {
           if (started) await started.stop();

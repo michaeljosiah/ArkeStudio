@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
+import { parseHTML } from "linkedom";
+import { ImageDialog } from "../src/components/image-dialog.js";
 import { App } from "../src/App.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -14,13 +15,13 @@ import { FIXTURE_STATE } from "./fixture-state.js";
  * A world image opens larger where it stands.
  *
  * Three screens had grown their own copy of this and they had drifted: one disabled its trigger
- * until the picture loaded, two did not. These assertions are mostly about there being one
- * implementation, because that is the property that decays.
+ * until the picture loaded, two did not. What is asserted is the rendered trigger on each screen
+ * that has one — disabled until the picture arrives, absent where the photo is a way in rather
+ * than a thing to look at. Whether the dialog is implemented once is a matter for review, not a
+ * grep of the source for `showModal()`.
  */
 
 __setStateForTest(FIXTURE_STATE);
-
-const here = dirname(fileURLToPath(import.meta.url));
 
 function renderAt(path: string): string {
   return renderToString(
@@ -30,43 +31,9 @@ function renderAt(path: string): string {
   );
 }
 
-function count(haystack: string, needle: string): number {
-  return haystack.split(needle).length - 1;
-}
-
 const W = `/w/${FIXTURE_WORLD_ID}`;
 
 describe("image dialog", () => {
-  it("is implemented once", () => {
-    // A <dialog> anywhere but the shared component means a fourth copy is growing.
-    for (const file of ["screens/world.tsx", "screens/character-reference.tsx"]) {
-      const source = readFileSync(join(here, "../src", file), "utf8");
-      assert.equal(
-        count(source, "showModal()"),
-        0,
-        `${file} should open images through ImageDialog, not its own <dialog>`,
-      );
-    }
-    const shared = readFileSync(join(here, "../src/components/image-dialog.tsx"), "utf8");
-    assert.ok(shared.includes("showModal()"), "the shared component is the one that opens it");
-  });
-
-  it("returns focus to the trigger when it closes", () => {
-    const shared = readFileSync(join(here, "../src/components/image-dialog.tsx"), "utf8");
-    assert.ok(
-      shared.includes("onClose={() => trigger.current?.focus()}"),
-      "closing a dialog that dropped focus leaves the keyboard at the top of the document",
-    );
-  });
-
-  it("dismisses on a backdrop click", () => {
-    const shared = readFileSync(join(here, "../src/components/image-dialog.tsx"), "utf8");
-    assert.ok(
-      shared.includes("event.target === event.currentTarget"),
-      "a click on the dialog itself rather than its panel is the backdrop",
-    );
-  });
-
   it("will not offer to enlarge a picture that has not arrived", () => {
     // Nothing has loaded in a server render, so no trigger may offer to enlarge anything yet.
     const html = renderAt(`${W}/cast/maren-kest/kit`);
@@ -74,40 +41,6 @@ describe("image dialog", () => {
     assert.ok(at > 0, "the trigger is rendered");
     const tag = html.slice(html.lastIndexOf("<button", at), html.indexOf(">", at) + 1);
     assert.match(tag, /\bdisabled\b/, "the trigger waits for the image");
-  });
-
-  /*
-   * Availability belongs to a picture, not to the component.
-   *
-   * It used to be a bare boolean reset by an effect, which raced the load it was guarding: a
-   * cached image settles during the first paint and the effect's mount pass then cleared it, so
-   * the character detail page's main photo — preloaded by the cast page it is reached from — was
-   * never clickable at all. Keying it to the subject decides the same thing during render, and
-   * still cannot enable for the previous picture, because the key changes with the path.
-   */
-  it("tracks which picture arrived rather than that one did", () => {
-    const shared = readFileSync(join(here, "../src/components/image-dialog.tsx"), "utf8");
-    assert.ok(shared.includes("disabled={!available}"), "the trigger waits for the image");
-    assert.match(
-      shared,
-      /const available = loaded === subject/,
-      "availability is compared against the picture on screen now",
-    );
-    assert.match(shared, /const subject = `\$\{worldSlug \?\? ""\}\|\$\{path\}`/, "and the subject is that path");
-    assert.ok(
-      !/useEffect/.test(shared),
-      "with no effect left to race the load it guards",
-    );
-  });
-
-  /*
-   * The other half of the same bug lives in Portrait: a load event that has already fired never
-   * fires again, so an image the browser had cached reported nothing at all.
-   */
-  it("reads availability off a cached image as well as listening for it", () => {
-    const portrait = readFileSync(join(here, "../src/components/portrait.tsx"), "utf8");
-    assert.match(portrait, /node\.complete/, "an image that already finished is asked directly");
-    assert.match(portrait, /node\.naturalWidth > 0/, "and a broken one is not mistaken for a loaded one");
   });
 
   /*
@@ -138,5 +71,66 @@ describe("image dialog", () => {
       html.includes('aria-label="View larger character sheet for Maren Kest"'),
       "and so does the sheet beside it, which already did",
     );
+  });
+
+  /*
+   * Availability belongs to a picture, not to the component.
+   *
+   * It used to be a bare boolean reset by an effect, which raced the load it was guarding: a
+   * cached image settles during the first paint and the effect's mount pass then cleared it, so
+   * the character detail page's main photo — preloaded by the cast page it is reached from — was
+   * never clickable at all. Keying it to the subject decides the same thing during render, and
+   * still cannot enable for the previous picture, because the key changes with the path.
+   */
+  it("enables for a picture that was already complete when it mounted, not for the next one until it is, and opens and closes from its own controls", async () => {
+    const dom = parseHTML("<!doctype html><html><body></body></html>");
+    Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }), innerWidth: 1024, innerHeight: 768 });
+    Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Node: dom.Node, Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true });
+    // What the browser reports for an image the cache already had: complete, with a size, before
+    // React can attach onLoad — and no load event to come.
+    const image = Object.getPrototypeOf(dom.document.createElement("img")) as object;
+    let cached = true;
+    // linkedom's <dialog> has neither method; a browser's close() ends in a `close` event.
+    Object.assign(dom.HTMLElement.prototype, {
+      showModal(this: HTMLDialogElement) { (this as { open: boolean }).open = true; },
+      close(this: HTMLDialogElement) { (this as { open: boolean }).open = false; this.dispatchEvent(new dom.window.Event("close")); },
+    });
+    Object.defineProperty(image, "complete", { configurable: true, get: () => cached });
+    Object.defineProperty(image, "naturalWidth", { configurable: true, get: () => (cached ? 640 : 0) });
+    const host = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(host);
+    const root = createRoot(host);
+    const render = (path: string) => act(async () => root.render(<ImageDialog worldSlug="w" path={path} label="Maren" title="Maren" triggerLabel="View larger main photo of Maren" triggerClassName="fy-portrait-trigger" />));
+    const trigger = () => host.querySelector<HTMLButtonElement>('button[aria-haspopup="dialog"]')!;
+    try {
+      await render("cast/maren/main.png");
+      assert.equal(trigger().disabled, false, "a cached picture is available at once, with no load event");
+      // The next picture is not cached: the trigger must not stay enabled on the strength of the last one.
+      cached = false;
+      await render("cast/maren/sheet.png");
+      assert.equal(trigger().disabled, true, "a new subject starts unavailable");
+      await act(async () => host.querySelector("img")!.dispatchEvent(new dom.window.Event("load")));
+      assert.equal(trigger().disabled, false, "and becomes available when its own load arrives");
+
+      // Open it, then out again by the backdrop and by the button; the keyboard comes back to the trigger each time.
+      let focused = 0;
+      trigger().focus = () => { focused += 1; };
+      const dialog = () => host.querySelector<HTMLDialogElement>("dialog.fy-portrait-dialog")!;
+      await act(async () => trigger().click());
+      assert.equal(dialog().open, true, "the trigger opens the enlarged copy");
+      await act(async () => dialog().dispatchEvent(new dom.window.Event("click", { bubbles: true })));
+      assert.equal(dialog().open, false, "a click on the dialog itself — the backdrop — closes it");
+      assert.equal(focused, 1, "and focus returns to the trigger");
+      await act(async () => trigger().click());
+      await act(async () => dialog().querySelector<HTMLElement>(".fy-portrait-dialog__panel")!.dispatchEvent(new dom.window.Event("click", { bubbles: true })));
+      assert.equal(dialog().open, true, "a click inside the panel does not");
+      await act(async () => dialog().querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click());
+      assert.equal(dialog().open, false, "the close button does");
+      assert.equal(focused, 2);
+    } finally {
+      await act(async () => root.unmount());
+      delete (image as { complete?: unknown }).complete;
+      delete (image as { naturalWidth?: unknown }).naturalWidth;
+    }
   });
 });

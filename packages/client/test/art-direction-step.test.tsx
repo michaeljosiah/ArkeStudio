@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
@@ -14,12 +11,14 @@ import { proposedMasterLookNote, splitDescription } from "../src/screens/art-dir
 import { authoredPrompt } from "../src/components/generation-dialog.js";
 import { NewWorldScreen } from "../src/screens/shell.js";
 import { App } from "../src/App.js";
-import { worldImagePrompt, type BuildReview, type ClientMessage, type GenesisBlueprint } from "@arke-studio/contracts";
+import { reviewPrompt, worldImagePrompt, type BuildReview, type ClientMessage, type GenesisBlueprint } from "@arke-studio/contracts";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
+const scrolled: HTMLElement[] = [];
+dom.HTMLElement.prototype.scrollIntoView = function () { scrolled.push(this); };
 Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }) });
 Object.assign(globalThis, {
   window: dom.window,
@@ -88,9 +87,16 @@ describe("the art-direction step of genesis", () => {
     assert.ok(html.includes("Begin in this world"));
   });
 
-  it("promises the step rather than springing it, so Begin is not a surprise", () => {
+  /*
+   * The door used to promise the look step in a sentence under Begin. Turn 69: a screen labels,
+   * it does not explain (issue 1008). The step itself is unchanged — Begin still opens it, which
+   * is what the tests below hold — and the rail's own heading is what names it.
+   */
+  it("does not narrate the step it is about to open", () => {
     __setStateForTest(FIXTURE_STATE);
-    assert.ok(render().includes("One more question"));
+    const html = render();
+    assert.ok(!html.includes("One more question"));
+    assert.ok(html.includes("Begin in this world"), "the press that opens it is still there");
   });
 });
 
@@ -244,15 +250,54 @@ describe("the chat-to-build handoff (issue 666)", () => {
   it("treats Begin as approval of the look already proposed in conversation", async () => {
     const mounted = await mountGenesis(genesisBlueprint("Ink-washed miniatures under cold harbor light."), BUILD_REVIEW);
     try {
+      scrolled.length = 0;
       await act(async () => button(mounted.container, "Begin in this world").click());
+      assert.equal(scrolled.length, 1, "the pending card is brought into view");
+      assert.ok(scrolled[0]?.querySelector(".fy-actioncard"));
+      assert.ok(mounted.container.querySelector(".fy-working__elapsed"), "sizing shows elapsed time");
+      assert.equal(mounted.container.querySelector(".fy-cx__busy")?.textContent, "sizing the build…");
       assert.ok(mounted.container.textContent?.includes("sizing the build"), "a cached review is not actionable");
       assert.ok(!mounted.container.textContent?.includes("Build Glass Harbor"));
       await answerPlan(mounted);
+      assert.equal(scrolled.length, 2, "the completed card is brought into view too");
+      assert.equal(mounted.container.querySelector(".fy-cx__busy"), null);
+      assert.equal(mounted.container.querySelector(".fy-working"), null);
       assert.ok(mounted.container.textContent?.includes("One press makes Glass Harbor."), "the final build review opens");
+      // A card in the thread, not a route of its own (issue 920): the conversation that reached
+      // the decision stays on screen under it.
+      assert.ok(mounted.container.textContent?.includes("A drowned city."), "the review is a card in the conversation");
+      assert.ok(button(mounted.container, "Begin in this world").disabled, "the card is the control while it is open");
       assert.ok(
         !mounted.container.textContent?.includes("The conversation proposed this look."),
         "the duplicate words confirmation is skipped",
       );
+      await act(async () => button(mounted.container, "Not yet").click());
+      assert.ok(!mounted.container.textContent?.includes("One press makes Glass Harbor."), "set aside, the card goes");
+      assert.equal(button(mounted.container, "Begin in this world").disabled, false);
+    } finally {
+      await unmountGenesis(mounted);
+    }
+  });
+
+  it("clears sizing on refusal or dismissal and ignores a dismissed result", async () => {
+    const mounted = await mountGenesis(genesisBlueprint("Ink-washed miniatures."));
+    try {
+      await act(async () => button(mounted.container, "Begin in this world").click());
+      scrolled.length = 0;
+      await emitBuildPlan(latestPlanRequest(mounted).requestId, null, "The plan could not be sized.");
+      assert.equal(scrolled.length, 1, "the refusal is brought into view");
+      assert.ok(scrolled[0]?.textContent?.includes("The plan could not be sized."));
+      assert.equal(mounted.container.querySelector(".fy-cx__busy"), null);
+      await act(async () => button(mounted.container, "Not yet").click());
+      await act(async () => button(mounted.container, "Begin in this world").click());
+      const request = latestPlanRequest(mounted);
+      await act(async () => button(mounted.container, "Not yet").click());
+      assert.equal(mounted.container.querySelector(".fy-working"), null);
+      assert.equal(mounted.container.querySelector(".fy-cx__busy"), null);
+      scrolled.length = 0;
+      await emitBuildPlan(request.requestId, BUILD_REVIEW);
+      assert.equal(scrolled.length, 0, "a dismissed reply cannot move the author's view");
+      assert.equal(mounted.container.querySelector(".fy-actioncard[aria-label='Build Glass Harbor']"), null);
     } finally {
       await unmountGenesis(mounted);
     }
@@ -271,7 +316,7 @@ describe("the chat-to-build handoff (issue 666)", () => {
     }
   });
 
-  it("uses a conversational look that changed after returning to chat", async () => {
+  it("follows a conversational look that changed under the open card", async () => {
     const firstLook = "Ink-washed miniatures under cold harbor light.";
     const latestLook = "Charcoal silhouettes against a warm harbor dawn.";
     const mounted = await mountGenesis(genesisBlueprint(firstLook));
@@ -279,7 +324,9 @@ describe("the chat-to-build handoff (issue 666)", () => {
       await act(async () => button(mounted.container, "Begin in this world").click());
       const firstRequest = latestPlanRequest(mounted);
       assert.equal(firstRequest.look, firstLook);
-      await act(async () => button(mounted.container, "Back to chat").click());
+      // The card sits in the thread, so the conversation can move under it. A blueprint that
+      // changed is what the press would be refused for, so the plan is asked again — with the
+      // look the conversation now proposes, not the one it proposed before.
       await act(async () => {
         __applyEventForTest({
           type: "genesis.blueprint",
@@ -288,8 +335,8 @@ describe("the chat-to-build handoff (issue 666)", () => {
           blueprint: genesisBlueprint(latestLook),
         });
       });
-      await act(async () => button(mounted.container, "Begin in this world").click());
       const latestRequest = latestPlanRequest(mounted);
+      assert.notEqual(latestRequest.requestId, firstRequest.requestId, "the moved blueprint is sized again");
       assert.equal(latestRequest.look, latestLook);
       await emitBuildPlan(latestRequest.requestId, BUILD_REVIEW);
       await emitBuildPlan(firstRequest.requestId, { ...BUILD_REVIEW, worldName: "Old Harbor" });
@@ -306,12 +353,16 @@ describe("the chat-to-build handoff (issue 666)", () => {
       await act(async () => button(mounted.container, "Begin in this world").click());
       await answerPlan(mounted);
       await act(async () => button(mounted.container, "Build Glass Harbor").click());
-      assert.equal(button(mounted.container, "Back to chat").disabled, true, "the authorized blueprint cannot change");
+      // The composer is the way the blueprint could change now that the card is in the thread,
+      // so it is the thing the press locks.
+      assert.ok(mounted.container.textContent?.includes("founding the world…"), "the authorized blueprint cannot change");
       assert.ok(mounted.container.textContent?.includes("Building…"), "the accepted review remains visible while it starts");
+      assert.equal(button(mounted.container, "Not yet").disabled, true);
       const beginRequest = latestBeginRequest(mounted);
       await emitBuildPlan(beginRequest.requestId, null, "the blueprint changed; review it again");
       assert.ok(mounted.container.textContent?.includes("the blueprint changed; review it again"));
-      assert.equal(button(mounted.container, "Back to chat").disabled, false, "a refused build releases navigation");
+      assert.ok(!mounted.container.textContent?.includes("founding the world…"), "a refused build releases the conversation");
+      assert.equal(button(mounted.container, "Not yet").disabled, false);
     } finally {
       await unmountGenesis(mounted);
     }
@@ -440,6 +491,13 @@ function renderArtDirection(world: Partial<typeof WORLD> = {}): string {
 }
 
 describe("key art on the art-direction page (design 64)", () => {
+  it("names unavailable look history while keeping the art-direction page usable", () => {
+    const message = "History for art direction, version 1, is unavailable. The current record is usable.";
+    const html = renderArtDirection({ problems: [{ path: ".history/art-direction/v1.json", message }] });
+    assert.ok(html.includes(message));
+    assert.match(html, /WORLD KEY ART/);
+  });
+
   it("gives key art a frame and two doors of its own", () => {
     const html = renderArtDirection({ keyArt: "world-art.png" });
     assert.match(html, /WORLD KEY ART/, "it is named, so which picture you are looking at is never a guess");
@@ -469,9 +527,32 @@ describe("key art on the art-direction page (design 64)", () => {
     assert.match(html.slice(to), /world-art\.png/);
   });
 
-  it("says which of the two it is, and that this one is never sent to a model", () => {
+  /*
+   * The distinction between the two pictures is the page's whole structure, and it used to be
+   * argued for in a paragraph as well — about a hundred words of rationale on a screen whose
+   * subject is two frames (issue 1008). The frames are labelled; the argument is the dv-rule's.
+   */
+  it("names each of the two pictures, and argues for neither", () => {
     const html = renderArtDirection({ keyArt: "world-art.png" });
-    assert.match(html, /Nothing sends it to a model/i, "the distinction that governs everything else");
+    assert.match(html, /WORLD KEY ART/, "the second picture is named");
+    assert.match(html, /Master look|NO MASTER LOOK/, "and so is the first");
+    assert.doesNotMatch(html, /Nothing sends it to a model/i, "without the paragraph explaining why");
+  });
+
+  /*
+   * The one thing this page owes that is not a label (SPEC-017 §2.5, codex round four). A
+   * reference carries its subject as well as its treatment, so a look with a face in it arrives
+   * in other characters' work — and §2.5 puts that on this surface by name, because this is the
+   * surface with Upload on it, the one path that can put a portrait here without a dialog.
+   */
+  it("says a plate is safer than a portrait, whether or not the look is derived", () => {
+    for (const bundle of [
+      { keyArt: "world-art.png" },
+      { keyArt: "world-art.png", artDirection: { ...WORLD.artDirection, derived: true } },
+    ]) {
+      const html = renderArtDirection(bundle);
+      assert.match(html, /A plate travels safely\. A face travels with it\./, "SPEC-017 §2.5");
+    }
   });
 
   /*
@@ -631,18 +712,93 @@ describe("location views ask in the dialog (design 66)", () => {
     assert.ok(dialog.includes("An angle needs a name"), "and says so while it is empty");
   });
 
-  it("lets the camera line be empty, because the brief is composed without it", () => {
+  it("lets the camera line be empty, because the brief is composed without it", async () => {
     // The one surface where the prompt adds to a brief rather than being it. Refusing an empty
-    // box here would demand a sentence nobody needs to write.
-    const shared = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), "../src/components/generation-dialog.tsx"),
-      "utf8",
-    );
-    assert.match(shared, /!promptOptional && prompt\.trim\(\)\.length === 0/, "the block is opt-out, not removed");
-    const locations = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), "../src/screens/location-reference.tsx"),
-      "utf8",
-    );
-    assert.match(locations, /promptOptional/, "and location views are the surface that opts out");
+    // box here would demand a sentence nobody needs to write. Mounted, with the angle named and
+    // the camera line left blank, Generate stays available; the hint says why.
+    Object.assign(dom.HTMLElement.prototype, { showModal() {}, close() {} });
+    __setStateForTest(FIXTURE_STATE);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => root.render(<MemoryRouter initialEntries={[`/w/${WORLD_ID}/locations/the-vigil/reference`]}><App /></MemoryRouter>));
+      const dialog = container.querySelector<HTMLElement>("dialog.fy-gendialog")!;
+      assert.ok(dialog, "the view dialog is on the page");
+      assert.ok(dialog.textContent?.includes("Optional. The place, its look and the angle's name are sent whether or not you write here."));
+      const generate = () => [...dialog.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "Generate")!;
+      assert.equal(generate().disabled, true, "an angle needs a name");
+      const name = dialog.querySelector<HTMLInputElement>(".fy-locref__namefield input")!;
+      const props = (name as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[Object.keys(name).find((k) => k.startsWith("__reactProps$"))!]!;
+      await act(async () => props.onChange({ target: { value: "From the seaward stair" } }));
+      assert.equal(dialog.querySelector("textarea")?.value ?? "", "", "the camera line is still blank");
+      assert.equal(generate().disabled, false, "and that is not what stops a generation here");
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      __setStateForTest(FIXTURE_STATE);
+    }
   });
+
+});
+
+describe("a character who is never depicted (issue 945)", () => {
+  /*
+   * A character the author ruled out is not waiting for anything (issue 945). The build card
+   * already says "never depicted"; the rail said "no face yet", which promises the picture the
+   * rule forbids — and the two sat on screen together.
+   */
+  it("says a never-depicted character is never depicted, not that a face is coming", async () => {
+    const mounted = await mountGenesis({
+      ...genesisBlueprint(),
+      characters: [
+        { name: "Boma Abbey", slug: "boma-abbey", description: "Sixteen, and she has started answering." },
+        { name: "Ibinabo", slug: "ibinabo", description: "A voice on a band that carries no station.", neverDepicted: true },
+      ],
+    });
+    try {
+      const text = mounted.container.textContent ?? "";
+      assert.ok(text.includes("sketch · never depicted"), "the ruled-out character says the rule");
+      assert.ok(text.includes("sketch · no face yet"), "an ordinary character still awaits its face");
+      assert.equal(
+        (text.match(/no face yet/g) ?? []).length,
+        1,
+        "only the character without the rule is told a face is coming",
+      );
+    } finally {
+      await unmountGenesis(mounted);
+    }
+  });
+
+});
+
+it("keeps key-art metadata at the editor and shows review only after a draft", async () => {
+  Object.assign(dom.HTMLElement.prototype, { showModal() {}, close() {} });
+  const prompt="A quiet harbour.",candidate="A quiet neon harbour.";
+  const plan={requestId:"review-test",prompt,carried:[],dropped:[],sources:[],fixedConstraints:"No text, no logos."};
+  __setStateForTest(FIXTURE_STATE,{keyArtPlans:{[WORLD_ID]:plan}});
+  const container=document.createElement("div"); document.body.append(container);
+  const root=createRoot(container);
+  try {
+    await act(async()=>{root.render(<MemoryRouter initialEntries={[`/w/${WORLD_ID}/art-direction`]}><App/></MemoryRouter>);});
+    await act(async()=>{await new Promise(resolve=>setTimeout(resolve,25));});
+    const dialog=[...container.querySelectorAll("dialog")].find(d=>d.textContent?.includes("Generate the world's key art"))!;
+    assert.ok(dialog);
+    assert.equal(dialog.querySelector('.fy-gendialog__count')?.textContent,String(Array.from(prompt).length));
+    assert.match(dialog.querySelector('.fy-gendialog__info')?.getAttribute('title')??"",/No text, no logos/);
+    assert.doesNotMatch(dialog.textContent??"",/No textual changes|Unverified means|Change:|Fixed constraints:/);
+    assert.equal(dialog.querySelector('[aria-label="Creative prompt diff"]'),null);
+    const review=await reviewPrompt(prompt,candidate,[]);
+    await act(async()=>{__setStateForTest(FIXTURE_STATE,{keyArtPlans:{[WORLD_ID]:{...plan,candidate,review}}});});
+    assert.ok(dialog.querySelector('[aria-label="Creative prompt diff"]'));
+    assert.match(dialog.querySelector('abbr')?.getAttribute('title')??"",/does not mean false/);
+    assert.doesNotMatch(dialog.textContent??"",/Unverified means/);
+    assert.equal(dialog.querySelectorAll('ins').length,0,"detail rows start collapsed");
+    const disclosure=dialog.querySelector('.fy-prompt-review details')!;
+    await act(async()=>{(disclosure as HTMLDetailsElement).open=true;disclosure.dispatchEvent(new Event('toggle'));});
+    assert.ok(dialog.querySelector('ins'),"opening the disclosure shows changes");
+    await act(async()=>button(dialog as HTMLElement,"Use candidate").click());
+    assert.equal(dialog.querySelector('textarea')?.value,candidate);
+    assert.match(dialog.querySelector('.fy-gendialog__count')?.textContent??"",/\+5/);
+  } finally { await act(async()=>root.unmount());container.remove();__setStateForTest(FIXTURE_STATE); }
 });

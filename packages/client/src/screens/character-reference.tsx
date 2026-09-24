@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import {
   compilationIsStale,
   designatedCompilation,
@@ -14,10 +14,11 @@ import {
   type Sheet,
   type Take,
 } from "@arke-studio/contracts";
-import { resolveModel } from "../components/dispatch-bar.js";
+import { resolveModel, worldModel } from "../components/dispatch-bar.js";
 import { authoredPrompt, GenerationDialog } from "../components/generation-dialog.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
-import { Button, Callout, cx } from "../components/ui.js";
+import { Button, Callout, IconButton, cx } from "../components/ui.js";
+import { Upload } from "../components/icons.js";
 import { Loading } from "../components/loading.js";
 import { ImageDialog } from "../components/image-dialog.js";
 import { ImageDownload } from "../components/image-actions.js";
@@ -72,7 +73,7 @@ function CharacterSheetPreview({
   );
 }
 
-function CharacterHeader({ active }: { active: "reference" | "looks" }) {
+export function CharacterHeader({ active }: { active: "reference" | "looks" | "voice" }) {
   const { worldId, sheetId } = useParams();
   const navigate = useNavigate();
   const world = useOpenWorldGuard(worldId);
@@ -124,7 +125,7 @@ function CharacterHeader({ active }: { active: "reference" | "looks" }) {
         </button>
         <button
           type="button"
-          className="fy-seg__item"
+          className={cx("fy-seg__item", active === "voice" && "fy-seg__item--active")}
           onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/voice`)}
         >
           Voice
@@ -154,7 +155,7 @@ export function mainPhotoPromptFor(sheet: Sheet | null | undefined): string {
  * screen could compute "no references" against one model while submitting another.
  */
 function shownImageModel(state: ReturnType<typeof useStore>["state"], chosenId?: string): ManifestModel | null {
-  return resolveModel(state, "image", chosenId).model;
+  return resolveModel(state, "image", chosenId, worldModel(state, "image")).model;
 }
 
 /**
@@ -163,7 +164,27 @@ function shownImageModel(state: ReturnType<typeof useStore>["state"], chosenId?:
  * a model that carries nothing must be refused here, not discovered at dispatch.
  */
 function carriesIdentity(model: ManifestModel | null): boolean {
-  return model !== null && model.unverified !== true && model.accepts.referenceImages > 0;
+  return referenceBudget(model) > 0;
+}
+
+/**
+ * How many images this model will actually carry — the coordinator's `referenceBudgetFor`, read
+ * on this side so the dialog can say what the request would drop.
+ *
+ * Identity is never displaced (`withStaged`): what a surface must carry goes first, and a staged
+ * reference rides only in the room left after it. On a one-slot model that room is nobody's, and
+ * the screen owes that clause before the press rather than after the spend.
+ */
+function referenceBudget(model: ManifestModel | null): number {
+  return model === null || model.unverified === true ? 0 : model.accepts.referenceImages;
+}
+
+/** The refusal for a staged reference the request will leave behind, or undefined when it rides. */
+function droppedReference(model: ManifestModel | null, carried: number): string | undefined {
+  if (model === null) return undefined;
+  return carried < referenceBudget(model)
+    ? undefined
+    : `${model.displayName} carries ${referenceBudget(model)} image${referenceBudget(model) === 1 ? "" : "s"} — this one is not sent`;
 }
 
 /**
@@ -247,10 +268,15 @@ export function CharacterReferenceScreen() {
       <main className="fy-reference-grid">
         <section className="fy-reference-card">
           <div className="fy-reference-card__image fy-reference-card__image--photo fy-imghost">
+            {/*
+             * "Outstanding" is owed work. A never-depicted character is not waiting for a photo —
+             * the author ruled one out and the build skipped it deliberately (issue 905, issue 945).
+             * Say the rule, not a shortfall.
+             */}
             <ImageDialog
               worldSlug={world.meta.slug}
               path={photo ? `references/${sheetId}/${photo.file}` : ""}
-              label={photo ? `${sheet.name} main photo` : "Main photo outstanding"}
+              label={photo ? `${sheet.name} main photo` : sheet.neverDepicted === true ? "Never depicted" : "Main photo outstanding"}
               title={sheet.name}
               subtitle="main photo"
               triggerLabel={`View larger main photo of ${sheet.name}`}
@@ -269,14 +295,16 @@ export function CharacterReferenceScreen() {
               <h2>Main photo</h2>
               <p>the face and physical identity to preserve</p>
             </div>
-            <Button
-              variant="ghost"
+            {/* Every card carried the same pair of words (issue 1010, U1). Upload is the quiet
+                half — a file from this computer, nothing generated — so it becomes the glyph and
+                the card keeps one named button. */}
+            <IconButton
+              label={photoUploading ? "Uploading…" : canUpload ? "Upload" : UPLOAD_UNAVAILABLE}
               disabled={!canUpload || photoUploading}
-              title={canUpload ? "Use an image from this computer — nothing is generated" : UPLOAD_UNAVAILABLE}
               onClick={() => importMainPhoto(world.meta.worldId, sheetId)}
             >
-              {photoUploading ? "Uploading…" : "Upload"}
-            </Button>
+              {photoUploading ? <Loading inline size={13} /> : <Upload />}
+            </IconButton>
             <Button onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/main-photo`)}>
               {photo ? "Replace" : "Create"}
             </Button>
@@ -320,20 +348,21 @@ export function CharacterReferenceScreen() {
                 world's identity anchor nothing, and waiting on one would be a rule with no
                 purpose behind it. Gated on a generation in flight, though — that one designates
                 itself when it lands, and would quietly replace a sheet uploaded while it ran. */}
-            <Button
-              variant="ghost"
-              disabled={!canUpload || runningSheet || sheetUploading}
-              title={
-                !canUpload
-                  ? UPLOAD_UNAVAILABLE
-                  : runningSheet
-                    ? "A generated sheet is on its way and will take this slot when it lands"
-                    : "Use a composite from this computer — nothing is generated"
+            <IconButton
+              label={
+                sheetUploading
+                  ? "Uploading…"
+                  : !canUpload
+                    ? UPLOAD_UNAVAILABLE
+                    : runningSheet
+                      ? "A generated sheet is on its way"
+                      : "Upload"
               }
+              disabled={!canUpload || runningSheet || sheetUploading}
               onClick={() => importCharacterSheet(world.meta.worldId, sheetId)}
             >
-              {sheetUploading ? "Uploading…" : "Upload"}
-            </Button>
+              {sheetUploading ? <Loading inline size={13} /> : <Upload />}
+            </IconButton>
             <Button disabled={!photo || runningSheet} onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/model-sheet`)}>
               {runningSheet ? "Generating" : compilation ? "Regenerate" : "Generate"}
             </Button>
@@ -511,11 +540,13 @@ export function GenerateCharacterSheetScreen() {
         onPrompt={setStyle}
         onResetPrompt={() => setStyle(null)}
         resetTitle="Back to the world look"
-        promptHint="Inherited from this world. Edit it and this one generation is made under your words instead — the look itself does not change."
         worldSlug={world.meta.slug}
         reference={world.stagedReferences[stagedReferenceKey("character-sheet", sheetId)] ?? null}
-        referenceHint="Optional. A layout, a pose sheet or a style plate to work from. It rides after the main photo, so it is dropped when the model has room for only one image."
+        referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("character-sheet", sheetId), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("character-sheet", sheetId)] ?? ""]?.worldName }}
+        referenceHint="Optional. A layout, a pose sheet, a style plate."
+        {...(droppedReference(chosenModel, 1) !== undefined ? { referenceDropped: droppedReference(chosenModel, 1)! } : {})}
         onAttachReference={() => pickStagedReference(world.meta.worldId, stagedReferenceKey("character-sheet", sheetId))}
+        worldReferences={{ world, model: chosenModel, onChoose: (file) => pickStagedReference(world.meta.worldId, stagedReferenceKey("character-sheet", sheetId), file) }}
         onClearReference={() => clearStagedReference(world.meta.worldId, stagedReferenceKey("character-sheet", sheetId))}
         extra={travelling}
         workflow="character-sheet"
@@ -552,7 +583,8 @@ export function GenerateCharacterSheetScreen() {
         }}
         previews={preview}
         generating={requested && generatedTake === null && dispatchError === null}
-        waitingHint={`Completes ${sheet.name}'s reference set. You can close this — it lands here and in Activity.`}
+        // R-23: the character-creation path says when a generation completes the set.
+        waitingHint={`Completes ${sheet.name}'s reference set · lands here and in Activity`}
         // One composite, so there is nothing to choose between: the take that came back is the
         // selection. Making somebody click a single tile before they may answer it would be a
         // step that exists only because the column can hold four.
@@ -698,7 +730,11 @@ export function ReplaceMainPhotoScreen() {
     <>
       <div className="fy-gendialog__refbuttons">
         {/* Two different things, so two buttons: one decides what travels with the generation,
-            the other brings in a finished image that needs no generation. */}
+            the other brings in a finished image that needs no generation.
+
+            Labels, not sentences: three of these share a 420px column, and "Use current photo ·
+            Choose from world · Upload your own" broke 2 + 1, which reads as two groups with a
+            loose one underneath (issue 1007). What each one means is on its title. */}
         <Button
           disabled={!photo}
           title={
@@ -708,9 +744,14 @@ export function ReplaceMainPhotoScreen() {
           }
           onClick={() => setCarryIdentity(!carryIdentity)}
         >
-          Use current photo
+          Current photo
         </Button>
-        <Button onClick={() => setWorldRef(!worldRef)}>Choose from world</Button>
+        <Button
+          title="Carry an image already in this world as the style reference"
+          onClick={() => setWorldRef(!worldRef)}
+        >
+          From world
+        </Button>
         <Button
           disabled={!canImport}
           title={
@@ -720,7 +761,7 @@ export function ReplaceMainPhotoScreen() {
           }
           onClick={() => importMainPhotoCandidate(world.meta.worldId, sheetId)}
         >
-          Upload your own
+          Upload
         </Button>
       </div>
       <div className="fy-gendialog__refs">
@@ -748,10 +789,8 @@ export function ReplaceMainPhotoScreen() {
         )}
       </div>
       {carryIdentity && !carriesReferences && model && (
-        <Callout tone="warning" title={`${model.displayName} accepts no reference images`}>
-          {sheet.name}&apos;s main photo will not ride along. The generation sees the written
-          description and the world look as text, and nothing of the face.
-        </Callout>
+        // The refusal is its one clause; what the generation sees instead is not explained (turn 137).
+        <Callout tone="warning" title={`${model.displayName} accepts no reference images`} />
       )}
     </>
   );
@@ -762,17 +801,21 @@ export function ReplaceMainPhotoScreen() {
         open
         onClose={back}
         title="Replace main photo"
-        lede={`${sheet.name} · the accepted identity anchor · World look · v${world.artDirection.version}`}
+        lede={`${sheet.name} · World look · v${world.artDirection.version}`}
         promptLabel="Describe the portrait"
         prompt={prompt}
         onPrompt={setPrompt}
         onResetPrompt={() => setPrompt(mainPhotoPromptFor(sheet))}
         resetTitle="Reset from character sheet"
-        promptHint="Written from the character sheet. Whatever is here is what the model is asked for."
         worldSlug={world.meta.slug}
         reference={world.stagedReferences[stagedReferenceKey("main-photo", sheetId)] ?? null}
-        referenceHint="Optional. A lighting study, a costume plate, a photograph to match. Identity goes first, so this rides only where the model has room for a second image."
+        referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("main-photo", sheetId), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("main-photo", sheetId)] ?? ""]?.worldName }}
+        referenceHint="Optional. A lighting study, a costume plate, a photograph."
+        {...(droppedReference(model, refs.length) !== undefined
+          ? { referenceDropped: droppedReference(model, refs.length)! }
+          : {})}
         onAttachReference={() => pickStagedReference(world.meta.worldId, stagedReferenceKey("main-photo", sheetId))}
+        worldReferences={{ world, model, onChoose: (file) => pickStagedReference(world.meta.worldId, stagedReferenceKey("main-photo", sheetId), file) }}
         onClearReference={() => clearStagedReference(world.meta.worldId, stagedReferenceKey("main-photo", sheetId))}
         extra={travelling}
         workflow="main-photo"
@@ -796,7 +839,6 @@ export function ReplaceMainPhotoScreen() {
           label: `Candidate ${index + 1}`,
         }))}
         generating={generating}
-        waitingHint="The selected world look carries as treatment, never subject."
         selected={selected}
         onSelect={setSelected}
         commit={{
@@ -805,10 +847,9 @@ export function ReplaceMainPhotoScreen() {
           onCommit: () => {
             if (selectedCandidate) chooseAnchor(world.meta.worldId, sheetId, selectedCandidate.selection);
           },
-          note:
-            acceptance?.status === "failed"
-              ? acceptance.reason
-              : "Replacing the main photo makes the current character sheet stale.",
+          // A refusal is the one line the card owes; the consequence rides on the control (turn 137).
+          hint: "Replacing the main photo makes the current character sheet stale.",
+          ...(acceptance?.status === "failed" ? { note: acceptance.reason } : {}),
         }}
       />
     </div>
@@ -931,6 +972,15 @@ export function CharacterLooksScreen() {
   const [exploring, setExploring] = useState(false);
   const resultsRef = useRef<HTMLDivElement>(null);
   const exploreRef = useRef<HTMLButtonElement>(null);
+  // The scene dialog's `Add a look` door lands here with the scene named (SPEC-044 R-12): one
+  // press attaches the chosen look to it, so nobody hunts through the select for the scene
+  // they just came from.
+  const [searchParams] = useSearchParams();
+  const preset = (() => {
+    const [scope, productionId, sceneId] = (searchParams.get("attach") ?? "").split(":");
+    const scene = scope === "scene" ? world?.productions.find((production) => production.meta.id === productionId)?.scenes.find((candidate) => candidate.id === sceneId) : undefined;
+    return scene !== undefined && productionId !== undefined && sceneId !== undefined ? { productionId, sceneId, number: scene.number } : null;
+  })();
   if (!world || !sheet || !sheetId) return null;
   const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId);
   const photo = kit ? mainPhotoFor(kit) : null;
@@ -960,23 +1010,19 @@ export function CharacterLooksScreen() {
         <section className="fy-looks-composer">
           <div>
             <h2>Explore more looks</h2>
-            <p>Optional visual exploration, outside the identity package.</p>
           </div>
           <Button ref={exploreRef} variant="primary" onClick={() => setExploring(true)}>
             Explore more looks
           </Button>
-          <p className="fy-looks-composer__note">
-            {photo
-              ? "Anchored to the accepted main photo, so an exploration is still this character."
-              : `${sheet.name} has no accepted main photo yet — a look is explored from one.`}
-          </p>
+          {/* Only the refusal. What the anchor does for a look is the rule's to say. */}
+          {!photo && <p className="fy-looks-composer__note">{sheet.name} has no accepted main photo yet</p>}
         </section>
         <GenerationDialog
           open={exploring}
           onClose={() => setExploring(false)}
           returnFocus={exploreRef}
           title="Explore more looks"
-          lede={`${sheet.name} · optional visual exploration, outside the identity package`}
+          lede={sheet.name}
           promptLabel="Describe the look"
           prompt={prompt}
           onPrompt={setPrompt}
@@ -987,11 +1033,13 @@ export function CharacterLooksScreen() {
                 ? "Mid-laugh, guard up, lost in thought…"
                 : "Years later, soaked through, after the fight…"
           }
-          promptHint="The main photo rides along, so what comes back is still this character wearing your words."
           worldSlug={world.meta.slug}
           reference={world.stagedReferences[stagedReferenceKey("look", sheetId)] ?? null}
-          referenceHint="Optional. A garment, a pose, a photograph to work from. The main photo goes first, so this rides only where the model has room for a second image."
+          referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("look", sheetId), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("look", sheetId)] ?? ""]?.worldName }}
+          referenceHint="Optional. A garment, a pose, a photograph."
+          {...(droppedReference(chosenModel, 1) !== undefined ? { referenceDropped: droppedReference(chosenModel, 1)! } : {})}
           onAttachReference={() => pickStagedReference(world.meta.worldId, stagedReferenceKey("look", sheetId))}
+          worldReferences={{ world, model: chosenModel, onChoose: (file) => pickStagedReference(world.meta.worldId, stagedReferenceKey("look", sheetId), file) }}
           onClearReference={() => clearStagedReference(world.meta.worldId, stagedReferenceKey("look", sheetId))}
           extra={
             <>
@@ -1058,8 +1106,7 @@ export function CharacterLooksScreen() {
           {images.length === 0 ? (
             <div className="fy-mainphoto-dialog__empty">
               <strong>Explore to promote a result</strong>
-              <span>Looks remain optional until you accept one.</span>
-            </div>
+              </div>
           ) : (
             <>
               <div className="fy-looks-results__grid" ref={resultsRef}>
@@ -1174,6 +1221,15 @@ export function CharacterLooksScreen() {
                     ))}
                   </select>
                 </label>
+                {preset !== null && (selectedLook.attachedTo?.kind !== "scene" || selectedLook.attachedTo.productionId !== preset.productionId || selectedLook.attachedTo.sceneId !== preset.sceneId) ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => attachCharacterLook(world.meta.worldId, sheetId, selectedLook.id, { kind: "scene", productionId: preset.productionId, sceneId: preset.sceneId })}
+                  >
+                    Use in scene {preset.number}
+                  </Button>
+                ) : null}
                 <Button
                   variant="ghost"
                   onClick={() => promoteCharacterLook(world.meta.worldId, sheetId, selectedLook.id)}

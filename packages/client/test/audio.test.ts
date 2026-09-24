@@ -183,4 +183,36 @@ describe("a page read walks its blocks", () => {
     assert.equal(element.src, "/Essence.wav", "a block that was never made is not somewhere to skip to");
     setAudioFactoryForTest(null);
   });
+
+  /*
+   * A chunked read's joined whole arrives under the same id as its pieces (issue 1208), and a
+   * replay of it while the pieces are still queued must not be followed by the queue's
+   * remaining pieces when it ends — the tail of the passage twice (codex on PR 1210).
+   */
+  it("a whole-file replay under a queued read's id supersedes the queue", async () => {
+    const { element } = fakeAudio();
+    setAudioFactoryForTest(() => element as never);
+    clearQueue();
+    const piece = (part: number) => ({ id: "read", url: `/piece-${part}.wav`, title: "Essence", part });
+    await enqueueClip(piece(0));
+    await enqueueClip(piece(1));
+    await enqueueClip(piece(2));
+    assert.equal(element.src, "/piece-0.wav");
+    // The row replays the joined whole while the first piece is still sounding.
+    await playClip({ id: "read", url: "/whole.wav", title: "Essence" });
+    assert.equal(element.src, "/whole.wav");
+    emitForTest("ended");
+    await Promise.resolve();
+    assert.equal(playbackSnapshot().status, "ended", "the whole ends the read: no piece follows it");
+    assert.equal(element.src, "/whole.wav");
+    // A piece replayed under the id is still the queue's own, and the queue walks on from it.
+    clearQueue();
+    await enqueueClip(piece(0));
+    await enqueueClip(piece(1));
+    await playClip(piece(0));
+    emitForTest("ended");
+    await Promise.resolve();
+    assert.equal(element.src, "/piece-1.wav");
+    setAudioFactoryForTest(null);
+  });
 });

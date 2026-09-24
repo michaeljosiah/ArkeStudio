@@ -11,10 +11,12 @@ import {
   spineTimelineFingerprint,
   storyShotFrames,
   storyTimelineFingerprint,
+  summariseVoices,
   type ArkeReadRequirement,
   type ArkeReadTarget,
   type ArkeTargetReadPage,
   type ArkeTargetReadTool,
+  type ChapterVoices,
   type DispatchPlan,
   type Job,
   type ProductionBundle,
@@ -57,6 +59,10 @@ export interface TargetReadDeps {
   readonly getJobs?: () => readonly Job[];
   readonly getExports?: () => readonly ArkeExportReadRecord[] | Promise<readonly ArkeExportReadRecord[]>;
   readonly getChapterBody?: (productionId: string, chapterFile: string) => Promise<string | null>;
+  /** The continuity record beside a chapter (turn 129), so an ask can be answered from the record rather than the whole prose. */
+  readonly getChapterContinuity?: (productionId: string, chapterFile: string) => Promise<import("@arke-studio/contracts").ChapterContinuity | null>;
+  /** The cast of lines beside a chapter (turn 130), so who speaks can be answered from the record. */
+  readonly getChapterVoices?: (productionId: string, chapterFile: string) => Promise<import("@arke-studio/contracts").ChapterVoices | null>;
 }
 
 export interface TargetReadOutcome {
@@ -162,6 +168,15 @@ export function chaptersFence(production: ProductionBundle | undefined): string 
   return fence(production?.chapters ?? []);
 }
 
+/**
+ * One chapter's fence (turn 128): the summary, which carries the file's content hash, so a
+ * receipt for `get_chapter` can be re-observed from the bundle without reading the body again.
+ */
+export function chapterFence(production: ProductionBundle | undefined, chapterId: string): string {
+  const chapter = production?.chapters.find((entry) => entry.id === chapterId || entry.file === chapterId) ?? null;
+  return fence(chapter, chapter === null ? "absent" : `${chapter.version}:${chapter.hash ?? "unhashed"}`);
+}
+
 export function scenesFence(production: ProductionBundle | undefined): string {
   return fence(sortScenes(production?.scenes ?? []));
 }
@@ -191,10 +206,12 @@ export function bibleFence(bundle: WorldBundle): string {
   return fence(bundle.bible, bundle.bible.version);
 }
 
-export function storyFence(production: ProductionBundle | undefined): string {
+export function storyFence(production: ProductionBundle | undefined, section?: "overview"): string {
+  // The style is in the read, so it is in the fence: a draft asked for against a style that has
+  // since been settled reads again rather than drafting against the old one.
   return fence(
-    { story: production?.story ?? null, treatment: production?.treatment ?? null },
-    production?.story?.version ?? "absent",
+    { story: production?.story ?? null, style: production?.proseStyle ?? null, ...(section === "overview" ? {} : { treatment: production?.treatment ?? null }) },
+    `${production?.story ? `v${production.story.version}` : "absent"}+${production?.proseStyle ? `v${production.proseStyle.version}` : "absent"}`,
   );
 }
 
@@ -387,6 +404,29 @@ function chunks(text: string): Row[] {
   const rows: Row[] = [];
   for (let offset = 0; offset < text.length; offset += TEXT_CHUNK_CHARS) {
     rows.push({ key: `text:${padded(offset)}`, value: { offset, text: text.slice(offset, offset + TEXT_CHUNK_CHARS) } });
+  }
+  return rows;
+}
+
+/**
+ * A cast in bounded rows (codex on PR 914): the stamp, then the lines fifty at a time, so the
+ * row limit and the cursor can split a record of four hundred lines that would otherwise reach
+ * a turn as one row twice the fallback budget.
+ */
+function voiceRows(voices: ChapterVoices): Row[] {
+  const rows: Row[] = [{ key: "voices", value: summariseVoices(voices) }];
+  let offset = 0;
+  while (offset < voices.lines.length) {
+    // As many lines as fit the text chunk a body row holds, and at least one: a row's size is
+    // its characters, not its count (codex on PR 914, round two).
+    let end = offset;
+    let size = 0;
+    while (end < voices.lines.length && (end === offset || size + JSON.stringify(voices.lines[end]).length <= TEXT_CHUNK_CHARS)) {
+      size += JSON.stringify(voices.lines[end]).length;
+      end += 1;
+    }
+    rows.push({ key: `voices:${padded(offset)}`, value: { offset, lines: voices.lines.slice(offset, end) } });
+    offset = end;
   }
   return rows;
 }
@@ -588,15 +628,20 @@ export class WorldChatTargetReads {
         break;
       }
       case "get_story": {
-        assertArgs(args, ["productionId"]);
+        assertArgs(args, ["productionId", "section"]);
         const productionId = requireString(args, "productionId");
         const production = productionOf(bundle, productionId);
-        readTarget = target("story", productionId);
+        const section = args["section"];
+        if (section !== undefined && section !== "overview") throw new TargetReadError("section must be overview");
+        readTarget = target("story", `${productionId}${section === "overview" ? ":overview" : ""}`);
         rows = [
           ...(production?.story ? [{ key: "overview", value: production.story }] : []),
-          ...chunks(production?.treatment ?? ""),
+          // The style the book is written in rides with the overview (turn 128), so every draft
+          // and every revision reads it in the one read they already make.
+          ...(production?.proseStyle ? [{ key: "style", value: production.proseStyle }] : []),
+          ...(section === "overview" ? [] : chunks(production?.treatment ?? "")),
         ];
-        revisionOrDigest = storyFence(production);
+        revisionOrDigest = storyFence(production, section);
         break;
       }
       case "get_season": {
@@ -632,14 +677,45 @@ export class WorldChatTargetReads {
         break;
       }
       case "get_chapter": {
-        assertArgs(args, ["productionId", "chapterId"]);
+        assertArgs(args, ["productionId", "chapterId", "section"]);
         const productionId = requireString(args, "productionId");
         const chapterId = requireString(args, "chapterId");
         const chapter = productionOf(bundle, productionId)?.chapters.find((entry) => entry.id === chapterId || entry.file === chapterId);
+        const section = args["section"];
+        if (section !== undefined && section !== "plan" && section !== "ending") throw new TargetReadError("section must be plan or ending");
+        if (section === "plan") {
+          readTarget = target("chapters", `${productionId}:${chapter?.id ?? chapterId}:plan`);
+          rows = chapter ? [{ key: "plan", value: chapter }] : [];
+          revisionOrDigest = chapterFence(productionOf(bundle, productionId), chapterId);
+          break;
+        }
         const body = chapter && this.deps.getChapterBody ? await this.deps.getChapterBody(productionId, chapter.file) : null;
-        readTarget = target("chapters", `${productionId}:${chapterId}`);
-        rows = chapter ? [{ key: "metadata", value: chapter }, ...chunks(body ?? "")] : [];
-        revisionOrDigest = fence({ chapter: chapter ?? null, body }, chapter?.version ?? "absent");
+        if (section === "ending") {
+          if (chapter && body === null) throw new TargetReadError("The previous chapter could not be read.");
+          const paragraphs = (body ?? "").trim().split(/\n\s*\n/).slice(-3).join("\n\n");
+          readTarget = target("chapters", `${productionId}:${chapter?.id ?? chapterId}:ending`);
+          rows = chapter ? [{ key: "ending", value: { chapterId: chapter.id, title: chapter.title, ending: paragraphs.slice(-6_000), truncated: paragraphs.length > 6_000 } }] : [];
+          revisionOrDigest = chapterFence(productionOf(bundle, productionId), chapterId);
+          break;
+        }
+        // The full record beside the chapter (turn 129): the summary carries only its stamp and
+        // placings, and a question about what a character learned is answered from the lines.
+        const continuity = chapter && this.deps.getChapterContinuity ? await this.deps.getChapterContinuity(productionId, chapter.file) : null;
+        const voices = chapter && this.deps.getChapterVoices ? await this.deps.getChapterVoices(productionId, chapter.file) : null;
+        // The receipt names the chapter by its id whichever spelling was asked for, so an edit
+        // that names it the other way still matches (codex on PR 899).
+        readTarget = target("chapters", `${productionId}:${chapter?.id ?? chapterId}`);
+        rows = chapter
+          ? [
+              { key: "metadata", value: chapter },
+              ...(continuity !== null ? [{ key: "continuity", value: continuity }] : []),
+              ...(voices !== null ? voiceRows(voices) : []),
+              ...chunks(body ?? ""),
+            ]
+          : [];
+        // Fenced on the summary's content hash rather than the body read here, so the action
+        // check can re-observe the same fence from the bundle (codex on PR 899).
+        revisionOrDigest = chapterFence(productionOf(bundle, productionId), chapterId);
         break;
       }
       case "list_scenes": {

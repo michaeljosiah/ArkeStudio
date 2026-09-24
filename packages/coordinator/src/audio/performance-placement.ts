@@ -96,14 +96,16 @@ export function placedPerformanceTimings(production: ProductionBundle): Dialogue
 }
 
 /** Revalidate immutable local bytes immediately before the existing export runner reads them. */
-export async function validatePlacedPerformanceBytes(store: WorldStore, production: ProductionBundle): Promise<void> {
+export async function validatePlacedPerformanceBytes(store: WorldStore, production: ProductionBundle, signal: AbortSignal = store.closingSignal): Promise<void> {
+  signal.throwIfAborted();
   if (production.timeline?.status !== "ready") return;
   const seen=new Set<string>();
   for (const track of production.timeline.timeline.tracks) for (const clip of track.clips) {
+    signal.throwIfAborted();
     if (clip.source.kind !== "performance" || seen.has(clip.source.performanceId)) continue;
     const source=clip.source; seen.add(source.performanceId);
     const performance=await readPerformance(store,production.meta.id,source.performanceId);
-    const bytes=await readAudioBytes(await audioWorldPath(store.dir,`productions/${production.meta.id}/performances/${performance.id}/${performance.file}`),store.closingSignal);
+    const bytes=await readAudioBytes(await audioWorldPath(store.dir,`productions/${production.meta.id}/performances/${performance.id}/${performance.file}`),signal);
     if (audioHash(bytes)!==source.sourceHash || source.sourceHash!==performance.provenance.outputHash) throw new Error(`${performance.id}: immutable performance media changed; export refused.`);
   }
 }
@@ -127,7 +129,7 @@ export async function proposePerformanceDuration(store: WorldStore, request: Ext
   if (!calculated.ok) throw new Error(calculated.reason);
   const durationSec=calculated.timing.requiredMinimumSec;
   if (durationSec===resolvedAuthoredDuration(shot)) throw new Error("The authored duration already fits this performance and handle exactly.");
-  const retimed=shot.staging ? stagingRetimed(shot.staging,durationSec) : undefined;
+  const retimed=shot.staging ? stagingRetimed(shot.staging,durationSec,resolvedAuthoredDuration(shot)) : undefined;
   const next=editShot(record,{shotId:shot.id,change:{durationSec,...(retimed ? {staging:{...retimed,version:retimed.version+1}} : {})}});
   return new ProposalManager(store).stage({kind:"scene-edit",summary:`Set ${shot.id} to ${durationSec}s for reviewed dialogue timing`,source:"performance-timing",production:request.productionId,
     targets:[{path,content:JSON.stringify(next,null,2)+"\n",expectedBaseHash:sha256(raw)}]});
