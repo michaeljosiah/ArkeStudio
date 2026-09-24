@@ -740,7 +740,9 @@ export type DockAsk = {
   subject?: WorldChatSubject;
   replyOnly?: boolean;
   draft?: boolean;
-  sent?: { requestId: string };
+  sent?: { requestId: string; at: string };
+  /** What the author has typed to finish a `draft` line, kept by the page with the ask. */
+  typed?: string;
 };
 
 export function ProductionConversation({
@@ -981,7 +983,7 @@ export function ProductionConversation({
     if (opening.attach) worldChatAttachFiles(worldId, opened);
     else {
       const requestId = sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId, opening.replyOnly ?? false);
-      setEcho({ seq: workspace?.seq ?? null });
+      if (workspace !== null) setEcho({ seq: workspace.seq });
       if (requestId !== null) opening.onSent?.(requestId);
     }
     setOpening(null);
@@ -1037,7 +1039,9 @@ export function ProductionConversation({
     if (!text || !worldId || !productionId) return false;
     // A second line said while the first is still opening its thread would open a second one,
     // and one said over a running turn starts a second turn the first can no longer stop.
-    if (opening || running) return false;
+    // Nor over a line just sent that the thread has not shown yet (codex on PR 1232): the runner
+    // would refuse it as already working, and nothing would say so.
+    if (opening || running || echo !== null) return false;
     /*
      * No thread yet: the first thing said opens one and is then said into it. Creating does not
      * take a turn — it only names the conversation — so without the send that follows, the
@@ -1063,7 +1067,8 @@ export function ProductionConversation({
     // here would promote that default above the agent and run a different model.
     const requestId = sendWorldChat(worldId, conversationId, text, [], about, languageModelId, replyOnly);
     if (requestId === null) return false;
-    setEcho({ seq: loaded?.seq ?? null });
+    // Held only while there is a thread to watch move; with none loaded there is nothing to wait on.
+    if (loaded !== null) setEcho({ seq: loaded.seq });
     setLanguageModelId(undefined);
     onSent?.(requestId);
     return true;
@@ -1073,15 +1078,19 @@ export function ProductionConversation({
     if (!text || !worldId || !productionId) return;
     // The field keeps its words while a thread is still opening; say() would drop them.
     if (opening) return;
-    setMessage("");
+    // The words leave the box only once they have gone (codex on PR 1232): a line held back —
+    // a turn running, one just sent — stays where the author typed it.
     // A line a menu press started is about the passage it was pressed on (codex on PR 1232).
     if (draftAsk !== null) {
       const prefix = draftAsk.text.slice(0, draftAsk.text.length - draftAsk.line.length).trimEnd();
-      if (say(`${prefix} ${text}`, false, draftAsk.subject)) onAsk?.(null);
+      if (say(`${prefix} ${text}`, false, draftAsk.subject)) {
+        setMessage("");
+        onAsk?.(null);
+      }
       return;
     }
     const prefix = dock?.subjectPrefix;
-    say(prefix === undefined ? text : `${prefix} ${text}`);
+    if (say(prefix === undefined ? text : `${prefix} ${text}`)) setMessage("");
   };
 
   /*
@@ -1115,6 +1124,8 @@ export function ProductionConversation({
    * never moves it, so the wait also ends on its own after a while.
    */
   const [echo, setEcho] = useState<{ seq: number | null } | null>(null);
+  const loadedRef = useRef(loaded);
+  loadedRef.current = loaded;
   useEffect(() => {
     if (echo === null) return;
     if ((loaded?.seq ?? null) !== echo.seq) {
@@ -1128,19 +1139,32 @@ export function ProductionConversation({
   useEffect(() => {
     if (ask !== undefined && ask.sent === undefined) setDeclinedAsk(null);
   }, [ask]);
-  // A line to finish: the composer, if empty, and the caret either way.
+  // A line to finish: the composer, if empty, and the caret either way — once per press, and
+  // again when a dock brought back meets it, with whatever the author had typed so far (codex on
+  // PR 1232), which the page keeps with the ask as they type.
+  const seededFor = useRef<string | null>(null);
   useEffect(() => {
-    if (draftAsk === null) return;
-    if (message.trim() === "") setMessage(draftAsk.line);
+    if (draftAsk === null) {
+      seededFor.current = null;
+      return;
+    }
+    if (seededFor.current === draftAsk.text) return;
+    seededFor.current = draftAsk.text;
+    if (message.trim() === "") setMessage(draftAsk.typed ?? draftAsk.line);
     setFocusRequest((n) => n + 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftAsk]);
+  useEffect(() => {
+    if (draftAsk === null || seededFor.current !== draftAsk.text || message === (draftAsk.typed ?? draftAsk.line)) return;
+    onAsk?.({ ...draftAsk, typed: message });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [message]);
   // Said when the dock is free.
   useEffect(() => {
     if (ask === undefined || ask.draft === true || ask.sent !== undefined) return;
     if (opening !== null || echo !== null || running || languageUnavailableReason !== undefined || connection !== "open") return;
     const pressed = ask;
-    say(pressed.text, pressed.replyOnly === true, pressed.subject, (requestId) => onAsk?.({ ...pressed, sent: { requestId } }));
+    say(pressed.text, pressed.replyOnly === true, pressed.subject, (requestId) => onAsk?.({ ...pressed, sent: { requestId, at: new Date().toISOString() } }));
     // say is rebuilt every render; the ask and the dock's readiness are what decide.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ask, opening, echo, running, languageUnavailableReason, connection]);
@@ -1160,8 +1184,16 @@ export function ProductionConversation({
     const unsubscribe = subscribeWorldChatSendResults((result) => {
       if (result.requestId === requestId) settle(result.admitted);
     });
-    // No answer at all within the lapse: the connection lost it.
-    const lapse = setTimeout(() => settle(false), 15_000);
+    // No answer at all within the lapse. The answer is not durable, so a connection lost after
+    // the turn was written loses it too (codex on PR 1232): before calling it not taken, look in
+    // the thread, which is, for these exact words said about when this was sent. Found, it was
+    // taken, and offering to send it again would pay for it twice.
+    const lapse = setTimeout(() => {
+      const sentAt = Date.parse(ask.sent!.at);
+      const said = (loadedRef.current?.messages ?? []).some((m) =>
+        m.role === "user" && m.text === ask.text && Math.abs(Date.parse(m.createdAt) - sentAt) < 120_000);
+      settle(said);
+    }, 15_000);
     return () => {
       unsubscribe();
       clearTimeout(lapse);
@@ -1394,7 +1426,7 @@ export function ProductionConversation({
                     key={prompt}
                     type="button"
                     className="fy-arke__prompt"
-                    disabled={press === undefined && (opening !== null || running || languageUnavailableReason !== undefined)}
+                    disabled={press === undefined && (opening !== null || running || echo !== null || languageUnavailableReason !== undefined)}
                     onClick={() => (press !== undefined ? press() : say(dock.subjectPrefix === undefined ? prompt : `${dock.subjectPrefix} ${prompt}`, replyOnly))}
                   >
                     {prompt}
@@ -1412,7 +1444,7 @@ export function ProductionConversation({
             onSubmit={submit}
             placeholder={placeholder}
             {...(dock.conversationFirst ? {} : { agentLabel: "story author" })}
-            busy={running || opening !== null}
+            busy={running || opening !== null || echo !== null}
             busyLabel={opening !== null ? openingNote ?? "opening…" : "reading the world…"}
             focusRequest={focusRequest}
             disabledReason={languageUnavailableReason}

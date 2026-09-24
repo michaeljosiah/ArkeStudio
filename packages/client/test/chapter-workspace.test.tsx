@@ -463,7 +463,12 @@ describe("the craft loop (turn 128)", () => {
 
   it("a selection of three words or more is the subject: the press beside it, the prompts a revision's, the passage said before what is asked", async () => {
     const styled = inkbound([], STYLE);
-    const m = await mount({ ...styled, world: { ...styled.world!, conversations: [THREAD] } });
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const m = await mount(state);
     await answerOpen(m);
     assert.match(text(m), /close third · past · v2/, "the side says the style in one line");
     assert.match(text(m), /settled in Develop/);
@@ -495,6 +500,8 @@ describe("the craft loop (turn 128)", () => {
       `the selection travels as a subject (${said?.subject === undefined ? "none sent" : "sent"})`,
     );
 
+    // The thread shows the first line before the next can go (codex on PR 1232).
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 5 } } as ClientState, { connection: "open" }));
     // The style check asks for a reply and nothing else, and the send says so.
     const hold = [...m.container.querySelectorAll("button.fy-arke__prompt")].find((b) => b.textContent === "Hold this against the style") as HTMLElement;
     await act(async () => {
@@ -752,6 +759,59 @@ describe("the craft loop (turn 128)", () => {
     await act(async () => (q(m, "button.fy-sw__rail") as HTMLElement).click());
     assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent, "Make this ", "the line is back in the composer");
     assert.match(text(m), /about this passage · 4 words/, "still about the passage it was pressed on");
+  });
+
+  it("a lost answer is looked for in the thread before an ask is called not sent (codex on PR 1232)", async (t) => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [] as unknown[], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const m = await mount(state);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const sent = m.sent.find((message) => message.kind === "world-chat-send") as { text: string };
+    // The connection dropped after the turn was written: no answer, but the thread holds it.
+    const said = { id: "msg_01J8F3K2QW9VZX4N7M0RTYB6H2" as never, role: "user" as const, text: sent.text, receipts: [], refusals: [], createdAt: new Date().toISOString() };
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 5, messages: [said] } } as ClientState, { connection: "open" }));
+    await act(async () => t.mock.timers.tick(15_000));
+    assert.doesNotMatch(text(m), /Not sent ·/, "taken, as the thread shows, so never offered again");
+    t.mock.timers.reset();
+  });
+
+  it("a line typed while the last one is still being taken stays in the composer (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const m = await mount({ ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const prompts = [...m.container.querySelectorAll("button.fy-arke__prompt")] as HTMLButtonElement[];
+    assert.ok(prompts.length > 0 && prompts.every((b) => b.disabled), "the quick asks wait for the thread too");
+  });
+
+  it("what the author types to finish a line survives the dock being put away (codex on PR 1232)", async () => {
+    const m = await mount({ ...inkbound([], STYLE), world: { ...inkbound([], STYLE).world!, conversations: [THREAD] } });
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone…") as HTMLElement).click());
+    const composer = q(m, ".fy-arke .fy-cx__editor")!;
+    composer.textContent = "Make this colder and slower";
+    await act(async () => {
+      composer.dispatchEvent(new dom.Event("input", { bubbles: true }));
+    });
+    await act(async () => (q(m, "button.fy-arke__pin") as HTMLElement).click());
+    await act(async () => (q(m, "button.fy-sw__rail") as HTMLElement).click());
+    assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent, "Make this colder and slower");
   });
 
   it("a line to finish never replaces what the author has typed (codex on PR 1232)", async () => {
