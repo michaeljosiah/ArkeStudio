@@ -13,6 +13,7 @@ Start with the root [AGENTS.md](../../AGENTS.md) and shared [operational rules](
 | How do I run and validate it? | [Contributor setup](../../CONTRIBUTING.md#getting-set-up), [testing](testing.md) |
 | What generates this file or ships this asset? | [Maintenance map](maintenance.md) |
 | How do I add or replace a local generation recipe? | [ComfyUI recipe procedure](comfyui-recipes.md) |
+| How do local Llama and Gemma models run? | [Local language models](local-language-models.md) |
 | What is implemented versus planned? | [Bounded implementation status](status.md), then the relevant spec |
 | Why is the product structured this way? | [Architecture guide](../architecture/index.html); for requirements, the master specification in the private document set (see below) |
 | Which disk writes does an operation perform? | [Filesystem operations](../filesystem-operations.md) |
