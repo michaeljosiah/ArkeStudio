@@ -740,7 +740,8 @@ export type DockAsk = {
   subject?: WorldChatSubject;
   replyOnly?: boolean;
   draft?: boolean;
-  sent?: { requestId: string; at: string };
+  /** `rejoins` is the store's count when it went: a larger one means its answer may be lost. */
+  sent?: { requestId: string; at: string; rejoins: number };
   /** What the author has typed to finish a `draft` line, kept by the page with the ask. */
   typed?: string;
 };
@@ -857,7 +858,7 @@ export function ProductionConversation({
   /** What is selected on the timeline while they talk (SPEC-039 R-26), sent with each turn. */
   subject?: WorldChatSubject;
 }) {
-  const { state, connection, snapshots } = useStore();
+  const { state, connection, rejoins } = useStore();
   const navigate = useNavigate();
   const [message, setMessage] = useState("");
   const [languageModelId, setLanguageModelId] = useState<string | undefined>();
@@ -990,7 +991,7 @@ export function ProductionConversation({
     if (opening.attach) worldChatAttachFiles(worldId, opened);
     else {
       const requestId = sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId, opening.replyOnly ?? false);
-      if (workspace !== null) setEcho({ seq: workspace.seq });
+      if (workspace !== null && requestId !== null) setEcho({ seq: workspace.seq, requestId, rejoins });
       if (requestId !== null) opening.onSent?.(requestId);
     }
     setOpening(null);
@@ -1077,7 +1078,7 @@ export function ProductionConversation({
     // here would promote that default above the agent and run a different model.
     const requestId = sendWorldChat(worldId, conversationId, text, [], about, languageModelId, replyOnly);
     if (requestId === null) return false;
-    if (loaded !== null) setEcho({ seq: loaded.seq });
+    if (loaded !== null) setEcho({ seq: loaded.seq, requestId, rejoins });
     setLanguageModelId(undefined);
     onSent?.(requestId);
     return true;
@@ -1131,19 +1132,23 @@ export function ProductionConversation({
    * A line just sent that the thread has not shown yet (codex on PR 1232). Between the send and
    * the snapshot that reports its turn, nothing here says a turn is running, and an ask released
    * in that gap is refused by the runner as already working. So the dock counts as busy until
-   * the conversation's sequence moves past the one it sent at; a send the coordinator refused
-   * never moves it, so the wait also ends on its own after a while.
+   * the conversation's sequence moves past the one it sent at. A send the coordinator refused
+   * never moves it, so its answer for the request ends the wait too, as does a rejoin that may
+   * have lost that answer — the rejoined thread says whether a turn is running. Never a clock
+   * (codex on PR 1232): a slow admission is still coming, and a line released over it would be
+   * refused as already working with nothing to say so.
    */
-  const [echo, setEcho] = useState<{ seq: number | null } | null>(null);
+  const [echo, setEcho] = useState<{ seq: number | null; requestId: string; rejoins: number } | null>(null);
   useEffect(() => {
     if (echo === null) return;
-    if ((loaded?.seq ?? null) !== echo.seq) {
+    if ((loaded?.seq ?? null) !== echo.seq || rejoins !== echo.rejoins || worldChatSendResult(echo.requestId) === false) {
       setEcho(null);
       return;
     }
-    const lapse = setTimeout(() => setEcho(null), 15_000);
-    return () => clearTimeout(lapse);
-  }, [echo, loaded?.seq]);
+    return subscribeWorldChatSendResults((result) => {
+      if (result.requestId === echo.requestId && !result.admitted) setEcho(null);
+    });
+  }, [echo, loaded?.seq, rejoins]);
   // A new press replaces whatever was shown as not sent.
   useEffect(() => {
     if (ask !== undefined && ask.sent === undefined) setDeclinedAsk(null);
@@ -1174,7 +1179,7 @@ export function ProductionConversation({
     if (opening !== null || echo !== null || running || languageUnavailableReason !== undefined || connection !== "open") return;
     if (conversationId && loaded === null) return;
     const pressed = ask;
-    say(pressed.text, pressed.replyOnly === true, pressed.subject, (requestId) => onAsk?.({ ...pressed, sent: { requestId, at: new Date().toISOString() } }));
+    say(pressed.text, pressed.replyOnly === true, pressed.subject, (requestId) => onAsk?.({ ...pressed, sent: { requestId, at: new Date().toISOString(), rejoins } }));
     // say is rebuilt every render; the ask and the dock's readiness are what decide.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ask, opening, echo, running, languageUnavailableReason, connection, loaded === null]);
@@ -1205,24 +1210,16 @@ export function ProductionConversation({
    * line the runner took (codex on PR 1232). No clock decides that — admission can be slow with
    * the socket open, and calling it lost then would offer a second paid turn. The loss is the
    * connection dropping; the verdict waits for the snapshot that rejoins, and is the thread's,
-   * which is durable: these exact words said about when this was sent.
+   * which is durable: these exact words said about when this was sent. The ask carries the
+   * rejoin count it was sent under, so a dock put away through the drop still knows on its
+   * return (codex on PR 1232).
    */
-  const droppedAt = useRef<number | null>(null);
   useEffect(() => {
-    if (ask?.sent === undefined) {
-      droppedAt.current = null;
-      return;
-    }
-    if (connection !== "open") {
-      droppedAt.current ??= snapshots;
-      return;
-    }
-    if (droppedAt.current === null || snapshots === droppedAt.current || loaded === null) return;
-    droppedAt.current = null;
+    if (ask?.sent === undefined || connection !== "open" || rejoins === ask.sent.rejoins || loaded === null) return;
     onAsk?.(null);
     if (!saidIn(loaded.messages, ask)) setDeclinedAsk(ask);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ask?.sent?.requestId, connection, snapshots, loaded === null]);
+  }, [ask?.sent?.requestId, connection, rejoins, loaded === null]);
   // Shown as not sent, and then heard of after all — an answer late past the rejoin, or the line
   // in the thread — it was taken, and Try again would pay for it twice.
   useEffect(() => {

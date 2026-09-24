@@ -410,8 +410,12 @@ interface StoreState {
   frameRunStartResults: Record<string, FrameRunStartResultEvent>;
   /** Bumped on snapshots so open quote dialogs abandon pre-refresh authorization. */
   frameRunRequestEpoch: number;
-  /** Snapshots received: how a screen tells that a rejoin has refreshed what it reads. */
-  snapshots: number;
+  /**
+   * Snapshots that answered a hello: each is a connection made again, and anything this window
+   * was waiting to hear over the one before may have been lost with it. A screen records the
+   * count when it starts waiting, and a larger one means the answer will not come.
+   */
+  rejoins: number;
 }
 
 export interface VoiceCandidatesState {
@@ -479,7 +483,7 @@ let current: StoreState = {
   frameRunQuotes: {},
   frameRunStartResults: {},
   frameRunRequestEpoch: 0,
-  snapshots: 0,
+  rejoins: 0,
 };
 
 export type QueueEnqueueResult = Extract<DomainEvent, { type: "queue.enqueue-result" }> & {
@@ -1187,7 +1191,7 @@ function handleFrame(json: string): void {
       frameRunQuotes: {},
       frameRunStartResults: {},
       frameRunRequestEpoch: current.frameRunRequestEpoch + 1,
-      snapshots: current.snapshots + 1,
+      rejoins: current.rejoins + (rejoined ? 1 : 0),
     });
   } else if (current.state) {
     let gateNotices = current.gateNotices;
@@ -4794,7 +4798,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     frameRunQuotes: {},
     frameRunStartResults: {},
     frameRunRequestEpoch: 0,
-    snapshots: 0,
+    rejoins: 0,
     ...extra,
   });
 }

@@ -674,7 +674,7 @@ describe("the craft loop (turn 128)", () => {
     t.mock.timers.reset();
     await act(async () => __setStateForTest(state, { connection: "closed" }));
     assert.doesNotMatch(text(m), /Not sent ·/, "nor the drop itself: the rejoined thread decides");
-    await act(async () => __setStateForTest(state, { connection: "open", snapshots: 1 }));
+    await act(async () => __setStateForTest(state, { connection: "open", rejoins: 1 }));
     assert.match(text(m), /Not sent · Tighten this/, "rejoined, and the thread does not hold it");
     // And an answer late past the rejoin still wins: taken, it is not offered again.
     await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: sent.requestId, admitted: true }));
@@ -793,7 +793,7 @@ describe("the craft loop (turn 128)", () => {
     // The connection dropped after the turn was written: no answer, but the thread holds it.
     await act(async () => __setStateForTest(state, { connection: "closed" }));
     const said = { id: "msg_01J8F3K2QW9VZX4N7M0RTYB6H2" as never, role: "user" as const, text: sent.text, receipts: [], refusals: [], createdAt: new Date().toISOString() };
-    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 5, messages: [said] } } as ClientState, { connection: "open", snapshots: 1 }));
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 5, messages: [said] } } as ClientState, { connection: "open", rejoins: 1 }));
     assert.doesNotMatch(text(m), /Not sent ·/, "taken, as the thread shows, so never offered again");
     assert.equal(m.sent.filter((message) => message.kind === "world-chat-send").length, 1, "and not said again");
   });
@@ -816,6 +816,47 @@ describe("the craft loop (turn 128)", () => {
     assert.equal(sends().length, 1, "loaded, it goes");
     const prompts = [...m.container.querySelectorAll("button.fy-arke__prompt")] as HTMLButtonElement[];
     assert.ok(prompts.length > 0 && prompts.every((b) => b.disabled), "and the dock holds until the thread shows it");
+  });
+
+  it("the dock holds for a slow admission until that request is answered (codex on PR 1232)", async (t) => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const m = await mount({ ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const sent = m.sent.find((message) => message.kind === "world-chat-send") as { requestId: string };
+    const prompts = () => [...m.container.querySelectorAll("button.fy-arke__prompt")] as HTMLButtonElement[];
+    await act(async () => t.mock.timers.tick(60_000));
+    t.mock.timers.reset();
+    assert.ok(prompts().length > 0 && prompts().every((b) => b.disabled), "no clock lets a line out over an admission still coming");
+    await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: sent.requestId, admitted: false }));
+    assert.ok(prompts().every((b) => !b.disabled), "refused, the dock is free again");
+  });
+
+  it("an ask sent before the dock was put away is settled on its return after a lost connection (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const m = await mount(state);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    await act(async () => (q(m, "button.fy-arke__pin") as HTMLElement).click());
+    // Dropped and rejoined with nothing mounted to watch it.
+    await act(async () => __setStateForTest(state, { connection: "closed" }));
+    await act(async () => __setStateForTest(state, { connection: "open", rejoins: 1 }));
+    await act(async () => (q(m, "button.fy-sw__rail") as HTMLElement).click());
+    assert.match(text(m), /Not sent · Tighten this/, "the ask knows it went before the rejoin");
   });
 
   it("a line typed while the last one is still being taken stays in the composer (codex on PR 1232)", async () => {
