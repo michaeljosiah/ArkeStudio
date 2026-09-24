@@ -742,6 +742,8 @@ export type DockAsk = {
   draft?: boolean;
   /** `rejoins` is the store's count when it went: a larger one means its answer may be lost. */
   sent?: { requestId: string; at: string; rejoins: number };
+  /** Sent and not taken: shown to be tried again or dismissed. */
+  declined?: boolean;
   /** What the author has typed to finish a `draft` line, kept by the page with the ask. */
   typed?: string;
 };
@@ -1091,12 +1093,13 @@ export function ProductionConversation({
     // The words leave the box only once they have gone (codex on PR 1232): a line held back —
     // a turn running, one just sent — stays where the author typed it.
     // A line a menu press started is about the passage it was pressed on (codex on PR 1232).
+    // Finished, it becomes an ask like any press (codex on PR 1232): said when the dock is free
+    // and kept by the page until the coordinator takes it, so a refusal shows it as not sent
+    // rather than losing what the author wrote.
     if (draftAsk !== null) {
       const prefix = draftAsk.text.slice(0, draftAsk.text.length - draftAsk.line.length).trimEnd();
-      if (say(`${prefix} ${text}`, false, draftAsk.subject)) {
-        setMessage("");
-        onAsk?.(null);
-      }
+      onAsk?.({ line: text, text: `${prefix} ${text}`, ...(draftAsk.subject !== undefined ? { subject: draftAsk.subject } : {}) });
+      setMessage("");
       return;
     }
     const prefix = dock?.subjectPrefix;
@@ -1124,10 +1127,10 @@ export function ProductionConversation({
    * by then.
    */
   const [focusRequest, setFocusRequest] = useState(0);
-  const [declinedAsk, setDeclinedAsk] = useState<DockAsk | null>(null);
   const ask = dock?.ask;
   const onAsk = dock?.onAsk;
   const draftAsk = ask?.draft === true ? ask : null;
+  const declinedAsk = ask?.declined === true ? ask : null;
   /*
    * A line just sent that the thread has not shown yet (codex on PR 1232). Between the send and
    * the snapshot that reports its turn, nothing here says a turn is running, and an ask released
@@ -1149,10 +1152,6 @@ export function ProductionConversation({
       if (result.requestId === echo.requestId && !result.admitted) setEcho(null);
     });
   }, [echo, loaded?.seq, rejoins]);
-  // A new press replaces whatever was shown as not sent.
-  useEffect(() => {
-    if (ask !== undefined && ask.sent === undefined) setDeclinedAsk(null);
-  }, [ask]);
   // A line to finish: the composer, if empty, and the caret either way — once per press, and
   // again when a dock brought back meets it, with whatever the author had typed so far (codex on
   // PR 1232), which the page keeps with the ask as they type.
@@ -1175,7 +1174,7 @@ export function ProductionConversation({
   }, [message]);
   // Said when the dock is free.
   useEffect(() => {
-    if (ask === undefined || ask.draft === true || ask.sent !== undefined) return;
+    if (ask === undefined || ask.draft === true || ask.declined === true || ask.sent !== undefined) return;
     if (opening !== null || echo !== null || running || languageUnavailableReason !== undefined || connection !== "open") return;
     if (conversationId && loaded === null) return;
     const pressed = ask;
@@ -1183,26 +1182,28 @@ export function ProductionConversation({
     // say is rebuilt every render; the ask and the dock's readiness are what decide.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ask, opening, echo, running, languageUnavailableReason, connection, loaded === null]);
-  // Answered: taken is done with; not taken is shown.
+  // Answered: taken is done with; not taken is shown, and stays the page's until it is tried
+  // again or dismissed (codex on PR 1232) — a dock put away over it finds it on return.
   useEffect(() => {
     const requestId = ask?.sent?.requestId;
     if (ask === undefined || requestId === undefined) return;
     const settle = (admitted: boolean) => {
-      onAsk?.(null);
-      if (admitted) return;
+      if (admitted) return onAsk?.(null);
+      if (ask.declined === true) return;
       // Refused outright: nothing later can make it taken, so it is not watched for (below).
       const { sent: _sent, ...refused } = ask;
-      setDeclinedAsk(refused);
+      onAsk?.({ ...refused, declined: true });
     };
     const already = worldChatSendResult(requestId);
     if (already !== undefined) {
       settle(already);
       return;
     }
-    const unsubscribe = subscribeWorldChatSendResults((result) => {
+    // Still subscribed once shown as lost: an answer late past the rejoin means it was taken,
+    // and Try again would pay for it twice.
+    return subscribeWorldChatSendResults((result) => {
       if (result.requestId === requestId) settle(result.admitted);
     });
-    return unsubscribe;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ask?.sent?.requestId]);
   /*
@@ -1212,27 +1213,15 @@ export function ProductionConversation({
    * connection dropping; the verdict waits for the snapshot that rejoins, and is the thread's,
    * which is durable: these exact words said about when this was sent. The ask carries the
    * rejoin count it was sent under, so a dock put away through the drop still knows on its
-   * return (codex on PR 1232).
+   * return (codex on PR 1232). Shown as lost, it keeps its request, and the line turning up in
+   * the thread later settles it as taken.
    */
   useEffect(() => {
     if (ask?.sent === undefined || connection !== "open" || rejoins === ask.sent.rejoins || loaded === null) return;
-    onAsk?.(null);
-    if (!saidIn(loaded.messages, ask)) setDeclinedAsk(ask);
+    if (saidIn(loaded.messages, ask)) onAsk?.(null);
+    else if (ask.declined !== true) onAsk?.({ ...ask, declined: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ask?.sent?.requestId, connection, rejoins, loaded === null]);
-  // Shown as not sent, and then heard of after all — an answer late past the rejoin, or the line
-  // in the thread — it was taken, and Try again would pay for it twice.
-  useEffect(() => {
-    const requestId = declinedAsk?.sent?.requestId;
-    if (declinedAsk === null || requestId === undefined) return;
-    if (worldChatSendResult(requestId) === true || saidIn(loaded?.messages ?? [], declinedAsk)) {
-      setDeclinedAsk(null);
-      return;
-    }
-    return subscribeWorldChatSendResults((result) => {
-      if (result.requestId === requestId && result.admitted) setDeclinedAsk(null);
-    });
-  }, [declinedAsk, loaded?.messages]);
+  }, [ask?.sent?.requestId, ask?.declined, connection, rejoins, loaded?.messages]);
 
   const points = loaded?.points ?? [];
   const carriedPoints = points.filter((p) => p.kind === "point" && p.settled).length;
@@ -1440,8 +1429,8 @@ export function ProductionConversation({
           {declinedAsk !== null && (
             <div className="fy-mono fy-arke__declined" role="status">
               <span>Not sent · {declinedAsk.line}</span>
-              <button type="button" onClick={() => { const { sent: _sent, ...again } = declinedAsk; onAsk?.(again); setDeclinedAsk(null); }}>Try again</button>
-              <button type="button" onClick={() => setDeclinedAsk(null)}>Dismiss</button>
+              <button type="button" onClick={() => { const { sent: _sent, declined: _declined, ...again } = declinedAsk; onAsk?.(again); }}>Try again</button>
+              <button type="button" onClick={() => onAsk?.(null)}>Dismiss</button>
             </div>
           )}
           {dock.prompts === undefined || dock.prompts.length === 0 ? null : (

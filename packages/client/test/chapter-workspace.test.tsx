@@ -859,6 +859,58 @@ describe("the craft loop (turn 128)", () => {
     assert.match(text(m), /Not sent · Tighten this/, "the ask knows it went before the rejoin");
   });
 
+  it("an ask shown as not sent survives the dock being put away (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const m = await mount(state);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const sends = () => m.sent.filter((message) => message.kind === "world-chat-send") as Array<{ requestId: string; text: string }>;
+    await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: sends()[0]!.requestId, admitted: false }));
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 5 } } as ClientState, { connection: "open" }));
+    await act(async () => (q(m, "button.fy-arke__pin") as HTMLElement).click());
+    await act(async () => (q(m, "button.fy-sw__rail") as HTMLElement).click());
+    assert.match(text(m), /Not sent · Tighten this/, "still offered once the dock is back");
+    await act(async () => ([...m.container.querySelectorAll(".fy-arke__declined button")].find((b) => b.textContent === "Try again") as HTMLElement).click());
+    assert.equal(sends().length, 2, "and tried again from there");
+    assert.equal(sends()[1]!.text, sends()[0]!.text);
+  });
+
+  it("a finished line refused by the coordinator is kept, not lost (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const m = await mount(state);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone…") as HTMLElement).click());
+    const composer = q(m, ".fy-arke .fy-cx__editor")!;
+    composer.textContent = "Make this colder";
+    await act(async () => {
+      composer.dispatchEvent(new dom.Event("input", { bubbles: true }));
+    });
+    const sendButton = [...m.container.querySelectorAll(".fy-arke button")].find((b) => /send/i.test(b.getAttribute("aria-label") ?? b.textContent ?? "")) as HTMLElement;
+    await act(async () => sendButton.click());
+    const sends = () => m.sent.filter((message) => message.kind === "world-chat-send") as Array<{ requestId: string; text: string }>;
+    assert.equal(sends().length, 1);
+    // Another window's turn started after this one's last snapshot: the runner refuses it.
+    await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: sends()[0]!.requestId, admitted: false }));
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 5 } } as ClientState, { connection: "open" }));
+    assert.match(text(m), /Not sent · Make this colder/, "what the author wrote is still there to send");
+    await act(async () => ([...m.container.querySelectorAll(".fy-arke__declined button")].find((b) => b.textContent === "Try again") as HTMLElement).click());
+    assert.match(sends()[1]?.text ?? "", /«Maren counted the bells\.» Make this colder$/, "and goes about the same passage");
+  });
+
   it("a line typed while the last one is still being taken stays in the composer (codex on PR 1232)", async () => {
     const styled = inkbound([], STYLE);
     const workspace = {
