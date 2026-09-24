@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { mainPhotoFor, orderedLocationViews, type WorldBundle } from "@arke-studio/contracts";
 import { mediaUrl } from "../lib/media.js";
+import { useStore } from "../lib/store.js";
 import { ImageDownload } from "./image-actions.js";
 
 /**
@@ -46,18 +47,20 @@ export function Portrait({
   onAvailabilityChange?: (available: boolean) => void;
   onDimensionsChange?: (dimensions: { width: number; height: number } | null) => void;
 }) {
+  const { state } = useStore();
+  const adultEnabled = state?.app.adapters?.adultContent.enabled === true;
   const [failed, setFailed] = useState(false);
   /*
    * Which picture is known to have arrived, rather than a bare "something has" — the same shape
    * ImageDialog's trigger uses, and for the same reason. A save control enabled by the *previous*
    * subject's load would write the wrong bytes, or none.
    */
-  const subject = `${worldSlug ?? ""}|${path}|${version ?? ""}`;
+  const subject = `${worldSlug ?? ""}|${path}|${version ?? ""}|${adultEnabled}`;
   const [loadedSubject, setLoadedSubject] = useState<string | null>(null);
   const loaded = loadedSubject === subject;
   useEffect(() => {
     setFailed(false);
-  }, [worldSlug, path, version]);
+  }, [worldSlug, path, version, adultEnabled]);
 
   // Held in a ref so `settle` below keeps one identity: callers pass an inline arrow, and a ref
   // callback that changes every render is detached and reattached every render with it.

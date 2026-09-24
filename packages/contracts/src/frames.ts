@@ -19,6 +19,7 @@ import { z } from "zod";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
 import { BIBLE_HELPER_BOUNDS, BibleHelperKindSchema } from "./bible.js";
 import { ClientStateSchema } from "./client-state.js";
+import { AdapterActionSchema } from "./adapters.js";
 import { MAX_CLIP_LANE } from "./cut.js";
 import {
   TimelineClipIdSchema,
@@ -856,6 +857,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** Local-runtime setup: leave one out, try one again, pause/resume, replace one, or stop the lot. */
   z.object({ kind: z.literal("setup-skip"), componentId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("adapter-command"), command: AdapterActionSchema }).strict(),
   z.object({ kind: z.literal("setup-retry"), componentId: z.string().min(1) }).strict(),
   /** Replace the Arke-managed ComfyUI tree with the pinned version, an explicit choice (SPEC-021 R-20; issue 592). */
   z.object({ kind: z.literal("comfyui-update-runtime") }).strict(),

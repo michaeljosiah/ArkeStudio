@@ -143,6 +143,8 @@ export interface EnqueueInput {
 }
 
 export interface JobQueueOptions {
+  /** Recheck host authorization after preparation and before the durable submission boundary. */
+  beforeSubmit?: (job: Job) => Promise<void>;
   /** The host owns durability; journalPath still locates disposable inline-artifact staging. */
   journal?: JobStateStore;
   journalPath: string;
@@ -501,6 +503,15 @@ export class JobQueue {
 
   listJobs(): Job[] {
     return [...this.jobs.values()];
+  }
+
+  /** A cancelled row can still have a submit unwinding or a GPU reservation in flight. */
+  adapterInUse(sha256: string): boolean {
+    return [...this.jobs.values()].some(job => Array.isArray(job.params.adapters) &&
+      job.params.adapters.some(row => (row as { sha256?: string }).sha256 === sha256) &&
+      (["queued", "submitting", "running"].includes(job.status) || this.submitAborts.has(job.id) ||
+        this.finalizing.has(job.id) || this.lane(job.provider).inFlight.has(this.engineRunKey(job)) ||
+        this.gpuReservations.has(this.engineRunKey(job)) || this.pendingGpuReservations.has(this.engineRunKey(job))));
   }
 
   // ---- enqueue and pump -----------------------------------------------------
@@ -1024,6 +1035,12 @@ export class JobQueue {
 
     if (this.disposed || !this.stillQueued(job) || this.opts.runtimeReady?.(job) === false) return;
 
+    try { await this.opts.beforeSubmit?.(job); }
+    catch (error) {
+      if (this.stillQueued(job)) await this.terminalize(job, "failed", error instanceof Error ? error.message : "Dispatch authorization failed.");
+      return;
+    }
+    if (this.disposed || !this.stillQueued(job)) return;
     // Persist the physical call before I/O. A crash may overcount one authorized call, but the
     // journal can never undercount requests that may have reached a paid provider.
     const submitting: Job = {

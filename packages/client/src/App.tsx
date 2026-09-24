@@ -187,6 +187,7 @@ function SettingsRoutes() {
         {/* Every model, cloud and local, under the kind it makes (SPEC-042 R-1). Providers
             keeps the credential; this is where the switch is. */}
         <Route path="models" element={<SettingsModelsScreen />} />
+        <Route path="adapters" element={<SettingsAdaptersScreen />} />
         <Route path="sign-in" element={<SettingsSignInScreen />} />
         <Route path="appearance" element={<SettingsAppearanceScreen />} />
         <Route path="notifications" element={<SettingsNotificationsScreen />} />
@@ -377,3 +378,4 @@ export function App() {
     </>
   );
 }
+import { SettingsAdaptersScreen } from "./screens/settings-adapters.js";

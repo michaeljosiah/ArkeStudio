@@ -15,6 +15,7 @@ export interface ScreenEntry {
 }
 
 export const SCREENS: ScreenEntry[] = [
+  { id: "settings-adapters", samplePath: "/settings/adapters" },
   // Shell
 
   { id: "startup", samplePath: "/" },

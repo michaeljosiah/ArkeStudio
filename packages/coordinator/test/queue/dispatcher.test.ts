@@ -56,6 +56,7 @@ async function makeHarness(
     readVideoReferences?: JobQueueOptions["readVideoReferences"];
     prepareReferences?: JobQueueOptions["prepareReferences"];
     admit?: JobQueueOptions["admit"];
+    beforeSubmit?: JobQueueOptions["beforeSubmit"];
     backoffBaseMs?: number;
     backoffCapMs?: number;
     rng?: () => number;
@@ -84,6 +85,7 @@ function build(
     readVideoReferences?: JobQueueOptions["readVideoReferences"];
     prepareReferences?: JobQueueOptions["prepareReferences"];
     admit?: JobQueueOptions["admit"];
+    beforeSubmit?: JobQueueOptions["beforeSubmit"];
     backoffBaseMs?: number;
     backoffCapMs?: number;
     rng?: () => number;
@@ -129,6 +131,7 @@ function build(
     ...(opts.readVideoReferences ? { readVideoReferences: opts.readVideoReferences } : {}),
     ...(opts.prepareReferences ? { prepareReferences: opts.prepareReferences } : {}),
     ...(opts.admit ? { admit: opts.admit } : {}),
+    ...(opts.beforeSubmit ? { beforeSubmit: opts.beforeSubmit } : {}),
     maxAttempts: 3,
     backoffBaseMs: 5,
     backoffCapMs: 20,
@@ -176,6 +179,20 @@ const FOLD_MS = 30_000;
 function foldedJob(h: Harness, id: string): Job | undefined {
   return h.queue.listJobs().find((j) => j.id === id);
 }
+
+it("rechecks authorization immediately before submit and never calls the provider after revocation", async () => {
+  const fake = new FakeProvider({});
+  let checks = 0;
+  const h = await makeHarness({ fake }, { admit: async () => ({ ok: true }), beforeSubmit: async () => { checks++; throw new Error("Adapter approval revoked"); } });
+  try {
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, job.id)?.status === "failed", "revoked job to fail", FOLD_MS);
+    assert.equal(checks, 1);
+    assert.equal(fake.submitCount, 0);
+    assert.match(foldedJob(h, job.id)!.error!, /revoked/);
+  } finally { h.queue.dispose(); }
+});
 
 describe("startup reconciliation scaling", () => {
   it("folds 1,000 terminal jobs in one history pass and reads the ledger once", async () => {

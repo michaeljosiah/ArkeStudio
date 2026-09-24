@@ -861,6 +861,10 @@ async function initialize(): Promise<{ port: number }> {
       allBaseUrls: () => comfyUiEngine.baseUrls(),
       isEndpointGone: url => comfyUiEngine.isManagedEndpointGone(url),
       preflight: (recipeId) => comfyUiEngine.preflight(recipeId),
+      adapterGuard: async (recipeId, selections) => {
+        if (!coordinator) throw new Error("The adapter library is not ready.");
+        await coordinator.guardAdapters(recipeId, selections);
+      },
       locality: () => comfyUiEngine.engineStatus().locality,
       // The engine says what it is doing only on its socket (SPEC-021 D16). Node's own
       // WebSocket, adapted to the two handlers the client needs — nothing here should hold a

@@ -455,6 +455,7 @@ export async function addBenchReference(
 // ---------------------------------------------------------------------------
 
 export interface BenchEnqueueInput {
+  recipe?: import("@arke-studio/contracts").RecipeIdentity;
   worldId: string;
   target: { kind: "bench-take"; id: string };
   capability: Capability;
@@ -652,6 +653,7 @@ export function planBenchDispatch(
      * A re-run keeps the version the take was made with rather than taking today's.
      */
     recipeVersionOf?: (modelId: string) => number | undefined;
+    adapterRecipeFor?: (modelId: string, selections: unknown) => import("@arke-studio/contracts").RecipeIdentity;
   },
 ): BenchDispatchPlan {
   const composer = options.fromTake
@@ -882,6 +884,19 @@ export function planBenchDispatch(
     };
   }
   const recipeVersion = frozen ?? current;
+  let adapterRecipe: import("@arke-studio/contracts").RecipeIdentity | undefined;
+  if (params.kind === "video" && params.adapters?.length) {
+    try {
+      if (model.provider !== "comfyui" || !options.adapterRecipeFor) throw new Error("Adapter recipes are unavailable for this provider.");
+      const currentRecipe = options.adapterRecipeFor(model.id, params.adapters);
+      const savedRecipe = options.fromTake?.request.recipe;
+      if (savedRecipe && (savedRecipe.templateDigest !== currentRecipe.templateDigest || savedRecipe.dependencyDigest !== currentRecipe.dependencyDigest ||
+        savedRecipe.version !== currentRecipe.version || JSON.stringify(savedRecipe.adapters) !== JSON.stringify(currentRecipe.adapters))) {
+        throw new Error("This take's adapter recipe has changed. Review a new request before dispatching.");
+      }
+      adapterRecipe = savedRecipe ?? currentRecipe;
+    } catch (error) { return { ok: false, reason: error instanceof Error ? error.message : "Adapter recipe could not be resolved." }; }
+  }
   const snapshotBase: Omit<BenchRequestSnapshot, "params"> = {
     ...(audioReferences ? { audioReferences } : {}),
     mode: composer.mode,
@@ -891,6 +906,7 @@ export function planBenchDispatch(
     provider: model.provider,
     model: model.id,
     ...(recipeVersion !== undefined ? { recipeVersion } : {}),
+    ...(adapterRecipe ? { recipe: adapterRecipe } : {}),
     ...(session.subject !== undefined
       ? {
           productionProvenance: productionProvenanceFor(
@@ -1047,6 +1063,7 @@ export function planBenchDispatch(
         params: {
           prompt: wirePrompt,
           ...(audioReferences ? { audioReferences } : {}),
+          ...(params.adapters?.length ? { adapters: params.adapters } : {}),
           ...(mediaReferences.length ? { referenceMedia: mediaReferences } : {}),
           ...(choice.kind === "asked" ? { duration: choice.wire } : {}),
           // A frame mode sends the size fields its route leaves unlocked (SPEC-019 R-33);
@@ -1150,7 +1167,7 @@ export function planBenchDispatch(
       });
     }
   }
-  return { ok: true, reserved, inputs };
+  return { ok: true, reserved, inputs: adapterRecipe ? inputs.map(input => ({ ...input, recipe: adapterRecipe })) : inputs };
 }
 
 // ---------------------------------------------------------------------------

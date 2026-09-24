@@ -53,6 +53,7 @@ for (let i = 0; i < 3; i++) {
 /** Native R2V is a separate checkpoint from FL2VA. Bindings are included in recipe identity,
  * including soundtrack slots; dropping an unused video must drop both of its consumers. */
 export const H3_REFERENCE: ComfyUiRecipe = {
+  adapterSlot: ["3", "model"],
   id: "comfyui-h3-reference-video", displayName: "Local · H3 Reference Video", capability: "video", recipeVersion: 1,
   engine: { minVersion: "0.33.1", exercisedThroughVersion: "0.33.1" },
   params, graph, referenceImages: images, referenceVideos: videos, referenceAudio: audio, outputNode: "13",

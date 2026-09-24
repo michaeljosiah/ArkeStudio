@@ -1565,6 +1565,7 @@ export function SettingsLayout() {
             [
               ["providers", "Providers"],
               ["models", "AI models"],
+              ["adapters", "Content & safety"],
               ["general", "General"],
               ["harness", "Harness"],
               ["appearance", "Appearance"],

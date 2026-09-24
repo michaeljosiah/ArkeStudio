@@ -1,4 +1,7 @@
 import { ProductionCreationService } from "./application/production-creation.js";
+import { AdapterLibrary, adapterSetupEntries, type AdapterComplianceClient } from "./local-ai/adapter-library.js";
+import { adapterMediaVisible } from "./local-ai/adapter-media.js";
+import { HEARMEMAN_ADAPTERS, COMFYUI_RECIPES, recipeWithAdapters, comfyUiRecipeById, comfyUiRecipeIdentity } from "@arke-studio/providers";
 import { ConversationActionService } from "./application/conversation-actions.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
 import { ConversationAuthoringService } from "./application/conversation-authoring.js";
@@ -669,6 +672,7 @@ async function landUploadedImage(
 }
 
 export interface CoordinatorOptions {
+  adapterCompliance?: AdapterComplianceClient;
   /** Explicit local infrastructure, normally supplied by desktop/dev composition. */
   storage?: StudioStorage;
   /** Host-minted session capability. Omission creates a fresh capability, never an open socket. */
@@ -2271,6 +2275,7 @@ export class Coordinator {
   private readonly appSettings: AppSettingsFile | null;
   /** SPEC-009: the dispatch engine. Null without an app root, clients and a ledger. */
   private readonly jobQueue: JobQueue | null;
+  private readonly adapterLibrary: AdapterLibrary | null;
   /** SPEC-011: catalogue, matching, previews and dictation. Null without voice wiring. */
   private readonly voiceService: VoiceService | null;
   private readonly keyArtPromptReviews = new KeyArtPromptReviews();
@@ -2540,6 +2545,11 @@ export class Coordinator {
             // refused with the readiness reason before anything is journalled. `unknown`
             // dispatches (D15) — the floor could not be checked, which is not a refusal.
             admit: async (input) => {
+              if (input.params.adapters !== undefined) {
+                if (input.provider !== "comfyui") return { ok: false, reason: "Adapters are supported only by local ComfyUI recipes." };
+                try { await this.guardAdapters(input.model, input.params.adapters); }
+                catch (error) { return { ok: false, reason: error instanceof Error ? error.message : "Adapter authorization failed." }; }
+              }
               const referenceModel = this.opts.manifest?.models.find(row => row.id === input.model && row.provider === input.provider);
               if (referenceModel?.limits.referenceSyntax === "seedance") {
                 const problem = referenceInputProblem(referenceModel, input.params);
@@ -2581,6 +2591,7 @@ export class Coordinator {
             },
             // Per-source recovery for local-engine jobs (SPEC-021 §2.11): the pure decision
             // table over the identity frozen at enqueue, against the engine resolved now.
+            beforeSubmit: (job) => this.guardAdapters(job.model, job.params.adapters),
             recoverLocal: (job) => {
               if (job.status !== "running" && job.status !== "submitting") return null;
               // Kokoro's old ids represented bytes held only in this process. Voxa restarts with
@@ -2762,7 +2773,10 @@ export class Coordinator {
         }
         const match = /^\/media\/([^/]+)\/(.+)$/.exec(urlPath);
         if (!match || !this.opts.provider.serveMedia) return null;
-        return this.opts.provider.serveMedia(match[1]!, match[2]!);
+        const file = await this.opts.provider.serveMedia(match[1]!, match[2]!);
+        if (!file) return null;
+        const enabled = (await this.adapterLibrary?.snapshot())?.adultContent.enabled === true;
+        return await adapterMediaVisible(file.path, match[2]!, enabled) ? file : null;
       },
       log: (line) => void this.appLog?.append({ kind: "transport.dropped", message: line }),
     };
@@ -2909,11 +2923,38 @@ export class Coordinator {
             log: (record) => void this.appLog?.append(record),
           })
         : null;
+    this.adapterLibrary = opts.appRoot ? new AdapterLibrary({
+      appRoot: opts.appRoot, releases: HEARMEMAN_ADAPTERS, scanner: opts.adapterCompliance,
+      modelsDir: () => opts.comfyui?.service.modelsDir() ?? null,
+      local: () => opts.comfyui?.service.engineIdentity()?.locality === "local",
+      install: async (ids) => {
+        if (!this.setup) throw new Error("Local setup is unavailable.");
+        for (const id of ids) { this.setup.installClosure(id); this.setup.resume(id); }
+        await this.setup.run(); await this.setup.run();
+      },
+      active: (sha) => this.jobQueue?.adapterInUse(sha) ?? false,
+      shared: (sha) => COMFYUI_RECIPES.some(recipe => recipe.requires.checkpoints.some(file => file.sha256 === sha)),
+      revoke: async (sha) => {
+        for (const release of HEARMEMAN_ADAPTERS) if (!sha || release.source.sha256 === sha) this.setup?.suspendComponent(`adapter-${release.id}`);
+        const jobs = this.jobQueue?.listJobs().filter(job => ["queued", "submitting", "running"].includes(job.status) &&
+          Array.isArray(job.params.adapters) && job.params.adapters.some(row => !sha || (row as { sha256?: string }).sha256 === sha)) ?? [];
+        for (const job of jobs) await this.jobQueue?.cancel(job.id);
+      },
+      changed: (adapters) => {
+        this.emit({ type: "adapters.changed", at: new Date().toISOString(), adapters });
+        if (this.setup) {
+          const setup = this.visibleAdapterSetup(this.setup.status());
+          this.readModel.setSetup(setup);
+          this.emit({ type: "setup.status", at: new Date().toISOString(), setup });
+        }
+      },
+    }) : null;
     this.setup =
       opts.setup && opts.appRoot
         ? new LocalSetupService(
             opts.setup,
             (event) => {
+              if (event.type === "setup.status") event = { ...event, setup: this.visibleAdapterSetup(event.setup) };
               // The snapshot carries it too: a window that opens mid-download still sees it.
               if (event.type === "setup.status") {
                 const previous = this.readModel.getState().app.setup;
@@ -2931,7 +2972,7 @@ export class Coordinator {
               appRoot: opts.appRoot,
               // The static catalogue plus what the host derives from provider-owned data —
               // the per-recipe weight entries (SPEC-021 §2.4). One list, one service.
-              catalogue: [...SETUP_CATALOGUE, ...(opts.setupExtraEntries ?? [])],
+              catalogue: [...SETUP_CATALOGUE, ...(opts.setupExtraEntries ?? []), ...adapterSetupEntries(HEARMEMAN_ADAPTERS)],
               // Weight entries land in the folder the engine actually reads: the same
               // resolver detection, launch and pre-flight use, so nothing can disagree.
               externalDirs: { "comfyui-models": () => this.opts.comfyui?.service.modelsDir() ?? null },
@@ -2944,6 +2985,8 @@ export class Coordinator {
                 },
               },
               onComponentReady: (componentId) => this.onSetupComponentReady(componentId),
+              beforeComponentInstall: async id => { if (id.startsWith("adapter-")) await this.adapterLibrary?.guardInstall(id); },
+              onFileInstalled: async (id, path) => { if (id.startsWith("adapter-")) await this.adapterLibrary?.recordInstalled(id, path); },
             },
           )
         : null;
@@ -3094,6 +3137,8 @@ export class Coordinator {
     if (
       parsed.type !== "health.changed" &&
       parsed.type !== "appearance.changed" &&
+      // The dedicated flushed adapter journal owns policy history; this is its UI projection.
+      parsed.type !== "adapters.changed" &&
       parsed.type !== "update.status" &&
       parsed.type !== "voice.runtime-test" &&
       // This is after-the-fact UI news derived from the accept result, not a second domain record.
@@ -3262,6 +3307,7 @@ export class Coordinator {
     });
 
     await this.seed();
+    await this.adapterLibrary?.refresh();
     await this.seedAppConfig();
     // The engine must be resolved BEFORE queue recovery, not after (SPEC-021 §2.11). Recovery
     // asks the service which engine is configured now, and a null answer means "no engine" —
@@ -4629,6 +4675,26 @@ export class Coordinator {
     return this.jobQueue.enqueue(this.freezeLocalIdentity(input));
   }
 
+  async guardAdapters(model: string, selections: unknown): Promise<void> {
+    if (selections === undefined) return;
+    if (!this.adapterLibrary) throw new Error("The adapter library is unavailable.");
+    await this.adapterLibrary.guard(model, selections, true);
+    if (Array.isArray(selections) && selections.length) {
+      const base = comfyUiRecipeById(model);
+      if (!base) throw new Error("Unknown adapter recipe.");
+      const recipe = recipeWithAdapters(base, selections);
+      const probes = this.readModel.getState().app.runtime?.probes;
+      const vram = probes?.vramMbByAccelerator?.cuda ?? probes?.vramMb;
+      if (vram == null || probes?.memMb == null) throw new Error("Measure local graphics and system memory before using adapters.");
+      if (vram < recipe.hardware.minVramMb || probes.memMb < (recipe.hardware.minMemMb ?? 0)) throw new Error("This adapter pairing needs more graphics or system memory than this device has.");
+    }
+  }
+
+  private visibleAdapterSetup(setup: import("@arke-studio/contracts").SetupStatus): import("@arke-studio/contracts").SetupStatus {
+    return this.readModel.getState().app.adapters?.adultContent.enabled ? setup :
+      { ...setup, components: setup.components.filter(row => !row.id.startsWith("adapter-")) };
+  }
+
   /** Release recovered work when a host-owned runtime reports capability readiness. */
   releaseJobRecovery(provider: string): void {
     this.jobQueue?.releaseRecovery(provider);
@@ -4640,6 +4706,14 @@ export class Coordinator {
    * the catalogue does not carry passes through too — admission refuses it with the reason,
    * which beats inventing identity for work that cannot run.
    */
+  private adapterRecipeIdentity(model: string, selections: unknown): import("@arke-studio/contracts").RecipeIdentity {
+    const base = comfyUiRecipeById(model);
+    if (!base) throw new Error("Unknown adapter recipe.");
+    const recipe = comfyUiRecipeIdentity(recipeWithAdapters(base, selections));
+    const engineVersion = this.opts.comfyui?.service.identityFor(model)?.recipe.engineVersion;
+    return { ...recipe, ...(engineVersion ? { engineVersion } : {}) };
+  }
+
   private freezeLocalIdentity(input: EnqueueInput): EnqueueInput {
     const store = this.opts.provider.openStore?.();
     const references = input.params.references;
@@ -4648,6 +4722,22 @@ export class Coordinator {
       const borrowedImages = references.flatMap(file => typeof file === "string" && origins[file] ? [origins[file]] : []);
       if (borrowedImages.length) input = { ...input, params: { ...input.params,
         provenance: { ...(input.params.provenance as object), borrowedImages } } };
+    }
+    if (input.provider === "comfyui" && Array.isArray(input.params.adapters) && input.params.adapters.length) {
+      const base = comfyUiRecipeById(input.model);
+      if (!base) throw new Error("Unknown adapter recipe.");
+      const recipe = comfyUiRecipeIdentity(recipeWithAdapters(base, input.params.adapters));
+      if (input.recipe !== undefined) {
+        if (input.recipe.id !== recipe.id || input.recipe.version !== recipe.version ||
+          input.recipe.templateDigest !== recipe.templateDigest || input.recipe.dependencyDigest !== recipe.dependencyDigest ||
+          JSON.stringify(input.recipe.adapters) !== JSON.stringify(recipe.adapters)) {
+          throw new Error("The saved adapter recipe no longer matches this build. Review the request before dispatching again.");
+        }
+        return input;
+      }
+      const engine = this.opts.comfyui?.service.identityFor(input.model);
+      return { ...input, recipe: { ...recipe, ...(engine?.recipe.engineVersion ? { engineVersion: engine.recipe.engineVersion } : {}) },
+        ...(engine?.engine ? { engine: engine.engine } : {}) };
     }
     if (input.provider !== "comfyui" || input.recipe !== undefined) return input;
     const identity = this.opts.comfyui?.service.identityFor(input.model);
@@ -5004,6 +5094,19 @@ export class Coordinator {
     }
     if (this.stopping) return;
     await guardProductionSetupAuthority(this.opts.provider.openStore?.(), msg);
+    // Adapter downloads and deletion must pass their own policy and ownership boundary,
+    // including requests from generic Downloads controls or an older client.
+    if ("componentId" in msg && typeof msg.componentId === "string" && msg.componentId.startsWith("adapter-")) {
+      const releaseId = msg.componentId.slice("adapter-".length);
+      if (msg.kind === "setup-install" || msg.kind === "setup-retry" || msg.kind === "setup-resume") {
+        await this.adapterLibrary?.handle({ action: "install", releaseIds: [releaseId] }).catch(() => {});
+      } else if (msg.kind === "setup-remove" || msg.kind === "setup-repair") {
+        await this.adapterLibrary?.handle({ action: "remove", releaseId, deleteOwnedFile: true }).catch(() => {});
+      } else if (msg.kind === "setup-pause" || msg.kind === "setup-skip") {
+        this.setup?.pause(msg.componentId);
+      }
+      return;
+    }
     switch (msg.kind) {
       case "save-production-narrative": {
         const store = this.opts.provider.openStore?.();
@@ -7534,6 +7637,10 @@ export class Coordinator {
         this.researchWeb = settings.research.web;
         this.readModel.seedAppConfig({ research: settings.research });
         this.transport.broadcastSnapshot();
+        return;
+      }
+      case "adapter-command": {
+        await this.adapterLibrary?.handle(msg.command).catch(() => {});
         return;
       }
       case "set-model-enabled": {
@@ -10715,6 +10822,7 @@ export class Coordinator {
           // A bench take of a local recipe records which version made it (R-13), and the
           // filed-artifact sidecar inherits it from this same snapshot.
           recipeVersionOf: (modelId) => this.opts.comfyui?.service.identityFor(modelId)?.recipe.version,
+          adapterRecipeFor: (modelId, selections) => this.adapterRecipeIdentity(modelId, selections),
         });
         if (!plan.ok) {
           this.rejectEnqueue(msg.requestId, msg.kind, plan.reason);
@@ -10840,6 +10948,7 @@ export class Coordinator {
           params: take.request.params,
           // How the bytes were made includes which recipe version made them (SPEC-021 R-13).
           ...(take.request.recipeVersion !== undefined ? { recipeVersion: take.request.recipeVersion } : {}),
+          ...(take.request.recipe ? { recipe: take.request.recipe } : {}),
           ...(take.request.requestedSeed !== undefined ? { requestedSeed: take.request.requestedSeed } : {}),
           costMicroUsd: take.cost?.actualMicroUsd ?? null,
         };
@@ -16213,6 +16322,7 @@ export class Coordinator {
       requestId: `quote-${createdAt}`,
       at: createdAt,
       recipeVersionOf: (modelId) => this.opts.comfyui?.service.identityFor(modelId)?.recipe.version,
+      adapterRecipeFor: (modelId, selections) => this.adapterRecipeIdentity(modelId, selections),
     });
     if (!plan.ok) throw new Error(plan.reason);
     const estimatedMicroUsd = plan.inputs.reduce((total, input) => total + input.estimatedMicroUsd, 0);
@@ -16905,6 +17015,7 @@ export class Coordinator {
     this.jobQueue?.stopAccepting();
     this.stopPromise = (async () => {
       const setupStopped = this.setup?.dispose();
+      await this.adapterLibrary?.dispose();
       for (const dispose of this.lifecycleDisposers) dispose();
       this.lifecycleDisposers.clear();
       for (const timer of this.lifecycleTimers) clearInterval(timer);

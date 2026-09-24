@@ -1,4 +1,6 @@
 import { castVoiceSummary, planSubjectCharacterAudio } from "@arke-studio/contracts";
+import { AdapterPicker } from "../components/adapter-picker.js";
+import { hasAdultAdapter } from "@arke-studio/contracts";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
@@ -2197,6 +2199,7 @@ function BenchWorkspace({
                 </>
               )}
             </span>
+            <div className="fy-bench__modelcontrols">
             {models.length === 0 ? (
               /* An empty select is mute; the bar says the repair (dispatch-bar's own words). */
               <span className="fy-bench__nomodel">
@@ -2271,6 +2274,10 @@ function BenchWorkspace({
                 <ChevronDown size={12} />
               </span>
             )}
+
+            {videoParams && <AdapterPicker recipeId={model?.provider === "comfyui" ? model.id : ""} selected={videoParams.adapters ?? []}
+              onChange={adapters => compose({ ...draft, params: { ...videoParams, adapters } })} />}
+            </div>
 
             {estimateCopy !== null && (
               <span data-testid="bench-estimate" className="fy-bench__estimate" title="a take">
@@ -2400,7 +2407,7 @@ function BenchWorkspace({
             </div>
           )}
 
-          {selected && selected.media ? (
+          {selected && hasAdultAdapter(selected.request.params) && !state?.app.adapters?.adultContent.enabled ? <div className="fy-bench__empty">Adult preview hidden · enable adult content in Settings to view this take.</div> : selected && selected.media ? (
             <div className="fy-bench__media fy-imghost">
               {selected.request.mode === "voice" || selected.request.mode === "music" ? (
                 // A take that is a sound has nothing to look at. Read as "video or else a
@@ -2614,7 +2621,7 @@ function BenchWorkspace({
                   className="fy-bench__takeframe"
                   data-inflight={inFlight(status) ? "true" : undefined}
                 >
-                  {take.media ? (
+                  {hasAdultAdapter(take.request.params) && !state?.app.adapters?.adultContent.enabled ? <span className="fy-bench__takestate">Hidden</span> : take.media ? (
                     <>
                       {/* Its first frame, not the clip: an <img> pointed at an .mp4 cannot decode,
                           and every video take on this strip was a grey box with a label in it. */}

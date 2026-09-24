@@ -48,6 +48,8 @@ export { OpenAiClient } from "./clients/openai.js";
 export { WhisperCppClient, type WhisperTranscribe } from "./clients/whispercpp.js";
 export { jsonRequest, tryProbe } from "./clients/http.js";
 export { requireModel, SHIPPED_MANIFEST } from "./manifest-data.js";
+export { HEARMEMAN_ADAPTERS } from "./comfyui/hearmeman.generated.js";
+export { recipeWithAdapters } from "./comfyui/adapters.js";
 export { createProviderClients, PROVIDER_DECLARATIONS, type ProviderClientDeps } from "./registry.js";
 export {
   discoverHiggsfield,

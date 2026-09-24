@@ -18,6 +18,35 @@ import {
 
 const GGML_MAGIC = [0x6c, 0x6d, 0x67, 0x67] as const;
 
+it("optional download policy is rechecked before transfer and before publication", async () => {
+  const appRoot = await root();
+  const entry = catalogue()[2]!;
+  let checks = 0, installed = 0;
+  const service = new LocalSetupService(deps(), () => {}, { appRoot, catalogue: [entry],
+    beforeComponentInstall: async () => { if (++checks === 2) throw new Error("Approval revoked during transfer"); },
+    onFileInstalled: async () => { installed++; } });
+  try {
+    await service.run();
+    assert.equal(checks, 2);
+    assert.equal(installed, 0);
+    assert.equal(service.status().components[0]!.state, "failed");
+    assert.match(service.status().components[0]!.detail!, /revoked/);
+  } finally { await service.dispose(); }
+});
+
+it("an existing user file never receives a managed-download ownership callback", async () => {
+  const appRoot = await root(), entry = catalogue()[2]!;
+  assert.equal(entry.spec.kind, "files");
+  if (entry.spec.kind !== "files") return;
+  const dir = join(appRoot, "models", entry.spec.dir);
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, entry.spec.files[0]!.file), bytes(2048));
+  let installed = 0;
+  const service = new LocalSetupService(deps(), () => {}, { appRoot, catalogue: [entry], onFileInstalled: async () => { installed++; } });
+  try { await service.run(); assert.equal(installed, 0); }
+  finally { await service.dispose(); }
+});
+
 it("reports sharing only for the same files at the same destination (#1004)", async () => {
   const weights = catalogue()[2]!;
   assert.equal(weights.spec.kind, "files");

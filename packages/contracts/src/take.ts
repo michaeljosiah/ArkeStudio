@@ -1,5 +1,6 @@
 import { DialogueDispatchAssessmentSchema } from "./dialogue-assessment.js";
 import { AudioAssetProvenanceSchema } from "./audio.js";
+import { RecipeIdentitySchema } from "./comfyui.js";
 import { z } from "zod";
 import { normalizeAspect, parseAspect } from "./manifest.js";
 import { PropIdSchema, PropStateIdSchema, PropStateProvenanceSchema } from "./prop.js";
@@ -87,6 +88,7 @@ export const ProvenanceSchema = z
      * enqueue, never looked up at arrival.
      */
     recipeVersion: z.number().int().min(1).optional(),
+    recipe: RecipeIdentitySchema.optional(),
     /**
      * The prop states this take dispatched with (design turn 105; issue 534) — one entry per prop
      * the shot cited, each explicit about what resolved and what did not. Absent for every take

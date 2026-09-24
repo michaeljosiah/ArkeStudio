@@ -101,6 +101,7 @@ function baseTake(
     provenance: {
       ...take.request.productionProvenance,
       ...(take.request.recipeVersion !== undefined ? { recipeVersion: take.request.recipeVersion } : {}),
+      ...(take.request.recipe ? { recipe: take.request.recipe } : {}),
     },
     prompt: take.request.brief,
     references,

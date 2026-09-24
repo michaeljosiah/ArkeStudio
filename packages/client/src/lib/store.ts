@@ -1,4 +1,5 @@
 import type { PromptReview, PromptSourceSnapshot } from "@arke-studio/contracts";
+import { setMediaStateSource } from "./media.js";
 import { devSession } from "./dev-session.js";
 import { useSyncExternalStore } from "react";
 import {
@@ -1080,6 +1081,8 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, residency: event.residency } };
     case "comfyui.status":
       return { ...state, app: { ...state.app, comfyui: event.comfyui } };
+    case "adapters.changed":
+      return { ...state, app: { ...state.app, adapters: event.adapters } };
     case "harness.status":
       return { ...state, app: { ...state.app, harness: event.harness } };
     case "voice.sidecar":
@@ -3056,6 +3059,9 @@ export function setWorldModel(worldId: string, capability: Capability, modelId: 
 export function setResearchWeb(enabled: boolean): void {
   send({ kind: "set-research-web", enabled });
 }
+export function adapterCommand(command: import("@arke-studio/contracts").AdapterAction): void {
+  send({ kind: "adapter-command", command });
+}
 
 export function setModelEnabled(modelId: string, enabled: boolean): void {
   send({ kind: "set-model-enabled", modelId, enabled });
@@ -4859,6 +4865,7 @@ export function useVoiceRuntimeTest(): StoreState["voiceRuntimeTest"] {
 }
 
 const getSnapshot = (): StoreState => current;
+setMediaStateSource(() => current.state);
 const subscribe = (l: () => void): (() => void) => {
   listeners.add(l);
   return () => listeners.delete(l);

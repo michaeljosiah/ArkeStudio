@@ -60,6 +60,7 @@ export interface ProviderClientDeps {
     /** Free system memory right now, in MB, or null where it cannot be asked (issue 846). */
     freeMemMb?: () => Promise<number | null>;
     locality?: EngineLocality;
+    adapterGuard?: (recipeId: string, selections: unknown) => Promise<void>;
   };
   capture?: ProviderCallCapture;
 }
@@ -157,6 +158,7 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
                 undefined,
                 deps.comfyui!.allBaseUrls,
                 deps.comfyui!.isEndpointGone,
+                deps.comfyui!.adapterGuard,
               ),
             deps.comfyui!.fetch ?? fetchImpl,
             capture,

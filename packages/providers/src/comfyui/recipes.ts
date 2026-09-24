@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ManifestModel, RecipeIdentity } from "@arke-studio/contracts";
+import type { ManifestModel, RecipeIdentity, AdapterSelection } from "@arke-studio/contracts";
 import { KREA2_IMAGE, KREA2_BUCKETS } from "./krea2-recipe.js";
 import { QWEN21_IMAGE, QWEN21_BUCKETS } from "./qwen21-recipe.js";
 import { H3_REFERENCE, H3_REFERENCE_MODEL } from "./h3-reference-recipe.js";
@@ -64,6 +64,9 @@ export interface RecipeCustomNode {
 }
 
 export interface ComfyUiRecipe {
+  adapters?: AdapterSelection[];
+  /** Catalogue-only adapter insertion point; absent means no selectable adapter support. */
+  adapterSlot?: readonly [nodeId: string, input: string];
   id: string;
   /**
    * `voice-tts` joins image and video (SPEC-021, amended 2026-08-19). Voxa covers preset speech and
@@ -412,6 +415,7 @@ export const H3_FRAMES_BY_SECONDS: Record<string, number> = {
  * `speechVideo: "untested"` still does not claim.
  */
 const H3_VIDEO: ComfyUiRecipe = {
+  adapterSlot: ["3", "model"],
   id: "comfyui-h3-video",
   capability: "video",
   displayName: "Local · H3 Video",
@@ -818,6 +822,7 @@ export function comfyUiRecipeIdentity(recipe: ComfyUiRecipe): RecipeIdentity {
     version: recipe.recipeVersion,
     templateDigest: recipeTemplateDigest(recipe),
     dependencyDigest: recipeDependencyDigest(recipe),
+    ...(recipe.adapters?.length ? { adapters: recipe.adapters } : {}),
   };
 }
 
