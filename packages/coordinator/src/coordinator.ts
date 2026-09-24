@@ -1039,6 +1039,12 @@ export class Coordinator {
   private readonly permissionRetryTimers = new Map<string, NodeJS.Timeout>();
   /** Genesis sandboxes whose attachments are still being carried into a new world. */
   private readonly carrying = new Map<string, Promise<void>>();
+  /**
+   * World-chat sends by request id, while being taken and once taken (PR 1232). A window that
+   * lost its answer to a dropped connection sends again under the same id; that must not buy a
+   * second turn while the first is still being admitted, or after it was.
+   */
+  private readonly worldChatSends = new Map<string, "pending" | "admitted">();
   /** Accept and Discard are one decision per take, even when their messages overlap. */
   private readonly benchTakeActions = new Map<string, Promise<void>>();
   /** Reservations read and advance one session take counter. */
@@ -5694,10 +5700,28 @@ export class Coordinator {
             requestId: msg.requestId,
             admitted,
           });
+        // The same request again is the same line (codex on PR 1232): still being taken, the
+        // first's answer is this one's too; taken, it is answered as taken and not said twice.
+        const seen = this.worldChatSends.get(msg.requestId);
+        if (seen === "pending") return;
+        if (seen === "admitted") {
+          answer(true);
+          return;
+        }
+        const declined = () => {
+          this.worldChatSends.delete(msg.requestId);
+          answer(false);
+        };
         const store = this.opts.provider.openStore?.();
         if (!store) {
           answer(false);
           return;
+        }
+        this.worldChatSends.set(msg.requestId, "pending");
+        // Only the recent past is remembered: a retry follows its loss within a reconnect.
+        for (const [id, state] of this.worldChatSends) {
+          if (this.worldChatSends.size <= 256) break;
+          if (state === "admitted") this.worldChatSends.delete(id);
         }
         // Taken only once the runner has made the line a turn (codex on PR 1232): the runner can
         // still decline after this returns — another window's turn running, the world closing —
@@ -5705,18 +5729,19 @@ export class Coordinator {
         let admitted = false;
         const started = await this.conversationAuthoring(store).send(msg, () => {
           admitted = true;
+          this.worldChatSends.set(msg.requestId, "admitted");
           answer(true);
         }).catch((error: unknown) => {
-          answer(false);
+          declined();
           throw error;
         });
         if (!started) {
-          answer(false);
+          declined();
           return;
         }
         void started.completion.then(
-          () => { if (!admitted) answer(false); },
-          () => { if (!admitted) answer(false); },
+          () => { if (!admitted) declined(); },
+          () => { if (!admitted) declined(); },
         );
         const { completion: inFlight, naming } = started;
         // The title may have just changed, and the screen shows the message immediately.

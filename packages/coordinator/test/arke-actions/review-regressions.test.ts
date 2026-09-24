@@ -421,3 +421,41 @@ it("a chat line the coordinator will not take is answered for its request, so a 
   assert.ok(answer, "the send is answered");
   assert.equal((answer as { admitted?: boolean }).admitted, false, "a conversation that is not there takes nothing");
 });
+
+it("a chat line sent again under the same request is not a second turn (codex on PR 1232)", async () => {
+  const w = await setup();
+  await w.coordinator.openWorld(WORLD_ID);
+  // A window lost its answer to a dropped connection and sends again while the first is still
+  // being taken, then again once it was.
+  let sends = 0;
+  let admit!: () => void;
+  let finish!: () => void;
+  const completion = new Promise<void>((resolve) => { finish = resolve; });
+  Object.assign(w.coordinator, {
+    conversationAuthoring: () => ({
+      send: async (_msg: unknown, onAdmitted: () => void) => {
+        sends += 1;
+        admit = onAdmitted;
+        return { completion, naming: null };
+      },
+    }),
+    refreshConversations: async () => {},
+    openWorldChat: async () => {},
+    refreshWorldSnapshot: async () => {},
+  });
+  const send = () => w.internal.handleClientMessage({
+    kind: "world-chat-send", worldId: WORLD_ID, requestId: "req-again", conversationId: newId("cv") as never,
+    text: "Tighten this", attachmentIds: [],
+  });
+  const first = send();
+  await new Promise((resolve) => setImmediate(resolve));
+  await send();
+  assert.equal(sends, 1, "still being taken: the first's answer is the second's too");
+  admit();
+  finish();
+  await first;
+  await send();
+  assert.equal(sends, 1, "taken: not said twice");
+  const answers = w.events.filter((event) => event.type === "world-chat.send-result" && event.requestId === "req-again");
+  assert.deepEqual(answers.map((event) => (event as { admitted: boolean }).admitted), [true, true], "answered as taken each time it was asked after");
+});

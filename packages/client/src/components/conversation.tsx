@@ -742,6 +742,8 @@ export type DockAsk = {
   draft?: boolean;
   /** `rejoins` is the store's count when it went: a larger one means its answer may be lost. */
   sent?: { requestId: string; at: string; rejoins: number };
+  /** A line lost on the way, tried again under the request it first went as. */
+  again?: string;
   /** Sent and not taken: shown to be tried again or dismissed. */
   declined?: boolean;
   /** What the author has typed to finish a `draft` line, kept by the page with the ask. */
@@ -1045,6 +1047,8 @@ export function ProductionConversation({
     about: WorldChatSubject | undefined = subject,
     /** Told the request id once the line has gone — at once, or after the thread it opens. */
     onSent?: (requestId: string) => void,
+    /** The request a line lost on the way goes again under. */
+    again?: string,
   ): boolean => {
     if (!text || !worldId || !productionId) return false;
     // A second line said while the first is still opening its thread would open a second one,
@@ -1078,7 +1082,7 @@ export function ProductionConversation({
     // Only the turn's explicit choice travels as an override. The coordinator resolves the
     // captured agent preference before the production default; sending the displayed fallback
     // here would promote that default above the agent and run a different model.
-    const requestId = sendWorldChat(worldId, conversationId, text, [], about, languageModelId, replyOnly);
+    const requestId = sendWorldChat(worldId, conversationId, text, [], about, languageModelId, replyOnly, again);
     if (requestId === null) return false;
     if (loaded !== null) setEcho({ seq: loaded.seq, requestId, rejoins });
     setLanguageModelId(undefined);
@@ -1164,6 +1168,9 @@ export function ProductionConversation({
     if (seededFor.current === draftAsk.text) return;
     seededFor.current = draftAsk.text;
     if (message.trim() === "") setMessage(draftAsk.typed ?? draftAsk.line);
+    // Words already in the composer are what the ask now carries (codex on PR 1232): put away
+    // before another keystroke, the dock would otherwise come back with only the menu's line.
+    else if (message !== draftAsk.typed) onAsk?.({ ...draftAsk, typed: message });
     setFocusRequest((n) => n + 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftAsk]);
@@ -1178,7 +1185,10 @@ export function ProductionConversation({
     if (opening !== null || echo !== null || running || languageUnavailableReason !== undefined || connection !== "open") return;
     if (conversationId && loaded === null) return;
     const pressed = ask;
-    say(pressed.text, pressed.replyOnly === true, pressed.subject, (requestId) => onAsk?.({ ...pressed, sent: { requestId, at: new Date().toISOString(), rejoins } }));
+    say(pressed.text, pressed.replyOnly === true, pressed.subject, (requestId) => {
+      const { again: _again, ...sent } = pressed;
+      onAsk?.({ ...sent, sent: { requestId, at: new Date().toISOString(), rejoins } });
+    }, pressed.again);
     // say is rebuilt every render; the ask and the dock's readiness are what decide.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ask, opening, echo, running, languageUnavailableReason, connection, loaded === null]);
@@ -1204,8 +1214,9 @@ export function ProductionConversation({
     return subscribeWorldChatSendResults((result) => {
       if (result.requestId === requestId) settle(result.admitted);
     });
+    // A retry under the same request is sent again, at a new time, and listened for afresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ask?.sent?.requestId]);
+  }, [ask?.sent?.requestId, ask?.sent?.at]);
   /*
    * The answer is not durable: a connection lost between send and answer loses it, even for a
    * line the runner took (codex on PR 1232). No clock decides that — admission can be slow with
@@ -1429,7 +1440,13 @@ export function ProductionConversation({
           {declinedAsk !== null && (
             <div className="fy-mono fy-arke__declined" role="status">
               <span>Not sent · {declinedAsk.line}</span>
-              <button type="button" onClick={() => { const { sent: _sent, declined: _declined, ...again } = declinedAsk; onAsk?.(again); }}>Try again</button>
+              <button type="button" onClick={() => {
+                // Lost on the way, it goes again under its first request, which the coordinator
+                // takes at most once (codex on PR 1232): a retry racing the original admission
+                // cannot buy a second turn. Refused, it is a new request.
+                const { sent, declined: _declined, ...again } = declinedAsk;
+                onAsk?.(sent === undefined ? again : { ...again, again: sent.requestId });
+              }}>Try again</button>
               <button type="button" onClick={() => onAsk?.(null)}>Dismiss</button>
             </div>
           )}

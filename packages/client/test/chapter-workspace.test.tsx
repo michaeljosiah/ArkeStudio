@@ -911,6 +911,72 @@ describe("the craft loop (turn 128)", () => {
     assert.match(sends()[1]?.text ?? "", /«Maren counted the bells\.» Make this colder$/, "and goes about the same passage");
   });
 
+  it("a lost ask tried again goes under its first request (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const m = await mount(state);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    await act(async () => __setStateForTest(state, { connection: "closed" }));
+    await act(async () => __setStateForTest(state, { connection: "open", rejoins: 1 }));
+    assert.match(text(m), /Not sent · Tighten this/);
+    await act(async () => ([...m.container.querySelectorAll(".fy-arke__declined button")].find((b) => b.textContent === "Try again") as HTMLElement).click());
+    const sends = m.sent.filter((message) => message.kind === "world-chat-send") as Array<{ requestId: string }>;
+    assert.equal(sends.length, 2);
+    assert.equal(sends[1]!.requestId, sends[0]!.requestId, "the coordinator takes one line per request, so a retry racing the first cannot pay twice");
+    // Answered late for that request, it is settled.
+    await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: sends[0]!.requestId, admitted: true }));
+    assert.doesNotMatch(text(m), /Not sent ·/);
+  });
+
+  it("words already in the composer stay with a line a press starts (codex on PR 1232)", async () => {
+    const m = await mount({ ...inkbound([], STYLE), world: { ...inkbound([], STYLE).world!, conversations: [THREAD] } });
+    await answerOpen(m);
+    const composer = q(m, ".fy-arke .fy-cx__editor")!;
+    composer.textContent = "half a thought";
+    await act(async () => {
+      composer.dispatchEvent(new dom.Event("input", { bubbles: true }));
+    });
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone…") as HTMLElement).click());
+    await act(async () => (q(m, "button.fy-arke__pin") as HTMLElement).click());
+    await act(async () => (q(m, "button.fy-sw__rail") as HTMLElement).click());
+    assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent, "half a thought", "put away at once, the dock still comes back with them");
+  });
+
+  it("the menu opened from the keyboard takes the caret, so its arrows can be reached (codex on PR 1232)", async () => {
+    const m = await mount({ ...inkbound([], STYLE), world: { ...inkbound([], STYLE).world!, conversations: [THREAD] } });
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    // linkedom keeps no focus, so the focus calls are what is watched.
+    const focused: string[] = [];
+    const was = dom.HTMLElement.prototype.focus;
+    Object.assign(dom.HTMLElement.prototype, {
+      focus(this: HTMLElement) {
+        focused.push(this.textContent ?? "");
+      },
+    });
+    try {
+      const pill = q(m, "button.fy-ch__ask") as HTMLElement;
+      await act(async () => {
+        const event = new dom.window.Event("keydown", { bubbles: true });
+        Object.assign(event, { key: "ArrowDown" });
+        pill.dispatchEvent(event);
+      });
+      assert.ok(m.container.querySelector("[role=menuitem]"), "the menu is open");
+      assert.equal(focused.at(-1), "Tighten", "and the caret is on its first ask");
+    } finally {
+      Object.assign(dom.HTMLElement.prototype, { focus: was });
+    }
+  });
+
   it("a line typed while the last one is still being taken stays in the composer (codex on PR 1232)", async () => {
     const styled = inkbound([], STYLE);
     const workspace = {
@@ -1080,6 +1146,19 @@ describe("the craft loop (turn 128)", () => {
       assert.equal(acceptButton(m).disabled, false, "no answer is coming for a keep the connection lost");
       assert.ok(edits(m).every((edit) => !(edit as HTMLButtonElement).disabled));
       assert.equal(m.sent.some((message) => message.kind === "proposal-accept"), false);
+    });
+
+    it("a whole accept in flight holds the choices too (codex on PR 1232)", async () => {
+      const m = await mount(inkbound([TWO]));
+      await answerOpen(m);
+      await act(async () => acceptButton(m).click());
+      const accepted = m.sent.filter((message) => message.kind === "proposal-accept");
+      assert.equal(accepted.length, 1);
+      assert.equal((accepted[0] as { expectedDraftRevision?: number }).expectedDraftRevision, 1, "fenced to the revision on screen");
+      assert.ok(edits(m).every((edit) => (edit as HTMLButtonElement).disabled), "no count can change under an accept already sent");
+      await act(async () => __setStateForTest(inkbound([TWO]), { connection: "closed" }));
+      await act(async () => __setStateForTest(inkbound([TWO]), { connection: "open" }));
+      assert.ok(edits(m).every((edit) => !(edit as HTMLButtonElement).disabled), "the connection lost it, so the choice is the author's again");
     });
 
     it("a newer revision that is not the passage kept is somebody else's, and is not accepted (codex on PR 1232)", async () => {

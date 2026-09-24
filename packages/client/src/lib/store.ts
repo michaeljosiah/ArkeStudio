@@ -2393,8 +2393,9 @@ export function setArtDirection(worldId: string, description: string, masterLook
   }) ? requestId : null;
 }
 
-export function acceptProposal(worldId: string, proposalId: string, confirmRipples?: string, expectedDraftRevision?: number): void {
-  send({
+/** True when the accept went out; false when the transport is down. */
+export function acceptProposal(worldId: string, proposalId: string, confirmRipples?: string, expectedDraftRevision?: number): boolean {
+  return send({
     kind: "proposal-accept",
     worldId,
     proposalId,
@@ -4859,8 +4860,12 @@ export function sendWorldChat(
   modelId?: string,
   /** A line that asks for a reply and nothing else (turn 128): no action the turn returns is staged. */
   replyOnly = false,
+  /**
+   * A line sent again after its answer was lost goes under its first request (PR 1232): the
+   * coordinator takes one line per request, so the retry cannot buy a second turn.
+   */
+  requestId: string = crypto.randomUUID(),
 ): string | null {
-  const requestId = crypto.randomUUID();
   return send({
     kind: "world-chat-send",
     worldId,

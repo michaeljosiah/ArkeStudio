@@ -298,6 +298,17 @@ function PassageMenu({
   const [open, setOpen] = useState(false);
   const items = useRef<(HTMLButtonElement | null)[]>([]);
   const move = (from: number, by: number) => items.current[(from + by + actions.length) % actions.length]?.focus();
+  /*
+   * Opened from the keyboard, the caret goes into the menu (codex on PR 1232), or its arrow keys
+   * could not be reached. Opened with the mouse it stays in the manuscript, whose selection the
+   * menu is about.
+   */
+  const [enter, setEnter] = useState(false);
+  useEffect(() => {
+    if (!open || !enter) return;
+    items.current[0]?.focus();
+    setEnter(false);
+  }, [open, enter]);
   return (
     <div
       className="fy-ch__ask-wrap"
@@ -316,7 +327,18 @@ function PassageMenu({
         aria-expanded={open && held === undefined}
         disabled={held !== undefined}
         onMouseDown={(e) => e.preventDefault()}
-        onClick={() => setOpen((was) => !was)}
+        onClick={(e) => {
+          // A click with no pointer behind it (detail 0) is Enter or Space.
+          if (!open && e.detail === 0) setEnter(true);
+          setOpen((was) => !was);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault();
+            setEnter(true);
+            setOpen(true);
+          }
+        }}
       >
         Ask Arke · {held ?? `${words.toLocaleString()} words`}
       </button>
@@ -1193,10 +1215,29 @@ export function ChapterWorkspace({
       setKeeping(null);
     }
   }, [keeping, connection, stagedId, stagedRevision, stagedBody, notices, worldId]);
+  /*
+   * A whole accept in flight holds the choices too (codex on PR 1232): toggled after the press,
+   * they would show a count the gate is not accepting. It is fenced to the revision on screen,
+   * and held until the proposal is gone, the gate answers with a notice, or the connection drops.
+   */
+  const [accepting, setAccepting] = useState<{ id: string; notice: GateNotice | undefined } | null>(null);
+  useEffect(() => {
+    if (accepting === null) return;
+    if (connection !== "open" || stagedId !== accepting.id || notices[accepting.id] !== accepting.notice) setAccepting(null);
+  }, [accepting, connection, stagedId, notices]);
   const accept = !choosing || stagedDraft === undefined || passageChange === null
     ? undefined
     : keptCount === editCount
-      ? { label: "Accept" }
+      ? {
+          label: "Accept",
+          ...(accepting !== null ? { blocked: "Accepting…" } : {}),
+          onAccept: (confirmSignature?: string) => {
+            const proposal = stagedDraft.staged.proposal;
+            if (acceptProposal(worldId, proposal.id, confirmSignature, proposal.draftRevision)) {
+              setAccepting({ id: proposal.id, notice: notices[proposal.id] });
+            }
+          },
+        }
       : {
           label: `Accept ${keptCount} of ${editCount}`,
           ...(keptCount === 0 ? { blocked: "Nothing kept" } : keeping !== null ? { blocked: "Keeping…" } : {}),
@@ -1417,7 +1458,7 @@ export function ChapterWorkspace({
                               type="button"
                               // Held while a keep is in flight (codex on PR 1232): what lands is
                               // what was pressed, never a choice changed after it.
-                              disabled={keeping !== null}
+                              disabled={keeping !== null || accepting !== null}
                               className={cx("fy-ch__edit", refused.has(segment.index) && "fy-ch__edit--refused")}
                               aria-pressed={!refused.has(segment.index)}
                               title={refused.has(segment.index) ? "Refused · press to keep" : "Kept · press to refuse"}
