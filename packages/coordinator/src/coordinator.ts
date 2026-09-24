@@ -5699,12 +5699,25 @@ export class Coordinator {
           answer(false);
           return;
         }
-        const started = await this.conversationAuthoring(store).send(msg).catch((error: unknown) => {
+        // Taken only once the runner has made the line a turn (codex on PR 1232): the runner can
+        // still decline after this returns — another window's turn running, the world closing —
+        // and then the turn ends without the line ever being appended.
+        let admitted = false;
+        const started = await this.conversationAuthoring(store).send(msg, () => {
+          admitted = true;
+          answer(true);
+        }).catch((error: unknown) => {
           answer(false);
           throw error;
         });
-        answer(started !== null && started !== undefined);
-        if (!started) return;
+        if (!started) {
+          answer(false);
+          return;
+        }
+        void started.completion.then(
+          () => { if (!admitted) answer(false); },
+          () => { if (!admitted) answer(false); },
+        );
         const { completion: inFlight, naming } = started;
         // The title may have just changed, and the screen shows the message immediately.
         await this.refreshConversations(store);

@@ -755,10 +755,20 @@ export function subscribeProposalResolutions(
 
 export type WorldChatSendResult = Extract<DomainEvent, { type: "world-chat.send-result" }>;
 const sendResultListeners = new Set<(result: WorldChatSendResult) => void>();
+/**
+ * The last answers, by request id, kept past the moment they arrive (codex on PR 1232): a screen
+ * that was not listening when its answer came — the dock put away and brought back — still finds
+ * it. A handful is plenty; nobody is waiting on an old send.
+ */
+let sendResults = new Map<string, boolean>();
 /** Whether a line sent into a conversation was taken as a turn, answered for its request id. */
 export function subscribeWorldChatSendResults(listener: (result: WorldChatSendResult) => void): () => void {
   sendResultListeners.add(listener);
   return () => sendResultListeners.delete(listener);
+}
+/** The answer already given for a request, if one has arrived. */
+export function worldChatSendResult(requestId: string): boolean | undefined {
+  return sendResults.get(requestId);
 }
 
 export type CanonContradictions = Extract<DomainEvent, { type: "canon.contradictions" }>;
@@ -1779,6 +1789,7 @@ function handleFrame(json: string): void {
     } else if (event.type === "dictation.result") {
       dictation = { ...dictation, [event.requestId]: { text: event.text, error: event.error } };
     } else if (event.type === "world-chat.send-result") {
+      sendResults = new Map([...sendResults, [event.requestId, event.admitted] as const].slice(-50));
       for (const listener of sendResultListeners) listener(event);
     } else if (event.type === "world-chat.attachment-refused") {
       // The last few only: a refusal is news for a moment, not a list to work through — the same

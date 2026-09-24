@@ -27,6 +27,7 @@ import {
   retryWorldChatTurn,
   sendWorldChat,
   subscribeWorldChatSendResults,
+  worldChatSendResult,
   setProductionModel,
   subscribeWorldChatMediaOpened,
   subscribeConversationActionDecision,
@@ -1074,9 +1075,9 @@ export function ProductionConversation({
     if (opening) return;
     setMessage("");
     // A line a menu press started is about the passage it was pressed on (codex on PR 1232).
-    if (draftAbout !== null) {
-      setDraftAbout(null);
-      say(`${draftAbout.prefix} ${text}`, false, draftAbout.subject);
+    if (draftAsk !== null) {
+      const prefix = draftAsk.text.slice(0, draftAsk.text.length - draftAsk.line.length).trimEnd();
+      if (say(`${prefix} ${text}`, false, draftAsk.subject)) onAsk?.(null);
       return;
     }
     const prefix = dock?.subjectPrefix;
@@ -1085,26 +1086,27 @@ export function ProductionConversation({
 
   /*
    * An ask handed in from the page — the chapter's selection menu. The page owns it (codex on PR
-   * 1232): its words and passage were fixed at the press, and it stays with the page until the
-   * coordinator has answered for it, so putting the dock away and bringing it back loses nothing.
-   * The dock says it when it is free, exactly as a quick ask is said, and reports back through
-   * `onAsk`: sent (with its request id), or done with.
+   * 1232): its words and passage were fixed at the press, and it stays with the page until it is
+   * done with, so putting the dock away and bringing it back loses nothing. The dock says it when
+   * it is free, exactly as a quick ask is said, and reports back through `onAsk`: sent (with its
+   * request id), or done with.
    *
-   * Taken or not is the coordinator's answer for that request id (`world-chat.send-result`), not
-   * a guess from the transcript, which is only the last few messages and is moved by other
-   * windows too. No answer within the lapse — the connection lost it — counts as not taken.
-   * Not taken, it is shown beside the prompts to be tried again or dismissed, never written over
-   * the composer.
+   * Taken or not is the coordinator's answer for that request id (`world-chat.send-result`),
+   * given once the runner has made the line a turn, not a guess from the transcript. The store
+   * keeps recent answers, so a dock brought back after its answer arrived still finds it. No
+   * answer within the lapse — the connection lost it — counts as not taken. Not taken, it is
+   * shown beside the prompts to be tried again or dismissed, never written over the composer.
    *
-   * A line that only starts an ask goes to the composer, and only an empty one; the passage it
-   * was pressed on stays with it until the author sends it or presses something else, so a
-   * changed selection meanwhile does not change what it is about.
+   * A line that only starts an ask (`draft`) stays the page's too, until it is sent or another
+   * press replaces it: the dock puts it in an empty composer — again after being brought back —
+   * and sends what the author finishes with the passage it was pressed on, whatever is selected
+   * by then.
    */
   const [focusRequest, setFocusRequest] = useState(0);
   const [declinedAsk, setDeclinedAsk] = useState<DockAsk | null>(null);
-  const [draftAbout, setDraftAbout] = useState<{ prefix: string; subject: WorldChatSubject | undefined } | null>(null);
   const ask = dock?.ask;
   const onAsk = dock?.onAsk;
+  const draftAsk = ask?.draft === true ? ask : null;
   /*
    * A line just sent that the thread has not shown yet (codex on PR 1232). Between the send and
    * the snapshot that reports its turn, nothing here says a turn is running, and an ask released
@@ -1122,22 +1124,17 @@ export function ProductionConversation({
     const lapse = setTimeout(() => setEcho(null), 15_000);
     return () => clearTimeout(lapse);
   }, [echo, loaded?.seq]);
-  // A new press replaces whatever was shown as not sent, and any passage a draft was holding.
+  // A new press replaces whatever was shown as not sent.
   useEffect(() => {
-    if (ask !== undefined && ask.sent === undefined) {
-      setDeclinedAsk(null);
-      setDraftAbout(null);
-    }
+    if (ask !== undefined && ask.sent === undefined) setDeclinedAsk(null);
   }, [ask]);
-  // A line to finish: the composer, if empty, the caret either way, and the passage kept with it.
+  // A line to finish: the composer, if empty, and the caret either way.
   useEffect(() => {
-    if (ask === undefined || ask.draft !== true) return;
-    onAsk?.(null);
-    if (message.trim() === "") setMessage(ask.line);
-    setDraftAbout({ prefix: ask.text.slice(0, ask.text.length - ask.line.length).trimEnd(), subject: ask.subject });
+    if (draftAsk === null) return;
+    if (message.trim() === "") setMessage(draftAsk.line);
     setFocusRequest((n) => n + 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ask]);
+  }, [draftAsk]);
   // Said when the dock is free.
   useEffect(() => {
     if (ask === undefined || ask.draft === true || ask.sent !== undefined) return;
@@ -1151,16 +1148,20 @@ export function ProductionConversation({
   useEffect(() => {
     const requestId = ask?.sent?.requestId;
     if (ask === undefined || requestId === undefined) return;
-    const unsubscribe = subscribeWorldChatSendResults((result) => {
-      if (result.requestId !== requestId) return;
+    const settle = (admitted: boolean) => {
       onAsk?.(null);
-      if (!result.admitted) setDeclinedAsk(ask);
+      if (!admitted) setDeclinedAsk(ask);
+    };
+    const already = worldChatSendResult(requestId);
+    if (already !== undefined) {
+      settle(already);
+      return;
+    }
+    const unsubscribe = subscribeWorldChatSendResults((result) => {
+      if (result.requestId === requestId) settle(result.admitted);
     });
     // No answer at all within the lapse: the connection lost it.
-    const lapse = setTimeout(() => {
-      onAsk?.(null);
-      setDeclinedAsk(ask);
-    }, 15_000);
+    const lapse = setTimeout(() => settle(false), 15_000);
     return () => {
       unsubscribe();
       clearTimeout(lapse);

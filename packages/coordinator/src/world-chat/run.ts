@@ -367,8 +367,10 @@ export class WorldChatRunner {
     modelId?: string,
     /** A line that asks for a reply and nothing else (turn 128); any action it returns is refused. */
     replyOnly = false,
+    /** Told once the line is durable as a turn; a send declined before that never calls it. */
+    onAdmitted?: () => void,
   ): Promise<TurnOutcome> {
-    return this.runTurn(store, conversationId, text, attachmentIds, undefined, subject, modelId, replyOnly);
+    return this.runTurn(store, conversationId, text, attachmentIds, undefined, subject, modelId, replyOnly, onAdmitted);
   }
 
   /**
@@ -415,6 +417,7 @@ export class WorldChatRunner {
     subject?: WorldChatSubject,
     modelId?: string,
     replyOnly = false,
+    onAdmitted?: () => void,
   ): Promise<TurnOutcome> {
     const adapter = this.deps.adapter;
     if (this.deps.closingSignal?.aborted) {
@@ -433,7 +436,7 @@ export class WorldChatRunner {
     const controller = new AbortController();
     this.cancelling.set(conversationId, controller);
     try {
-      return await this.runRegisteredTurn(controller, store, conversationId, text, attachmentIds, existingTurnId, subject, modelId, replyOnly);
+      return await this.runRegisteredTurn(controller, store, conversationId, text, attachmentIds, existingTurnId, subject, modelId, replyOnly, onAdmitted);
     } finally {
       // Include preflight reads and model selection: their failures must release the same slot
       // as a model failure, or the overlap guard would lock this conversation indefinitely.
@@ -451,6 +454,7 @@ export class WorldChatRunner {
     subject: WorldChatSubject | undefined,
     modelId: string | undefined,
     replyOnly: boolean,
+    onAdmitted?: () => void,
   ): Promise<TurnOutcome> {
     const adapter = this.deps.adapter!;
     const at = this.deps.now();
@@ -595,6 +599,8 @@ export class WorldChatRunner {
       existingTurnId ? { type: "run.retry-started", run } : { type: "turn.started", message, run },
       { at },
     );
+    // Taken, and not before (PR 1232): every refusal above returns without appending.
+    if (!existingTurnId) onAdmitted?.();
     if (controller.signal.aborted) {
       await this.finish(store, run, controller.signal.reason === "world-closed" ? "interrupted" : "cancelled", "cancelled before the studio was asked");
       return { status: "cancelled" };

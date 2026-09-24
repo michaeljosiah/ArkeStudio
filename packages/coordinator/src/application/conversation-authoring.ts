@@ -31,7 +31,8 @@ export interface StartedConversationTurn {
 export class ConversationAuthoringService {
   constructor(private readonly store: WorldStore, private readonly deps: ConversationAuthoringDependencies) {}
 
-  async send(input: ConversationSendInput): Promise<StartedConversationTurn | null> {
+  /** `onAdmitted` is told once the runner has made the line durable as a turn, and only then. */
+  async send(input: ConversationSendInput, onAdmitted?: () => void): Promise<StartedConversationTurn | null> {
     const service = new WorldChatService(this.store.dir);
     const log = new WorldChatStore(conversationDir(this.store.dir, input.conversationId));
     if (!(await log.readMeta())) return null;
@@ -50,7 +51,7 @@ export class ConversationAuthoringService {
     const title = first ? titleFrom(input.text) : null;
     if (title !== null) await service.rename(input.conversationId, title).catch(() => {});
     const completion = this.deps.runner(input.conversationId).send(log, input.conversationId,
-      input.text, input.attachmentIds, input.subject, input.modelId, input.replyOnly === true);
+      input.text, input.attachmentIds, input.subject, input.modelId, input.replyOnly === true, onAdmitted);
     const naming = title === null ? null : this.deps.name(input.conversationId, input.text, title);
     return { completion, naming };
   }

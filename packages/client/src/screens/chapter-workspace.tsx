@@ -1108,6 +1108,7 @@ export function ChapterWorkspace({
    * the thread has yet to show it, loses nothing.
    */
   const [ask, setAsk] = useState<DockAsk | null>(null);
+  const shownSubject = ask?.draft === true && ask.subject !== undefined ? ask.subject : dockSubject;
   const askPassage = (action: PassageAction) => {
     setDock(true);
     setAsk({
@@ -1869,7 +1870,9 @@ export function ChapterWorkspace({
             // The thread is the production's own (no new entry context, turn 126): the chapter
             // the dock names has to be in the words themselves or the studio never hears it.
             subjectPrefix: dockPrefix,
-            ...(passage !== null ? { subjectLine: `about this passage · ${countWords(passage).toLocaleString()} words` } : {}),
+            // A line a menu press started is about the passage it was pressed on, and the dock
+            // says that one, not whatever is selected now (codex on PR 1232).
+            ...(shownSubject.kind === "passage" ? { subjectLine: `about this passage · ${countWords(shownSubject.text).toLocaleString()} words` } : {}),
           }}
           openingNote="opening…"
           emptyLine={`Nothing written with Arke for ${chapterLabel} yet.`}
