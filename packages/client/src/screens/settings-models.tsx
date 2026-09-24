@@ -403,11 +403,11 @@ function LocalTile({ facts, externalEngine }: { facts: LocalFacts; externalEngin
         {facts.model.id === "comfyui-qwen21-image" && (
           <>
             <div className="fy-set__why">
-              <span>Noncommercial research · <a className="fy-set__link" href="https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">Licence</a></span>
+              <span>Noncommercial research · <a className="fy-set__link" href="https://huggingface.co/Qwen/Qwen-Image-2.1/blob/790c92633540aa0cb11d9abf19eb46d861714758/LICENSE" target="_blank" rel="noopener noreferrer">Licence</a></span>
             </div>
             {externalEngine && (
               <div className="fy-set__why">
-                <span>Dedicated engine profile required · <a className="fy-set__link" href="https://github.com/michaeljosiah/ArkeStudio/blob/main/docs/development/qwen21.md#externally-managed-url-engines" target="_blank" rel="noopener noreferrer">Setup</a></span>
+                <span>Dedicated engine profile required · <a className="fy-set__link" href="https://github.com/michaeljosiah/ArkeStudio/blob/e98271edd7d4754fa986128f13379281fa7fff0e/docs/development/qwen21.md#externally-managed-url-engines" target="_blank" rel="noopener noreferrer">Setup</a></span>
               </div>
             )}
           </>

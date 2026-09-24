@@ -100,7 +100,7 @@ describe("Qwen's terms and external setup are visible before download (#1226)", 
   it("places the noncommercial label and official licence beside the download controls", () => {
     const html = render("/settings/models?half=local&kind=image", qwenState("managed"));
     assert.match(html, /Noncommercial research/);
-    assert.match(html, /href="https:\/\/huggingface.co\/Qwen\/Qwen-Image-2.1\/blob\/main\/LICENSE"[^>]*>Licence<\/a>/);
+    assert.match(html, /href="https:\/\/huggingface.co\/Qwen\/Qwen-Image-2.1\/blob\/[a-f0-9]{40}\/LICENSE"[^>]*>Licence<\/a>/);
     assert.ok(html.indexOf("Noncommercial research") < html.indexOf("Download ·"));
     assert.doesNotMatch(html, /Dedicated engine profile required/);
   });
@@ -109,7 +109,7 @@ describe("Qwen's terms and external setup are visible before download (#1226)", 
     for (const reason of ["the engine did not answer", "custom node ArkeQwen21Runtime is missing from the engine", undefined]) {
       const html = render("/settings/models?half=local&kind=image", qwenState("user-url", reason));
       assert.match(html, /Dedicated engine profile required/);
-      assert.match(html, /href="https:\/\/github.com\/michaeljosiah\/ArkeStudio\/blob\/main\/docs\/development\/qwen21.md#externally-managed-url-engines"[^>]*>Setup<\/a>/);
+      assert.match(html, /href="https:\/\/github.com\/michaeljosiah\/ArkeStudio\/blob\/[a-f0-9]{40}\/docs\/development\/qwen21.md#externally-managed-url-engines"[^>]*>Setup<\/a>/);
       assert.ok(html.indexOf("Dedicated engine profile required") < html.indexOf("Download ·"));
       if (reason) assert.ok(html.includes(reason), "the measured readiness reason remains available");
     }
