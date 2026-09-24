@@ -10,6 +10,7 @@ import { setOwner } from "../../src/artifacts/filing.js";
 import type { FfmpegRunner } from "../../src/takes/export.js";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
 import { worldChatActionAdapters } from "../../src/world-chat/actions.js";
+import { discoverConversations } from "../../src/world-chat/discover.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { chaptersFence, jobsFence, sceneFence, storyFence, timelineFence, worldMetadataFence } from "../../src/world-chat/target-reads.js";
@@ -483,4 +484,17 @@ it("an accept refused because the draft moved on says so, rather than offering a
   const reason = (id: string) => (w.events.find((event) => event.type === "proposal.blocked" && event.proposalId === id) as { reason?: string } | undefined)?.reason;
   assert.equal(reason(MOVED_ID), "draft-changed");
   assert.equal(reason(STALE_ID), "stale", "told by what the gate said, not by the proposal read afterwards");
+});
+
+it("a conversation made again under the same request is the same conversation (codex on PR 1232)", async () => {
+  const w = await setup();
+  await w.coordinator.openWorld(WORLD_ID);
+  const store = w.provider.openStore()!;
+  const before = (await discoverConversations(store.dir)).summaries.length;
+  // A window lost the answer to its create and makes it again while the first is still being made,
+  // then once more after it was.
+  const create = () => w.internal.handleClientMessage({ kind: "world-chat-create", worldId: WORLD_ID, title: "Tighten this", requestId: "req-create-once" });
+  await Promise.all([create(), create()]);
+  await create();
+  assert.equal((await discoverConversations(store.dir)).summaries.length, before + 1, "one conversation, however many times it was asked for");
 });

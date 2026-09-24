@@ -749,14 +749,16 @@ export type DockAsk = {
   again?: string;
   /**
    * Said first into a thread it opened, which has not arrived yet: `was` is the thread before,
-   * `rejoins` the store's count when the create went.
+   * `rejoins` the store's count when the create went, `request` the create's own id.
    */
-  opening?: { was: string | null; rejoins: number };
+  opening?: { was: string | null; rejoins: number; request: string };
   /**
    * The coordinator's answer for `sent`, kept with the ask by whoever holds it (codex on PR 1232):
    * the store's own record of answers is bounded, and an ask can wait a long while for its dock.
    */
   answered?: boolean;
+  /** Which press made it: the same words pressed twice are two presses. */
+  press?: string;
   /** Sent and not taken: shown to be tried again or dismissed. */
   declined?: boolean;
   /** What the author has typed to finish a `draft` line, kept by the page with the ask. */
@@ -881,7 +883,7 @@ export function ProductionConversation({
   /** What is selected on the timeline while they talk (SPEC-039 R-26), sent with each turn. */
   subject?: WorldChatSubject;
 }) {
-  const { state, connection, rejoins } = useStore();
+  const { state, connection, rejoins, worldChatHolds } = useStore();
   const navigate = useNavigate();
   const [message, setMessage] = useState("");
   const [languageModelId, setLanguageModelId] = useState<string | undefined>();
@@ -1014,7 +1016,6 @@ export function ProductionConversation({
     if (opening.attach) worldChatAttachFiles(worldId, opened);
     else {
       const requestId = sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId, opening.replyOnly ?? false);
-      if (workspace !== null && requestId !== null) setEcho({ seq: workspace.seq, requestId, rejoins });
       if (requestId !== null) opening.onSent?.(requestId);
     }
     setOpening(null);
@@ -1068,7 +1069,7 @@ export function ProductionConversation({
     about: WorldChatSubject | undefined = subject,
     /** Told the request id once the line has gone — at once, or after the thread it opens. */
     onSent?: (requestId: string) => void,
-    /** The request a line lost on the way goes again under. */
+    /** The request a line lost on the way goes again under — or, opening a thread, its create. */
     again?: string,
   ): boolean => {
     if (!text || !worldId || !productionId) return false;
@@ -1087,7 +1088,9 @@ export function ProductionConversation({
      */
     if (!conversationId) {
       // Nothing is waited on for a create that never left (codex on PR 1232).
-      if (!createWorldChat(worldId, conversationTitle(text), crypto.randomUUID(), context)) return false;
+      // A create made again after it was lost goes under its first request, which the coordinator
+      // makes at most once (codex on PR 1232).
+      if (!createWorldChat(worldId, conversationTitle(text), again ?? crypto.randomUUID(), context)) return false;
       // The subject goes with it: the first thing said is the likeliest "move this earlier".
       setOpening({
         text,
@@ -1105,7 +1108,6 @@ export function ProductionConversation({
     // here would promote that default above the agent and run a different model.
     const requestId = sendWorldChat(worldId, conversationId, text, [], about, languageModelId, replyOnly, again);
     if (requestId === null) return false;
-    if (loaded !== null) setEcho({ seq: loaded.seq, requestId, rejoins });
     setLanguageModelId(undefined);
     onSent?.(requestId);
     return true;
@@ -1157,37 +1159,12 @@ export function ProductionConversation({
   const draftAsk = ask?.draft === true ? ask : null;
   const declinedAsk = ask?.declined === true ? ask : null;
   /*
-   * A line just sent that the thread has not shown yet (codex on PR 1232). Between the send and
-   * the snapshot that reports its turn, nothing here says a turn is running, and an ask released
-   * in that gap is refused by the runner as already working. So the dock counts as busy until
-   * the coordinator answers for that request: refused, the wait is over; taken, it lasts until
-   * the thread shows the turn — running, or moved on since the answer. The sequence alone is not
-   * enough (codex on PR 1232): another window's edit moves it too, while this line is still
-   * being taken. A rejoin that may have lost the answer ends the wait as well — the rejoined
-   * thread says whether a turn is running. Never a clock: a slow admission is still coming.
+   * A line just sent that the thread has not shown yet (codex on PR 1232): nothing here says a
+   * turn is running, and a line released into that gap is refused by the runner as already
+   * working. The store holds it by conversation until the coordinator's answer and the thread
+   * say otherwise, so a dock put away and brought back in the gap still waits.
    */
-  const [echo, setEcho] = useState<{ seq: number | null; requestId: string; rejoins: number; takenAt?: number | null } | null>(null);
-  useEffect(() => {
-    if (echo === null) return;
-    const seq = loaded?.seq ?? null;
-    if (rejoins !== echo.rejoins || worldChatSendResult(echo.requestId) === false) {
-      setEcho(null);
-      return;
-    }
-    if (echo.takenAt !== undefined) {
-      if (running || seq !== echo.takenAt) setEcho(null);
-      return;
-    }
-    if (worldChatSendResult(echo.requestId) === true) {
-      setEcho({ ...echo, takenAt: seq });
-      return;
-    }
-    return subscribeWorldChatSendResults((result) => {
-      if (result.requestId !== echo.requestId) return;
-      if (!result.admitted) setEcho(null);
-      else setEcho((was) => (was?.requestId === result.requestId && was.takenAt === undefined ? { ...was, takenAt: loadedRef.current?.seq ?? null } : was));
-    });
-  }, [echo, loaded?.seq, rejoins, running]);
+  const echo = conversationId ? worldChatHolds[conversationId] ?? null : null;
   // A line to finish: the composer, if empty, and the caret either way — once per press, and
   // again when a dock brought back meets it, with whatever the author had typed so far (codex on
   // PR 1232), which the page keeps with the ask as they type.
@@ -1197,8 +1174,10 @@ export function ProductionConversation({
       seededFor.current = null;
       return;
     }
-    if (seededFor.current === draftAsk.text) return;
-    seededFor.current = draftAsk.text;
+    // By press, not by words (codex on PR 1232): the same line pressed again is a new press.
+    const key = draftAsk.press ?? draftAsk.text;
+    if (seededFor.current === key) return;
+    seededFor.current = key;
     if (message.trim() === "") setMessage(draftAsk.typed ?? draftAsk.line);
     // Words already in the composer are what the ask now carries (codex on PR 1232): put away
     // before another keystroke, the dock would otherwise come back with only the menu's line.
@@ -1207,7 +1186,7 @@ export function ProductionConversation({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftAsk]);
   useEffect(() => {
-    if (draftAsk === null || seededFor.current !== draftAsk.text || message === (draftAsk.typed ?? draftAsk.line)) return;
+    if (draftAsk === null || seededFor.current !== (draftAsk.press ?? draftAsk.text) || message === (draftAsk.typed ?? draftAsk.line)) return;
     onAsk?.({ ...draftAsk, typed: message });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [message]);
@@ -1228,10 +1207,11 @@ export function ProductionConversation({
     const pressed = ask;
     const was = workspace?.conversationId ?? null;
     const opens = !conversationId;
+    const request = opens ? pressed.again ?? crypto.randomUUID() : pressed.again;
     // Opening a thread first, the ask says so (codex on PR 1232): a dock put away before the
     // thread arrives comes back waiting for it, rather than opening a second.
-    if (say(pressed.text, pressed.replyOnly === true, pressed.subject, sentAs(pressed), pressed.again) && opens) {
-      onAsk?.({ ...pressed, opening: { was, rejoins: rejoinsRef.current } });
+    if (say(pressed.text, pressed.replyOnly === true, pressed.subject, sentAs(pressed), request) && opens) {
+      onAsk?.({ ...pressed, opening: { was, rejoins: rejoinsRef.current, request: request! } });
     }
     // say is rebuilt every render; the ask and the dock's readiness are what decide.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1243,9 +1223,10 @@ export function ProductionConversation({
    */
   useEffect(() => {
     if (ask?.opening === undefined || connection !== "open" || conversationId || rejoins === ask.opening.rejoins) return;
-    const { opening: _opening, ...again } = ask;
+    // Made again under the same create, so one still being made is not made twice.
+    const { opening, ...again } = ask;
     setOpening(null);
-    onAsk?.(again);
+    onAsk?.({ ...again, again: opening.request });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ask?.opening, connection, rejoins, conversationId]);
   // Brought back while its thread is still opening: wait for that thread, and say it there.

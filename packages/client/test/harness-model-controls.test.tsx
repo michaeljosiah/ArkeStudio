@@ -8,7 +8,7 @@ import { OPENCODE_AVAILABILITY, type ClientMessage, type ClientState } from "@ar
 import { AgentsPanel } from "../src/screens/agents.js";
 import { SettingsHarnessScreen, SettingsLayout } from "../src/screens/shell.js";
 import { ProductionConversation } from "../src/components/conversation.js";
-import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __clearWorldChatHoldsForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -85,6 +85,7 @@ async function mount(state: ClientState, children: ReactNode, path = "/settings/
 }
 
 afterEach(async () => {
+  __clearWorldChatHoldsForTest();
   if (root) await act(async () => root!.unmount());
   root = undefined;
   container?.remove();

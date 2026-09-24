@@ -321,6 +321,7 @@ function PassageMenu({
 }) {
   const [open, setOpen] = useState(false);
   const items = useRef<(HTMLButtonElement | null)[]>([]);
+  const trigger = useRef<HTMLButtonElement | null>(null);
   const move = (from: number, by: number) => items.current[(from + by + actions.length) % actions.length]?.focus();
   /*
    * Opened from the keyboard, the caret goes into the menu (codex on PR 1232), or its arrow keys
@@ -341,10 +342,13 @@ function PassageMenu({
         if (e.key === "Escape" && open) {
           e.stopPropagation();
           setOpen(false);
+          // Back to the press, so the keyboard keeps its place (codex on PR 1232).
+          trigger.current?.focus();
         }
       }}
     >
       <button
+        ref={trigger}
         type="button"
         className="fy-ch__ask"
         aria-haspopup="menu"
@@ -1178,6 +1182,7 @@ export function ChapterWorkspace({
   const askPassage = (action: PassageAction) => {
     setDock(true);
     setAsk({
+      press: crypto.randomUUID(),
       line: action.line,
       text: `${dockPrefix} ${action.line}`,
       subject: dockSubject,

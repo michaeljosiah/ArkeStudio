@@ -1046,6 +1046,12 @@ export class Coordinator {
    * second turn while the first is still being admitted, or after it was.
    */
   private readonly worldChatSends = new Map<string, "pending" | "admitted">();
+  /**
+   * World-chat creates by request id, for the same reason (codex on PR 1232): a window that lost
+   * a create to a dropped connection makes it again under the same id, and must not open two
+   * conversations — one of them left empty — while the first is still being made, or after.
+   */
+  private readonly worldChatCreates = new Map<string, Promise<{ id: ConversationId } | null>>();
   /** Accept and Discard are one decision per take, even when their messages overlap. */
   private readonly benchTakeActions = new Map<string, Promise<void>>();
   /** Reservations read and advance one session take counter. */
@@ -3537,6 +3543,11 @@ export class Coordinator {
     // does check, but a repair that can destroy live state should not depend on it.
     const wasAlreadyOpen = this.opts.provider.openStore?.()?.worldId === worldId;
     const loaded = await this.opts.provider.loadWorld(worldId);
+    // Requests are remembered for one world's session, which is as long as a window holds them.
+    if (!wasAlreadyOpen) {
+      this.worldChatSends.clear();
+      this.worldChatCreates.clear();
+    }
     /*
      * Everything past the load is repair, and repair does not decide whether the world opened
      * (issue 571, Codex round 3).
@@ -5725,12 +5736,9 @@ export class Coordinator {
           answer(false);
           return;
         }
+        // Kept for the world's session, not by count (codex on PR 1232): a window holds an ask
+        // for as long as that, and a retry under a forgotten id would buy a second turn.
         this.worldChatSends.set(msg.requestId, "pending");
-        // Only the recent past is remembered: a retry follows its loss within a reconnect.
-        for (const [id, state] of this.worldChatSends) {
-          if (this.worldChatSends.size <= 256) break;
-          if (state === "admitted") this.worldChatSends.delete(id);
-        }
         // Taken only once the runner has made the line a turn (codex on PR 1232): the runner can
         // still decline after this returns — another window's turn running, the world closing —
         // and then the turn ends without the line ever being appended.
@@ -6139,38 +6147,61 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
         if (msg.entryContext !== undefined && !worldChatContextExists(store.getBundle(), msg.entryContext)) return;
-        // The first conversation crosses the schema boundary (#70 §4.1, issue #403): older
-        // builds must refuse this world rather than export `.conversations` they do not know
-        // to exclude. The raise is durable before the conversation directory exists.
-        await store.ensureSchemaVersion(2, "world-chat");
-        const service = new WorldChatService(store.dir);
-        const create = () =>
-          service.create({
-            title: msg.title,
-            requestId: msg.requestId,
-            ...(msg.entryContext ? { entryContext: msg.entryContext } : {}),
-          });
-        const sceneContext = msg.entryContext?.kind === "scene" ? msg.entryContext : null;
-        const row = sceneContext !== null
-          ? await serialiseSceneConversation(
-              store.dir,
-              sceneContext.productionId,
-              sceneContext.sceneId,
-              async () => {
-                const existing = (await discoverConversations(store.dir)).summaries.find(
-                  (summary) =>
-                    summary.status !== "archived" &&
-                    summary.entryContext?.kind === "scene" &&
-                    summary.entryContext.productionId === sceneContext.productionId &&
-                    summary.entryContext.sceneId === sceneContext.sceneId,
-                );
-                return existing ?? create();
-              },
-            )
-          : await create();
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, row.id);
-        return;
+        // The same request again is the same conversation: wait for it and show it.
+        const earlier = this.worldChatCreates.get(msg.requestId);
+        if (earlier !== undefined) {
+          const made = await earlier;
+          if (made === null) return;
+          await this.refreshConversations(store);
+          await this.openWorldChat(store, made.id);
+          return;
+        }
+        let settle!: (made: { id: ConversationId } | null) => void;
+        let made = false;
+        this.worldChatCreates.set(msg.requestId, new Promise((resolve) => { settle = resolve; }));
+        try {
+          // The first conversation crosses the schema boundary (#70 §4.1, issue #403): older
+          // builds must refuse this world rather than export `.conversations` they do not know
+          // to exclude. The raise is durable before the conversation directory exists.
+          await store.ensureSchemaVersion(2, "world-chat");
+          const service = new WorldChatService(store.dir);
+          const create = () =>
+            service.create({
+              title: msg.title,
+              requestId: msg.requestId,
+              ...(msg.entryContext ? { entryContext: msg.entryContext } : {}),
+            });
+          const sceneContext = msg.entryContext?.kind === "scene" ? msg.entryContext : null;
+          const row = sceneContext !== null
+            ? await serialiseSceneConversation(
+                store.dir,
+                sceneContext.productionId,
+                sceneContext.sceneId,
+                async () => {
+                  const existing = (await discoverConversations(store.dir)).summaries.find(
+                    (summary) =>
+                      summary.status !== "archived" &&
+                      summary.entryContext?.kind === "scene" &&
+                      summary.entryContext.productionId === sceneContext.productionId &&
+                      summary.entryContext.sceneId === sceneContext.sceneId,
+                  );
+                  return existing ?? create();
+                },
+              )
+            : await create();
+          made = true;
+          settle(row);
+          await this.refreshConversations(store);
+          await this.openWorldChat(store, row.id);
+          return;
+        } catch (error) {
+          // Not made: a later request under the same id may try again.
+          if (!made) {
+            this.worldChatCreates.delete(msg.requestId);
+            settle(null);
+          }
+          throw error;
+        }
       }
       case "world-chat-delete": {
         const store = this.opts.provider.openStore?.();

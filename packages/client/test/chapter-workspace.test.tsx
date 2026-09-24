@@ -7,7 +7,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { paragraphSpans, type ChapterContinuity, type ChapterSummary, type ChapterVoices, type ClientMessage, type ClientState, type ProseStyle, type StagedProposal, type WorldChatSummary } from "@arke-studio/contracts";
 import { ChapterScreen, __clearHeldAsksForTest, firstPrompt, paragraphAt, passageSubject, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
-import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __clearWorldChatHoldsForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -206,6 +206,7 @@ afterEach(async () => {
     mounted.container.remove();
   }
   __clearHeldAsksForTest();
+  __clearWorldChatHoldsForTest();
 });
 
 const text = (m: Mounted): string => m.container.textContent ?? "";
@@ -1168,6 +1169,8 @@ describe("the craft loop (turn 128)", () => {
     await act(async () => __setStateForTest(styled, { connection: "closed" }));
     await act(async () => __setStateForTest(styled, { connection: "open", rejoins: 1 }));
     assert.equal(creates().length, 2, "rejoined with no thread, nothing would open one: the ask goes again");
+    const ids = creates().map((message) => (message as { requestId: string }).requestId);
+    assert.equal(ids[1], ids[0], "under the same create, which the coordinator makes at most once");
   });
 
   it("an answer for an ask put away is kept however much is said meanwhile (codex on PR 1232)", async () => {
@@ -1190,6 +1193,75 @@ describe("the craft loop (turn 128)", () => {
     });
     await act(async () => (q(m, "button.fy-sw__rail") as HTMLElement).click());
     assert.match(text(m), /Not sent · Tighten this/, "the ask kept its own answer");
+  });
+
+  it("the hold on a line just taken outlasts the dock being put away (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const m = await mount(state);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const sent = m.sent.find((message) => message.kind === "world-chat-send") as { requestId: string };
+    await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: sent.requestId, admitted: true }));
+    await act(async () => (q(m, "button.fy-arke__pin") as HTMLElement).click());
+    await act(async () => (q(m, "button.fy-sw__rail") as HTMLElement).click());
+    const prompts = () => [...m.container.querySelectorAll("button.fy-arke__prompt")] as HTMLButtonElement[];
+    assert.ok(prompts().length > 0 && prompts().every((b) => b.disabled), "brought back before the thread shows the turn, it still waits");
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 5 } } as ClientState, { connection: "open" }));
+    assert.ok(prompts().every((b) => !b.disabled));
+  });
+
+  it("the same line pressed again keeps what the author had written (codex on PR 1232)", async () => {
+    const m = await mount({ ...inkbound([], STYLE), world: { ...inkbound([], STYLE).world!, conversations: [THREAD] } });
+    await answerOpen(m);
+    const area = q(m, "textarea.fy-ch__source") as HTMLTextAreaElement;
+    const tone = async () => {
+      await keyup(area, 0, 24);
+      await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+      await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone…") as HTMLElement).click());
+    };
+    await tone();
+    const composer = q(m, ".fy-arke .fy-cx__editor")!;
+    composer.textContent = "Make this colder";
+    await act(async () => {
+      composer.dispatchEvent(new dom.Event("input", { bubbles: true }));
+    });
+    await tone();
+    await act(async () => (q(m, "button.fy-arke__pin") as HTMLElement).click());
+    await act(async () => (q(m, "button.fy-sw__rail") as HTMLElement).click());
+    assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent, "Make this colder", "a new press, the same words: what was written is kept");
+  });
+
+  it("closing the menu from the keyboard puts the caret back on the press (codex on PR 1232)", async () => {
+    const m = await mount({ ...inkbound([], STYLE), world: { ...inkbound([], STYLE).world!, conversations: [THREAD] } });
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    const focused: string[] = [];
+    const was = dom.HTMLElement.prototype.focus;
+    Object.assign(dom.HTMLElement.prototype, {
+      focus(this: HTMLElement) {
+        focused.push(this.textContent ?? "");
+      },
+    });
+    try {
+      const key = (target: Element, name: string) => {
+        const event = new dom.window.Event("keydown", { bubbles: true });
+        Object.assign(event, { key: name });
+        target.dispatchEvent(event);
+      };
+      await act(async () => key(q(m, "button.fy-ch__ask")!, "ArrowDown"));
+      await act(async () => key(m.container.querySelector("[role=menuitem]")!, "Escape"));
+      assert.equal(m.container.querySelector("[role=menu]"), null, "closed");
+      assert.match(focused.at(-1) ?? "", /Ask Arke/, "and the caret is back on the press");
+    } finally {
+      Object.assign(dom.HTMLElement.prototype, { focus: was });
+    }
   });
 
   it("a line typed while the last one is still being taken stays in the composer (codex on PR 1232)", async () => {

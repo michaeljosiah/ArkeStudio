@@ -418,7 +418,17 @@ interface StoreState {
    * count when it starts waiting, and a larger one means the answer will not come.
    */
   rejoins: number;
+  /**
+   * A line just sent into a conversation the screen has not yet seen become a turn, by
+   * conversation (codex on PR 1232). Kept here rather than by whichever dock sent it, so a dock
+   * put away and brought back in the gap still holds: a line said into it would be refused by the
+   * runner as already working. Ended by the coordinator's answer for that request — refused, or
+   * taken and then shown running or moved on — or by a rejoin, whose snapshot says what is running.
+   */
+  worldChatHolds: Record<string, WorldChatHold>;
 }
+
+export type WorldChatHold = { requestId: string; seq: number | null; rejoins: number; takenAt?: number | null };
 
 export interface VoiceCandidatesState {
   extracted: string[];
@@ -486,6 +496,7 @@ let current: StoreState = {
   frameRunStartResults: {},
   frameRunRequestEpoch: 0,
   rejoins: 0,
+  worldChatHolds: {},
 };
 
 export type QueueEnqueueResult = Extract<DomainEvent, { type: "queue.enqueue-result" }> & {
@@ -898,8 +909,29 @@ export function onWorldChange(listener: (worldId: string | null) => void): () =>
   return () => worldListeners.delete(listener);
 }
 
+/** Ends the holds whose line has been answered and shown, or whose answer a rejoin may have lost. */
+function settleHolds(next: StoreState): StoreState {
+  let holds: Record<string, WorldChatHold> | null = null;
+  for (const [conversationId, hold] of Object.entries(next.worldChatHolds)) {
+    const workspace = next.state?.worldChat?.conversationId === conversationId ? next.state.worldChat : null;
+    const seq = workspace?.seq ?? null;
+    const running = workspace?.runStatus === "running";
+    const answer = sendResults.get(hold.requestId);
+    let settled: WorldChatHold | null = hold;
+    if (next.rejoins !== hold.rejoins || answer === false) settled = null;
+    else if (hold.takenAt !== undefined) settled = running || seq !== hold.takenAt ? null : hold;
+    else if (answer === true) settled = running ? null : { ...hold, takenAt: seq };
+    if (settled === hold) continue;
+    holds ??= { ...next.worldChatHolds };
+    if (settled === null) delete holds[conversationId];
+    else holds[conversationId] = settled;
+  }
+  return holds === null ? next : { ...next, worldChatHolds: holds };
+}
+
 function emitChange(next: StoreState): void {
   const was = current.state?.world?.meta.worldId ?? null;
+  next = settleHolds(next);
   current = next;
   const now = next.state?.world?.meta.worldId ?? null;
   if (now !== was) for (const l of worldListeners) l(now);
@@ -4815,6 +4847,9 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     frameRunStartResults: {},
     frameRunRequestEpoch: 0,
     rejoins: 0,
+    // A line just sent stays held across a test's state changes, as it does across snapshots;
+    // `__clearWorldChatHoldsForTest` starts a test without one.
+    worldChatHolds: current.worldChatHolds,
     ...extra,
   });
 }
@@ -4881,7 +4916,7 @@ export function sendWorldChat(
    */
   requestId: string = crypto.randomUUID(),
 ): string | null {
-  return send({
+  const sent = send({
     kind: "world-chat-send",
     worldId,
     requestId,
@@ -4891,7 +4926,27 @@ export function sendWorldChat(
     ...(modelId !== undefined ? { modelId } : {}),
     ...(subject !== undefined ? { subject } : {}),
     ...(replyOnly ? { replyOnly: true } : {}),
-  }) ? requestId : null;
+  });
+  if (!sent) return null;
+  // Held only while there is a thread on screen to watch move; with none there is nothing to wait on.
+  const workspace = current.state?.worldChat;
+  if (workspace?.conversationId === conversationId) {
+    emitChange({
+      ...current,
+      worldChatHolds: { ...current.worldChatHolds, [conversationId]: { requestId, seq: workspace.seq, rejoins: current.rejoins } },
+    });
+  }
+  return requestId;
+}
+
+/** Test hook: no line held from an earlier test. */
+export function __clearWorldChatHoldsForTest(): void {
+  current = { ...current, worldChatHolds: {} };
+}
+
+/** The line just sent into a conversation that the screen has not seen become a turn, if any. */
+export function worldChatHold(conversationId: string | null | undefined): WorldChatHold | null {
+  return conversationId ? current.worldChatHolds[conversationId] ?? null : null;
 }
 
 /** Decide exactly the card and conversation revision currently on screen. */
