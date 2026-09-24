@@ -153,11 +153,11 @@ Implemented landing directories include:
 ## Publication foundation
 
 Publication foundation services (SPEC-048, issue #1228) are not yet exposed as export commands.
-`capturePublicationInputs` checks declared dependencies under the world's existing write gate and
+`capturePublicationInputs` checks declared dependencies under the world's ownership/read gate and
 copies media into a unique `arke-publication-*` child of a host-provided scratch directory. It
 does not edit authored sources or create a completed edition. Cancellation/failure removes that
 child; successful callers own its `dispose()` cleanup. Abrupt process exit can leave scratch files;
-there is no publication recovery or automatic sweep yet. `verifyPublicationDirectory` is read-only
+there is no automatic scratch sweep yet. `verifyPublicationDirectory` is read-only
 and checks a portable directory independently of an open world. See the
 [service boundaries](development/publications.md) for ownership, limits and remaining work.
 
@@ -169,6 +169,22 @@ returning it, removes the captured inputs, and gives the caller a package `dispo
 Cancel, world close or failure removes only these operation-owned temporary directories. This
 does not promote a destination, record durable completion or reconcile retries; abrupt exit can
 leave scratch output and it must not be presented as a completed export.
+
+`publishVideoPublication` wraps that compiler in local delivery. Under a host-owned output root it
+creates an operation UUID directory with immutable request, prepared and completed JSON receipts.
+Unique attempts hold copied/flushed/verified package bytes on the same filesystem. Directory
+promotion renames inside the chosen attempt; ZIP promotion uses a no-replace hard link. Receipt
+installation also uses exclusive hard links after file sync. Retry validates the recorded output
+and completes interrupted promotion without recompiling it. Existing conflicting/damaged output
+is preserved and refused. Failures before preparation remove only the current attempt; after
+preparation it is retained for retry. Crashes before preparation can leave orphan attempts.
+
+`writePublicationZip` streams inventoried files into a new ZIP. `extractPublicationZip` allocates
+an owned scratch child, pins the input archive, validates its bounded inventory, then extracts and
+verifies the package there. Its `dispose()` removes both temporary forms, never the source ZIP.
+Only the returned portable package path is a delivery artifact; adjacent operation receipts are
+internal state. These services assume trusted local storage and do not promise arbitrary power-loss
+recovery or an atomic fence against hostile external filesystem mutation.
 
 ## Artifacts and extraction
 
