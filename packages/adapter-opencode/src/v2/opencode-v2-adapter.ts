@@ -181,11 +181,16 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   private lastKnownWindow: number | null = null;
   /** Every catalogue row's window by `provider/id`, so a pinned session can be budgeted from its own model. */
   private readonly modelWindows = new Map<string, number>();
-  /** The pinned model's window per session, taken at creation from the catalogue as it stood then. */
-  private readonly sessionWindows = new Map<string, number>();
+  /**
+   * The pinned model's window per session, taken at creation from the catalogue as it stood
+   * then. Null is a pinned model whose window the catalogue did not state: the caller's floor
+   * is the right budget for it, and the default model's window is the wrong one twice over.
+   */
+  private readonly sessionWindows = new Map<string, number | null>();
 
   knownInputTokenLimit(sessionId?: string): number | null {
-    return (sessionId !== undefined ? this.sessionWindows.get(sessionId) : undefined) ?? this.lastKnownWindow;
+    if (sessionId !== undefined && this.sessionWindows.has(sessionId)) return this.sessionWindows.get(sessionId)!;
+    return this.lastKnownWindow;
   }
 
   /**
@@ -249,8 +254,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     );
     const sessionId = session?.id ?? "";
     if (!sessionId) throw new Error("OpenCode v2 did not return a session id");
-    const window = model !== null ? this.modelWindows.get(`${model.providerID}/${model.id}`) : undefined;
-    if (window !== undefined) this.sessionWindows.set(sessionId, window);
+    if (model !== null) this.sessionWindows.set(sessionId, this.modelWindows.get(`${model.providerID}/${model.id}`) ?? null);
     // The envelope assertion in reqData covers scoped GETs; session create echoes the location
     // inside data, so assert here too — a session in the wrong directory writes the wrong world.
     if (location && session?.location?.directory !== undefined && !sameDirectory(session.location.directory, location)) {

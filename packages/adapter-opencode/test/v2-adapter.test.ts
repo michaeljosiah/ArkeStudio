@@ -246,6 +246,7 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
       stub.models = [
         { id: "gpt-5.4-mini", providerID: "openai", limit: { context: 400_000, input: 272_000 } },
         { id: "gemma4:12b", providerID: "ollama", limit: { context: 131_072 } },
+        { id: "mystery:7b", providerID: "ollama" },
       ];
       stub.defaultModel = { id: "gpt-5.4-mini", providerID: "openai" };
       await adapter.listModels();
@@ -253,8 +254,11 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
       const pinned = await adapter.createSession({ purpose: "authoring", agent: "scene-writer", preparationId: "prep_window" });
       adapter.prepareSession({ preparationId: "prep_unpinned" });
       const unpinned = await adapter.createSession({ purpose: "authoring", agent: "scene-writer", preparationId: "prep_unpinned" });
+      adapter.prepareSession({ preparationId: "prep_unknown", model: "ollama/mystery:7b" });
+      const unknown = await adapter.createSession({ purpose: "authoring", agent: "scene-writer", preparationId: "prep_unknown" });
       assert.equal(adapter.knownInputTokenLimit(pinned.sessionId), 131_072);
       assert.equal(adapter.knownInputTokenLimit(unpinned.sessionId), 272_000, "an unpinned session answers with the default model");
+      assert.equal(adapter.knownInputTokenLimit(unknown.sessionId), null, "a pinned model with no stated window takes the floor, never the default's window");
       assert.equal(adapter.knownInputTokenLimit(), 272_000);
     } finally {
       stub.models = [];

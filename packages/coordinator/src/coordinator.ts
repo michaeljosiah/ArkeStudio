@@ -3925,11 +3925,23 @@ export class Coordinator {
    * invalidated: the screens that show models ask for them on mount and on a harness change,
    * so a pull that lands while a picker is open would otherwise wait for a Retry.
    */
-  private async publishLocalHarnessModels(): Promise<void> {
+  private publishLocalHarnessModels(): Promise<void> {
     const publish = this.opts.publishLocalHarnessModels;
     const client = this.opts.dispatchClients?.["ollama"];
-    if (!publish || !client?.listModels) return;
-    const models = await client.listModels().catch(() => []);
+    if (!publish || !client?.listModels || this.stopping) return Promise.resolve();
+    // Tracked, because the probe that calls this is fire-and-forget: stop() must wait out a
+    // profile write in flight rather than return under it.
+    const work = this.publishLocalHarnessModelsNow(publish, client.listModels.bind(client)).catch(() => {});
+    this.backgroundWork.add(work);
+    void work.finally(() => this.backgroundWork.delete(work));
+    return work;
+  }
+
+  private async publishLocalHarnessModelsNow(
+    publish: (models: readonly import("@arke-studio/contracts").LocalHarnessModel[]) => Promise<void>,
+    list: () => Promise<readonly import("@arke-studio/contracts").LocalHarnessModel[]>,
+  ): Promise<void> {
+    const models = await list().catch(() => []);
     const fingerprint = JSON.stringify(models);
     if (this.stopping || fingerprint === this.publishedLocalHarnessModels) return;
     try {
@@ -3940,6 +3952,8 @@ export class Coordinator {
       return;
     }
     this.publishedLocalHarnessModels = fingerprint;
+    // Shutdown may have started during the write; nothing is scheduled past it.
+    if (this.stopping) return;
     const timer = setTimeout(() => {
       this.lifecycleTimers.delete(timer);
       if (this.stopping) return;
