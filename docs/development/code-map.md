@@ -97,6 +97,8 @@ playback live together in `production-takes.tsx`, the episode picker in
 `production-dashboard.tsx` owns the home route and dashboard. `production-shell.tsx` retains
 layout, navigation and the providers for the single scene/chapter creation contexts declared
 in `production-story.tsx`. Take media and verdict presentation live in `lib/take-presentation.ts`;
+contracts `take.ts` resolves immutable take duration/dimension facts, with loaded media measurements
+supplied by `BenchPlayer` and `Portrait` for the Advanced generation wall;
 default episode selection lives in `lib/production-navigation.ts`; look-option helpers live
 with `production-cast.tsx`. These boundaries implement the assessment in
 [PR 1192](https://github.com/michaeljosiah/ArkeStudio/pull/1192); the Cut and library retain

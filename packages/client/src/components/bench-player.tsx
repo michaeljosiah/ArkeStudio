@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { TakeMediaMeasurements } from "@arke-studio/contracts";
 import { PauseSolid, PlaySolid } from "./icons.js";
 import { clock } from "./player.js";
 
@@ -16,10 +17,12 @@ export function BenchPlayer({
   src,
   poster,
   segment,
+  onMetadata,
 }: {
   src: string;
   poster?: string;
   segment?: { inSec: number; outSec: number };
+  onMetadata?: (measurements: TakeMediaMeasurements | null) => void;
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -71,10 +74,11 @@ export function BenchPlayer({
         onLoadedMetadata={(e) => {
           const el = e.currentTarget;
           setDuration(Number.isFinite(el.duration) ? el.duration : 0);
+          onMetadata?.({ durationSec: el.duration, width: el.videoWidth, height: el.videoHeight });
           if (segment !== undefined) el.currentTime = segment.inSec;
         }}
         onClick={toggle}
-        onError={() => setFailed(true)}
+        onError={() => { setFailed(true); onMetadata?.(null); }}
       />
       {failed && (
         <span className="fy-bench__playfail" role="status">
