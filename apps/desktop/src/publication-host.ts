@@ -164,9 +164,14 @@ export class PublicationHost implements PublicationBridge {
       } finally { this.opening = false; }
     });
   }
-  async close(sessionId: string): Promise<void> {
+  close(sessionId: string): Promise<void> {
     const pinned = this.players.get(sessionId); this.players.delete(sessionId);
-    await pinned?.dispose();
+    const work = pinned?.dispose() ?? Promise.resolve();
+    // A route can begin closing just before shutdown takes its snapshot. Keep that disposal
+    // in the drain even though its asset ids have already been withdrawn from the endpoint.
+    this.pending.add(work);
+    void work.then(() => this.pending.delete(work), () => this.pending.delete(work));
+    return work;
   }
   private listen(): Promise<void> {
     return this.starting ??= new Promise((resolve, reject) => {

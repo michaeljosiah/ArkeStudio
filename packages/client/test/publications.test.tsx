@@ -5,8 +5,10 @@ import { createRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { parseHTML } from "linkedom";
-import type { PublicationPlayback } from "@arke-studio/contracts";
+import { applyTimelineCommands, seedEmptyPictureTimeline, type ClientState, type PublicationPlayback, type PublicationBridge } from "@arke-studio/contracts";
 import { PublicationVideo, PublicationsScreen } from "../src/screens/publications.js";
+import { PublicationExport } from "../src/screens/publication-export.js";
+import { FIXTURE_STATE } from "./fixture-state.js";
 import { readPublicationPreference, savePublicationPreference } from "../src/lib/publication-preferences.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -56,4 +58,37 @@ it("resume state is isolated by edition identity and manifest digest", () => {
   assert.deepEqual(readPublicationPreference("edition-b:hash-b", "en"), { time: 0, caption: "en" });
   stored.set("bad", '{"time":-1,"caption":"en"}');
   assert.deepEqual(readPublicationPreference("bad", ""), { time: 0, caption: "" });
+});
+
+it("submits a fresh edition identity with the saved revision and explicit publication options", async t => {
+  const state = structuredClone(FIXTURE_STATE) as ClientState;
+  const production = state.world!.productions[0]!;
+  const timeline = applyTimelineCommands(seedEmptyPictureTimeline(production), [
+    { kind: "place", trackId: "tr_picture", clip: { id: "cl_blank", startFrame: 0, durationFrames: 48, sourceInFrames: 0,
+      source: { kind: "artifact", artifactId: "ar_01J8G0000000000000000000A1", label: "Blank" } } },
+  ]);
+  timeline.tracks[0]!.muted = true;
+  production.timeline = { status: "ready", timeline };
+  const sent: Array<Parameters<PublicationBridge["start"]>[0]> = [];
+  const previous = window.arke;
+  window.arke = { appVersion: "test", platform: "test", connect() {}, send() {}, subscribe() {}, publications: {
+    list: async () => ({ ok: true, value: [] }),
+    start: async input => { sent.push(input); return { ok: true, value: { operationId: "job", worldId: "world", productionId: production.meta.id, title: input.request.title, status: "running", phase: "Rendering" } }; },
+    open: async () => ({ ok: false, reason: "unused" }), close: async () => {}, retry: async () => ({ ok: false, reason: "unused" }), cancel: async () => {}, reveal: async () => ({ ok: true, value: null }),
+  } };
+  const node = document.createElement("div"); document.body.append(node); const root = createRoot(node);
+  t.after(async () => { await act(async () => root.unmount()); node.remove(); window.arke = previous; });
+  await act(async () => root.render(<MemoryRouter><PublicationExport worldId="world" production={production} world={state.world} preset="master" disabled={false} /></MemoryRouter>));
+  const button = (text: string) => Array.from(node.querySelectorAll("button")).find(item => item.textContent === text)!;
+  await act(async () => button("Publish playable edition").click());
+  assert.equal(button("Choose folder and publish").disabled, false, node.textContent!);
+  await act(async () => button("Choose folder and publish").click());
+  assert.equal(sent.length, 1);
+  assert.match(sent[0]!.request.id, /^urn:uuid:/);
+  assert.notEqual(sent[0]!.request.id, "urn:uuid:00000000-0000-4000-8000-000000000000");
+  assert.equal(sent[0]!.request.timelineRevision, timeline.revision);
+  assert.equal(sent[0]!.request.preset, "master");
+  assert.equal(sent[0]!.format, "zip");
+  assert.deepEqual(sent[0]!.request.textTracks, [], "ordinary export burn-in choices never leak into publication tracks");
+  assert.match(node.textContent!, /Publication started/);
 });
