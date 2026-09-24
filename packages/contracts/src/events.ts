@@ -1288,6 +1288,23 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
    * the screen two sources for one fact — and they would eventually disagree. A refusal has no
    * such home: nothing was written, so if this does not say it, nothing does.
    */
+  /**
+   * Whether a line sent into a conversation was taken as a turn, answered for its `requestId`
+   * (PR 1232). The coordinator can decline a send without appending anything — a turn already
+   * running from another window, the conversation gone — and nothing durable records that, so a
+   * screen holding the line (the chapter's selection menu) would otherwise have to infer it from
+   * a transcript that is only ever the last few messages.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("world-chat.send-result"),
+      conversationId: z.string().min(1),
+      requestId: z.string().min(1),
+      admitted: z.boolean(),
+    })
+    .strict(),
+
   z
     .object({
       ...base,

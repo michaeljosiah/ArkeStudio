@@ -26,6 +26,7 @@ import {
   openWorldChatMedia,
   retryWorldChatTurn,
   sendWorldChat,
+  subscribeWorldChatSendResults,
   setProductionModel,
   subscribeWorldChatMediaOpened,
   subscribeConversationActionDecision,
@@ -730,7 +731,7 @@ export function languageChoiceReason(
 /**
  * An ask a page hands the dock (the chapter's selection menu), with its words and subject fixed
  * at the press. `draft` only starts a line in the composer. `sent` is set by the dock once it has
- * gone, with how many times the thread already held these words.
+ * gone, with the request id the coordinator answers for.
  */
 export type DockAsk = {
   line: string;
@@ -738,7 +739,7 @@ export type DockAsk = {
   subject?: WorldChatSubject;
   replyOnly?: boolean;
   draft?: boolean;
-  sent?: { said: number };
+  sent?: { requestId: string };
 };
 
 export function ProductionConversation({
@@ -876,6 +877,8 @@ export function ProductionConversation({
     subject?: WorldChatSubject;
     modelId?: string;
     replyOnly?: boolean;
+    /** Told the request id once the line is sent into the thread this opened. */
+    onSent?: (requestId: string) => void;
   } | null>(null);
   const [busyMedia, setBusyMedia] = useState<string | null>(null);
   const [mediaRefusal, setMediaRefusal] = useState<string | null>(null);
@@ -976,8 +979,9 @@ export function ProductionConversation({
     if (!opened || opened === opening.was || opened !== conversationId) return;
     if (opening.attach) worldChatAttachFiles(worldId, opened);
     else {
-      sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId, opening.replyOnly ?? false);
+      const requestId = sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId, opening.replyOnly ?? false);
       setEcho({ seq: workspace?.seq ?? null });
+      if (requestId !== null) opening.onSent?.(requestId);
     }
     setOpening(null);
   }, [opening, worldId, workspace?.conversationId, conversationId]);
@@ -1022,7 +1026,13 @@ export function ProductionConversation({
 
   /** Says one thing into the thread — the composer's draft, or a quick ask said as it stands. */
   /** True when the line went out; false when it was held back or the transport is down. */
-  const say = (text: string, replyOnly = false, about: WorldChatSubject | undefined = subject): boolean => {
+  const say = (
+    text: string,
+    replyOnly = false,
+    about: WorldChatSubject | undefined = subject,
+    /** Told the request id once the line has gone — at once, or after the thread it opens. */
+    onSent?: (requestId: string) => void,
+  ): boolean => {
     if (!text || !worldId || !productionId) return false;
     // A second line said while the first is still opening its thread would open a second one,
     // and one said over a running turn starts a second turn the first can no longer stop.
@@ -1042,6 +1052,7 @@ export function ProductionConversation({
         ...(about !== undefined ? { subject: about } : {}),
         ...(languageModelId !== undefined ? { modelId: languageModelId } : {}),
         ...(replyOnly ? { replyOnly: true } : {}),
+        ...(onSent !== undefined ? { onSent } : {}),
       });
       setLanguageModelId(undefined);
       return true;
@@ -1049,9 +1060,11 @@ export function ProductionConversation({
     // Only the turn's explicit choice travels as an override. The coordinator resolves the
     // captured agent preference before the production default; sending the displayed fallback
     // here would promote that default above the agent and run a different model.
-    if (!sendWorldChat(worldId, conversationId, text, [], about, languageModelId, replyOnly)) return false;
+    const requestId = sendWorldChat(worldId, conversationId, text, [], about, languageModelId, replyOnly);
+    if (requestId === null) return false;
     setEcho({ seq: loaded?.seq ?? null });
     setLanguageModelId(undefined);
+    onSent?.(requestId);
     return true;
   };
   const submit = () => {
@@ -1060,6 +1073,12 @@ export function ProductionConversation({
     // The field keeps its words while a thread is still opening; say() would drop them.
     if (opening) return;
     setMessage("");
+    // A line a menu press started is about the passage it was pressed on (codex on PR 1232).
+    if (draftAbout !== null) {
+      setDraftAbout(null);
+      say(`${draftAbout.prefix} ${text}`, false, draftAbout.subject);
+      return;
+    }
     const prefix = dock?.subjectPrefix;
     say(prefix === undefined ? text : `${prefix} ${text}`);
   };
@@ -1067,24 +1086,25 @@ export function ProductionConversation({
   /*
    * An ask handed in from the page — the chapter's selection menu. The page owns it (codex on PR
    * 1232): its words and passage were fixed at the press, and it stays with the page until the
-   * thread shows it said, so putting the dock away and bringing it back loses nothing. The dock
-   * says it when it is free, exactly as a quick ask is said, and reports back through `onAsk`:
-   * sent (with how many times the thread already held those words), taken, or handed back to
-   * try again.
+   * coordinator has answered for it, so putting the dock away and bringing it back loses nothing.
+   * The dock says it when it is free, exactly as a quick ask is said, and reports back through
+   * `onAsk`: sent (with its request id), or done with.
    *
-   * Said means the thread holds one more user message with exactly these words than it did at
-   * the send. The sequence moving is not proof — another window's turn moves it too while the
-   * coordinator quietly declines this one — and the words carry the quoted passage, so nobody
-   * else's turn matches them. The count is taken only once the thread is loaded, so words said
-   * before are never mistaken for this send. Not said within the lapse, the ask was declined;
-   * it is shown beside the prompts to be tried again or dismissed, never written over the
-   * composer. A line that only starts an ask goes to the composer, and only an empty one.
+   * Taken or not is the coordinator's answer for that request id (`world-chat.send-result`), not
+   * a guess from the transcript, which is only the last few messages and is moved by other
+   * windows too. No answer within the lapse — the connection lost it — counts as not taken.
+   * Not taken, it is shown beside the prompts to be tried again or dismissed, never written over
+   * the composer.
+   *
+   * A line that only starts an ask goes to the composer, and only an empty one; the passage it
+   * was pressed on stays with it until the author sends it or presses something else, so a
+   * changed selection meanwhile does not change what it is about.
    */
   const [focusRequest, setFocusRequest] = useState(0);
   const [declinedAsk, setDeclinedAsk] = useState<DockAsk | null>(null);
+  const [draftAbout, setDraftAbout] = useState<{ prefix: string; subject: WorldChatSubject | undefined } | null>(null);
   const ask = dock?.ask;
   const onAsk = dock?.onAsk;
-  const timesSaid = (text: string) => (loaded?.messages ?? []).filter((m) => m.role === "user" && m.text === text).length;
   /*
    * A line just sent that the thread has not shown yet (codex on PR 1232). Between the send and
    * the snapshot that reports its turn, nothing here says a turn is running, and an ask released
@@ -1102,45 +1122,51 @@ export function ProductionConversation({
     const lapse = setTimeout(() => setEcho(null), 15_000);
     return () => clearTimeout(lapse);
   }, [echo, loaded?.seq]);
-  // A new press replaces whatever was shown as not sent.
+  // A new press replaces whatever was shown as not sent, and any passage a draft was holding.
   useEffect(() => {
-    if (ask !== undefined && ask.sent === undefined) setDeclinedAsk(null);
+    if (ask !== undefined && ask.sent === undefined) {
+      setDeclinedAsk(null);
+      setDraftAbout(null);
+    }
   }, [ask]);
-  // A line to finish: the composer, if empty, and the caret either way.
+  // A line to finish: the composer, if empty, the caret either way, and the passage kept with it.
   useEffect(() => {
     if (ask === undefined || ask.draft !== true) return;
     onAsk?.(null);
     if (message.trim() === "") setMessage(ask.line);
+    setDraftAbout({ prefix: ask.text.slice(0, ask.text.length - ask.line.length).trimEnd(), subject: ask.subject });
     setFocusRequest((n) => n + 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ask]);
-  // Said when the dock is free and the thread it would be said into is loaded.
-  const threadReady = !conversationId || loaded !== null;
+  // Said when the dock is free.
   useEffect(() => {
     if (ask === undefined || ask.draft === true || ask.sent !== undefined) return;
-    if (!threadReady || opening !== null || echo !== null || running || languageUnavailableReason !== undefined || connection !== "open") return;
-    const said = timesSaid(ask.text);
-    if (say(ask.text, ask.replyOnly === true, ask.subject)) onAsk?.({ ...ask, sent: { said } });
+    if (opening !== null || echo !== null || running || languageUnavailableReason !== undefined || connection !== "open") return;
+    const pressed = ask;
+    say(pressed.text, pressed.replyOnly === true, pressed.subject, (requestId) => onAsk?.({ ...pressed, sent: { requestId } }));
     // say is rebuilt every render; the ask and the dock's readiness are what decide.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ask, threadReady, opening, echo, running, languageUnavailableReason, connection]);
-  // Taken once the thread holds it.
+  }, [ask, opening, echo, running, languageUnavailableReason, connection]);
+  // Answered: taken is done with; not taken is shown.
   useEffect(() => {
-    if (ask?.sent === undefined || loaded === null) return;
-    if (timesSaid(ask.text) > ask.sent.said) onAsk?.(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ask, loaded?.messages]);
-  // Declined when it is not, within the lapse.
-  useEffect(() => {
-    if (ask?.sent === undefined) return;
-    const declined = ask;
+    const requestId = ask?.sent?.requestId;
+    if (ask === undefined || requestId === undefined) return;
+    const unsubscribe = subscribeWorldChatSendResults((result) => {
+      if (result.requestId !== requestId) return;
+      onAsk?.(null);
+      if (!result.admitted) setDeclinedAsk(ask);
+    });
+    // No answer at all within the lapse: the connection lost it.
     const lapse = setTimeout(() => {
       onAsk?.(null);
-      setDeclinedAsk(declined);
+      setDeclinedAsk(ask);
     }, 15_000);
-    return () => clearTimeout(lapse);
+    return () => {
+      unsubscribe();
+      clearTimeout(lapse);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ask]);
+  }, [ask?.sent?.requestId]);
 
   const points = loaded?.points ?? [];
   const carriedPoints = points.filter((p) => p.kind === "point" && p.settled).length;

@@ -549,8 +549,11 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: z.string().min(1),
       proposalId: z.string().min(1),
       path: z.string().min(1),
-      before: z.string().max(2_400),
-      after: z.string().max(2_400),
+      // The span as drawn is the replacement widened to whole words at both ends, so it can run
+      // past the 2,400 the model's replacement is held to (codex on PR 1232); the gate compares
+      // it with the span it finds, so the bound is only there to keep the frame sane.
+      before: z.string().max(20_000),
+      after: z.string().max(20_000),
       kept: z.array(z.number().int().min(0)).max(2_400),
       expectedDraftRevision: z.number().int().min(1),
     })

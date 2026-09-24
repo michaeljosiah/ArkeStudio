@@ -5684,9 +5684,26 @@ export class Coordinator {
         return;
       }
       case "world-chat-send": {
+        // Every send is answered for its request (PR 1232): taken as a turn, or not. A decline
+        // appends nothing, so without this the sender can only guess from the transcript.
+        const answer = (admitted: boolean) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "world-chat.send-result",
+            conversationId: msg.conversationId,
+            requestId: msg.requestId,
+            admitted,
+          });
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        const started = await this.conversationAuthoring(store).send(msg);
+        if (!store) {
+          answer(false);
+          return;
+        }
+        const started = await this.conversationAuthoring(store).send(msg).catch((error: unknown) => {
+          answer(false);
+          throw error;
+        });
+        answer(started !== null && started !== undefined);
         if (!started) return;
         const { completion: inFlight, naming } = started;
         // The title may have just changed, and the screen shows the message immediately.

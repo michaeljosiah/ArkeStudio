@@ -409,3 +409,15 @@ it("a passage keep that throws is refused out loud, so a screen waiting on it ca
   assert.equal((blocked as { reason?: string }).reason, "invalid");
   assert.doesNotMatch(JSON.stringify(blocked), /could not be parsed/, "the thrown message is not relayed");
 });
+
+it("a chat line the coordinator will not take is answered for its request, so a screen holding it can say so (PR 1232)", async () => {
+  const w = await setup();
+  await w.coordinator.openWorld(WORLD_ID);
+  await w.internal.handleClientMessage({
+    kind: "world-chat-send", worldId: WORLD_ID, requestId: "req-nowhere", conversationId: newId("cv") as never,
+    text: "Tighten this", attachmentIds: [],
+  });
+  const answer = w.events.find((event) => event.type === "world-chat.send-result" && event.requestId === "req-nowhere");
+  assert.ok(answer, "the send is answered");
+  assert.equal((answer as { admitted?: boolean }).admitted, false, "a conversation that is not there takes nothing");
+});

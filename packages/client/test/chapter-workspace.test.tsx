@@ -611,7 +611,42 @@ describe("the craft loop (turn 128)", () => {
     assert.deepEqual((tightened()[0] as { subject?: unknown }).subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells." });
   });
 
-  it("an ask the coordinator declines is shown to be tried again, never written over the composer (codex on PR 1232)", async (t) => {
+  it("an ask is done with when the coordinator takes it, and shown to be tried again when it does not (PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const m = await mount(state);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    const press = async (label: string) => {
+      await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+      await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === label) as HTMLElement).click());
+    };
+    const sendsOf = (line: string) => m.sent.filter((message) => message.kind === "world-chat-send" && (message as { text: string }).text.endsWith(line)) as Array<{ requestId: string }>;
+    const answer = async (requestId: string, admitted: boolean) =>
+      act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId, admitted }));
+
+    await press("Tighten");
+    assert.equal(sendsOf("Tighten this").length, 1);
+    // Another window's turn moving the thread is not an answer for this request.
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 5 } } as ClientState, { connection: "open" }));
+    await answer("someone-else", false);
+    assert.doesNotMatch(text(m), /Not sent ·/, "only this request's answer counts");
+    await answer(sendsOf("Tighten this")[0]!.requestId, false);
+    assert.match(text(m), /Not sent · Tighten this/, "declined, it is shown rather than lost");
+    assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent ?? "", "", "and never written over the composer");
+
+    await act(async () => ([...m.container.querySelectorAll(".fy-arke__declined button")].find((b) => b.textContent === "Try again") as HTMLElement).click());
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 6 } } as ClientState, { connection: "open" }));
+    assert.equal(sendsOf("Tighten this").length, 2, "tried again at the author's word");
+    await answer(sendsOf("Tighten this")[1]!.requestId, true);
+    assert.doesNotMatch(text(m), /Not sent ·/, "taken, it is done with");
+  });
+
+  it("no answer at all within the lapse counts as not taken (PR 1232)", async (t) => {
     const styled = inkbound([], STYLE);
     const workspace = {
       conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
@@ -623,21 +658,45 @@ describe("the craft loop (turn 128)", () => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
     await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
-    const tightened = () => m.sent.filter((message) => message.kind === "world-chat-send" && (message as { text: string }).text.endsWith("Tighten this")).length;
-    assert.equal(tightened(), 1);
-    // Another window's turn moves the thread, but not with these words: not proof this ask was
-    // taken (codex on PR 1232), so it is still held.
-    const foreign = { ...workspace, seq: 5, messages: [{ id: "msg_01J8F3K2QW9VZX4N7M0RTYB6H1" as never, role: "user" as const, text: "Something another window said.", receipts: [], refusals: [], createdAt: "2026-09-06T12:00:00Z" }] };
-    await act(async () => __setStateForTest({ ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: foreign } as ClientState, { connection: "open" }));
-    assert.doesNotMatch(text(m), /Not sent ·/);
-    // The lapse passes without the thread holding it: declined, and said so.
     await act(async () => t.mock.timers.tick(15_000));
-    assert.match(text(m), /Not sent · Tighten this/, "shown to the author rather than lost");
-    assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent ?? "", "", "and never written over the composer");
-    await act(async () => ([...m.container.querySelectorAll(".fy-arke__declined button")].find((b) => b.textContent === "Try again") as HTMLElement).click());
-    assert.equal(tightened(), 2, "tried again at the author's word");
-    assert.doesNotMatch(text(m), /Not sent ·/);
+    assert.match(text(m), /Not sent · Tighten this/);
     t.mock.timers.reset();
+  });
+
+  it("the menu waits for the selected words to be saved (codex on PR 1232)", async () => {
+    const m = await mount({ ...inkbound([], STYLE), world: { ...inkbound([], STYLE).world!, conversations: [THREAD] } });
+    await answerOpen(m);
+    await typeProse(m, `${BODY} More.`);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    const pill = q(m, "button.fy-ch__ask") as HTMLButtonElement;
+    assert.match(pill.textContent ?? "", /saving…/, "the press says why it waits");
+    assert.equal(pill.disabled, true);
+    // Saved, the press is the author's again (and nothing is left parked for the next screen).
+    const save = m.sent.findLast((message) => message.kind === "save-chapter") as Extract<ClientMessage, { kind: "save-chapter" }>;
+    await answerSave(save, "saved", `sha256:${"b".repeat(64)}`);
+    assert.equal((q(m, "button.fy-ch__ask") as HTMLButtonElement).disabled, false);
+    assert.match(q(m, "button.fy-ch__ask")?.textContent ?? "", /Ask Arke · 4 words/);
+  });
+
+  it("a line a press started stays about the passage it was pressed on (codex on PR 1232)", async () => {
+    const m = await mount({ ...inkbound([], STYLE), world: { ...inkbound([], STYLE).world!, conversations: [THREAD] } });
+    await answerOpen(m);
+    const area = q(m, "textarea.fy-ch__source") as HTMLTextAreaElement;
+    await keyup(area, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone…") as HTMLElement).click());
+    // The author moves the selection away, then finishes the line and sends it.
+    await keyup(area, 3, 3);
+    const composer = q(m, ".fy-arke .fy-cx__editor")!;
+    composer.textContent = "Make this colder";
+    await act(async () => {
+      composer.dispatchEvent(new dom.Event("input", { bubbles: true }));
+    });
+    const sendButton = [...m.container.querySelectorAll(".fy-arke button")].find((b) => /send/i.test(b.getAttribute("aria-label") ?? b.textContent ?? "")) as HTMLElement;
+    await act(async () => sendButton.click());
+    const sent = m.sent.find((message) => message.kind === "world-chat-send" && (message as { text: string }).text.endsWith("Make this colder")) as { text: string; subject?: unknown } | undefined;
+    assert.match(sent?.text ?? "", /^About this passage in chapter 02, paragraph 1: «Maren counted the bells.» Make this colder$/);
+    assert.deepEqual(sent?.subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells." });
   });
 
   it("an ask survives the dock being put away and brought back (codex on PR 1232)", async () => {

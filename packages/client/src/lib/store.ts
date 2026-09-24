@@ -753,6 +753,14 @@ export function subscribeProposalResolutions(
   return () => proposalResolutionListeners.delete(listener);
 }
 
+export type WorldChatSendResult = Extract<DomainEvent, { type: "world-chat.send-result" }>;
+const sendResultListeners = new Set<(result: WorldChatSendResult) => void>();
+/** Whether a line sent into a conversation was taken as a turn, answered for its request id. */
+export function subscribeWorldChatSendResults(listener: (result: WorldChatSendResult) => void): () => void {
+  sendResultListeners.add(listener);
+  return () => sendResultListeners.delete(listener);
+}
+
 export type CanonContradictions = Extract<DomainEvent, { type: "canon.contradictions" }>;
 const canonContradictionListeners = new Set<(result: CanonContradictions) => void>();
 export function subscribeCanonContradictions(listener: (result: CanonContradictions) => void): () => void {
@@ -1770,6 +1778,8 @@ function handleFrame(json: string): void {
       }
     } else if (event.type === "dictation.result") {
       dictation = { ...dictation, [event.requestId]: { text: event.text, error: event.error } };
+    } else if (event.type === "world-chat.send-result") {
+      for (const listener of sendResultListeners) listener(event);
     } else if (event.type === "world-chat.attachment-refused") {
       // The last few only: a refusal is news for a moment, not a list to work through — the same
       // rule the composer applies to the ones it raises itself.
@@ -4829,18 +4839,19 @@ export function sendWorldChat(
   modelId?: string,
   /** A line that asks for a reply and nothing else (turn 128): no action the turn returns is staged. */
   replyOnly = false,
-): boolean {
+): string | null {
+  const requestId = crypto.randomUUID();
   return send({
     kind: "world-chat-send",
     worldId,
-    requestId: crypto.randomUUID(),
+    requestId,
     conversationId,
     text,
     attachmentIds,
     ...(modelId !== undefined ? { modelId } : {}),
     ...(subject !== undefined ? { subject } : {}),
     ...(replyOnly ? { replyOnly: true } : {}),
-  });
+  }) ? requestId : null;
 }
 
 /** Decide exactly the card and conversation revision currently on screen. */

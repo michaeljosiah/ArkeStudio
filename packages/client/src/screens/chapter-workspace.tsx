@@ -283,12 +283,15 @@ function PassageMenu({
   end,
   actions,
   onAsk,
+  held,
 }: {
   words: number;
   top: number;
   left: number;
   /** Near the manuscript's right edge: the menu opens leftward. */
   end: boolean;
+  /** Why nothing can be asked yet — the selected words are not saved — said on the press. */
+  held?: string;
   actions: readonly PassageAction[];
   onAsk: (action: PassageAction) => void;
 }) {
@@ -310,13 +313,14 @@ function PassageMenu({
         type="button"
         className="fy-ch__ask"
         aria-haspopup="menu"
-        aria-expanded={open}
+        aria-expanded={open && held === undefined}
+        disabled={held !== undefined}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => setOpen((was) => !was)}
       >
-        Ask Arke · {words.toLocaleString()} words
+        Ask Arke · {held ?? `${words.toLocaleString()} words`}
       </button>
-      {open && (
+      {open && held === undefined && (
         <div className={cx("fy-ch__ask-menu", end && "fy-ch__ask-menu--end")} role="menu" aria-label="Ask about this passage">
           {actions.map((action, i) => (
             <button
@@ -1504,6 +1508,13 @@ export function ChapterWorkspace({
                 end={selection.end}
                 actions={passageActions(style !== null)}
                 onAsk={askPassage}
+                // Asked only about words on disk (codex on PR 1232): a revision comes back as a
+                // span of the saved chapter, so text still being saved — or refused — has none.
+                {...(draftConflict || saveRefusal !== null
+                  ? { held: "not saved" }
+                  : saving || draft !== null
+                    ? { held: "saving…" }
+                    : {})}
               />
             )}
             <div className="fy-ch__foot">

@@ -1269,6 +1269,7 @@ describe("domain events and frames", () => {
       assert.throws(() => ClientMessageSchema.parse(without), `${missing} must be required`);
     }
     assert.throws(() => ClientMessageSchema.parse({ ...kept, kept: [-1] }), "an edit is named by its index");
+    assert.doesNotThrow(() => ClientMessageSchema.parse({ ...kept, after: `${"x".repeat(2_400)}.` }), "a span widened to whole words may pass the replacement's own cap");
     assert.throws(() => ClientMessageSchema.parse({ ...kept, text: "words the reviewer never saw" }), "the passage is composed by the gate, never sent");
   });
 
