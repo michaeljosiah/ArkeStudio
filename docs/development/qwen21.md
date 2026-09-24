@@ -2,7 +2,7 @@
 
 `comfyui-qwen21-image` implements SPEC-021 R-2, R-13 and R-16 as a separate research recipe.
 It offers 1024 × 1024 PNG images and one optional reference. Krea and SDXL keep their
-existing identities and defaults. The [Qwen Research License](https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE)
+existing identities and defaults. The [Qwen Research License](https://huggingface.co/Qwen/Qwen-Image-2.1/blob/790c92633540aa0cb11d9abf19eb46d861714758/LICENSE)
 permits noncommercial research and evaluation; commercial use requires separate terms. The
 model name retains **Research**; its AI models card explicitly says **Noncommercial research**
 and links the licence beside the download controls, including after installation.
@@ -52,6 +52,12 @@ Managed and supervised-path engines do not show this manual-setup notice.
 
 Arke cannot change the launch settings of an external server. Its owner must install the pinned
 runtime guard into an engine containing `main.py`:
+
+Use the installer and `vendor/comfyui/ArkeQwen21Runtime` together from
+[ArkeStudio revision 7905f2d](https://github.com/michaeljosiah/ArkeStudio/tree/7905f2d550de415a7b0460ef10b118c367c99ebe),
+which introduced the guard pinned by this recipe. Run the command from that source snapshot;
+do not substitute a newer `main` checkout. The guard's content identity must match the recipe
+in the installed app. The model card links a fixed revision of this guide for the same reason.
 
 ```powershell
 node scripts/install-comfyui-qwen21.mjs C:/path/to/ComfyUI
