@@ -1,0 +1,16 @@
+{
+  "name": "arke-publication-interop-spike",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "node generate.mjs",
+    "test": "node --test test.mjs"
+  },
+  "dependencies": {
+    "@readium/navigator": "2.10.3",
+    "@readium/shared": "2.5.1",
+    "ajv": "8.17.1",
+    "ajv-formats": "3.0.1",
+    "jszip": "3.10.1"
+  }
+}

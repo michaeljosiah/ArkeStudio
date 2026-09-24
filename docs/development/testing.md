@@ -59,6 +59,9 @@ Close stores, sockets, watchers, timers and supervisors in test cleanup before d
 
 ## Boundary-specific checks
 
+Book/audio standards experiments use the separate [publication interoperability checks](publication-interop.md#reproduce).
+They install their own locked development dependencies and exercise Readium, package closure and EPUBCheck.
+
 | Change | Additional evidence |
 |---|---|
 | Contracts/wire state | Typecheck consumers; affected client/server state and transport tests |
