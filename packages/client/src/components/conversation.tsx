@@ -1767,7 +1767,7 @@ export function StagedDecision({
 }: {
   worldId: string | undefined;
   /** Accept as the page needs it (see ConnectedProposalPanel); absent accepts the whole draft. */
-  accept?: { label?: string; blocked?: string; onAccept?: (confirmSignature?: string) => void };
+  accept?: { label?: string; blocked?: string; pending?: boolean; onAccept?: (confirmSignature?: string) => void };
   /** What is being decided, in the words of the level — "season", "episode 03". */
   subject: string;
   staged: StagedProposal;

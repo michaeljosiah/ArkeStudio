@@ -460,6 +460,13 @@ it("a chat line sent again under the same request is not a second turn (codex on
   assert.equal(sends, 1, "taken: not said twice");
   const answers = w.events.filter((event) => event.type === "world-chat.send-result" && event.requestId === "req-again");
   assert.deepEqual(answers.map((event) => (event as { admitted: boolean }).admitted), [true, true], "answered as taken each time it was asked after");
+  // Asked where it stands after a rejoin: taken; and one never sent is not known to be taken.
+  const status = (requestId: string) => w.internal.handleClientMessage({ kind: "world-chat-send-status", worldId: WORLD_ID, requestId, conversationId: newId("cv") as never });
+  await status("req-again");
+  await status("req-never");
+  const answered = (requestId: string) => w.events.filter((event) => event.type === "world-chat.send-result" && event.requestId === requestId).map((event) => (event as { admitted: boolean }).admitted);
+  assert.deepEqual(answered("req-again"), [true, true, true]);
+  assert.deepEqual(answered("req-never"), [false]);
 });
 
 it("an accept refused because the draft moved on says so, rather than offering a rebase (codex on PR 1232)", async (t) => {
@@ -497,4 +504,16 @@ it("a conversation made again under the same request is the same conversation (c
   await Promise.all([create(), create()]);
   await create();
   assert.equal((await discoverConversations(store.dir)).summaries.length, before + 1, "one conversation, however many times it was asked for");
+});
+
+it("an accept that throws is refused out loud, so a screen holding its controls can let go (codex on PR 1232)", async () => {
+  const w = await setup();
+  await w.coordinator.openWorld(WORLD_ID);
+  const THROWS_ID = newId("pr");
+  const engine = (w.coordinator as unknown as { engine: { proposals: { accept: unknown } } }).engine;
+  Object.assign(engine.proposals, { accept: async () => { throw new Error("the manifest could not be read"); } });
+  await w.internal.handleClientMessage({ kind: "proposal-accept", worldId: WORLD_ID, proposalId: THROWS_ID, expectedDraftRevision: 1 });
+  const blocked = w.events.find((event) => event.type === "proposal.blocked" && event.proposalId === THROWS_ID);
+  assert.equal((blocked as { reason?: string } | undefined)?.reason, "invalid");
+  assert.doesNotMatch(JSON.stringify(blocked), /manifest could not be read/, "what failed is not relayed");
 });

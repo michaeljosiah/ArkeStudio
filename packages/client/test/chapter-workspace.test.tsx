@@ -936,13 +936,40 @@ describe("the craft loop (turn 128)", () => {
     await act(async () => __setStateForTest(state, { connection: "closed" }));
     await act(async () => __setStateForTest(state, { connection: "open", rejoins: 1 }));
     assert.match(text(m), /Not sent · Tighten this/);
+    const first = (m.sent.find((message) => message.kind === "world-chat-send") as { requestId: string }).requestId;
+    // The rejoin does not end the hold on the line: the coordinator is asked where it stands.
+    assert.ok(m.sent.some((message) => message.kind === "world-chat-send-status" && (message as { requestId: string }).requestId === first), "asked where the line stands");
     await act(async () => ([...m.container.querySelectorAll(".fy-arke__declined button")].find((b) => b.textContent === "Try again") as HTMLElement).click());
-    const sends = m.sent.filter((message) => message.kind === "world-chat-send") as Array<{ requestId: string }>;
-    assert.equal(sends.length, 2);
-    assert.equal(sends[1]!.requestId, sends[0]!.requestId, "the coordinator takes one line per request, so a retry racing the first cannot pay twice");
-    // Answered late for that request, it is settled.
-    await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: sends[0]!.requestId, admitted: true }));
-    assert.doesNotMatch(text(m), /Not sent ·/);
+    const sends = () => m.sent.filter((message) => message.kind === "world-chat-send") as Array<{ requestId: string }>;
+    assert.equal(sends().length, 1, "and nothing goes again until it answers");
+    // Not taken as far as it knows: the ask goes again, under the same request all the same.
+    await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: first, admitted: false }));
+    assert.equal(sends().length, 2);
+    assert.equal(sends()[1]!.requestId, first, "the coordinator takes one line per request, so a retry cannot pay twice");
+  });
+
+  it("a line whose answer a rejoin lost is settled by asking the coordinator (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const m = await mount(state);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const first = (m.sent.find((message) => message.kind === "world-chat-send") as { requestId: string }).requestId;
+    const prompts = () => [...m.container.querySelectorAll("button.fy-arke__prompt")] as HTMLButtonElement[];
+    await act(async () => __setStateForTest(state, { connection: "closed" }));
+    await act(async () => __setStateForTest(state, { connection: "open", rejoins: 1 }));
+    assert.ok(prompts().every((b) => b.disabled), "the rejoin's snapshot may predate the turn: the dock still waits");
+    // Taken after all: the ask is done with, and the dock waits for the thread to show it.
+    await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: first, admitted: true }));
+    assert.doesNotMatch(text(m), /Not sent ·/, "never offered again");
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 5, runStatus: "running" as never } } as ClientState, { connection: "open", rejoins: 1 }));
+    assert.ok(prompts().every((b) => b.disabled), "running: a turn is on");
   });
 
   it("words already in the composer stay with a line a press starts (codex on PR 1232)", async () => {
@@ -1264,6 +1291,14 @@ describe("the craft loop (turn 128)", () => {
     }
   });
 
+  it("with no prose style, the dock offers no holding against one (codex on PR 1232)", async () => {
+    const m = await mount({ ...inkbound([]), world: { ...inkbound([]).world!, conversations: [THREAD] } });
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    const labels = [...m.container.querySelectorAll("button.fy-arke__prompt")].map((b) => b.textContent);
+    assert.equal(labels.some((label) => /against the style/.test(label ?? "")), false);
+  });
+
   it("a line typed while the last one is still being taken stays in the composer (codex on PR 1232)", async () => {
     const styled = inkbound([], STYLE);
     const workspace = {
@@ -1567,7 +1602,11 @@ describe("the craft loop (turn 128)", () => {
       assert.equal(acceptButton(m).textContent, "Accept");
       await act(async () => acceptButton(m).click());
       assert.equal(m.sent.some((message) => message.kind === "proposal-update-passage"), false);
-      assert.equal(m.sent.some((message) => message.kind === "proposal-accept"), true);
+      const accepted = m.sent.find((message) => message.kind === "proposal-accept") as { expectedDraftRevision?: number } | undefined;
+      assert.equal(accepted?.expectedDraftRevision, PASSAGE.proposal.draftRevision, "fenced to the revision on screen, one edit or many (codex on PR 1232)");
+      // The decision on its way holds the others (codex on PR 1232).
+      const discard = [...m.container.querySelectorAll("button")].find((b) => b.textContent === "Discard") as HTMLButtonElement;
+      assert.equal(discard.disabled, true, "a Discard racing the accept could land after it");
     });
   });
 

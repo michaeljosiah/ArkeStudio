@@ -5494,7 +5494,17 @@ export class Coordinator {
             });
           }
         } catch {
-          /* surfaced only through the refreshed snapshot */
+          // Said as a refusal (codex on PR 1232): a screen holding its controls until the accept
+          // settles would otherwise wait on a proposal the refresh shows unchanged. What failed is
+          // not relayed; the proposal stands as it was.
+          this.emit({
+            at: new Date().toISOString(),
+            type: "proposal.blocked",
+            worldId: msg.worldId,
+            proposalId: msg.proposalId,
+            reason: "invalid",
+            detail: "this could not be accepted; nothing was written",
+          });
         }
         await this.refreshWorldSnapshot(msg.worldId);
         return;
@@ -5655,9 +5665,11 @@ export class Coordinator {
             type: "proposal.blocked",
             worldId: msg.worldId,
             proposalId: msg.proposalId,
+            // Stale here is always the draft moving — another window's edit landed first — never
+            // the world under it, so nothing is offered to rebase (codex on PR 1232).
             reason:
               outcome.status === "stale"
-                ? "stale"
+                ? "draft-changed"
                 : outcome.status === "draft-unresolved"
                   ? "draft-unresolved"
                   : "invalid",
@@ -5771,6 +5783,21 @@ export class Coordinator {
           await this.refreshConversations(store);
           await this.openWorldChat(store, msg.conversationId);
         }
+        return;
+      }
+      case "world-chat-send-status": {
+        // Taken is known for the world's session; anything else is not taken as far as this
+        // coordinator knows — declined, never received, or sent to one that has since restarted.
+        // Still being taken, the first send's own answer will come.
+        const seen = this.worldChatSends.get(msg.requestId);
+        if (seen === "pending") return;
+        this.emit({
+          at: new Date().toISOString(),
+          type: "world-chat.send-result",
+          conversationId: msg.conversationId,
+          requestId: msg.requestId,
+          admitted: seen === "admitted",
+        });
         return;
       }
       case "world-chat-retry-turn": {

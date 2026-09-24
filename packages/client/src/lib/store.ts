@@ -423,12 +423,14 @@ interface StoreState {
    * conversation (codex on PR 1232). Kept here rather than by whichever dock sent it, so a dock
    * put away and brought back in the gap still holds: a line said into it would be refused by the
    * runner as already working. Ended by the coordinator's answer for that request — refused, or
-   * taken and then shown running or moved on — or by a rejoin, whose snapshot says what is running.
+   * taken and then shown running or moved on. A rejoin may have lost that answer, and its
+   * snapshot can be taken while the line is still being admitted (codex on PR 1232), so the
+   * rejoin does not end it: the coordinator is asked where the line stands, and answers.
    */
   worldChatHolds: Record<string, WorldChatHold>;
 }
 
-export type WorldChatHold = { requestId: string; seq: number | null; rejoins: number; takenAt?: number | null };
+export type WorldChatHold = { requestId: string; worldId: string; seq: number | null; rejoins: number; takenAt?: number | null };
 
 export interface VoiceCandidatesState {
   extracted: string[];
@@ -909,7 +911,7 @@ export function onWorldChange(listener: (worldId: string | null) => void): () =>
   return () => worldListeners.delete(listener);
 }
 
-/** Ends the holds whose line has been answered and shown, or whose answer a rejoin may have lost. */
+/** Ends the holds whose line has been answered and shown; after a rejoin, asks where each stands. */
 function settleHolds(next: StoreState): StoreState {
   let holds: Record<string, WorldChatHold> | null = null;
   for (const [conversationId, hold] of Object.entries(next.worldChatHolds)) {
@@ -918,9 +920,14 @@ function settleHolds(next: StoreState): StoreState {
     const running = workspace?.runStatus === "running";
     const answer = sendResults.get(hold.requestId);
     let settled: WorldChatHold | null = hold;
-    if (next.rejoins !== hold.rejoins || answer === false) settled = null;
+    if (answer === false) settled = null;
     else if (hold.takenAt !== undefined) settled = running || seq !== hold.takenAt ? null : hold;
     else if (answer === true) settled = running ? null : { ...hold, takenAt: seq };
+    else if (next.rejoins !== hold.rejoins && next.connection === "open") {
+      // Asked once per rejoin, after this change has landed.
+      settled = { ...hold, rejoins: next.rejoins };
+      queueMicrotask(() => send({ kind: "world-chat-send-status", worldId: hold.worldId, requestId: hold.requestId, conversationId: conversationId as never }));
+    }
     if (settled === hold) continue;
     holds ??= { ...next.worldChatHolds };
     if (settled === null) delete holds[conversationId];
@@ -4933,7 +4940,7 @@ export function sendWorldChat(
   if (workspace?.conversationId === conversationId) {
     emitChange({
       ...current,
-      worldChatHolds: { ...current.worldChatHolds, [conversationId]: { requestId, seq: workspace.seq, rejoins: current.rejoins } },
+      worldChatHolds: { ...current.worldChatHolds, [conversationId]: { requestId, worldId, seq: workspace.seq, rejoins: current.rejoins } },
     });
   }
   return requestId;

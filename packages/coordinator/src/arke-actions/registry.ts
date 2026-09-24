@@ -218,6 +218,7 @@ const CLIENT_COMMAND_METADATA = {
   "world-chat-open": readOnly("Selects a conversation projection; it does not mutate creative state."),
   "conversation-action-decide": humanOnly("Only the local person may approve or deny a prepared conversation action."),
   "world-chat-send": humanOnly("Only the person may add a user message; Arke cannot converse with or prompt itself."),
+  "world-chat-send-status": readOnly("Asks whether a sent line was taken; it changes nothing."),
   "production-setup": humanOnly("The setup lifecycle belongs to the author; setup turns can update only their draft."),
   "save-production-narrative": humanOnly("The film narrative editor saves the author's reviewed text against its version."),
   "world-chat-wrap-up": humanOnly(HUMAN_DECISION),

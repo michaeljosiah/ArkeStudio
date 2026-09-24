@@ -599,6 +599,19 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
+   * Where a sent line stands, asked again after a rejoin that may have lost its answer (PR 1232).
+   * Answered with `world-chat.send-result`: taken, or not known to be taken — declined, or never
+   * received. A line still being taken is answered when it is, as it would have been anyway.
+   */
+  z
+    .object({
+      kind: z.literal("world-chat-send-status"),
+      worldId: UlidSchema,
+      requestId: z.string().min(1),
+      conversationId: ConversationIdSchema,
+    })
+    .strict(),
+  /**
    * #70 §10.1.1: turn the conversation into proposals and close it.
    *
    * One command. A stale `expectedConversationSeq` is refused rather than silently re-planned,

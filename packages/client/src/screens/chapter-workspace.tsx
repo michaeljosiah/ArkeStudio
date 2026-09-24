@@ -1274,11 +1274,14 @@ export function ChapterWorkspace({
     if (accepting === null) return;
     if (connection !== "open" || stagedId !== accepting.id || notices[accepting.id] !== accepting.notice) setAccepting(null);
   }, [accepting, connection, stagedId, notices]);
-  const accept = !choosing || stagedDraft === undefined || passageChange === null
+  // Every passage accept is fenced to the revision on screen (codex on PR 1232), one edit or many.
+  const pending = keeping !== null || accepting !== null;
+  const accept = stagedDraft === undefined || passageChange === null
     ? undefined
-    : keptCount === editCount
+    : !choosing || keptCount === editCount
       ? {
           label: "Accept",
+          pending,
           ...(accepting !== null ? { blocked: "Accepting…" } : {}),
           onAccept: (confirmSignature?: string) => {
             const proposal = stagedDraft.staged.proposal;
@@ -1289,6 +1292,7 @@ export function ChapterWorkspace({
         }
       : {
           label: `Accept ${keptCount} of ${editCount}`,
+          pending,
           ...(keptCount === 0 ? { blocked: "Nothing kept" } : keeping !== null ? { blocked: "Keeping…" } : {}),
           onAccept: () => {
             const proposal = stagedDraft.staged.proposal;
@@ -1949,7 +1953,8 @@ export function ChapterWorkspace({
             prompts: view === "audiobook"
               ? [{ label: directionStands ? "Direct again" : "Direct this chapter", press: audiobook.directPress }, "Who reads this chapter?", "Which blocks are stale?"]
               : passage !== null
-              ? [TIGHTEN.line, { label: HOLD_TO_STYLE.line, replyOnly: true }]
+              // Held against the style only when there is one (codex on PR 1232), as the menu does.
+              ? [TIGHTEN.line, { label: (style !== null ? HOLD_TO_STYLE : passageAction("critique")!).line, replyOnly: true }]
               : voicesRecord !== null && voicesStale
                 ? [{ label: "Cast again", press: castLinesPress }, "Who speaks in this chapter?"]
                 : voicesRecord !== null && speakers.length > 0 && !(continuityRecord !== null && continuityStale)

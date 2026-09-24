@@ -31,7 +31,7 @@ export function ConnectedProposalPanel({
    * press does — keeping part of a passage first, then accepting (turn 128). Absent, Accept
    * accepts the whole proposal.
    */
-  accept?: { label?: string; blocked?: string; onAccept?: (confirmSignature?: string) => void };
+  accept?: { label?: string; blocked?: string; pending?: boolean; onAccept?: (confirmSignature?: string) => void };
   /** Called only after the coordinator reports that this proposal actually landed. */
   onAccepted?: () => void;
   /** A proposal-backed Studio conversation that can keep revising this same draft. */
@@ -83,8 +83,10 @@ export function ConnectedProposalPanel({
         onAccept={running ? undefined : accept?.onAccept ?? ((confirmSignature) => acceptProposal(worldId, id, confirmSignature))}
         {...(accept?.label !== undefined ? { acceptLabel: accept.label } : {})}
         {...(accept?.blocked !== undefined ? { acceptBlocked: accept.blocked } : {})}
-        onDiscard={running ? undefined : () => discardProposal(worldId, id)}
-        {...(!running && (staged.proposal.worldChatOrigins ?? []).length > 0
+        // A decision already on its way holds the others (codex on PR 1232): a Discard racing it
+        // could land after the accept, or make it fail.
+        onDiscard={running || accept?.pending === true ? undefined : () => discardProposal(worldId, id)}
+        {...(!running && accept?.pending !== true && (staged.proposal.worldChatOrigins ?? []).length > 0
           ? { onSendBack: () => sendProposalBack(worldId, id) }
           : {})}
         onRebase={() => rebaseProposal(worldId, id)}
