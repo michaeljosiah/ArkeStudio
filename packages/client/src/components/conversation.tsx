@@ -1063,36 +1063,49 @@ export function ProductionConversation({
   type QueuedAsk = { line: string; text: string; subject: WorldChatSubject | undefined; replyOnly: boolean; tries: number };
   const [waitingAsk, setWaitingAsk] = useState<QueuedAsk | null>(null);
   /*
-   * The ask last sent from the queue, held until the thread shows its turn (codex on PR 1232). A
+   * The ask last sent from the queue, held until the thread shows it said (codex on PR 1232). A
    * frame that reached the coordinator can still be declined there without a word — another
-   * window's turn already running, the conversation gone — and only the sequence not moving says
-   * so. Declined once, it goes back in the queue; declined again, its line goes to the composer,
-   * where the author can see it and say it again, rather than vanishing.
+   * window's turn already running, the conversation gone. The sequence moving is not proof it
+   * was taken, because that other window's turn moves it too; the thread holding one more user
+   * message with exactly these words is, and the words carry the quoted passage, so nobody
+   * else's turn matches them. Declined once, it goes back in the queue; declined again, it is
+   * shown beside the prompts to be tried again or dismissed, never written over the composer.
    */
-  const sentAsk = useRef<QueuedAsk | null>(null);
+  const sentAsk = useRef<{ ask: QueuedAsk; said: number } | null>(null);
+  const [sentAt, setSentAt] = useState(0);
+  const [declinedAsk, setDeclinedAsk] = useState<QueuedAsk | null>(null);
+  const timesSaid = (text: string) => (loaded?.messages ?? []).filter((m) => m.role === "user" && m.text === text).length;
+  useEffect(() => {
+    const sent = sentAsk.current;
+    if (sent !== null && timesSaid(sent.ask.text) > sent.said) sentAsk.current = null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded?.messages]);
+  useEffect(() => {
+    if (sentAt === 0) return;
+    const lapse = setTimeout(() => {
+      const declined = sentAsk.current;
+      sentAsk.current = null;
+      if (declined === null) return;
+      if (declined.ask.tries < 2) setWaitingAsk((later) => later ?? declined.ask);
+      else setDeclinedAsk(declined.ask);
+    }, 15_000);
+    return () => clearTimeout(lapse);
+  }, [sentAt]);
   /*
    * A line just sent that the thread has not shown yet (codex on PR 1232). Between the send and
    * the snapshot that reports its turn, nothing here says a turn is running, and a waiting ask
-   * released in that gap is refused by the runner as already working — lost without a word. So
-   * the dock counts as busy until the conversation's sequence moves past the one it sent at; a
-   * send the coordinator refused never moves it, so the wait also ends on its own after a while.
+   * released in that gap is refused by the runner as already working. So the dock counts as busy
+   * until the conversation's sequence moves past the one it sent at; a send the coordinator
+   * refused never moves it, so the wait also ends on its own after a while.
    */
   const [echo, setEcho] = useState<{ seq: number | null } | null>(null);
   useEffect(() => {
     if (echo === null) return;
     if ((loaded?.seq ?? null) !== echo.seq) {
       setEcho(null);
-      sentAsk.current = null;
       return;
     }
-    const lapse = setTimeout(() => {
-      setEcho(null);
-      const declined = sentAsk.current;
-      sentAsk.current = null;
-      if (declined === null) return;
-      if (declined.tries < 2) setWaitingAsk((later) => later ?? declined);
-      else setMessage(declined.line);
-    }, 15_000);
+    const lapse = setTimeout(() => setEcho(null), 15_000);
     return () => clearTimeout(lapse);
   }, [echo, loaded?.seq]);
   const ask = dock?.ask;
@@ -1100,6 +1113,7 @@ export function ProductionConversation({
   useEffect(() => {
     if (ask === undefined) return;
     onAskTaken?.();
+    setDeclinedAsk(null);
     if (ask.draft === true) {
       // A later press replaces a waiting ask, whichever kind it is (codex on PR 1232).
       setWaitingAsk(null);
@@ -1118,8 +1132,10 @@ export function ProductionConversation({
     if (waitingAsk === null || opening !== null || echo !== null || running || languageUnavailableReason !== undefined || connection !== "open") return;
     // Kept until it has actually gone (codex on PR 1232): a send into a closed transport is
     // tried again when the connection comes back rather than dropped.
+    const said = timesSaid(waitingAsk.text);
     if (say(waitingAsk.text, waitingAsk.replyOnly, waitingAsk.subject)) {
-      sentAsk.current = { ...waitingAsk, tries: waitingAsk.tries + 1 };
+      sentAsk.current = { ask: { ...waitingAsk, tries: waitingAsk.tries + 1 }, said };
+      setSentAt((n) => n + 1);
       setWaitingAsk(null);
     }
     // say is rebuilt every render; the ask and the dock's readiness are what decide.
@@ -1329,6 +1345,13 @@ export function ProductionConversation({
         <div className="fy-arke__foot">
           {sceneDock ? null : languageControl}
           {dock.subjectLine !== undefined && <div className="fy-mono fy-arke__subject">{dock.subjectLine}</div>}
+          {declinedAsk !== null && (
+            <div className="fy-mono fy-arke__declined" role="status">
+              <span>Not sent · {declinedAsk.line}</span>
+              <button type="button" onClick={() => { setWaitingAsk({ ...declinedAsk, tries: 0 }); setDeclinedAsk(null); }}>Try again</button>
+              <button type="button" onClick={() => setDeclinedAsk(null)}>Dismiss</button>
+            </div>
+          )}
           {dock.prompts === undefined || dock.prompts.length === 0 ? null : (
             <div className="fy-arke__prompts">
               {dock.prompts.map((entry) => {

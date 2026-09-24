@@ -625,13 +625,22 @@ describe("the craft loop (turn 128)", () => {
     await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
     const tightened = () => m.sent.filter((message) => message.kind === "world-chat-send" && (message as { text: string }).text.endsWith("Tighten this")).length;
     assert.equal(tightened(), 1);
-    // The thread never moves: the coordinator declined it. Tried again once...
+    // Another window's turn moves the thread, but not with these words: not proof this ask was
+    // taken (codex on PR 1232), so it is still held.
+    const foreign = { ...workspace, seq: 5, messages: [{ id: "msg_01J8F3K2QW9VZX4N7M0RTYB6H1" as never, role: "user" as const, text: "Something another window said.", receipts: [], refusals: [], createdAt: "2026-09-06T12:00:00Z" }] };
+    await act(async () => __setStateForTest({ ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: foreign } as ClientState, { connection: "open" }));
+    // The coordinator declined it. Tried again once...
     await act(async () => t.mock.timers.tick(15_000));
     assert.equal(tightened(), 2, "declined once, it is tried again");
     // ...and declined again, it is handed to the author rather than lost.
     await act(async () => t.mock.timers.tick(15_000));
     assert.equal(tightened(), 2, "not tried a third time");
-    assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent, "Tighten this", "left in the composer, where the author can see it");
+    assert.match(text(m), /Not sent · Tighten this/, "shown to the author rather than lost");
+    assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent ?? "", "", "and never written over the composer");
+    // Try again puts it back in the queue.
+    await act(async () => ([...m.container.querySelectorAll(".fy-arke__declined button")].find((b) => b.textContent === "Try again") as HTMLElement).click());
+    assert.equal(tightened(), 3, "tried again at the author's word");
+    assert.doesNotMatch(text(m), /Not sent ·/);
     t.mock.timers.reset();
   });
 
