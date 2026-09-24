@@ -664,6 +664,7 @@ describe("the craft loop (turn 128)", () => {
   });
 
   it("an ask waits for its answer however long it takes, and only a lost connection loses it (codex on PR 1232)", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
     const styled = inkbound([], STYLE);
     const workspace = {
       conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
@@ -673,22 +674,23 @@ describe("the craft loop (turn 128)", () => {
     const m = await mount(state);
     await answerOpen(m);
     await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
-    t.mock.timers.enable({ apis: ["setTimeout"] });
     await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
     await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
-    const sent = m.sent.find((message) => message.kind === "world-chat-send") as { requestId: string };
+    const first = (m.sent.find((message) => message.kind === "world-chat-send") as { requestId: string }).requestId;
+    const asked = () => m.sent.filter((message) => message.kind === "world-chat-send-status" && (message as { requestId: string }).requestId === first).length;
+    const answer = async (admitted: boolean) =>
+      act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: first, admitted }));
     // A slow admission with the socket open is still coming: calling it lost would offer a
     // second paid turn.
     await act(async () => t.mock.timers.tick(60_000));
-    assert.doesNotMatch(text(m), /Not sent ·/, "no clock calls it lost");
     t.mock.timers.reset();
+    assert.doesNotMatch(text(m), /Not sent ·/, "no clock calls it lost");
     await act(async () => __setStateForTest(state, { connection: "closed" }));
-    assert.doesNotMatch(text(m), /Not sent ·/, "nor the drop itself: the rejoined thread decides");
     await act(async () => __setStateForTest(state, { connection: "open", rejoins: 1 }));
-    assert.match(text(m), /Not sent · Tighten this/, "rejoined, and the thread does not hold it");
-    // And an answer late past the rejoin still wins: taken, it is not offered again.
-    await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: sent.requestId, admitted: true }));
-    assert.doesNotMatch(text(m), /Not sent ·/, "heard of after all, it was taken");
+    assert.ok(asked() >= 1, "rejoined, the coordinator is asked where the line stands");
+    assert.doesNotMatch(text(m), /Not sent ·/, "and nothing is called lost before it answers (codex on PR 1232)");
+    await answer(false);
+    assert.match(text(m), /Not sent · Tighten this/, "not taken, it is shown to be tried again");
   });
 
   it("the menu waits for the selected words to be saved (codex on PR 1232)", async () => {
@@ -787,7 +789,7 @@ describe("the craft loop (turn 128)", () => {
     assert.match(text(m), /about this passage · 4 words/, "still about the passage it was pressed on");
   });
 
-  it("a lost answer is looked for in the thread before an ask is called not sent (codex on PR 1232)", async () => {
+  it("an ask whose answer was lost is not called not sent on the thread's word (codex on PR 1232)", async () => {
     const styled = inkbound([], STYLE);
     const workspace = {
       conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
@@ -861,12 +863,18 @@ describe("the craft loop (turn 128)", () => {
     await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
     await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
     await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const first = (m.sent.find((message) => message.kind === "world-chat-send") as { requestId: string }).requestId;
+    const asked = () => m.sent.filter((message) => message.kind === "world-chat-send-status" && (message as { requestId: string }).requestId === first).length;
+    const answer = async (admitted: boolean) =>
+      act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: first, admitted }));
     await act(async () => (q(m, "button.fy-arke__pin") as HTMLElement).click());
     // Dropped and rejoined with nothing mounted to watch it.
     await act(async () => __setStateForTest(state, { connection: "closed" }));
     await act(async () => __setStateForTest(state, { connection: "open", rejoins: 1 }));
     await act(async () => (q(m, "button.fy-sw__rail") as HTMLElement).click());
-    assert.match(text(m), /Not sent · Tighten this/, "the ask knows it went before the rejoin");
+    assert.ok(asked() >= 1, "brought back, the ask knows it went before the rejoin and asks after it");
+    await answer(true);
+    assert.doesNotMatch(text(m), /Not sent ·/, "taken, it is done with");
   });
 
   it("an ask shown as not sent survives the dock being put away (codex on PR 1232)", async () => {
@@ -921,7 +929,7 @@ describe("the craft loop (turn 128)", () => {
     assert.match(sends()[1]?.text ?? "", /«Maren counted the bells\.» Make this colder$/, "and goes about the same passage");
   });
 
-  it("a lost ask tried again goes under its first request (codex on PR 1232)", async () => {
+  it("a line the coordinator did not take is tried again as a new request (codex on PR 1232)", async () => {
     const styled = inkbound([], STYLE);
     const workspace = {
       conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
@@ -933,19 +941,19 @@ describe("the craft loop (turn 128)", () => {
     await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
     await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
     await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const first = (m.sent.find((message) => message.kind === "world-chat-send") as { requestId: string }).requestId;
+    const asked = () => m.sent.filter((message) => message.kind === "world-chat-send-status" && (message as { requestId: string }).requestId === first).length;
+    const answer = async (admitted: boolean) =>
+      act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: first, admitted }));
     await act(async () => __setStateForTest(state, { connection: "closed" }));
     await act(async () => __setStateForTest(state, { connection: "open", rejoins: 1 }));
+    assert.ok(asked() >= 1);
+    await answer(false);
     assert.match(text(m), /Not sent · Tighten this/);
-    const first = (m.sent.find((message) => message.kind === "world-chat-send") as { requestId: string }).requestId;
-    // The rejoin does not end the hold on the line: the coordinator is asked where it stands.
-    assert.ok(m.sent.some((message) => message.kind === "world-chat-send-status" && (message as { requestId: string }).requestId === first), "asked where the line stands");
     await act(async () => ([...m.container.querySelectorAll(".fy-arke__declined button")].find((b) => b.textContent === "Try again") as HTMLElement).click());
-    const sends = () => m.sent.filter((message) => message.kind === "world-chat-send") as Array<{ requestId: string }>;
-    assert.equal(sends().length, 1, "and nothing goes again until it answers");
-    // Not taken as far as it knows: the ask goes again, under the same request all the same.
-    await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: first, admitted: false }));
-    assert.equal(sends().length, 2);
-    assert.equal(sends()[1]!.requestId, first, "the coordinator takes one line per request, so a retry cannot pay twice");
+    const sends = m.sent.filter((message) => message.kind === "world-chat-send") as Array<{ requestId: string; text: string }>;
+    assert.equal(sends.length, 2, "tried again at the author's word");
+    assert.equal(sends[1]!.text, sends[0]!.text);
   });
 
   it("a line whose answer a rejoin lost is settled by asking the coordinator (codex on PR 1232)", async () => {
@@ -1014,29 +1022,6 @@ describe("the craft loop (turn 128)", () => {
     }
   });
 
-  it("the same press made again is not mistaken for the first in the thread (codex on PR 1232)", async () => {
-    const styled = inkbound([], STYLE);
-    const m0 = await mount({ ...styled, world: { ...styled.world!, conversations: [THREAD] } } as ClientState);
-    await answerOpen(m0);
-    await keyup(q(m0, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
-    // The first Tighten is already in the thread, a moment ago.
-    const words = "About this passage in chapter 02, paragraph 1: «Maren counted the bells.» Tighten this";
-    const earlier = { id: "msg_01J8F3K2QW9VZX4N7M0RTYB6H2" as never, role: "user" as const, text: words, receipts: [], refusals: [], createdAt: new Date().toISOString() };
-    const workspace = {
-      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
-      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [earlier], points: [],
-    };
-    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
-    await act(async () => __setStateForTest(state, { connection: "open" }));
-    await act(async () => (q(m0, "button.fy-ch__ask") as HTMLElement).click());
-    await act(async () => ([...m0.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
-    const sent = m0.sent.filter((message) => message.kind === "world-chat-send") as Array<{ text: string }>;
-    assert.equal(sent.at(-1)?.text, words);
-    // The second's answer is lost; the rejoined thread holds only the first.
-    await act(async () => __setStateForTest(state, { connection: "closed" }));
-    await act(async () => __setStateForTest(state, { connection: "open", rejoins: 1 }));
-    assert.match(text(m0), /Not sent · Tighten this/, "the line already there was the first press, not this one");
-  });
 
   it("a waiting ask names the passage it was pressed on, and holds the menu (codex on PR 1232)", async () => {
     const styled = inkbound([], STYLE);
@@ -1454,6 +1439,30 @@ describe("the craft loop (turn 128)", () => {
       assert.equal(accepted.length, 1, "then the revision it landed as is accepted, once");
       assert.equal((accepted[0] as { proposalId: string }).proposalId, TWO.proposal.id);
       assert.equal((accepted[0] as { expectedDraftRevision?: number }).expectedDraftRevision, 2, "fenced to the revision seen (codex on PR 1232)");
+      const discard = [...m.container.querySelectorAll("button")].find((b) => b.textContent === "Discard") as HTMLButtonElement;
+      assert.equal(discard.disabled, true, "the accept that follows the keep holds the other decisions too (codex on PR 1232)");
+    });
+
+    it("a partial accept left mid-way is finished by the next screen to see the keep land (codex on PR 1232)", async () => {
+      const first = await mount(inkbound([TWO]));
+      await answerOpen(first);
+      await act(async () => edits(first)[0]!.click());
+      await act(async () => acceptButton(first).click());
+      assert.ok(first.sent.some((message) => message.kind === "proposal-update-passage"));
+      // The author opens another chapter before the keep lands.
+      await act(async () => first.root.unmount());
+      const landed: StagedProposal = {
+        ...TWO,
+        proposal: { ...TWO.proposal, draftRevision: 2 },
+        review: {
+          targets: [{ ...TWO.review!.targets[0]!, fields: [{ field: "Prose", before: BODY, proposed: BODY.replace("Maren counted the bells.", "Maren counted the seven bells.") }] }],
+        },
+      };
+      const back = await mount(inkbound([landed]));
+      await answerOpen(back);
+      const accepted = back.sent.filter((message) => message.kind === "proposal-accept");
+      assert.equal(accepted.length, 1, "the accept the press promised is sent");
+      assert.equal((accepted[0] as { expectedDraftRevision?: number }).expectedDraftRevision, 2);
     });
 
     it("holds the choices while a keep is in flight, and lets go when the connection drops (codex on PR 1232)", async () => {

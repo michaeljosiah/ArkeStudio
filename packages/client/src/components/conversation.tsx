@@ -26,6 +26,7 @@ import {
   openWorldChatMedia,
   retryWorldChatTurn,
   sendWorldChat,
+  askWorldChatSendStatus,
   subscribeWorldChatSendResults,
   worldChatSendResult,
   setProductionModel,
@@ -741,10 +742,10 @@ export type DockAsk = {
   replyOnly?: boolean;
   draft?: boolean;
   /**
-   * `rejoins` is the store's count when it went: a larger one means its answer may be lost.
-   * `after` is the last line the thread held then, so only a line after it can be this one.
+   * `rejoins` is the store's count when it went, or when it was last asked after: a larger one
+   * means its answer may have been lost, and the coordinator is asked where it stands.
    */
-  sent?: { requestId: string; at: string; rejoins: number; after?: string };
+  sent?: { requestId: string; at: string; rejoins: number; conversationId: string };
   /** A line lost on the way, tried again under the request it first went as. */
   again?: string;
   /**
@@ -764,19 +765,6 @@ export type DockAsk = {
   /** What the author has typed to finish a `draft` line, kept by the page with the ask. */
   typed?: string;
 };
-
-/**
- * A sent ask found in the thread: its exact words, said by the author about when it went, and
- * after the last line the thread held when it went (codex on PR 1232). The same press made twice
- * says the same words, and the first one is already in the thread before the second can go —
- * the dock holds until it shows — so only what came after can be this one.
- */
-function saidIn(messages: ReadonlyArray<{ id: string; role: string; text: string; createdAt: string }>, ask: DockAsk): boolean {
-  if (ask.sent === undefined) return false;
-  const sentAt = Date.parse(ask.sent.at);
-  const after = ask.sent.after === undefined ? -1 : messages.findIndex((m) => m.id === ask.sent!.after);
-  return messages.slice(after + 1).some((m) => m.role === "user" && m.text === ask.text && Math.abs(Date.parse(m.createdAt) - sentAt) < 120_000);
-}
 
 export function ProductionConversation({
   worldId,
@@ -1195,10 +1183,12 @@ export function ProductionConversation({
   // a thread it opened goes after that thread arrives, perhaps across a rejoin.
   const rejoinsRef = useRef(rejoins);
   rejoinsRef.current = rejoins;
+  const conversationIdRef = useRef(conversationId);
+  conversationIdRef.current = conversationId;
   const sentAs = (pressed: DockAsk) => (requestId: string) => {
     const { again: _again, opening: _opening, answered: _answered, ...sent } = pressed;
-    const after = loadedRef.current?.messages.at(-1)?.id;
-    onAsk?.({ ...sent, sent: { requestId, at: new Date().toISOString(), rejoins: rejoinsRef.current, ...(after !== undefined ? { after } : {}) } });
+    const into = loadedRef.current?.conversationId ?? conversationIdRef.current ?? "";
+    onAsk?.({ ...sent, sent: { requestId, at: new Date().toISOString(), rejoins: rejoinsRef.current, conversationId: into } });
   };
   useEffect(() => {
     if (ask === undefined || ask.draft === true || ask.declined === true || ask.sent !== undefined || ask.opening !== undefined) return;
@@ -1269,20 +1259,18 @@ export function ProductionConversation({
   }, [ask?.sent?.requestId, ask?.sent?.at]);
   /*
    * The answer is not durable: a connection lost between send and answer loses it, even for a
-   * line the runner took (codex on PR 1232). No clock decides that — admission can be slow with
-   * the socket open, and calling it lost then would offer a second paid turn. The loss is the
-   * connection dropping; the verdict waits for the snapshot that rejoins, and is the thread's,
-   * which is durable: these exact words said about when this was sent. The ask carries the
-   * rejoin count it was sent under, so a dock put away through the drop still knows on its
-   * return (codex on PR 1232). Shown as lost, it keeps its request, and the line turning up in
-   * the thread later settles it as taken.
+   * line the runner took (codex on PR 1232). No clock decides that, and neither does the
+   * rejoined thread — its snapshot can be taken while the line is still being admitted. The
+   * coordinator is asked where the line stands, and its answer settles the ask as above: taken,
+   * done with; not taken, shown to be tried again. The ask carries the rejoin count it was last
+   * asked under, so a dock put away through the drop asks on its return, and asks once.
    */
   useEffect(() => {
-    if (ask?.sent === undefined || connection !== "open" || rejoins === ask.sent.rejoins || loaded === null) return;
-    if (saidIn(loaded.messages, ask)) onAsk?.(null);
-    else if (ask.declined !== true) onAsk?.({ ...ask, declined: true });
+    if (ask?.sent === undefined || connection !== "open" || rejoins === ask.sent.rejoins || !worldId) return;
+    askWorldChatSendStatus(worldId, ask.sent.conversationId, ask.sent.requestId);
+    onAsk?.({ ...ask, sent: { ...ask.sent, rejoins } });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ask?.sent?.requestId, ask?.declined, connection, rejoins, loaded?.messages]);
+  }, [ask?.sent?.requestId, connection, rejoins]);
 
   const points = loaded?.points ?? [];
   const carriedPoints = points.filter((p) => p.kind === "point" && p.settled).length;
@@ -1491,11 +1479,10 @@ export function ProductionConversation({
             <div className="fy-mono fy-arke__declined" role="status">
               <span>Not sent · {declinedAsk.line}</span>
               <button type="button" onClick={() => {
-                // Lost on the way, it goes again under its first request, which the coordinator
-                // takes at most once (codex on PR 1232): a retry racing the original admission
-                // cannot buy a second turn. Refused, it is a new request.
-                const { sent, declined: _declined, ...again } = declinedAsk;
-                onAsk?.(sent === undefined ? again : { ...again, again: sent.requestId });
+                // Only a line the coordinator says it did not take is shown here, so trying
+                // again is a new request.
+                const { sent: _sent, declined: _declined, ...again } = declinedAsk;
+                onAsk?.(again);
               }}>Try again</button>
               <button type="button" onClick={() => onAsk?.(null)}>Dismiss</button>
             </div>

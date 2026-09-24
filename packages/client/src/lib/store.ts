@@ -926,7 +926,7 @@ function settleHolds(next: StoreState): StoreState {
     else if (next.rejoins !== hold.rejoins && next.connection === "open") {
       // Asked once per rejoin, after this change has landed.
       settled = { ...hold, rejoins: next.rejoins };
-      queueMicrotask(() => send({ kind: "world-chat-send-status", worldId: hold.worldId, requestId: hold.requestId, conversationId: conversationId as never }));
+      queueMicrotask(() => askWorldChatSendStatus(hold.worldId, conversationId, hold.requestId));
     }
     if (settled === hold) continue;
     holds ??= { ...next.worldChatHolds };
@@ -4944,6 +4944,11 @@ export function sendWorldChat(
     });
   }
   return requestId;
+}
+
+/** Asks where a sent line stands, after a rejoin that may have lost its answer (PR 1232). */
+export function askWorldChatSendStatus(worldId: string, conversationId: string, requestId: string): boolean {
+  return send({ kind: "world-chat-send-status", worldId, requestId, conversationId: conversationId as never });
 }
 
 /** Test hook: no line held from an earlier test. */

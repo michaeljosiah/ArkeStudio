@@ -157,9 +157,18 @@ const parkedKey = (worldId: string, prodId: string, file: string): string => `${
  * theirs when they come back.
  */
 const heldAsks = new Map<string, DockAsk>();
+/**
+ * A partial accept on its way, by chapter, for the same reason (codex on PR 1232): the keep lands
+ * after the screen may have gone, and the accept it promised is sent by the next one to see it.
+ */
+type HeldKeep = { id: string; revision: number; notice: GateNotice | undefined; expected: string; rejoins: number };
+const heldKeeps = new Map<string, HeldKeep>();
 // Only for the world's session they were pressed in (codex on PR 1232): closed and opened again,
 // an ask still waiting would otherwise go by itself, quoting prose that may have moved since.
-onWorldChange(() => heldAsks.clear());
+onWorldChange(() => {
+  heldAsks.clear();
+  heldKeeps.clear();
+});
 // The answer to a held ask is kept with it (codex on PR 1232): the store remembers only recent
 // answers, and a chapter left for long enough would come back to one it no longer has.
 subscribeWorldChatSendResults((result) => {
@@ -170,6 +179,7 @@ subscribeWorldChatSendResults((result) => {
 /** Test hook: asks outlive a screen by design, so each test starts with none. */
 export function __clearHeldAsksForTest(): void {
   heldAsks.clear();
+  heldKeeps.clear();
 }
 
 /** Sending is not saving: an answer can refuse after the editor has unmounted. */
@@ -440,7 +450,7 @@ export function ChapterWorkspace({
   const worldId = world.meta.worldId;
   const prodId = production.meta.id;
   const path = chapterPath(production, chapter);
-  const connection = useStore().connection;
+  const { connection, rejoins } = useStore();
 
   /*
    * What was read, and the request that read it.
@@ -1244,7 +1254,13 @@ export function ChapterWorkspace({
    * composed — anything else is somebody else's draft, and the author decides it afresh.
    */
   const notices = useGateNotices();
-  const [keeping, setKeeping] = useState<{ id: string; revision: number; notice: GateNotice | undefined; expected: string } | null>(null);
+  const [keeping, setKeepingState] = useState<HeldKeep | null>(() => heldKeeps.get(parkedKey(worldId, prodId, path)) ?? null);
+  const setKeeping = (next: HeldKeep | null) => {
+    const key = parkedKey(worldId, prodId, path);
+    if (next === null) heldKeeps.delete(key);
+    else heldKeeps.set(key, next);
+    setKeepingState(next);
+  };
   const stagedId = stagedDraft?.staged.proposal.id;
   const stagedRevision = stagedDraft?.staged.proposal.draftRevision;
   const stagedBody = stagedDraft?.body ?? null;
@@ -1252,18 +1268,22 @@ export function ChapterWorkspace({
   // rejoin brings the snapshot as it was, so the wait ends with the connection, not with a reply.
   useEffect(() => {
     if (keeping === null) return;
-    if (connection !== "open" || stagedId !== keeping.id || notices[keeping.id] !== keeping.notice) setKeeping(null);
-    else if (stagedRevision !== undefined && stagedRevision > keeping.revision) {
+    if (stagedId === keeping.id && stagedRevision !== undefined && stagedRevision > keeping.revision) {
       // Only the keep's own revision is accepted, and fenced to it (codex on PR 1232): the keep
       // moves the draft exactly one revision, so a later one carries some other edit too —
       // perhaps to a field the prose does not show — and is left for the author. One moved on
-      // again before the accept reaches the gate is refused there as stale.
-      if (stagedRevision === keeping.revision + 1 && stagedBody === keeping.expected) {
-        acceptProposal(worldId, keeping.id, undefined, stagedRevision);
+      // again before the accept reaches the gate is refused there as stale. The accept holds the
+      // controls in its turn, so nothing races it between the two (codex on PR 1232).
+      if (stagedRevision === keeping.revision + 1 && stagedBody === keeping.expected
+        && acceptProposal(worldId, keeping.id, undefined, stagedRevision)) {
+        setAccepting({ id: keeping.id, notice: notices[keeping.id] });
       }
       setKeeping(null);
+    } else if (connection !== "open" || rejoins !== keeping.rejoins || stagedId !== keeping.id || notices[keeping.id] !== keeping.notice) {
+      setKeeping(null);
     }
-  }, [keeping, connection, stagedId, stagedRevision, stagedBody, notices, worldId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keeping, connection, rejoins, stagedId, stagedRevision, stagedBody, notices, worldId]);
   /*
    * A whole accept in flight holds the choices too (codex on PR 1232): toggled after the press,
    * they would show a count the gate is not accepting. It is fenced to the revision on screen,
@@ -1301,7 +1321,7 @@ export function ChapterWorkspace({
             if (!updateProposalPassage(worldId, proposal.id, path, passageChange, kept, proposal.draftRevision)) return;
             const body = stagedDraft.body ?? live;
             const expected = body.slice(0, passageChange.start) + composePassage(segments, new Set(kept)) + body.slice(passageChange.start + passageChange.after.length);
-            setKeeping({ id: proposal.id, revision: proposal.draftRevision, notice: notices[proposal.id], expected });
+            setKeeping({ id: proposal.id, revision: proposal.draftRevision, notice: notices[proposal.id], expected, rejoins });
           },
         };
   const foot = locked && stagedDraft !== undefined
