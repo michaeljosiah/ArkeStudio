@@ -467,6 +467,7 @@ import { ConversationInUseError, WorldChatService } from "./world-chat/service.j
 import {
   acceptDecided,
   artDirectionFormContent,
+  DRAFT_CHANGED_DETAIL,
   explainAcceptRefusal,
   landed,
   type AcceptOutcome,
@@ -1039,6 +1040,18 @@ export class Coordinator {
   private readonly permissionRetryTimers = new Map<string, NodeJS.Timeout>();
   /** Genesis sandboxes whose attachments are still being carried into a new world. */
   private readonly carrying = new Map<string, Promise<void>>();
+  /**
+   * World-chat sends by request id, while being taken and once taken (PR 1232). A window that
+   * lost its answer to a dropped connection sends again under the same id; that must not buy a
+   * second turn while the first is still being admitted, or after it was.
+   */
+  private readonly worldChatSends = new Map<string, "pending" | { turnId: string }>();
+  /**
+   * World-chat creates by request id, for the same reason (codex on PR 1232): a window that lost
+   * a create to a dropped connection makes it again under the same id, and must not open two
+   * conversations — one of them left empty — while the first is still being made, or after.
+   */
+  private readonly worldChatCreates = new Map<string, Promise<{ id: ConversationId } | null>>();
   /** Accept and Discard are one decision per take, even when their messages overlap. */
   private readonly benchTakeActions = new Map<string, Promise<void>>();
   /** Reservations read and advance one session take counter. */
@@ -3012,13 +3025,14 @@ export class Coordinator {
    * a reason without the state that closes the gate leaves it free to ask again (review of
    * PR 371). `getState()` reads the live runs at broadcast time, so this needs no rescan.
    */
-  private refuseWhileDrafting(worldId: string, proposalId: string): boolean {
+  private refuseWhileDrafting(worldId: string, proposalId: string, requestId?: string): boolean {
     if (!this.authoring?.isRunning(proposalId)) return false;
     this.emit({
       at: new Date().toISOString(),
       type: "proposal.blocked",
       worldId,
       proposalId,
+      ...(requestId !== undefined ? { requestId } : {}),
       reason: "drafting",
       detail: "the studio is still writing into this proposal — cancel the run first",
     });
@@ -3535,6 +3549,11 @@ export class Coordinator {
     // does check, but a repair that can destroy live state should not depend on it.
     const wasAlreadyOpen = this.opts.provider.openStore?.()?.worldId === worldId;
     const loaded = await this.opts.provider.loadWorld(worldId);
+    // Requests are remembered for one world's session, which is as long as a window holds them.
+    if (!wasAlreadyOpen) {
+      this.worldChatSends.clear();
+      this.worldChatCreates.clear();
+    }
     /*
      * Everything past the load is repair, and repair does not decide whether the world opened
      * (issue 571, Codex round 3).
@@ -5408,13 +5427,22 @@ export class Coordinator {
         // A proposal being written into is not a proposal to commit (issue 239). The client hides
         // Accept while a run is live, but it learns that from a snapshot it may have taken a
         // moment ago, and the run is here — so the refusal is made where the answer is known.
-        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
+        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId, msg.requestId)) return;
         // Read before accepting: acceptance rewrites the manifest, and the origin is needed to
         // tell the conversation what became of its propositions.
         try {
           const outcome = (await this.engine.proposals.accept(LOCAL_ENGINE_CONTEXT, msg.worldId,
-            msg.proposalId, { operationId: ulid(), ...(msg.confirmRipples === undefined ? {} : { confirmRipples: msg.confirmRipples }) })).value;
+            msg.proposalId, {
+              operationId: ulid(),
+              ...(msg.confirmRipples === undefined ? {} : { confirmRipples: msg.confirmRipples }),
+              ...(msg.expectedDraftRevision === undefined ? {} : { expectedDraftRevision: msg.expectedDraftRevision }),
+            })).value;
           const at = new Date().toISOString();
+          // Refused against a revision the press was fenced to, and the draft has since moved on
+          // (codex on PR 1232): another window kept or edited part of it. That is not the world
+          // moving, so the answer is to read the newer draft, never to rebase it. Told by what the
+          // gate said under its lock, not by reading the proposal again once it has let go.
+          const draftMoved = outcome.status === "stale" && outcome.detail === DRAFT_CHANGED_DETAIL;
           // `no-op` retires the proposal too (gate/proposals.ts): every target already reads as
           // proposed, so there is nothing to decide. It has to settle here for the same reason —
           // a conversation whose propositions stayed `proposed` behind a proposal that no longer
@@ -5435,13 +5463,14 @@ export class Coordinator {
               type: "proposal.blocked",
               worldId: msg.worldId,
               proposalId: msg.proposalId,
+              ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
               reason:
                 // `no-op` is not here: it settles above, because the world already says what the
                 // proposal says and there is nothing left to block on.
                 outcome.status === "needs-reconfirm"
                   ? "needs-reconfirm"
                   : outcome.status === "stale"
-                    ? "stale"
+                    ? draftMoved ? "draft-changed" : "stale"
                     : outcome.status === "pending-review"
                       ? "pending-review"
                       : outcome.status === "unresolved-conflicts"
@@ -5455,7 +5484,9 @@ export class Coordinator {
                             : "target-retired",
               detail:
                 outcome.status === "stale"
-                  ? `moved since drafting: ${outcome.stalePaths.join(", ")}`
+                  ? draftMoved
+                    ? "another change to this draft arrived first; read the draft as it stands now"
+                    : `moved since drafting: ${outcome.stalePaths.join(", ")}`
                   : outcome.status === "unresolved-conflicts"
                     ? `${outcome.count} conflicted field${outcome.count === 1 ? "" : "s"} await a choice`
                     : outcome.status === "open-choices"
@@ -5471,7 +5502,37 @@ export class Coordinator {
             });
           }
         } catch {
-          /* surfaced only through the refreshed snapshot */
+          // Always answered (codex on PR 1232): a screen holding its controls until the accept
+          // settles would otherwise wait on a proposal the refresh shows unchanged. What failed is
+          // not relayed. The accept can throw after the gate committed — its bookkeeping and
+          // delivery come after — so what is said follows the proposal. The gate's tombstone
+          // says it landed, even with its manifest still on disk behind a busy handle (codex on
+          // PR 1232). Otherwise standing, it did not finish; gone with no tombstone, it may have
+          // landed or lost to another window's discard, and neither is claimed.
+          const settled = await gate.landed(msg.proposalId).catch(() => false);
+          const standing = settled ? false : await gate.readManifest(msg.proposalId).then(
+            () => true as const,
+            (error: unknown) => (error as NodeJS.ErrnoException)?.code === "ENOENT" ? false as const : null,
+          );
+          const at = new Date().toISOString();
+          if (settled) {
+            this.authoring?.release(msg.proposalId);
+            this.emit({ at, type: "proposal.resolved", worldId: msg.worldId, proposalId: msg.proposalId, outcome: "accepted" });
+          } else {
+            this.emit({
+              at,
+              type: "proposal.blocked",
+              worldId: msg.worldId,
+              proposalId: msg.proposalId,
+              ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
+              reason: "invalid",
+              detail: standing === true
+                ? "this could not be accepted; the proposal still stands"
+                : standing === false
+                  ? "this proposal is no longer open; read the draft as it stands"
+                  : "whether this was accepted is not known; reopen the world to see the draft as it stands",
+            });
+          }
         }
         await this.refreshWorldSnapshot(msg.worldId);
         return;
@@ -5581,22 +5642,49 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
-      case "proposal-update-field": {
+      // Keeping part of a passage revision is the same kind of edit as changing one field, and is
+      // fenced, journalled and refused out loud the same way; only what is edited differs.
+      case "proposal-update-field":
+      case "proposal-update-passage": {
         const gate = this.opts.provider.gate?.();
         if (!gate) return;
         // The journal's revision check cannot see the agent, which does not write through it —
         // so an edit landing mid-run is the interleaving it exists to refuse, unnoticed.
-        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
-        const outcome = await gate
-          .updateField({
+        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId, msg.requestId)) return;
+        const outcome = await (msg.kind === "proposal-update-field"
+          ? gate.updateField({
+              proposalId: msg.proposalId,
+              requestId: msg.requestId,
+              path: msg.path,
+              field: msg.field,
+              value: msg.value,
+              expectedDraftRevision: msg.expectedDraftRevision,
+            })
+          : gate.updatePassage({
+              proposalId: msg.proposalId,
+              requestId: msg.requestId,
+              path: msg.path,
+              before: msg.before,
+              after: msg.after,
+              kept: msg.kept,
+              expectedDraftRevision: msg.expectedDraftRevision,
+            })
+        ).catch(() => "threw" as const);
+        // An edit that threw is refused out loud too (codex on PR 1232): said nothing, a screen
+        // waiting on it has no answer to end the wait with.
+        if (outcome === "threw") {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "proposal.blocked",
+            worldId: msg.worldId,
             proposalId: msg.proposalId,
             requestId: msg.requestId,
-            path: msg.path,
-            field: msg.field,
-            value: msg.value,
-            expectedDraftRevision: msg.expectedDraftRevision,
-          })
-          .catch(() => null);
+            reason: "invalid",
+            detail: "that edit could not be applied to this proposal",
+          });
+          await this.refreshWorldSnapshot(msg.worldId);
+          return;
+        }
         // A refusal is said out loud. The screen is showing a value the person just typed, and
         // silently reverting it on the next snapshot would read as the app losing their work
         // rather than as somebody else having changed it first.
@@ -5606,9 +5694,12 @@ export class Coordinator {
             type: "proposal.blocked",
             worldId: msg.worldId,
             proposalId: msg.proposalId,
+            requestId: msg.requestId,
+            // Stale here is always the draft moving — another window's edit landed first — never
+            // the world under it, so nothing is offered to rebase (codex on PR 1232).
             reason:
               outcome.status === "stale"
-                ? "stale"
+                ? "draft-changed"
                 : outcome.status === "draft-unresolved"
                   ? "draft-unresolved"
                   : "invalid",
@@ -5660,10 +5751,57 @@ export class Coordinator {
         return;
       }
       case "world-chat-send": {
+        // Every send is answered for its request (PR 1232): taken as a turn, or not. A decline
+        // appends nothing, so without this the sender can only guess from the transcript.
+        const answer = (admitted: boolean, turnId?: string) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "world-chat.send-result",
+            conversationId: msg.conversationId,
+            requestId: msg.requestId,
+            admitted,
+            ...(turnId !== undefined ? { turnId } : {}),
+          });
+        // The same request again is the same line (codex on PR 1232): still being taken, the
+        // first's answer is this one's too; taken, it is answered as taken and not said twice.
+        const seen = this.worldChatSends.get(msg.requestId);
+        if (seen === "pending") return;
+        if (seen !== undefined) {
+          answer(true, seen.turnId);
+          return;
+        }
+        const declined = () => {
+          this.worldChatSends.delete(msg.requestId);
+          answer(false);
+        };
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        const started = await this.conversationAuthoring(store).send(msg);
-        if (!started) return;
+        if (!store) {
+          answer(false);
+          return;
+        }
+        // Kept for the world's session, not by count (codex on PR 1232): a window holds an ask
+        // for as long as that, and a retry under a forgotten id would buy a second turn.
+        this.worldChatSends.set(msg.requestId, "pending");
+        // Taken only once the runner has made the line a turn (codex on PR 1232): the runner can
+        // still decline after this returns — another window's turn running, the world closing —
+        // and then the turn ends without the line ever being appended.
+        let admitted = false;
+        const started = await this.conversationAuthoring(store).send(msg, (turnId) => {
+          admitted = true;
+          this.worldChatSends.set(msg.requestId, { turnId });
+          answer(true, turnId);
+        }).catch((error: unknown) => {
+          declined();
+          throw error;
+        });
+        if (!started) {
+          declined();
+          return;
+        }
+        void started.completion.then(
+          () => { if (!admitted) declined(); },
+          () => { if (!admitted) declined(); },
+        );
         const { completion: inFlight, naming } = started;
         // The title may have just changed, and the screen shows the message immediately.
         await this.refreshConversations(store);
@@ -5676,6 +5814,22 @@ export class Coordinator {
           await this.refreshConversations(store);
           await this.openWorldChat(store, msg.conversationId);
         }
+        return;
+      }
+      case "world-chat-send-status": {
+        // Taken is known for the world's session; anything else is not taken as far as this
+        // coordinator knows — declined, never received, or sent to one that has since restarted.
+        // Still being taken, the first send's own answer will come.
+        const seen = this.worldChatSends.get(msg.requestId);
+        if (seen === "pending") return;
+        this.emit({
+          at: new Date().toISOString(),
+          type: "world-chat.send-result",
+          conversationId: msg.conversationId,
+          requestId: msg.requestId,
+          admitted: seen !== undefined,
+          ...(seen !== undefined ? { turnId: seen.turnId } : {}),
+        });
         return;
       }
       case "world-chat-retry-turn": {
@@ -6056,38 +6210,61 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
         if (msg.entryContext !== undefined && !worldChatContextExists(store.getBundle(), msg.entryContext)) return;
-        // The first conversation crosses the schema boundary (#70 §4.1, issue #403): older
-        // builds must refuse this world rather than export `.conversations` they do not know
-        // to exclude. The raise is durable before the conversation directory exists.
-        await store.ensureSchemaVersion(2, "world-chat");
-        const service = new WorldChatService(store.dir);
-        const create = () =>
-          service.create({
-            title: msg.title,
-            requestId: msg.requestId,
-            ...(msg.entryContext ? { entryContext: msg.entryContext } : {}),
-          });
-        const sceneContext = msg.entryContext?.kind === "scene" ? msg.entryContext : null;
-        const row = sceneContext !== null
-          ? await serialiseSceneConversation(
-              store.dir,
-              sceneContext.productionId,
-              sceneContext.sceneId,
-              async () => {
-                const existing = (await discoverConversations(store.dir)).summaries.find(
-                  (summary) =>
-                    summary.status !== "archived" &&
-                    summary.entryContext?.kind === "scene" &&
-                    summary.entryContext.productionId === sceneContext.productionId &&
-                    summary.entryContext.sceneId === sceneContext.sceneId,
-                );
-                return existing ?? create();
-              },
-            )
-          : await create();
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, row.id);
-        return;
+        // The same request again is the same conversation: wait for it and show it.
+        const earlier = this.worldChatCreates.get(msg.requestId);
+        if (earlier !== undefined) {
+          const made = await earlier;
+          if (made === null) return;
+          await this.refreshConversations(store);
+          await this.openWorldChat(store, made.id);
+          return;
+        }
+        let settle!: (made: { id: ConversationId } | null) => void;
+        let made = false;
+        this.worldChatCreates.set(msg.requestId, new Promise((resolve) => { settle = resolve; }));
+        try {
+          // The first conversation crosses the schema boundary (#70 §4.1, issue #403): older
+          // builds must refuse this world rather than export `.conversations` they do not know
+          // to exclude. The raise is durable before the conversation directory exists.
+          await store.ensureSchemaVersion(2, "world-chat");
+          const service = new WorldChatService(store.dir);
+          const create = () =>
+            service.create({
+              title: msg.title,
+              requestId: msg.requestId,
+              ...(msg.entryContext ? { entryContext: msg.entryContext } : {}),
+            });
+          const sceneContext = msg.entryContext?.kind === "scene" ? msg.entryContext : null;
+          const row = sceneContext !== null
+            ? await serialiseSceneConversation(
+                store.dir,
+                sceneContext.productionId,
+                sceneContext.sceneId,
+                async () => {
+                  const existing = (await discoverConversations(store.dir)).summaries.find(
+                    (summary) =>
+                      summary.status !== "archived" &&
+                      summary.entryContext?.kind === "scene" &&
+                      summary.entryContext.productionId === sceneContext.productionId &&
+                      summary.entryContext.sceneId === sceneContext.sceneId,
+                  );
+                  return existing ?? create();
+                },
+              )
+            : await create();
+          made = true;
+          settle(row);
+          await this.refreshConversations(store);
+          await this.openWorldChat(store, row.id);
+          return;
+        } catch (error) {
+          // Not made: a later request under the same id may try again.
+          if (!made) {
+            this.worldChatCreates.delete(msg.requestId);
+            settle(null);
+          }
+          throw error;
+        }
       }
       case "world-chat-delete": {
         const store = this.opts.provider.openStore?.();

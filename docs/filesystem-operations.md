@@ -161,6 +161,15 @@ there is no publication recovery or automatic sweep yet. `verifyPublicationDirec
 and checks a portable directory independently of an open world. See the
 [service boundaries](development/publications.md) for ownership, limits and remaining work.
 
+`compileVideoPublication` now discovers and revalidates sources through capture's trusted
+preparation callback, then renders from the copies after releasing the world gate. It writes
+`movie.mp4`, selected `text-N.vtt` sidecars and `publication.json` into a separate unique
+`arke-video-publication-*` scratch child. It syncs output files and verifies the package before
+returning it, removes the captured inputs, and gives the caller a package `dispose()` function.
+Cancel, world close or failure removes only these operation-owned temporary directories. This
+does not promote a destination, record durable completion or reconcile retries; abrupt exit can
+leave scratch output and it must not be presented as a completed export.
+
 ## Artifacts and extraction
 
 | Operation | Creates, changes, or removes |

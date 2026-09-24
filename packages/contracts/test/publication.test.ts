@@ -4,6 +4,8 @@ import { describe, it } from "node:test";
 import {
   PublicationAssetPathSchema,
   PublicationCaptureSchema,
+  MAX_PUBLICATION_ASSETS,
+  MAX_PUBLICATION_RECORDS,
   VideoPublicationManifestSchema,
   fingerprintPublicationCapture,
   publicationCaptureText,
@@ -208,6 +210,15 @@ describe("portable publication asset paths", () => {
 });
 
 describe("publication dependency fingerprints (SPEC-048 R-6..R-8)", () => {
+  it("bounds editable records separately from packaged media assets", () => {
+    const input = capture();
+    input.records = Array.from({ length: MAX_PUBLICATION_ASSETS + 1 }, (_, index) => ({ key: `record-${index}`, sha256: "a".repeat(64) }));
+    assert.equal(PublicationCaptureSchema.safeParse(input).success, true);
+    assert.ok(MAX_PUBLICATION_RECORDS > MAX_PUBLICATION_ASSETS);
+    input.media = Array.from({ length: MAX_PUBLICATION_ASSETS + 1 }, (_, index) => ({ key: `media-${index}`, sha256: "b".repeat(64), byteLength: 1 }));
+    assert.equal(PublicationCaptureSchema.safeParse(input).success, false, "the larger record budget must not relax the media cap");
+  });
+
   it("is stable across object and inventory order and matches standard SHA-256", async () => {
     const input = capture();
     const before = structuredClone(input);

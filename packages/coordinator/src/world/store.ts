@@ -263,6 +263,20 @@ export class WorldStore {
     });
   }
 
+  /**
+   * Read-only capture uses the same ownership/serialization boundary as managed writes.
+   * It never edits the world, so suppressing watcher events and rescanning afterward would
+   * only lose outside edits and make a cancelled capture wait for another unabortable scan.
+   * Watcher work queues normally behind this read; callers must not recursively enter the gate.
+   */
+  async ownedRead<T>(fn: () => Promise<T>): Promise<T> {
+    this.assertWritable();
+    return this.serialise(async () => {
+      await this.verifyOwnership();
+      return fn();
+    });
+  }
+
   /** The committer's clock — gate records share the world's notion of now. */
   now(): string {
     return this.clockFn();
@@ -299,7 +313,7 @@ export class WorldStore {
     return this.closingController.signal;
   }
 
-  /** Recheck disk ownership before acknowledging a long operation already under ownedWrite. */
+  /** Recheck disk ownership before acknowledging a long operation already under the gate. */
   async assertOwnership(): Promise<void> {
     this.assertWritable();
     await this.verifyOwnership();

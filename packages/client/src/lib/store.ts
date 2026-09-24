@@ -73,9 +73,13 @@ export interface GateNotice {
     /** #70 SS11.4.1: an in-place edit whose outcome is unknown, so accepting is not offered. */
     | "draft-unresolved"
     /** Issue 239: a turn is writing into the proposal, so it is not settled enough to act on. */
-    | "drafting";
+    | "drafting"
+    /** PR 1232: the draft moved on since the press; the newer one is to be read, not rebased. */
+    | "draft-changed";
   detail?: string;
   authoritativeSignature?: string;
+  /** The request refused, when it carried one: only a screen's own answers it (PR 1232). */
+  requestId?: string;
 }
 
 /** Live authoring activity per proposal (SPEC-005 R-13, R-15). */
@@ -411,7 +415,33 @@ interface StoreState {
   frameRunStartResults: Record<string, FrameRunStartResultEvent>;
   /** Bumped on snapshots so open quote dialogs abandon pre-refresh authorization. */
   frameRunRequestEpoch: number;
+  /**
+   * Snapshots that answered a hello: each is a connection made again, and anything this window
+   * was waiting to hear over the one before may have been lost with it. A screen records the
+   * count when it starts waiting, and a larger one means the answer will not come.
+   */
+  rejoins: number;
+  /**
+   * A line just sent into a conversation the screen has not yet seen become a turn, by
+   * conversation (codex on PR 1232). Kept here rather than by whichever dock sent it, so a dock
+   * put away and brought back in the gap still holds: a line said into it would be refused by the
+   * runner as already working. Ended by the coordinator's answer for that request — refused, or
+   * taken and then shown running or moved on. A rejoin may have lost that answer, and its
+   * snapshot can be taken while the line is still being admitted (codex on PR 1232), so the
+   * rejoin does not end it: the coordinator is asked where the line stands, and answers.
+   */
+  worldChatHolds: Record<string, WorldChatHold>;
 }
+
+export type WorldChatHold = {
+  requestId: string;
+  worldId: string;
+  seq: number | null;
+  rejoins: number;
+  takenAt?: number | null;
+  /** Asked where it stands after a rejoin. */
+  asked?: boolean;
+};
 
 export interface VoiceCandidatesState {
   extracted: string[];
@@ -478,6 +508,8 @@ let current: StoreState = {
   frameRunQuotes: {},
   frameRunStartResults: {},
   frameRunRequestEpoch: 0,
+  rejoins: 0,
+  worldChatHolds: {},
 };
 
 export type QueueEnqueueResult = Extract<DomainEvent, { type: "queue.enqueue-result" }> & {
@@ -754,6 +786,45 @@ export function subscribeProposalResolutions(
   return () => proposalResolutionListeners.delete(listener);
 }
 
+/**
+ * Refusals by the request they answer, kept past the moment they arrive (codex on PR 1232): the
+ * notice on a proposal is only its latest, and another window's refusal on the same proposal
+ * would otherwise overwrite the one a screen is holding its controls for. Only this window's own
+ * requests are kept, and each until the screen holding it lets go or the world closes — not by
+ * count (codex on PR 1232): a chapter put away while others are refused would come back to a
+ * hold whose answer had been dropped. Refreshed with each notice, so a screen reading this on
+ * render sees it as soon as it lands.
+ */
+const gateRequests = new Set<string>();
+const gateAnswers = new Set<string>();
+/** Whether the gate has refused this request, by its id. */
+export function gateAnswered(requestId: string): boolean {
+  return gateAnswers.has(requestId);
+}
+/** The screen that sent this request has settled it; its answer is no longer wanted. */
+export function forgetGateRequest(requestId: string): void {
+  gateRequests.delete(requestId);
+  gateAnswers.delete(requestId);
+}
+
+export type WorldChatSendResult = Extract<DomainEvent, { type: "world-chat.send-result" }>;
+const sendResultListeners = new Set<(result: WorldChatSendResult) => void>();
+/**
+ * The last answers, by request id, kept past the moment they arrive (codex on PR 1232): a screen
+ * that was not listening when its answer came — the dock put away and brought back — still finds
+ * it. A handful is plenty; nobody is waiting on an old send.
+ */
+let sendResults = new Map<string, WorldChatSendResult>();
+/** Whether a line sent into a conversation was taken as a turn, answered for its request id. */
+export function subscribeWorldChatSendResults(listener: (result: WorldChatSendResult) => void): () => void {
+  sendResultListeners.add(listener);
+  return () => sendResultListeners.delete(listener);
+}
+/** The answer already given for a request, if one has arrived. */
+export function worldChatSendResult(requestId: string): boolean | undefined {
+  return sendResults.get(requestId)?.admitted;
+}
+
 export type CanonContradictions = Extract<DomainEvent, { type: "canon.contradictions" }>;
 const canonContradictionListeners = new Set<(result: CanonContradictions) => void>();
 export function subscribeCanonContradictions(listener: (result: CanonContradictions) => void): () => void {
@@ -862,8 +933,67 @@ let rejoining = false;
 let reconnectAttempts = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
+const worldListeners = new Set<(worldId: string | null) => void>();
+/**
+ * Told when the open world changes or closes — not on a snapshot of the same world. For what a
+ * screen keeps beyond itself that belongs to one world's session and must not outlive it.
+ */
+export function onWorldChange(listener: (worldId: string | null) => void): () => void {
+  worldListeners.add(listener);
+  return () => worldListeners.delete(listener);
+}
+
+/** Ends the holds whose line has been answered and shown; after a rejoin, asks where each stands. */
+function settleHolds(next: StoreState): StoreState {
+  let holds: Record<string, WorldChatHold> | null = null;
+  for (const [conversationId, hold] of Object.entries(next.worldChatHolds)) {
+    const workspace = next.state?.worldChat?.conversationId === conversationId ? next.state.worldChat : null;
+    const seq = workspace?.seq ?? null;
+    const running = workspace?.runStatus === "running";
+    const result = sendResults.get(hold.requestId);
+    const answer = result?.admitted;
+    let settled: WorldChatHold | null = hold;
+    if (answer === false) settled = null;
+    else if (hold.takenAt !== undefined) settled = running || seq !== hold.takenAt ? null : hold;
+    // Taken, and asked after a rejoin that brought the turn whole — the line already in the
+    // thread (codex on PR 1232) — the hold has nothing left to wait for. The thread is searched
+    // for the turn the answer names, not for the words: the same words said again in another
+    // window are another turn. A thread that has only moved may have moved for another window's
+    // edit, so otherwise the turn itself is awaited.
+    else if (answer === true) {
+      const shown = hold.asked === true && result?.turnId !== undefined
+        && (workspace?.messages ?? []).some((m) => m.role === "user" && m.turnId === result.turnId);
+      settled = running || shown ? null : { ...hold, takenAt: seq };
+    }
+    else if (next.rejoins !== hold.rejoins && next.connection === "open") {
+      // Asked once per rejoin, after this change has landed.
+      settled = { ...hold, rejoins: next.rejoins, asked: true };
+      queueMicrotask(() => askWorldChatSendStatus(hold.worldId, conversationId, hold.requestId));
+    }
+    if (settled === hold) continue;
+    holds ??= { ...next.worldChatHolds };
+    if (settled === null) delete holds[conversationId];
+    else holds[conversationId] = settled;
+  }
+  return holds === null ? next : { ...next, worldChatHolds: holds };
+}
+
 function emitChange(next: StoreState): void {
+  const was = current.state?.world?.meta.worldId ?? null;
+  const now = next.state?.world?.meta.worldId ?? null;
+  // A line held for a world that has since closed has nothing left to wait for (codex on PR
+  // 1232): its answer belongs to that world's session, and coming back to it is no rejoin, so
+  // it would never be asked after.
+  if (now !== was && Object.values(next.worldChatHolds).some((hold) => hold.worldId !== now)) {
+    next = { ...next, worldChatHolds: Object.fromEntries(Object.entries(next.worldChatHolds).filter(([, hold]) => hold.worldId === now)) };
+  }
+  next = settleHolds(next);
   current = next;
+  if (now !== was) {
+    gateRequests.clear();
+    gateAnswers.clear();
+    for (const l of worldListeners) l(now);
+  }
   for (const l of listeners) l();
 }
 
@@ -1167,6 +1297,7 @@ function handleFrame(json: string): void {
       frameRunQuotes: {},
       frameRunStartResults: {},
       frameRunRequestEpoch: current.frameRunRequestEpoch + 1,
+      rejoins: current.rejoins + (rejoined ? 1 : 0),
     });
   } else if (current.state) {
     let gateNotices = current.gateNotices;
@@ -1328,6 +1459,7 @@ function handleFrame(json: string): void {
       for (const listener of filedBatchListeners) listener(event);
     }
     if (event.type === "proposal.blocked") {
+      if (event.requestId !== undefined && gateRequests.has(event.requestId)) gateAnswers.add(event.requestId);
       gateNotices = {
         ...gateNotices,
         [event.proposalId]: {
@@ -1336,6 +1468,7 @@ function handleFrame(json: string): void {
           ...(event.authoritativeSignature !== undefined
             ? { authoritativeSignature: event.authoritativeSignature }
             : {}),
+          ...(event.requestId !== undefined ? { requestId: event.requestId } : {}),
         },
       };
     } else if (event.type === "proposal.resolved") {
@@ -1771,6 +1904,9 @@ function handleFrame(json: string): void {
       }
     } else if (event.type === "dictation.result") {
       dictation = { ...dictation, [event.requestId]: { text: event.text, error: event.error } };
+    } else if (event.type === "world-chat.send-result") {
+      sendResults = new Map([...sendResults, [event.requestId, event] as const].slice(-50));
+      for (const listener of sendResultListeners) listener(event);
     } else if (event.type === "world-chat.attachment-refused") {
       // The last few only: a refusal is news for a moment, not a list to work through — the same
       // rule the composer applies to the ones it raises itself.
@@ -2367,12 +2503,23 @@ export function setArtDirection(worldId: string, description: string, masterLook
   }) ? requestId : null;
 }
 
-export function acceptProposal(worldId: string, proposalId: string, confirmRipples?: string): void {
-  send({
+/** True when the accept went out; false when the transport is down. */
+export function acceptProposal(
+  worldId: string,
+  proposalId: string,
+  confirmRipples?: string,
+  expectedDraftRevision?: number,
+  /** Echoed on a refusal, so the screen that pressed knows the answer is its own (PR 1232). */
+  requestId?: string,
+): boolean {
+  if (requestId !== undefined) gateRequests.add(requestId);
+  return send({
     kind: "proposal-accept",
     worldId,
     proposalId,
+    ...(requestId !== undefined ? { requestId } : {}),
     ...(confirmRipples !== undefined ? { confirmRipples } : {}),
+    ...(expectedDraftRevision !== undefined ? { expectedDraftRevision } : {}),
   });
 }
 
@@ -2412,6 +2559,35 @@ export function resolveProposalChoice(
     proposalId,
     choiceId,
     optionId,
+    expectedDraftRevision,
+  });
+}
+
+/**
+ * Keep part of a staged passage revision (turn 128): the span as the screen drew it, and the edits
+ * kept by index; the gate composes the passage. Fenced to the draft revision shown, as a field
+ * edit is. False when nothing was sent, so the screen does not wait for an answer that cannot come.
+ */
+export function updateProposalPassage(
+  worldId: string,
+  proposalId: string,
+  path: string,
+  span: { before: string; after: string },
+  kept: readonly number[],
+  expectedDraftRevision: number,
+  /** The keep's own id: sent again after a rejoin, the gate makes the same edit once (PR 1232). */
+  requestId: string = crypto.randomUUID(),
+): boolean {
+  gateRequests.add(requestId);
+  return send({
+    kind: "proposal-update-passage",
+    worldId,
+    requestId,
+    proposalId,
+    path,
+    before: span.before,
+    after: span.after,
+    kept: [...kept],
     expectedDraftRevision,
   });
 }
@@ -4766,6 +4942,10 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     frameRunQuotes: {},
     frameRunStartResults: {},
     frameRunRequestEpoch: 0,
+    rejoins: 0,
+    // A line just sent stays held across a test's state changes, as it does across snapshots;
+    // `__clearWorldChatHoldsForTest` starts a test without one.
+    worldChatHolds: current.worldChatHolds,
     ...extra,
   });
 }
@@ -4812,8 +4992,8 @@ export function createWorldChat(
   title: string,
   requestId: string,
   entryContext?: WorldChatContext,
-): void {
-  send({ kind: "world-chat-create", worldId, title, requestId, ...(entryContext ? { entryContext } : {}) });
+): boolean {
+  return send({ kind: "world-chat-create", worldId, title, requestId, ...(entryContext ? { entryContext } : {}) });
 }
 
 /** Say something in a conversation, and take a turn. */
@@ -4826,11 +5006,16 @@ export function sendWorldChat(
   modelId?: string,
   /** A line that asks for a reply and nothing else (turn 128): no action the turn returns is staged. */
   replyOnly = false,
-): void {
-  send({
+  /**
+   * A line sent again after its answer was lost goes under its first request (PR 1232): the
+   * coordinator takes one line per request, so the retry cannot buy a second turn.
+   */
+  requestId: string = crypto.randomUUID(),
+): string | null {
+  const sent = send({
     kind: "world-chat-send",
     worldId,
-    requestId: crypto.randomUUID(),
+    requestId,
     conversationId,
     text,
     attachmentIds,
@@ -4838,6 +5023,34 @@ export function sendWorldChat(
     ...(subject !== undefined ? { subject } : {}),
     ...(replyOnly ? { replyOnly: true } : {}),
   });
+  if (!sent) return null;
+  // Held only while there is a thread on screen to watch move; with none there is nothing to wait on.
+  const workspace = current.state?.worldChat;
+  if (workspace?.conversationId === conversationId) {
+    emitChange({
+      ...current,
+      worldChatHolds: {
+        ...current.worldChatHolds,
+        [conversationId]: { requestId, worldId, seq: workspace.seq, rejoins: current.rejoins },
+      },
+    });
+  }
+  return requestId;
+}
+
+/** Asks where a sent line stands, after a rejoin that may have lost its answer (PR 1232). */
+export function askWorldChatSendStatus(worldId: string, conversationId: string, requestId: string): boolean {
+  return send({ kind: "world-chat-send-status", worldId, requestId, conversationId: conversationId as never });
+}
+
+/** Test hook: no line held from an earlier test. */
+export function __clearWorldChatHoldsForTest(): void {
+  current = { ...current, worldChatHolds: {} };
+}
+
+/** The line just sent into a conversation that the screen has not seen become a turn, if any. */
+export function worldChatHold(conversationId: string | null | undefined): WorldChatHold | null {
+  return conversationId ? current.worldChatHolds[conversationId] ?? null : null;
 }
 
 /** Decide exactly the card and conversation revision currently on screen. */

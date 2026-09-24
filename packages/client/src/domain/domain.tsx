@@ -199,7 +199,9 @@ export interface ProposalGateNotice {
     /** #70 SS11.4.1: an in-place edit whose outcome is unknown; accepting is not offered. */
     | "draft-unresolved"
     /** Issue 239: a turn is writing into the proposal, so it is not settled enough to act on. */
-    | "drafting";
+    | "drafting"
+    /** PR 1232: the draft moved on since the press; the newer one is to be read, not rebased. */
+    | "draft-changed";
   detail?: string;
   authoritativeSignature?: string;
 }
@@ -215,6 +217,7 @@ const NOTICE_TITLES: Record<ProposalGateNotice["reason"], string> = {
   invalid: "This draft cannot be written as it stands",
   "draft-unresolved": "An edit to this proposal did not finish",
   drafting: "The studio is still drafting",
+  "draft-changed": "The draft changed since you read it",
 };
 
 /**
@@ -251,9 +254,15 @@ export function ProposalPanel({
   onMarkSeen,
   onSendBack,
   disabledReason,
+  acceptLabel = "Accept",
+  acceptBlocked,
 }: {
   staged: StagedProposal;
   notice?: ProposalGateNotice;
+  /** What Accept says when it accepts less than the whole draft — `Accept 2 of 3`. */
+  acceptLabel?: string;
+  /** Why Accept cannot be pressed now, from the surface deciding (nothing kept, say). */
+  acceptBlocked?: string;
   onAccept?: (confirmSignature?: string) => void;
   onDiscard?: () => void;
   onRebase?: () => void;
@@ -401,10 +410,10 @@ export function ProposalPanel({
           <Button
             variant="primary"
             onClick={() => onAccept?.()}
-            disabled={!onAccept || unresolved.length > 0 || openChoices.length > 0}
-            title={openChoices.length > 0 ? "Answer the question above before accepting" : disabledReason}
+            disabled={!onAccept || unresolved.length > 0 || openChoices.length > 0 || acceptBlocked !== undefined}
+            title={openChoices.length > 0 ? "Answer the question above before accepting" : acceptBlocked ?? disabledReason}
           >
-            Accept
+            {acceptLabel}
           </Button>
         )}
         {onSendBack && (

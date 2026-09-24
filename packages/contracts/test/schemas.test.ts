@@ -1244,6 +1244,35 @@ describe("domain events and frames", () => {
     assert.throws(() => ClientMessageSchema.parse({ ...answer, targetPath: "canon/CANON-018.md" }));
   });
 
+  it("an accept may name the draft revision it decided on", () => {
+    const accept = { kind: "proposal-accept", worldId: WORLD_ID, proposalId: "pr_1" };
+    assert.doesNotThrow(() => ClientMessageSchema.parse(accept), "unfenced, as every accept has been");
+    assert.doesNotThrow(() => ClientMessageSchema.parse({ ...accept, expectedDraftRevision: 2 }));
+    assert.throws(() => ClientMessageSchema.parse({ ...accept, expectedDraftRevision: 0 }));
+  });
+
+  it("fences a kept part of a passage revision to the draft and the span shown", () => {
+    const kept = {
+      kind: "proposal-update-passage",
+      worldId: WORLD_ID,
+      requestId: "req-passage-1",
+      proposalId: "pr_1",
+      path: "productions/inkbound/chapters/01-neap.md",
+      before: "the bells",
+      after: "the seven bells slowly",
+      kept: [0],
+      expectedDraftRevision: 1,
+    };
+    assert.doesNotThrow(() => ClientMessageSchema.parse(kept));
+    for (const missing of ["requestId", "path", "before", "after", "kept", "expectedDraftRevision"]) {
+      const { [missing]: _dropped, ...without } = kept as Record<string, unknown>;
+      assert.throws(() => ClientMessageSchema.parse(without), `${missing} must be required`);
+    }
+    assert.throws(() => ClientMessageSchema.parse({ ...kept, kept: [-1] }), "an edit is named by its index");
+    assert.doesNotThrow(() => ClientMessageSchema.parse({ ...kept, after: `${"x".repeat(2_400)}.` }), "a span widened to whole words may pass the replacement's own cap");
+    assert.throws(() => ClientMessageSchema.parse({ ...kept, text: "words the reviewer never saw" }), "the passage is composed by the gate, never sent");
+  });
+
   it("carries non-empty authoritative World Chat ripples as transient news", () => {
     const event = {
       at: "2026-08-04T08:00:00Z",

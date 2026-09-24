@@ -26,6 +26,9 @@ import {
   openWorldChatMedia,
   retryWorldChatTurn,
   sendWorldChat,
+  askWorldChatSendStatus,
+  subscribeWorldChatSendResults,
+  worldChatSendResult,
   setProductionModel,
   subscribeWorldChatMediaOpened,
   subscribeConversationActionDecision,
@@ -727,6 +730,42 @@ export function languageChoiceReason(
  * to make a conversation before they can say anything — and it is opened on arrival and released
  * on the way out, so a session that visits every view still holds one workspace.
  */
+/**
+ * An ask a page hands the dock (the chapter's selection menu), with its words and subject fixed
+ * at the press. `draft` only starts a line in the composer. `sent` is set by the dock once it has
+ * gone, with the request id the coordinator answers for.
+ */
+export type DockAsk = {
+  line: string;
+  text: string;
+  subject?: WorldChatSubject;
+  replyOnly?: boolean;
+  draft?: boolean;
+  /**
+   * `rejoins` is the store's count when it went, or when it was last asked after: a larger one
+   * means its answer may have been lost, and the coordinator is asked where it stands.
+   */
+  sent?: { requestId: string; at: string; rejoins: number; conversationId: string };
+  /** A line lost on the way, tried again under the request it first went as. */
+  again?: string;
+  /**
+   * Said first into a thread it opened, which has not arrived yet: `was` is the thread before,
+   * `rejoins` the store's count when the create went, `request` the create's own id.
+   */
+  opening?: { was: string | null; rejoins: number; request: string };
+  /**
+   * The coordinator's answer for `sent`, kept with the ask by whoever holds it (codex on PR 1232):
+   * the store's own record of answers is bounded, and an ask can wait a long while for its dock.
+   */
+  answered?: boolean;
+  /** Which press made it: the same words pressed twice are two presses. */
+  press?: string;
+  /** Sent and not taken: shown to be tried again or dismissed. */
+  declined?: boolean;
+  /** What the author has typed to finish a `draft` line, kept by the page with the ask. */
+  typed?: string;
+};
+
 export function ProductionConversation({
   worldId,
   productionId,
@@ -799,6 +838,13 @@ export function ProductionConversation({
      */
     prompts?: readonly (string | { label: string; replyOnly?: boolean; press?: () => void })[];
     /**
+     * An ask handed in from outside the dock, said once as a quick ask is. `draft` only puts the
+     * line in the composer for the author to finish. The page clears it in `onAskTaken`.
+     */
+    ask?: DockAsk;
+    /** The dock's word on the ask: sent (the ask back, marked), or done with (null). */
+    onAsk?: (next: DockAsk | null) => void;
+    /**
      * Said before whatever is typed while a shot is the subject. The thread enters at the scene,
      * so the shot the dock names has to be in the words themselves or the studio never hears it.
      */
@@ -825,7 +871,7 @@ export function ProductionConversation({
   /** What is selected on the timeline while they talk (SPEC-039 R-26), sent with each turn. */
   subject?: WorldChatSubject;
 }) {
-  const { state } = useStore();
+  const { state, connection, rejoins, worldChatHolds } = useStore();
   const navigate = useNavigate();
   const [message, setMessage] = useState("");
   const [languageModelId, setLanguageModelId] = useState<string | undefined>();
@@ -855,6 +901,8 @@ export function ProductionConversation({
     subject?: WorldChatSubject;
     modelId?: string;
     replyOnly?: boolean;
+    /** Told the request id once the line is sent into the thread this opened. */
+    onSent?: (requestId: string) => void;
   } | null>(null);
   const [busyMedia, setBusyMedia] = useState<string | null>(null);
   const [mediaRefusal, setMediaRefusal] = useState<string | null>(null);
@@ -953,11 +1001,20 @@ export function ProductionConversation({
     if (!opening || !worldId) return;
     const opened = workspace?.conversationId ?? null;
     if (!opened || opened === opening.was || opened !== conversationId) return;
+    // Said only on a connection that can carry it (codex on PR 1232): a send that does not leave
+    // keeps the line waiting for its thread, rather than dropping the wait to be made again.
+    if (connection !== "open") return;
     if (opening.attach) worldChatAttachFiles(worldId, opened);
-    else sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId, opening.replyOnly ?? false);
+    else {
+      const requestId = sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId, opening.replyOnly ?? false);
+      if (requestId === null) return;
+      opening.onSent?.(requestId);
+    }
     setOpening(null);
-  }, [opening, worldId, workspace?.conversationId, conversationId]);
+  }, [opening, worldId, workspace?.conversationId, conversationId, connection]);
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
+  const loadedRef = useRef(loaded);
+  loadedRef.current = loaded;
   const progress = useWorldChatProgress(conversationId ?? undefined, loaded?.runStartedAt ?? null);
   const running = loaded?.runStatus === "running";
   const failure = loaded?.lastFailure ?? null;
@@ -997,44 +1054,214 @@ export function ProductionConversation({
   }, [openWith, worldId, productionId, conversationId]);
 
   /** Says one thing into the thread — the composer's draft, or a quick ask said as it stands. */
-  const say = (text: string, replyOnly = false) => {
-    if (!text || !worldId || !productionId) return;
+  /** True when the line went out; false when it was held back or the transport is down. */
+  const say = (
+    text: string,
+    replyOnly = false,
+    about: WorldChatSubject | undefined = subject,
+    /** Told the request id once the line has gone — at once, or after the thread it opens. */
+    onSent?: (requestId: string) => void,
+    /** The request a line lost on the way goes again under — or, opening a thread, its create. */
+    again?: string,
+  ): boolean => {
+    if (!text || !worldId || !productionId) return false;
     // A second line said while the first is still opening its thread would open a second one,
     // and one said over a running turn starts a second turn the first can no longer stop.
-    if (opening || running) return;
+    // Nor over a line just sent that the thread has not shown yet (codex on PR 1232): the runner
+    // would refuse it as already working, and nothing would say so.
+    if (opening || running || echo !== null) return false;
+    // Nor into a thread still loading (codex on PR 1232): with no sequence to watch, the line
+    // could not be held as just sent, and the next would go out over it.
+    if (conversationId && loaded === null) return false;
     /*
      * No thread yet: the first thing said opens one and is then said into it. Creating does not
      * take a turn — it only names the conversation — so without the send that follows, the
      * opening message became a title and the studio never answered it (turn 95).
      */
     if (!conversationId) {
+      // Nothing is waited on for a create that never left (codex on PR 1232).
+      // A create made again after it was lost goes under its first request, which the coordinator
+      // makes at most once (codex on PR 1232).
+      if (!createWorldChat(worldId, conversationTitle(text), again ?? crypto.randomUUID(), context)) return false;
       // The subject goes with it: the first thing said is the likeliest "move this earlier".
       setOpening({
         text,
         was: workspace?.conversationId ?? null,
-        ...(subject !== undefined ? { subject } : {}),
+        ...(about !== undefined ? { subject: about } : {}),
         ...(languageModelId !== undefined ? { modelId: languageModelId } : {}),
         ...(replyOnly ? { replyOnly: true } : {}),
+        ...(onSent !== undefined ? { onSent } : {}),
       });
       setLanguageModelId(undefined);
-      createWorldChat(worldId, conversationTitle(text), crypto.randomUUID(), context);
-      return;
+      return true;
     }
     // Only the turn's explicit choice travels as an override. The coordinator resolves the
     // captured agent preference before the production default; sending the displayed fallback
     // here would promote that default above the agent and run a different model.
-    sendWorldChat(worldId, conversationId, text, [], subject, languageModelId, replyOnly);
+    const requestId = sendWorldChat(worldId, conversationId, text, [], about, languageModelId, replyOnly, again);
+    if (requestId === null) return false;
     setLanguageModelId(undefined);
+    onSent?.(requestId);
+    return true;
   };
   const submit = () => {
     const text = message.trim();
     if (!text || !worldId || !productionId) return;
     // The field keeps its words while a thread is still opening; say() would drop them.
     if (opening) return;
-    setMessage("");
+    // The words leave the box only once they have gone (codex on PR 1232): a line held back —
+    // a turn running, one just sent — stays where the author typed it.
+    // A line a menu press started is about the passage it was pressed on (codex on PR 1232).
+    // Finished, it becomes an ask like any press (codex on PR 1232): said when the dock is free
+    // and kept by the page until the coordinator takes it, so a refusal shows it as not sent
+    // rather than losing what the author wrote.
+    if (draftAsk !== null) {
+      const prefix = draftAsk.text.slice(0, draftAsk.text.length - draftAsk.line.length).trimEnd();
+      onAsk?.({ line: text, text: `${prefix} ${text}`, ...(draftAsk.subject !== undefined ? { subject: draftAsk.subject } : {}) });
+      setMessage("");
+      return;
+    }
     const prefix = dock?.subjectPrefix;
-    say(prefix === undefined ? text : `${prefix} ${text}`);
+    if (say(prefix === undefined ? text : `${prefix} ${text}`)) setMessage("");
   };
+
+  /*
+   * An ask handed in from the page — the chapter's selection menu. The page owns it (codex on PR
+   * 1232): its words and passage were fixed at the press, and it stays with the page until it is
+   * done with, so putting the dock away and bringing it back loses nothing. The dock says it when
+   * it is free, exactly as a quick ask is said, and reports back through `onAsk`: sent (with its
+   * request id), or done with.
+   *
+   * Taken or not is the coordinator's answer for that request id (`world-chat.send-result`),
+   * given once the runner has made the line a turn, not a guess from the transcript. The store
+   * keeps recent answers, so a dock brought back after its answer arrived still finds it. While
+   * the connection holds, the answer always comes, however long admission takes, so it is waited
+   * for; only a connection lost on the way loses it, and then the rejoined thread says. Not
+   * taken, it is shown beside the prompts to be tried again or dismissed, never written over the
+   * composer.
+   *
+   * A line that only starts an ask (`draft`) stays the page's too, until it is sent or another
+   * press replaces it: the dock puts it in an empty composer — again after being brought back —
+   * and sends what the author finishes with the passage it was pressed on, whatever is selected
+   * by then.
+   */
+  const [focusRequest, setFocusRequest] = useState(0);
+  const ask = dock?.ask;
+  const onAsk = dock?.onAsk;
+  const draftAsk = ask?.draft === true ? ask : null;
+  const declinedAsk = ask?.declined === true ? ask : null;
+  /*
+   * A line just sent that the thread has not shown yet (codex on PR 1232): nothing here says a
+   * turn is running, and a line released into that gap is refused by the runner as already
+   * working. The store holds it by conversation until the coordinator's answer and the thread
+   * say otherwise, so a dock put away and brought back in the gap still waits.
+   */
+  const echo = conversationId ? worldChatHolds[conversationId] ?? null : null;
+  // A line to finish: the composer, if empty, and the caret either way — once per press, and
+  // again when a dock brought back meets it, with whatever the author had typed so far (codex on
+  // PR 1232), which the page keeps with the ask as they type.
+  const seededFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (draftAsk === null) {
+      seededFor.current = null;
+      return;
+    }
+    // By press, not by words (codex on PR 1232): the same line pressed again is a new press.
+    const key = draftAsk.press ?? draftAsk.text;
+    if (seededFor.current === key) return;
+    seededFor.current = key;
+    if (message.trim() === "") setMessage(draftAsk.typed ?? draftAsk.line);
+    // Words already in the composer are what the ask now carries (codex on PR 1232): put away
+    // before another keystroke, the dock would otherwise come back with only the menu's line.
+    else if (message !== draftAsk.typed) onAsk?.({ ...draftAsk, typed: message });
+    setFocusRequest((n) => n + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftAsk]);
+  useEffect(() => {
+    if (draftAsk === null || seededFor.current !== (draftAsk.press ?? draftAsk.text) || message === (draftAsk.typed ?? draftAsk.line)) return;
+    onAsk?.({ ...draftAsk, typed: message });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [message]);
+  // Said when the dock is free.
+  // Read when the line goes, not when the callback was made (codex on PR 1232): a line said into
+  // a thread it opened goes after that thread arrives, perhaps across a rejoin.
+  const rejoinsRef = useRef(rejoins);
+  rejoinsRef.current = rejoins;
+  const conversationIdRef = useRef(conversationId);
+  conversationIdRef.current = conversationId;
+  const sentAs = (pressed: DockAsk) => (requestId: string) => {
+    const { again: _again, opening: _opening, answered: _answered, ...sent } = pressed;
+    const into = loadedRef.current?.conversationId ?? conversationIdRef.current ?? "";
+    onAsk?.({ ...sent, sent: { requestId, at: new Date().toISOString(), rejoins: rejoinsRef.current, conversationId: into } });
+  };
+  /*
+   * One ask, one step at a time (codex on PR 1232). An ask moves through its life — waiting for
+   * the dock, opening a thread, sent, answered — by one transition per render, decided from where
+   * it stands now. Separate effects each took their step from the same render and wrote over one
+   * another's result: an answer undone by a rejoin's bookkeeping, a retry undone by a restore.
+   *
+   * Sent, it is settled by the coordinator's answer for its request: taken is done with; not
+   * taken is shown to be tried again. The answer is not durable — a connection lost between send
+   * and answer loses it, even for a line the runner took — and no clock or rejoined transcript
+   * can stand in for it: admission can be slow, and a rejoin snapshot can predate it. So after a
+   * rejoin the coordinator is asked where the line stands, once per rejoin, and its answer
+   * settles it. Opening a thread first, the ask says so: a dock put away before the thread
+   * arrives comes back waiting for it rather than opening a second, and a create lost with the
+   * connection — rejoined and still no thread — is made again under the same create, which the
+   * coordinator makes at most once.
+   */
+  const askRef = useRef(ask);
+  askRef.current = ask;
+  const [answers, setAnswers] = useState(0);
+  // Answers arrive between renders; noted, the transition reads them.
+  useEffect(() => subscribeWorldChatSendResults((result) => {
+    if (askRef.current?.sent?.requestId === result.requestId) setAnswers((n) => n + 1);
+  }), []);
+  useEffect(() => {
+    if (ask === undefined || ask.draft === true || ask.declined === true) return;
+    if (ask.sent !== undefined) {
+      const answer = ask.answered ?? worldChatSendResult(ask.sent.requestId);
+      if (answer === true) {
+        onAsk?.(null);
+      } else if (answer === false) {
+        const { sent: _sent, ...refused } = ask;
+        onAsk?.({ ...refused, declined: true });
+      } else if (connection === "open" && rejoins !== ask.sent.rejoins && worldId) {
+        askWorldChatSendStatus(worldId, ask.sent.conversationId, ask.sent.requestId);
+        onAsk?.({ ...ask, sent: { ...ask.sent, rejoins } });
+      }
+      return;
+    }
+    if (ask.opening !== undefined) {
+      if (connection === "open" && !conversationId && rejoins !== ask.opening.rejoins) {
+        const { opening: lost, ...again } = ask;
+        setOpening(null);
+        onAsk?.({ ...again, again: lost.request });
+      } else if (opening === null) {
+        setOpening({
+          text: ask.text,
+          was: ask.opening.was,
+          ...(ask.subject !== undefined ? { subject: ask.subject } : {}),
+          ...(ask.replyOnly === true ? { replyOnly: true } : {}),
+          onSent: sentAs(ask),
+        });
+      }
+      return;
+    }
+    // Waiting: said when the dock is free.
+    if (opening !== null || echo !== null || running || languageUnavailableReason !== undefined || connection !== "open") return;
+    if (conversationId && loaded === null) return;
+    const pressed = ask;
+    const was = workspace?.conversationId ?? null;
+    const opens = !conversationId;
+    const request = opens ? pressed.again ?? crypto.randomUUID() : pressed.again;
+    if (say(pressed.text, pressed.replyOnly === true, pressed.subject, sentAs(pressed), request) && opens) {
+      onAsk?.({ ...pressed, opening: { was, rejoins: rejoinsRef.current, request: request! } });
+    }
+    // say and sentAs are rebuilt every render; where the ask stands and the dock's readiness are
+    // what decide.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ask, answers, opening, echo, running, languageUnavailableReason, connection, rejoins, conversationId, loaded === null, worldId]);
 
   const points = loaded?.points ?? [];
   const carriedPoints = points.filter((p) => p.kind === "point" && p.settled).length;
@@ -1239,6 +1466,18 @@ export function ProductionConversation({
         <div className="fy-arke__foot">
           {sceneDock ? null : languageControl}
           {dock.subjectLine !== undefined && <div className="fy-mono fy-arke__subject">{dock.subjectLine}</div>}
+          {declinedAsk !== null && (
+            <div className="fy-mono fy-arke__declined" role="status">
+              <span>Not sent · {declinedAsk.line}</span>
+              <button type="button" onClick={() => {
+                // Only a line the coordinator says it did not take is shown here, so trying
+                // again is a new request.
+                const { sent: _sent, declined: _declined, ...again } = declinedAsk;
+                onAsk?.(again);
+              }}>Try again</button>
+              <button type="button" onClick={() => onAsk?.(null)}>Dismiss</button>
+            </div>
+          )}
           {dock.prompts === undefined || dock.prompts.length === 0 ? null : (
             <div className="fy-arke__prompts">
               {dock.prompts.map((entry) => {
@@ -1254,7 +1493,7 @@ export function ProductionConversation({
                     key={prompt}
                     type="button"
                     className="fy-arke__prompt"
-                    disabled={press === undefined && (opening !== null || running || languageUnavailableReason !== undefined)}
+                    disabled={press === undefined && (opening !== null || running || echo !== null || languageUnavailableReason !== undefined)}
                     onClick={() => (press !== undefined ? press() : say(dock.subjectPrefix === undefined ? prompt : `${dock.subjectPrefix} ${prompt}`, replyOnly))}
                   >
                     {prompt}
@@ -1272,8 +1511,9 @@ export function ProductionConversation({
             onSubmit={submit}
             placeholder={placeholder}
             {...(dock.conversationFirst ? {} : { agentLabel: "story author" })}
-            busy={running || opening !== null}
+            busy={running || opening !== null || echo !== null}
             busyLabel={opening !== null ? openingNote ?? "opening…" : "reading the world…"}
+            focusRequest={focusRequest}
             disabledReason={languageUnavailableReason}
             onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
             {...attachProps}
@@ -1501,8 +1741,11 @@ export function StagedDecision({
   staged,
   items,
   onAccepted,
+  accept,
 }: {
   worldId: string | undefined;
+  /** Accept as the page needs it (see ConnectedProposalPanel); absent accepts the whole draft. */
+  accept?: { label?: string; blocked?: string; pending?: boolean; onAccept?: (confirmSignature?: string) => void };
   /** What is being decided, in the words of the level — "season", "episode 03". */
   subject: string;
   staged: StagedProposal;
@@ -1524,6 +1767,7 @@ export function StagedDecision({
       <ConnectedProposalPanel
         staged={staged}
         onAccepted={onAccepted}
+        {...(accept !== undefined ? { accept } : {})}
       />
       <div className="fy-mono">
         {items !== undefined && items.length > 0 ? items.map((item) => item.label).join(" · ") : files.join(" · ")}

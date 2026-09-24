@@ -449,8 +449,15 @@ describe("a world look through the generic gate", () => {
     await writeFile(join(dir, "art-direction", "art-direction.json"), `${JSON.stringify(moved, null, 2)}
 `, "utf8");
 
+    const before = (await gate.readManifest(mine.id)).draftRevision;
     const { conflicts } = await gate.rebase(mine.id);
     assert.deepEqual(conflicts, []);
+    // Rewritten files are a new draft (codex on PR 1232): a screen fenced to the old revision
+    // cannot accept them unread, even once the merged result is marked seen elsewhere.
+    assert.equal((await gate.readManifest(mine.id)).draftRevision, before + 1);
+    await gate.markSeen(mine.id);
+    const fenced = await gate.accept(mine.id, { expectedDraftRevision: before });
+    assert.equal(fenced.status, "stale");
     const restated = JSON.parse(
       await readFile(join(dir, ".proposals", mine.id, "art-direction", "art-direction.json"), "utf8"),
     ) as { description: string; audio: { music: string }; failureModes: string[] };

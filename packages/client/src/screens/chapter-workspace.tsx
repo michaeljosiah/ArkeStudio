@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Link, useParams, useNavigate, useSearchParams } from "react-router";
 import {
   chapterParagraphs,
   countWords,
   paragraphSpans,
   passageOf,
+  passageDiff,
+  composePassage,
+  type PassageSegment,
   targetWords,
   type ChangedSpan,
   type ChapterContinuity,
@@ -17,10 +20,13 @@ import {
   type ProductionBundle,
   type ProseReadSource,
   type StagedProposal,
+  type WorldChatSubject,
   type WorldBundle,
   overviewMoved,
+  PASSAGE_KEPT_MAX,
+  PASSAGE_SPAN_MAX,
 } from "@arke-studio/contracts";
-import { ProductionConversation, StagedDecision } from "../components/conversation.js";
+import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
 import { Pin, RotateCcw } from "../components/icons.js";
@@ -28,6 +34,7 @@ import { PageReadControl, useProsePageRead, type PageReadBlock } from "../compon
 import { EmptyState, Screen } from "../components/layout.js";
 import { Button, cx } from "../components/ui.js";
 import { continuityStamp } from "../lib/continuity.js";
+import { passageAction, passageActions, type PassageAction } from "../lib/passage-actions.js";
 import { useProduction } from "../lib/selectors.js";
 import { EditableText, SceneTitle } from "./storyboard.js";
 import { AudiobookBlocks, AudiobookSide, DirectionCard, useChapterAudiobook, type AudiobookIntent } from "./chapter-audiobook.js";
@@ -52,6 +59,13 @@ import {
   useCasting,
   useAudiobookRuns,
   useAudiobookRecords,
+  acceptProposal,
+  onWorldChange,
+  subscribeWorldChatSendResults,
+  updateProposalPassage,
+  useGateNotices,
+  gateAnswered,
+  forgetGateRequest,
 } from "../lib/store.js";
 
 /**
@@ -139,6 +153,55 @@ type ParkedDraft = { value: string; baseHash: string; landedBody: string | null;
 const parkedDrafts = new Map<string, ParkedDraft>();
 const parkedKey = (worldId: string, prodId: string, file: string): string => `${worldId}/${prodId}/${file}`;
 
+/**
+ * Asks from the passage menu, by chapter, until the dock is done with them (codex on PR 1232).
+ * Outside any component for the same reason as the drafts above: the screen is keyed by chapter
+ * and goes when the author moves to another, and an ask waiting, sent or not taken is still
+ * theirs when they come back.
+ */
+const heldAsks = new Map<string, DockAsk>();
+/**
+ * A partial accept on its way, by chapter, for the same reason (codex on PR 1232): the keep lands
+ * after the screen may have gone, and the accept it promised is sent by the next one to see it.
+ */
+type HeldKeep = {
+  id: string;
+  revision: number;
+  expected: string;
+  rejoins: number;
+  /** The consequences confirmed with the press, carried to the accept the keep promised. */
+  confirm?: string;
+  /** The keep itself, to send again under its own id after a rejoin that may have lost it. */
+  request: { requestId: string; path: string; span: { before: string; after: string }; kept: number[] };
+};
+const heldKeeps = new Map<string, HeldKeep>();
+/**
+ * An accept on its way, by chapter: its decision holds the others until it settles. It keeps
+ * what it sent, to send again under its own id after a rejoin that may have lost it.
+ */
+type HeldAccept = { id: string; rejoins: number; requestId: string; revision: number; confirm?: string };
+const heldAccepts = new Map<string, HeldAccept>();
+// Only for the world's session they were pressed in (codex on PR 1232): closed and opened again,
+// an ask still waiting would otherwise go by itself, quoting prose that may have moved since.
+onWorldChange(() => {
+  heldAsks.clear();
+  heldKeeps.clear();
+  heldAccepts.clear();
+});
+// The answer to a held ask is kept with it (codex on PR 1232): the store remembers only recent
+// answers, and a chapter left for long enough would come back to one it no longer has.
+subscribeWorldChatSendResults((result) => {
+  for (const [key, held] of heldAsks) {
+    if (held.sent?.requestId === result.requestId) heldAsks.set(key, { ...held, answered: result.admitted });
+  }
+});
+/** Test hook: asks outlive a screen by design, so each test starts with none. */
+export function __clearHeldAsksForTest(): void {
+  heldAsks.clear();
+  heldKeeps.clear();
+  heldAccepts.clear();
+}
+
 /** Sending is not saving: an answer can refuse after the editor has unmounted. */
 function keepUntilSaved(key: string, held: ParkedDraft, requestId: string | null): void {
   if (requestId === null) return;
@@ -216,9 +279,12 @@ function chapterPath(production: ProductionBundle, chapter: ChapterSummary): str
 export function stagedChapterDraft(
   proposals: readonly StagedProposal[],
   path: string,
+  /** One proposal by id, whether or not it is the newest (codex on PR 1232). */
+  id?: string,
 ): { staged: StagedProposal; body: string | null; before: string | null } | undefined {
   const staged = [...proposals]
     .filter((entry) => entry.proposal.kind === "chapter-draft" && entry.proposal.targets.some((t) => t.path === path))
+    .filter((entry) => id === undefined || entry.proposal.id === id)
     .sort((left, right) =>
       left.proposal.created.localeCompare(right.proposal.created) || left.proposal.id.localeCompare(right.proposal.id),
     )
@@ -256,20 +322,194 @@ export function paragraphAt(text: string, offset: number): number | null {
   return index < 0 ? null : index + 1;
 }
 
+const TIGHTEN = passageAction("tighten")!;
+const NONE_REFUSED: ReadonlySet<number> = new Set();
+const HOLD_TO_STYLE = passageAction("style")!;
+/** The menu's groups, ruled apart: what rewrites the passage, what only answers, and the rest. */
+const groupOf = (action: PassageAction) => (action.replyOnly ? "reply" : action.id === "other" ? "other" : "rewrite");
+
+/**
+ * The press beside a selection (turn 128), opened into what can be asked of it. Mouse-down is
+ * swallowed on the press and on every item, so a click does not collapse the selection it is
+ * about before it lands; the menu is keyed by the selection, so a new one starts it closed.
+ */
+function PassageMenu({
+  words,
+  top,
+  left,
+  end,
+  actions,
+  onAsk,
+  held,
+}: {
+  words: number;
+  top: number;
+  left: number;
+  /** Near the manuscript's right edge: the menu opens leftward. */
+  end: boolean;
+  /** Why nothing can be asked yet — the selected words are not saved — said on the press. */
+  held?: string;
+  actions: readonly PassageAction[];
+  onAsk: (action: PassageAction) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const items = useRef<(HTMLButtonElement | null)[]>([]);
+  const trigger = useRef<HTMLButtonElement | null>(null);
+  const move = (from: number, by: number) => items.current[(from + by + actions.length) % actions.length]?.focus();
+  /*
+   * Opened from the keyboard, the caret goes into the menu (codex on PR 1232), or its arrow keys
+   * could not be reached. Opened with the mouse it stays in the manuscript, whose selection the
+   * menu is about.
+   */
+  const [enter, setEnter] = useState(false);
+  useEffect(() => {
+    if (!open || !enter) return;
+    items.current[0]?.focus();
+    setEnter(false);
+  }, [open, enter]);
+  return (
+    <div
+      className="fy-ch__ask-wrap"
+      style={{ top, left }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && open) {
+          e.stopPropagation();
+          setOpen(false);
+          // Back to the press, so the keyboard keeps its place (codex on PR 1232).
+          trigger.current?.focus();
+        }
+      }}
+    >
+      <button
+        ref={trigger}
+        type="button"
+        className="fy-ch__ask"
+        aria-haspopup="menu"
+        aria-expanded={open && held === undefined}
+        disabled={held !== undefined}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={(e) => {
+          // A click with no pointer behind it (detail 0) is Enter or Space.
+          if (!open && e.detail === 0) setEnter(true);
+          setOpen((was) => !was);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault();
+            setEnter(true);
+            setOpen(true);
+          }
+        }}
+      >
+        Ask Arke · {held ?? `${words.toLocaleString()} words`}
+      </button>
+      {open && held === undefined && (
+        <div className={cx("fy-ch__ask-menu", end && "fy-ch__ask-menu--end")} role="menu" aria-label="Ask about this passage">
+          {actions.map((action, i) => (
+            <button
+              key={action.id}
+              ref={(el) => {
+                items.current[i] = el;
+              }}
+              type="button"
+              role="menuitem"
+              className={cx("fy-ch__ask-item", i > 0 && groupOf(actions[i - 1]!) !== groupOf(action) && "fy-ch__ask-item--rule")}
+              onMouseDown={(e) => e.preventDefault()}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  move(i, 1);
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  move(i, -1);
+                }
+              }}
+              onClick={() => {
+                setOpen(false);
+                onAsk(action);
+              }}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The widest the menu of asks draws, its border and padding included (fidelity.css). */
+const ASK_MENU_WIDTH = 200;
+
 /**
  * Where the press beside a selection goes: at the end of the selected words, in the manuscript's
  * own coordinates. Off screen (no DOM selection to measure, as under test) it sits at the top.
  */
-function askAt(host: HTMLElement | null): { top: number; left: number } {
-  const selection = typeof window.getSelection === "function" ? window.getSelection() : null;
-  if (!host || !selection || selection.rangeCount === 0) return { top: 0, left: 0 };
-  const rect = selection.getRangeAt(0).getBoundingClientRect();
+type AskAt = { top: number; left: number; end: boolean };
+const ASK_UNPLACED: AskAt = { top: 0, left: 0, end: false };
+
+/** The press beside words ending at (`right`, `bottom`) on screen, in the host's coordinates. */
+function askBeside(host: HTMLElement, right: number, bottom: number): AskAt {
   const frame = host.getBoundingClientRect();
-  if (rect.width === 0 && rect.height === 0) return { top: 0, left: 0 };
+  const at = right - frame.left + 8;
   return {
-    top: Math.max(0, rect.bottom - frame.top - 22),
-    left: Math.max(0, Math.min(rect.right - frame.left + 8, frame.width - 150)),
+    top: Math.max(0, bottom - frame.top - 22),
+    left: Math.max(0, Math.min(at, frame.width - 150)),
+    // The menu is wider than the press (codex on PR 1232): near the right edge it opens leftward
+    // from the press's end rather than over the dock.
+    end: at > frame.width - ASK_MENU_WIDTH,
   };
+}
+
+function askAt(host: HTMLElement | null): AskAt {
+  const selection = typeof window.getSelection === "function" ? window.getSelection() : null;
+  if (!host || !selection || selection.rangeCount === 0) return ASK_UNPLACED;
+  const rect = selection.getRangeAt(0).getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) return ASK_UNPLACED;
+  return askBeside(host, rect.right, rect.bottom);
+}
+
+/** What lays text out in a textarea, copied to the mirror that measures where a selection ends. */
+const MIRRORED = [
+  "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+  "fontFamily", "fontSize", "fontStyle", "fontVariant", "fontWeight", "letterSpacing", "lineHeight",
+  "textIndent", "textTransform", "tabSize", "wordSpacing",
+] as const;
+
+/**
+ * The same for the Markdown source (codex on PR 1232): a textarea's selection is not the
+ * document's, so `getSelection` measures nothing there, or something stale elsewhere. Where its
+ * selection ends is found by laying the text before it out again in a hidden copy of the box.
+ */
+function askAtSource(host: HTMLElement | null, area: HTMLTextAreaElement): AskAt {
+  if (!host || typeof window.getComputedStyle !== "function") return ASK_UNPLACED;
+  const box = area.getBoundingClientRect();
+  if (box.width === 0 && box.height === 0) return ASK_UNPLACED;
+  const style = window.getComputedStyle(area);
+  const mirror = document.createElement("div");
+  for (const key of MIRRORED) mirror.style[key] = style[key];
+  // As wide as the text the box actually wraps (codex on PR 1232): its client width, padding in
+  // and border and scrollbar out. The CSS width would include a scrollbar the mirror lacks, and
+  // lines would break elsewhere. The border is added back when the offsets are placed.
+  Object.assign(mirror.style, {
+    position: "absolute", top: "0", left: "-9999px", visibility: "hidden", whiteSpace: "pre-wrap", overflowWrap: "break-word",
+    height: "auto", boxSizing: "border-box", border: "0",
+    ...(area.clientWidth > 0 ? { width: `${area.clientWidth}px` } : {}),
+  });
+  mirror.textContent = area.value.slice(0, area.selectionEnd);
+  const mark = document.createElement("span");
+  mark.textContent = "\u200b";
+  mirror.appendChild(mark);
+  document.body.appendChild(mirror);
+  // A layout-less DOM (the tests') measures nothing; the offsets then count as the box's corner.
+  const [offsetLeft, offsetTop, offsetHeight] = [mark.offsetLeft || 0, mark.offsetTop || 0, mark.offsetHeight || 0];
+  mirror.remove();
+  const border = (side: string) => parseFloat(side) || 0;
+  return askBeside(
+    host,
+    box.left + border(style.borderLeftWidth) + offsetLeft - area.scrollLeft,
+    box.top + border(style.borderTopWidth) + offsetTop + offsetHeight - area.scrollTop,
+  );
 }
 
 export function ChapterWorkspace({
@@ -284,7 +524,7 @@ export function ChapterWorkspace({
   const worldId = world.meta.worldId;
   const prodId = production.meta.id;
   const path = chapterPath(production, chapter);
-  const connection = useStore().connection;
+  const { connection, rejoins } = useStore();
 
   /*
    * What was read, and the request that read it.
@@ -963,13 +1203,14 @@ export function ChapterWorkspace({
    * end, for the press beside them. The words rather than positions, because what is said about
    * them goes into the production's thread, which never sees the editor.
    */
-  const [selection, setSelection] = useState<{ text: string; paragraph: number | null; top: number; left: number } | null>(null);
+  const [selection, setSelection] = useState<{ text: string; paragraph: number | null; top: number; left: number; end: boolean } | null>(null);
   const manuscriptRef = useRef<HTMLDivElement | null>(null);
   // The paragraph rides with the words (codex on turn 128): the coordinator looks for the passage
   // there and only there, so an occurrence elsewhere can never be the one changed.
-  const onSelect = useCallback((text: string | null, paragraph: number | null = null) => {
+  const onSelect = useCallback((text: string | null, paragraph: number | null = null, source?: HTMLTextAreaElement) => {
     const subject = passageSubject(text);
-    setSelection(subject === null ? null : { text: subject, paragraph, ...askAt(manuscriptRef.current) });
+    const at = source === undefined ? askAt(manuscriptRef.current) : askAtSource(manuscriptRef.current, source);
+    setSelection(subject === null ? null : { text: subject, paragraph, ...at });
     // A subject flushes the pending autosave, as Read the chapter does (codex on turn 128): the
     // words the thread hears must be the words the coordinator will find, and an ask sent inside
     // the autosave window would otherwise quote prose the file does not hold yet.
@@ -979,12 +1220,61 @@ export function ChapterWorkspace({
   // string in a browser, and only the first is there under test.
   const onTextareaSelect = (e: { currentTarget: HTMLTextAreaElement }) => {
     const { selectionStart, selectionEnd } = e.currentTarget;
-    onSelect(selectionStart === selectionEnd ? null : text.slice(selectionStart, selectionEnd), paragraphAt(text, selectionStart));
+    const selected = text.slice(selectionStart, selectionEnd);
+    // Anchored at the first word the ask quotes (codex on PR 1232): a drag begun on the blank line
+    // before a paragraph is trimmed to that paragraph's words, and must be placed in it too.
+    const lead = selected.length - selected.trimStart().length;
+    onSelect(selectionStart === selectionEnd ? null : selected, paragraphAt(text, selectionStart + lead), e.currentTarget);
   };
   useEffect(() => {
     if (locked) setSelection(null);
   }, [locked]);
   const passage = selection?.text ?? null;
+  /*
+   * What the dock is about and what it says first: the passage, when one is selected. The dock's
+   * own quick asks read these at the send; the menu's are fixed at the press (codex on PR 1232),
+   * because an ask that has to wait is still about the passage it was pressed on.
+   */
+  const dockSubject: WorldChatSubject = passage === null
+    ? { kind: "chapter", chapterId: chapter.id }
+    : { kind: "passage", chapterId: chapter.id, ...(selection?.paragraph ? { paragraph: selection.paragraph } : {}), text: passage };
+  const dockPrefix = passage !== null
+    ? `About this passage in ${chapterLabel}${selection?.paragraph ? `, paragraph ${selection.paragraph}` : ""}: «${passage}»`
+    : `About ${chapterLabel}:`;
+  /*
+   * An ask from the menu beside the selection. The page holds it, not the dock, until the dock
+   * says it is done with it (codex on PR 1232): putting the dock away while it waits, or while
+   * the thread has yet to show it, loses nothing.
+   */
+  const askKey = parkedKey(worldId, prodId, path);
+  const [ask, setAskState] = useState<DockAsk | null>(() => heldAsks.get(askKey) ?? null);
+  const setAsk = useCallback((next: DockAsk | null) => {
+    if (next === null) heldAsks.delete(askKey);
+    else heldAsks.set(askKey, next);
+    setAskState(next);
+  }, [askKey]);
+  // The screen's own copy takes its answer too, for a dock put away while it came.
+  useEffect(() => subscribeWorldChatSendResults((result) => {
+    setAskState((held) => (held?.sent?.requestId === result.requestId ? { ...held, answered: result.admitted } : held));
+  }), []);
+  // Any ask held is about the passage it was pressed on, waiting, sent or not taken (codex on
+  // PR 1232): the dock says so, whatever is selected by then.
+  const shownSubject = ask?.subject ?? dockSubject;
+  // One ask at a time (codex on PR 1232): a second press would replace one still waiting or
+  // being answered, and a refusal or a lost answer would then have nowhere to be shown. A line
+  // only started, or one shown as not sent, is the author's to replace.
+  const asking = ask !== null && ask.draft !== true && ask.declined !== true;
+  const askPassage = (action: PassageAction) => {
+    setDock(true);
+    setAsk({
+      press: crypto.randomUUID(),
+      line: action.line,
+      text: `${dockPrefix} ${action.line}`,
+      subject: dockSubject,
+      ...(action.replyOnly ? { replyOnly: true } : {}),
+      ...(action.draft ? { draft: true } : {}),
+    });
+  };
 
   /*
    * A passage waits (turn 128): the staged draft changes one span and leaves the rest of the
@@ -998,6 +1288,204 @@ export function ChapterWorkspace({
       ? null
       : passageOf(stagedDraft.before, stagedDraft.body);
   const waiting = stagedDraft === undefined ? null : passageChange === null ? "draft" : "passage";
+
+  /*
+   * Keeping part of a passage: the revision taken apart into edits, each kept until the author
+   * refuses it. Only a revision of two edits or more offers the choice — one edit refused is a
+   * discard, which the card already has. What is refused belongs to the draft revision it was
+   * chosen against, so a revision that moves (the part kept, landed) starts every edit kept.
+   */
+  const segments = useMemo(
+    (): PassageSegment[] => (passageChange === null ? [] : passageDiff(passageChange.before, passageChange.after)),
+    [passageChange?.before, passageChange?.after],
+  );
+  const editCount = segments.filter((segment) => segment.kind === "edit").length;
+  const passageParagraphs = stagedDraft === undefined ? [] : paragraphSpans(stagedDraft.body ?? live);
+  const anchorParagraph = passageChange === null
+    ? -1
+    : passageParagraphs.findIndex((paragraph) => paragraph.end >= passageChange.start && paragraph.start <= passageChange.start + Math.max(passageChange.after.length, 1));
+  const choosing = stagedDraft !== undefined && passageChange !== null && editCount > 1;
+  // A passage that removes whole paragraphs has no replacement to stand in their place: what it
+  // removes is drawn struck instead, or the page would show nothing to decide (codex on PR 1232).
+  // Read from its one edit rather than the span, which is widened to whole words and so carries
+  // the next paragraph's first word when the cut is in the chapter's middle. Told by a line
+  // break among what goes: words cut inside a paragraph still mark the paragraph, as always.
+  const lone = editCount === 1 ? segments.find((segment) => segment.kind === "edit") : undefined;
+  const removed = lone?.kind === "edit" && lone.after.trim() === "" && lone.before.includes("\n") ? lone.before.trim() : null;
+  const cut = removed !== null;
+  const struck = removed === null ? null : <p className="fy-ch__passage"><del>{removed}</del></p>;
+  const edits = () =>
+    segments.map((segment, n) =>
+      segment.kind === "same" ? (
+        <span key={n}>{segment.text}</span>
+      ) : (
+        <button
+          key={n}
+          type="button"
+          // Held while a keep is in flight (codex on PR 1232): what lands is
+          // what was pressed, never a choice changed after it.
+          disabled={keeping !== null || accepting !== null}
+          className={cx("fy-ch__edit", refused.has(segment.index) && "fy-ch__edit--refused")}
+          aria-pressed={!refused.has(segment.index)}
+          title={refused.has(segment.index) ? "Refused · press to keep" : "Kept · press to refuse"}
+          onClick={() => toggleEdit(segment.index)}
+        >
+          {segment.before !== "" && <del>{segment.before}</del>}
+          {segment.after !== "" && <ins>{segment.after}</ins>}
+        </button>
+      ),
+    );
+  // The passage is in the key as well as the revision (codex on PR 1232): an authoring run can
+  // rewrite the staged file without moving the revision, and an index refused against one set of
+  // edits must never refuse a different edit of the next.
+  const choiceKey = stagedDraft === undefined || passageChange === null
+    ? null
+    : `${stagedDraft.staged.proposal.id}:${stagedDraft.staged.proposal.draftRevision}:${passageChange.before}\u0000${passageChange.after}`;
+  const [refusedFor, setRefusedFor] = useState<{ key: string | null; refused: ReadonlySet<number> }>({ key: null, refused: new Set() });
+  const refused = choosing && refusedFor.key === choiceKey ? refusedFor.refused : NONE_REFUSED;
+  const keptCount = editCount - refused.size;
+  const toggleEdit = (index: number) => {
+    const next = new Set(refused);
+    if (!next.delete(index)) next.add(index);
+    setRefusedFor({ key: choiceKey, refused: next });
+  };
+  /*
+   * Accepting part is two presses the author makes as one: the part is kept through the gate,
+   * and once it lands, the revision it landed as is accepted. A refusal of the first (a notice
+   * for the proposal, new since the press) ends it there, said on the card, and accepts nothing.
+   * A newer revision alone is not proof the keep landed (codex on PR 1232): another window can
+   * move the draft on, and this keep is then refused as stale in the same breath. So the refusal
+   * is looked at first, and a revision is accepted only when its passage is the one this press
+   * composed — anything else is somebody else's draft, and the author decides it afresh.
+   */
+  const notices = useGateNotices();
+  const [keeping, setKeepingState] = useState<HeldKeep | null>(() => heldKeeps.get(parkedKey(worldId, prodId, path)) ?? null);
+  const setKeeping = (next: HeldKeep | null) => {
+    const key = parkedKey(worldId, prodId, path);
+    // A settled request's answer is no longer wanted; the store keeps it until told so.
+    const was = heldKeeps.get(key)?.request.requestId;
+    if (was !== undefined && was !== next?.request.requestId) forgetGateRequest(was);
+    if (next === null) heldKeeps.delete(key);
+    else heldKeeps.set(key, next);
+    setKeepingState(next);
+  };
+  // A keep sent into a connection that then dropped has no answer coming (codex on PR 1232): the
+  // rejoin brings the snapshot as it was, so the wait ends with the connection, not with a reply.
+  // The keep's own proposal, whether or not a newer draft has since taken the card (codex on PR
+  // 1232): the keep can still land on it, and its accept is still owed.
+  const kept = keeping === null ? undefined : stagedChapterDraft(world.proposals, path, keeping.id);
+  const keptRevision = kept?.staged.proposal.draftRevision;
+  const keptBody = kept?.body ?? null;
+  useEffect(() => {
+    if (keeping === null) return;
+    if (kept === undefined) setKeeping(null);
+    else if (keptRevision !== undefined && keptRevision > keeping.revision) {
+      // Only the keep's own revision is accepted, and fenced to it (codex on PR 1232): the keep
+      // moves the draft exactly one revision, so a later one carries some other edit too —
+      // perhaps to a field the prose does not show — and is left for the author. One moved on
+      // again before the accept reaches the gate is refused there as stale. The accept holds the
+      // controls in its turn, so nothing races it between the two (codex on PR 1232).
+      const requestId = crypto.randomUUID();
+      if (keptRevision === keeping.revision + 1 && keptBody === keeping.expected
+        && acceptProposal(worldId, keeping.id, keeping.confirm, keptRevision, requestId)) {
+        setAccepting({ id: keeping.id, requestId, revision: keptRevision, ...(keeping.confirm !== undefined ? { confirm: keeping.confirm } : {}) });
+      }
+      setKeeping(null);
+    } else if (gateAnswered(keeping.request.requestId)) {
+      setKeeping(null);
+    } else if (connection === "open" && rejoins !== keeping.rejoins) {
+      // A rejoin does not say whether the keep landed (codex on PR 1232): it may have reached the
+      // gate before the drop and still be writing. Sent again under its own id, the gate makes
+      // the same edit once — landed already, it answers with it; lost, it lands now.
+      const { requestId, path: keptPath, span, kept } = keeping.request;
+      if (updateProposalPassage(worldId, keeping.id, keptPath, span, kept, keeping.revision, requestId)) {
+        setKeeping({ ...keeping, rejoins });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keeping, connection, rejoins, kept === undefined, keptRevision, keptBody, notices, worldId]);
+  /*
+   * A whole accept in flight holds the choices too (codex on PR 1232): toggled after the press,
+   * they would show a count the gate is not accepting. It is fenced to the revision on screen,
+   * and held until the proposal is gone or the gate refuses this request by its id.
+   */
+  // Held outside the screen, like the keep (codex on PR 1232): back on the chapter while it runs,
+  // the other decisions still wait. Settled by the proposal going or by its own refusal; a rejoin
+  // that may have lost the answer sends the same accept again, fenced to the same revision, which
+  // cannot land twice — accepted already, the proposal is gone.
+  const [accepting, setAcceptingState] = useState<HeldAccept | null>(() => heldAccepts.get(parkedKey(worldId, prodId, path)) ?? null);
+  const setAccepting = (next: Omit<HeldAccept, "rejoins"> | null) => {
+    const key = parkedKey(worldId, prodId, path);
+    const was = heldAccepts.get(key)?.requestId;
+    if (was !== undefined && was !== next?.requestId) forgetGateRequest(was);
+    const held = next === null ? null : { ...next, rejoins };
+    if (held === null) heldAccepts.delete(key);
+    else heldAccepts.set(key, held);
+    setAcceptingState(held);
+  };
+  // Its own proposal too: gone is accepted (or discarded); a newer draft on the card is not.
+  const acceptingGone = accepting !== null && stagedChapterDraft(world.proposals, path, accepting.id) === undefined;
+  useEffect(() => {
+    if (accepting === null) return;
+    if (acceptingGone || gateAnswered(accepting.requestId)) setAccepting(null);
+    else if (connection === "open" && rejoins !== accepting.rejoins
+      && acceptProposal(worldId, accepting.id, accepting.confirm, accepting.revision, accepting.requestId)) {
+      setAccepting(accepting);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accepting, connection, rejoins, acceptingGone, notices]);
+  // Every passage accept is fenced to the revision on screen (codex on PR 1232), one edit or many.
+  const pending = keeping !== null || accepting !== null;
+  // Too long for the frame a keep travels in (codex on PR 1232): a span widened to whole words
+  // round an unbroken run can outgrow it, and the transport would drop the keep unanswered.
+  const keepFits = passageChange !== null && passageChange.before.length <= PASSAGE_SPAN_MAX
+    && passageChange.after.length <= PASSAGE_SPAN_MAX && editCount <= PASSAGE_KEPT_MAX;
+  const accept = stagedDraft === undefined
+    ? undefined
+    : passageChange === null
+      // A newer draft that took the card while a keep or accept of the passage before it is
+      // still held (codex on PR 1232): the same chapter, so its decisions wait for that one.
+      ? pending ? { pending, blocked: keeping !== null ? "Keeping…" : "Accepting…" } : undefined
+    : !choosing || keptCount === editCount
+      ? {
+          label: "Accept",
+          pending,
+          ...(accepting !== null ? { blocked: "Accepting…" } : {}),
+          onAccept: (confirmSignature?: string) => {
+            const proposal = stagedDraft.staged.proposal;
+            const requestId = crypto.randomUUID();
+            if (acceptProposal(worldId, proposal.id, confirmSignature, proposal.draftRevision, requestId)) {
+              setAccepting({
+                id: proposal.id, requestId, revision: proposal.draftRevision,
+                ...(confirmSignature !== undefined ? { confirm: confirmSignature } : {}),
+              });
+            }
+          },
+        }
+      : {
+          label: `Accept ${keptCount} of ${editCount}`,
+          pending,
+          ...(keptCount === 0
+            ? { blocked: "Nothing kept" }
+            : !keepFits ? { blocked: "Too long to keep in part" } : keeping !== null ? { blocked: "Keeping…" } : {}),
+          onAccept: (confirmSignature?: string) => {
+            if (!keepFits) return;
+            const proposal = stagedDraft.staged.proposal;
+            const kept = segments.flatMap((segment) => (segment.kind === "edit" && !refused.has(segment.index) ? [segment.index] : []));
+            // Nothing sent is nothing to wait for (codex on PR 1232): the press stays the author's.
+            const requestId = crypto.randomUUID();
+            if (!updateProposalPassage(worldId, proposal.id, path, passageChange, kept, proposal.draftRevision, requestId)) return;
+            const body = stagedDraft.body ?? live;
+            const expected = body.slice(0, passageChange.start) + composePassage(segments, new Set(kept)) + body.slice(passageChange.start + passageChange.after.length);
+            setKeeping({
+              id: proposal.id, revision: proposal.draftRevision, expected, rejoins,
+              // The consequences confirmed with this press (codex on PR 1232): the accept after
+              // the keep carries them, rather than asking the author to confirm them again.
+              ...(confirmSignature !== undefined ? { confirm: confirmSignature } : {}),
+              request: { requestId, path, span: { before: passageChange.before, after: passageChange.after }, kept },
+            });
+          },
+        };
   const foot = locked && stagedDraft !== undefined
     ? `Locked while a ${waiting} waits · v${record?.version ?? chapter.version} · ${words.toLocaleString()} words`
     : saveRefusal !== null
@@ -1159,24 +1647,60 @@ export function ChapterWorkspace({
                 <div className="fy-ch__band">
                   <span className="fy-ch__band-who">Arke&rsquo;s passage</span>
                   <span>· {countWords(passageChange.before).toLocaleString()} → {countWords(passageChange.after).toLocaleString()} words</span>
+                  {choosing && <span>· {keptCount} of {editCount} changes kept</span>}
                   <span>· against v{record.version}</span>
                   <span className="fy-ch__band-push" />
                   <span>decide in the thread</span>
                 </div>
                 <div className="fy-ch__draft-passage" aria-label="Arke's passage">
-                  {paragraphSpans(stagedDraft.body ?? live).map((paragraph, i) => {
+                  {passageParagraphs.map((paragraph, i) => {
                     // Inclusive at both ends, and at least one character wide (codex on PR 899):
                     // a deletion at a paragraph's first character, or of a whole paragraph, is a
                     // zero-width span on a boundary, and the paragraph it touches is still marked.
                     const from = passageChange.start;
                     const to = from + Math.max(passageChange.after.length, 1);
                     const changed = paragraph.end >= from && paragraph.start <= to;
+                    // With edits to choose among, the paragraph the span starts in carries the
+                    // whole span as edits, and any later paragraph the span reached is not drawn
+                    // twice: the edits are the passage, head and tail around them as they stand.
+                    if (!choosing || !changed) {
+                      const line = (
+                        <p key={i} className={changed ? "fy-ch__passage" : undefined}>
+                          {paragraph.text}
+                        </p>
+                      );
+                      if (!cut || anchorParagraph !== i) return line;
+                      // A cut replaces nothing, so what goes is drawn beside the paragraph it
+                      // touched, on the side it stood (codex on PR 1232).
+                      return passageChange.start <= paragraph.start
+                        ? <Fragment key={i}>{struck}{line}</Fragment>
+                        : <Fragment key={i}>{line}{struck}</Fragment>;
+                    }
+                    const body = stagedDraft.body ?? live;
+                    // The first paragraph the span touches draws it, even when the span begins in
+                    // the blank line before it (a paragraph removed whole).
+                    if (anchorParagraph !== i) return null;
+                    const endOfSpan = from + passageChange.after.length;
+                    // The passage runs to the end of the last paragraph the span touches — the
+                    // same paragraphs marked changed above, and drawn nowhere else — found by the
+                    // spans, not by a separator, so a blank line holding spaces is still a
+                    // boundary (codex on PR 1232).
+                    const touched = passageParagraphs.filter((p) => p.end >= from && p.start <= to);
+                    const tailEnd = Math.max(endOfSpan, touched[touched.length - 1]?.end ?? endOfSpan);
                     return (
-                      <p key={i} className={changed ? "fy-ch__passage" : undefined}>
-                        {paragraph.text}
+                      <p key={i} className="fy-ch__passage fy-ch__passage--choose">
+                        {body.slice(Math.min(paragraph.start, from), from)}
+                        {edits()}
+                        {body.slice(endOfSpan, tailEnd)}
                       </p>
                     );
                   })}
+                  {/* A passage cut from the chapter's end may touch no paragraph that is left
+                      (codex on PR 1232): what goes is drawn where it stood, so there is something
+                      to decide on the page as well as on the card. */}
+                  {anchorParagraph === -1 && (choosing
+                    ? <p className="fy-ch__passage fy-ch__passage--choose">{edits()}</p>
+                    : struck ?? <p className="fy-ch__passage"><del>{passageChange.before.trim()}</del></p>)}
                 </div>
               </div>
             ) : stagedDraft !== undefined ? (
@@ -1246,15 +1770,24 @@ export function ChapterWorkspace({
             {/* The press beside a selection (turn 128). Mouse-down is swallowed so the press does
                 not collapse the selection it is about before the click lands. */}
             {selection !== null && !locked && (
-              <button
-                type="button"
-                className="fy-ch__ask"
-                style={{ top: selection.top, left: selection.left }}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => setDock(true)}
-              >
-                Ask Arke · {countWords(selection.text).toLocaleString()} words
-              </button>
+              <PassageMenu
+                key={selection.text}
+                words={countWords(selection.text)}
+                top={selection.top}
+                left={selection.left}
+                end={selection.end}
+                actions={passageActions(style !== null)}
+                onAsk={askPassage}
+                // Asked only about words on disk (codex on PR 1232): a revision comes back as a
+                // span of the saved chapter, so text still being saved — or refused — has none.
+                {...(draftConflict || saveRefusal !== null
+                  ? { held: "not saved" }
+                  : saving || draft !== null
+                    ? { held: "saving…" }
+                    : asking
+                      ? { held: "asking…" }
+                      : {})}
+              />
             )}
             <div className="fy-ch__foot">
               <span className="fy-mono">{foot}</span>
@@ -1575,14 +2108,14 @@ export function ChapterWorkspace({
           // The selection travels beside the words as well as inside them (codex on turn 128):
           // the coordinator holds a revision that comes back to this chapter, this paragraph
           // and these words, whatever the model retold.
-          {...(passage === null
-            ? { subject: { kind: "chapter" as const, chapterId: chapter.id } }
-            : { subject: { kind: "passage" as const, chapterId: chapter.id, ...(selection?.paragraph ? { paragraph: selection.paragraph } : {}), text: passage } })}
+          subject={dockSubject}
           dock={{
             title: `Arke · Chapter ${String(chapter.order).padStart(2, "0")}`,
             subject: `${chapter.title} · ${production.meta.title}`,
             conversationFirst: true,
             onPutAway: () => setDock(false),
+            ...(ask !== null ? { ask } : {}),
+            onAsk: setAsk,
             // The first prompt follows the plan (turn 127): a synopsis with no prose is drafted
             // from; a chapter with prose is continued. While a passage is selected the prompts
             // are a revision's (turn 128), and the passage is the subject.
@@ -1595,7 +2128,8 @@ export function ChapterWorkspace({
             prompts: view === "audiobook"
               ? [{ label: directionStands ? "Direct again" : "Direct this chapter", press: audiobook.directPress }, "Who reads this chapter?", "Which blocks are stale?"]
               : passage !== null
-              ? ["Tighten this", { label: "Hold this against the style", replyOnly: true }]
+              // Held against the style only when there is one (codex on PR 1232), as the menu does.
+              ? [TIGHTEN.line, { label: (style !== null ? HOLD_TO_STYLE : passageAction("critique")!).line, replyOnly: true }]
               : voicesRecord !== null && voicesStale
                 ? [{ label: "Cast again", press: castLinesPress }, "Who speaks in this chapter?"]
                 : voicesRecord !== null && speakers.length > 0 && !(continuityRecord !== null && continuityStale)
@@ -1607,10 +2141,10 @@ export function ChapterWorkspace({
                   : [firstPrompt(live, chapter.synopsis), style !== null ? { label: "Hold this against the style", replyOnly: true } : "What does this chapter draw on?"],
             // The thread is the production's own (no new entry context, turn 126): the chapter
             // the dock names has to be in the words themselves or the studio never hears it.
-            subjectPrefix: passage !== null
-              ? `About this passage in ${chapterLabel}${selection?.paragraph ? `, paragraph ${selection.paragraph}` : ""}: «${passage}»`
-              : `About ${chapterLabel}:`,
-            ...(passage !== null ? { subjectLine: `about this passage · ${countWords(passage).toLocaleString()} words` } : {}),
+            subjectPrefix: dockPrefix,
+            // A line a menu press started is about the passage it was pressed on, and the dock
+            // says that one, not whatever is selected now (codex on PR 1232).
+            ...(shownSubject.kind === "passage" ? { subjectLine: `about this passage · ${countWords(shownSubject.text).toLocaleString()} words` } : {}),
           }}
           openingNote="opening…"
           emptyLine={`Nothing written with Arke for ${chapterLabel} yet.`}
@@ -1625,6 +2159,7 @@ export function ChapterWorkspace({
                     worldId={worldId}
                     subject={chapterLabel}
                     staged={stagedDraft.staged}
+                    {...(accept !== undefined ? { accept } : {})}
                     items={[
                       passageChange !== null
                         ? {
