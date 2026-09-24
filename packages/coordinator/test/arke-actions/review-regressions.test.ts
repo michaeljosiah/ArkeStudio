@@ -512,8 +512,9 @@ it("an accept that throws is refused out loud, so a screen holding its controls 
   const THROWS_ID = newId("pr");
   const engine = (w.coordinator as unknown as { engine: { proposals: { accept: unknown } } }).engine;
   Object.assign(engine.proposals, { accept: async () => { throw new Error("the manifest could not be read"); } });
-  await w.internal.handleClientMessage({ kind: "proposal-accept", worldId: WORLD_ID, proposalId: THROWS_ID, expectedDraftRevision: 1 });
+  await w.internal.handleClientMessage({ kind: "proposal-accept", worldId: WORLD_ID, proposalId: THROWS_ID, expectedDraftRevision: 1, requestId: "req-accept-throws" });
   const blocked = w.events.find((event) => event.type === "proposal.blocked" && event.proposalId === THROWS_ID);
   assert.equal((blocked as { reason?: string } | undefined)?.reason, "invalid");
+  assert.equal((blocked as { requestId?: string } | undefined)?.requestId, "req-accept-throws", "the refusal names the request it answers");
   assert.doesNotMatch(JSON.stringify(blocked), /manifest could not be read/, "what failed is not relayed");
 });

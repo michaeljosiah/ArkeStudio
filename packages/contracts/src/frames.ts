@@ -476,6 +476,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        * (the part of a passage kept, then accepted) must land on the revision it observed.
        */
       expectedDraftRevision: z.number().int().min(1).optional(),
+      /** Echoed on a refusal, so the screen that pressed knows the answer is its own (PR 1232). */
+      requestId: z.string().min(1).optional(),
     })
     .strict(),
   z

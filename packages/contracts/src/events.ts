@@ -537,6 +537,11 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
         "draft-changed",
       ]),
       detail: z.string().optional(),
+      /**
+       * The request refused, when the command carried one (PR 1232): a notice for the same
+       * proposal can come from another window's command, and only its own answers a screen.
+       */
+      requestId: z.string().min(1).optional(),
       /** On needs-reconfirm: the authoritative set and its signature to echo back (R-10). */
       authoritativeSignature: z.string().optional(),
     })

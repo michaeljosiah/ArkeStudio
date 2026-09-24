@@ -77,6 +77,8 @@ export interface GateNotice {
     | "draft-changed";
   detail?: string;
   authoritativeSignature?: string;
+  /** The request refused, when it carried one: only a screen's own answers it (PR 1232). */
+  requestId?: string;
 }
 
 /** Live authoring activity per proposal (SPEC-005 R-13, R-15). */
@@ -1415,6 +1417,7 @@ function handleFrame(json: string): void {
           ...(event.authoritativeSignature !== undefined
             ? { authoritativeSignature: event.authoritativeSignature }
             : {}),
+          ...(event.requestId !== undefined ? { requestId: event.requestId } : {}),
         },
       };
     } else if (event.type === "proposal.resolved") {
@@ -2448,11 +2451,19 @@ export function setArtDirection(worldId: string, description: string, masterLook
 }
 
 /** True when the accept went out; false when the transport is down. */
-export function acceptProposal(worldId: string, proposalId: string, confirmRipples?: string, expectedDraftRevision?: number): boolean {
+export function acceptProposal(
+  worldId: string,
+  proposalId: string,
+  confirmRipples?: string,
+  expectedDraftRevision?: number,
+  /** Echoed on a refusal, so the screen that pressed knows the answer is its own (PR 1232). */
+  requestId?: string,
+): boolean {
   return send({
     kind: "proposal-accept",
     worldId,
     proposalId,
+    ...(requestId !== undefined ? { requestId } : {}),
     ...(confirmRipples !== undefined ? { confirmRipples } : {}),
     ...(expectedDraftRevision !== undefined ? { expectedDraftRevision } : {}),
   });

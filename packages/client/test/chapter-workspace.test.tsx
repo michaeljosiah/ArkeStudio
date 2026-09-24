@@ -1482,7 +1482,7 @@ describe("the craft loop (turn 128)", () => {
       assert.equal(acceptButton(m).disabled, true, "still keeping");
       // Refused: the press is the author's again, and nothing is accepted.
       await act(async () => {
-        __applyEventForTest({ at: "2026-09-06T12:00:03Z", type: "proposal.blocked", worldId: FIXTURE_WORLD_ID, proposalId: TWO.proposal.id, reason: "draft-changed" });
+        __applyEventForTest({ at: "2026-09-06T12:00:03Z", type: "proposal.blocked", worldId: FIXTURE_WORLD_ID, proposalId: TWO.proposal.id, reason: "draft-changed", requestId: keeps()[0]!.requestId });
       });
       assert.equal(acceptButton(m).disabled, false);
       assert.ok(edits(m).every((edit) => !(edit as HTMLButtonElement).disabled));
@@ -1511,8 +1511,23 @@ describe("the craft loop (turn 128)", () => {
       assert.equal((accepted[0] as { expectedDraftRevision?: number }).expectedDraftRevision, 1, "fenced to the revision on screen");
       assert.ok(edits(m).every((edit) => (edit as HTMLButtonElement).disabled), "no count can change under an accept already sent");
       await act(async () => __setStateForTest(inkbound([TWO]), { connection: "closed" }));
-      await act(async () => __setStateForTest(inkbound([TWO]), { connection: "open" }));
-      assert.ok(edits(m).every((edit) => !(edit as HTMLButtonElement).disabled), "the connection lost it, so the choice is the author's again");
+      await act(async () => __setStateForTest(inkbound([TWO]), { connection: "open", rejoins: 1 }));
+      // A rejoin does not say whether it landed: the same accept goes again, fenced, under its
+      // own id — accepted already, the proposal is gone and it cannot land twice.
+      const again = m.sent.filter((message) => message.kind === "proposal-accept") as Array<{ requestId?: string; expectedDraftRevision?: number }>;
+      assert.equal(again.length, 2);
+      assert.equal(again[1]!.requestId, again[0]!.requestId);
+      assert.equal(again[1]!.expectedDraftRevision, 1);
+      assert.ok(edits(m).every((edit) => (edit as HTMLButtonElement).disabled), "still held");
+      // Another window's refusal for the same proposal is not this accept's answer.
+      await act(async () => {
+        __applyEventForTest({ at: "2026-09-06T12:00:03Z", type: "proposal.blocked", worldId: FIXTURE_WORLD_ID, proposalId: TWO.proposal.id, reason: "draft-changed", requestId: "someone-else" });
+      });
+      assert.ok(edits(m).every((edit) => (edit as HTMLButtonElement).disabled), "only its own refusal answers it (codex on PR 1232)");
+      await act(async () => {
+        __applyEventForTest({ at: "2026-09-06T12:00:04Z", type: "proposal.blocked", worldId: FIXTURE_WORLD_ID, proposalId: TWO.proposal.id, reason: "draft-changed", requestId: again[0]!.requestId! });
+      });
+      assert.ok(edits(m).every((edit) => !(edit as HTMLButtonElement).disabled), "refused, the choice is the author's again");
     });
 
     it("a newer revision that is not the passage kept is somebody else's, and is not accepted (codex on PR 1232)", async () => {
@@ -1596,12 +1611,14 @@ describe("the craft loop (turn 128)", () => {
       await answerOpen(m);
       await act(async () => edits(m)[0]!.click());
       await act(async () => acceptButton(m).click());
+      const keep = m.sent.find((message) => message.kind === "proposal-update-passage") as { requestId: string };
       await act(async () => {
         __applyEventForTest({
           at: "2026-09-06T12:00:03Z",
           type: "proposal.blocked",
           worldId: FIXTURE_WORLD_ID,
           proposalId: TWO.proposal.id,
+          requestId: keep.requestId,
           reason: "invalid",
           detail: "This passage is not the one on screen. Reload it and choose again.",
         });

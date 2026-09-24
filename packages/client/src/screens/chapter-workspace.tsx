@@ -171,8 +171,17 @@ type HeldKeep = {
   request: { requestId: string; path: string; span: { before: string; after: string }; kept: number[] };
 };
 const heldKeeps = new Map<string, HeldKeep>();
-/** An accept on its way, by chapter: its decision holds the others until it settles. */
-type HeldAccept = { id: string; notice: GateNotice | undefined; rejoins: number };
+/**
+ * An accept on its way, by chapter: its decision holds the others until it settles. It keeps
+ * what it sent, to send again under its own id after a rejoin that may have lost it.
+ */
+type HeldAccept = { id: string; notice: GateNotice | undefined; rejoins: number; requestId: string; revision: number; confirm?: string };
+/**
+ * A notice that answers this request, not merely one for the same proposal (codex on PR 1232):
+ * another window's command on it is refused under its own id.
+ */
+const answers = (notice: GateNotice | undefined, was: GateNotice | undefined, requestId: string): boolean =>
+  notice !== was && notice?.requestId === requestId;
 const heldAccepts = new Map<string, HeldAccept>();
 // Only for the world's session they were pressed in (codex on PR 1232): closed and opened again,
 // an ask still waiting would otherwise go by itself, quoting prose that may have moved since.
@@ -1287,12 +1296,13 @@ export function ChapterWorkspace({
       // perhaps to a field the prose does not show — and is left for the author. One moved on
       // again before the accept reaches the gate is refused there as stale. The accept holds the
       // controls in its turn, so nothing races it between the two (codex on PR 1232).
+      const requestId = crypto.randomUUID();
       if (stagedRevision === keeping.revision + 1 && stagedBody === keeping.expected
-        && acceptProposal(worldId, keeping.id, undefined, stagedRevision)) {
-        setAccepting({ id: keeping.id, notice: notices[keeping.id] });
+        && acceptProposal(worldId, keeping.id, undefined, stagedRevision, requestId)) {
+        setAccepting({ id: keeping.id, notice: notices[keeping.id], requestId, revision: stagedRevision });
       }
       setKeeping(null);
-    } else if (stagedId !== keeping.id || notices[keeping.id] !== keeping.notice) {
+    } else if (stagedId !== keeping.id || answers(notices[keeping.id], keeping.notice, keeping.request.requestId)) {
       setKeeping(null);
     } else if (connection === "open" && rejoins !== keeping.rejoins) {
       // A rejoin does not say whether the keep landed (codex on PR 1232): it may have reached the
@@ -1308,10 +1318,12 @@ export function ChapterWorkspace({
   /*
    * A whole accept in flight holds the choices too (codex on PR 1232): toggled after the press,
    * they would show a count the gate is not accepting. It is fenced to the revision on screen,
-   * and held until the proposal is gone, the gate answers with a notice, or the connection drops.
+   * and held until the proposal is gone or the gate refuses this request by its id.
    */
   // Held outside the screen, like the keep (codex on PR 1232): back on the chapter while it runs,
-  // the other decisions still wait. A rejoin ends it — its snapshot shows the proposal gone or not.
+  // the other decisions still wait. Settled by the proposal going or by its own refusal; a rejoin
+  // that may have lost the answer sends the same accept again, fenced to the same revision, which
+  // cannot land twice — accepted already, the proposal is gone.
   const [accepting, setAcceptingState] = useState<HeldAccept | null>(() => heldAccepts.get(parkedKey(worldId, prodId, path)) ?? null);
   const setAccepting = (next: Omit<HeldAccept, "rejoins"> | null) => {
     const key = parkedKey(worldId, prodId, path);
@@ -1322,7 +1334,11 @@ export function ChapterWorkspace({
   };
   useEffect(() => {
     if (accepting === null) return;
-    if (connection !== "open" || rejoins !== accepting.rejoins || stagedId !== accepting.id || notices[accepting.id] !== accepting.notice) setAccepting(null);
+    if (stagedId !== accepting.id || answers(notices[accepting.id], accepting.notice, accepting.requestId)) setAccepting(null);
+    else if (connection === "open" && rejoins !== accepting.rejoins
+      && acceptProposal(worldId, accepting.id, accepting.confirm, accepting.revision, accepting.requestId)) {
+      setAccepting(accepting);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accepting, connection, rejoins, stagedId, notices]);
   // Every passage accept is fenced to the revision on screen (codex on PR 1232), one edit or many.
@@ -1336,8 +1352,12 @@ export function ChapterWorkspace({
           ...(accepting !== null ? { blocked: "Accepting…" } : {}),
           onAccept: (confirmSignature?: string) => {
             const proposal = stagedDraft.staged.proposal;
-            if (acceptProposal(worldId, proposal.id, confirmSignature, proposal.draftRevision)) {
-              setAccepting({ id: proposal.id, notice: notices[proposal.id] });
+            const requestId = crypto.randomUUID();
+            if (acceptProposal(worldId, proposal.id, confirmSignature, proposal.draftRevision, requestId)) {
+              setAccepting({
+                id: proposal.id, notice: notices[proposal.id], requestId, revision: proposal.draftRevision,
+                ...(confirmSignature !== undefined ? { confirm: confirmSignature } : {}),
+              });
             }
           },
         }

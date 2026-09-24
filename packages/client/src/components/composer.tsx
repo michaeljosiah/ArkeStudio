@@ -169,7 +169,19 @@ export function Composer(props: ComposerProps) {
   }, [autoFocus, locked]);
 
   useEffect(() => {
-    if (focusRequest !== undefined && focusRequest > 0 && !locked) editor.current?.focus();
+    const node = editor.current;
+    if (focusRequest === undefined || focusRequest <= 0 || locked || !node) return;
+    node.focus();
+    // At the end of what is there (codex on PR 1232): a line started for the author to finish is
+    // finished after its words, and a focused box would otherwise take them at the start.
+    const range = document.createRange();
+    // A DOM without selections (the tests' linkedom) keeps the focus alone.
+    if (typeof range.collapse !== "function" || typeof window.getSelection !== "function") return;
+    range.selectNodeContents(node);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
     // Only a new request moves the caret; the box becoming unlocked later is not one.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusRequest]);

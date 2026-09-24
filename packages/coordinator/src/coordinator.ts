@@ -3020,13 +3020,14 @@ export class Coordinator {
    * a reason without the state that closes the gate leaves it free to ask again (review of
    * PR 371). `getState()` reads the live runs at broadcast time, so this needs no rescan.
    */
-  private refuseWhileDrafting(worldId: string, proposalId: string): boolean {
+  private refuseWhileDrafting(worldId: string, proposalId: string, requestId?: string): boolean {
     if (!this.authoring?.isRunning(proposalId)) return false;
     this.emit({
       at: new Date().toISOString(),
       type: "proposal.blocked",
       worldId,
       proposalId,
+      ...(requestId !== undefined ? { requestId } : {}),
       reason: "drafting",
       detail: "the studio is still writing into this proposal — cancel the run first",
     });
@@ -5420,7 +5421,7 @@ export class Coordinator {
         // A proposal being written into is not a proposal to commit (issue 239). The client hides
         // Accept while a run is live, but it learns that from a snapshot it may have taken a
         // moment ago, and the run is here — so the refusal is made where the answer is known.
-        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
+        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId, msg.requestId)) return;
         // Read before accepting: acceptance rewrites the manifest, and the origin is needed to
         // tell the conversation what became of its propositions.
         try {
@@ -5456,6 +5457,7 @@ export class Coordinator {
               type: "proposal.blocked",
               worldId: msg.worldId,
               proposalId: msg.proposalId,
+              ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
               reason:
                 // `no-op` is not here: it settles above, because the world already says what the
                 // proposal says and there is nothing left to block on.
@@ -5502,6 +5504,7 @@ export class Coordinator {
             type: "proposal.blocked",
             worldId: msg.worldId,
             proposalId: msg.proposalId,
+            ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
             reason: "invalid",
             detail: "this could not be accepted; nothing was written",
           });
@@ -5622,7 +5625,7 @@ export class Coordinator {
         if (!gate) return;
         // The journal's revision check cannot see the agent, which does not write through it —
         // so an edit landing mid-run is the interleaving it exists to refuse, unnoticed.
-        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
+        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId, msg.requestId)) return;
         const outcome = await (msg.kind === "proposal-update-field"
           ? gate.updateField({
               proposalId: msg.proposalId,
@@ -5650,6 +5653,7 @@ export class Coordinator {
             type: "proposal.blocked",
             worldId: msg.worldId,
             proposalId: msg.proposalId,
+            requestId: msg.requestId,
             reason: "invalid",
             detail: "that edit could not be applied to this proposal",
           });
