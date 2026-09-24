@@ -740,8 +740,11 @@ export type DockAsk = {
   subject?: WorldChatSubject;
   replyOnly?: boolean;
   draft?: boolean;
-  /** `rejoins` is the store's count when it went: a larger one means its answer may be lost. */
-  sent?: { requestId: string; at: string; rejoins: number };
+  /**
+   * `rejoins` is the store's count when it went: a larger one means its answer may be lost.
+   * `after` is the last line the thread held then, so only a line after it can be this one.
+   */
+  sent?: { requestId: string; at: string; rejoins: number; after?: string };
   /** A line lost on the way, tried again under the request it first went as. */
   again?: string;
   /** Sent and not taken: shown to be tried again or dismissed. */
@@ -750,11 +753,17 @@ export type DockAsk = {
   typed?: string;
 };
 
-/** A sent ask found in the thread: its exact words, said by the author about when it went. */
-function saidIn(messages: ReadonlyArray<{ role: string; text: string; createdAt: string }>, ask: DockAsk): boolean {
+/**
+ * A sent ask found in the thread: its exact words, said by the author about when it went, and
+ * after the last line the thread held when it went (codex on PR 1232). The same press made twice
+ * says the same words, and the first one is already in the thread before the second can go —
+ * the dock holds until it shows — so only what came after can be this one.
+ */
+function saidIn(messages: ReadonlyArray<{ id: string; role: string; text: string; createdAt: string }>, ask: DockAsk): boolean {
   if (ask.sent === undefined) return false;
   const sentAt = Date.parse(ask.sent.at);
-  return messages.some((m) => m.role === "user" && m.text === ask.text && Math.abs(Date.parse(m.createdAt) - sentAt) < 120_000);
+  const after = ask.sent.after === undefined ? -1 : messages.findIndex((m) => m.id === ask.sent!.after);
+  return messages.slice(after + 1).some((m) => m.role === "user" && m.text === ask.text && Math.abs(Date.parse(m.createdAt) - sentAt) < 120_000);
 }
 
 export function ProductionConversation({
@@ -1187,7 +1196,8 @@ export function ProductionConversation({
     const pressed = ask;
     say(pressed.text, pressed.replyOnly === true, pressed.subject, (requestId) => {
       const { again: _again, ...sent } = pressed;
-      onAsk?.({ ...sent, sent: { requestId, at: new Date().toISOString(), rejoins } });
+      const after = loaded?.messages.at(-1)?.id;
+      onAsk?.({ ...sent, sent: { requestId, at: new Date().toISOString(), rejoins, ...(after !== undefined ? { after } : {}) } });
     }, pressed.again);
     // say is rebuilt every render; the ask and the dock's readiness are what decide.
     // eslint-disable-next-line react-hooks/exhaustive-deps

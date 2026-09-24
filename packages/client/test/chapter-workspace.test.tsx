@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { paragraphSpans, type ChapterContinuity, type ChapterSummary, type ChapterVoices, type ClientMessage, type ClientState, type ProseStyle, type StagedProposal, type WorldChatSummary } from "@arke-studio/contracts";
-import { ChapterScreen, firstPrompt, paragraphAt, passageSubject, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
+import { ChapterScreen, __clearHeldAsksForTest, firstPrompt, paragraphAt, passageSubject, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -205,6 +205,7 @@ afterEach(async () => {
     await act(async () => mounted.root.unmount());
     mounted.container.remove();
   }
+  __clearHeldAsksForTest();
 });
 
 const text = (m: Mounted): string => m.container.textContent ?? "";
@@ -557,17 +558,22 @@ describe("the craft loop (turn 128)", () => {
     assert.deepEqual(expand?.subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells." });
     assert.equal(expand?.replyOnly, undefined, "a rewrite may stage");
 
+    // One ask at a time (codex on PR 1232): the press waits for the first to be answered.
+    assert.equal((q(m, "button.fy-ch__ask") as HTMLButtonElement).disabled, true, "held while the first is being taken");
+    const answered = async (requestId: string, seq: number) => {
+      await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId, admitted: true }));
+      await act(async () => __setStateForTest({ ...state, worldChat: workspaceAt(seq) }, { connection: "open" }));
+    };
+    await answered((expand as unknown as { requestId: string }).requestId, 5);
     await act(async () => {
       (q(m, "button.fy-ch__ask") as HTMLElement).click();
     });
     await act(async () => {
       item("Critique").click();
     });
-    // Pressed before the thread shows the first ask's turn, the second waits (codex on PR 1232):
-    // released into that gap, the runner would refuse it as already working.
-    assert.equal(sends().some((message) => message.text.includes("What works here")), false, "not said over a turn the thread has not shown yet");
-    await act(async () => __setStateForTest({ ...state, worldChat: workspaceAt(5) }, { connection: "open" }));
-    assert.equal(sends().find((message) => message.text.includes("What works here"))?.replyOnly, true, "said once the thread moves; a critique is a reply and nothing else");
+    const critique = sends().find((message) => message.text.includes("What works here"));
+    assert.equal(critique?.replyOnly, true, "a critique is a reply and nothing else");
+    await answered((critique as unknown as { requestId: string }).requestId, 6);
 
     // A line that only starts the ask goes into the composer, said by nobody yet.
     const before = sends().length;
@@ -582,7 +588,7 @@ describe("the craft loop (turn 128)", () => {
     assert.equal(composer?.textContent, "Make this ");
   });
 
-  it("an ask pressed while the dock is busy waits with its own passage, never in the composer (codex on PR 1232)", async () => {
+  it("a second press waits for the first ask, which is opening the thread, and nothing lands in the composer (codex on PR 1232)", async () => {
     // No thread yet: the first ask opens one, and the dock is busy until it arrives.
     const m = await mount(inkbound([], STYLE));
     await answerOpen(m);
@@ -592,10 +598,11 @@ describe("the craft loop (turn 128)", () => {
     await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
     await act(async () => item("Expand").click());
     assert.equal(m.sent.filter((message) => message.kind === "world-chat-create").length, 1, "the first ask opens the thread");
-    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
-    await act(async () => item("Critique").click());
-    assert.equal(m.sent.filter((message) => message.kind === "world-chat-create" || message.kind === "world-chat-send").length, 1, "the second waits for the dock");
-    assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent ?? "", "", "and is not left in the composer to be said about whatever is selected next");
+    const pill = q(m, "button.fy-ch__ask") as HTMLButtonElement;
+    assert.equal(pill.disabled, true, "the press waits: a second would replace the first while it opens the thread");
+    assert.match(pill.textContent ?? "", /asking…/);
+    assert.equal(m.sent.filter((message) => message.kind === "world-chat-create" || message.kind === "world-chat-send").length, 1);
+    assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent ?? "", "", "and nothing is left in the composer to be said about whatever is selected next");
   });
 
   it("an ask pressed with the connection down waits and goes when it comes back (codex on PR 1232)", async () => {
@@ -975,6 +982,72 @@ describe("the craft loop (turn 128)", () => {
     } finally {
       Object.assign(dom.HTMLElement.prototype, { focus: was });
     }
+  });
+
+  it("the same press made again is not mistaken for the first in the thread (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const m0 = await mount({ ...styled, world: { ...styled.world!, conversations: [THREAD] } } as ClientState);
+    await answerOpen(m0);
+    await keyup(q(m0, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    // The first Tighten is already in the thread, a moment ago.
+    const words = "About this passage in chapter 02, paragraph 1: «Maren counted the bells.» Tighten this";
+    const earlier = { id: "msg_01J8F3K2QW9VZX4N7M0RTYB6H2" as never, role: "user" as const, text: words, receipts: [], refusals: [], createdAt: new Date().toISOString() };
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [earlier], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    await act(async () => __setStateForTest(state, { connection: "open" }));
+    await act(async () => (q(m0, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m0.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const sent = m0.sent.filter((message) => message.kind === "world-chat-send") as Array<{ text: string }>;
+    assert.equal(sent.at(-1)?.text, words);
+    // The second's answer is lost; the rejoined thread holds only the first.
+    await act(async () => __setStateForTest(state, { connection: "closed" }));
+    await act(async () => __setStateForTest(state, { connection: "open", rejoins: 1 }));
+    assert.match(text(m0), /Not sent · Tighten this/, "the line already there was the first press, not this one");
+  });
+
+  it("a waiting ask names the passage it was pressed on, and holds the menu (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const m = await mount(state);
+    await answerOpen(m);
+    const area = q(m, "textarea.fy-ch__source") as HTMLTextAreaElement;
+    await keyup(area, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const pill = q(m, "button.fy-ch__ask") as HTMLButtonElement;
+    assert.equal(pill.disabled, true, "a second press would replace the first before its answer");
+    assert.match(pill.textContent ?? "", /asking…/);
+    await keyup(area, 3, 3);
+    assert.match(text(m), /about this passage · 4 words/, "the dock names the passage the ask is about, not what is selected now");
+  });
+
+  it("an ask waiting survives moving to another chapter and back (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const first = await mount(state);
+    await answerOpen(first);
+    await keyup(q(first, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => __setStateForTest(state, { connection: "closed" }));
+    await act(async () => (q(first, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...first.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    // The screen goes, as it does when the author opens another chapter.
+    await act(async () => first.root.unmount());
+    const back = await mount(state);
+    await answerOpen(back);
+    await act(async () => __setStateForTest(state, { connection: "open" }));
+    const sends = back.sent.filter((message) => message.kind === "world-chat-send" && (message as { text: string }).text.endsWith("Tighten this"));
+    assert.equal(sends.length, 1, "back on the chapter, the ask goes");
   });
 
   it("a line typed while the last one is still being taken stays in the composer (codex on PR 1232)", async () => {

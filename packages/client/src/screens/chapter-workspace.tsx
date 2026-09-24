@@ -148,6 +148,18 @@ type ParkedDraft = { value: string; baseHash: string; landedBody: string | null;
 const parkedDrafts = new Map<string, ParkedDraft>();
 const parkedKey = (worldId: string, prodId: string, file: string): string => `${worldId}/${prodId}/${file}`;
 
+/**
+ * Asks from the passage menu, by chapter, until the dock is done with them (codex on PR 1232).
+ * Outside any component for the same reason as the drafts above: the screen is keyed by chapter
+ * and goes when the author moves to another, and an ask waiting, sent or not taken is still
+ * theirs when they come back.
+ */
+const heldAsks = new Map<string, DockAsk>();
+/** Test hook: asks outlive a screen by design, so each test starts with none. */
+export function __clearHeldAsksForTest(): void {
+  heldAsks.clear();
+}
+
 /** Sending is not saving: an answer can refuse after the editor has unmounted. */
 function keepUntilSaved(key: string, held: ParkedDraft, requestId: string | null): void {
   if (requestId === null) return;
@@ -1129,8 +1141,20 @@ export function ChapterWorkspace({
    * says it is done with it (codex on PR 1232): putting the dock away while it waits, or while
    * the thread has yet to show it, loses nothing.
    */
-  const [ask, setAsk] = useState<DockAsk | null>(null);
-  const shownSubject = ask?.draft === true && ask.subject !== undefined ? ask.subject : dockSubject;
+  const askKey = parkedKey(worldId, prodId, path);
+  const [ask, setAskState] = useState<DockAsk | null>(() => heldAsks.get(askKey) ?? null);
+  const setAsk = useCallback((next: DockAsk | null) => {
+    if (next === null) heldAsks.delete(askKey);
+    else heldAsks.set(askKey, next);
+    setAskState(next);
+  }, [askKey]);
+  // Any ask held is about the passage it was pressed on, waiting, sent or not taken (codex on
+  // PR 1232): the dock says so, whatever is selected by then.
+  const shownSubject = ask?.subject ?? dockSubject;
+  // One ask at a time (codex on PR 1232): a second press would replace one still waiting or
+  // being answered, and a refusal or a lost answer would then have nowhere to be shown. A line
+  // only started, or one shown as not sent, is the author's to replace.
+  const asking = ask !== null && ask.draft !== true && ask.declined !== true;
   const askPassage = (action: PassageAction) => {
     setDock(true);
     setAsk({
@@ -1556,7 +1580,9 @@ export function ChapterWorkspace({
                   ? { held: "not saved" }
                   : saving || draft !== null
                     ? { held: "saving…" }
-                    : {})}
+                    : asking
+                      ? { held: "asking…" }
+                      : {})}
               />
             )}
             <div className="fy-ch__foot">
