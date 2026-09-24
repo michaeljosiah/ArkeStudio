@@ -25,6 +25,15 @@ describe("immutable take media facts (#1234)", () => {
     }
   });
 
+  it("reads frame-run output dimensions before legacy top-level dimensions", () => {
+    const frame = { ...take, kind: "frame" as const, params: { ...take.params, output: { width: 2048, height: 1536 } } };
+    assert.deepEqual(takeMediaFacts(frame).dimensions, { width: 2048, height: 1536 });
+    assert.deepEqual(takeMediaFacts(frame, { width: 1024, height: 768 }).dimensions, { width: 1024, height: 768 });
+    for (const output of [null, [], "2048x1536", { width: 0, height: 1536 }]) {
+      assert.deepEqual(takeMediaFacts({ ...frame, params: { ...take.params, output } }).dimensions, { width: 720, height: 1280 });
+    }
+  });
+
   it("labels a pass segment by its range rather than the backing file", () => {
     const segment = { passTakeId: "tk_01J8F0000000000000000000P1", inSec: 4, outSec: 9 };
     assert.equal(takeMediaFacts({ ...take, segment }, { durationSec: 20 }).durationSec, 5);

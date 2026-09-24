@@ -523,7 +523,9 @@ describe("Advanced, on the bench's wall (design 142a)", () => {
       meta: { ...p.meta, aspect: "1:1" },
       scenes: p.scenes.map((scene) => "shots" in scene
         ? { ...scene, shots: scene.shots.map((shot) => ({ ...shot, durationSec: 15 })) } : scene),
-      takes: p.takes.map((take) => ({ ...take, params: { durationSec: 4, aspect: "9:16" } })),
+      takes: p.takes.map((take) => ({ ...take, params: {
+        durationSec: 4, aspect: "9:16", ...(take.kind === "frame" ? { output: { width: 2048, height: 1536 } } : {}),
+      } })),
     }));
     const { container } = await mount(state, ADVANCED);
     const heading = () => container.querySelector(".fy-gen__takeline")!.textContent!;
@@ -542,12 +544,15 @@ describe("Advanced, on the bench's wall (design 142a)", () => {
       .find((button) => button.getAttribute("aria-label")?.startsWith("Take 2"))!;
     await act(async () => stillButton.click());
     assert.doesNotMatch(heading() + chip(), /4\.1s|720×1280|4s/, "a still cannot inherit the previous clip's facts");
+    assert.match(chip(), /2048×1536/, "frame-run dimensions are available before the image loads");
     const still = container.querySelector(".fy-bench__media img.fy-portrait")!;
     Object.assign(still, { naturalWidth: 1024, naturalHeight: 1024 });
     await act(async () => still.dispatchEvent(new dom.window.Event("load")));
     assert.match(chip(), /1024×1024/);
     await act(async () => video.dispatchEvent(new dom.window.Event("loadedmetadata")));
     assert.match(chip(), /1024×1024/, "late events from an old player cannot relabel the selected take");
+    await act(async () => still.dispatchEvent(new dom.window.Event("error")));
+    assert.match(chip(), /2048×1536/, "unavailable media still has its saved output dimensions");
   });
 
   it("omits unknown duration and shape instead of borrowing dispatch settings (#1234)", () => {

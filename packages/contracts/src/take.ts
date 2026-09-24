@@ -234,6 +234,9 @@ export function takeMediaFacts(take: Pick<Take, "params" | "segment" | "kind">, 
       ? { width: width as number, height: height as number }
       : undefined;
   const storedAspect = typeof take.params["aspect"] === "string" ? take.params["aspect"] : undefined;
+  const output = take.params["output"];
+  const savedOutput = typeof output === "object" && output !== null && !Array.isArray(output)
+    ? output as Record<string, unknown> : {};
   const ratio = storedAspect === undefined ? null : parseAspect(storedAspect);
   // A segment describes a range of the backing file, not that entire file's measured length.
   // Stills have no runtime, even when an old record happens to carry a duration parameter.
@@ -242,7 +245,9 @@ export function takeMediaFacts(take: Pick<Take, "params" | "segment" | "kind">, 
     : positive(measured.durationSec) ?? positive(take.params["durationSec"]);
   return {
     durationSec,
-    dimensions: dimensions(measured.width, measured.height) ?? dimensions(take.params["width"], take.params["height"]),
+    dimensions: dimensions(measured.width, measured.height)
+      ?? dimensions(savedOutput["width"], savedOutput["height"])
+      ?? dimensions(take.params["width"], take.params["height"]),
     aspect: storedAspect !== undefined && ratio !== null && Number.isFinite(ratio) && ratio > 0
       ? normalizeAspect(storedAspect) ?? undefined : undefined,
   };
