@@ -73,6 +73,7 @@ async function run() {
   window.interopResult = report;
   document.querySelector("#result").textContent = JSON.stringify(report, null, 2);
   // Keep the page visible for the smoke screenshot; release the audio engine's timers.
+  media.removeEventListener("timeupdate", highlight);
   audio.destroy();
 }
 run().catch(error => { window.interopError = error.stack ?? String(error); document.querySelector("#result").textContent = window.interopError; });
