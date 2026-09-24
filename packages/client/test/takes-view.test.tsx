@@ -521,7 +521,8 @@ describe("Advanced, on the bench's wall (design 142a)", () => {
     const state = withSaltlight((p) => ({
       ...p,
       meta: { ...p.meta, aspect: "1:1" },
-      scenes: p.scenes.map((scene) => ({ ...scene, shots: scene.shots.map((shot) => ({ ...shot, durationSec: 15 })) })),
+      scenes: p.scenes.map((scene) => "shots" in scene
+        ? { ...scene, shots: scene.shots.map((shot) => ({ ...shot, durationSec: 15 })) } : scene),
       takes: p.takes.map((take) => ({ ...take, params: { durationSec: 4, aspect: "9:16" } })),
     }));
     const { container } = await mount(state, ADVANCED);
