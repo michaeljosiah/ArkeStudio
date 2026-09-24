@@ -191,6 +191,10 @@ it("refuses changed take bytes even when sound is muted, but allows genuinely un
   await assert.rejects(compileVideoPublication(f.store, f.request, f.options), /Take bytes no longer match/);
   assert.equal(f.invocations.length, 0);
   assert.deepEqual(await readdir(f.scratch), []);
+  await f.store.ownedWrite(() => writeFile(join(takeDir, "media-info.json"), JSON.stringify({ sourceHash: hash(bytes),
+    probedAt: "2026-09-01T00:00:00Z", mediaInfo: { durationSec: 6, hasVideo: true, hasAudio: true } })));
+  const measured = await compileVideoPublication(f.store, f.request, f.options);
+  await measured.dispose();
   await f.store.ownedWrite(() => unlink(join(takeDir, "media-info.json")));
   const result = await compileVideoPublication(f.store, f.request, f.options);
   await result.dispose();

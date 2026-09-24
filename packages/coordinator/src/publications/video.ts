@@ -102,6 +102,10 @@ export async function compileVideoPublication(
           throw new PublicationFileError("source-changed", `Take bytes no longer match their media measurement: ${path}`);
         }
         const file = await readPublicationFile(store.dir, path, Math.min(limits.assetBytes, limits.totalBytes - total), signal);
+        const measurement = takeId === null ? undefined : before.takeMediaInfo[takeId];
+        if (measurement && measurement.sourceHash !== `sha256:${file.sha256}`) {
+          throw new PublicationFileError("source-changed", `Take bytes changed after discovery: ${path}`);
+        }
         for (const artifact of before.artifacts.filter(item => `artifacts/${item.file}` === path)) {
           if (artifact.hash !== `sha256:${file.sha256}`) {
             throw new PublicationFileError("source-changed", `Artifact bytes no longer match their record: ${path}`);
