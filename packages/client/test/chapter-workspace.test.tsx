@@ -1465,18 +1465,41 @@ describe("the craft loop (turn 128)", () => {
       assert.equal((accepted[0] as { expectedDraftRevision?: number }).expectedDraftRevision, 2);
     });
 
-    it("holds the choices while a keep is in flight, and lets go when the connection drops (codex on PR 1232)", async () => {
+    it("holds the choices while a keep is in flight, through a rejoin that may have lost it (codex on PR 1232)", async () => {
       const m = await mount(inkbound([TWO]));
       await answerOpen(m);
       await act(async () => edits(m)[0]!.click());
       await act(async () => acceptButton(m).click());
       assert.ok(edits(m).every((edit) => (edit as HTMLButtonElement).disabled), "what lands is what was pressed");
       assert.equal(acceptButton(m).disabled, true, "Keeping…");
+      const keeps = () => m.sent.filter((message) => message.kind === "proposal-update-passage") as Array<{ requestId: string }>;
       await act(async () => __setStateForTest(inkbound([TWO]), { connection: "closed" }));
-      await act(async () => __setStateForTest(inkbound([TWO]), { connection: "open" }));
-      assert.equal(acceptButton(m).disabled, false, "no answer is coming for a keep the connection lost");
+      await act(async () => __setStateForTest(inkbound([TWO]), { connection: "open", rejoins: 1 }));
+      // The drop does not say whether the keep landed: it is sent again under its own id, which
+      // the gate makes once.
+      assert.equal(keeps().length, 2);
+      assert.equal(keeps()[1]!.requestId, keeps()[0]!.requestId);
+      assert.equal(acceptButton(m).disabled, true, "still keeping");
+      // Refused: the press is the author's again, and nothing is accepted.
+      await act(async () => {
+        __applyEventForTest({ at: "2026-09-06T12:00:03Z", type: "proposal.blocked", worldId: FIXTURE_WORLD_ID, proposalId: TWO.proposal.id, reason: "draft-changed" });
+      });
+      assert.equal(acceptButton(m).disabled, false);
       assert.ok(edits(m).every((edit) => !(edit as HTMLButtonElement).disabled));
       assert.equal(m.sent.some((message) => message.kind === "proposal-accept"), false);
+    });
+
+    it("an accept on its way still holds the other decisions on a screen brought back (codex on PR 1232)", async () => {
+      const first = await mount(inkbound([TWO]));
+      await answerOpen(first);
+      await act(async () => acceptButton(first).click());
+      assert.ok(first.sent.some((message) => message.kind === "proposal-accept"));
+      await act(async () => first.root.unmount());
+      const back = await mount(inkbound([TWO]));
+      await answerOpen(back);
+      const discard = [...back.container.querySelectorAll("button")].find((b) => b.textContent === "Discard") as HTMLButtonElement;
+      assert.equal(discard.disabled, true, "the accept is still running");
+      assert.ok(edits(back).every((edit) => (edit as HTMLButtonElement).disabled));
     });
 
     it("a whole accept in flight holds the choices too (codex on PR 1232)", async () => {

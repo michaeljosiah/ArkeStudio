@@ -161,13 +161,25 @@ const heldAsks = new Map<string, DockAsk>();
  * A partial accept on its way, by chapter, for the same reason (codex on PR 1232): the keep lands
  * after the screen may have gone, and the accept it promised is sent by the next one to see it.
  */
-type HeldKeep = { id: string; revision: number; notice: GateNotice | undefined; expected: string; rejoins: number };
+type HeldKeep = {
+  id: string;
+  revision: number;
+  notice: GateNotice | undefined;
+  expected: string;
+  rejoins: number;
+  /** The keep itself, to send again under its own id after a rejoin that may have lost it. */
+  request: { requestId: string; path: string; span: { before: string; after: string }; kept: number[] };
+};
 const heldKeeps = new Map<string, HeldKeep>();
+/** An accept on its way, by chapter: its decision holds the others until it settles. */
+type HeldAccept = { id: string; notice: GateNotice | undefined; rejoins: number };
+const heldAccepts = new Map<string, HeldAccept>();
 // Only for the world's session they were pressed in (codex on PR 1232): closed and opened again,
 // an ask still waiting would otherwise go by itself, quoting prose that may have moved since.
 onWorldChange(() => {
   heldAsks.clear();
   heldKeeps.clear();
+  heldAccepts.clear();
 });
 // The answer to a held ask is kept with it (codex on PR 1232): the store remembers only recent
 // answers, and a chapter left for long enough would come back to one it no longer has.
@@ -180,6 +192,7 @@ subscribeWorldChatSendResults((result) => {
 export function __clearHeldAsksForTest(): void {
   heldAsks.clear();
   heldKeeps.clear();
+  heldAccepts.clear();
 }
 
 /** Sending is not saving: an answer can refuse after the editor has unmounted. */
@@ -1279,8 +1292,16 @@ export function ChapterWorkspace({
         setAccepting({ id: keeping.id, notice: notices[keeping.id] });
       }
       setKeeping(null);
-    } else if (connection !== "open" || rejoins !== keeping.rejoins || stagedId !== keeping.id || notices[keeping.id] !== keeping.notice) {
+    } else if (stagedId !== keeping.id || notices[keeping.id] !== keeping.notice) {
       setKeeping(null);
+    } else if (connection === "open" && rejoins !== keeping.rejoins) {
+      // A rejoin does not say whether the keep landed (codex on PR 1232): it may have reached the
+      // gate before the drop and still be writing. Sent again under its own id, the gate makes
+      // the same edit once — landed already, it answers with it; lost, it lands now.
+      const { requestId, path: keptPath, span, kept } = keeping.request;
+      if (updateProposalPassage(worldId, keeping.id, keptPath, span, kept, keeping.revision, requestId)) {
+        setKeeping({ ...keeping, rejoins });
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keeping, connection, rejoins, stagedId, stagedRevision, stagedBody, notices, worldId]);
@@ -1289,11 +1310,21 @@ export function ChapterWorkspace({
    * they would show a count the gate is not accepting. It is fenced to the revision on screen,
    * and held until the proposal is gone, the gate answers with a notice, or the connection drops.
    */
-  const [accepting, setAccepting] = useState<{ id: string; notice: GateNotice | undefined } | null>(null);
+  // Held outside the screen, like the keep (codex on PR 1232): back on the chapter while it runs,
+  // the other decisions still wait. A rejoin ends it — its snapshot shows the proposal gone or not.
+  const [accepting, setAcceptingState] = useState<HeldAccept | null>(() => heldAccepts.get(parkedKey(worldId, prodId, path)) ?? null);
+  const setAccepting = (next: Omit<HeldAccept, "rejoins"> | null) => {
+    const key = parkedKey(worldId, prodId, path);
+    const held = next === null ? null : { ...next, rejoins };
+    if (held === null) heldAccepts.delete(key);
+    else heldAccepts.set(key, held);
+    setAcceptingState(held);
+  };
   useEffect(() => {
     if (accepting === null) return;
-    if (connection !== "open" || stagedId !== accepting.id || notices[accepting.id] !== accepting.notice) setAccepting(null);
-  }, [accepting, connection, stagedId, notices]);
+    if (connection !== "open" || rejoins !== accepting.rejoins || stagedId !== accepting.id || notices[accepting.id] !== accepting.notice) setAccepting(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accepting, connection, rejoins, stagedId, notices]);
   // Every passage accept is fenced to the revision on screen (codex on PR 1232), one edit or many.
   const pending = keeping !== null || accepting !== null;
   const accept = stagedDraft === undefined || passageChange === null
@@ -1318,10 +1349,14 @@ export function ChapterWorkspace({
             const proposal = stagedDraft.staged.proposal;
             const kept = segments.flatMap((segment) => (segment.kind === "edit" && !refused.has(segment.index) ? [segment.index] : []));
             // Nothing sent is nothing to wait for (codex on PR 1232): the press stays the author's.
-            if (!updateProposalPassage(worldId, proposal.id, path, passageChange, kept, proposal.draftRevision)) return;
+            const requestId = crypto.randomUUID();
+            if (!updateProposalPassage(worldId, proposal.id, path, passageChange, kept, proposal.draftRevision, requestId)) return;
             const body = stagedDraft.body ?? live;
             const expected = body.slice(0, passageChange.start) + composePassage(segments, new Set(kept)) + body.slice(passageChange.start + passageChange.after.length);
-            setKeeping({ id: proposal.id, revision: proposal.draftRevision, notice: notices[proposal.id], expected, rejoins });
+            setKeeping({
+              id: proposal.id, revision: proposal.draftRevision, notice: notices[proposal.id], expected, rejoins,
+              request: { requestId, path, span: { before: passageChange.before, after: passageChange.after }, kept },
+            });
           },
         };
   const foot = locked && stagedDraft !== undefined

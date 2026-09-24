@@ -2510,11 +2510,13 @@ export function updateProposalPassage(
   span: { before: string; after: string },
   kept: readonly number[],
   expectedDraftRevision: number,
+  /** The keep's own id: sent again after a rejoin, the gate makes the same edit once (PR 1232). */
+  requestId: string = crypto.randomUUID(),
 ): boolean {
   return send({
     kind: "proposal-update-passage",
     worldId,
-    requestId: crypto.randomUUID(),
+    requestId,
     proposalId,
     path,
     before: span.before,
