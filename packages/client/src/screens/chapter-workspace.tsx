@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Link, useParams, useNavigate, useSearchParams } from "react-router";
 import {
   chapterParagraphs,
@@ -467,8 +467,7 @@ function askAt(host: HTMLElement | null): AskAt {
 
 /** What lays text out in a textarea, copied to the mirror that measures where a selection ends. */
 const MIRRORED = [
-  "boxSizing", "width", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
-  "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth", "borderStyle",
+  "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
   "fontFamily", "fontSize", "fontStyle", "fontVariant", "fontWeight", "letterSpacing", "lineHeight",
   "textIndent", "textTransform", "tabSize", "wordSpacing",
 ] as const;
@@ -485,7 +484,14 @@ function askAtSource(host: HTMLElement | null, area: HTMLTextAreaElement): AskAt
   const style = window.getComputedStyle(area);
   const mirror = document.createElement("div");
   for (const key of MIRRORED) mirror.style[key] = style[key];
-  Object.assign(mirror.style, { position: "absolute", top: "0", left: "-9999px", visibility: "hidden", whiteSpace: "pre-wrap", overflowWrap: "break-word", height: "auto" });
+  // As wide as the text the box actually wraps (codex on PR 1232): its client width, padding in
+  // and border and scrollbar out. The CSS width would include a scrollbar the mirror lacks, and
+  // lines would break elsewhere. The border is added back when the offsets are placed.
+  Object.assign(mirror.style, {
+    position: "absolute", top: "0", left: "-9999px", visibility: "hidden", whiteSpace: "pre-wrap", overflowWrap: "break-word",
+    height: "auto", boxSizing: "border-box", border: "0",
+    ...(area.clientWidth > 0 ? { width: `${area.clientWidth}px` } : {}),
+  });
   mirror.textContent = area.value.slice(0, area.selectionEnd);
   const mark = document.createElement("span");
   mark.textContent = "\u200b";
@@ -1295,6 +1301,33 @@ export function ChapterWorkspace({
     ? -1
     : passageParagraphs.findIndex((paragraph) => paragraph.end >= passageChange.start && paragraph.start <= passageChange.start + Math.max(passageChange.after.length, 1));
   const choosing = stagedDraft !== undefined && passageChange !== null && editCount > 1;
+  // A passage that removes whole paragraphs has no replacement to stand in their place: what it
+  // removes is drawn struck instead, or the page would show nothing to decide (codex on PR 1232).
+  // Told by a line break among what goes: words cut inside a paragraph still mark the paragraph,
+  // as they always have.
+  const cut = passageChange !== null && passageChange.after.trim() === "" && passageChange.before.includes("\n");
+  const struck = passageChange === null ? null : <p className="fy-ch__passage"><del>{passageChange.before.trim()}</del></p>;
+  const edits = () =>
+    segments.map((segment, n) =>
+      segment.kind === "same" ? (
+        <span key={n}>{segment.text}</span>
+      ) : (
+        <button
+          key={n}
+          type="button"
+          // Held while a keep is in flight (codex on PR 1232): what lands is
+          // what was pressed, never a choice changed after it.
+          disabled={keeping !== null || accepting !== null}
+          className={cx("fy-ch__edit", refused.has(segment.index) && "fy-ch__edit--refused")}
+          aria-pressed={!refused.has(segment.index)}
+          title={refused.has(segment.index) ? "Refused · press to keep" : "Kept · press to refuse"}
+          onClick={() => toggleEdit(segment.index)}
+        >
+          {segment.before !== "" && <del>{segment.before}</del>}
+          {segment.after !== "" && <ins>{segment.after}</ins>}
+        </button>
+      ),
+    );
   // The passage is in the key as well as the revision (codex on PR 1232): an authoring run can
   // rewrite the staged file without moving the revision, and an index refused against one set of
   // edits must never refuse a different edit of the next.
@@ -1610,11 +1643,17 @@ export function ChapterWorkspace({
                     // whole span as edits, and any later paragraph the span reached is not drawn
                     // twice: the edits are the passage, head and tail around them as they stand.
                     if (!choosing || !changed) {
-                      return (
+                      const line = (
                         <p key={i} className={changed ? "fy-ch__passage" : undefined}>
                           {paragraph.text}
                         </p>
                       );
+                      if (!cut || anchorParagraph !== i) return line;
+                      // A cut replaces nothing, so what goes is drawn beside the paragraph it
+                      // touched, on the side it stood (codex on PR 1232).
+                      return passageChange.start <= paragraph.start
+                        ? <Fragment key={i}>{struck}{line}</Fragment>
+                        : <Fragment key={i}>{line}{struck}</Fragment>;
                     }
                     const body = stagedDraft.body ?? live;
                     // The first paragraph the span touches draws it, even when the span begins in
@@ -1630,30 +1669,17 @@ export function ChapterWorkspace({
                     return (
                       <p key={i} className="fy-ch__passage fy-ch__passage--choose">
                         {body.slice(Math.min(paragraph.start, from), from)}
-                        {segments.map((segment, n) =>
-                          segment.kind === "same" ? (
-                            <span key={n}>{segment.text}</span>
-                          ) : (
-                            <button
-                              key={n}
-                              type="button"
-                              // Held while a keep is in flight (codex on PR 1232): what lands is
-                              // what was pressed, never a choice changed after it.
-                              disabled={keeping !== null || accepting !== null}
-                              className={cx("fy-ch__edit", refused.has(segment.index) && "fy-ch__edit--refused")}
-                              aria-pressed={!refused.has(segment.index)}
-                              title={refused.has(segment.index) ? "Refused · press to keep" : "Kept · press to refuse"}
-                              onClick={() => toggleEdit(segment.index)}
-                            >
-                              {segment.before !== "" && <del>{segment.before}</del>}
-                              {segment.after !== "" && <ins>{segment.after}</ins>}
-                            </button>
-                          ),
-                        )}
+                        {edits()}
                         {body.slice(endOfSpan, tailEnd)}
                       </p>
                     );
                   })}
+                  {/* A passage cut from the chapter's end may touch no paragraph that is left
+                      (codex on PR 1232): what goes is drawn where it stood, so there is something
+                      to decide on the page as well as on the card. */}
+                  {anchorParagraph === -1 && (choosing
+                    ? <p className="fy-ch__passage fy-ch__passage--choose">{edits()}</p>
+                    : struck)}
                 </div>
               </div>
             ) : stagedDraft !== undefined ? (

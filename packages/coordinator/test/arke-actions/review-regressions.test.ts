@@ -515,11 +515,14 @@ it("an accept that throws is answered by what became of the proposal (codex on P
   const STANDING_ID = newId("pr");
   const GONE_ID = newId("pr");
   const UNKNOWN_ID = newId("pr");
+  const SETTLED_ID = newId("pr");
   const engine = (w.coordinator as unknown as { engine: { proposals: { accept: unknown } } }).engine;
   Object.assign(engine.proposals, { accept: async () => { throw new Error("the manifest could not be read"); } });
-  // Still standing, gone (landed, or discarded by another window first), or unreadable.
+  // Still standing, gone (landed, or discarded by another window first), unreadable, or landed
+  // with its tombstone written and its manifest left behind a busy handle.
+  t.mock.method(ProposalManager.prototype, "landed", async (proposalId: string) => proposalId === SETTLED_ID);
   t.mock.method(ProposalManager.prototype, "readManifest", async (proposalId: string) => {
-    if (proposalId === STANDING_ID) return { draftRevision: 1 };
+    if (proposalId === STANDING_ID || proposalId === SETTLED_ID) return { draftRevision: 1 };
     if (proposalId === GONE_ID) throw Object.assign(new Error("gone"), { code: "ENOENT" });
     throw Object.assign(new Error("denied"), { code: "EACCES" });
   });
@@ -528,6 +531,7 @@ it("an accept that throws is answered by what became of the proposal (codex on P
   await accept(STANDING_ID, "req-standing");
   await accept(GONE_ID, "req-gone");
   await accept(UNKNOWN_ID, "req-unknown");
+  await accept(SETTLED_ID, "req-settled");
   const blocked = (proposalId: string) => w.events.find((event) => event.type === "proposal.blocked" && event.proposalId === proposalId) as
     { reason?: string; requestId?: string; detail?: string } | undefined;
   assert.equal(blocked(STANDING_ID)?.reason, "invalid");
@@ -540,4 +544,6 @@ it("an accept that throws is answered by what became of the proposal (codex on P
   assert.equal(w.events.some((event) => event.type === "proposal.resolved" && event.proposalId === GONE_ID), false, "nor to have landed");
   assert.equal(blocked(UNKNOWN_ID)?.requestId, "req-unknown");
   assert.match(blocked(UNKNOWN_ID)?.detail ?? "", /not known/, "and when nobody can tell, it says so");
+  assert.equal(blocked(SETTLED_ID), undefined, "a tombstone is a landing, whatever is still on disk");
+  assert.ok(w.events.some((event) => event.type === "proposal.resolved" && event.proposalId === SETTLED_ID && event.outcome === "accepted"));
 });

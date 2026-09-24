@@ -8,7 +8,7 @@ import { OPENCODE_AVAILABILITY, type ClientMessage, type ClientState } from "@ar
 import { AgentsPanel } from "../src/screens/agents.js";
 import { SettingsHarnessScreen, SettingsLayout } from "../src/screens/shell.js";
 import { ProductionConversation } from "../src/components/conversation.js";
-import { __applyEventForTest, __clearWorldChatHoldsForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __clearWorldChatHoldsForTest, __setBridgeForTest, __setStateForTest, __stateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -306,6 +306,17 @@ describe("live harness model controls (#1123, #1124)", () => {
     assert.equal(explicit.modelId, OPUS);
     assert.match(container.textContent!, /THIS PRODUCTION/);
     assert.equal(sent.some((message) => message.kind === "set-production-model"), false);
+  });
+
+  it("a line held for a world that closes is not held when that world opens again (codex on PR 1232)", async () => {
+    await mount(modelState(), conversation());
+    await press("Explain the scene");
+    assert.equal(Object.keys(__stateForTest().worldChatHolds).length, 1, "held until its answer comes");
+    const elsewhere = modelState();
+    elsewhere.world = { ...elsewhere.world!, meta: { ...elsewhere.world!.meta, worldId: "wld_elsewhere" as never } };
+    await act(async () => __setStateForTest(elsewhere));
+    await act(async () => __setStateForTest(modelState()));
+    assert.deepEqual(__stateForTest().worldChatHolds, {}, "its answer belonged to the session that closed");
   });
 
   it("shows the chat agent override ahead of an unavailable production choice", async () => {

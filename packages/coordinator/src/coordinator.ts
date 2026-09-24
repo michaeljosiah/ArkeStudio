@@ -5499,26 +5499,34 @@ export class Coordinator {
           // Always answered (codex on PR 1232): a screen holding its controls until the accept
           // settles would otherwise wait on a proposal the refresh shows unchanged. What failed is
           // not relayed. The accept can throw after the gate committed — its bookkeeping and
-          // delivery come after — so what is said follows the proposal. Standing, it did not
-          // finish. Gone, it may have landed or another window may have discarded it first, and
-          // the gate keeps nothing to tell which (codex on PR 1232), so neither is claimed.
-          const standing = await gate.readManifest(msg.proposalId).then(
+          // delivery come after — so what is said follows the proposal. The gate's tombstone
+          // says it landed, even with its manifest still on disk behind a busy handle (codex on
+          // PR 1232). Otherwise standing, it did not finish; gone with no tombstone, it may have
+          // landed or lost to another window's discard, and neither is claimed.
+          const settled = await gate.landed(msg.proposalId).catch(() => false);
+          const standing = settled ? false : await gate.readManifest(msg.proposalId).then(
             () => true as const,
             (error: unknown) => (error as NodeJS.ErrnoException)?.code === "ENOENT" ? false as const : null,
           );
-          this.emit({
-            at: new Date().toISOString(),
-            type: "proposal.blocked",
-            worldId: msg.worldId,
-            proposalId: msg.proposalId,
-            ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
-            reason: "invalid",
-            detail: standing === true
-              ? "this could not be accepted; the proposal still stands"
-              : standing === false
-                ? "this proposal is no longer open; read the draft as it stands"
-                : "whether this was accepted is not known; reopen the world to see the draft as it stands",
-          });
+          const at = new Date().toISOString();
+          if (settled) {
+            this.authoring?.release(msg.proposalId);
+            this.emit({ at, type: "proposal.resolved", worldId: msg.worldId, proposalId: msg.proposalId, outcome: "accepted" });
+          } else {
+            this.emit({
+              at,
+              type: "proposal.blocked",
+              worldId: msg.worldId,
+              proposalId: msg.proposalId,
+              ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
+              reason: "invalid",
+              detail: standing === true
+                ? "this could not be accepted; the proposal still stands"
+                : standing === false
+                  ? "this proposal is no longer open; read the draft as it stands"
+                  : "whether this was accepted is not known; reopen the world to see the draft as it stands",
+            });
+          }
         }
         await this.refreshWorldSnapshot(msg.worldId);
         return;

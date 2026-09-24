@@ -1318,8 +1318,17 @@ describe("the craft loop (turn 128)", () => {
     // The manuscript at (100, 50); the source box inside it at (120, 80). A layout-less DOM lays
     // nothing out, so the selection's end measures at the box's corner, past its scroll.
     Object.assign(host, { getBoundingClientRect: () => rect(100, 50, 800, 600) });
-    Object.assign(area, { getBoundingClientRect: () => rect(120, 80, 700, 500), scrollTop: 0, scrollLeft: 0 });
-    await keyup(area, 0, 24);
+    // A scrollbar takes 15px of the box's 700: the text wraps in what is left, and so must the copy.
+    Object.assign(area, { getBoundingClientRect: () => rect(120, 80, 700, 500), scrollTop: 0, scrollLeft: 0, clientWidth: 685 });
+    const mirrors: HTMLElement[] = [];
+    const append = dom.document.body.appendChild.bind(dom.document.body);
+    Object.assign(dom.document.body, { appendChild: (node: HTMLElement) => (mirrors.push(node), append(node)) });
+    try {
+      await keyup(area, 0, 24);
+    } finally {
+      Object.assign(dom.document.body, { appendChild: append });
+    }
+    assert.equal(mirrors.at(-1)?.style.width, "685px", "the copy wraps at the box's text width, not its CSS width");
     const press = q(m, ".fy-ch__ask-wrap") as HTMLElement;
     assert.match(press.getAttribute("style") ?? "", /left:\s*28px/, "measured from the source box, not the document's selection");
     assert.match(press.getAttribute("style") ?? "", /top:\s*8px/);
@@ -1541,6 +1550,29 @@ describe("the craft loop (turn 128)", () => {
     const marked = [...m.container.querySelectorAll("p.fy-ch__passage")].map((p) => p.textContent);
     assert.deepEqual(marked, ["Maren counted the seven bells."], "only the paragraph the span falls in is marked");
     assert.doesNotMatch(text(m), /Ask Arke · /, "nothing is offered on a locked manuscript");
+  });
+
+  it("a passage cut from the chapter's end is drawn where it stood (codex on PR 1232)", async () => {
+    const CUT: StagedProposal = {
+      ...PASSAGE,
+      proposal: { ...PASSAGE.proposal, id: "pr_01J8H0000000000000000000PC" },
+      review: {
+        targets: [
+          {
+            path: PATH,
+            label: "The counting of bells",
+            kind: "chapter",
+            action: "amend",
+            // The line break before it kept: the span starts past every paragraph that is left.
+            fields: [{ field: "Prose", before: BODY, proposed: "Maren counted the bells.\n" }],
+          },
+        ],
+      },
+    };
+    const m = await mount(inkbound([CUT]));
+    await answerOpen(m);
+    const passage = q(m, ".fy-ch__draft-passage") as HTMLElement;
+    assert.match(passage.querySelector(".fy-ch__passage del")?.textContent ?? "", /Six, and the tide/, "what goes is on the page, struck");
   });
 
   describe("keeping part of a passage", () => {

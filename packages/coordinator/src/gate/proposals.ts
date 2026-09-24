@@ -1899,6 +1899,15 @@ export class ProposalManager {
     return out;
   }
 
+  /**
+   * Whether this proposal's change landed (PR 1232): the tombstone is written before the
+   * directory goes, and may outlive a removal a busy handle refused. Only a landing writes it —
+   * a discard removes the directory outright — so a tombstone is never a discard.
+   */
+  async landed(id: string): Promise<boolean> {
+    return this.isSettled(id);
+  }
+
   private async isSettled(id: string): Promise<boolean> {
     try {
       await stat(toExtendedLength(join(this.proposalDir(id), SETTLED_FILE)));

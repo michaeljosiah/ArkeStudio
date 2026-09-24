@@ -979,9 +979,15 @@ function settleHolds(next: StoreState): StoreState {
 
 function emitChange(next: StoreState): void {
   const was = current.state?.world?.meta.worldId ?? null;
+  const now = next.state?.world?.meta.worldId ?? null;
+  // A line held for a world that has since closed has nothing left to wait for (codex on PR
+  // 1232): its answer belongs to that world's session, and coming back to it is no rejoin, so
+  // it would never be asked after.
+  if (now !== was && Object.values(next.worldChatHolds).some((hold) => hold.worldId !== now)) {
+    next = { ...next, worldChatHolds: Object.fromEntries(Object.entries(next.worldChatHolds).filter(([, hold]) => hold.worldId === now)) };
+  }
   next = settleHolds(next);
   current = next;
-  const now = next.state?.world?.meta.worldId ?? null;
   if (now !== was) {
     gateRequests.clear();
     gateAnswers.clear();
