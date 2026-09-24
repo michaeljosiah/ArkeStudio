@@ -18,6 +18,7 @@ export function validatePublicationVtt(text: string, duration: number): void {
   for (const block of blocks) {
     const rows = block.split("\n");
     if (/^NOTE(?:[ \t]|$)/.test(rows[0]!)) continue;
+    if (/^(?:STYLE|REGION)(?:[ \t]|$)/.test(rows[0]!)) { fail(); continue; }
     if (!rows[0]!.includes("-->")) rows.shift();
     const timing = /^(\S+) --> (\S+)$/.exec(rows.shift() ?? "");
     if (!timing || !rows.join("\n").trim()) { fail(); continue; }
@@ -26,4 +27,3 @@ export function validatePublicationVtt(text: string, duration: number): void {
     previous = start;
   }
 }
-

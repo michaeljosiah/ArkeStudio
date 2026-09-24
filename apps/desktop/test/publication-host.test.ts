@@ -109,11 +109,13 @@ it("flushes the intent before work and drains cancellation during shutdown", asy
   assert.equal((await host.list()).ok, false, "shutdown does not resurrect work");
 });
 it("preflights real codec metadata and reports unsupported pixel formats", async () => {
-  let pix_fmt = "yuv420p";
+  let pix_fmt = "yuv420p", extra: string | undefined;
   const media = publicationMedia({ run: async () => ({ code: 0, stdout: Buffer.from(JSON.stringify({ format: { duration: "2", format_name: "mov,mp4,m4a,3gp,3g2,mj2" },
-    streams: [{ codec_type: "video", codec_name: "h264", pix_fmt }, { codec_type: "audio", codec_name: "aac" }] })), stderr: "", timedOut: false, outputLimitExceeded: false, cancelled: false }) });
+    streams: [{ codec_type: "video", codec_name: "h264", pix_fmt }, { codec_type: "audio", codec_name: "aac" }, ...(extra ? [{ codec_type: extra }] : [])] })), stderr: "", timedOut: false, outputLimitExceeded: false, cancelled: false }) });
   assert.deepEqual(await media.playback("opaque", "video/mp4"), { duration: 2, mediaType: 'video/mp4; codecs="avc1, mp4a.40.2"' });
   pix_fmt = "yuv420p10le"; await assert.rejects(media.playback("opaque", "video/mp4"), /Unsupported publication codec/);
+  pix_fmt = "yuv420p";
+  for (extra of ["subtitle", "data", "attachment", "unknown"]) await assert.rejects(media.playback("opaque", "video/mp4"), /Unsupported publication codec/);
 });
 
 it("refuses drawtext before encoding a clean publication without rejecting ordinary input names", async () => {
@@ -127,17 +129,22 @@ it("refuses drawtext before encoding a clean publication without rejecting ordin
   assert.equal(calls.length, 2);
 });
 
-it("reports an encoder change as requiring a new edition instead of an endless retry", async t => {
+for (const cause of ["encoder", "conflict"] as const) it(`requires a new edition after saved ${cause} incompatibility instead of an endless retry`, async t => {
   const f = await fixture(t); const operationId = randomUUID();
   await mkdir(join(f.ports.root, "operations"), { recursive: true });
   await writeFile(join(f.ports.root, "operations", `${operationId}.json`), JSON.stringify({ worldId: "world", request,
-    encoderVersion: "older-build", format: "directory", outputRoot: f.output, operationId }));
+    encoderVersion: cause === "encoder" ? "older-build" : "test-1", format: "directory", outputRoot: f.output, operationId }));
+  if (cause === "conflict") {
+    await mkdir(join(f.output, operationId));
+    await writeFile(join(f.output, operationId, "operation.json"), JSON.stringify({ version: 1, operationId, publicationId: request.id, format: "zip", requestFingerprint: "0".repeat(64) }));
+  }
   const host = new PublicationHost(f.ports); t.after(() => host.stop());
   assert.ok((await host.retry(operationId)).ok);
   for (let n = 0; n < 600; n++) { const state = await host.list(); if (state.ok && state.value[0]?.status !== "running") break; await new Promise(resolve => setTimeout(resolve, 25)); }
   const state = await host.list(); assert.ok(state.ok);
   assert.equal(state.value[0]!.status, "failed"); assert.equal(state.value[0]!.retryable, false);
-  assert.match(state.value[0]!.reason!, /encoder changed.*Create a new edition/);
+  assert.match(state.value[0]!.reason!, /Create a new edition/);
+  assert.match(state.value[0]!.reason!, cause === "encoder" ? /encoder changed/ : /operation-conflict/);
 });
 
 it("preserves unreadable recovery records while listing valid jobs, opening packages and starting new work", async t => {

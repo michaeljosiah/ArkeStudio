@@ -86,7 +86,7 @@ it("keeps the current movie on cancelled/invalid opens and releases it only afte
       opening++;
       if (opening === 2) return { ok: false, cancelled: true, reason: "cancelled" };
       if (opening === 3) return { ok: false, reason: "unsupported package" };
-      return { ok: true, value: { ...publication, sessionId: opening === 1 ? "first" : "second" } };
+      return { ok: true, value: { ...publication, sessionId: opening === 1 ? "first" : `candidate-${opening}` } };
     },
     start: async () => ({ ok: false, reason: "unused" }), retry: async () => ({ ok: false, reason: "unused" }), cancel: async () => {}, reveal: async () => ({ ok: true, value: null }),
   } };
@@ -95,10 +95,21 @@ it("keeps the current movie on cancelled/invalid opens and releases it only afte
   await act(async () => root.render(<MemoryRouter><PublicationsScreen /></MemoryRouter>));
   const open = async () => { await act(async () => Array.from(node.querySelectorAll("button")).find(button => button.textContent === "Open folder")!.click()); };
   await open(); const first = node.querySelector("video"); assert.ok(first);
+  await act(async () => first.dispatchEvent(new dom.Event("loadeddata")));
   await open(); assert.equal(node.querySelector("video"), first); assert.equal(node.querySelector('[role="alert"]'), null);
   await open(); assert.equal(node.querySelector("video"), first); assert.match(node.textContent!, /unsupported package/);
   assert.deepEqual(closed, []);
-  await open(); assert.notEqual(node.querySelector("video"), first); assert.deepEqual(closed, ["first"]);
+  Object.assign(Object.getPrototypeOf(document.createElement("video")), { canPlayType: () => "" });
+  await open(); assert.equal(node.querySelector("video"), first); assert.deepEqual(closed, ["candidate-4"]);
+  Object.assign(Object.getPrototypeOf(document.createElement("video")), { canPlayType: () => "probably" });
+  await open();
+  await act(async () => node.querySelectorAll("video")[1]!.dispatchEvent(new dom.Event("error")));
+  assert.equal(node.querySelector("video"), first); assert.deepEqual(closed, ["candidate-4", "candidate-5"]);
+  await open(); const candidate = node.querySelectorAll("video")[1]!;
+  assert.equal(node.querySelector("video"), first, "the previous movie remains while the candidate decodes");
+  await act(async () => candidate.dispatchEvent(new dom.Event("loadeddata")));
+  assert.equal(node.querySelector("video"), candidate, "promotion preserves the already-decoded element");
+  assert.deepEqual(closed, ["candidate-4", "candidate-5", "first"]);
 });
 
 it("submits a fresh edition identity with the saved revision and explicit publication options", async t => {

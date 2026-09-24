@@ -41,7 +41,7 @@ export function publicationMedia(runner: MediaProcessRunner) {
       const video = videos[0];
       const mp4 = mediaType === "video/mp4";
       const format = data.format?.format_name ?? "";
-      if (videos.length !== 1 || audio.length > 1 || video?.pix_fmt !== "yuv420p" ||
+      if (videos.length !== 1 || audio.length > 1 || data.streams!.some(stream => !["video", "audio"].includes(stream.codec_type ?? "")) || video?.pix_fmt !== "yuv420p" ||
         (mp4 ? !format.split(",").includes("mp4") || video.codec_name !== "h264" || audio.some(s => s.codec_name !== "aac")
           : !format.split(",").includes("webm") || !["vp8", "vp9"].includes(video.codec_name ?? "") || audio.some(s => !["opus", "vorbis"].includes(s.codec_name ?? "")))) {
         throw new PublicationFileError("unsupported-codec", "Unsupported publication codec. Use H.264/AAC MP4 or VP8/VP9 WebM with Opus/Vorbis, in 8-bit 4:2:0.");

@@ -178,9 +178,10 @@ export class PublicationHost implements PublicationBridge {
         }, { outputRoot: intent.outputRoot, signal, onPhase: phase => { job.view.phase = phase === "prepared" ? "Publishing" : "Verifying output"; } });
         job.view = { ...job.view, status: "completed", phase: "Ready to play" };
       } catch (error) {
-        const permanent = error instanceof EncoderChanged || error instanceof PublicationFileError && error.code === "incomplete-publication";
+        const conflict = error instanceof PublicationFileError && error.code === "operation-conflict";
+        const permanent = error instanceof EncoderChanged || error instanceof PublicationFileError && error.code === "incomplete-publication" || conflict;
         job.view = { ...job.view, status: signal.aborted ? "cancelled" : "failed", phase: permanent ? "Create a new edition" : "Check or retry",
-          reason: this.reason(error), ...(permanent ? { retryable: false } : {}) };
+          reason: this.reason(error) + (conflict ? " Create a new edition." : ""), ...(permanent ? { retryable: false } : {}) };
       } finally { delete job.work; delete job.controller; }
     })();
   }

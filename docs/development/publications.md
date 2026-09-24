@@ -277,7 +277,8 @@ closing the world provider. Provider access lasts only through capture, so world
 available during encoding. The renderer does not own operation lifetime.
 Unreadable/incompatible intent files are preserved and reported individually without hiding valid
 jobs or blocking unrelated playback. A changed encoder on an unprepared retry explicitly requires
-a new edition; damaged prepared/completed data is likewise non-retryable, while transient system
+a new edition; conflicting saved operation identities and damaged prepared/completed data are
+likewise non-retryable, while transient system
 errors remain retryable. Native picker waits are raced against shutdown/renderer cancellation;
 late dialog answers cannot restart work. Clean video-v1 uses no drawtext: the adapter
 refuses accidental text-drawing graphs, while ordinary exports retain their bundled-font checks.
@@ -291,7 +292,9 @@ endpoint only. The public bridge contains neither paths nor credentials. Named d
 map to fixed product copy, including when their internal messages contain filesystem errors.
 
 The current native media preflight accepts H.264/AAC MP4 and VP8/VP9 WebM with Opus/Vorbis,
-one video and at most one audio stream, with 8-bit 4:2:0 video. Other codecs get `unsupported-codec`.
+one video and at most one audio stream, with 8-bit 4:2:0 video and no other embedded streams.
+Subtitle, data and attachment streams are refused; selectable text belongs in inventoried sidecars.
+Other codecs get `unsupported-codec`.
 The browser also checks `canPlayType`; later decode/asset errors remain visible. Caption preflight
 accepts bounded UTF-8 WebVTT with cue ids, plain timing lines, native cue text and NOTE blocks.
 It refuses styles, regions, cue settings, invalid/reversed/out-of-order times and cues beyond the
@@ -305,8 +308,10 @@ The client uses native media controls and an explicit captions/off selector. Res
 choice live in browser storage keyed by publication id and manifest digest, outside immutable files.
 Only the desktop host currently supplies disk opening/export; the reusable HTML player receives
 verified URLs. No browser upload host, book/audio/interactive profile or OTIO adapter is claimed.
-Cancelled or failed opens preserve current playback. A successful replacement mounts before the
-previous session is closed; the host allows at most two sessions for this handoff. Closing playback
+Cancelled or failed opens preserve current playback. A candidate video loads beside the current
+movie and remains hidden until Chromium decodes its first frame. Codec/decode failures or a 30-second
+readiness timeout discard only the candidate; promotion keeps its decoded element and closes the
+previous session after unmount. The host allows at most two sessions for this handoff. Closing playback
 removes its owned copy. A renderer reload/crash cancels pending opens and releases playback copies
 without cancelling host-owned export jobs. Abrupt exit can leave scratch files; no orphan
 sweep or power-loss durability guarantee is added by the UI.

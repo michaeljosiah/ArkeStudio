@@ -6,7 +6,7 @@ import { AppChrome } from "../components/chrome.js";
 import { readPublicationPreference, savePublicationPreference } from "../lib/publication-preferences.js";
 
 /** Native controls keep keyboard/seek/volume behavior; preferences never write into the edition. */
-export function PublicationVideo({ publication }: { publication: PublicationPlayback }) {
+export function PublicationVideo({ publication, onReady, onFailure }: { publication: PublicationPlayback; onReady?: () => void; onFailure?: (reason: string) => void }) {
   const video = useRef<HTMLVideoElement>(null);
   const { manifest } = publication;
   const key = `arke-publication:${manifest.id}:${publication.manifestSha256}`;
@@ -17,7 +17,10 @@ export function PublicationVideo({ publication }: { publication: PublicationPlay
   useEffect(() => {
     const element = video.current;
     if (!element) return;
-    if (element.canPlayType(publication.mediaType) === "") setError("This player does not support the publication’s video codec.");
+    if (element.canPlayType(publication.mediaType) === "") {
+      const reason = "This player does not support the publication’s video codec.";
+      setError(reason); onFailure?.(reason);
+    }
     else setSupported(true);
   }, [publication.mediaType]);
   const applyCaption = () => {
@@ -43,14 +46,15 @@ export function PublicationVideo({ publication }: { publication: PublicationPlay
   };
   useEffect(remember, [caption]);
   return <div className="fy-publication-video">
-    <video ref={video} controls crossOrigin="anonymous" preload="metadata" aria-label={manifest.title}
+    <video ref={video} controls crossOrigin="anonymous" preload={onReady ? "auto" : "metadata"} aria-label={manifest.title}
       src={supported ? publication.assets[manifest.content.video] : undefined}
       onLoadedMetadata={() => {
         const element = video.current!;
         if (saved.current.time < element.duration - 1) element.currentTime = saved.current.time;
         applyCaption();
       }} onPause={remember} onSeeked={remember} onTimeUpdate={remember}
-      onError={() => setError("The video could not be decoded or its media became unavailable.")}>
+      onLoadedData={onReady}
+      onError={() => { const reason = "The video could not be decoded or its media became unavailable."; setError(reason); onFailure?.(reason); }}>
       {supported && manifest.content.textTracks.map(track => <track key={track.asset} src={publication.assets[track.asset]} kind={track.kind}
         label={track.label} srcLang={track.language} default={track.asset === saved.current.caption} onLoad={applyCaption}
         onError={() => setError(`Could not load ${track.label}.`)} />)}
@@ -106,32 +110,43 @@ export function PublicationJobs({ worldId, productionId, onOpen }: { worldId?: s
 export function PublicationsScreen() {
   const [params, setParams] = useSearchParams();
   const [publication, setPublication] = useState<PublicationPlayback | null>(null);
+  const [pending, setPending] = useState<PublicationPlayback | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const alive = useRef(true);
   const opening = useRef(false);
+  const owned = useRef(new Set<string>());
   const bridge = typeof window === "undefined" ? undefined : window.arke?.publications;
+  const close = (id: string) => { if (owned.current.delete(id)) void bridge?.close(id).catch(() => {}); };
+  const finish = () => { opening.current = false; if (alive.current) setBusy(false); };
+  const failed = (reason: string) => { setPending(null); setError(reason); finish(); };
   const open = async (kind: "directory" | "zip" | { operationId: string }) => {
     if (!bridge || opening.current) return;
     opening.current = true;
     setBusy(true); setError(null);
+    let preparing = false;
     try {
       const result = await bridge.open(kind);
       if (!alive.current) { if (result.ok) await bridge.close(result.value.sessionId); return; }
-      if (result.ok) setPublication(result.value);
+      if (result.ok) { owned.current.add(result.value.sessionId); setPending(result.value); preparing = true; }
       else if (!result.cancelled) setError(result.reason);
     } catch { if (alive.current) setError("Could not open the publication."); }
-    finally { opening.current = false; if (alive.current) setBusy(false); }
+    finally { if (!preparing) finish(); }
   };
   useEffect(() => {
     alive.current = true;
-    return () => { alive.current = false; };
+    return () => { alive.current = false; for (const id of owned.current) close(id); };
   }, [bridge]);
-  useEffect(() => () => {
-    // The old video has unmounted before its pinned bytes are released. Cancelled/failed
-    // replacements never change this dependency, so the current movie remains playable.
-    if (publication) void bridge?.close(publication.sessionId).catch(() => {});
-  }, [bridge, publication?.sessionId]);
+  useEffect(() => {
+    // Dispose only after React has removed the old/failed element. A candidate remains hidden
+    // beside the current movie until Chromium has decoded its first frame, then keeps its key.
+    for (const id of owned.current) if (id !== publication?.sessionId && id !== pending?.sessionId) close(id);
+  }, [bridge, publication?.sessionId, pending?.sessionId]);
+  useEffect(() => {
+    if (!pending) return;
+    const timer = setTimeout(() => failed("The publication’s video did not become ready. Try opening it again."), 30_000);
+    return () => clearTimeout(timer);
+  }, [pending?.sessionId]);
   useEffect(() => {
     const id = params.get("operation");
     if (id && bridge) { setParams({}, { replace: true }); void open({ operationId: id }); }
@@ -148,7 +163,9 @@ export function PublicationsScreen() {
     {!bridge && <p>Open publications in the desktop app.</p>}
     {busy && <p role="status">Verifying publication…</p>}
     {error && <p role="alert">{error}</p>}
-    {publication && <PublicationVideo key={publication.sessionId} publication={publication} />}
+    {[publication, pending].filter((item): item is PublicationPlayback => item !== null).map(item => <div key={item.sessionId} hidden={item === pending}>
+      <PublicationVideo publication={item} {...(item === pending ? { onReady: () => { setPublication(item); setPending(null); finish(); }, onFailure: failed } : {})} />
+    </div>)}
     <PublicationJobs onOpen={id => void open({ operationId: id })} />
     </main>
   </div>;

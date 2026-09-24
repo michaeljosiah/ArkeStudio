@@ -75,7 +75,7 @@ app.whenReady().then(async () => {
   for (const kind of ['folder', 'ZIP']) {
     console.log('[smoke] opening ' + kind);
     await window.webContents.executeJavaScript('Array.from(document.querySelectorAll("button")).find(b => b.textContent === ' + JSON.stringify('Open ' + kind) + ').click()');
-    await wait('document.querySelector("video")?.readyState >= 1');
+    await wait('document.querySelector("video")?.readyState >= 1 && document.querySelector(".fy-publication-actions button").disabled === false');
     // preload=metadata need not decode a frame until play is requested, especially while hidden.
     await window.webContents.executeJavaScript('document.querySelector("video").muted = true; document.querySelector("video").play()', true);
     await wait('document.querySelector("video").readyState >= 2 && document.querySelector("video").currentTime > 0 && !document.querySelector("video").seeking');
@@ -110,7 +110,7 @@ app.whenReady().then(async () => {
     await window.loadFile(${JSON.stringify(join(repo, "packages/client/dist/index.html"))}, { hash: '/publications' });
     await wait('!!document.querySelector("[data-screen=publications]")');
     await window.webContents.executeJavaScript('Array.from(document.querySelectorAll("button")).find(b => b.textContent === "Open ZIP").click()');
-    await wait('document.querySelector("video")?.readyState >= 1');
+    await wait('document.querySelector("video")?.readyState >= 1 && document.querySelector(".fy-publication-actions button").disabled === false');
   }
   window.destroy(); await host.stop(); clearTimeout(timeout);
   console.log('[smoke] real file-page player: directory + ZIP, source removed, offline video, two tracks, captions off, keyboard play/pause, seek and renderer reload');

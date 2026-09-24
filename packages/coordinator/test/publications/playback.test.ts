@@ -42,7 +42,8 @@ it("refuses semantically broken captions even when their hashes match, and clean
 });
 it("rejects malformed, reversed, unordered or non-inert caption blocks", () => {
   for (const text of [vtt.replace("WEBVTT", "WEBVTTBAD"), vtt.replace("WEBVTT", "WEBVTT --> metadata"), vtt.replace("00:00:01.000", "00:00:00.000"), vtt.replace("Hello", ""),
-    "WEBVTT\n\nSTYLE\n::cue { color: red; }\n", vtt + "\n00:00:00.500 --> 00:00:01.500\nNext\n\n00:00:00.100 --> 00:00:01.500\nEarlier\n"]) {
+    "WEBVTT\n\nSTYLE\n::cue { color: red; }\n", vtt.replace("\n\n", "\n\nSTYLE\n"), vtt.replace("\n\n", "\n\nREGION\n"),
+    vtt + "\n00:00:00.500 --> 00:00:01.500\nNext\n\n00:00:00.100 --> 00:00:01.500\nEarlier\n"]) {
     assert.throws(() => validatePublicationVtt(text, 2), /WebVTT/);
   }
   validatePublicationVtt(vtt, 2); validatePublicationVtt("WEBVTT\n\n", 2);
