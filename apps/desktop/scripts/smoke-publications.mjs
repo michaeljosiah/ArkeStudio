@@ -48,7 +48,7 @@ import { writePublicationZip } from ${imports("packages/coordinator/src/publicat
 app.disableHardwareAcceleration();
 app.on('window-all-closed', () => {});
 app.setPath('userData', join(__dirname, 'profile'));
-const timeout = setTimeout(() => { console.error('Publication smoke timed out'); app.exit(1); }, 45000);
+const timeout = setTimeout(() => { console.error('Publication smoke timed out'); app.exit(1); }, 90000);
 app.whenReady().then(async () => {
   const source = join(__dirname, 'publication'); const zip = join(__dirname, 'publication.zip');
   await writePublicationZip(source, zip);
@@ -66,14 +66,22 @@ app.whenReady().then(async () => {
   window.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (details, callback) => callback({ cancel: new URL(details.url).hostname !== '127.0.0.1' }));
   await window.loadFile(${JSON.stringify(join(repo, "packages/client/dist/index.html"))}, { hash: '/publications' });
   const wait = async code => {
-    for (let n = 0; n < 150; n++) { if (await window.webContents.executeJavaScript(code)) return; await new Promise(resolve => setTimeout(resolve, 100)); }
+    for (let n = 0; n < 300; n++) { if (await window.webContents.executeJavaScript(code)) return; await new Promise(resolve => setTimeout(resolve, 100)); }
     throw new Error('UI condition failed: ' + code + '\\n' + await window.webContents.executeJavaScript('document.body.innerText'));
   };
   await wait('!!document.querySelector("[data-screen=publications]")');
   for (const kind of ['folder', 'ZIP']) {
     console.log('[smoke] opening ' + kind);
     await window.webContents.executeJavaScript('Array.from(document.querySelectorAll("button")).find(b => b.textContent === ' + JSON.stringify('Open ' + kind) + ').click()');
-    await wait('document.querySelector("video")?.readyState >= 2');
+    await wait('document.querySelector("video")?.readyState >= 1');
+    // preload=metadata need not decode a frame until play is requested, especially while hidden.
+    await window.webContents.executeJavaScript('document.querySelector("video").muted = true; document.querySelector("video").play()', true);
+    await wait('document.querySelector("video").readyState >= 2 && document.querySelector("video").currentTime > 0 && !document.querySelector("video").seeking');
+    await window.webContents.executeJavaScript('document.querySelector("video").pause()');
+    if (kind === 'ZIP') {
+      await wait('document.querySelector(".fy-publication-video select").value === ""');
+      await wait('document.querySelector("video").currentTime >= 1 && !document.querySelector("video").seeking');
+    }
     await rm(kind === 'folder' ? source : zip, { recursive: true, force: true });
     assert.equal(await window.webContents.executeJavaScript('document.querySelector("video").textTracks.length'), 2);
     await window.webContents.executeJavaScript('document.querySelector("video").muted = true; document.querySelector("video").currentTime = 1;');

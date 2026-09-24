@@ -48,6 +48,8 @@ it("preflights codecs, restores position, switches both caption kinds off/on and
   assert.equal(readPublicationPreference(key, "en").caption, "");
   assert.equal(node.querySelectorAll("track").length, 2);
   assert.equal(node.querySelector("track")!.getAttribute("kind"), "captions");
+  assert.equal(node.querySelector("track")!.hasAttribute("default"), false, "the package default must not override a saved track choice");
+  assert.equal(node.querySelectorAll("track")[1]!.hasAttribute("default"), true);
   assert.equal(video.getAttribute("src"), publication.assets.movie);
   Object.assign(prototype, { canPlayType: () => "" });
   await act(async () => root.render(<PublicationVideo key="unsupported" publication={publication} />));

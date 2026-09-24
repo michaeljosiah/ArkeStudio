@@ -39,7 +39,7 @@ export function PublicationVideo({ publication }: { publication: PublicationPlay
     return () => tracks.removeEventListener("change", changed);
   }, [supported, manifest]);
   const remember = () => {
-    savePublicationPreference(key, { time: video.current?.currentTime ?? saved.current.time, caption });
+    savePublicationPreference(key, { time: video.current && video.current.readyState >= 1 ? video.current.currentTime : saved.current.time, caption });
   };
   useEffect(remember, [caption]);
   return <div className="fy-publication-video">
@@ -52,7 +52,7 @@ export function PublicationVideo({ publication }: { publication: PublicationPlay
       }} onPause={remember} onSeeked={remember} onTimeUpdate={remember}
       onError={() => setError("The video could not be decoded or its media became unavailable.")}>
       {supported && manifest.content.textTracks.map(track => <track key={track.asset} src={publication.assets[track.asset]} kind={track.kind}
-        label={track.label} srcLang={track.language} default={track.default} onLoad={applyCaption}
+        label={track.label} srcLang={track.language} default={track.asset === saved.current.caption} onLoad={applyCaption}
         onError={() => setError(`Could not load ${track.label}.`)} />)}
     </video>
     <label className="fy-publication-field">Captions and subtitles
