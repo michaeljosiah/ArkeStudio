@@ -441,20 +441,65 @@ const ASK_MENU_WIDTH = 200;
  * Where the press beside a selection goes: at the end of the selected words, in the manuscript's
  * own coordinates. Off screen (no DOM selection to measure, as under test) it sits at the top.
  */
-function askAt(host: HTMLElement | null): { top: number; left: number; end: boolean } {
-  const selection = typeof window.getSelection === "function" ? window.getSelection() : null;
-  if (!host || !selection || selection.rangeCount === 0) return { top: 0, left: 0, end: false };
-  const rect = selection.getRangeAt(0).getBoundingClientRect();
+type AskAt = { top: number; left: number; end: boolean };
+const ASK_UNPLACED: AskAt = { top: 0, left: 0, end: false };
+
+/** The press beside words ending at (`right`, `bottom`) on screen, in the host's coordinates. */
+function askBeside(host: HTMLElement, right: number, bottom: number): AskAt {
   const frame = host.getBoundingClientRect();
-  if (rect.width === 0 && rect.height === 0) return { top: 0, left: 0, end: false };
-  const at = rect.right - frame.left + 8;
+  const at = right - frame.left + 8;
   return {
-    top: Math.max(0, rect.bottom - frame.top - 22),
+    top: Math.max(0, bottom - frame.top - 22),
     left: Math.max(0, Math.min(at, frame.width - 150)),
     // The menu is wider than the press (codex on PR 1232): near the right edge it opens leftward
     // from the press's end rather than over the dock.
     end: at > frame.width - ASK_MENU_WIDTH,
   };
+}
+
+function askAt(host: HTMLElement | null): AskAt {
+  const selection = typeof window.getSelection === "function" ? window.getSelection() : null;
+  if (!host || !selection || selection.rangeCount === 0) return ASK_UNPLACED;
+  const rect = selection.getRangeAt(0).getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) return ASK_UNPLACED;
+  return askBeside(host, rect.right, rect.bottom);
+}
+
+/** What lays text out in a textarea, copied to the mirror that measures where a selection ends. */
+const MIRRORED = [
+  "boxSizing", "width", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+  "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth", "borderStyle",
+  "fontFamily", "fontSize", "fontStyle", "fontVariant", "fontWeight", "letterSpacing", "lineHeight",
+  "textIndent", "textTransform", "tabSize", "wordSpacing",
+] as const;
+
+/**
+ * The same for the Markdown source (codex on PR 1232): a textarea's selection is not the
+ * document's, so `getSelection` measures nothing there, or something stale elsewhere. Where its
+ * selection ends is found by laying the text before it out again in a hidden copy of the box.
+ */
+function askAtSource(host: HTMLElement | null, area: HTMLTextAreaElement): AskAt {
+  if (!host || typeof window.getComputedStyle !== "function") return ASK_UNPLACED;
+  const box = area.getBoundingClientRect();
+  if (box.width === 0 && box.height === 0) return ASK_UNPLACED;
+  const style = window.getComputedStyle(area);
+  const mirror = document.createElement("div");
+  for (const key of MIRRORED) mirror.style[key] = style[key];
+  Object.assign(mirror.style, { position: "absolute", top: "0", left: "-9999px", visibility: "hidden", whiteSpace: "pre-wrap", overflowWrap: "break-word", height: "auto" });
+  mirror.textContent = area.value.slice(0, area.selectionEnd);
+  const mark = document.createElement("span");
+  mark.textContent = "\u200b";
+  mirror.appendChild(mark);
+  document.body.appendChild(mirror);
+  // A layout-less DOM (the tests') measures nothing; the offsets then count as the box's corner.
+  const [offsetLeft, offsetTop, offsetHeight] = [mark.offsetLeft || 0, mark.offsetTop || 0, mark.offsetHeight || 0];
+  mirror.remove();
+  const border = (side: string) => parseFloat(side) || 0;
+  return askBeside(
+    host,
+    box.left + border(style.borderLeftWidth) + offsetLeft - area.scrollLeft,
+    box.top + border(style.borderTopWidth) + offsetTop + offsetHeight - area.scrollTop,
+  );
 }
 
 export function ChapterWorkspace({
@@ -1152,9 +1197,10 @@ export function ChapterWorkspace({
   const manuscriptRef = useRef<HTMLDivElement | null>(null);
   // The paragraph rides with the words (codex on turn 128): the coordinator looks for the passage
   // there and only there, so an occurrence elsewhere can never be the one changed.
-  const onSelect = useCallback((text: string | null, paragraph: number | null = null) => {
+  const onSelect = useCallback((text: string | null, paragraph: number | null = null, source?: HTMLTextAreaElement) => {
     const subject = passageSubject(text);
-    setSelection(subject === null ? null : { text: subject, paragraph, ...askAt(manuscriptRef.current) });
+    const at = source === undefined ? askAt(manuscriptRef.current) : askAtSource(manuscriptRef.current, source);
+    setSelection(subject === null ? null : { text: subject, paragraph, ...at });
     // A subject flushes the pending autosave, as Read the chapter does (codex on turn 128): the
     // words the thread hears must be the words the coordinator will find, and an ask sent inside
     // the autosave window would otherwise quote prose the file does not hold yet.
@@ -1168,7 +1214,7 @@ export function ChapterWorkspace({
     // Anchored at the first word the ask quotes (codex on PR 1232): a drag begun on the blank line
     // before a paragraph is trimmed to that paragraph's words, and must be placed in it too.
     const lead = selected.length - selected.trimStart().length;
-    onSelect(selectionStart === selectionEnd ? null : selected, paragraphAt(text, selectionStart + lead));
+    onSelect(selectionStart === selectionEnd ? null : selected, paragraphAt(text, selectionStart + lead), e.currentTarget);
   };
   useEffect(() => {
     if (locked) setSelection(null);

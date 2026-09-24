@@ -1308,6 +1308,23 @@ describe("the craft loop (turn 128)", () => {
     }
   });
 
+  it("in the Markdown source, the press sits beside the selection, not the page's corner (codex on PR 1232)", async () => {
+    const m = await mount({ ...inkbound([], STYLE), world: { ...inkbound([], STYLE).world!, conversations: [THREAD] } });
+    await answerOpen(m);
+    const area = q(m, "textarea.fy-ch__source") as HTMLTextAreaElement;
+    const host = q(m, ".fy-ch__manuscript") as HTMLElement;
+    const rect = (left: number, top: number, width: number, height: number) =>
+      ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON() {} });
+    // The manuscript at (100, 50); the source box inside it at (120, 80). A layout-less DOM lays
+    // nothing out, so the selection's end measures at the box's corner, past its scroll.
+    Object.assign(host, { getBoundingClientRect: () => rect(100, 50, 800, 600) });
+    Object.assign(area, { getBoundingClientRect: () => rect(120, 80, 700, 500), scrollTop: 0, scrollLeft: 0 });
+    await keyup(area, 0, 24);
+    const press = q(m, ".fy-ch__ask-wrap") as HTMLElement;
+    assert.match(press.getAttribute("style") ?? "", /left:\s*28px/, "measured from the source box, not the document's selection");
+    assert.match(press.getAttribute("style") ?? "", /top:\s*8px/);
+  });
+
   it("with no prose style, the dock offers no holding against one (codex on PR 1232)", async () => {
     const m = await mount({ ...inkbound([]), world: { ...inkbound([]).world!, conversations: [THREAD] } });
     await answerOpen(m);
