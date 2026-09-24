@@ -35,7 +35,7 @@ import { PropIdSchema, PropStateIdSchema } from "./prop.js";
 import { ProseReadSourceSchema } from "./prose.js";
 import { SceneCommandSchema } from "./scene-operations.js";
 import { SizeTierSchema } from "./manifest.js";
-import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
+import { CapabilitySchema, ModelChoicesSchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
 import { HarnessEngineSchema } from "./harness.js";
 import { BackgroundNotificationPreferenceSchema, NarratorSettingsSchema, ThemePreferenceSchema } from "./settings.js";
@@ -129,6 +129,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        * the sandbox, and handing something over would have meant nothing.
        */
       genesisId: GenesisIdSchema.optional(),
+      /**
+       * The models chosen on the genesis card (design turn 153). Held by the screen until the
+       * world exists, and sent with every frame that spends or founds, so the preview, the
+       * review's prices and the press all read the same choice. Absent entries follow Settings.
+       */
+      models: ModelChoicesSchema.optional(),
     })
     .strict(),
   z
@@ -887,6 +893,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        * founded on, so a preview the author then rewrote is named as lost, not as carried.
        */
       look: z.string().trim().max(2000).optional(),
+      models: ModelChoicesSchema.optional(),
     })
     .strict(),
   /**
@@ -907,6 +914,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        * staleness test reads (R-54).
        */
       look: z.string().trim().max(2000).optional(),
+      /** Written into world.json as the world is created, and read by the build's image route. */
+      models: ModelChoicesSchema.optional(),
     })
     .strict(),
   /** The author's Stop — the only halt a run has (SPEC-031 R-35). */
@@ -926,7 +935,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * if the look it was made from is the look the world is founded on (R-53, R-54).
    */
   z
-    .object({ kind: z.literal("generate-look-preview"), genesisId: GenesisIdSchema, requestId: UlidSchema })
+    .object({
+      kind: z.literal("generate-look-preview"),
+      genesisId: GenesisIdSchema,
+      requestId: UlidSchema,
+      models: ModelChoicesSchema.optional(),
+    })
     .strict(),
   /**
    * Run one build item — or, with no key, everything runnable that has not landed, which is
@@ -2170,6 +2184,18 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       productionId: SlugSchema,
       aspect: z.string().min(1).max(20),
+    })
+    .strict(),
+  /**
+   * Which model this world's own work reaches for (design turn 153). `null` clears it, which is
+   * how the world goes back to following Settings — never by writing the default's id.
+   */
+  z
+    .object({
+      kind: z.literal("set-world-model"),
+      worldId: UlidSchema,
+      capability: CapabilitySchema,
+      modelId: z.string().min(1).nullable(),
     })
     .strict(),
   /**

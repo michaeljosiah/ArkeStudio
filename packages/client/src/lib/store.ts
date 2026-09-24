@@ -9,6 +9,7 @@ import {
   type BenchParams,
   type BibleHelperKind,
   type Capability,
+  type ModelChoices,
   type ChangeRecord,
   type ClientMessage,
   type ClientState,
@@ -2218,6 +2219,8 @@ export function createWorld(input: {
   bible?: string;
   /** Begun from a conversation: its attachments are filed into the world as it opens. */
   genesisId?: string;
+  /** The genesis card's models (design turn 153), written into the new world. */
+  models?: ModelChoices;
 }): void {
   send({ kind: "create-world", ...input });
 }
@@ -2665,14 +2668,27 @@ export function genesisDiscard(genesisId: string): void {
 
 // ---- The founding build (SPEC-031) ----------------------------------------
 
-export function planFoundingBuild(genesisId: string, requestId: string, look?: string): void {
+export function planFoundingBuild(genesisId: string, requestId: string, look?: string, models?: ModelChoices): void {
   // The same look the press will send: the review's master-look note is only true if it asks
   // the carry question against the words the world would actually be founded on (SPEC-031 R-54).
-  send({ kind: "plan-founding-build", genesisId, requestId, ...(look !== undefined ? { look } : {}) });
+  // The same holds for the models: the review prices the build on the model the press will use.
+  send({
+    kind: "plan-founding-build",
+    genesisId,
+    requestId,
+    ...(look !== undefined ? { look } : {}),
+    ...(models !== undefined ? { models } : {}),
+  });
 }
 
-export function beginFoundingBuild(genesisId: string, requestId: string, look?: string): void {
-  send({ kind: "begin-founding-build", genesisId, requestId, ...(look !== undefined ? { look } : {}) });
+export function beginFoundingBuild(genesisId: string, requestId: string, look?: string, models?: ModelChoices): void {
+  send({
+    kind: "begin-founding-build",
+    genesisId,
+    requestId,
+    ...(look !== undefined ? { look } : {}),
+    ...(models !== undefined ? { models } : {}),
+  });
 }
 
 export function stopFoundingBuild(worldId: string): void {
@@ -2689,8 +2705,8 @@ export function dismissBuildNotice(worldId: string): void {
 }
 
 /** One picture of the look, from inside the conversation (SPEC-031 R-50) — a person pressed. */
-export function generateLookPreview(genesisId: string): void {
-  send({ kind: "generate-look-preview", genesisId, requestId: ulid() });
+export function generateLookPreview(genesisId: string, models?: ModelChoices): void {
+  send({ kind: "generate-look-preview", genesisId, requestId: ulid(), ...(models !== undefined ? { models } : {}) });
 }
 
 /** What key art would carry and drop — asked when the dialog opens (SPEC-010 R-15). */
@@ -3025,6 +3041,14 @@ export function setProductionModel(
   modelId: string | null,
 ): void {
   send({ kind: "set-production-model", worldId, productionId, capability, modelId });
+}
+
+/**
+ * Which model this world's own work reaches for, per capability (design turn 153). `null` clears
+ * it, which is how the world goes back to following Settings.
+ */
+export function setWorldModel(worldId: string, capability: Capability, modelId: string | null): void {
+  send({ kind: "set-world-model", worldId, capability, modelId });
 }
 
 /** Offer a model, or stop offering it. Never edits routing — a stranded default is shown instead. */

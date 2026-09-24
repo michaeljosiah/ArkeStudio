@@ -31,6 +31,32 @@ export const CapabilitySchema = z.enum([
 ]);
 export type Capability = z.infer<typeof CapabilitySchema>;
 
+/**
+ * A scope's own model per capability — a world's or a production's (SPEC-033 §1.12; design
+ * turn 153). Each entry is a concrete model id, and an absent entry means "follow Settings":
+ * the scope inherits the routing default rather than a copy of it, so changing the default in
+ * Settings still reaches every world and production that never chose.
+ */
+export const ModelChoicesSchema = z.record(CapabilitySchema, z.string().min(1));
+export type ModelChoices = z.infer<typeof ModelChoicesSchema>;
+
+/**
+ * The id a scope resolves to for a capability, and where it came from.
+ *
+ * Two scopes with one parent (design turn 153): world work reads the world's choice, production
+ * work reads the production's, and both fall back to Settings — never to each other. A world's
+ * choice is for making the world; a production that wants the same model says so on its own.
+ */
+export function scopedModelId(
+  scope: Partial<Record<Capability, string>> | undefined,
+  routing: Partial<Record<Capability, string>> | undefined,
+  capability: Capability,
+): { id: string | undefined; source: "scope" | "default" } {
+  const own = scope?.[capability];
+  if (own !== undefined) return { id: own, source: "scope" };
+  return { id: routing?.[capability], source: "default" };
+}
+
 export const ProviderIdSchema = z.enum([
   "fal",
   "higgsfield",

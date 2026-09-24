@@ -4,7 +4,7 @@ import { ChapterAudiobookStateSchema } from "./audiobook.js";
 // The same bound the world's list uses, shared rather than restated: two copies of one
 // constraint is how a list and its copy come to disagree (issue 243's finalization bug).
 import { FailureModesSchema } from "./art-direction.js";
-import { CapabilitySchema } from "./provider.js";
+import { ModelChoicesSchema } from "./provider.js";
 
 /**
  * The world entity model (master spec §2). Prose lives in Markdown with YAML frontmatter,
@@ -51,6 +51,16 @@ export const WorldMetaSchema = z
     logline: z.string().optional(),
     tone: z.string().optional(),
     genre: z.string().optional(),
+    /**
+     * Which model this world's own work reaches for, per capability (design turn 153): the look
+     * preview, the founding build, key art, master looks, main photos, and character and location
+     * sheets. Absent entries follow Settings.
+     *
+     * On the world and not in app settings for the reason the production's `models` gives: it
+     * travels with the folder, and an installation-level store would collide across copies. It is
+     * not a production's default — a production falls back to Settings, never to its world.
+     */
+    models: ModelChoicesSchema.optional(),
     /** One monotonic world-level canon revision (§2.4). */
     canonRevision: z.number().int().min(0),
     /** Persisted allocation counter — canon ids are never reused (§2.3.1, R-CANON-4). */
@@ -305,7 +315,7 @@ export const ProductionSchema = z
      * It seeds the dispatch picker and does not lock it: the per-dispatch override is unchanged,
      * and a choice that cannot be honoured is stated at dispatch rather than silently swapped.
      */
-    models: z.record(CapabilitySchema, z.string().min(1)).optional(),
+    models: ModelChoicesSchema.optional(),
     /** Added to the world's failure modes at dispatch, never instead of them. */
     failureModes: FailureModesSchema,
     created: IsoDateTimeSchema,

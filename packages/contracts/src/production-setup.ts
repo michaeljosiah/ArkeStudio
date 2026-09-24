@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ConversationIdSchema, SlugSchema, UlidSchema, Sha256Schema, TurnIdSchema } from "./ids.js";
 import { FrameRateSchema, SeasonSchema, pickableSheets, type Sheet } from "./world.js";
+import { ModelChoicesSchema } from "./provider.js";
 import { ScriptBlockSchema } from "./scene.js";
 import { NarrativeFieldsSchema } from "./production-narrative.js";
 import { MICRODRAMA_DEFAULTS, ProductionCreationPlanSchema } from "./production-creation.js";
@@ -43,6 +44,11 @@ const SetupFieldsSchema = z.object({
   arcs: z.array(SetupArcSchema).max(PRODUCTION_SETUP_BOUNDS.arcs),
   references: z.array(SlugSchema).max(PRODUCTION_SETUP_BOUNDS.references),
   openQuestions: z.array(z.string().min(1).max(PRODUCTION_SETUP_BOUNDS.question)).max(PRODUCTION_SETUP_BOUNDS.questions),
+  /**
+   * The production's own models, chosen on the setup card (design turn 153) and written with the
+   * production. Absent entries follow Settings — not the world's choice.
+   */
+  models: ModelChoicesSchema.optional(),
 }).strict();
 export const ProductionSetupDraftSchema = SetupFieldsSchema.extend({
   schemaVersion: z.literal(1),
@@ -107,6 +113,9 @@ export function applyProductionSetupUpdate(draft: ProductionSetupDraft, raw: Pro
 
   return ProductionSetupDraftSchema.parse({
     ...draft, ...update.fields, revision: draft.revision + 1,
+    // Clearing the last model removes the key: an empty map on disk reads as a choice that was
+    // made and then emptied, which is not the same as never having made one.
+    ...(update.fields?.models !== undefined && Object.keys(update.fields.models).length === 0 ? { models: undefined } : {}),
     narrative: { ...draft.narrative, ...update.fields?.narrative },
     series: update.fields?.series === null ? undefined : update.fields?.series
       ? { ...draft.series, ...update.fields.series } : draft.series,

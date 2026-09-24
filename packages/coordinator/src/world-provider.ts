@@ -1,4 +1,4 @@
-import type { WorldBundle, WorldSummary, WorldImageReference } from "@arke-studio/contracts";
+import type { Capability, WorldBundle, WorldSummary, WorldImageReference } from "@arke-studio/contracts";
 import type { ProposalManager } from "./gate/proposals.js";
 import type { WorldStore } from "./world/store.js";
 
@@ -22,6 +22,8 @@ export interface WorldProvider {
     genre?: string;
     artDirection?: string;
     bible?: string;
+    /** The genesis card's models (design turn 153), written into world.json. */
+    models?: Partial<Record<Capability, string>>;
   }): Promise<{ worldId: string; slug: string }>;
   /** Move a world out of the library into `archive/`, whole. Returns where it went. */
   archiveWorld?(worldId: string): Promise<{ folder: string }>;

@@ -22,6 +22,7 @@ import { FactRow } from "./settings-providers.js";
 // Providers absorbed both surfaces (SPEC-034 R-5), so its pane draws their parts: the engine
 // details unabridged, and one engine's models grouped by the provider that owns them.
 import { eligibilityInputs, strandReason } from "../components/dispatch-bar.js";
+import { ModelsCard, WORLD_MODEL_CAPABILITIES, modelFacts, withModelChoice } from "../components/models-card.js";
 import { AppChrome } from "../components/chrome.js";
 import type { StartupState } from "../arke-bridge.js";
 import { Working } from "../components/working.js";
@@ -92,8 +93,7 @@ import {
   type HarnessAvailability,
   type HarnessEngine,
   OPENCODE_AVAILABILITY,
-  type ManifestModel,
-  type ProviderId,
+  type ModelChoices,
   type VendorAuthMethod,
   type VendorIntegration,
   type VendorSignIn,
@@ -104,8 +104,6 @@ import {
   modelForCapability,
   supportsVoiceUse,
   ulid,
-  ENGINE_LABEL,
-  engineOfProvider,
   modelEligible,
 } from "@arke-studio/contracts";
 
@@ -760,6 +758,10 @@ export function NewWorldScreen() {
   const [lookSource, setLookSource] = useState<"conversation" | "preset" | null>(null);
   const conversationLookRef = useRef<string | null>(null);
   const seededRef = useRef(false);
+  // The world's own models, chosen on the card before the world exists (design turn 153). Held
+  // here and sent with every frame that spends or founds — the preview, the review, the press —
+  // so the price reviewed is the model the build runs on. Absent entries follow Settings.
+  const [models, setModels] = useState<ModelChoices | undefined>(undefined);
   const [genMode, setGenMode] = useState<"form" | "chat">("form");
   const modeTouchedRef = useRef(false);
   const genesisIdRef = useRef(`gen-${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`);
@@ -831,7 +833,7 @@ export function NewWorldScreen() {
   const previewEstimate = (() => {
     const manifest = state?.app.manifest;
     if (!manifest) return null;
-    const routed = modelForCapability(manifest, state?.app.routing.defaults, "image");
+    const routed = modelForCapability(manifest, { ...state?.app.routing.defaults, ...models }, "image");
     if (!routed || state?.app.models.disabled.includes(routed.id)) return null;
     return estimateImageMicroUsd(routed, { landscape: true });
   })();
@@ -894,12 +896,31 @@ export function NewWorldScreen() {
   // exactly what the coordinator would refuse the press for. Either change asks the plan
   // again. A look the conversation proposed follows the conversation; words the author edited
   // or chose from a preset stay theirs.
-  const plannedAgainst = useRef<{ blueprint: typeof blueprint; preview: string | null } | null>(null);
+  // What the build's image route resolves from, as one comparable string: the card's choice or
+  // the Settings default it follows, whether that model is switched off, and its provider's key.
+  // Any of them can change behind an open card — the gear goes to Settings and back — and the
+  // review must be asked again, or it shows one model and price while the press spends on another.
+  const imageRoute = (() => {
+    // Resolved the way the build resolves it: the card's choice, else what Settings routes —
+    // which, with no saved default, is the manifest's first image model, not nothing.
+    const manifest = state?.app.manifest;
+    const id = models?.image ?? (manifest ? modelForCapability(manifest, state?.app.routing.defaults, "image")?.id : undefined);
+    const model = id === undefined ? undefined : manifest?.models.find((m) => m.id === id);
+    const provider = model === undefined ? undefined : state?.app.providers.find((p) => p.id === model.provider);
+    return [
+      id ?? "",
+      model === undefined ? "missing" : "listed",
+      id !== undefined && state?.app.models.disabled.includes(id) ? "off" : "on",
+      provider?.configured === true ? "keyed" : "unkeyed",
+      provider?.validation ?? "",
+    ].join("|");
+  })();
+  const plannedAgainst = useRef<{ blueprint: typeof blueprint; preview: string | null; route: string } | null>(null);
   useEffect(() => {
     if (!buildCardOpen || buildPressed) return;
     const preview = previewJob?.status ?? null;
     const last = plannedAgainst.current;
-    if (last !== null && last.blueprint === blueprint && last.preview === preview) return;
+    if (last !== null && last.blueprint === blueprint && last.preview === preview && last.route === imageRoute) return;
     let lookText = lookForBuild;
     if (lookSource === "conversation" && look.trim() === conversationLookRef.current) {
       lookText = blueprint?.look?.trim() ?? "";
@@ -907,23 +928,23 @@ export function NewWorldScreen() {
       setLook(lookText);
       setLookForBuild(lookText);
     }
-    plannedAgainst.current = { blueprint, preview };
+    plannedAgainst.current = { blueprint, preview, route: imageRoute };
     const requestId = ulid();
     setPlanRequestId(requestId);
     setPlanStartedAt(new Date().toISOString());
     // A refusal answered the blueprint that moved; the fresh plan is the review it asked for.
     setBuildRequestId(null);
-    planFoundingBuild(genesisId, requestId, lookText);
-  }, [buildCardOpen, buildPressed, previewJob?.status, blueprint, lookForBuild, look, lookSource, genesisId]);
+    planFoundingBuild(genesisId, requestId, lookText, models);
+  }, [buildCardOpen, buildPressed, previewJob?.status, blueprint, lookForBuild, look, lookSource, genesisId, models, imageRoute]);
 
   const openBuildCard = (lookText: string) => {
     setLookForBuild(lookText);
     setBuildRequestId(null);
-    plannedAgainst.current = { blueprint, preview: previewJob?.status ?? null };
+    plannedAgainst.current = { blueprint, preview: previewJob?.status ?? null, route: imageRoute };
     const requestId = ulid();
     setPlanRequestId(requestId);
     setPlanStartedAt(new Date().toISOString());
-    planFoundingBuild(genesisId, requestId, lookText);
+    planFoundingBuild(genesisId, requestId, lookText, models);
     setStep("draft");
   };
 
@@ -963,6 +984,7 @@ export function NewWorldScreen() {
       // something is attached: the sandbox is the source of truth for what is waiting, and the
       // screen's idea of it can lag an event behind.
       genesisId,
+      ...(models !== undefined ? { models } : {}),
     });
   };
 
@@ -1174,7 +1196,7 @@ export function NewWorldScreen() {
                               variant="outline"
                               size="sm"
                               disabled={previewEstimate === null}
-                              onClick={() => generateLookPreview(genesisId)}
+                              onClick={() => generateLookPreview(genesisId, models)}
                             >
                               See the look{previewEstimate !== null ? ` · ~${formatMicroUsd(previewEstimate)}` : ""}
                             </Button>
@@ -1200,7 +1222,7 @@ export function NewWorldScreen() {
                         if (buildRequestRef.current === null) buildRequestRef.current = ulid();
                         setBuildRequestId(buildRequestRef.current);
                         setBuildPressed(true);
-                        beginFoundingBuild(genesisId, buildRequestRef.current, lookForBuild);
+                        beginFoundingBuild(genesisId, buildRequestRef.current, lookForBuild, models);
                       }}
                     />
                   </div>
@@ -1470,6 +1492,17 @@ export function NewWorldScreen() {
             </div>
           )}
           <div style={{ flex: 1, minHeight: 16 }} />
+          {/* The models this world will make with, chosen where the world is begun (design turn
+              153) — last in the world so far, above the press that spends on them. Locked once
+              the build is pressed: the run froze its route. */}
+          <ModelsCard
+            state={state}
+            capabilities={WORLD_MODEL_CAPABILITIES}
+            choices={models}
+            scopeWord="this world"
+            disabled={buildPressed || submittedName !== null}
+            onChange={(capability, modelId) => setModels((current) => withModelChoice(current, capability, modelId))}
+          />
           <div style={{ display: "grid", gap: 8 }}>
             <Button
               variant="primary"
@@ -2218,64 +2251,9 @@ export function SettingsGeneralScreen() {
   const manifest = state?.app.manifest ?? null;
   const routing = state?.app.routing ?? { defaults: {}, faults: [] };
   const drift = state?.app.drift ?? [];
-  const statuses = state?.app.providers ?? [];
   const eligibility = eligibilityInputs(state);
-  /**
-   * Stored, tested, or neither — the three things Providers actually knows (SPEC-028 R-33), as
-   * the state cell says them. `not tested` is muted and carries no dot (issue 991): a key nobody
-   * has tried is not an unwell one.
-   */
-  const providerState = (id: ProviderId): string => {
-    const status = statuses.find((p) => p.id === id);
-    if (status?.configured !== true) return PROVIDER_TABLE[id].credential === "external" ? "not signed in" : "no key";
-    if (status.validation === "valid") return "connected";
-    if (status.validation === "invalid") return "key rejected";
-    // `testing` is its own state and reads as one: a key mid-validation is not the same thing as
-    // one nobody has tried, and the words are the ones the provider table actually has.
-    return status.validation === "testing" ? "testing" : "not tested";
-  };
-  /**
-   * Why a stranded default cannot run, in the state cell's three words. `strandReason` keeps the
-   * sentence for the option list, where a row has room to say whose key is missing; here the
-   * control already names the provider, so the state names only what is wrong with it.
-   */
-  const strandState = (model: ManifestModel): string => {
-    if ((state?.app.models.disabled ?? []).includes(model.id)) return "turned off";
-    const fit = (state?.app.runtime?.models ?? []).find((row) => row.modelId === model.id)?.fit;
-    if (fit === "insufficient" || fit === "unsupported") return "cannot run here";
-    if (PROVIDER_TABLE[model.provider].local) return "not ready";
-    const status = statuses.find((p) => p.id === model.provider);
-    if (status?.validation === "invalid") return "key rejected";
-    if (status?.configured !== true) return providerState(model.provider);
-    return "not unlocked";
-  };
-  /**
-   * What to call the thing a default comes from, which is not the same word on both halves.
-   *
-   * A keyed service is its own source and names itself. A local model's is the **engine**, which
-   * is what Providers' rail is keyed on: `Voxa · Kokoro 82M` rather than `Kokoro · Kokoro 82M`,
-   * because the reader who wants to act on it goes to Voxa's pane. The id is what carries the
-   * mark (SPEC-042 R-20), and the engine's mark is the engine's.
-   */
-  const sourceOf = (model: ManifestModel): { id: string; label: string } => {
-    const engine = engineOfProvider(model.provider);
-    return engine === undefined
-      ? { id: model.provider, label: PROVIDER_TABLE[model.provider].displayName }
-      : { id: engine, label: ENGINE_LABEL[engine] };
-  };
-  /**
-   * Where a model actually runs (R-16a), from the resolved engine rather than the provider flag.
-   * `PROVIDERS.comfyui.local` is `true` for every recipe, so reading the flag would tell someone
-   * their video drafts here while it renders on a box down the hall.
-   */
-  const runsOn = (model: ManifestModel): string => {
-    if (!PROVIDER_TABLE[model.provider].local) return providerState(model.provider);
-    const gated = (state?.app.runtime?.models ?? []).find((m) => m.modelId === model.id);
-    const locality =
-      gated?.locality ??
-      (model.provider === "comfyui" ? (state?.app.comfyui?.engine.locality ?? "local") : "local");
-    return locality === "remote" ? "another machine" : "this machine";
-  };
+  // The state cell's words, shared with the Models card so the two never disagree (turn 153).
+  const { strandState, sourceOf, runsOn } = modelFacts(state);
   const warn = (words: string) => (
     <span className="fy-fact__state fy-fact__state--warn">
       <span className="fy-set__dot fy-set__dot--warn" aria-hidden="true" />

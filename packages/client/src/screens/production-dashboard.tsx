@@ -6,6 +6,7 @@ import {
   STANDARD_ASPECTS,
   storyProgressDay,
   targetWords,
+  type ModelChoices,
 } from "@arke-studio/contracts";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
@@ -13,6 +14,7 @@ import { Composer } from "../components/composer.js";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Portrait } from "../components/portrait.js";
 import { Button } from "../components/ui.js";
+import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES } from "../components/models-card.js";
 import { seconds, usd } from "../lib/format.js";
 import { acceptedTakeId, isDayOne, takeDecisions, useProduction } from "../lib/selectors.js";
 import {
@@ -20,7 +22,9 @@ import {
   attachHostText,
   hostCanAttach,
   setProductionAspect,
+  setProductionModel,
   uploadArtifacts,
+  useStore,
 } from "../lib/store.js";
 import { decisionTone, takeMediaPath } from "../lib/take-presentation.js";
 import { DevelopmentWorkspace } from "./development.js";
@@ -188,10 +192,12 @@ export function ProductionDashboardScreen() {
               a box to type in. Delivery postdates that drawing and is the app's own (issue 389),
               so it sits where it cannot interrupt the opening. */}
           <DeliveryAspect production={production} worldId={worldId} prodId={prodId} />
+          <ProductionModels production={production} worldId={worldId} prodId={prodId} />
         </>
       ) : (
         <>
           <DeliveryAspect production={production} worldId={worldId} prodId={prodId} />
+          <ProductionModels production={production} worldId={worldId} prodId={prodId} />
           <div className="fy-dashrow">
             <div className="fy-threadcard">
               <div className="fy-threadcard__head">
@@ -323,6 +329,33 @@ export function ProductionDashboardScreen() {
  * The one editable delivery-profile field (issue 389): validated and normalized server-side,
  * refused per route at dispatch, and every planning surface reads it.
  */
+/**
+ * The production's own models (design turn 153): the same card it was set up with, changed here
+ * after. It writes the field "Remember for this production" writes, and each row follows
+ * Settings — not the world — until someone chooses.
+ */
+function ProductionModels({
+  production,
+  worldId,
+  prodId,
+}: {
+  production: { meta: { models?: ModelChoices } };
+  worldId: string | undefined;
+  prodId: string | undefined;
+}) {
+  const { state } = useStore();
+  if (worldId === undefined || prodId === undefined) return null;
+  return (
+    <ModelsCard
+      state={state}
+      capabilities={PRODUCTION_MODEL_CAPABILITIES}
+      choices={production.meta.models}
+      scopeWord="this production"
+      onChange={(capability, modelId) => setProductionModel(worldId, prodId, capability, modelId)}
+    />
+  );
+}
+
 function DeliveryAspect({
   production,
   worldId,

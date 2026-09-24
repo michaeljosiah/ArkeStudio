@@ -11,6 +11,7 @@ import { Composer } from "../components/composer.js";
 import { ProductionSetupOutline } from "../components/production-setup-outline.js";
 import { Button } from "../components/ui.js";
 import { HarnessModelOptions, HarnessModelStatus } from "../components/harness-models.js";
+import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES, withModelChoice } from "../components/models-card.js";
 
 /** Same transcript and composer as production chat; the rail is the authoritative setup draft. */
 export function ProductionSetupScreen() {
@@ -159,6 +160,17 @@ export function ProductionSetupScreen() {
                   onBlur={event => { if (event.target.value) update({ defaults: { episodeSecondsMax: Number(event.target.value) } }); }} /></label>
               </div>}
             </fieldset>
+            {/* The production's own models (design turn 153), written with the production. Each
+                row follows Settings until chosen here — Settings, not the world: the world's
+                choice was for making the world. */}
+            <ModelsCard
+              state={state}
+              capabilities={PRODUCTION_MODEL_CAPABILITIES}
+              choices={draft.models}
+              scopeWord="this production"
+              disabled={!!pending || running || locked}
+              onChange={(capability, modelId) => update({ models: withModelChoice(draft.models, capability, modelId) ?? {} })}
+            />
             {draft.logline && <p>{draft.logline}</p>}
             <ProductionSetupOutline draft={draft} sheetName={id => world?.sheets.find(sheet => sheet.id === id)?.name ?? id} />
             {problems.length > 0 && <div className="fy-production-setup__problems" role="status"><h3>Still to resolve</h3><ul>{problems.map((problem, i) => <li key={i}>{problem}</li>)}</ul>

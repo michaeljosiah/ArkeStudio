@@ -10,6 +10,7 @@ import {
   modelForCapability,
   nativeResolution,
   type AppSettings,
+  type Capability,
   type CharacterImageWorkflow,
   type ManifestModel,
   type ModelManifest,
@@ -456,7 +457,14 @@ export function imageModelFor(
   settings: AppSettings | null,
   manifest: ModelManifest,
   requestedId?: string,
+  /**
+   * The scope's own choices — the world's for world work, a genesis card's before the world
+   * exists (design turn 153). Its image entry outranks Settings and is held to the same rule as
+   * a requested id: a choice that cannot run is refused, never replaced with the default.
+   */
+  scope?: Partial<Record<Capability, string>>,
 ): ManifestModel | null {
+  requestedId ??= scope?.image;
   if (requestedId !== undefined) {
     const requested = manifest.models.find((m) => m.id === requestedId && m.capability === "image");
     if (!requested) return null;

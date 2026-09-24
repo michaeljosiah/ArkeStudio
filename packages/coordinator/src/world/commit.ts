@@ -294,6 +294,13 @@ export const AUDIOBOOK_DIRECTION_SCHEMA_VERSION = 24;
  * the whole sidecar. Fenced with the first sidecar that carries it, as the direction was.
  */
 export const AUDIOBOOK_REMAKE_SCHEMA_VERSION = 25;
+/**
+ * A world's own models (design turn 153): `models` on world.json, and on a production setup
+ * draft. Both schemas are strict, so a build that predates the field fails the parse — for
+ * world.json that drops the whole world from the list rather than saying an update is needed.
+ * Fenced with the first write that carries it, including a world founded with a choice.
+ */
+export const WORLD_MODELS_SCHEMA_VERSION = 27;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {

@@ -7,6 +7,7 @@ import {
   ArtDirectionRecordSchema,
   BIBLE_PATH,
   WorldAuthoredFieldChangesSchema,
+  type Capability,
   type ExternalEdit,
   type WorldAuthoredFieldChanges,
   type WorldBundle,
@@ -16,7 +17,7 @@ import { completesFoundingLook } from "../references/master-look.js";
 import { WorldIndex } from "../index-db/world-index.js";
 import type { DatabaseCtor } from "../index-db/sqlite.js";
 import { restoredSceneContent } from "../productions/scene-record.js";
-import { atomicWriteFile } from "./atomic.js";
+import { atomicWriteFile, serializeFileMutation } from "./atomic.js";
 import { readBible } from "./bible.js";
 import { readChanges } from "./change-writer.js";
 import {
@@ -28,6 +29,7 @@ import {
   type CommitInput,
   type CommitResult,
   type PendingCommit,
+  WORLD_MODELS_SCHEMA_VERSION,
 } from "./commit.js";
 import { WorldLock, type WorldLockOptions } from "./lock.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
@@ -403,6 +405,31 @@ export class WorldStore {
       undefined,
       precondition,
     );
+  }
+
+  /**
+   * Which model this world's own work reaches for, per capability (design turn 153). `null`
+   * clears it, and clearing the last one removes the key: an empty map reads as a choice made
+   * and then emptied, which is not the same as never having chosen.
+   */
+  async setWorldModel(capability: Capability, modelId: string | null, source = "form"): Promise<CommitResult> {
+    // Read and commit as one step. The map is built from the live bundle, so two rows changed in
+    // one breath would each copy the same map and the second commit would erase the first
+    // capability — the same race the production's choice closes on production.json.
+    return serializeFileMutation(join(this.dir, "world.json"), async () => {
+      const current: Partial<Record<Capability, string>> = { ...this.getBundle().meta.models };
+      delete current[capability];
+      if (modelId !== null) current[capability] = modelId;
+      return this.commit({
+        kind: "world-metadata-edit",
+        source,
+        files: [],
+        worldFields: { models: Object.keys(current).length > 0 ? current : null },
+        // Raised with the bytes that need it, never ahead of them: a world that only ever
+        // clears stays openable by the builds before the field.
+        ...(modelId !== null ? { raiseSchemaVersion: WORLD_MODELS_SCHEMA_VERSION } : {}),
+      });
+    });
   }
 
   /** Retire, never delete (R-26): the entity stays on disk, marked, still resolving. */

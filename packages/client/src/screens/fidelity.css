@@ -3290,6 +3290,38 @@ select.fy-set__pill { padding-right: 26px; }
    read, not pressed. */
 .fy-default > .ui-select__control { padding-top: 6px; padding-bottom: 6px; font-weight: var(--weight-regular); }
 /*
+ * The Models card (design turn 153): General's row grammar narrowed to a rail. The same card sits
+ * in the world so far, in production setup, on Art direction and on the production dashboard, so
+ * it carries its own surface rather than borrowing a host's — and the select shrinks before the
+ * state does, because the state is the word that says where the model came from.
+ */
+.fy-models {
+  flex: none;
+  margin: 12px 0;
+  padding: 14px 16px 6px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-xs);
+}
+.fy-models__head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.fy-models__head > h3 { margin: 0; font: var(--type-ui); font-weight: var(--weight-semibold); }
+.fy-models__head > :last-child { margin-left: auto; margin-right: -6px; }
+.fy-models__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 46px;
+  border-top: 1px solid var(--border);
+  font: var(--type-body);
+  font-size: var(--text-sm);
+}
+.fy-models__what { width: 62px; flex: none; color: var(--muted-foreground); }
+.fy-models__select { flex: 0 1 236px; min-width: 0; }
+.fy-models__select > .ui-select__control { padding-top: 6px; padding-bottom: 6px; font-weight: var(--weight-regular); }
+.fy-models__own { color: var(--foreground); font-weight: var(--weight-medium); }
+.fy-models__reset { margin-left: auto; margin-right: -6px; }
+/*
  * Archiving, on a world card. The button hides until the card is hovered — a world you are
  * looking at should not be advertising the way to put it away — and the confirm covers the
  * card rather than opening a dialog, because the decision belongs to that one world.

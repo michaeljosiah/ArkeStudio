@@ -14,7 +14,7 @@ import {
   type Sheet,
   type Take,
 } from "@arke-studio/contracts";
-import { resolveModel } from "../components/dispatch-bar.js";
+import { resolveModel, worldModel } from "../components/dispatch-bar.js";
 import { authoredPrompt, GenerationDialog } from "../components/generation-dialog.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { Button, Callout, IconButton, cx } from "../components/ui.js";
@@ -155,7 +155,7 @@ export function mainPhotoPromptFor(sheet: Sheet | null | undefined): string {
  * screen could compute "no references" against one model while submitting another.
  */
 function shownImageModel(state: ReturnType<typeof useStore>["state"], chosenId?: string): ManifestModel | null {
-  return resolveModel(state, "image", chosenId).model;
+  return resolveModel(state, "image", chosenId, worldModel(state, "image")).model;
 }
 
 /**
