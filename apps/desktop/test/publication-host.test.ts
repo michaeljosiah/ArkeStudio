@@ -59,10 +59,35 @@ it("restart reconciliation returns the prepared edition without a world, encoder
   const host = new PublicationHost({ ...f.ports, compiler: async () => { throw new Error("must not rebuild"); } }); t.after(() => host.stop());
   const list = await host.list(); assert.ok(list.ok); assert.equal(list.value[0]!.status, "interrupted");
   assert.ok((await host.retry(operationId)).ok);
-  for (let n = 0; n < 100; n++) { const state = await host.list(); if (state.ok && state.value[0]?.status !== "running") break; await new Promise(resolve => setTimeout(resolve, 10)); }
+  for (let n = 0; n < 600; n++) { const state = await host.list(); if (state.ok && state.value[0]?.status !== "running") break; await new Promise(resolve => setTimeout(resolve, 25)); }
   const finished = await host.list(); assert.ok(finished.ok); assert.equal(finished.value[0]!.status, "completed");
   assert.ok((await host.open({ operationId })).ok);
   assert.equal((await readdir(join(f.output, operationId))).filter(name => name.startsWith("attempt-")).length, 1);
+  const attempt = (await readdir(join(f.output, operationId))).find(name => name.startsWith("attempt-"))!;
+  const movie = join(f.output, operationId, attempt, "publication", "movie.mp4");
+  await writeFile(movie, "damaged");
+  assert.ok((await host.retry(operationId)).ok);
+  for (let n = 0; n < 600; n++) { const state = await host.list(); if (state.ok && state.value[0]?.status !== "running") break; await new Promise(resolve => setTimeout(resolve, 25)); }
+  const damaged = await host.list(); assert.ok(damaged.ok);
+  assert.equal(damaged.value[0]!.status, "failed"); assert.equal(damaged.value[0]!.retryable, false);
+  assert.match(damaged.value[0]!.reason!, /preserved.*Create a new edition/);
+  assert.equal(await readFile(movie, "utf8"), "damaged");
+});
+
+for (const action of ["start", "open"] as const) it(`shutdown leaves a pending ${action} picker without resuming late work`, { timeout: 15_000 }, async t => {
+  const f = await fixture(t); let entered!: () => void, release!: (value: string) => void;
+  const waiting = new Promise<void>(resolve => { entered = resolve; });
+  const choice = new Promise<string>(resolve => { release = resolve; });
+  const host = new PublicationHost({ ...f.ports, pick: async () => { entered(); return choice; } });
+  t.after(async () => { release(f.source); await host.stop(); });
+  const work = action === "open" ? host.open("directory") : host.start({ worldId: "world", request, format: "zip" });
+  await waiting;
+  await host.stop();
+  const reply = await work; assert.ok(!reply.ok && reply.cancelled);
+  release(f.source); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(host.session, null);
+  assert.deepEqual(await readdir(join(f.ports.root, "playback")), []);
+  if (action === "start") assert.deepEqual(await readdir(join(f.ports.root, "operations")), []);
 });
 it("flushes the intent before work and drains cancellation during shutdown", async t => {
   const f = await fixture(t); let calls = 0; let entered!: () => void;
@@ -109,7 +134,7 @@ it("reports an encoder change as requiring a new edition instead of an endless r
     encoderVersion: "older-build", format: "directory", outputRoot: f.output, operationId }));
   const host = new PublicationHost(f.ports); t.after(() => host.stop());
   assert.ok((await host.retry(operationId)).ok);
-  for (let n = 0; n < 100; n++) { const state = await host.list(); if (state.ok && state.value[0]?.status !== "running") break; await new Promise(resolve => setTimeout(resolve, 10)); }
+  for (let n = 0; n < 600; n++) { const state = await host.list(); if (state.ok && state.value[0]?.status !== "running") break; await new Promise(resolve => setTimeout(resolve, 25)); }
   const state = await host.list(); assert.ok(state.ok);
   assert.equal(state.value[0]!.status, "failed"); assert.equal(state.value[0]!.retryable, false);
   assert.match(state.value[0]!.reason!, /encoder changed.*Create a new edition/);

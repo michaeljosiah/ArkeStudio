@@ -277,7 +277,9 @@ closing the world provider. Provider access lasts only through capture, so world
 available during encoding. The renderer does not own operation lifetime.
 Unreadable/incompatible intent files are preserved and reported individually without hiding valid
 jobs or blocking unrelated playback. A changed encoder on an unprepared retry explicitly requires
-a new edition; that job does not offer another retry. Clean video-v1 uses no drawtext: the adapter
+a new edition; damaged prepared/completed data is likewise non-retryable, while transient system
+errors remain retryable. Native picker waits are raced against shutdown/renderer cancellation;
+late dialog answers cannot restart work. Clean video-v1 uses no drawtext: the adapter
 refuses accidental text-drawing graphs, while ordinary exports retain their bundled-font checks.
 
 Worlds → **Open publication** opens a directory or ZIP without opening a world or making a provider
@@ -295,6 +297,9 @@ accepts bounded UTF-8 WebVTT with cue ids, plain timing lines, native cue text a
 It refuses styles, regions, cue settings, invalid/reversed/out-of-order times and cues beyond the
 movie (50 ms rounding tolerance). Each sidecar is limited to 8 MiB. This is deliberately narrower
 than all of WebVTT; future support needs explicit fixtures rather than silently discarding features.
+Compiler and player share `src/publications/captions.ts`: generated sidecars must pass the same
+8 MiB, syntax and measured-movie duration checks before publication. The encoder's broader
+frame/container tolerance does not allow captions extending more than 50 ms beyond the movie.
 
 The client uses native media controls and an explicit captions/off selector. Resume time and caption
 choice live in browser storage keyed by publication id and manifest digest, outside immutable files.

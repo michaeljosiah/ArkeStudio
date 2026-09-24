@@ -18,7 +18,7 @@ const REFUSALS: Record<PublicationFileError["code"], string> = {
   "unsupported-profile": "This player does not support the publication profile.",
   "unsupported-capability": "The publication requires unsupported player features.",
   "operation-conflict": "The saved operation conflicts with these settings or is already in use.",
-  "incomplete-publication": "Saved publication output is incomplete or damaged. It has been preserved.",
+  "incomplete-publication": "Saved publication output is incomplete or damaged. It has been preserved. Create a new edition.",
   "unsupported-codec": "Unsupported codec. Use H.264/AAC MP4 or VP8/VP9 WebM with Opus/Vorbis in 8-bit 4:2:0.",
 };
 
@@ -102,6 +102,19 @@ export class PublicationHost implements PublicationBridge {
     if (error instanceof Error && error.name === "AbortError") return "Publication cancelled.";
     return "The publication could not be processed. Check the package, media tools and available disk space, then retry.";
   }
+  private pick(kind: "directory" | "zip" | "output", signal: AbortSignal): Promise<string | null> {
+    signal.throwIfAborted();
+    // Native file dialogs have no close/abort API. Stop waiting on shutdown or renderer loss;
+    // attach both handlers so a later answer cannot resume work or reject unobserved.
+    return new Promise((resolve, reject) => {
+      const abort = () => reject(signal.reason);
+      signal.addEventListener("abort", abort, { once: true });
+      const cleanup = () => signal.removeEventListener("abort", abort);
+      Promise.resolve().then(() => { signal.throwIfAborted(); return this.ports.pick(kind); }).then(
+        value => { cleanup(); resolve(value); }, error => { cleanup(); reject(error); });
+      if (signal.aborted) { cleanup(); abort(); }
+    });
+  }
   list() { return this.reply(async () => { await this.initialize(); return [...this.recoveryProblems.values(), ...[...this.jobs.values()].map(job => job.view)].map(view => ({ ...view })); }); }
   start(input: Parameters<PublicationBridge["start"]>[0]) {
     return this.reply(async () => {
@@ -110,7 +123,7 @@ export class PublicationHost implements PublicationBridge {
       this.startingJob = true;
       try {
         const parsed = Start.parse(input);
-        const outputRoot = await this.ports.pick("output");
+        const outputRoot = await this.pick("output", this.controller.signal);
         if (!outputRoot) throw new DOMException("Cancelled", "AbortError");
         this.controller.signal.throwIfAborted();
         const provider = this.provider();
@@ -165,8 +178,9 @@ export class PublicationHost implements PublicationBridge {
         }, { outputRoot: intent.outputRoot, signal, onPhase: phase => { job.view.phase = phase === "prepared" ? "Publishing" : "Verifying output"; } });
         job.view = { ...job.view, status: "completed", phase: "Ready to play" };
       } catch (error) {
-        job.view = { ...job.view, status: signal.aborted ? "cancelled" : "failed", phase: error instanceof EncoderChanged ? "Create a new edition" : "Check or retry",
-          reason: this.reason(error), ...(error instanceof EncoderChanged ? { retryable: false } : {}) };
+        const permanent = error instanceof EncoderChanged || error instanceof PublicationFileError && error.code === "incomplete-publication";
+        job.view = { ...job.view, status: signal.aborted ? "cancelled" : "failed", phase: permanent ? "Create a new edition" : "Check or retry",
+          reason: this.reason(error), ...(permanent ? { retryable: false } : {}) };
       } finally { delete job.work; delete job.controller; }
     })();
   }
@@ -185,7 +199,7 @@ export class PublicationHost implements PublicationBridge {
       try {
         await mkdir(join(this.ports.root, "playback"), { recursive: true });
         let source: string | null; let format: "directory" | "zip";
-        if (kind === "directory" || kind === "zip") { format = kind; source = await this.ports.pick(kind); }
+        if (kind === "directory" || kind === "zip") { format = kind; source = await this.pick(kind, signal); }
         else {
           await this.initialize();
           const parsed = z.object({ operationId: z.string().uuid() }).strict().parse(kind);

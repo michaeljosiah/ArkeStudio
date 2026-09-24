@@ -11,6 +11,7 @@ import { FsWorldProvider } from "../../src/world/provider.js";
 import { verifyPublicationDirectory } from "../../src/publications/verify.js";
 import { publishVideoPublication } from "../../src/publications/publish.js";
 import { extractPublicationZip } from "../../src/publications/archive.js";
+import { openPublication } from "../../src/publications/playback.js";
 import { parseFfprobeJson } from "../../src/media/probe.js";
 import { WorldStore } from "../../src/world/store.js";
 import { hashMedia, scanWorld } from "../../src/world/scan.js";
@@ -98,6 +99,19 @@ it("keeps the same fingerprint for unchanged inputs and changes it for trim or s
   assert.equal(fingerprints[0], fingerprints[1]);
   assert.notEqual(fingerprints[1], fingerprints[2], "trim changes without advancing timeline revision still count");
   assert.notEqual(fingerprints[2], fingerprints[3]);
+});
+
+it("checks generated captions against measured output with the same tolerance as playback", async t => {
+  const f = await fixture(t); let duration = 1.93;
+  const options = { ...f.options, probe: { info: async (path: string) => ({ durationSec: basename(path) === "movie.mp4" ? duration : 6, hasAudio: true, hasVideo: true }) } };
+  // A 70 ms shortfall passes the video frame/container tolerance but cannot carry the final cue.
+  await assert.rejects(compileVideoPublication(f.store, f.request, options), /WebVTT/);
+  assert.deepEqual(await readdir(f.scratch), []);
+  duration = 1.96;
+  const result = await compileVideoPublication(f.store, f.request, options);
+  t.after(() => result.dispose());
+  const opened = await openPublication(result.directory, "directory", f.scratch, async () => ({ duration, mediaType: "video/mp4" }));
+  await opened.dispose();
 });
 
 it("publishes a production ZIP and retries the captured edition after the source changes", async t => {

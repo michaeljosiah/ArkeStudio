@@ -12,6 +12,7 @@ import { toExtendedLength } from "../world/paths.js";
 import { scanWorld } from "../world/scan.js";
 import type { WorldStore } from "../world/store.js";
 import { capturePublicationInputs, type CapturedPublicationInputs } from "./capture.js";
+import { validatePublicationVtt } from "./captions.js";
 import { PublicationFileError, readPublicationFile } from "./files.js";
 import { publicationFileLimits, verifyPublicationDirectory, type PublicationFileLimits, type VerifiedPublicationDirectory } from "./verify.js";
 
@@ -233,7 +234,11 @@ async function renderCapturedVideoPublication(
     for (const entry of frozen.textTracks) {
       signal.throwIfAborted();
       const href = `${entry.track.asset}.vtt`;
-      await writeFlushed(join(directory, href), serializeTimedText(entry.cues, "vtt"));
+      const text = serializeTimedText(entry.cues, "vtt");
+      // Encoder duration tolerance is wider than caption tolerance. Validate actual serialized
+      // sidecars against the measured movie so a completed package passes player preflight.
+      validatePublicationVtt(text, info.durationSec);
+      await writeFlushed(join(directory, href), text);
       const measured = await readPublicationFile(directory, href, limits.assetBytes, signal);
       assets[entry.track.asset] = { href, mediaType: "text/vtt", sha256: measured.sha256, byteLength: measured.byteLength };
     }
