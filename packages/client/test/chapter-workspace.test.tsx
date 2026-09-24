@@ -1717,6 +1717,21 @@ describe("the craft loop (turn 128)", () => {
       assert.ok(edits(m).every((edit) => !(edit as HTMLButtonElement).disabled), "not left holding the controls");
     });
 
+    it("its refusal is kept however many others follow it (codex on PR 1232)", async () => {
+      const m = await mount(inkbound([TWO]));
+      await answerOpen(m);
+      await act(async () => acceptButton(m).click());
+      const sent = m.sent.find((message) => message.kind === "proposal-accept") as { requestId: string };
+      // Refused while nobody looks, then a run of other windows' refusals before the screen does.
+      await act(async () => {
+        __applyEventForTest({ at: "2026-09-06T12:00:03Z", type: "proposal.blocked", worldId: FIXTURE_WORLD_ID, proposalId: TWO.proposal.id, reason: "stale", requestId: sent.requestId });
+        for (let i = 0; i < 60; i += 1) {
+          __applyEventForTest({ at: "2026-09-06T12:00:04Z", type: "proposal.blocked", worldId: FIXTURE_WORLD_ID, proposalId: TWO.proposal.id, reason: "stale", requestId: `someone-else-${i}` });
+        }
+      });
+      assert.ok(edits(m).every((edit) => !(edit as HTMLButtonElement).disabled), "its own answer was not pushed out");
+    });
+
     it("a newer revision that is not the passage kept is somebody else's, and is not accepted (codex on PR 1232)", async () => {
       const m = await mount(inkbound([TWO]));
       await answerOpen(m);

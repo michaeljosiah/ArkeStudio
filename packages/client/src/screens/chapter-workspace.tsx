@@ -63,6 +63,7 @@ import {
   updateProposalPassage,
   useGateNotices,
   gateAnswered,
+  forgetGateRequest,
 } from "../lib/store.js";
 
 /**
@@ -1275,6 +1276,9 @@ export function ChapterWorkspace({
   const [keeping, setKeepingState] = useState<HeldKeep | null>(() => heldKeeps.get(parkedKey(worldId, prodId, path)) ?? null);
   const setKeeping = (next: HeldKeep | null) => {
     const key = parkedKey(worldId, prodId, path);
+    // A settled request's answer is no longer wanted; the store keeps it until told so.
+    const was = heldKeeps.get(key)?.request.requestId;
+    if (was !== undefined && was !== next?.request.requestId) forgetGateRequest(was);
     if (next === null) heldKeeps.delete(key);
     else heldKeeps.set(key, next);
     setKeepingState(next);
@@ -1326,6 +1330,8 @@ export function ChapterWorkspace({
   const [accepting, setAcceptingState] = useState<HeldAccept | null>(() => heldAccepts.get(parkedKey(worldId, prodId, path)) ?? null);
   const setAccepting = (next: Omit<HeldAccept, "rejoins"> | null) => {
     const key = parkedKey(worldId, prodId, path);
+    const was = heldAccepts.get(key)?.requestId;
+    if (was !== undefined && was !== next?.requestId) forgetGateRequest(was);
     const held = next === null ? null : { ...next, rejoins };
     if (held === null) heldAccepts.delete(key);
     else heldAccepts.set(key, held);

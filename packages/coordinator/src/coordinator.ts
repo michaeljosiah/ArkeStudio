@@ -5499,29 +5499,26 @@ export class Coordinator {
           // Always answered (codex on PR 1232): a screen holding its controls until the accept
           // settles would otherwise wait on a proposal the refresh shows unchanged. What failed is
           // not relayed. The accept can throw after the gate committed — its bookkeeping and
-          // delivery come after — so what is said follows the proposal: retired means it landed,
-          // standing means it did not finish, and unreadable means nobody can say which.
+          // delivery come after — so what is said follows the proposal. Standing, it did not
+          // finish. Gone, it may have landed or another window may have discarded it first, and
+          // the gate keeps nothing to tell which (codex on PR 1232), so neither is claimed.
           const standing = await gate.readManifest(msg.proposalId).then(
             () => true as const,
             (error: unknown) => (error as NodeJS.ErrnoException)?.code === "ENOENT" ? false as const : null,
           );
-          const at = new Date().toISOString();
-          if (standing === false) {
-            this.authoring?.release(msg.proposalId);
-            this.emit({ at, type: "proposal.resolved", worldId: msg.worldId, proposalId: msg.proposalId, outcome: "accepted" });
-          } else {
-            this.emit({
-              at,
-              type: "proposal.blocked",
-              worldId: msg.worldId,
-              proposalId: msg.proposalId,
-              ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
-              reason: "invalid",
-              detail: standing
-                ? "this could not be accepted; the proposal still stands"
+          this.emit({
+            at: new Date().toISOString(),
+            type: "proposal.blocked",
+            worldId: msg.worldId,
+            proposalId: msg.proposalId,
+            ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
+            reason: "invalid",
+            detail: standing === true
+              ? "this could not be accepted; the proposal still stands"
+              : standing === false
+                ? "this proposal is no longer open; read the draft as it stands"
                 : "whether this was accepted is not known; reopen the world to see the draft as it stands",
-            });
-          }
+          });
         }
         await this.refreshWorldSnapshot(msg.worldId);
         return;

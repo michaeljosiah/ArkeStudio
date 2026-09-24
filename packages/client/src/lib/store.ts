@@ -788,13 +788,22 @@ export function subscribeProposalResolutions(
 /**
  * Refusals by the request they answer, kept past the moment they arrive (codex on PR 1232): the
  * notice on a proposal is only its latest, and another window's refusal on the same proposal
- * would otherwise overwrite the one a screen is holding its controls for. Refreshed with each
- * notice, so a screen reading this on render sees it as soon as it lands.
+ * would otherwise overwrite the one a screen is holding its controls for. Only this window's own
+ * requests are kept, and each until the screen holding it lets go or the world closes — not by
+ * count (codex on PR 1232): a chapter put away while others are refused would come back to a
+ * hold whose answer had been dropped. Refreshed with each notice, so a screen reading this on
+ * render sees it as soon as it lands.
  */
-let gateAnswers = new Map<string, GateNotice["reason"]>();
+const gateRequests = new Set<string>();
+const gateAnswers = new Set<string>();
 /** Whether the gate has refused this request, by its id. */
 export function gateAnswered(requestId: string): boolean {
   return gateAnswers.has(requestId);
+}
+/** The screen that sent this request has settled it; its answer is no longer wanted. */
+export function forgetGateRequest(requestId: string): void {
+  gateRequests.delete(requestId);
+  gateAnswers.delete(requestId);
 }
 
 export type WorldChatSendResult = Extract<DomainEvent, { type: "world-chat.send-result" }>;
@@ -973,7 +982,11 @@ function emitChange(next: StoreState): void {
   next = settleHolds(next);
   current = next;
   const now = next.state?.world?.meta.worldId ?? null;
-  if (now !== was) for (const l of worldListeners) l(now);
+  if (now !== was) {
+    gateRequests.clear();
+    gateAnswers.clear();
+    for (const l of worldListeners) l(now);
+  }
   for (const l of listeners) l();
 }
 
@@ -1439,9 +1452,7 @@ function handleFrame(json: string): void {
       for (const listener of filedBatchListeners) listener(event);
     }
     if (event.type === "proposal.blocked") {
-      if (event.requestId !== undefined) {
-        gateAnswers = new Map([...gateAnswers, [event.requestId, event.reason] as const].slice(-50));
-      }
+      if (event.requestId !== undefined && gateRequests.has(event.requestId)) gateAnswers.add(event.requestId);
       gateNotices = {
         ...gateNotices,
         [event.proposalId]: {
@@ -2492,6 +2503,7 @@ export function acceptProposal(
   /** Echoed on a refusal, so the screen that pressed knows the answer is its own (PR 1232). */
   requestId?: string,
 ): boolean {
+  if (requestId !== undefined) gateRequests.add(requestId);
   return send({
     kind: "proposal-accept",
     worldId,
@@ -2557,6 +2569,7 @@ export function updateProposalPassage(
   /** The keep's own id: sent again after a rejoin, the gate makes the same edit once (PR 1232). */
   requestId: string = crypto.randomUUID(),
 ): boolean {
+  gateRequests.add(requestId);
   return send({
     kind: "proposal-update-passage",
     worldId,
