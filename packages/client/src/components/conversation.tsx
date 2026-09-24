@@ -1194,87 +1194,74 @@ export function ProductionConversation({
     const into = loadedRef.current?.conversationId ?? conversationIdRef.current ?? "";
     onAsk?.({ ...sent, sent: { requestId, at: new Date().toISOString(), rejoins: rejoinsRef.current, conversationId: into } });
   };
+  /*
+   * One ask, one step at a time (codex on PR 1232). An ask moves through its life — waiting for
+   * the dock, opening a thread, sent, answered — by one transition per render, decided from where
+   * it stands now. Separate effects each took their step from the same render and wrote over one
+   * another's result: an answer undone by a rejoin's bookkeeping, a retry undone by a restore.
+   *
+   * Sent, it is settled by the coordinator's answer for its request: taken is done with; not
+   * taken is shown to be tried again. The answer is not durable — a connection lost between send
+   * and answer loses it, even for a line the runner took — and no clock or rejoined transcript
+   * can stand in for it: admission can be slow, and a rejoin snapshot can predate it. So after a
+   * rejoin the coordinator is asked where the line stands, once per rejoin, and its answer
+   * settles it. Opening a thread first, the ask says so: a dock put away before the thread
+   * arrives comes back waiting for it rather than opening a second, and a create lost with the
+   * connection — rejoined and still no thread — is made again under the same create, which the
+   * coordinator makes at most once.
+   */
+  const askRef = useRef(ask);
+  askRef.current = ask;
+  const [answers, setAnswers] = useState(0);
+  // Answers arrive between renders; noted, the transition reads them.
+  useEffect(() => subscribeWorldChatSendResults((result) => {
+    if (askRef.current?.sent?.requestId === result.requestId) setAnswers((n) => n + 1);
+  }), []);
   useEffect(() => {
-    if (ask === undefined || ask.draft === true || ask.declined === true || ask.sent !== undefined || ask.opening !== undefined) return;
+    if (ask === undefined || ask.draft === true || ask.declined === true) return;
+    if (ask.sent !== undefined) {
+      const answer = ask.answered ?? worldChatSendResult(ask.sent.requestId);
+      if (answer === true) {
+        onAsk?.(null);
+      } else if (answer === false) {
+        const { sent: _sent, ...refused } = ask;
+        onAsk?.({ ...refused, declined: true });
+      } else if (connection === "open" && rejoins !== ask.sent.rejoins && worldId) {
+        askWorldChatSendStatus(worldId, ask.sent.conversationId, ask.sent.requestId);
+        onAsk?.({ ...ask, sent: { ...ask.sent, rejoins } });
+      }
+      return;
+    }
+    if (ask.opening !== undefined) {
+      if (connection === "open" && !conversationId && rejoins !== ask.opening.rejoins) {
+        const { opening: lost, ...again } = ask;
+        setOpening(null);
+        onAsk?.({ ...again, again: lost.request });
+      } else if (opening === null) {
+        setOpening({
+          text: ask.text,
+          was: ask.opening.was,
+          ...(ask.subject !== undefined ? { subject: ask.subject } : {}),
+          ...(ask.replyOnly === true ? { replyOnly: true } : {}),
+          onSent: sentAs(ask),
+        });
+      }
+      return;
+    }
+    // Waiting: said when the dock is free.
     if (opening !== null || echo !== null || running || languageUnavailableReason !== undefined || connection !== "open") return;
     if (conversationId && loaded === null) return;
     const pressed = ask;
     const was = workspace?.conversationId ?? null;
     const opens = !conversationId;
     const request = opens ? pressed.again ?? crypto.randomUUID() : pressed.again;
-    // Opening a thread first, the ask says so (codex on PR 1232): a dock put away before the
-    // thread arrives comes back waiting for it, rather than opening a second.
     if (say(pressed.text, pressed.replyOnly === true, pressed.subject, sentAs(pressed), request) && opens) {
       onAsk?.({ ...pressed, opening: { was, rejoins: rejoinsRef.current, request: request! } });
     }
-    // say is rebuilt every render; the ask and the dock's readiness are what decide.
+    // say and sentAs are rebuilt every render; where the ask stands and the dock's readiness are
+    // what decide.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ask, opening, echo, running, languageUnavailableReason, connection, loaded === null]);
-  /*
-   * A create lost with the connection (codex on PR 1232): rejoined and still no thread, nothing
-   * will open one, so the ask goes again from the start. A thread that did open arrives with the
-   * rejoin, and the line is said into it instead.
-   */
-  useEffect(() => {
-    if (ask?.opening === undefined || connection !== "open" || conversationId || rejoins === ask.opening.rejoins) return;
-    // Made again under the same create, so one still being made is not made twice.
-    const { opening, ...again } = ask;
-    setOpening(null);
-    onAsk?.({ ...again, again: opening.request });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ask?.opening, connection, rejoins, conversationId]);
-  // Brought back while its thread is still opening: wait for that thread, and say it there.
-  useEffect(() => {
-    if (ask?.opening === undefined || opening !== null) return;
-    const pressed = ask;
-    setOpening({
-      text: pressed.text,
-      was: pressed.opening!.was,
-      ...(pressed.subject !== undefined ? { subject: pressed.subject } : {}),
-      ...(pressed.replyOnly === true ? { replyOnly: true } : {}),
-      onSent: sentAs(pressed),
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ask?.opening, opening === null]);
-  // Answered: taken is done with; not taken is shown, and stays the page's until it is tried
-  // again or dismissed (codex on PR 1232) — a dock put away over it finds it on return.
-  useEffect(() => {
-    const requestId = ask?.sent?.requestId;
-    if (ask === undefined || requestId === undefined) return;
-    const settle = (admitted: boolean) => {
-      if (admitted) return onAsk?.(null);
-      if (ask.declined === true) return;
-      // Refused outright: nothing later can make it taken, so it is not watched for (below).
-      const { sent: _sent, ...refused } = ask;
-      onAsk?.({ ...refused, declined: true });
-    };
-    const already = ask.answered ?? worldChatSendResult(requestId);
-    if (already !== undefined) {
-      settle(already);
-      return;
-    }
-    // Still subscribed once shown as lost: an answer late past the rejoin means it was taken,
-    // and Try again would pay for it twice.
-    return subscribeWorldChatSendResults((result) => {
-      if (result.requestId === requestId) settle(result.admitted);
-    });
-    // A retry under the same request is sent again, at a new time, and listened for afresh.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ask?.sent?.requestId, ask?.sent?.at]);
-  /*
-   * The answer is not durable: a connection lost between send and answer loses it, even for a
-   * line the runner took (codex on PR 1232). No clock decides that, and neither does the
-   * rejoined thread — its snapshot can be taken while the line is still being admitted. The
-   * coordinator is asked where the line stands, and its answer settles the ask as above: taken,
-   * done with; not taken, shown to be tried again. The ask carries the rejoin count it was last
-   * asked under, so a dock put away through the drop asks on its return, and asks once.
-   */
-  useEffect(() => {
-    if (ask?.sent === undefined || connection !== "open" || rejoins === ask.sent.rejoins || !worldId) return;
-    askWorldChatSendStatus(worldId, ask.sent.conversationId, ask.sent.requestId);
-    onAsk?.({ ...ask, sent: { ...ask.sent, rejoins } });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ask?.sent?.requestId, connection, rejoins]);
+  }, [ask, answers, opening, echo, running, languageUnavailableReason, connection, rejoins, conversationId, loaded === null, worldId]);
 
   const points = loaded?.points ?? [];
   const carriedPoints = points.filter((p) => p.kind === "point" && p.settled).length;

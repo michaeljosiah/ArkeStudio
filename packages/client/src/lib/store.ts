@@ -440,6 +440,9 @@ export type WorldChatHold = {
   takenAt?: number | null;
   /** Asked where it stands after a rejoin. */
   asked?: boolean;
+  /** The words said and when, to find the line in a thread a rejoin brought whole. */
+  text: string;
+  sentAt: number;
 };
 
 export interface VoiceCandidatesState {
@@ -932,10 +935,14 @@ function settleHolds(next: StoreState): StoreState {
     let settled: WorldChatHold | null = hold;
     if (answer === false) settled = null;
     else if (hold.takenAt !== undefined) settled = running || seq !== hold.takenAt ? null : hold;
-    // Taken, and asked after a rejoin whose snapshot is already past the send — it can bring the
-    // whole turn at once (codex on PR 1232) — the hold has nothing left to wait for. Without a
-    // rejoin, a thread that moved meanwhile may be another window's edit, so the turn is awaited.
-    else if (answer === true) settled = running || (hold.asked === true && seq !== hold.seq) ? null : { ...hold, takenAt: seq };
+    // Taken, and asked after a rejoin that brought the turn whole — the line already in the
+    // thread (codex on PR 1232) — the hold has nothing left to wait for. A thread that has only
+    // moved may have moved for another window's edit, so otherwise the turn itself is awaited.
+    else if (answer === true) {
+      const shown = hold.asked === true && (workspace?.messages ?? []).some((m) =>
+        m.role === "user" && m.text === hold.text && Date.parse(m.createdAt) >= hold.sentAt - 5_000);
+      settled = running || shown ? null : { ...hold, takenAt: seq };
+    }
     else if (next.rejoins !== hold.rejoins && next.connection === "open") {
       // Asked once per rejoin, after this change has landed.
       settled = { ...hold, rejoins: next.rejoins, asked: true };
@@ -4964,7 +4971,10 @@ export function sendWorldChat(
   if (workspace?.conversationId === conversationId) {
     emitChange({
       ...current,
-      worldChatHolds: { ...current.worldChatHolds, [conversationId]: { requestId, worldId, seq: workspace.seq, rejoins: current.rejoins } },
+      worldChatHolds: {
+        ...current.worldChatHolds,
+        [conversationId]: { requestId, worldId, seq: workspace.seq, rejoins: current.rejoins, text, sentAt: Date.now() },
+      },
     });
   }
   return requestId;

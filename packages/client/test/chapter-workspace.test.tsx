@@ -1296,12 +1296,18 @@ describe("the craft loop (turn 128)", () => {
     await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
     await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
     await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
-    const first = (m.sent.find((message) => message.kind === "world-chat-send") as { requestId: string }).requestId;
+    const sent = m.sent.find((message) => message.kind === "world-chat-send") as { requestId: string; text: string };
+    const first = sent.requestId;
     const prompts = () => [...m.container.querySelectorAll("button.fy-arke__prompt")] as HTMLButtonElement[];
     await act(async () => __setStateForTest(state, { connection: "closed" }));
-    // The whole turn ran while away: the rejoin brings it finished.
-    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 9 } } as ClientState, { connection: "open", rejoins: 1 }));
+    // Another window's edit moved the thread; this line is not in it yet.
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 7 } } as ClientState, { connection: "open", rejoins: 1 }));
     await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: first, admitted: true }));
+    assert.ok(prompts().every((b) => b.disabled), "moved is not shown: the turn is still awaited (codex on PR 1232)");
+    // The whole turn ran while away: a later rejoin brings it finished, the line in the thread.
+    const said = { id: "msg_01J8F3K2QW9VZX4N7M0RTYB6H2" as never, role: "user" as const, text: sent.text, receipts: [], refusals: [], createdAt: new Date().toISOString() };
+    await act(async () => __setStateForTest(state, { connection: "closed" }));
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 9, messages: [said] } } as unknown as ClientState, { connection: "open", rejoins: 2 }));
     assert.ok(prompts().every((b) => !b.disabled), "nothing left to wait for");
   });
 
@@ -1324,6 +1330,29 @@ describe("the craft loop (turn 128)", () => {
     await act(async () => __setStateForTest(opened, { connection: "open" }));
     assert.equal(sends().length, 1, "said once the connection is back");
     assert.equal(m.sent.filter((message) => message.kind === "world-chat-create").length, 1, "into the thread it opened");
+  });
+
+  it("an ask answered while put away, through a rejoin, is done with on return (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const m = await mount(state);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const first = (m.sent.find((message) => message.kind === "world-chat-send") as { requestId: string }).requestId;
+    await act(async () => (q(m, "button.fy-arke__pin") as HTMLElement).click());
+    await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: first, admitted: true }));
+    await act(async () => __setStateForTest(state, { connection: "closed" }));
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 5 } } as ClientState, { connection: "open", rejoins: 1 }));
+    await act(async () => (q(m, "button.fy-sw__rail") as HTMLElement).click());
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    const pill = q(m, "button.fy-ch__ask") as HTMLButtonElement;
+    assert.doesNotMatch(pill.textContent ?? "", /asking…/, "the answer settled it; the rejoin did not bring it back");
   });
 
   it("a line typed while the last one is still being taken stays in the composer (codex on PR 1232)", async () => {
