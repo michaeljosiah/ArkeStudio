@@ -96,14 +96,16 @@ export function placedPerformanceTimings(production: ProductionBundle): Dialogue
 }
 
 /** Revalidate immutable local bytes immediately before the existing export runner reads them. */
-export async function validatePlacedPerformanceBytes(store: WorldStore, production: ProductionBundle): Promise<void> {
+export async function validatePlacedPerformanceBytes(store: WorldStore, production: ProductionBundle, signal: AbortSignal = store.closingSignal): Promise<void> {
+  signal.throwIfAborted();
   if (production.timeline?.status !== "ready") return;
   const seen=new Set<string>();
   for (const track of production.timeline.timeline.tracks) for (const clip of track.clips) {
+    signal.throwIfAborted();
     if (clip.source.kind !== "performance" || seen.has(clip.source.performanceId)) continue;
     const source=clip.source; seen.add(source.performanceId);
     const performance=await readPerformance(store,production.meta.id,source.performanceId);
-    const bytes=await readAudioBytes(await audioWorldPath(store.dir,`productions/${production.meta.id}/performances/${performance.id}/${performance.file}`),store.closingSignal);
+    const bytes=await readAudioBytes(await audioWorldPath(store.dir,`productions/${production.meta.id}/performances/${performance.id}/${performance.file}`),signal);
     if (audioHash(bytes)!==source.sourceHash || source.sourceHash!==performance.provenance.outputHash) throw new Error(`${performance.id}: immutable performance media changed; export refused.`);
   }
 }

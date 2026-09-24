@@ -65,13 +65,15 @@ records and media. The profile compiler must supply a complete dependency set, d
 the same records as its resolved plan and settings. This service does not discover dependencies,
 resolve a RenderPlan or validate the plan/settings hashes on its behalf.
 
-Under `WorldStore.ownedWrite`, capture checks the declared record hashes, copies and hashes media
+Under `WorldStore.ownedRead`, capture checks the declared record hashes, copies and hashes media
 into a unique child of an existing host-owned scratch directory, then rechecks every source record
 and media file. It rechecks disk ownership before returning the receipt, fingerprint, copied media
 paths and an idempotent `dispose()` function. No returned host path belongs in a public manifest.
 App writes wait for capture; subsequent source edits do not change the copies. External file edits
 are detected by hashes and file identity/stat checks. As with world ownership, these checks are
 not an atomic filesystem fence against a process actively swapping ancestors.
+The read operation shares the write queue and ownership checks, but never suppresses watchers or
+runs a post-write rescan: it does not edit the world. Queued watcher work can run after the read.
 
 Caller cancellation and world close abort in-flight capture. Failure removes only its unique
 scratch child; successful callers must dispose it after consuming the copies. Files are synced
@@ -141,6 +143,10 @@ inputs and refuses missing streams or out-of-source seek ranges. Existing short-
 behavior stays in the shared FFmpeg graph. It writes H.264/yuv420p MP4, with AAC when sound is
 present, and checks the output's video, audio and duration through the host probe. Encoder
 availability and codec decoding support still belong to the platform/player.
+Video overlays must have enough source for their full window, because the shared graph passes
+through to the lower picture at EOF. Discovery passes cancellation into authored reads, review
+logs, performance-byte checks and streamed take hashing. It omits operational proposals, change
+history, conversation/bench sessions and staged reference artwork that do not feed the compiler.
 
 The temporary package contains only `publication.json`, `movie.mp4` and requested `text-N.vtt`
 files. No world paths or private source records enter the manifest. Blank lines and unsupported

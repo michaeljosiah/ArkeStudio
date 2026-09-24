@@ -24,7 +24,7 @@ export interface CapturedPublicationInputs {
   dispose(): Promise<void>;
 }
 
-/** Both callbacks run inside ownedWrite and must not await another operation using that gate. */
+/** Both callbacks run inside ownedRead and must not await another operation using that gate. */
 export interface PreparedPublicationCapture {
   request: PublicationCaptureRequest;
   /** Recheck discovery, including dependencies that were absent when preparing the plan. */
@@ -70,7 +70,7 @@ export async function capturePublicationInputs(
     }
   };
   try {
-    return await store.ownedWrite(async () => {
+    return await store.ownedRead(async () => {
       signal.throwIfAborted();
       const prepared = typeof request === "function" ? await request() : null;
       const { receipt, records, media } = supplied ?? copyRequest(prepared!.request);
@@ -100,7 +100,7 @@ export async function capturePublicationInputs(
         totalBytes += source.byteLength;
         await options.onCopied?.(source.key);
       }
-      // Managed writes were held by ownedWrite. External writes still need a second check,
+      // Managed writes were held by ownedRead. External writes still need a second check,
       // including source bytes: a file may have been replaced after its copy completed.
       await prepared?.revalidate();
       await checkRecords();

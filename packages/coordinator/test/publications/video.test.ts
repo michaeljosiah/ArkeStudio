@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, toNamespacedPath } from "node:path";
 import { it, type TestContext } from "node:test";
 import { promisify } from "node:util";
@@ -10,7 +10,7 @@ import { compileVideoPublication, type VideoPublicationCompilerOptions } from ".
 import { verifyPublicationDirectory } from "../../src/publications/verify.js";
 import { parseFfprobeJson } from "../../src/media/probe.js";
 import { WorldStore } from "../../src/world/store.js";
-import { scanWorld } from "../../src/world/scan.js";
+import { hashMedia, scanWorld } from "../../src/world/scan.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { tempDir } from "../tmp.js";
 
@@ -174,6 +174,56 @@ it("refuses replaced artifact bytes and missing source files before encoding", a
   artifact.file = "missing.mp4";
   await f.store.ownedWrite(() => writeFile(sidecarPath, JSON.stringify(artifact)));
   await assert.rejects(compileVideoPublication(f.store, f.request, f.options));
+  assert.equal(f.invocations.length, 0);
+  assert.deepEqual(await readdir(f.scratch), []);
+});
+
+it("rejects a video overlay whose source ends before its authored window", async t => {
+  const f = await fixture(t);
+  const timeline = applyTimelineCommands(f.timeline, [
+    { kind: "add-track", trackId: "tr_overlay", trackKind: "picture", name: "Overlay" },
+    { kind: "place", trackId: "tr_overlay", clip: { id: "cl_overlay", startFrame: 0, durationFrames: 48, sourceInFrames: 120,
+      audio: "mute", source: { kind: "artifact", artifactId: ARTIFACT, label: "Overlay" } } },
+  ]);
+  await f.store.ownedWrite(() => writeFile(f.timelinePath, JSON.stringify(timeline)));
+  await assert.rejects(compileVideoPublication(f.store, { ...f.request, timelineRevision: timeline.revision }, f.options), /source range/);
+  assert.equal(f.invocations.length, 0);
+  assert.deepEqual(await readdir(f.scratch), []);
+});
+
+it("aborts discovery and streamed media hashing instead of returning partial scan state", async t => {
+  const world = await makeTempWorld();
+  const scanAbort = new AbortController();
+  const scan = scanWorld(world, { signal: scanAbort.signal, includeOperationalState: false });
+  scanAbort.abort();
+  await assert.rejects(scan, { name: "AbortError" });
+  const root = await tempDir("arke-publication-hash-");
+  const path = join(root, "large.mp4");
+  const file = await open(path, "wx");
+  try { await file.truncate(128 * 1024 * 1024); } finally { await file.close(); }
+  const controller = new AbortController();
+  const hashing = hashMedia(path, controller.signal);
+  const timer = setTimeout(() => controller.abort(), 5);
+  t.after(() => clearTimeout(timer));
+  await assert.rejects(hashing, { name: "AbortError" });
+  await writeFile(path, bytes);
+  assert.equal(await hashMedia(path), hash(bytes), "an aborted read never populates the hash cache");
+});
+
+it("cancellation during discovery releases the read gate without a post-capture scan", async t => {
+  const f = await fixture(t);
+  const controller = new AbortController();
+  const capturedRead = f.store.ownedRead.bind(f.store);
+  let entered = false;
+  t.mock.method(f.store, "ownedRead", async <T>(fn: () => Promise<T>) => capturedRead(async () => {
+    entered = true;
+    const result = fn();
+    controller.abort();
+    return result;
+  }));
+  await assert.rejects(compileVideoPublication(f.store, f.request, { ...f.options, signal: controller.signal }), { name: "AbortError" });
+  assert.equal(entered, true);
+  await f.store.ownedWrite(() => writeFile(join(f.world, "artifacts/after-cancel.txt"), "gate released"));
   assert.equal(f.invocations.length, 0);
   assert.deepEqual(await readdir(f.scratch), []);
 });

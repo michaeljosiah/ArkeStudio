@@ -69,13 +69,13 @@ export async function compileVideoPublication(
   let plan: VideoPublicationPlan | undefined;
   const snapshot = async () => {
     signal.throwIfAborted();
-    const scan = await scanWorld(store.dir);
+    const scan = await scanWorld(store.dir, { signal, includeOperationalState: false });
     signal.throwIfAborted();
     const production = scan.bundle.productions.find(item => item.meta.id === request.productionId);
     if (!production) throw new PublicationFileError("invalid-package", "The production is missing or invalid.");
     const problem = scan.problems.find(item => item.path.startsWith(`productions/${request.productionId}/`) || item.path.startsWith("artifacts/"));
     if (problem) throw new PublicationFileError("invalid-package", `Invalid source ${problem.path}: ${problem.message}`);
-    await validatePlacedPerformanceBytes(store, production);
+    await validatePlacedPerformanceBytes(store, production, signal);
     const projected = buildVideoPublicationPlan({ production, artifacts: scan.bundle.artifacts, timeline: production.timeline }, request);
     if (!projected.ok) throw new PublicationFileError("invalid-package", projected.reason);
     // Conservative discovery includes the scanner's authored inventory, not just existing
@@ -125,8 +125,8 @@ export async function compileVideoPublication(
       if (!copy) throw new PublicationFileError("invalid-package", `Uncaptured render input: ${path}`);
       return basename(copy);
     };
-    // The same file can supply picture and sound. All paths, including overlays, must leave
-    // the world before the gate is released; no encoder input resolves a live selection.
+    // The same file can supply picture and sound. All paths, including overlays, target
+    // copies pinned before the gate was released; no encoder input resolves a live selection.
     const render = { ...frozen.render,
       items: frozen.render.items.map(item => item.type === "clip" ? { ...item, path: pathOf(item.path) } : item),
       overlays: frozen.render.overlays.map(item => ({ ...item, path: pathOf(item.path) })),
@@ -148,6 +148,7 @@ export async function compileVideoPublication(
       if (!info || !Number.isFinite(info.durationSec) || info.durationSec <= 0 ||
         ((clips.length || overlays.length) && info.hasVideo !== true) || (audio.length && !info.hasAudio) ||
         starts.some(start => !Number.isFinite(start) || start < 0 || start >= info.durationSec) ||
+        overlays.some(item => (item.sourceInSec ?? 0) + item.endSec - item.startSec > info.durationSec + 1 / render.frameRate) ||
         clips.some(item => item.type === "clip" && item.outSec !== undefined &&
           (item.outSec <= (item.inSec ?? 0) || item.outSec > info.durationSec + 1 / render.frameRate))) {
         throw new PublicationFileError("invalid-package", `Captured media cannot supply the requested picture, sound or source range: ${path}`);

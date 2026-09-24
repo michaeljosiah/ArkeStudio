@@ -85,6 +85,21 @@ describe("video publication scope parity (SPEC-048)", () => {
     assert.equal(VideoPublicationRequestSchema.safeParse({ ...settings, textTracks: [settings.textTracks[0], settings.textTracks[0]] }).success, false);
     assert.equal(VideoPublicationRequestSchema.safeParse({ ...settings, textTracks: settings.textTracks.map(track => ({ ...track, default: true })) }).success, false);
   });
+
+  it("refuses leading and internal blank lines that would terminate a WebVTT cue", () => {
+    const value = production();
+    for (const text of ["\nHello", " \t\nHello", "Hello\n\nWorld", "Hello\n \nWorld", "Hello\0"]) {
+      const timeline = applyTimelineCommands(seedStoryPictureTimeline(value), [
+        { kind: "set-track", trackId: "tr_picture", muted: true },
+        { kind: "add-subtitle-track", trackId: "tr_en", name: "English", language: "en" },
+        { kind: "add-cue", trackId: "tr_en", cue: { id: "cu_invalid", text, startFrame: 100, endFrame: 125 } },
+      ]);
+      const settings = request(timeline.revision);
+      settings.textTracks = [settings.textTracks[0]!];
+      const result = buildVideoPublicationPlan({ production: value, artifacts, timeline: { status: "ready", timeline } }, settings);
+      assert.ok(!result.ok); assert.match(result.reason, /blank line or unsupported control/);
+    }
+  });
 });
 
 /**

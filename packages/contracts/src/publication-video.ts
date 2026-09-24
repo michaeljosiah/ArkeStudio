@@ -69,7 +69,7 @@ export function buildVideoPublicationPlan(
       }
       // A blank line ends a WebVTT cue. Refuse rather than silently dropping the remaining
       // author text, or interpreting it as another block after the shared serializer runs.
-      if (cue.text.includes("\0") || /\r|\n[ \t]*\n/.test(cue.text)) return { ok: false, reason: `Subtitle cue ${cue.id} contains a blank line or unsupported control character.` };
+      if (cue.text.includes("\0") || /\r|^[ \t]*\n|\n[ \t]*\n/.test(cue.text)) return { ok: false, reason: `Subtitle cue ${cue.id} contains a blank line or unsupported control character.` };
     }
     textTracks.push({ track: {
       asset: `text-${index}`, kind: choice.kind, language: subtitles.language, label: choice.label, default: choice.default,
