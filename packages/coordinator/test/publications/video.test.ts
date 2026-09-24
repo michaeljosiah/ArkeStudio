@@ -8,6 +8,8 @@ import { promisify } from "node:util";
 import { applyTimelineCommands, seedEmptyPictureTimeline, type VideoPublicationRequest } from "@arke-studio/contracts";
 import { compileVideoPublication, type VideoPublicationCompilerOptions } from "../../src/publications/video.js";
 import { verifyPublicationDirectory } from "../../src/publications/verify.js";
+import { publishVideoPublication } from "../../src/publications/publish.js";
+import { extractPublicationZip } from "../../src/publications/archive.js";
 import { parseFfprobeJson } from "../../src/media/probe.js";
 import { WorldStore } from "../../src/world/store.js";
 import { hashMedia, scanWorld } from "../../src/world/scan.js";
@@ -95,6 +97,19 @@ it("keeps the same fingerprint for unchanged inputs and changes it for trim or s
   assert.equal(fingerprints[0], fingerprints[1]);
   assert.notEqual(fingerprints[1], fingerprints[2], "trim changes without advancing timeline revision still count");
   assert.notEqual(fingerprints[2], fingerprints[3]);
+});
+
+it("publishes a production ZIP and retries the captured edition after the source changes", async t => {
+  const f = await fixture(t);
+  const options = { ...f.options, outputRoot: f.scratch, operationId: randomUUID(), format: "zip" as const };
+  const result = await publishVideoPublication(f.store, f.request, options);
+  await f.store.ownedWrite(() => writeFile(join(f.world, "artifacts/movie.mp4"), "later source bytes"));
+  const retry = await publishVideoPublication(f.store, f.request, options);
+  assert.equal(retry.path, result.path); assert.equal(f.invocations.length, 1);
+  const extracted = await extractPublicationZip(result.path, f.scratch);
+  try { assert.equal(extracted.manifest.content.textTracks.length, 2); }
+  finally { await extracted.dispose(); }
+  await assert.rejects(publishVideoPublication(f.store, { ...f.request, title: "Another edition" }, options), { code: "operation-conflict" });
 });
 
 for (const change of ["media", "new-record", "timeline"] as const) {
@@ -286,14 +301,16 @@ it("encodes and probes a real captured MP4 with selectable captions", { skip: !p
   artifact.mediaInfo.durationSec = 4;
   await writeFile(artifactPath, JSON.stringify(artifact));
   const version = (await execute(ffmpeg, ["-version"], { windowsHide: true })).stdout.split(/\r?\n/)[0]!;
-  const result = await compileVideoPublication(f.store, f.request, { ...f.options, encoderVersion: version,
+  const result = await publishVideoPublication(f.store, f.request, { ...f.options, encoderVersion: version,
+    operationId: randomUUID(), outputRoot: f.scratch, format: "zip",
     encoder: { slateFont: "unused", run: async (args, _progress, signal) => { await execute(ffmpeg, args, { signal, windowsHide: true }); } },
     probe: { info: async (path, opts) => parseFfprobeJson((await execute(ffprobe, ["-v", "error", "-show_streams", "-show_format", "-of", "json", path],
       { signal: opts?.signal, windowsHide: true })).stdout) },
   });
+  const extracted = await extractPublicationZip(result.path, f.scratch);
   try {
     assert.equal(result.manifest.content.textTracks.length, 2);
-    await execute(ffmpeg, ["-v", "error", "-i", join(result.directory, "movie.mp4"), "-f", "null", "-"], { windowsHide: true });
+    await execute(ffmpeg, ["-v", "error", "-i", join(extracted.directory, "movie.mp4"), "-f", "null", "-"], { windowsHide: true });
     assert.ok(result.manifest.assets.movie!.byteLength > 1000);
-  } finally { await result.dispose(); }
+  } finally { await extracted.dispose(); }
 });

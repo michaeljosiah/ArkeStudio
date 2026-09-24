@@ -1,9 +1,9 @@
-# Publication contracts and video compiler
+# Publication contracts, compilation and local delivery
 
 The implemented foundation of SPEC-048 supplies the shared contract for a portable video
-publication, source capture, directory integrity verification and a video compiler that returns
-a verified temporary package. Durable publication, ZIP delivery, a player and an export command
-are not yet implemented.
+publication, source capture, directory integrity verification, a video compiler, recoverable local
+publication delivery and bounded ZIP writing/extraction. A player and an export command are not
+yet implemented.
 Track the remaining work in [issue #1228](https://github.com/michaeljosiah/ArkeStudio/issues/1228).
 
 `packages/contracts/src/publication.ts` exports the video manifest schema, compatibility reader,
@@ -36,8 +36,8 @@ URL escapes, traversal, Windows device names, trailing dots, case collisions, fi
 conflicts and collisions with the root `publication.json` are rejected.
 
 Successful parsing is **not package verification**. The coordinator directory verifier below
-checks file integrity. A future ZIP reader must also bound extraction sizes and reject duplicate
-entries before extraction. WebVTT timing and codec preflight remain separate, unimplemented checks.
+checks file integrity. The ZIP reader below bounds extraction sizes and rejects duplicate
+entries before extraction. General reader WebVTT timing and codec preflight remain player work.
 The schema cannot establish those facts from a JSON description alone.
 
 ## Dependency boundary
@@ -160,11 +160,96 @@ Output files are synced, inventoried and independently verified before returning
 is then removed. The returned package includes an idempotent `dispose()`; callers must consume it
 and dispose it. Failure, cancellation or world close removes this operation's temporary files.
 No destination is promoted or reported as durably completed, and a process crash can leave
-scratch files. A future publisher must add no-overwrite promotion and retry reconciliation before
-this API is exposed as a completed user export.
+scratch files. The publisher below consumes this temporary output and adds promotion and retry
+reconciliation.
 
 Regression coverage includes scope parity in contracts `test/delivery-scopes.test.ts` and compiler
 lifecycle in coordinator `test/publications/video.test.ts`. To also encode, probe and decode real
 media, set `ARKE_TEST_FFMPEG` and `ARKE_TEST_FFPROBE` to executable paths before running that test.
-Typecheck consumers after changes. Next work adds durable package promotion/recovery and ZIP,
-then wires an independent player and export action.
+Typecheck consumers after changes. The remaining user-facing work is the independent player and
+export action, including persisted operation ids, progress, cancellation and retry controls.
+
+## Recoverable local delivery
+
+Coordinator `src/publications/publish.ts` exports `publishVideoPublication(store, request, options)`.
+The host supplies the compiler ports, an existing trusted local `outputRoot`, a persisted UUID
+`operationId` and `format: "directory" | "zip"`. The video wrapper fingerprints the request,
+world identity and encoder identity. Reusing an operation id with different settings refuses as
+`operation-conflict`. Source edits after preparation do not change the saved edition: retries
+verify that edition without scanning the world or running the encoder again.
+
+The lower-level `publishPublication(request, build, options)` accepts a trusted compiler callback
+that returns a disposable verified directory. Hosts must persist its operation id, publication id,
+format and complete request fingerprint before starting, and mint a new publication id for a new
+edition. The publisher cannot infer omitted settings from a caller's fingerprint. It coordinates
+by operation id within one output root; copying an edition elsewhere preserves its publication id.
+It does not supply a global publication registry or deduplicate different operation ids.
+
+Each operation allocates `<outputRoot>/<operationId>/`. Internal recovery records live there,
+outside the portable package:
+
+```text
+<operationId>/
+  operation.json                    immutable request identity
+  prepared.json                     chosen attempt and measured package/ZIP hashes
+  complete.json                     acknowledgement of verified promoted output
+  attempt-XXXXXX/
+    publication/                    portable directory, or publication.zip
+```
+
+Compilation and package copying use a unique attempt directory on the destination filesystem.
+Every copied package file and the ZIP are flushed; the exact inventory and hashes are verified
+before a prepared receipt selects the attempt. Receipts are written to flushed temporary files
+and installed with exclusive hard links, so neither retries nor competing processes overwrite
+records. Processes may prepare competing candidates; one wins and losing attempts are discarded.
+The in-process queue also avoids redundant compilation for ordinary concurrent callers.
+
+A prepared directory is renamed inside its selected attempt; the ZIP is installed with a
+no-replace hard link. Existing targets are verified, never treated as permission to overwrite.
+Completion is recorded only after the promoted output is verified against the prepared receipt.
+If a process stops before or after promotion, retry reconciles the recorded attempt and destination.
+A missing completion record never means that no output exists. A damaged, missing or conflicting
+prepared/completed edition is refused and preserved rather than rerendered under the same operation.
+The returned `path` names only the portable directory/ZIP; recovery records must not be shipped.
+
+Cancellation is checked during copying, ZIP work and verification, and before entering promotion
+and completion. Before preparation, failures remove the current attempt. After preparation, an
+interruption preserves the selected attempt/output for reconciliation. Once completion installation
+starts, its outcome must be reconciled even if the caller loses the acknowledgement. The optional
+`onPhase` hook observes prepared/promoted/completed boundaries; it must not recursively await a
+publisher on the same operation. The caller must await/drain its publisher promise on shutdown.
+The video wrapper combines caller cancellation with world close.
+
+This supports process-crash recovery on a trusted local filesystem with hard links and same-volume
+rename (such as NTFS/ext4). It does not promise recovery from arbitrary power loss, an atomic fence
+against hostile path replacement, or correctness on network/actively synchronized storage. It does
+not change the existing world ownership protocol. Abrupt exit before preparation can leave orphan
+attempts or receipt temporaries; there is no automatic orphan sweep yet. ZIP staging may retain a
+second hard-link name to the completed archive; it does not duplicate its stored bytes.
+
+## ZIP portability and reader limits
+
+Coordinator `src/publications/archive.ts` uses [yazl](https://github.com/thejoshwolfe/yazl) for
+streamed ZIP/ZIP64 output and [yauzl](https://github.com/thejoshwolfe/yauzl) for bounded extraction.
+Files are stored without recompressing already encoded media. `writePublicationZip` requires an
+absent destination and writes only the verified inventory, with `publication.json` at root. It is a
+container writer, not a completion API; the publisher validates its output before promotion.
+
+`extractPublicationZip(archive, scratchRoot, options?)` first pins the archive to its own scratch
+child, then validates all central-directory paths and declared sizes before extracting anything.
+It rejects traversal, non-portable names, duplicates/case aliases, file/directory collisions,
+links/special files, encryption and unsupported compression. Stored and deflated entries and ZIP64
+are supported, including ordinary explicit directory entries. Extraction streams enforce actual
+expanded lengths and CRC32; the existing directory verifier then validates the manifest and full
+SHA-256 inventory. Missing/unlisted assets, incompatible manifests and tampered data still refuse.
+Malformed archives report `invalid-package`; filesystem and cancellation errors remain distinct.
+
+The directory byte/count limits also govern extraction. Pinned archives are bounded to the package
+byte limit plus 16 MiB for container overhead. The returned `ExtractedPublication` owns its pinned
+ZIP and verified extracted directory; `dispose()` removes those copies and leaves the input alone.
+The scratch root must have space for both forms. No extraction result implies codec support or
+caption-semantic validation; the player still owns those checks.
+
+`test/publications/delivery.test.ts` covers malformed archives, receipts, cancellation, preservation
+of existing output, abrupt process exit and competing processes. `test/publications/video.test.ts`
+includes compiler-to-publisher retry after source edits and opt-in real-media ZIP decode.
