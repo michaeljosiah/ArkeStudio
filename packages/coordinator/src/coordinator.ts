@@ -467,6 +467,7 @@ import { ConversationInUseError, WorldChatService } from "./world-chat/service.j
 import {
   acceptDecided,
   artDirectionFormContent,
+  DRAFT_CHANGED_DETAIL,
   explainAcceptRefusal,
   landed,
   type AcceptOutcome,
@@ -5421,9 +5422,9 @@ export class Coordinator {
           const at = new Date().toISOString();
           // Refused against a revision the press was fenced to, and the draft has since moved on
           // (codex on PR 1232): another window kept or edited part of it. That is not the world
-          // moving, so the answer is to read the newer draft, never to rebase it.
-          const draftMoved = outcome.status === "stale" && msg.expectedDraftRevision !== undefined
-            && (await gate.readManifest(msg.proposalId).then((p) => p.draftRevision !== msg.expectedDraftRevision, () => false));
+          // moving, so the answer is to read the newer draft, never to rebase it. Told by what the
+          // gate said under its lock, not by reading the proposal again once it has let go.
+          const draftMoved = outcome.status === "stale" && outcome.detail === DRAFT_CHANGED_DETAIL;
           // `no-op` retires the proposal too (gate/proposals.ts): every target already reads as
           // proposed, so there is nothing to decide. It has to settle here for the same reason —
           // a conversation whose propositions stayed `proposed` behind a proposal that no longer

@@ -235,6 +235,13 @@ export class DraftUnresolvedError extends Error {
   }
 }
 
+/**
+ * The detail of an accept refused because the proposal's own draft moved past the revision the
+ * press was fenced to (PR 1232), as opposed to the world moving under it. Said by the gate while
+ * it holds the lock, so a caller can tell the two apart without reading the proposal again.
+ */
+export const DRAFT_CHANGED_DETAIL = "The proposal changed since review.";
+
 export type AcceptOutcome =
   | { status: "accepted"; result: CommitResult; ripples: RippleItem[] }
   | { status: "no-op" }
@@ -1037,7 +1044,7 @@ export class ProposalManager {
       const proposal = await this.readManifest(proposalId);
 
       if (opts.expectedDraftRevision !== undefined && proposal.draftRevision !== opts.expectedDraftRevision) {
-        return { status: "stale", stalePaths: proposal.targets.map(target => target.path), detail: "The proposal changed since review." };
+        return { status: "stale", stalePaths: proposal.targets.map(target => target.path), detail: DRAFT_CHANGED_DETAIL };
       }
 
       const openChoices = proposal.openChoices ?? [];

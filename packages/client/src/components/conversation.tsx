@@ -1193,10 +1193,14 @@ export function ProductionConversation({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [message]);
   // Said when the dock is free.
+  // Read when the line goes, not when the callback was made (codex on PR 1232): a line said into
+  // a thread it opened goes after that thread arrives, perhaps across a rejoin.
+  const rejoinsRef = useRef(rejoins);
+  rejoinsRef.current = rejoins;
   const sentAs = (pressed: DockAsk) => (requestId: string) => {
     const { again: _again, opening: _opening, ...sent } = pressed;
     const after = loadedRef.current?.messages.at(-1)?.id;
-    onAsk?.({ ...sent, sent: { requestId, at: new Date().toISOString(), rejoins, ...(after !== undefined ? { after } : {}) } });
+    onAsk?.({ ...sent, sent: { requestId, at: new Date().toISOString(), rejoins: rejoinsRef.current, ...(after !== undefined ? { after } : {}) } });
   };
   useEffect(() => {
     if (ask === undefined || ask.draft === true || ask.declined === true || ask.sent !== undefined || ask.opening !== undefined) return;

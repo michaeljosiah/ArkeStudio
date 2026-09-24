@@ -1112,6 +1112,25 @@ describe("the craft loop (turn 128)", () => {
     assert.equal(sends.length, 1);
   });
 
+  it("a first ask said after a rejoin is not taken for lost (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const m = await mount(styled);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Expand") as HTMLElement).click());
+    // The connection drops and rejoins while the thread is being opened.
+    await act(async () => __setStateForTest(styled, { connection: "closed" }));
+    await act(async () => __setStateForTest(styled, { connection: "open", rejoins: 1 }));
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 1, actions: [], messages: [], points: [],
+    };
+    await act(async () => __setStateForTest({ ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState, { connection: "open", rejoins: 1 }));
+    assert.equal(m.sent.filter((message) => message.kind === "world-chat-send").length, 1, "said into the thread it opened");
+    assert.doesNotMatch(text(m), /Not sent ·/, "sent after the rejoin, so its answer is still coming");
+  });
+
   it("a line typed while the last one is still being taken stays in the composer (codex on PR 1232)", async () => {
     const styled = inkbound([], STYLE);
     const workspace = {

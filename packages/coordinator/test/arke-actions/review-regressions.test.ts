@@ -13,7 +13,7 @@ import { worldChatActionAdapters } from "../../src/world-chat/actions.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { chaptersFence, jobsFence, sceneFence, storyFence, timelineFence, worldMetadataFence } from "../../src/world-chat/target-reads.js";
-import { ProposalManager } from "../../src/gate/proposals.js";
+import { DRAFT_CHANGED_DETAIL, ProposalManager } from "../../src/gate/proposals.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { WorldStateStaleError, type WorldStore } from "../../src/world/store.js";
 import { sha256 } from "../../src/world/text-files.js";
@@ -465,12 +465,22 @@ it("an accept refused because the draft moved on says so, rather than offering a
   const w = await setup();
   await w.coordinator.openWorld(WORLD_ID);
   const MOVED_ID = newId("pr");
-  // Another window kept part of the draft first: the gate refuses the fenced accept as stale,
-  // and the proposal's draft is now a revision past the one the press was made on.
+  const STALE_ID = newId("pr");
+  // Another window kept part of the draft first: the gate refuses the fenced accept for that.
+  // The other is the world moving under it — and the draft moving on only after the gate let go
+  // must not turn that into the first kind (codex on PR 1232).
   const engine = (w.coordinator as unknown as { engine: { proposals: { accept: unknown } } }).engine;
-  Object.assign(engine.proposals, { accept: async () => ({ value: { status: "stale", stalePaths: ["x.md"], detail: "The proposal changed since review." } }) });
+  Object.assign(engine.proposals, {
+    accept: async (_context: unknown, _world: string, proposalId: string) => ({
+      value: proposalId === MOVED_ID
+        ? { status: "stale", stalePaths: ["x.md"], detail: DRAFT_CHANGED_DETAIL }
+        : { status: "stale", stalePaths: ["x.md"] },
+    }),
+  });
   t.mock.method(ProposalManager.prototype, "readManifest", async () => ({ draftRevision: 3 }));
   await w.internal.handleClientMessage({ kind: "proposal-accept", worldId: WORLD_ID, proposalId: MOVED_ID, expectedDraftRevision: 2 });
-  const blocked = w.events.find((event) => event.type === "proposal.blocked" && event.proposalId === MOVED_ID);
-  assert.equal((blocked as { reason?: string } | undefined)?.reason, "draft-changed");
+  await w.internal.handleClientMessage({ kind: "proposal-accept", worldId: WORLD_ID, proposalId: STALE_ID, expectedDraftRevision: 2 });
+  const reason = (id: string) => (w.events.find((event) => event.type === "proposal.blocked" && event.proposalId === id) as { reason?: string } | undefined)?.reason;
+  assert.equal(reason(MOVED_ID), "draft-changed");
+  assert.equal(reason(STALE_ID), "stale", "told by what the gate said, not by the proposal read afterwards");
 });
