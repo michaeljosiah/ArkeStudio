@@ -1284,6 +1284,48 @@ describe("the craft loop (turn 128)", () => {
     assert.equal(labels.some((label) => /against the style/.test(label ?? "")), false);
   });
 
+  it("a line taken while the connection was down is free once the rejoin shows it (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const m = await mount(state);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const first = (m.sent.find((message) => message.kind === "world-chat-send") as { requestId: string }).requestId;
+    const prompts = () => [...m.container.querySelectorAll("button.fy-arke__prompt")] as HTMLButtonElement[];
+    await act(async () => __setStateForTest(state, { connection: "closed" }));
+    // The whole turn ran while away: the rejoin brings it finished.
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 9 } } as ClientState, { connection: "open", rejoins: 1 }));
+    await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: first, admitted: true }));
+    assert.ok(prompts().every((b) => !b.disabled), "nothing left to wait for");
+  });
+
+  it("a line waiting for the thread it opened keeps waiting through a closed connection (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const m = await mount(styled);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Expand") as HTMLElement).click());
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 1, actions: [], messages: [], points: [],
+    };
+    const opened = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    // The thread arrives with the connection down: nothing can be said yet, and nothing is lost.
+    await act(async () => __setStateForTest(opened, { connection: "closed" }));
+    const sends = () => m.sent.filter((message) => message.kind === "world-chat-send" && (message as { text: string }).text.includes("Expand this"));
+    assert.equal(sends().length, 0);
+    await act(async () => __setStateForTest(opened, { connection: "open" }));
+    assert.equal(sends().length, 1, "said once the connection is back");
+    assert.equal(m.sent.filter((message) => message.kind === "world-chat-create").length, 1, "into the thread it opened");
+  });
+
   it("a line typed while the last one is still being taken stays in the composer (codex on PR 1232)", async () => {
     const styled = inkbound([], STYLE);
     const workspace = {
@@ -1441,6 +1483,27 @@ describe("the craft loop (turn 128)", () => {
       assert.equal((accepted[0] as { expectedDraftRevision?: number }).expectedDraftRevision, 2, "fenced to the revision seen (codex on PR 1232)");
       const discard = [...m.container.querySelectorAll("button")].find((b) => b.textContent === "Discard") as HTMLButtonElement;
       assert.equal(discard.disabled, true, "the accept that follows the keep holds the other decisions too (codex on PR 1232)");
+    });
+
+    it("a keep still lands its accept when a newer draft takes the card (codex on PR 1232)", async () => {
+      const m = await mount(inkbound([TWO]));
+      await answerOpen(m);
+      await act(async () => edits(m)[0]!.click());
+      await act(async () => acceptButton(m).click());
+      const landed: StagedProposal = {
+        ...TWO,
+        proposal: { ...TWO.proposal, draftRevision: 2 },
+        review: {
+          targets: [{ ...TWO.review!.targets[0]!, fields: [{ field: "Prose", before: BODY, proposed: BODY.replace("Maren counted the bells.", "Maren counted the seven bells.") }] }],
+        },
+      };
+      // Another draft for the chapter is staged after it, and is the one the card now shows.
+      const newer: StagedProposal = { ...DRAFT, proposal: { ...DRAFT.proposal, id: "pr_01J8H0000000000000000000PN", created: "2026-09-06T13:00:00Z" } };
+      await act(async () => __setStateForTest(inkbound([landed, newer]), { connection: "open" }));
+      const accepted = m.sent.filter((message) => message.kind === "proposal-accept") as Array<{ proposalId: string; expectedDraftRevision?: number }>;
+      assert.equal(accepted.length, 1, "the accept the press promised is still sent");
+      assert.equal(accepted[0]!.proposalId, TWO.proposal.id);
+      assert.equal(accepted[0]!.expectedDraftRevision, 2);
     });
 
     it("a partial accept left mid-way is finished by the next screen to see the keep land (codex on PR 1232)", async () => {

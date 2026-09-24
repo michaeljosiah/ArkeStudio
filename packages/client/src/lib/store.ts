@@ -432,7 +432,15 @@ interface StoreState {
   worldChatHolds: Record<string, WorldChatHold>;
 }
 
-export type WorldChatHold = { requestId: string; worldId: string; seq: number | null; rejoins: number; takenAt?: number | null };
+export type WorldChatHold = {
+  requestId: string;
+  worldId: string;
+  seq: number | null;
+  rejoins: number;
+  takenAt?: number | null;
+  /** Asked where it stands after a rejoin. */
+  asked?: boolean;
+};
 
 export interface VoiceCandidatesState {
   extracted: string[];
@@ -924,10 +932,13 @@ function settleHolds(next: StoreState): StoreState {
     let settled: WorldChatHold | null = hold;
     if (answer === false) settled = null;
     else if (hold.takenAt !== undefined) settled = running || seq !== hold.takenAt ? null : hold;
-    else if (answer === true) settled = running ? null : { ...hold, takenAt: seq };
+    // Taken, and asked after a rejoin whose snapshot is already past the send — it can bring the
+    // whole turn at once (codex on PR 1232) — the hold has nothing left to wait for. Without a
+    // rejoin, a thread that moved meanwhile may be another window's edit, so the turn is awaited.
+    else if (answer === true) settled = running || (hold.asked === true && seq !== hold.seq) ? null : { ...hold, takenAt: seq };
     else if (next.rejoins !== hold.rejoins && next.connection === "open") {
       // Asked once per rejoin, after this change has landed.
-      settled = { ...hold, rejoins: next.rejoins };
+      settled = { ...hold, rejoins: next.rejoins, asked: true };
       queueMicrotask(() => askWorldChatSendStatus(hold.worldId, conversationId, hold.requestId));
     }
     if (settled === hold) continue;

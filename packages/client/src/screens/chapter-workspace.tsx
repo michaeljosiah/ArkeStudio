@@ -281,9 +281,12 @@ function chapterPath(production: ProductionBundle, chapter: ChapterSummary): str
 export function stagedChapterDraft(
   proposals: readonly StagedProposal[],
   path: string,
+  /** One proposal by id, whether or not it is the newest (codex on PR 1232). */
+  id?: string,
 ): { staged: StagedProposal; body: string | null; before: string | null } | undefined {
   const staged = [...proposals]
     .filter((entry) => entry.proposal.kind === "chapter-draft" && entry.proposal.targets.some((t) => t.path === path))
+    .filter((entry) => id === undefined || entry.proposal.id === id)
     .sort((left, right) =>
       left.proposal.created.localeCompare(right.proposal.created) || left.proposal.id.localeCompare(right.proposal.id),
     )
@@ -1283,26 +1286,29 @@ export function ChapterWorkspace({
     else heldKeeps.set(key, next);
     setKeepingState(next);
   };
-  const stagedId = stagedDraft?.staged.proposal.id;
-  const stagedRevision = stagedDraft?.staged.proposal.draftRevision;
-  const stagedBody = stagedDraft?.body ?? null;
   // A keep sent into a connection that then dropped has no answer coming (codex on PR 1232): the
   // rejoin brings the snapshot as it was, so the wait ends with the connection, not with a reply.
+  // The keep's own proposal, whether or not a newer draft has since taken the card (codex on PR
+  // 1232): the keep can still land on it, and its accept is still owed.
+  const kept = keeping === null ? undefined : stagedChapterDraft(world.proposals, path, keeping.id);
+  const keptRevision = kept?.staged.proposal.draftRevision;
+  const keptBody = kept?.body ?? null;
   useEffect(() => {
     if (keeping === null) return;
-    if (stagedId === keeping.id && stagedRevision !== undefined && stagedRevision > keeping.revision) {
+    if (kept === undefined) setKeeping(null);
+    else if (keptRevision !== undefined && keptRevision > keeping.revision) {
       // Only the keep's own revision is accepted, and fenced to it (codex on PR 1232): the keep
       // moves the draft exactly one revision, so a later one carries some other edit too —
       // perhaps to a field the prose does not show — and is left for the author. One moved on
       // again before the accept reaches the gate is refused there as stale. The accept holds the
       // controls in its turn, so nothing races it between the two (codex on PR 1232).
       const requestId = crypto.randomUUID();
-      if (stagedRevision === keeping.revision + 1 && stagedBody === keeping.expected
-        && acceptProposal(worldId, keeping.id, undefined, stagedRevision, requestId)) {
-        setAccepting({ id: keeping.id, notice: notices[keeping.id], requestId, revision: stagedRevision });
+      if (keptRevision === keeping.revision + 1 && keptBody === keeping.expected
+        && acceptProposal(worldId, keeping.id, undefined, keptRevision, requestId)) {
+        setAccepting({ id: keeping.id, notice: notices[keeping.id], requestId, revision: keptRevision });
       }
       setKeeping(null);
-    } else if (stagedId !== keeping.id || answers(notices[keeping.id], keeping.notice, keeping.request.requestId)) {
+    } else if (answers(notices[keeping.id], keeping.notice, keeping.request.requestId)) {
       setKeeping(null);
     } else if (connection === "open" && rejoins !== keeping.rejoins) {
       // A rejoin does not say whether the keep landed (codex on PR 1232): it may have reached the
@@ -1314,7 +1320,7 @@ export function ChapterWorkspace({
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keeping, connection, rejoins, stagedId, stagedRevision, stagedBody, notices, worldId]);
+  }, [keeping, connection, rejoins, kept === undefined, keptRevision, keptBody, notices, worldId]);
   /*
    * A whole accept in flight holds the choices too (codex on PR 1232): toggled after the press,
    * they would show a count the gate is not accepting. It is fenced to the revision on screen,
@@ -1332,15 +1338,17 @@ export function ChapterWorkspace({
     else heldAccepts.set(key, held);
     setAcceptingState(held);
   };
+  // Its own proposal too: gone is accepted (or discarded); a newer draft on the card is not.
+  const acceptingGone = accepting !== null && stagedChapterDraft(world.proposals, path, accepting.id) === undefined;
   useEffect(() => {
     if (accepting === null) return;
-    if (stagedId !== accepting.id || answers(notices[accepting.id], accepting.notice, accepting.requestId)) setAccepting(null);
+    if (acceptingGone || answers(notices[accepting.id], accepting.notice, accepting.requestId)) setAccepting(null);
     else if (connection === "open" && rejoins !== accepting.rejoins
       && acceptProposal(worldId, accepting.id, accepting.confirm, accepting.revision, accepting.requestId)) {
       setAccepting(accepting);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accepting, connection, rejoins, stagedId, notices]);
+  }, [accepting, connection, rejoins, acceptingGone, notices]);
   // Every passage accept is fenced to the revision on screen (codex on PR 1232), one edit or many.
   const pending = keeping !== null || accepting !== null;
   const accept = stagedDraft === undefined || passageChange === null

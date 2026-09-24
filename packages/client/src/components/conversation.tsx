@@ -1001,13 +1001,17 @@ export function ProductionConversation({
     if (!opening || !worldId) return;
     const opened = workspace?.conversationId ?? null;
     if (!opened || opened === opening.was || opened !== conversationId) return;
+    // Said only on a connection that can carry it (codex on PR 1232): a send that does not leave
+    // keeps the line waiting for its thread, rather than dropping the wait to be made again.
+    if (connection !== "open") return;
     if (opening.attach) worldChatAttachFiles(worldId, opened);
     else {
       const requestId = sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId, opening.replyOnly ?? false);
-      if (requestId !== null) opening.onSent?.(requestId);
+      if (requestId === null) return;
+      opening.onSent?.(requestId);
     }
     setOpening(null);
-  }, [opening, worldId, workspace?.conversationId, conversationId]);
+  }, [opening, worldId, workspace?.conversationId, conversationId, connection]);
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
   const loadedRef = useRef(loaded);
   loadedRef.current = loaded;

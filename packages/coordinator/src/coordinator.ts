@@ -5669,6 +5669,7 @@ export class Coordinator {
             type: "proposal.blocked",
             worldId: msg.worldId,
             proposalId: msg.proposalId,
+            requestId: msg.requestId,
             // Stale here is always the draft moving — another window's edit landed first — never
             // the world under it, so nothing is offered to rebase (codex on PR 1232).
             reason:

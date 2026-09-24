@@ -1564,6 +1564,9 @@ export class ProposalManager {
         targets,
         baseCanonRevision: this.store.getBundle().meta.canonRevision,
         rebasedAt: this.store.now(),
+        // The files were rewritten, so a screen fenced to the revision before must not accept
+        // them unread (codex on PR 1232): the draft revision marks every rewrite, not only edits.
+        draftRevision: proposal.draftRevision + 1,
         pendingReview: true, // must be seen before accept (R-7)
         ...(conflicts.length > 0 ? { conflicts } : { conflicts: [] }),
       };
@@ -1649,7 +1652,8 @@ export class ProposalManager {
       const conflicts = (proposal.conflicts ?? []).map((c) =>
         c.path === path && c.field === field ? { ...c, resolution: choice } : c,
       );
-      await this.writeManifest({ ...proposal, conflicts });
+      // A choice changes what the proposal writes, so it moves the draft revision too.
+      await this.writeManifest({ ...proposal, conflicts, draftRevision: proposal.draftRevision + 1 });
     });
   }
 
