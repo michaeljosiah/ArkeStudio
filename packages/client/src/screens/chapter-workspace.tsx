@@ -279,12 +279,15 @@ function PassageMenu({
   words,
   top,
   left,
+  end,
   actions,
   onAsk,
 }: {
   words: number;
   top: number;
   left: number;
+  /** Near the manuscript's right edge: the menu opens leftward. */
+  end: boolean;
   actions: readonly PassageAction[];
   onAsk: (action: PassageAction) => void;
 }) {
@@ -313,7 +316,7 @@ function PassageMenu({
         Ask Arke · {words.toLocaleString()} words
       </button>
       {open && (
-        <div className="fy-ch__ask-menu" role="menu" aria-label="Ask about this passage">
+        <div className={cx("fy-ch__ask-menu", end && "fy-ch__ask-menu--end")} role="menu" aria-label="Ask about this passage">
           {actions.map((action, i) => (
             <button
               key={action.id}
@@ -347,19 +350,26 @@ function PassageMenu({
   );
 }
 
+/** The widest the menu of asks draws, its border and padding included (fidelity.css). */
+const ASK_MENU_WIDTH = 200;
+
 /**
  * Where the press beside a selection goes: at the end of the selected words, in the manuscript's
  * own coordinates. Off screen (no DOM selection to measure, as under test) it sits at the top.
  */
-function askAt(host: HTMLElement | null): { top: number; left: number } {
+function askAt(host: HTMLElement | null): { top: number; left: number; end: boolean } {
   const selection = typeof window.getSelection === "function" ? window.getSelection() : null;
-  if (!host || !selection || selection.rangeCount === 0) return { top: 0, left: 0 };
+  if (!host || !selection || selection.rangeCount === 0) return { top: 0, left: 0, end: false };
   const rect = selection.getRangeAt(0).getBoundingClientRect();
   const frame = host.getBoundingClientRect();
-  if (rect.width === 0 && rect.height === 0) return { top: 0, left: 0 };
+  if (rect.width === 0 && rect.height === 0) return { top: 0, left: 0, end: false };
+  const at = rect.right - frame.left + 8;
   return {
     top: Math.max(0, rect.bottom - frame.top - 22),
-    left: Math.max(0, Math.min(rect.right - frame.left + 8, frame.width - 150)),
+    left: Math.max(0, Math.min(at, frame.width - 150)),
+    // The menu is wider than the press (codex on PR 1232): near the right edge it opens leftward
+    // from the press's end rather than over the dock.
+    end: at > frame.width - ASK_MENU_WIDTH,
   };
 }
 
@@ -1054,7 +1064,7 @@ export function ChapterWorkspace({
    * end, for the press beside them. The words rather than positions, because what is said about
    * them goes into the production's thread, which never sees the editor.
    */
-  const [selection, setSelection] = useState<{ text: string; paragraph: number | null; top: number; left: number } | null>(null);
+  const [selection, setSelection] = useState<{ text: string; paragraph: number | null; top: number; left: number; end: boolean } | null>(null);
   const manuscriptRef = useRef<HTMLDivElement | null>(null);
   // The paragraph rides with the words (codex on turn 128): the coordinator looks for the passage
   // there and only there, so an occurrence elsewhere can never be the one changed.
@@ -1464,6 +1474,7 @@ export function ChapterWorkspace({
                 words={countWords(selection.text)}
                 top={selection.top}
                 left={selection.left}
+                end={selection.end}
                 actions={passageActions(style !== null)}
                 onAsk={askPassage}
               />

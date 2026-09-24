@@ -6807,7 +6807,8 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ch__edit--refused ins { font-weight: inherit; color: var(--muted-foreground); text-decoration: line-through; }
 .fy-ch__ask { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--background); box-shadow: var(--shadow-xs); font: 500 10.5px var(--font-sans); color: var(--foreground); cursor: pointer; white-space: nowrap; transition: var(--transition-control); }
 .fy-ch__ask:hover { background: var(--accent); }
-.fy-ch__ask-menu { position: absolute; top: calc(100% + 4px); left: 0; display: flex; flex-direction: column; min-width: 180px; padding: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); box-shadow: var(--shadow-md); }
+.fy-ch__ask-menu { position: absolute; top: calc(100% + 4px); left: 0; display: flex; flex-direction: column; width: 190px; max-width: 190px; padding: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); box-shadow: var(--shadow-md); }
+.fy-ch__ask-menu--end { left: auto; right: 0; }
 .fy-ch__ask-item { padding: 5px 8px; border: 0; border-radius: 5px; background: transparent; font: 500 11.5px var(--font-sans); color: var(--foreground); text-align: left; cursor: pointer; white-space: nowrap; }
 .fy-ch__ask-item:hover, .fy-ch__ask-item:focus-visible { background: var(--accent); outline: none; }
 .fy-ch__ask-item--rule { margin-top: 4px; border-top: 1px solid var(--border); border-radius: 0 0 5px 5px; padding-top: 8px; }

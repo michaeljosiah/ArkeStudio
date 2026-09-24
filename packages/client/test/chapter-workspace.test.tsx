@@ -512,7 +512,23 @@ describe("the craft loop (turn 128)", () => {
 
   it("the press beside a selection opens what can be asked of it, each said with the passage as the dock's own asks are", async () => {
     const styled = inkbound([], STYLE);
-    const m = await mount({ ...styled, world: { ...styled.world!, conversations: [THREAD] } });
+    // The thread open and idle, so what is said goes straight to it.
+    const workspaceAt = (seq: number) => ({
+      conversationId: THREAD.id as never,
+      status: "open" as const,
+      initiative: "collaborate" as const,
+      hasMore: false,
+      runStatus: null,
+      runStartedAt: null,
+      retrievalUnavailable: false,
+      attachments: [],
+      seq,
+      actions: [],
+      messages: [],
+      points: [],
+    });
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspaceAt(4) } as ClientState;
+    const m = await mount(state);
     await answerOpen(m);
     const area = q(m, "textarea.fy-ch__source") as HTMLTextAreaElement;
     await keyup(area, 0, 24);
@@ -540,7 +556,11 @@ describe("the craft loop (turn 128)", () => {
     await act(async () => {
       item("Critique").click();
     });
-    assert.equal(sends().find((message) => message.text.includes("What works here"))?.replyOnly, true, "a critique is a reply and nothing else");
+    // Pressed before the thread shows the first ask's turn, the second waits (codex on PR 1232):
+    // released into that gap, the runner would refuse it as already working.
+    assert.equal(sends().some((message) => message.text.includes("What works here")), false, "not said over a turn the thread has not shown yet");
+    await act(async () => __setStateForTest({ ...state, worldChat: workspaceAt(5) }, { connection: "open" }));
+    assert.equal(sends().find((message) => message.text.includes("What works here"))?.replyOnly, true, "said once the thread moves; a critique is a reply and nothing else");
 
     // A line that only starts the ask goes into the composer, said by nobody yet.
     const before = sends().length;

@@ -960,7 +960,10 @@ export function ProductionConversation({
     const opened = workspace?.conversationId ?? null;
     if (!opened || opened === opening.was || opened !== conversationId) return;
     if (opening.attach) worldChatAttachFiles(worldId, opened);
-    else sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId, opening.replyOnly ?? false);
+    else {
+      sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId, opening.replyOnly ?? false);
+      setEcho({ seq: workspace?.seq ?? null });
+    }
     setOpening(null);
   }, [opening, worldId, workspace?.conversationId, conversationId]);
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
@@ -1030,6 +1033,7 @@ export function ProductionConversation({
     // captured agent preference before the production default; sending the displayed fallback
     // here would promote that default above the agent and run a different model.
     sendWorldChat(worldId, conversationId, text, [], about, languageModelId, replyOnly);
+    setEcho({ seq: loaded?.seq ?? null });
     setLanguageModelId(undefined);
   };
   const submit = () => {
@@ -1053,6 +1057,23 @@ export function ProductionConversation({
    * author's to finish under whatever they then select.
    */
   const [waitingAsk, setWaitingAsk] = useState<{ text: string; subject: WorldChatSubject | undefined; replyOnly: boolean } | null>(null);
+  /*
+   * A line just sent that the thread has not shown yet (codex on PR 1232). Between the send and
+   * the snapshot that reports its turn, nothing here says a turn is running, and a waiting ask
+   * released in that gap is refused by the runner as already working — lost without a word. So
+   * the dock counts as busy until the conversation's sequence moves past the one it sent at; a
+   * send the coordinator refused never moves it, so the wait also ends on its own after a while.
+   */
+  const [echo, setEcho] = useState<{ seq: number | null } | null>(null);
+  useEffect(() => {
+    if (echo === null) return;
+    if ((loaded?.seq ?? null) !== echo.seq) {
+      setEcho(null);
+      return;
+    }
+    const lapse = setTimeout(() => setEcho(null), 15_000);
+    return () => clearTimeout(lapse);
+  }, [echo, loaded?.seq]);
   const ask = dock?.ask;
   const onAskTaken = dock?.onAskTaken;
   useEffect(() => {
@@ -1070,12 +1091,12 @@ export function ProductionConversation({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ask]);
   useEffect(() => {
-    if (waitingAsk === null || opening !== null || running || languageUnavailableReason !== undefined) return;
+    if (waitingAsk === null || opening !== null || echo !== null || running || languageUnavailableReason !== undefined) return;
     setWaitingAsk(null);
     say(waitingAsk.text, waitingAsk.replyOnly, waitingAsk.subject);
     // say is rebuilt every render; the ask and the dock's readiness are what decide.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [waitingAsk, opening, running, languageUnavailableReason]);
+  }, [waitingAsk, opening, echo, running, languageUnavailableReason]);
 
   const points = loaded?.points ?? [];
   const carriedPoints = points.filter((p) => p.kind === "point" && p.settled).length;
