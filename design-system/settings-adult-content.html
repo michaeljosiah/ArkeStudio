@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arke Studio · Adult content design</title>
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/colors.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/typography.css">
+<style>
+:root{color-scheme:light;--background:#fff;--foreground:#151515;--muted-foreground:#686868;--border:#e5e5e5;--accent:#f4f4f3;--signal:#8b570b;font-family:var(--font-sans),system-ui,sans-serif}
+:root.dark{color-scheme:dark;--background:#151515;--foreground:#f0f0f0;--muted-foreground:#aaa;--border:#363636;--accent:#232323;--signal:#edc17b}
+*{box-sizing:border-box}body{margin:0;background:var(--background);color:var(--foreground);font-size:14px}button,input{font:inherit}button{cursor:pointer;color:inherit}button:disabled{cursor:default;opacity:.45}button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid var(--foreground);outline-offset:4px}a{color:inherit}button{border:1px solid var(--border);background:var(--background);border-radius:7px;padding:9px 14px}.primary{color:var(--background);background:var(--foreground);border-color:var(--foreground)}.quiet{border:0;background:transparent;padding:7px 9px}.top{height:46px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 22px}.brand{font-size:15px;font-weight:600}.muted,p{color:var(--muted-foreground)}.small{font-size:12px;line-height:1.6}.shell{display:grid;grid-template-columns:190px 206px minmax(0,1fr);min-height:calc(100vh - 87px)}.rail,.topics{padding:28px 18px;border-right:1px solid var(--border)}.rail strong{display:block;margin:0 10px 24px;font-size:18px}.rail span,.rail button,.topics span{display:block;width:100%;text-align:left;padding:10px 12px;margin:3px 0;font-size:13px;border:0;border-radius:6px}.rail span,.topics span{color:var(--muted-foreground)}.rail button[aria-current=page],.topics .selected{color:var(--foreground);background:var(--accent);font-weight:600}.topics h2{font-size:13px;margin:10px 12px 22px}.content{padding:46px 44px;max-width:990px;width:100%}h1{font-size:28px;letter-spacing:-.035em;margin:0 0 12px;font-weight:600}h2{font-size:16px;font-weight:600}h3{font-size:14px;margin:0 0 6px}p{line-height:1.6;margin:0 0 16px}.intro{max-width:600px;margin-bottom:34px}.setting{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:23px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}.setting p{margin:0;font-size:13px;max-width:500px}.switch{width:42px;height:24px;padding:3px;border-radius:20px;background:var(--border);border:0;flex-shrink:0}.switch::before{content:'';display:block;width:18px;height:18px;border-radius:50%;background:var(--background);box-shadow:0 1px 2px #0003;transition:transform .15s}.switch[aria-checked=true]{background:var(--foreground)}.switch[aria-checked=true]::before{transform:translateX(18px)}.switch-label{display:flex;gap:12px;align-items:center;font-size:13px}.summary{padding:22px 0;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr;gap:22px}.summary p{font-size:13px;margin:0}.footnote{padding-top:20px;max-width:620px}.status{margin-top:24px;padding:14px 16px;background:var(--accent);border-radius:7px;font-size:13px;line-height:1.6}.status strong{display:block;color:var(--foreground)}.demo{min-height:41px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px;padding:5px 20px;color:var(--muted-foreground);font-size:11px}.demo button{font-size:11px}.tabs{display:flex;gap:6px;margin:26px 0}.tabs button[aria-pressed=true]{background:var(--accent);font-weight:600}.catalogue{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}.tile{border:1px solid var(--border);border-radius:8px;overflow:hidden}.placeholder{height:116px;background:var(--accent);display:flex;align-items:center;justify-content:center;gap:8px;color:var(--muted-foreground);font-size:12px}.placeholder svg{width:28px;height:28px}.tile-body{padding:18px}.tile-body p{font-size:12px;min-height:38px}.tag{display:inline-block;font-size:11px;border:1px solid var(--border);border-radius:4px;padding:3px 6px;margin-bottom:12px}.tile-action{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12px}.notice{border-left:2px solid var(--signal);padding:2px 0 2px 14px;margin:24px 0}.notice h3{color:var(--signal)}.notice p{font-size:13px;margin:0}.retained{margin-top:24px;display:flex;gap:18px;align-items:center;border:1px solid var(--border);padding:18px;border-radius:8px}.retained .placeholder{width:90px;height:68px;flex-shrink:0}.retained p{margin:0;font-size:12px}dialog{width:min(540px,calc(100% - 32px));max-height:calc(100% - 32px);overflow:auto;border:1px solid var(--border);border-radius:12px;padding:30px;background:var(--background);color:var(--foreground);box-shadow:0 18px 80px #0003}dialog::backdrop{background:#0006}dialog h2{font-size:23px;letter-spacing:-.025em;margin:12px 0}dialog .tag{margin:0}dialog p{font-size:13px}.checks{margin:23px 0;display:grid;gap:17px}.checks label{display:flex;align-items:flex-start;gap:12px;font-size:13px;line-height:1.55}.checks input{width:17px;height:17px;flex-shrink:0;margin:2px 0;accent-color:var(--foreground)}.actions{display:flex;justify-content:flex-end;gap:9px;margin-top:22px}.locked{padding:32px 0;border-top:1px solid var(--border)}[hidden]{display:none!important}
+@media(max-width:900px){.shell{grid-template-columns:160px minmax(0,1fr)}.topics{display:none}.content{padding:32px 26px}.catalogue{grid-template-columns:1fr}}
+@media(max-width:550px){.shell{display:block}.rail{border-right:0;border-bottom:1px solid var(--border);padding:10px;display:flex;gap:5px}.rail strong,.rail span{display:none}.rail button{width:auto;margin:0;font-size:12px}.content{padding:28px 20px}.summary{grid-template-columns:1fr}.setting{align-items:flex-start}.switch-label{flex-direction:column-reverse;gap:6px}.top{padding:0 16px}.top .small{font-size:10px}h1{font-size:25px}.demo{align-items:flex-start;flex-wrap:wrap}.actions{flex-wrap:wrap}dialog{padding:24px}.retained{align-items:flex-start}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header class="top"><span class="muted small">Settings</span><span class="brand">Arke <span class="muted">Studio</span></span><span class="small muted">This device</span></header>
+<div class="shell">
+<nav class="rail" aria-label="Settings"><strong>Settings</strong><span>General</span><span>Providers</span><button data-page="models">AI models</button><button data-page="safety" aria-current="page">Content &amp; safety</button><span>Harness</span><span>Appearance</span><span>About</span></nav>
+<aside class="topics"><h2 id="topic-heading">Content &amp; safety</h2><span class="selected" id="topic-selected">Adult content</span><span id="topic-description">Images &amp; video</span></aside>
+<main class="content">
+<section id="safety-page">
+<h1>Adult content</h1><p class="intro">Choose whether adult image and video tools are available in your studio. This preference belongs to you on this device.</p>
+<div class="setting"><div><h3>Enable adult content</h3><p>Allow adult-specific recipes and eligible local models without built-in content filters.</p></div><div class="switch-label"><span id="setting-state">Off</span><button id="adult-switch" class="switch" role="switch" aria-checked="false" aria-label="Enable adult content" aria-describedby="setting-explanation"></button></div></div>
+<div class="summary"><div><h3>Adult recipes</h3><p id="recipe-summary">Hidden from browsing, search and Arke suggestions.</p></div><div><h3>Local models</h3><p id="model-summary">Adult and unrestricted options are unavailable.</p></div></div>
+<p class="small footnote" id="setting-explanation">Adult content includes nudity and sexually explicit images or video. Only eligible tools running on this device can be used. Cloud services keep their own restrictions.</p>
+<p class="small">Content involving minors or non-consensual intimate depictions is never permitted.</p>
+<div id="enabled-status" class="status" hidden><strong>Adult content is enabled</strong>Your acknowledgement applies to images and video on this device. Choose a recipe and model separately.<br><button id="browse" class="quiet"><u>View adult tools</u> &rarr;</button></div>
+<div id="off-status" class="status" hidden><strong>Adult content is off</strong>Adult tools are unavailable. Pending adult jobs are blocked and existing adult previews are hidden.</div>
+<div id="retained-preview" class="retained" hidden><div class="placeholder">18+</div><div><h3>Adult preview hidden</h3><p>Your files and accepted work are kept. Enable adult content to view this preview in Arke.</p></div></div>
+</section>
+<section id="models-page" hidden>
+<h1>AI models</h1><p class="intro">On this machine <span aria-hidden="true">/</span> Adult tools</p>
+<div id="catalogue-locked" class="locked"><h2>Adult content is off</h2><p>Enable adult content to browse eligible recipes and local models.</p><button id="inline-enable">Enable adult content&hellip;</button></div>
+<div id="catalogue-enabled" hidden>
+<div class="notice"><h3>Adult content enabled</h3><p>These tools run on this device. Enabling access does not download a model or start generation.</p></div>
+<div class="tabs" aria-label="Adult tools"><button aria-pressed="true" data-kind="recipes">Recipes</button><button aria-pressed="false" data-kind="models">Local models</button></div>
+<div class="catalogue" id="recipe-cards">
+<article class="tile"><div class="placeholder"><span>18+</span><span>Image recipe</span></div><div class="tile-body"><span class="tag">Adult · On this device</span><h3>Adult figure study</h3><p>Image recipe. Requires an eligible local image model.</p><div class="tile-action"><span>Available</span><button data-inspect="Adult figure study">View recipe</button></div></div></article>
+<article class="tile"><div class="placeholder"><span>18+</span><span>Video recipe</span></div><div class="tile-body"><span class="tag">Adult · On this device</span><h3>Adult cinema</h3><p>Video recipe with reviewed model and adapter requirements.</p><div class="tile-action"><span>Model needed</span><button data-inspect="Adult cinema">View recipe</button></div></div></article>
+</div>
+<div class="catalogue" id="model-cards" hidden>
+<article class="tile"><div class="placeholder">Image model</div><div class="tile-body"><span class="tag">Local · No built-in content filter</span><h3>Local image model</h3><p>Illustrative eligible model. Installed and compatible with this device.</p><div class="tile-action"><span>Ready</span><button class="switch" role="switch" aria-label="Use local image model" aria-checked="false" id="model-switch"></button></div></div></article>
+<article class="tile"><div class="placeholder">Video model</div><div class="tile-body"><span class="tag">Local · No built-in content filter</span><h3>Local video model</h3><p>Licence eligibility has not been confirmed for this configuration.</p><div class="tile-action"><span>Unavailable</span><button data-inspect="Model eligibility">Why?</button></div></div></article>
+</div>
+<p class="small footnote">Illustrative catalogue. A model and any LoRAs must be eligible, compatible and explicitly selected. Adult access alone does not make a model ready.</p>
+<p id="model-status" class="small" role="status"></p>
+</div>
+</section>
+</main></div>
+<footer class="demo"><span>Design proposal · No settings are saved and no media is generated.</span><div><button class="quiet" id="theme">Dark theme</button><button class="quiet" id="reset">Reset demo</button></div></footer>
+<dialog id="consent" aria-labelledby="consent-title" aria-describedby="consent-description">
+<span class="tag">18+ · Images &amp; video</span><h2 id="consent-title">Enable adult content?</h2><p id="consent-description">This makes adult recipes and eligible local models available in your studio. Please confirm each statement.</p>
+<form id="consent-form"><div class="checks">
+<label><input type="checkbox" name="age" required><span>I am 18 or older and meet the adult-age requirement where I live.</span></label>
+<label><input type="checkbox" name="choice" required><span>I choose to access adult images and videos, including nudity and sexually explicit content.</span></label>
+<label><input type="checkbox" name="rights" required><span>I will use only lawful content with the necessary rights and consent. I understand that minors and non-consensual intimate depictions are prohibited, and model licences still apply.</span></label>
+</div><p class="small">This choice applies only to you on this device. You can turn it off at any time in Content &amp; safety.</p><div class="actions"><button type="button" id="cancel">Keep off</button><button type="submit" id="confirm" class="primary" disabled>Enable adult content</button></div></form>
+</dialog>
+<dialog id="details" aria-labelledby="details-title"><span class="tag">Design preview</span><h2 id="details-title"></h2><p id="details-copy"></p><div class="actions"><button id="close-details">Close</button></div></dialog>
+<script>
+// Ephemeral demonstration state only. Production consent belongs to the coordinator,
+// never URL parameters, browser storage, imported worlds or instructions from an agent.
+const $ = (id) => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+let enabled = params.get('state') === 'on';
+let revoked = params.get('state') === 'revoked';
+let page = enabled ? 'models' : 'safety';
+let opener;
+function render() {
+  $('adult-switch').setAttribute('aria-checked', String(enabled));
+  $('setting-state').textContent = enabled ? 'On' : 'Off';
+  $('recipe-summary').textContent = enabled ? 'Available in browsing, search and Arke suggestions.' : 'Hidden from browsing, search and Arke suggestions.';
+  $('model-summary').textContent = enabled ? 'Eligible local options can be selected individually.' : 'Adult and unrestricted options are unavailable.';
+  $('enabled-status').hidden = !enabled;
+  $('off-status').hidden = !revoked;
+  $('retained-preview').hidden = !revoked;
+  $('safety-page').hidden = page !== 'safety';
+  $('models-page').hidden = page !== 'models';
+  $('catalogue-locked').hidden = enabled;
+  $('catalogue-enabled').hidden = !enabled;
+  $('topic-heading').textContent = page === 'safety' ? 'Content & safety' : 'On this machine';
+  $('topic-selected').textContent = page === 'safety' ? 'Adult content' : 'Adult tools';
+  document.querySelectorAll('[data-page]').forEach(button => {
+    if (button.dataset.page === page) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  });
+}
+function requestConsent(button) {
+  opener = button;
+  $('consent-form').reset();
+  $('confirm').disabled = true;
+  $('consent').showModal();
+}
+function turnOff() {
+  enabled = false; revoked = true;
+  $('model-switch').setAttribute('aria-checked', 'false');
+  $('model-status').textContent = '';
+  render();
+}
+$('adult-switch').onclick = () => enabled ? turnOff() : requestConsent($('adult-switch'));
+$('inline-enable').onclick = () => requestConsent($('inline-enable'));
+$('consent-form').onchange = () => $('confirm').disabled = ![...$('consent-form').querySelectorAll('input')].every(input => input.checked);
+$('consent-form').onsubmit = (event) => {
+  event.preventDefault();
+  if (!$('consent-form').checkValidity()) return;
+  enabled = true; revoked = false;
+  $('consent').close(); render();
+  if (page === 'models') document.querySelector('[data-kind=recipes]').focus();
+};
+$('cancel').onclick = () => $('consent').close();
+$('consent').addEventListener('close', () => { if (opener && !opener.closest('[hidden]')) opener.focus(); });
+document.querySelectorAll('[data-page]').forEach(button => button.onclick = () => { page = button.dataset.page; render(); });
+$('browse').onclick = () => { page = 'models'; render(); document.querySelector('[data-kind=recipes]').focus(); };
+document.querySelectorAll('[data-kind]').forEach(button => button.onclick = () => {
+  const recipes = button.dataset.kind === 'recipes';
+  $('recipe-cards').hidden = !recipes; $('model-cards').hidden = recipes;
+  document.querySelectorAll('[data-kind]').forEach(tab => tab.setAttribute('aria-pressed', String(tab === button)));
+});
+$('model-switch').onclick = () => {
+  if (!enabled) return;
+  const on = $('model-switch').getAttribute('aria-checked') !== 'true';
+  $('model-switch').setAttribute('aria-checked', String(on));
+  $('model-status').textContent = on ? 'Local image model selected in this preview. No generation started.' : 'Local image model turned off in this preview.';
+};
+document.querySelectorAll('[data-inspect]').forEach(button => button.onclick = () => {
+  $('details-title').textContent = button.dataset.inspect;
+  $('details-copy').textContent = button.dataset.inspect === 'Model eligibility'
+    ? 'Adult access cannot override a model licence or territorial restriction. This illustrative model remains unavailable until eligibility is confirmed.'
+    : 'The recipe detail will name its exact model, required adapters, device requirements and content scope before you choose it. This is an illustrative catalogue entry; no recipe is installed or executed.';
+  $('details').showModal();
+});
+$('close-details').onclick = () => $('details').close();
+function applyTheme(dark) { document.documentElement.classList.toggle('dark', dark); $('theme').textContent = dark ? 'Light theme' : 'Dark theme'; }
+$('theme').onclick = () => applyTheme(!document.documentElement.classList.contains('dark'));
+if (window.parent !== window) {
+  try {
+    const root = window.parent.document.documentElement;
+    applyTheme(root.classList.contains('dark'));
+    new MutationObserver(() => applyTheme(root.classList.contains('dark'))).observe(root, {attributes:true, attributeFilter:['class']});
+  } catch { /* A separately hosted preview retains its own theme control. */ }
+}
+$('reset').onclick = () => { enabled = false; revoked = false; page = 'safety'; $('model-switch').setAttribute('aria-checked','false'); $('model-status').textContent = ''; render(); };
+render();
+if (params.get('state') === 'consent') requestConsent($('adult-switch'));
+</script>
+</body>
+</html>
