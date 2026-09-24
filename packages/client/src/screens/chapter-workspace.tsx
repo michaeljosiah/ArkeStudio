@@ -58,6 +58,7 @@ import {
   useAudiobookRuns,
   useAudiobookRecords,
   acceptProposal,
+  onWorldChange,
   updateProposalPassage,
   useGateNotices,
   type GateNotice,
@@ -155,6 +156,9 @@ const parkedKey = (worldId: string, prodId: string, file: string): string => `${
  * theirs when they come back.
  */
 const heldAsks = new Map<string, DockAsk>();
+// Only for the world's session they were pressed in (codex on PR 1232): closed and opened again,
+// an ask still waiting would otherwise go by itself, quoting prose that may have moved since.
+onWorldChange(() => heldAsks.clear());
 /** Test hook: asks outlive a screen by design, so each test starts with none. */
 export function __clearHeldAsksForTest(): void {
   heldAsks.clear();

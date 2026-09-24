@@ -886,8 +886,21 @@ let rejoining = false;
 let reconnectAttempts = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
+const worldListeners = new Set<(worldId: string | null) => void>();
+/**
+ * Told when the open world changes or closes — not on a snapshot of the same world. For what a
+ * screen keeps beyond itself that belongs to one world's session and must not outlive it.
+ */
+export function onWorldChange(listener: (worldId: string | null) => void): () => void {
+  worldListeners.add(listener);
+  return () => worldListeners.delete(listener);
+}
+
 function emitChange(next: StoreState): void {
+  const was = current.state?.world?.meta.worldId ?? null;
   current = next;
+  const now = next.state?.world?.meta.worldId ?? null;
+  if (now !== was) for (const l of worldListeners) l(now);
   for (const l of listeners) l();
 }
 

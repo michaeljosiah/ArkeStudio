@@ -1050,6 +1050,29 @@ describe("the craft loop (turn 128)", () => {
     assert.equal(sends.length, 1, "back on the chapter, the ask goes");
   });
 
+  it("an ask waiting does not outlive its world's session (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const first = await mount(state);
+    await answerOpen(first);
+    await keyup(q(first, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => __setStateForTest(state, { connection: "closed" }));
+    await act(async () => (q(first, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...first.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    await act(async () => first.root.unmount());
+    // The world is closed, then opened again later.
+    await act(async () => __setStateForTest({ ...state, world: null, worldChat: null } as ClientState, { connection: "open" }));
+    const back = await mount(state);
+    await answerOpen(back);
+    await act(async () => __setStateForTest(state, { connection: "open" }));
+    const sends = back.sent.filter((message) => message.kind === "world-chat-send");
+    assert.equal(sends.length, 0, "nothing pressed in the last session goes by itself");
+  });
+
   it("a line typed while the last one is still being taken stays in the composer (codex on PR 1232)", async () => {
     const styled = inkbound([], STYLE);
     const workspace = {
