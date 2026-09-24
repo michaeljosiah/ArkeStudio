@@ -148,6 +148,9 @@ inputs and refuses missing streams or out-of-source seek ranges. Existing short-
 behavior stays in the shared FFmpeg graph. It writes H.264/yuv420p MP4, with AAC when sound is
 present, and checks the output's video, audio and duration through the host probe. Encoder
 availability and codec decoding support still belong to the platform/player.
+Compiler version 2 disables inherited global/stream metadata and chapter mappings. Source camera
+tags, notes and stale chapter markers are not publication metadata; FFmpeg may still write its own
+normal encoder/container tags.
 Video overlays must have enough source for their full window, because the shared graph passes
 through to the lower picture at EOF. Discovery passes cancellation into authored reads, review
 logs, performance-byte checks and streamed take hashing. It omits operational proposals, change

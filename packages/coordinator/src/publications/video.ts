@@ -71,7 +71,7 @@ export async function prepareVideoPublication(
   signal.throwIfAborted();
   const limits = publicationFileLimits(options.limits);
   if (!options.encoderVersion.trim() || options.encoderVersion.length > 256) throw new Error("A bounded encoder build identity is required.");
-  const compiler = { compiler: "arke-video-publication", compilerVersion: `1; ${options.encoderVersion}` };
+  const compiler = { compiler: "arke-video-publication", compilerVersion: `2; ${options.encoderVersion}` };
   const scratch = await realpath(toExtendedLength(options.scratchRoot));
   let captured: CapturedPublicationInputs | undefined;
   let plan: VideoPublicationPlan | undefined;
@@ -217,7 +217,9 @@ async function renderCapturedVideoPublication(
     for (let index = 0; index < args.length - 1; index++) {
       if (args[index] === "-i" && args[index + 1]!.startsWith(`${captured.directory}/`)) args[index + 1] = normalize(args[index + 1]!);
     }
-    args.splice(args.length - 1, 0, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart");
+    // Camera tags and source chapters belong to the editing inputs, not the published edition.
+    args.splice(args.length - 1, 0, "-map_metadata", "-1", "-map_metadata:s", "-1", "-map_chapters", "-1",
+      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart");
     await options.encoder.run(args, options.onProgress ?? (() => {}), signal);
     signal.throwIfAborted();
     const info = await options.probe.info(movie, { signal });

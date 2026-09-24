@@ -345,8 +345,15 @@ it("cancellation during discovery releases the read gate without a post-capture 
 it("encodes and probes a real captured MP4 with selectable captions", { skip: !process.env.ARKE_TEST_FFMPEG || !process.env.ARKE_TEST_FFPROBE }, async t => {
   const f = await fixture(t), execute = promisify(execFile);
   const ffmpeg = process.env.ARKE_TEST_FFMPEG!, ffprobe = process.env.ARKE_TEST_FFPROBE!;
+  const metadata = join(f.scratch, "source-metadata.txt");
+  await writeFile(metadata, ";FFMETADATA1\ntitle=Private camera title\ncomment=Private shooting notes\nlocation=+51.5000-000.1200/\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=4000\ntitle=Raw source chapter\n");
   await execute(ffmpeg, ["-y", "-f", "lavfi", "-i", "color=c=blue:s=128x72:r=24", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
-    "-t", "4", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", join(f.world, "artifacts/movie.mp4")], { windowsHide: true });
+    "-f", "ffmetadata", "-i", metadata, "-map", "0:v", "-map", "1:a", "-map_metadata", "2", "-map_chapters", "2",
+    "-metadata:s:v:0", "handler_name=Private camera stream", "-t", "4", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", join(f.world, "artifacts/movie.mp4")], { windowsHide: true });
+  const inspect = async (path: string) => JSON.parse((await execute(ffprobe, ["-v", "error", "-show_streams", "-show_format", "-show_chapters", "-of", "json", path], { windowsHide: true })).stdout);
+  const sourceInfo = await inspect(join(f.world, "artifacts/movie.mp4"));
+  assert.equal(sourceInfo.format.tags.title, "Private camera title"); assert.equal(sourceInfo.chapters.length, 1);
+  assert.ok(JSON.stringify(sourceInfo).includes("Private camera stream"));
   const artifactPath = join(f.world, "artifacts/movie.json");
   const artifact = JSON.parse(await readFile(artifactPath, "utf8"));
   artifact.hash = hash(await readFile(join(f.world, "artifacts/movie.mp4")));
@@ -363,6 +370,11 @@ it("encodes and probes a real captured MP4 with selectable captions", { skip: !p
   try {
     assert.equal(result.manifest.content.textTracks.length, 2);
     await execute(ffmpeg, ["-v", "error", "-i", join(extracted.directory, "movie.mp4"), "-f", "null", "-"], { windowsHide: true });
+    const outputInfo = await inspect(join(extracted.directory, "movie.mp4"));
+    assert.deepEqual(outputInfo.chapters, []);
+    assert.equal(outputInfo.format.tags.location, undefined); assert.equal(outputInfo.format.tags["location-eng"], undefined);
+    assert.ok(!/Private|Raw source chapter|51\.5000/.test(JSON.stringify(outputInfo)), "source tags and stale chapter names must not enter the edition");
+    assert.ok(outputInfo.streams.every((stream: { codec_type: string }) => ["video", "audio"].includes(stream.codec_type)));
     assert.ok(result.manifest.assets.movie!.byteLength > 1000);
   } finally { await extracted.dispose(); }
 });
