@@ -28,6 +28,8 @@ export interface ComposerProps {
   /** Unavailable, with the reason stated beneath rather than a dead box. */
   disabledReason?: string;
   autoFocus?: boolean;
+  /** Each change asks for the caret here: a page handing the author a line to finish. */
+  focusRequest?: number;
   /** Present → the + button appears and asks the host to open its picker. */
   onAttach?: () => void;
   /**
@@ -111,6 +113,7 @@ export function Composer(props: ComposerProps) {
     busyLabel = "Working…",
     disabledReason,
     autoFocus = false,
+    focusRequest,
     onAttach,
     onDictate,
     onAttachFiles,
@@ -164,6 +167,12 @@ export function Composer(props: ComposerProps) {
   useEffect(() => {
     if (autoFocus && !locked) editor.current?.focus();
   }, [autoFocus, locked]);
+
+  useEffect(() => {
+    if (focusRequest !== undefined && focusRequest > 0 && !locked) editor.current?.focus();
+    // Only a new request moves the caret; the box becoming unlocked later is not one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusRequest]);
 
   return (
     <div

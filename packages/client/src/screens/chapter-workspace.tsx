@@ -1160,9 +1160,13 @@ export function ChapterWorkspace({
     if (keeping === null) return;
     if (connection !== "open" || stagedId !== keeping.id || notices[keeping.id] !== keeping.notice) setKeeping(null);
     else if (stagedRevision !== undefined && stagedRevision > keeping.revision) {
-      // Fenced to the revision seen (codex on PR 1232): one moved on again before the accept
-      // reaches the gate is refused as stale there, not accepted unseen.
-      if (stagedBody === keeping.expected) acceptProposal(worldId, keeping.id, undefined, stagedRevision);
+      // Only the keep's own revision is accepted, and fenced to it (codex on PR 1232): the keep
+      // moves the draft exactly one revision, so a later one carries some other edit too —
+      // perhaps to a field the prose does not show — and is left for the author. One moved on
+      // again before the accept reaches the gate is refused there as stale.
+      if (stagedRevision === keeping.revision + 1 && stagedBody === keeping.expected) {
+        acceptProposal(worldId, keeping.id, undefined, stagedRevision);
+      }
       setKeeping(null);
     }
   }, [keeping, connection, stagedId, stagedRevision, stagedBody, notices, worldId]);

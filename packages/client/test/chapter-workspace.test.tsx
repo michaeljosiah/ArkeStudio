@@ -591,6 +591,38 @@ describe("the craft loop (turn 128)", () => {
     assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent ?? "", "", "and is not left in the composer to be said about whatever is selected next");
   });
 
+  it("an ask pressed with the connection down waits and goes when it comes back (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const m = await mount(state);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => __setStateForTest(state, { connection: "closed" }));
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const tightened = () => m.sent.filter((message) => message.kind === "world-chat-send" && (message as { text: string }).text.endsWith("Tighten this"));
+    assert.equal(tightened().length, 0, "nothing can go while the connection is down");
+    await act(async () => __setStateForTest(state, { connection: "open" }));
+    assert.equal(tightened().length, 1, "and it is not lost: it goes when the connection is back");
+    assert.deepEqual((tightened()[0] as { subject?: unknown }).subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells." });
+  });
+
+  it("Ask something else… puts the caret in the composer (codex on PR 1232)", async () => {
+    const m = await mount({ ...inkbound([], STYLE), world: { ...inkbound([], STYLE).world!, conversations: [THREAD] } });
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    const composer = q(m, ".fy-arke .fy-cx__editor")!;
+    let focused = 0;
+    Object.assign(composer, { focus: () => { focused++; } });
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Ask something else…") as HTMLElement).click());
+    assert.equal(focused, 1, "the author is handed the box, not left with a menu that closed on nothing");
+  });
+
   it("without a prose style the menu does not offer to hold the passage against one", async () => {
     const m = await mount({ ...inkbound(), world: { ...inkbound().world!, conversations: [THREAD] } });
     await answerOpen(m);
@@ -721,6 +753,23 @@ describe("the craft loop (turn 128)", () => {
       await act(async () => __setStateForTest(inkbound([theirs]), { connection: "open" }));
       assert.equal(m.sent.some((message) => message.kind === "proposal-accept"), false, "a revision the author never saw is never accepted");
       assert.equal(acceptButton(m).disabled, false, "and the press is theirs again");
+    });
+
+    it("accepts only the keep's own revision, never a later one with the same prose (codex on PR 1232)", async () => {
+      const m = await mount(inkbound([TWO]));
+      await answerOpen(m);
+      await act(async () => edits(m)[0]!.click());
+      await act(async () => acceptButton(m).click());
+      // The keep's words, but two revisions on: something else moved the draft as well.
+      const later: StagedProposal = {
+        ...TWO,
+        proposal: { ...TWO.proposal, draftRevision: 3 },
+        review: {
+          targets: [{ ...TWO.review!.targets[0]!, fields: [{ field: "Prose", before: BODY, proposed: BODY.replace("Maren counted the bells.", "Maren counted the seven bells.") }] }],
+        },
+      };
+      await act(async () => __setStateForTest(inkbound([later]), { connection: "open" }));
+      assert.equal(m.sent.some((message) => message.kind === "proposal-accept"), false, "revision 3 carries more than the keep");
     });
 
     it("a keep that could not be sent leaves the press the author's (codex on PR 1232)", async () => {

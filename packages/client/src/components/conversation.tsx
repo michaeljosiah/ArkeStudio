@@ -831,7 +831,7 @@ export function ProductionConversation({
   /** What is selected on the timeline while they talk (SPEC-039 R-26), sent with each turn. */
   subject?: WorldChatSubject;
 }) {
-  const { state } = useStore();
+  const { state, connection } = useStore();
   const navigate = useNavigate();
   const [message, setMessage] = useState("");
   const [languageModelId, setLanguageModelId] = useState<string | undefined>();
@@ -1006,17 +1006,20 @@ export function ProductionConversation({
   }, [openWith, worldId, productionId, conversationId]);
 
   /** Says one thing into the thread — the composer's draft, or a quick ask said as it stands. */
-  const say = (text: string, replyOnly = false, about: WorldChatSubject | undefined = subject) => {
-    if (!text || !worldId || !productionId) return;
+  /** True when the line went out; false when it was held back or the transport is down. */
+  const say = (text: string, replyOnly = false, about: WorldChatSubject | undefined = subject): boolean => {
+    if (!text || !worldId || !productionId) return false;
     // A second line said while the first is still opening its thread would open a second one,
     // and one said over a running turn starts a second turn the first can no longer stop.
-    if (opening || running) return;
+    if (opening || running) return false;
     /*
      * No thread yet: the first thing said opens one and is then said into it. Creating does not
      * take a turn — it only names the conversation — so without the send that follows, the
      * opening message became a title and the studio never answered it (turn 95).
      */
     if (!conversationId) {
+      // Nothing is waited on for a create that never left (codex on PR 1232).
+      if (!createWorldChat(worldId, conversationTitle(text), crypto.randomUUID(), context)) return false;
       // The subject goes with it: the first thing said is the likeliest "move this earlier".
       setOpening({
         text,
@@ -1026,15 +1029,15 @@ export function ProductionConversation({
         ...(replyOnly ? { replyOnly: true } : {}),
       });
       setLanguageModelId(undefined);
-      createWorldChat(worldId, conversationTitle(text), crypto.randomUUID(), context);
-      return;
+      return true;
     }
     // Only the turn's explicit choice travels as an override. The coordinator resolves the
     // captured agent preference before the production default; sending the displayed fallback
     // here would promote that default above the agent and run a different model.
-    sendWorldChat(worldId, conversationId, text, [], about, languageModelId, replyOnly);
+    if (!sendWorldChat(worldId, conversationId, text, [], about, languageModelId, replyOnly)) return false;
     setEcho({ seq: loaded?.seq ?? null });
     setLanguageModelId(undefined);
+    return true;
   };
   const submit = () => {
     const text = message.trim();
@@ -1056,6 +1059,7 @@ export function ProductionConversation({
    * replaces a waiting one. A line that only starts an ask goes to the composer, where it is the
    * author's to finish under whatever they then select.
    */
+  const [focusRequest, setFocusRequest] = useState(0);
   const [waitingAsk, setWaitingAsk] = useState<{ text: string; subject: WorldChatSubject | undefined; replyOnly: boolean } | null>(null);
   /*
    * A line just sent that the thread has not shown yet (codex on PR 1232). Between the send and
@@ -1083,6 +1087,9 @@ export function ProductionConversation({
       // A later press replaces a waiting ask, whichever kind it is (codex on PR 1232).
       setWaitingAsk(null);
       setMessage(ask.line);
+      // And the caret goes to the box, so a line to finish — or none at all, for "Ask something
+      // else…" — is visibly the author's to type (codex on PR 1232).
+      setFocusRequest((n) => n + 1);
       return;
     }
     const prefix = dock?.subjectPrefix;
@@ -1091,12 +1098,13 @@ export function ProductionConversation({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ask]);
   useEffect(() => {
-    if (waitingAsk === null || opening !== null || echo !== null || running || languageUnavailableReason !== undefined) return;
-    setWaitingAsk(null);
-    say(waitingAsk.text, waitingAsk.replyOnly, waitingAsk.subject);
+    if (waitingAsk === null || opening !== null || echo !== null || running || languageUnavailableReason !== undefined || connection !== "open") return;
+    // Kept until it has actually gone (codex on PR 1232): a send into a closed transport is
+    // tried again when the connection comes back rather than dropped.
+    if (say(waitingAsk.text, waitingAsk.replyOnly, waitingAsk.subject)) setWaitingAsk(null);
     // say is rebuilt every render; the ask and the dock's readiness are what decide.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [waitingAsk, opening, echo, running, languageUnavailableReason]);
+  }, [waitingAsk, opening, echo, running, languageUnavailableReason, connection]);
 
   const points = loaded?.points ?? [];
   const carriedPoints = points.filter((p) => p.kind === "point" && p.settled).length;
@@ -1336,6 +1344,7 @@ export function ProductionConversation({
             {...(dock.conversationFirst ? {} : { agentLabel: "story author" })}
             busy={running || opening !== null}
             busyLabel={opening !== null ? openingNote ?? "opening…" : "reading the world…"}
+            focusRequest={focusRequest}
             disabledReason={languageUnavailableReason}
             onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
             {...attachProps}

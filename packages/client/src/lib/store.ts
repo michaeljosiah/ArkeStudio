@@ -4815,8 +4815,8 @@ export function createWorldChat(
   title: string,
   requestId: string,
   entryContext?: WorldChatContext,
-): void {
-  send({ kind: "world-chat-create", worldId, title, requestId, ...(entryContext ? { entryContext } : {}) });
+): boolean {
+  return send({ kind: "world-chat-create", worldId, title, requestId, ...(entryContext ? { entryContext } : {}) });
 }
 
 /** Say something in a conversation, and take a turn. */
@@ -4829,8 +4829,8 @@ export function sendWorldChat(
   modelId?: string,
   /** A line that asks for a reply and nothing else (turn 128): no action the turn returns is staged. */
   replyOnly = false,
-): void {
-  send({
+): boolean {
+  return send({
     kind: "world-chat-send",
     worldId,
     requestId: crypto.randomUUID(),
