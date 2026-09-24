@@ -62,7 +62,7 @@ import {
   subscribeWorldChatSendResults,
   updateProposalPassage,
   useGateNotices,
-  type GateNotice,
+  gateAnswered,
 } from "../lib/store.js";
 
 /**
@@ -164,7 +164,6 @@ const heldAsks = new Map<string, DockAsk>();
 type HeldKeep = {
   id: string;
   revision: number;
-  notice: GateNotice | undefined;
   expected: string;
   rejoins: number;
   /** The keep itself, to send again under its own id after a rejoin that may have lost it. */
@@ -175,13 +174,7 @@ const heldKeeps = new Map<string, HeldKeep>();
  * An accept on its way, by chapter: its decision holds the others until it settles. It keeps
  * what it sent, to send again under its own id after a rejoin that may have lost it.
  */
-type HeldAccept = { id: string; notice: GateNotice | undefined; rejoins: number; requestId: string; revision: number; confirm?: string };
-/**
- * A notice that answers this request, not merely one for the same proposal (codex on PR 1232):
- * another window's command on it is refused under its own id.
- */
-const answers = (notice: GateNotice | undefined, was: GateNotice | undefined, requestId: string): boolean =>
-  notice !== was && notice?.requestId === requestId;
+type HeldAccept = { id: string; rejoins: number; requestId: string; revision: number; confirm?: string };
 const heldAccepts = new Map<string, HeldAccept>();
 // Only for the world's session they were pressed in (codex on PR 1232): closed and opened again,
 // an ask still waiting would otherwise go by itself, quoting prose that may have moved since.
@@ -1305,10 +1298,10 @@ export function ChapterWorkspace({
       const requestId = crypto.randomUUID();
       if (keptRevision === keeping.revision + 1 && keptBody === keeping.expected
         && acceptProposal(worldId, keeping.id, undefined, keptRevision, requestId)) {
-        setAccepting({ id: keeping.id, notice: notices[keeping.id], requestId, revision: keptRevision });
+        setAccepting({ id: keeping.id, requestId, revision: keptRevision });
       }
       setKeeping(null);
-    } else if (answers(notices[keeping.id], keeping.notice, keeping.request.requestId)) {
+    } else if (gateAnswered(keeping.request.requestId)) {
       setKeeping(null);
     } else if (connection === "open" && rejoins !== keeping.rejoins) {
       // A rejoin does not say whether the keep landed (codex on PR 1232): it may have reached the
@@ -1342,7 +1335,7 @@ export function ChapterWorkspace({
   const acceptingGone = accepting !== null && stagedChapterDraft(world.proposals, path, accepting.id) === undefined;
   useEffect(() => {
     if (accepting === null) return;
-    if (acceptingGone || answers(notices[accepting.id], accepting.notice, accepting.requestId)) setAccepting(null);
+    if (acceptingGone || gateAnswered(accepting.requestId)) setAccepting(null);
     else if (connection === "open" && rejoins !== accepting.rejoins
       && acceptProposal(worldId, accepting.id, accepting.confirm, accepting.revision, accepting.requestId)) {
       setAccepting(accepting);
@@ -1363,7 +1356,7 @@ export function ChapterWorkspace({
             const requestId = crypto.randomUUID();
             if (acceptProposal(worldId, proposal.id, confirmSignature, proposal.draftRevision, requestId)) {
               setAccepting({
-                id: proposal.id, notice: notices[proposal.id], requestId, revision: proposal.draftRevision,
+                id: proposal.id, requestId, revision: proposal.draftRevision,
                 ...(confirmSignature !== undefined ? { confirm: confirmSignature } : {}),
               });
             }
@@ -1382,7 +1375,7 @@ export function ChapterWorkspace({
             const body = stagedDraft.body ?? live;
             const expected = body.slice(0, passageChange.start) + composePassage(segments, new Set(kept)) + body.slice(passageChange.start + passageChange.after.length);
             setKeeping({
-              id: proposal.id, revision: proposal.draftRevision, notice: notices[proposal.id], expected, rejoins,
+              id: proposal.id, revision: proposal.draftRevision, expected, rejoins,
               request: { requestId, path, span: { before: passageChange.before, after: passageChange.after }, kept },
             });
           },

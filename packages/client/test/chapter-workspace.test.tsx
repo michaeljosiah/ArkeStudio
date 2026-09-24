@@ -1276,6 +1276,38 @@ describe("the craft loop (turn 128)", () => {
     }
   });
 
+  it("a line started while the dock is busy is focused once it frees (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: "running" as const, runStartedAt: "2026-09-06T12:00:00Z", retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const m = await mount(state);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    const focused: string[] = [];
+    const was = dom.HTMLElement.prototype.focus;
+    Object.assign(dom.HTMLElement.prototype, {
+      focus(this: HTMLElement) {
+        focused.push(this.className);
+      },
+    });
+    try {
+      await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+      await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone…") as HTMLElement).click());
+      const editorFocused = () => focused.filter((name) => name.includes("fy-cx__editor")).length;
+      assert.equal(editorFocused(), 0, "a locked box takes no focus");
+      await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, runStatus: null } } as ClientState));
+      assert.equal(editorFocused(), 1, "and takes it once it unlocks");
+      await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, runStatus: "running" } } as ClientState));
+      await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, runStatus: null } } as ClientState));
+      assert.equal(editorFocused(), 1, "once: unlocking again later is not a new request");
+    } finally {
+      Object.assign(dom.HTMLElement.prototype, { focus: was });
+    }
+  });
+
   it("with no prose style, the dock offers no holding against one (codex on PR 1232)", async () => {
     const m = await mount({ ...inkbound([]), world: { ...inkbound([]).world!, conversations: [THREAD] } });
     await answerOpen(m);
@@ -1670,6 +1702,19 @@ describe("the craft loop (turn 128)", () => {
         __applyEventForTest({ at: "2026-09-06T12:00:04Z", type: "proposal.blocked", worldId: FIXTURE_WORLD_ID, proposalId: TWO.proposal.id, reason: "draft-changed", requestId: again[0]!.requestId! });
       });
       assert.ok(edits(m).every((edit) => !(edit as HTMLButtonElement).disabled), "refused, the choice is the author's again");
+    });
+
+    it("its refusal answers it even when another window's lands on the same proposal first (codex on PR 1232)", async () => {
+      const m = await mount(inkbound([TWO]));
+      await answerOpen(m);
+      await act(async () => acceptButton(m).click());
+      const sent = m.sent.find((message) => message.kind === "proposal-accept") as { requestId: string };
+      // Both arrive before the screen looks again: the proposal's notice is now the other one.
+      await act(async () => {
+        __applyEventForTest({ at: "2026-09-06T12:00:03Z", type: "proposal.blocked", worldId: FIXTURE_WORLD_ID, proposalId: TWO.proposal.id, reason: "draft-changed", requestId: sent.requestId });
+        __applyEventForTest({ at: "2026-09-06T12:00:03Z", type: "proposal.blocked", worldId: FIXTURE_WORLD_ID, proposalId: TWO.proposal.id, reason: "stale", requestId: "someone-else" });
+      });
+      assert.ok(edits(m).every((edit) => !(edit as HTMLButtonElement).disabled), "not left holding the controls");
     });
 
     it("a newer revision that is not the passage kept is somebody else's, and is not accepted (codex on PR 1232)", async () => {

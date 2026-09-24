@@ -5496,18 +5496,32 @@ export class Coordinator {
             });
           }
         } catch {
-          // Said as a refusal (codex on PR 1232): a screen holding its controls until the accept
+          // Always answered (codex on PR 1232): a screen holding its controls until the accept
           // settles would otherwise wait on a proposal the refresh shows unchanged. What failed is
-          // not relayed; the proposal stands as it was.
-          this.emit({
-            at: new Date().toISOString(),
-            type: "proposal.blocked",
-            worldId: msg.worldId,
-            proposalId: msg.proposalId,
-            ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
-            reason: "invalid",
-            detail: "this could not be accepted; nothing was written",
-          });
+          // not relayed. The accept can throw after the gate committed — its bookkeeping and
+          // delivery come after — so what is said follows the proposal: retired means it landed,
+          // standing means it did not finish, and unreadable means nobody can say which.
+          const standing = await gate.readManifest(msg.proposalId).then(
+            () => true as const,
+            (error: unknown) => (error as NodeJS.ErrnoException)?.code === "ENOENT" ? false as const : null,
+          );
+          const at = new Date().toISOString();
+          if (standing === false) {
+            this.authoring?.release(msg.proposalId);
+            this.emit({ at, type: "proposal.resolved", worldId: msg.worldId, proposalId: msg.proposalId, outcome: "accepted" });
+          } else {
+            this.emit({
+              at,
+              type: "proposal.blocked",
+              worldId: msg.worldId,
+              proposalId: msg.proposalId,
+              ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
+              reason: "invalid",
+              detail: standing
+                ? "this could not be accepted; the proposal still stands"
+                : "whether this was accepted is not known; reopen the world to see the draft as it stands",
+            });
+          }
         }
         await this.refreshWorldSnapshot(msg.worldId);
         return;

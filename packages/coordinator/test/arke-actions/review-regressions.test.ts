@@ -509,15 +509,33 @@ it("a conversation made again under the same request is the same conversation (c
   assert.equal((await discoverConversations(store.dir)).summaries.length, before + 1, "one conversation, however many times it was asked for");
 });
 
-it("an accept that throws is refused out loud, so a screen holding its controls can let go (codex on PR 1232)", async () => {
+it("an accept that throws is answered by what became of the proposal (codex on PR 1232)", async (t) => {
   const w = await setup();
   await w.coordinator.openWorld(WORLD_ID);
-  const THROWS_ID = newId("pr");
+  const STANDING_ID = newId("pr");
+  const LANDED_ID = newId("pr");
+  const UNKNOWN_ID = newId("pr");
   const engine = (w.coordinator as unknown as { engine: { proposals: { accept: unknown } } }).engine;
   Object.assign(engine.proposals, { accept: async () => { throw new Error("the manifest could not be read"); } });
-  await w.internal.handleClientMessage({ kind: "proposal-accept", worldId: WORLD_ID, proposalId: THROWS_ID, expectedDraftRevision: 1, requestId: "req-accept-throws" });
-  const blocked = w.events.find((event) => event.type === "proposal.blocked" && event.proposalId === THROWS_ID);
-  assert.equal((blocked as { reason?: string } | undefined)?.reason, "invalid");
-  assert.equal((blocked as { requestId?: string } | undefined)?.requestId, "req-accept-throws", "the refusal names the request it answers");
-  assert.doesNotMatch(JSON.stringify(blocked), /manifest could not be read/, "what failed is not relayed");
+  // Still standing, retired by a commit the bookkeeping after it failed to record, or unreadable.
+  t.mock.method(ProposalManager.prototype, "readManifest", async (proposalId: string) => {
+    if (proposalId === STANDING_ID) return { draftRevision: 1 };
+    if (proposalId === LANDED_ID) throw Object.assign(new Error("gone"), { code: "ENOENT" });
+    throw Object.assign(new Error("denied"), { code: "EACCES" });
+  });
+  const accept = (proposalId: string, requestId: string) =>
+    w.internal.handleClientMessage({ kind: "proposal-accept", worldId: WORLD_ID, proposalId, expectedDraftRevision: 1, requestId });
+  await accept(STANDING_ID, "req-standing");
+  await accept(LANDED_ID, "req-landed");
+  await accept(UNKNOWN_ID, "req-unknown");
+  const blocked = (proposalId: string) => w.events.find((event) => event.type === "proposal.blocked" && event.proposalId === proposalId) as
+    { reason?: string; requestId?: string; detail?: string } | undefined;
+  assert.equal(blocked(STANDING_ID)?.reason, "invalid");
+  assert.equal(blocked(STANDING_ID)?.requestId, "req-standing", "the refusal names the request it answers");
+  assert.match(blocked(STANDING_ID)?.detail ?? "", /still stands/);
+  assert.doesNotMatch(JSON.stringify(blocked(STANDING_ID)), /manifest could not be read/, "what failed is not relayed");
+  assert.equal(blocked(LANDED_ID), undefined, "a proposal the gate retired is not said to be unwritten");
+  assert.ok(w.events.some((event) => event.type === "proposal.resolved" && event.proposalId === LANDED_ID && event.outcome === "accepted"), "it landed");
+  assert.equal(blocked(UNKNOWN_ID)?.requestId, "req-unknown");
+  assert.match(blocked(UNKNOWN_ID)?.detail ?? "", /not known/, "and when nobody can tell, it says so");
 });

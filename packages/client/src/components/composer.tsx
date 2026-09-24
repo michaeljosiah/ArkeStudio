@@ -168,9 +168,14 @@ export function Composer(props: ComposerProps) {
     if (autoFocus && !locked) editor.current?.focus();
   }, [autoFocus, locked]);
 
+  // A request made while the box is locked waits for it to unlock (codex on PR 1232): the seeded
+  // line is still there to finish once a running turn ends or the connection comes back. Each
+  // request is honoured once, so unlocking again later does not move the caret.
+  const focusHonoured = useRef(0);
   useEffect(() => {
     const node = editor.current;
-    if (focusRequest === undefined || focusRequest <= 0 || locked || !node) return;
+    if (focusRequest === undefined || focusRequest <= focusHonoured.current || locked || !node) return;
+    focusHonoured.current = focusRequest;
     node.focus();
     // At the end of what is there (codex on PR 1232): a line started for the author to finish is
     // finished after its words, and a focused box would otherwise take them at the start.
@@ -182,9 +187,7 @@ export function Composer(props: ComposerProps) {
     const selection = window.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
-    // Only a new request moves the caret; the box becoming unlocked later is not one.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusRequest]);
+  }, [focusRequest, locked]);
 
   return (
     <div

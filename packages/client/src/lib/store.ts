@@ -785,6 +785,18 @@ export function subscribeProposalResolutions(
   return () => proposalResolutionListeners.delete(listener);
 }
 
+/**
+ * Refusals by the request they answer, kept past the moment they arrive (codex on PR 1232): the
+ * notice on a proposal is only its latest, and another window's refusal on the same proposal
+ * would otherwise overwrite the one a screen is holding its controls for. Refreshed with each
+ * notice, so a screen reading this on render sees it as soon as it lands.
+ */
+let gateAnswers = new Map<string, GateNotice["reason"]>();
+/** Whether the gate has refused this request, by its id. */
+export function gateAnswered(requestId: string): boolean {
+  return gateAnswers.has(requestId);
+}
+
 export type WorldChatSendResult = Extract<DomainEvent, { type: "world-chat.send-result" }>;
 const sendResultListeners = new Set<(result: WorldChatSendResult) => void>();
 /**
@@ -1427,6 +1439,9 @@ function handleFrame(json: string): void {
       for (const listener of filedBatchListeners) listener(event);
     }
     if (event.type === "proposal.blocked") {
+      if (event.requestId !== undefined) {
+        gateAnswers = new Map([...gateAnswers, [event.requestId, event.reason] as const].slice(-50));
+      }
       gateNotices = {
         ...gateNotices,
         [event.proposalId]: {
