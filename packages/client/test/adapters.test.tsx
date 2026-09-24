@@ -55,3 +55,16 @@ test("picker never advertises an unverified entry as selectable and retains a re
   assert.doesNotMatch(off, /Fixture adapter/);
   assert.match(off, /Clear selection/);
 });
+
+test("picker follows the selected model and keeps an incompatible saved selection clearable", () => {
+  set(library);
+  const render = (recipeId: string, selected: { releaseId: string; sha256: string; strength: number }[] = []) =>
+    renderToString(<MemoryRouter><AdapterPicker recipeId={recipeId} selected={selected} onChange={() => {}} /></MemoryRouter>);
+  assert.equal(render("another-model"), "");
+  assert.equal(render(""), "");
+  assert.match(render("test-recipe"), /Fixture adapter/);
+  const stale = render("another-model", [{ releaseId: release.id, sha256: release.source.sha256, strength: 1 }]);
+  assert.match(stale, /Saved adapter unavailable/);
+  assert.match(stale, /Choose None to clear it/);
+  assert.doesNotMatch(stale, /Adapter strength/);
+});

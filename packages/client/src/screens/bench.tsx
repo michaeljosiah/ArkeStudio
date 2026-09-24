@@ -2084,8 +2084,6 @@ function BenchWorkspace({
                 {characterAudio.disabled ? "voice refs · off" : "voice refs · on"}
               </button>
             )}
-            {videoParams && draft.provider === "comfyui" && <AdapterPicker recipeId={draft.model} selected={videoParams.adapters ?? []}
-              onChange={adapters => compose({ ...draft, params: { ...videoParams, adapters } })} />}
             {subject !== undefined && (rebuildNote ?? subjectOpen.note) !== null && (
               <span className="fy-bench__subjectnote">{rebuildNote ?? subjectOpen.note}</span>
             )}
@@ -2201,6 +2199,7 @@ function BenchWorkspace({
                 </>
               )}
             </span>
+            <div className="fy-bench__modelcontrols">
             {models.length === 0 ? (
               /* An empty select is mute; the bar says the repair (dispatch-bar's own words). */
               <span className="fy-bench__nomodel">
@@ -2275,6 +2274,10 @@ function BenchWorkspace({
                 <ChevronDown size={12} />
               </span>
             )}
+
+            {videoParams && <AdapterPicker recipeId={model?.provider === "comfyui" ? model.id : ""} selected={videoParams.adapters ?? []}
+              onChange={adapters => compose({ ...draft, params: { ...videoParams, adapters } })} />}
+            </div>
 
             {estimateCopy !== null && (
               <span data-testid="bench-estimate" className="fy-bench__estimate" title="a take">

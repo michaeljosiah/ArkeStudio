@@ -22,3 +22,13 @@
 .fy-adapters .fy-editordialog__panel label { display: flex; gap: 12px; align-items: flex-start; color: var(--foreground); }
 .fy-adapters .fy-editordialog__panel input { margin-top: 3px; }
 @media (max-width: 800px) { .fy-adapters { padding: 20px 16px 32px; } }
+
+.fy-bench__modelcontrols { display: grid; gap: 8px; flex: 1 1 120px; min-width: 0; }
+.fy-adapter-picker { display: grid; gap: 6px; min-width: 0; font: 400 var(--text-2xs)/1.4 var(--font-sans); color: var(--muted-foreground); }
+.fy-adapter-picker label { display: grid; gap: 4px; min-width: 0; }
+.fy-adapter-picker select, .fy-adapter-picker input {
+  min-width: 0; max-width: 100%; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--background); color: var(--foreground); font: inherit; padding: 6px 8px;
+}
+.fy-adapter-picker input { width: 80px; }
+.fy-adapter-picker a { width: fit-content; }

@@ -71,6 +71,11 @@ Effective recipes use the stricter floors. Admission checks permission, compatib
 memory and bytes; permission/bytes are checked again before submission and immediately before
 `/prompt`. Changed frozen identities are refused rather than substituted.
 
+Generate places the optional adapter selector immediately below the model selector. It appears
+only for models with catalogue pairings, while preserving an unavailable saved choice so the
+user can clear it deliberately. Choices are filtered to that model; unavailable entries show
+their reason and cannot be selected. None keeps the base model alone.
+
 Quotes, jobs, take records and re-runs preserve adapter IDs, hashes, order, strengths and effective
 graph/dependency identity. Disabling access revokes queued/active adapter work through existing
 cancellation and stops downloads. Bench previews are hidden; authenticated media serving checks
