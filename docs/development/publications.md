@@ -5,6 +5,8 @@ publication, source capture, directory integrity verification, a video compiler,
 publication delivery and bounded ZIP writing/extraction. Desktop adds an export-sheet action and
 a world-independent player at `/publications`.
 Track the remaining work in [issue #1228](https://github.com/michaeljosiah/ArkeStudio/issues/1228).
+The opt-in [book/audio interoperability spike](publication-interop.md) records external-format
+fixtures and reader evidence; it does not add supported application profiles.
 
 `packages/contracts/src/publication.ts` exports the video manifest schema, compatibility reader,
 portable asset path rules and dependency receipt/fingerprint helpers. The owning tests are
