@@ -16,6 +16,7 @@ import {
   ulid,
   type AppSettings,
   type BuildItem,
+  type Capability,
   type BuildJournalEntry,
   type BuildJobFacts,
   type BuildReview,
@@ -89,6 +90,7 @@ export interface FoundingBuildPorts {
     genre?: string;
     artDirection?: string;
     bible?: string;
+    models?: Partial<Record<Capability, string>>;
   }): Promise<{ worldId: string }>;
   openWorld(worldId: string): Promise<void>;
   openStore(): WorldStore | null;
@@ -202,15 +204,27 @@ export class FoundingBuildService {
   // Preconditions and the review (R-10..R-12)
   // -------------------------------------------------------------------------
 
+  /**
+   * The models a world's build reads (design turn 153): the world's own once it exists. Read
+   * through the open store only when it is this world's — another world's choices are not this
+   * one's, and a closed world falls back to Settings exactly as it did before it had any.
+   */
+  private worldModels(worldId: string): Partial<Record<Capability, string>> | undefined {
+    const store = this.ports.openStore();
+    return store && store.worldId === worldId ? store.getBundle().meta.models : undefined;
+  }
+
   /** The frozen image route, or null with the reasons a text-only build is offered (R-11). */
-  private async resolveImageRoute(): Promise<{ route: ImageRoute | null; notes: string[] }> {
+  private async resolveImageRoute(
+    models: Partial<Record<Capability, string>> | undefined,
+  ): Promise<{ route: ImageRoute | null; notes: string[] }> {
     const notes: string[] = [];
     const manifest = this.ports.manifest;
     if (!manifest) {
       notes.push("No model manifest is loaded — every file and sheet will be written, and no images will be made.");
       return { route: null, notes };
     }
-    const model = imageModelFor(await this.ports.loadSettings(), manifest);
+    const model = imageModelFor(await this.ports.loadSettings(), manifest, undefined, models);
     if (!model) {
       notes.push(
         "No image model resolves — every file and sheet will be written, and no images will be made. The images stay runnable in one press once a provider is set up.",
@@ -270,7 +284,12 @@ export class FoundingBuildService {
       : "No look preview was made — this world will be founded without a master look.";
   }
 
-  async plan(genesisId: string, requestId: string, look?: string): Promise<void> {
+  async plan(
+    genesisId: string,
+    requestId: string,
+    look?: string,
+    models?: Partial<Record<Capability, string>>,
+  ): Promise<void> {
     const refuse = (reason: string) =>
       this.ports.emit({
         at: this.ports.nowIso(),
@@ -291,7 +310,7 @@ export class FoundingBuildService {
       refuse("the world has no name yet — settle one in the conversation first");
       return;
     }
-    const { route, notes } = await this.resolveImageRoute();
+    const { route, notes } = await this.resolveImageRoute(models);
     for (const character of blueprint.characters) {
       if (character.neverDepicted === true) notes.push(`${character.name} — never depicted`);
     }
@@ -338,16 +357,26 @@ export class FoundingBuildService {
   // The press (R-13, R-16, R-17)
   // -------------------------------------------------------------------------
 
-  async begin(genesisId: string, requestId: string, look?: string): Promise<void> {
+  async begin(
+    genesisId: string,
+    requestId: string,
+    look?: string,
+    models?: Partial<Record<Capability, string>>,
+  ): Promise<void> {
     // Two presses in one tick are one run (row 8): the second joins the first's promise.
     const inFlight = this.beginning.get(genesisId);
     if (inFlight) return inFlight;
-    const work = this.beginWork(genesisId, requestId, look).finally(() => this.beginning.delete(genesisId));
+    const work = this.beginWork(genesisId, requestId, look, models).finally(() => this.beginning.delete(genesisId));
     this.beginning.set(genesisId, work);
     return work;
   }
 
-  private async beginWork(genesisId: string, requestId: string, look?: string): Promise<void> {
+  private async beginWork(
+    genesisId: string,
+    requestId: string,
+    look?: string,
+    models?: Partial<Record<Capability, string>>,
+  ): Promise<void> {
     const sandbox = await this.ports.genesisDir(genesisId);
     const markerPath = join(sandbox, BEGUN_MARKER);
     const marker = await readFile(toExtendedLength(markerPath), "utf8")
@@ -387,7 +416,7 @@ export class FoundingBuildService {
       });
       return;
     }
-    const { route } = await this.resolveImageRoute();
+    const { route } = await this.resolveImageRoute(models);
     const items = compileBuildItems(
       blueprint,
       route === null ? null : { model: route.model, referenceImages: route.referenceImages },
@@ -408,6 +437,7 @@ export class FoundingBuildService {
         ...(blueprint.genre !== undefined ? { genre: blueprint.genre.toLowerCase() } : {}),
         ...(blueprint.look !== undefined ? { artDirection: blueprint.look } : {}),
         ...(blueprint.bible !== undefined ? { bible: blueprint.bible } : {}),
+        ...(models !== undefined ? { models } : {}),
       });
       worldId = created.worldId;
       await atomicWriteFile(markerPath, JSON.stringify({ worldId, requestId }) + "\n");
@@ -544,7 +574,7 @@ export class FoundingBuildService {
       // An intent with a journalled key and no job id: the crash window between the append
       // and the enqueue. Re-enqueueing the same key joins the existing job when one was
       // made, and is the first dispatch when none was (row 22).
-      const { route } = await this.resolveImageRoute();
+      const { route } = await this.resolveImageRoute(this.worldModels(active.record.worldId));
       const jobId = await this.dispatchOne(active, item, route?.model ?? null).catch(() => null);
       await this.settleDispatched(active, item, jobId).catch(() => {});
       settledAny = true;
@@ -635,7 +665,7 @@ export class FoundingBuildService {
     if (keys.length === 0) return;
     // An unauthorized item runs only when a route resolves NOW — the reason it was refused
     // may have been fixed, which is the whole point of the press (R-11).
-    const { route } = await this.resolveImageRoute();
+    const { route } = await this.resolveImageRoute(this.worldModels(worldId));
     for (const key of keys) {
       const item = active.record.items.find((candidate) => candidate.key === key);
       if (!item) continue;

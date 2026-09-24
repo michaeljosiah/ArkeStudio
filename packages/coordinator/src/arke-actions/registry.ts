@@ -269,6 +269,7 @@ const CLIENT_COMMAND_METADATA = {
   "duplicate-sheet": action("world", "authored-diff", "proposal-manager", "authored-change", ["sheets"], { preparation: SHEET_TARGET, execution: SHEET_TARGET }),
   "set-sheet-status": action("world", "authored-diff", "proposal-manager", "authored-change", ["sheets"], { preparation: SHEET_TARGET, execution: SHEET_TARGET }),
   "rename-world": action("world", "authored-diff", "world-store", "authored-change", ["world-metadata"]),
+  "set-world-model": action("world", "setting", "world-store", "authored-change", ["world-metadata"]),
   "rename-sheet": action("world", "authored-diff", "proposal-manager", "authored-change", ["sheets"], { preparation: SHEET_TARGET, execution: SHEET_TARGET }),
   "assign-voice": action("world", "setting", "proposal-manager", "authored-change", ["sheets", "voices"], { preparation: SHEET_TARGET, execution: SHEET_TARGET }),
   "sheet-refs": readOnly(QUERY),

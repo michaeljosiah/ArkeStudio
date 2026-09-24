@@ -2127,11 +2127,16 @@ export class Coordinator {
   private async skillForPurpose(
     purpose: "scene-drafting" | "storyboard",
     capability: Capability,
+    /** The production's own choices: its shots are shot by its model, not the installation's (design turn 153). */
+    scope?: Partial<Record<Capability, string>>,
   ): Promise<{ id: string; version: number; family: string; models?: string[] } | null> {
     const resolve = this.opts.authoring?.skillFor;
     if (!resolve || !this.opts.manifest) return null;
     const settings = this.appSettings ? await this.appSettings.load() : null;
-    const model = modelForCapability(this.opts.manifest, settings?.routing, capability);
+    const chosen = scope?.[capability];
+    const model =
+      (chosen === undefined ? undefined : this.opts.manifest.models.find((m) => m.id === chosen && m.capability === capability)) ??
+      modelForCapability(this.opts.manifest, settings?.routing, capability);
     return resolve(purpose, model?.family, model?.id);
   }
 
@@ -5057,6 +5062,7 @@ export class Coordinator {
             ...(msg.genre !== undefined ? { genre: msg.genre } : {}),
             ...(msg.artDirection !== undefined ? { artDirection: msg.artDirection } : {}),
             ...(msg.bible !== undefined ? { bible: msg.bible } : {}),
+            ...(msg.models !== undefined ? { models: msg.models } : {}),
           });
           this.readModel.setWorlds(await this.opts.provider.listWorlds());
           await this.openWorld(worldId);
@@ -5897,9 +5903,13 @@ export class Coordinator {
             ? prior.sessionId
             : mediaSessionId(candidate.id, candidate.revision);
         const settings = this.appSettings ? await this.appSettings.load() : null;
-        const routed = this.opts.manifest
-          ? modelForCapability(this.opts.manifest, settings?.routing, medium)
-          : undefined;
+        // World chat is world work: the world's own choice first, then Settings (design turn 153).
+        const chosen = bundle.meta.models?.[medium];
+        const routed = !this.opts.manifest
+          ? undefined
+          : chosen !== undefined
+            ? this.opts.manifest.models.find((m) => m.id === chosen && m.capability === medium)
+            : modelForCapability(this.opts.manifest, settings?.routing, medium);
         const enabled = routed && settings?.models.disabled.includes(routed.id) !== true ? routed : null;
         const opened = await openBenchSession(store.dir, () => this.nowIso(), {
           sessionId,
@@ -6352,9 +6362,13 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, "The conversation has not settled a look yet.");
           return;
         }
+        // The genesis card's choice, if it made one (design turn 153): the preview is the
+        // world's first image and runs on the model the world will be founded with.
         const model = imageModelFor(
           this.appSettings ? await this.appSettings.load() : null,
           this.opts.manifest,
+          undefined,
+          msg.models,
         );
         if (!model) {
           this.rejectEnqueue(msg.requestId, msg.kind, "No image model is available. Check provider settings.");
@@ -6403,13 +6417,13 @@ export class Coordinator {
           });
           return;
         }
-        await this.foundingBuild.plan(msg.genesisId, msg.requestId, msg.look);
+        await this.foundingBuild.plan(msg.genesisId, msg.requestId, msg.look, msg.models);
         return;
       }
       case "begin-founding-build": {
         if (!this.foundingBuild) return;
         try {
-          await this.foundingBuild.begin(msg.genesisId, msg.requestId, msg.look);
+          await this.foundingBuild.begin(msg.genesisId, msg.requestId, msg.look, msg.models);
         } catch (err) {
           this.emit({
             at: new Date().toISOString(),
@@ -6665,6 +6679,29 @@ export class Coordinator {
         });
         await this.refreshWorldSnapshot(msg.worldId);
         await this.refreshWorldList();
+        return;
+      }
+      case "set-world-model": {
+        // The world's own models (design turn 153). A world field, committed like a rename.
+        // Only the one sanity check the id needs to be a choice at all — the right capability in
+        // this manifest; whether it can run *now* is shown on the card and stated at dispatch,
+        // never enforced by quietly refusing to remember it.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        if (msg.modelId !== null && this.opts.manifest &&
+            !this.opts.manifest.models.some((m) => m.id === msg.modelId && m.capability === msg.capability)) {
+          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null,
+            reason: `${msg.modelId} is not a ${msg.capability} model.` });
+          return;
+        }
+        await store.setWorldModel(msg.capability, msg.modelId).catch((err: unknown) => {
+          void this.appLog?.append({
+            kind: "world-edit.refused",
+            reason: err instanceof Error ? err.message : String(err),
+            detail: { capability: msg.capability, modelId: msg.modelId },
+          });
+        });
+        this.refreshIfStillOpen(store);
         return;
       }
       case "retire-entity": {
@@ -7754,7 +7791,11 @@ export class Coordinator {
             // Shots are drafted for the model that will shoot them (SPEC-019 R-16). The routed
             // video model names its family; a family with no skill drafts under general
             // guidance, and the scope line says which happened (R-20).
-            skill: await this.skillForPurpose("scene-drafting", "video"),
+            skill: await this.skillForPurpose(
+              "scene-drafting",
+              "video",
+              store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.meta.models,
+            ),
           });
           this.emit({
             at: new Date().toISOString(),
@@ -12954,7 +12995,7 @@ export class Coordinator {
         // the words the dispatch would actually compose, brief and bible included (R-58).
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId || !this.opts.manifest) return;
-        const model = imageModelFor(this.appSettings ? await this.appSettings.load() : null, this.opts.manifest, msg.modelId);
+        const model = imageModelFor(this.appSettings ? await this.appSettings.load() : null, this.opts.manifest, msg.modelId, store.getBundle().meta.models);
         const bundle = store.getBundle();
         const brief = await readKeyArtBrief(store.dir);
         const staged = model ? stagedFor(bundle, stagedReferenceKey("world-image"), model)[0] : undefined;
@@ -13013,6 +13054,7 @@ export class Coordinator {
           this.appSettings ? await this.appSettings.load() : null,
           this.opts.manifest,
           "modelId" in msg ? msg.modelId : undefined,
+          store.getBundle().meta.models,
         );
         // The screen disables the button without a usable image model and says why; this is the
         // backstop for a frame that arrives anyway.
@@ -13282,6 +13324,7 @@ export class Coordinator {
           this.appSettings ? await this.appSettings.load() : null,
           this.opts.manifest,
           msg.modelId,
+          store.getBundle().meta.models,
         );
         if (!model) {
           this.rejectEnqueue(
@@ -13654,6 +13697,8 @@ export class Coordinator {
         const model = imageModelFor(
           this.appSettings ? await this.appSettings.load() : null,
           this.opts.manifest,
+          undefined,
+          store.getBundle().meta.models,
         );
         if (!model) {
           this.rejectEnqueue(
@@ -14019,6 +14064,7 @@ export class Coordinator {
           this.appSettings ? await this.appSettings.load() : null,
           this.opts.manifest,
           "modelId" in msg ? msg.modelId : undefined,
+          store.getBundle().meta.models,
         );
         if (!sheet || !model) {
           this.rejectEnqueue(msg.requestId, msg.kind, "The character or image model is no longer available.");
@@ -14049,6 +14095,7 @@ export class Coordinator {
           this.appSettings ? await this.appSettings.load() : null,
           this.opts.manifest,
           "modelId" in msg ? msg.modelId : undefined,
+          store.getBundle().meta.models,
         );
         if (!sheet || sheet.type !== "location" || !model) {
           this.rejectEnqueue(msg.requestId, msg.kind, "The location or image model is no longer available.");
@@ -14589,6 +14636,7 @@ export class Coordinator {
           this.appSettings ? await this.appSettings.load() : null,
           this.opts.manifest,
           "modelId" in msg ? msg.modelId : undefined,
+          store.getBundle().meta.models,
         );
         if (!sheet || !kit || !model) {
           this.rejectEnqueue(msg.requestId, msg.kind, "An accepted main photo and image model are required.");
@@ -14679,6 +14727,7 @@ export class Coordinator {
           this.appSettings ? await this.appSettings.load() : null,
           this.opts.manifest,
           "modelId" in msg ? msg.modelId : undefined,
+          store.getBundle().meta.models,
         );
         if (!sheet || !kit || !model) {
           this.rejectEnqueue(msg.requestId, msg.kind, "An accepted main photo and image model are required.");
@@ -14812,6 +14861,8 @@ export class Coordinator {
         const model = imageModelFor(
           this.appSettings ? await this.appSettings.load() : null,
           this.opts.manifest,
+          undefined,
+          store.getBundle().meta.models,
         );
         if (!model) {
           this.rejectEnqueue(
@@ -15348,7 +15399,7 @@ export class Coordinator {
    */
   private async openBenchWorkspace(store: WorldStore, sessionId?: SessionId, fresh = false): Promise<void> {
     const settings = this.appSettings ? await this.appSettings.load() : null;
-    const routed = this.opts.manifest ? imageModelFor(settings, this.opts.manifest) : null;
+    const routed = this.opts.manifest ? imageModelFor(settings, this.opts.manifest, undefined, store.getBundle().meta.models) : null;
     const opened = await openBenchSession(store.dir, () => this.nowIso(), {
       sessionId,
       fresh,

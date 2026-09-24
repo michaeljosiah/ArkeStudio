@@ -9,6 +9,7 @@ import {
   worldImageReferences,
   type WorldImageReference,
   type ArtDirectionRecord,
+  type Capability,
   type WorldBundle,
   type WorldSummary,
 } from "@arke-studio/contracts";
@@ -40,6 +41,8 @@ export interface CreateWorldInput {
   artDirection?: string;
   /** The through-line the founding conversation wrote. Absent means the world has no bible yet. */
   bible?: string;
+  /** The models chosen on the genesis card (design turn 153). Absent entries follow Settings. */
+  models?: Partial<Record<Capability, string>>;
 }
 
 /** Codes a held handle produces. The rename has already retried through them (issue 288). */
@@ -303,6 +306,7 @@ export class FsWorldProvider implements WorldProvider {
       ...(input.logline ? { logline: input.logline } : {}),
       ...(input.tone ? { tone: input.tone } : {}),
       ...(input.genre ? { genre: input.genre } : {}),
+      ...(input.models && Object.keys(input.models).length > 0 ? { models: input.models } : {}),
       canonRevision: 0,
       nextCanonId: 1,
       created: at,

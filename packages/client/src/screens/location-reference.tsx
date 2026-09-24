@@ -1,4 +1,4 @@
-import { resolveModel } from "../components/dispatch-bar.js";
+import { resolveModel, worldModel } from "../components/dispatch-bar.js";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import {
@@ -469,7 +469,7 @@ export function LocationReferenceScreen() {
             referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("location-view", sheetId), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("location-view", sheetId)] ?? ""]?.worldName }}
             referenceHint="Optional. A photograph or a plate of the place to work from. The establishing view goes first, so this rides only where the model has room for a second image."
             onAttachReference={() => pickStagedReference(worldId, stagedReferenceKey("location-view", sheetId))}
-            worldReferences={{ world, model: resolveModel(state, "image", choice.modelId).model, onChoose: (file) => pickStagedReference(worldId, stagedReferenceKey("location-view", sheetId), file) }}
+            worldReferences={{ world, model: resolveModel(state, "image", choice.modelId, worldModel(state, "image")).model, onChoose: (file) => pickStagedReference(worldId, stagedReferenceKey("location-view", sheetId), file) }}
             onClearReference={() => clearStagedReference(worldId, stagedReferenceKey("location-view", sheetId))}
             extra={
               <label className="fy-locref__namefield">

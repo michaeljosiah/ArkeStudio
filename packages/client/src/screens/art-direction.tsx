@@ -1,6 +1,6 @@
 import { PromptReviewDetails } from "../components/prompt-review.js";
 import { reviewPrompt, normalizePrompt, type PromptReview } from "@arke-studio/contracts";
-import { send } from "../lib/store.js";
+import { send, setWorldModel } from "../lib/store.js";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useNavigate, useParams } from "react-router";
 import type {
@@ -11,10 +11,11 @@ import type {
 } from "@arke-studio/contracts";
 import { stagedReferenceKey, worldImagePrompt } from "@arke-studio/contracts";
 import { ArtStyleGrid } from "../components/art-style-picker.js";
-import { resolveModel, resolveOutputChoice, strandReason, usableModels } from "../components/dispatch-bar.js";
+import { resolveModel, worldModel, resolveOutputChoice, strandReason, usableModels } from "../components/dispatch-bar.js";
 import { GenerationDialog } from "../components/generation-dialog.js";
 import { seedFrom } from "../lib/art-styles.js";
 import { Button } from "../components/ui.js";
+import { ModelsCard, WORLD_MODEL_CAPABILITIES } from "../components/models-card.js";
 import { Portrait } from "../components/portrait.js";
 import { SingleActFeedback, useSingleAct } from "../components/single-act.js";
 import { shortDate } from "../lib/format.js";
@@ -276,7 +277,7 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
 
   // The same resolver the bar in the dialog uses, so the button and the picker cannot disagree
   // about which model this surface will send.
-  const resolved = resolveModel(state, "image", choice.modelId);
+  const resolved = resolveModel(state, "image", choice.modelId, worldModel(state, "image"));
   const model = resolved.stranded === null ? resolved.model : null;
   const offered = usableModels(state, "image");
   const why =
@@ -504,7 +505,7 @@ export function ArtDirectionScreen() {
   // The same resolver the bar in the dialog uses, so the button and the picker cannot disagree
   // about which model this surface will send — and a stranded default blocks rather than quietly
   // running as something else.
-  const resolved = resolveModel(state, "image", choice.modelId);
+  const resolved = resolveModel(state, "image", choice.modelId, worldModel(state, "image"));
   const model = resolved.stranded === null ? resolved.model : null;
   // What the bar in the dialog will actually send, asked of the bar rather than read off the last
   // click: switching models drops a size or a shape the new row cannot reach.
@@ -685,6 +686,15 @@ export function ArtDirectionScreen() {
             </p>
           )
         )}
+        {/* The models the world's own work makes with (design turn 153): its key art, master
+            looks and kits. The same card the world was begun with, changed here after. */}
+        <ModelsCard
+          state={state}
+          capabilities={WORLD_MODEL_CAPABILITIES}
+          choices={world.meta.models}
+          scopeWord="this world"
+          onChange={(capability, modelId) => setWorldModel(worldId, capability, modelId)}
+        />
         <div className="fy-artdirection__spacer" />
         {world.problems.filter((problem) => problem.path.startsWith(".history/art-direction/")).map((problem) => (
           <p role="status" key={problem.path}>{problem.message}</p>

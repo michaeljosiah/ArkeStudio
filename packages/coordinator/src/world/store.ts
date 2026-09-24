@@ -7,6 +7,7 @@ import {
   ArtDirectionRecordSchema,
   BIBLE_PATH,
   WorldAuthoredFieldChangesSchema,
+  type Capability,
   type ExternalEdit,
   type WorldAuthoredFieldChanges,
   type WorldBundle,
@@ -389,6 +390,23 @@ export class WorldStore {
       undefined,
       precondition,
     );
+  }
+
+  /**
+   * Which model this world's own work reaches for, per capability (design turn 153). `null`
+   * clears it, and clearing the last one removes the key: an empty map reads as a choice made
+   * and then emptied, which is not the same as never having chosen.
+   */
+  async setWorldModel(capability: Capability, modelId: string | null, source = "form"): Promise<CommitResult> {
+    const current: Partial<Record<Capability, string>> = { ...this.getBundle().meta.models };
+    delete current[capability];
+    if (modelId !== null) current[capability] = modelId;
+    return this.commit({
+      kind: "world-metadata-edit",
+      source,
+      files: [],
+      worldFields: { models: Object.keys(current).length > 0 ? current : null },
+    });
   }
 
   /** Retire, never delete (R-26): the entity stays on disk, marked, still resolving. */

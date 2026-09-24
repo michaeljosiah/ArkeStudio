@@ -236,6 +236,11 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
     result.candidateOperations.length || result.groupOperations.length || result.actions.length ||
     result.bibleEdits.length || result.editorRequests.length || result.sceneEdits.length
   )) return { ok: false, problems: [problem("setup-authority", "Production setup only accepts conversation and setupUpdate. Keep new world entities as openQuestions; return empty action and candidate lists.")] };
+  // Which model spends on this production is the person's choice on the setup card (design turn
+  // 153), not the conversation's: a reply that could pick a model could pick a price.
+  if (result.setupUpdate?.fields?.models !== undefined) {
+    return { ok: false, problems: [problem("setup-authority", "Production setup does not choose models. Leave setupUpdate.fields.models out; the author picks them on the Models card.")] };
+  }
 
   const problems: TurnProblem[] = [];
   const byId = new Map(input.existing.map((c) => [c.id, c]));

@@ -1,5 +1,5 @@
 import {
-  EpisodeSchema, ProductionCreationPlanSchema, ProductionNarrativeSchema,
+  EpisodeSchema, ProductionCreationPlanSchema, ProductionNarrativeSchema, ProductionSchema,
   ProductionSetupDraftSchema, SceneRecordSchema, SeasonSchema, SeriesSchema,
   migrateLegacyScene, normalizeAspect, pickableSheets, productionSetupProblems,
   type ProductionCreationPlan, type ProductionSetupDraft, type WorldBundle,
@@ -33,6 +33,11 @@ export function planProductionSetup(bundle: WorldBundle, raw: ProductionSetupDra
     ...(draft.defaults ? { defaults: draft.defaults } : {}),
     ...(draft.series ? { seriesTitle: draft.series.title } : {}),
   }, at);
+  // The setup card's models become the production's own (design turn 153), through the same
+  // field "Remember for this production" writes; absent entries follow Settings.
+  if (draft.models && Object.keys(draft.models).length > 0) {
+    base.production = ProductionSchema.parse({ ...base.production, models: draft.models });
+  }
   // Keys, not titles, select stable ids and stems. Renaming an item changes no membership.
   const sceneId = (key: string) => `sc_${key}`;
   const episodeId = (key: string) => `ep_${key}`;
