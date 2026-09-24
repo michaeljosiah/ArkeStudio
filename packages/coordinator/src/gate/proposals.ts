@@ -157,7 +157,7 @@ export interface MergeFormInput {
   requestId: string;
   path: string;
   expectedDraftRevision: number;
-  edit(content: string, proposal: Proposal): { content: string } | { reason: string };
+  edit(content: string, proposal: Proposal): { content: string } | { reason: string } | Promise<{ content: string } | { reason: string }>;
 }
 
 export interface UpdatePassageInput {
@@ -632,7 +632,7 @@ export class ProposalManager {
 
       const current = await this.readProposalFile(input.proposalId, input.path);
       if (current === null) return { status: "unknown-target" };
-      const edited = input.edit(current, proposal);
+      const edited = await input.edit(current, proposal);
       if ("reason" in edited) return { status: "rejected", message: edited.reason };
 
       const nextManifest: Proposal = {
@@ -669,13 +669,15 @@ export class ProposalManager {
    * gone and the span cannot be placed, which is the stale proposal accept would refuse anyway.
    */
   async updatePassage(input: UpdatePassageInput): Promise<UpdateFieldOutcome> {
-    const live = await this.readLive(input.path);
     return this.mergeFormEdit({
       proposalId: input.proposalId,
       requestId: input.requestId,
       path: input.path,
       expectedDraftRevision: input.expectedDraftRevision,
-      edit(content, proposal) {
+      // The base is read inside the gate operation (codex on PR 1232): read before it, a chapter
+      // moved in between would have its old bytes composed into a draft the next accept refuses.
+      edit: async (content, proposal) => {
+        const live = await this.readLive(input.path);
         if (proposal.kind !== "chapter-draft" || proposal.origin?.gesture !== "passage-revision") {
           return { reason: "Only a passage revision can be kept in part." };
         }

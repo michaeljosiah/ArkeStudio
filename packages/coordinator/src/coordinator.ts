@@ -5606,7 +5606,21 @@ export class Coordinator {
               kept: msg.kept,
               expectedDraftRevision: msg.expectedDraftRevision,
             })
-        ).catch(() => null);
+        ).catch(() => "threw" as const);
+        // An edit that threw is refused out loud too (codex on PR 1232): said nothing, a screen
+        // waiting on it has no answer to end the wait with.
+        if (outcome === "threw") {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "proposal.blocked",
+            worldId: msg.worldId,
+            proposalId: msg.proposalId,
+            reason: "invalid",
+            detail: "that edit could not be applied to this proposal",
+          });
+          await this.refreshWorldSnapshot(msg.worldId);
+          return;
+        }
         // A refusal is said out loud. The screen is showing a value the person just typed, and
         // silently reverting it on the next snapshot would read as the app losing their work
         // rather than as somebody else having changed it first.

@@ -394,3 +394,18 @@ describe("PR 815 coordinator regressions", () => {
     assert.match(refusal.reason, /editor-requests.json is invalid/);
   });
 });
+
+it("a passage keep that throws is refused out loud, so a screen waiting on it can let go (codex on PR 1232)", async () => {
+  const w = await setup();
+  await w.coordinator.openWorld(WORLD_ID);
+  const THROWS_ID = newId("pr");
+  Object.assign(w.gate, { updatePassage: async () => { throw new Error("the staged chapter could not be parsed"); } });
+  await w.internal.handleClientMessage({
+    kind: "proposal-update-passage", worldId: WORLD_ID, requestId: "req-throws", proposalId: THROWS_ID,
+    path: "productions/the-ledger-of-nights/chapters/01-neap.md", before: "a", after: "b", kept: [0], expectedDraftRevision: 1,
+  });
+  const blocked = w.events.find((event) => event.type === "proposal.blocked" && event.proposalId === THROWS_ID);
+  assert.ok(blocked, "a refusal is emitted rather than nothing");
+  assert.equal((blocked as { reason?: string }).reason, "invalid");
+  assert.doesNotMatch(JSON.stringify(blocked), /could not be parsed/, "the thrown message is not relayed");
+});

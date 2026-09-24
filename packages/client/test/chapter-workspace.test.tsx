@@ -611,6 +611,30 @@ describe("the craft loop (turn 128)", () => {
     assert.deepEqual((tightened()[0] as { subject?: unknown }).subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells." });
   });
 
+  it("an ask the coordinator declines is tried once more, then left in the composer (codex on PR 1232)", async (t) => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const m = await mount({ ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const tightened = () => m.sent.filter((message) => message.kind === "world-chat-send" && (message as { text: string }).text.endsWith("Tighten this")).length;
+    assert.equal(tightened(), 1);
+    // The thread never moves: the coordinator declined it. Tried again once...
+    await act(async () => t.mock.timers.tick(15_000));
+    assert.equal(tightened(), 2, "declined once, it is tried again");
+    // ...and declined again, it is handed to the author rather than lost.
+    await act(async () => t.mock.timers.tick(15_000));
+    assert.equal(tightened(), 2, "not tried a third time");
+    assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent, "Tighten this", "left in the composer, where the author can see it");
+    t.mock.timers.reset();
+  });
+
   it("Ask something else… puts the caret in the composer (codex on PR 1232)", async () => {
     const m = await mount({ ...inkbound([], STYLE), world: { ...inkbound([], STYLE).world!, conversations: [THREAD] } });
     await answerOpen(m);
