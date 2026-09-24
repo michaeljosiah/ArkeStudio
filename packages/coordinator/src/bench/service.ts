@@ -455,6 +455,7 @@ export async function addBenchReference(
 // ---------------------------------------------------------------------------
 
 export interface BenchEnqueueInput {
+  recipe?: import("@arke-studio/contracts").RecipeIdentity;
   worldId: string;
   target: { kind: "bench-take"; id: string };
   capability: Capability;

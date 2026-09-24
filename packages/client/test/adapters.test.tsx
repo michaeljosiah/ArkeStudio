@@ -31,7 +31,7 @@ test("turning access off changes a loaded take's media URL without rewriting its
   __setStateForTest(disabled);
   assert.equal(adapterPreviewHidden(disabled, world.meta.slug, path), true);
   assert.equal(mediaUrl(world.meta.slug, path), "about:blank");
-  assert.equal(take.params.adapters.length, 1);
+  assert.deepEqual(take.params.adapters, [{ releaseId: release.id, sha256: release.source.sha256, strength: 0.5 }]);
 });
 
 test("settings hide the catalogue when off and state pending review when on", () => {

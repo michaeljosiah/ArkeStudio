@@ -17,8 +17,9 @@ export function adapterPreviewHidden(state: ClientState | null, slug: string, pa
     const generation = world.artifacts.find(row => row.file === parts.slice(1).join("/"))?.generation;
     return !!generation && "params" in generation && hasAdultAdapter(generation.params);
   }
-  if (parts[0] === ".sessions" && parts[2] === "media" && state.bench?.session.id === parts[1]) {
-    return hasAdultAdapter(state.bench.session.takes.find(row => row.id === parts[3])?.request.params);
+  const bench = state.bench;
+  if (parts[0] === ".sessions" && parts[2] === "media" && bench && bench.session.id === parts[1]) {
+    return hasAdultAdapter(bench.session.takes.find(row => row.id === parts[3])?.request.params);
   }
   return false;
 }
