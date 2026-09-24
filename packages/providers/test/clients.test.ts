@@ -58,6 +58,28 @@ it("Ollama residency retries late reports and distinguishes processor fallback f
   assert.equal((await client.residency())[0]?.state, "mixed");
 });
 
+it("Ollama lists what is pulled with what each model can do, and leaves out what cannot complete (issue 1247)", async () => {
+  const shown: Record<string, unknown> = {
+    "gemma4:12b": { capabilities: ["completion", "tools", "vision"], model_info: { "general.architecture": "gemma4", "gemma4.context_length": 131072 } },
+    "nomic-embed-text": { capabilities: ["embedding"], model_info: {} },
+    "old-model": { model_info: { "general.architecture": "llama" } },
+  };
+  const client = new OllamaClient(async (url, init) => {
+    assert.ok(init?.signal, "listing requests are bounded");
+    if (url.endsWith("/api/tags")) return Response.json({ models: Object.keys(shown).map((name) => ({ name })).concat([{ name: "broken" }]) });
+    const { model } = JSON.parse(String(init?.body)) as { model: string };
+    return model === "broken" ? new Response("boom", { status: 500 }) : Response.json(shown[model]);
+  });
+  assert.deepEqual(await client.listModels(), [
+    { id: "gemma4:12b", contextLength: 131072, tools: true, vision: true },
+    // No capabilities stated: listed, tools assumed, nothing about images claimed.
+    { id: "old-model", tools: true, vision: false },
+    // A show that fails still lists the model — hidden is worse than refused.
+    { id: "broken", tools: true, vision: false },
+  ]);
+  assert.deepEqual(await new OllamaClient(fakeFetch([])).listModels(), [], "Ollama down is an empty list");
+});
+
 describe("provider HTTP failures preserve the provider's reason", () => {
   it("reads a 403 JSON detail before raising the provider fault", async () => {
     const detail = "User is locked. Reason: Exhausted balance. Top up at fal.ai/dashboard/billing.";

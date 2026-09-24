@@ -6,6 +6,7 @@ import {
   sessionSkillForAgent,
   ToolIntent,
   type AgentConfinement,
+  type LocalHarnessModel,
   type SessionConfigInput,
 } from "@arke-studio/contracts";
 import { assessMappedPermission, type SessionPermissionPolicy } from "../permission-policy.js";
@@ -150,5 +151,49 @@ export function buildSessionConfigV2(input: SessionConfigV2Input): Record<string
       { action: "shell", resource: "*", effect: "ask" },
       { action: "webfetch", resource: "*", effect: "ask" },
     ],
+  };
+}
+
+/** Where the bundled Ollama answers. Loopback only: a remote runtime is a setting nobody has asked for. */
+export const OLLAMA_BASE_URL = "http://127.0.0.1:11434/v1";
+
+/**
+ * The profile-level config that puts the local models in front of OpenCode (issue 1247).
+ *
+ * Measured against the pinned v2 build, and every clause below is a thing it refused
+ * differently. OpenCode never probes Ollama, so the models are listed by name — a provider
+ * with no `models` map lists nothing, and the server never asks `/v1/models`. The grammar is
+ * v2's own: `providers`, `package` with the `aisdk:` prefix, `settings.baseURL`; the v1 shape
+ * (`provider`, `npm`, `options`) parses without a warning and produces no rows. The key is
+ * whatever non-empty string keeps the SDK happy; Ollama does not read it. Written into the
+ * redirected profile rather than beside each session so the catalogue the pickers validate
+ * against carries the rows before any session exists — and the server reloads that file on
+ * change (about three seconds, measured), so a pull reaches the picker without a relaunch.
+ *
+ * No models means the provider block is gone too: a stale row for a model somebody deleted
+ * would validate in the picker and fail on the turn.
+ */
+export function buildProfileConfigV2(models: readonly LocalHarnessModel[], baseUrl = OLLAMA_BASE_URL): Record<string, unknown> {
+  if (models.length === 0) return { $schema: "https://opencode.ai/config.json" };
+  const rows: Record<string, unknown> = {};
+  for (const model of models) {
+    rows[model.id] = {
+      name: model.id,
+      capabilities: { tools: model.tools, input: model.vision ? ["text", "image"] : ["text"], output: ["text"] },
+      ...(model.contextLength !== undefined ? { limit: { context: model.contextLength } } : {}),
+      // Zero, stated: an absent cost is displayed as unknown, and a local model costs nothing.
+      cost: { input: 0, output: 0 },
+    };
+  }
+  return {
+    $schema: "https://opencode.ai/config.json",
+    providers: {
+      ollama: {
+        name: "Ollama",
+        package: "aisdk:@ai-sdk/openai-compatible",
+        settings: { baseURL: baseUrl, apiKey: "ollama" },
+        models: rows,
+      },
+    },
   };
 }

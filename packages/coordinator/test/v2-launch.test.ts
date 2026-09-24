@@ -3,9 +3,11 @@ import { describe, it } from "node:test";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./tmp.js";
+import { readFile } from "node:fs/promises";
 import {
   assembleHarness,
   HarnessPasswordHolder,
+  harnessProfileConfigPath,
   harnessProfileDir,
   passwordFromLine,
   v2ProfileEnv,
@@ -65,6 +67,41 @@ describe("the v2 launch protocol (issue 327 §4)", () => {
     assert.equal(env["XDG_CONFIG_HOME"], join("C:\\root\\harness\\profile", ".config"));
     assert.equal(env["XDG_DATA_HOME"], join("C:\\root\\harness\\profile", ".local", "share"));
     assert.equal(harnessProfileDir("C:\\root"), join("C:\\root", "harness", "profile"));
+    // The config OpenCode resolves against XDG_CONFIG_HOME — inside the redirected profile.
+    assert.equal(harnessProfileConfigPath("C:\\root"), join("C:\\root", "harness", "profile", ".config", "opencode", "opencode.json"));
+  });
+
+  it("publishes the local models into the redirected profile, for a v2 launch only (issue 1247)", async () => {
+    const machine = (answers: Record<string, string>) => async (command: string, args: string[]) => {
+      if (command === "where" || command === "which") {
+        const target = args[0]!;
+        return answers[target] !== undefined ? { status: 0, stdout: `C:\\bin\\${target}.exe\n` } : { status: 1, stdout: "" };
+      }
+      const name = command.replace(/^C:\\bin\\/, "").replace(/\.exe$/, "");
+      return answers[name] !== undefined ? { status: 0, stdout: answers[name]! } : { status: 1, stdout: "" };
+    };
+    const appRoot = await tempDir("v2-launch-");
+    const v2 = await assembleHarness({
+      appRoot,
+      v1: { runCommand: machine({}) },
+      v2: { runCommand: machine({ opencode2: "opencode2 v0.0.0-next-17444" }) },
+    });
+    assert.equal(v2.isV2, true);
+    assert.ok(v2.publishLocalModels, "a v2 launch owns its profile and can write into it");
+    await v2.publishLocalModels([{ id: "gemma4:12b", contextLength: 131072, tools: true, vision: false }]);
+    const written = JSON.parse(await readFile(harnessProfileConfigPath(appRoot), "utf8")) as { providers: { ollama: { models: Record<string, unknown> } } };
+    assert.deepEqual(Object.keys(written.providers.ollama.models), ["gemma4:12b"]);
+    await v2.publishLocalModels([]);
+    assert.equal((JSON.parse(await readFile(harnessProfileConfigPath(appRoot), "utf8")) as { providers?: unknown }).providers, undefined);
+
+    // v1 reads the person's own config; there is nothing of Arke's to write into.
+    const v1 = await assembleHarness({
+      appRoot: await tempDir("v2-launch-"),
+      v1: { runCommand: machine({ opencode: "opencode v1.18.18" }) },
+      v2: { runCommand: machine({}) },
+    });
+    assert.equal(v1.isV2, false);
+    assert.equal(v1.publishLocalModels, undefined);
   });
 
   it("carries a v2 child from password line to authenticated health, no secret in any status", async () => {

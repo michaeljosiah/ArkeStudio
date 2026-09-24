@@ -317,6 +317,8 @@ export interface ProviderClient {
   /** Coordinator-owned local GPU handover; remote engines must leave their models alone. */
   unload?(signal?: AbortSignal): Promise<void>;
   residency?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").ModelResidency[]>;
+  /** The language models a local runtime has pulled, for the writing harness's catalogue (issue 1247). */
+  listModels?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").LocalHarnessModel[]>;
   /** Release optional long-lived transports. No provider call may occur after this. */
   dispose?(): void;
   /**

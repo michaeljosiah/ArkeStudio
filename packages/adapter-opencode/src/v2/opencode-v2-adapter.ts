@@ -79,6 +79,13 @@ const STREAM_SILENCE_MS = 45_000;
  */
 const WARMUP_MS = 30_000;
 
+/** `provider/model` as v2's session model reference. Null when no provider is named: the server decides. */
+export function wireModelRef(reference: string): { providerID: string; id: string } | null {
+  const slash = reference.indexOf("/");
+  if (slash <= 0 || slash === reference.length - 1) return null;
+  return { providerID: reference.slice(0, slash), id: reference.slice(slash + 1) };
+}
+
 /** v2 rejects client message ids outside the msg_ namespace, and ids are globally durable. */
 let wireIdCounter = 0;
 function freshWireId(): string {
@@ -215,15 +222,25 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   }
 
   async createSession(input: CreateSessionInput): Promise<SessionRef> {
+    const model = wireModelRef(this.preparedPolicies.model(input.agent, input.preparationId) ?? "");
     const permissionPolicy = this.preparedPolicies.take(input.agent, input.preparationId);
     if (input.preparationId !== undefined && permissionPolicy === null) {
       throw new Error("session preparation is missing or was already consumed");
     }
     const location = input.cwd;
+    // The model is session state, pinned at creation (issue 1247). Measured against the pinned
+    // build: an agent's `model` in opencode.json shows on GET /api/agent and is never consulted
+    // for a turn — the runner reads only the session's own model, and a session without one
+    // answers with the server default. So every choice Studio wrote into the config was being
+    // read back as the default model, a cloud one, whatever the person had picked. Split at
+    // the first slash, because a model id may carry its own (`openrouter/vendor/model`).
     const session = await this.http.reqData<{ id?: string; location?: { directory?: string } }>(
       "POST",
       "/api/session",
-      location ? { location: { directory: wireDirectory(location) } } : {},
+      {
+        ...(location ? { location: { directory: wireDirectory(location) } } : {}),
+        ...(model !== null ? { model } : {}),
+      },
       { signal: input.signal },
     );
     const sessionId = session?.id ?? "";

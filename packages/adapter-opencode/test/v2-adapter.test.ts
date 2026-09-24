@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { HarnessEvent } from "@arke-studio/contracts";
 import { OpenCodeV2Adapter } from "../src/v2/opencode-v2-adapter.js";
 import { createNormalizeV2State, normalizeOpenCodeV2 } from "../src/v2/normalize.js";
-import { buildSessionConfigV2 } from "../src/v2/config.js";
+import { buildProfileConfigV2, buildSessionConfigV2 } from "../src/v2/config.js";
 import { credentialEnvPatch } from "../src/config.js";
 import { sameDirectory } from "../src/v2/http.js";
 import { meetsV2Gate, discoverOpenCode2, discoverPreferredHarness } from "../src/discovery.js";
@@ -210,6 +210,30 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
       const pin = stub.lastRequest(/\/agent$/);
       assert.deepEqual(pin?.body, { agent: "scene-writer" });
       assert.equal(pin?.authorized, true);
+    } finally {
+      await adapter.dispose();
+    }
+  });
+
+  it("pins the prepared model as session state, dispatch choice over agent default (issue 1247)", async () => {
+    const adapter = makeAdapter();
+    try {
+      await adapter.init();
+      // Measured against the pinned build: the agent's `model` in opencode.json is shown on
+      // GET /api/agent and never consulted for a turn. Only the session's own model runs.
+      adapter.prepareSession({ preparationId: "prep_agent_model", agents: { "scene-writer": { model: "ollama/gemma4:12b" } } });
+      await adapter.createSession({ purpose: "authoring", cwd: "C:\\worlds\\proposal-3", agent: "scene-writer", preparationId: "prep_agent_model" });
+      assert.deepEqual(stub.lastRequest(/^\/api\/session$/)?.body, {
+        location: { directory: "C:/worlds/proposal-3" },
+        model: { providerID: "ollama", id: "gemma4:12b" },
+      });
+      adapter.prepareSession({ preparationId: "prep_dispatch", model: "openrouter/vendor/model-x", agents: { "scene-writer": { model: "ollama/gemma4:12b" } } });
+      await adapter.createSession({ purpose: "authoring", agent: "scene-writer", preparationId: "prep_dispatch" });
+      // The id keeps its own slashes; only the first one names the provider.
+      assert.deepEqual(stub.lastRequest(/^\/api\/session$/)?.body, { model: { providerID: "openrouter", id: "vendor/model-x" } });
+      adapter.prepareSession({ preparationId: "prep_none" });
+      await adapter.createSession({ purpose: "authoring", agent: "scene-writer", preparationId: "prep_none" });
+      assert.deepEqual(stub.lastRequest(/^\/api\/session$/)?.body, {}, "no choice pins nothing; the server's default stands");
     } finally {
       await adapter.dispose();
     }
@@ -533,6 +557,35 @@ describe("v2 session config (issue 327 §7)", () => {
       ANTHROPIC_API_KEY: undefined,
       OPENAI_API_KEY: undefined,
     });
+  });
+
+  it("lists the local models in v2's provider grammar, by name, and drops the block when there are none (issue 1247)", () => {
+    const config = buildProfileConfigV2([
+      { id: "gemma4:12b", contextLength: 131072, tools: true, vision: false },
+      { id: "qwen3-vl:8b", tools: true, vision: true },
+    ]);
+    // Measured against 0.0.0-next-17444: `providers` + `package` + `settings.baseURL` produce
+    // rows; the v1 spelling (`provider`, `npm`, `options`) parses and produces nothing.
+    assert.equal(config["provider"], undefined);
+    const providers = config["providers"] as Record<string, Record<string, unknown>>;
+    assert.equal(providers["ollama"]!["package"], "aisdk:@ai-sdk/openai-compatible");
+    assert.deepEqual(providers["ollama"]!["settings"], { baseURL: "http://127.0.0.1:11434/v1", apiKey: "ollama" });
+    assert.deepEqual(providers["ollama"]!["models"], {
+      "gemma4:12b": {
+        name: "gemma4:12b",
+        capabilities: { tools: true, input: ["text"], output: ["text"] },
+        limit: { context: 131072 },
+        cost: { input: 0, output: 0 },
+      },
+      "qwen3-vl:8b": {
+        name: "qwen3-vl:8b",
+        capabilities: { tools: true, input: ["text", "image"], output: ["text"] },
+        cost: { input: 0, output: 0 },
+      },
+    });
+    // The server keeps no provider without models and never asks Ollama itself, so an empty
+    // list must take the whole block away rather than leave a provider that lists nothing.
+    assert.deepEqual(buildProfileConfigV2([]), { $schema: "https://opencode.ai/config.json" });
   });
 
   it("speaks the v2 grammar: agents plural, system not prompt, default_agent set", () => {

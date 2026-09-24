@@ -1,4 +1,4 @@
-import type { CapabilityProbe, ClientDeclarations, ModelResidency } from "@arke-studio/contracts";
+import type { CapabilityProbe, ClientDeclarations, LocalHarnessModel, ModelResidency } from "@arke-studio/contracts";
 import { setTimeout as pause } from "node:timers/promises";
 import { jsonRequest, tryProbe } from "./http.js";
 import type { FetchedArtifact, FetchLike, PollResult, ProviderClient, SubmitRequest, SubmitResult } from "../types.js";
@@ -94,6 +94,56 @@ export class OllamaClient implements ProviderClient {
     if (first.length > 0 && first.every((model) => model.state === "gpu" || model.state === "mixed")) return first;
     await this.residencyPause(signal);
     return read();
+  }
+
+  /**
+   * What is pulled, with what each model can do, for the writing harness's catalogue (issue 1247).
+   *
+   * `/api/tags` names the models; `/api/show` says per model whether it completes, calls tools
+   * and reads images, and how long its context is. A model that does not complete (an embedding
+   * model) is left out — the harness would list it and every turn on it would fail. A show that
+   * fails still lists the model, with tools assumed: a wrong assumption is a refused call the
+   * person can read, where an omitted model is one they cannot find. Ollama down is an empty
+   * list, not an error — the caller publishes whatever the runtime holds, and that is nothing.
+   */
+  async listModels(signal?: AbortSignal): Promise<LocalHarnessModel[]> {
+    const bounded = (ms: number) => AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(ms)]);
+    let tags: { status: number; body: unknown };
+    try {
+      tags = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/api/tags`, { signal: bounded(3_000) });
+    } catch {
+      return [];
+    }
+    const names = ((tags.body as { models?: Array<{ name?: unknown }> } | null)?.models ?? [])
+      .map((model) => model.name).filter((name): name is string => typeof name === "string" && name.length > 0);
+    if (tags.status >= 400) return [];
+    const models: LocalHarnessModel[] = [];
+    for (const id of names) {
+      let shown: { capabilities?: unknown; model_info?: Record<string, unknown> } | null = null;
+      try {
+        const response = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/api/show`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, signal: bounded(5_000),
+          body: JSON.stringify({ model: id }),
+        });
+        if (response.status < 400 && response.body && typeof response.body === "object") {
+          shown = response.body as { capabilities?: unknown; model_info?: Record<string, unknown> };
+        }
+      } catch { /* listed without metadata, as the comment above says */ }
+      const capabilities = Array.isArray(shown?.capabilities) ? shown.capabilities.filter((c): c is string => typeof c === "string") : null;
+      if (capabilities && !capabilities.includes("completion")) continue;
+      // The key is architecture-prefixed — `gemma4.context_length` — and the architecture
+      // itself is stated beside it, so one lookup names the other.
+      const info = shown?.model_info ?? {};
+      const architecture = typeof info["general.architecture"] === "string" ? info["general.architecture"] : null;
+      const context = architecture !== null ? info[`${architecture}.context_length`] : undefined;
+      models.push({
+        id,
+        ...(typeof context === "number" && Number.isSafeInteger(context) && context > 0 ? { contextLength: context } : {}),
+        tools: capabilities ? capabilities.includes("tools") : true,
+        vision: capabilities ? capabilities.includes("vision") : false,
+      });
+    }
+    return models;
   }
 
   /** Query the runtime, including models loaded by the writing harness, before a GPU handover. */
