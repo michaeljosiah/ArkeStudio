@@ -275,6 +275,10 @@ output can finish without a world or encoder. An unprepared retry needs the sour
 encoder build; changed settings require a new edition. Shutdown aborts and drains jobs before
 closing the world provider. Provider access lasts only through capture, so world selection remains
 available during encoding. The renderer does not own operation lifetime.
+Unreadable/incompatible intent files are preserved and reported individually without hiding valid
+jobs or blocking unrelated playback. A changed encoder on an unprepared retry explicitly requires
+a new edition; that job does not offer another retry. Clean video-v1 uses no drawtext: the adapter
+refuses accidental text-drawing graphs, while ordinary exports retain their bundled-font checks.
 
 Worlds → **Open publication** opens a directory or ZIP without opening a world or making a provider
 call. Coordinator `openPublication` pins it into a private scratch child, verifies the inventory,

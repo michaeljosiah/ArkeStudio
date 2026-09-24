@@ -97,7 +97,7 @@ export function PublicationJobs({ worldId, productionId, onOpen }: { worldId?: s
           job.status === "completed" ? <>
             {onOpen ? <Button onClick={() => onOpen(job.operationId)}>Play</Button> : <Link to={`/publications?operation=${job.operationId}`}>Play</Link>}
             <Button variant="ghost" onClick={() => void action("reveal", job.operationId)}>Show in folder</Button>
-          </> : <Button variant="ghost" onClick={() => void action("retry", job.operationId)}>Check or retry</Button>}
+          </> : job.retryable !== false ? <Button variant="ghost" onClick={() => void action("retry", job.operationId)}>Check or retry</Button> : null}
       </div>
     </div>)}
   </div>;

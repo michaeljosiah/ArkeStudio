@@ -91,6 +91,49 @@ it("preflights real codec metadata and reports unsupported pixel formats", async
   pix_fmt = "yuv420p10le"; await assert.rejects(media.playback("opaque", "video/mp4"), /Unsupported publication codec/);
 });
 
+it("refuses drawtext before encoding a clean publication without rejecting ordinary input names", async () => {
+  const calls: string[][] = [];
+  const media = publicationMedia({ run: async (_tool, args) => { calls.push(args); return { code: 0, stdout: Buffer.from("test-version"), stderr: "", timedOut: false, outputLimitExceeded: false, cancelled: false }; } });
+  const signal = new AbortController().signal;
+  const options = await media.compiler(signal);
+  await assert.rejects(options.encoder.run(["-filter_complex", "drawtext=fontfile=:text=Missing"], () => {}, signal), /do not support drawn text/);
+  assert.equal(calls.length, 1, "only the version probe runs; no font fallback or encode");
+  await options.encoder.run(["-i", "drawtext=ordinary-file.mp4", "output.mp4"], () => {}, signal);
+  assert.equal(calls.length, 2);
+});
+
+it("reports an encoder change as requiring a new edition instead of an endless retry", async t => {
+  const f = await fixture(t); const operationId = randomUUID();
+  await mkdir(join(f.ports.root, "operations"), { recursive: true });
+  await writeFile(join(f.ports.root, "operations", `${operationId}.json`), JSON.stringify({ worldId: "world", request,
+    encoderVersion: "older-build", format: "directory", outputRoot: f.output, operationId }));
+  const host = new PublicationHost(f.ports); t.after(() => host.stop());
+  assert.ok((await host.retry(operationId)).ok);
+  for (let n = 0; n < 100; n++) { const state = await host.list(); if (state.ok && state.value[0]?.status !== "running") break; await new Promise(resolve => setTimeout(resolve, 10)); }
+  const state = await host.list(); assert.ok(state.ok);
+  assert.equal(state.value[0]!.status, "failed"); assert.equal(state.value[0]!.retryable, false);
+  assert.match(state.value[0]!.reason!, /encoder changed.*Create a new edition/);
+});
+
+it("preserves unreadable recovery records while listing valid jobs, opening packages and starting new work", async t => {
+  const f = await fixture(t); const brokenId = randomUUID(), validId = randomUUID();
+  const operations = join(f.ports.root, "operations"); await mkdir(operations, { recursive: true });
+  const brokenPath = join(operations, `${brokenId}.json`); const broken = `{ truncated private path ${f.root}`;
+  await writeFile(brokenPath, broken);
+  await writeFile(join(operations, `${validId}.json`), JSON.stringify({ worldId: "world", request,
+    encoderVersion: "test-1", format: "directory", outputRoot: f.output, operationId: validId }));
+  const host = new PublicationHost({ ...f.ports, pick: async kind => kind === "output" ? f.output : f.source,
+    providers: () => ({ starting: null, live: { listWorlds: async () => [], loadWorld: async () => { throw new Error(); }, assertWritingScratch: async () => {} } }) });
+  t.after(() => host.stop());
+  assert.ok((await host.open("directory")).ok);
+  const listed = await host.list(); assert.ok(listed.ok); assert.equal(listed.value.length, 2);
+  assert.equal(listed.value.find(job => job.operationId === validId)!.status, "interrupted");
+  const bad = listed.value.find(job => job.operationId === brokenId)!;
+  assert.equal(bad.retryable, false); assert.match(bad.reason!, /preserved.*Create a new edition/);
+  assert.ok(!JSON.stringify(listed).includes(f.root)); assert.equal(await readFile(brokenPath, "utf8"), broken);
+  assert.ok((await host.start({ worldId: "world", request, format: "directory" })).ok);
+});
+
 it("releases lost renderer sessions and cancels a pending open", async t => {
   const f = await fixture(t); let delay = false; let entered!: () => void; let release!: () => void;
   const picking = new Promise<void>(resolve => { entered = resolve; });

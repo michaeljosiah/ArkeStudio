@@ -6,7 +6,7 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { parseHTML } from "linkedom";
 import { applyTimelineCommands, seedEmptyPictureTimeline, type ClientState, type PublicationPlayback, type PublicationBridge } from "@arke-studio/contracts";
-import { PublicationVideo, PublicationsScreen } from "../src/screens/publications.js";
+import { PublicationJobs, PublicationVideo, PublicationsScreen } from "../src/screens/publications.js";
 import { PublicationExport } from "../src/screens/publication-export.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { readPublicationPreference, savePublicationPreference } from "../src/lib/publication-preferences.js";
@@ -60,6 +60,20 @@ it("resume state is isolated by edition identity and manifest digest", () => {
   assert.deepEqual(readPublicationPreference("edition-b:hash-b", "en"), { time: 0, caption: "en" });
   stored.set("bad", '{"time":-1,"caption":"en"}');
   assert.deepEqual(readPublicationPreference("bad", ""), { time: 0, caption: "" });
+});
+
+it("shows a new-edition refusal without offering a retry that cannot recover it", async t => {
+  const previous = window.arke;
+  window.arke = { appVersion: "test", platform: "test", connect() {}, send() {}, subscribe() {}, publications: {
+    list: async () => ({ ok: true, value: [{ operationId: "job", worldId: "world", productionId: "film", title: "Film", status: "failed", phase: "Create a new edition",
+      reason: "The media encoder changed. Create a new edition.", retryable: false }] }),
+    open: async () => ({ ok: false, reason: "unused" }), close: async () => {}, start: async () => ({ ok: false, reason: "unused" }),
+    retry: async () => ({ ok: false, reason: "unused" }), cancel: async () => {}, reveal: async () => ({ ok: true, value: null }),
+  } };
+  const node = document.createElement("div"); document.body.append(node); const root = createRoot(node);
+  t.after(async () => { await act(async () => root.unmount()); node.remove(); window.arke = previous; });
+  await act(async () => root.render(<MemoryRouter><PublicationJobs /></MemoryRouter>));
+  assert.match(node.textContent!, /encoder changed/); assert.equal(node.querySelector("button"), null);
 });
 
 it("keeps the current movie on cancelled/invalid opens and releases it only after a successful replacement", async t => {

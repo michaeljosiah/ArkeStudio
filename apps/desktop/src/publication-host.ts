@@ -25,6 +25,8 @@ const REFUSALS: Record<PublicationFileError["code"], string> = {
 const Start = z.object({ worldId: z.string().min(1), request: VideoPublicationRequestSchema, format: z.enum(["directory", "zip"]) }).strict();
 const Intent = Start.extend({ operationId: z.string().uuid(), outputRoot: z.string().min(1), encoderVersion: z.string().min(1).max(256) }).strict();
 type Intent = z.infer<typeof Intent>;
+class EncoderChanged extends Error {}
+const UNREADABLE_RECOVERY = "The saved publication job is unreadable or incompatible. Its files have been preserved. Create a new edition.";
 interface Job { intent: Intent; view: PublicationJob; controller?: AbortController; work?: Promise<void>; result?: PublishedPublication }
 interface Ports {
   root: string;
@@ -39,6 +41,7 @@ interface Ports {
 /** Desktop lifetime owns native dialogs, private intent records, the media endpoint and drains. */
 export class PublicationHost implements PublicationBridge {
   private jobs = new Map<string, Job>();
+  private recoveryProblems = new Map<string, PublicationJob>();
   private players = new Map<string, PinnedPublication>();
   private ready: Promise<void> | undefined;
   private server: Server | undefined;
@@ -64,10 +67,18 @@ export class PublicationHost implements PublicationBridge {
       for (const name of await readdir(join(this.ports.root, "operations"))) {
         if (!/^[0-9a-f-]{36}\.json$/.test(name)) continue;
         const path = join(this.ports.root, "operations", name);
-        if ((await stat(path)).size > 1024 * 1024) throw new Error("A publication recovery record is too large.");
-        const intent = Intent.parse(JSON.parse(await readFile(path, "utf8")));
-        if (name !== `${intent.operationId}.json`) throw new Error("Publication recovery identity mismatch.");
-        this.jobs.set(intent.operationId, { intent, view: this.view(intent) });
+        try {
+          if ((await stat(path)).size > 1024 * 1024) throw new Error("A publication recovery record is too large.");
+          const intent = Intent.parse(JSON.parse(await readFile(path, "utf8")));
+          if (name !== `${intent.operationId}.json`) throw new Error("Publication recovery identity mismatch.");
+          this.jobs.set(intent.operationId, { intent, view: this.view(intent) });
+        } catch {
+          // Preserve each bad record and report only its opaque filename identity. One damaged
+          // intent must not hide valid jobs or stop unrelated publications opening.
+          const operationId = name.slice(0, -5);
+          this.recoveryProblems.set(operationId, { operationId, worldId: "", productionId: "", title: "Unreadable publication job",
+            status: "failed", phase: "Recovery unavailable", reason: UNREADABLE_RECOVERY, retryable: false });
+        }
       }
     })();
   }
@@ -85,12 +96,13 @@ export class PublicationHost implements PublicationBridge {
     return promise;
   }
   private reason(error: unknown): string {
+    if (error instanceof EncoderChanged) return "The media encoder changed since this job was saved. Create a new edition from the source production.";
     // Domain wrappers can contain nested filesystem errors too. Only fixed copy crosses IPC.
     if (error instanceof PublicationFileError) return `${error.code}: ${REFUSALS[error.code]}`;
     if (error instanceof Error && error.name === "AbortError") return "Publication cancelled.";
     return "The publication could not be processed. Check the package, media tools and available disk space, then retry.";
   }
-  list() { return this.reply(async () => { await this.initialize(); return [...this.jobs.values()].map(job => ({ ...job.view })); }); }
+  list() { return this.reply(async () => { await this.initialize(); return [...this.recoveryProblems.values(), ...[...this.jobs.values()].map(job => job.view)].map(view => ({ ...view })); }); }
   start(input: Parameters<PublicationBridge["start"]>[0]) {
     return this.reply(async () => {
       await this.initialize();
@@ -121,6 +133,7 @@ export class PublicationHost implements PublicationBridge {
   }
   retry(operationId: string) { return this.reply(async () => {
     await this.initialize();
+    if (this.recoveryProblems.has(operationId)) throw new PublicationFileError("incomplete-publication", "Unreadable recovery record.");
     const job = this.jobs.get(operationId);
     if (!job || this.startingJob || [...this.jobs.values()].some(item => item.work)) throw new Error("Publication is unavailable or running.");
     this.launch(job); return { ...job.view };
@@ -136,7 +149,7 @@ export class PublicationHost implements PublicationBridge {
         const requestFingerprint = createHash("sha256").update(JSON.stringify({ request: intent.request, world: intent.worldId, encoder: intent.encoderVersion })).digest("hex");
         job.result = await publishPublication({ operationId: intent.operationId, publicationId: intent.request.id, requestFingerprint, format: intent.format }, async scratchRoot => {
           const compiler = await this.ports.compiler(signal);
-          if (compiler.encoderVersion !== intent.encoderVersion) throw new Error("Encoder changed; create a new publication.");
+          if (compiler.encoderVersion !== intent.encoderVersion) throw new EncoderChanged();
           const provider = this.provider();
           if (!provider?.withWorldStore) throw new Error("World is unavailable.");
           job.view.phase = "Capturing";
@@ -152,7 +165,8 @@ export class PublicationHost implements PublicationBridge {
         }, { outputRoot: intent.outputRoot, signal, onPhase: phase => { job.view.phase = phase === "prepared" ? "Publishing" : "Verifying output"; } });
         job.view = { ...job.view, status: "completed", phase: "Ready to play" };
       } catch (error) {
-        job.view = { ...job.view, status: signal.aborted ? "cancelled" : "failed", phase: "Check or retry", reason: this.reason(error) };
+        job.view = { ...job.view, status: signal.aborted ? "cancelled" : "failed", phase: error instanceof EncoderChanged ? "Create a new edition" : "Check or retry",
+          reason: this.reason(error), ...(error instanceof EncoderChanged ? { retryable: false } : {}) };
       } finally { delete job.work; delete job.controller; }
     })();
   }
@@ -169,10 +183,11 @@ export class PublicationHost implements PublicationBridge {
       this.opening = true;
       const signal = AbortSignal.any([this.controller.signal, this.playbackController.signal]);
       try {
-        await this.initialize();
+        await mkdir(join(this.ports.root, "playback"), { recursive: true });
         let source: string | null; let format: "directory" | "zip";
         if (kind === "directory" || kind === "zip") { format = kind; source = await this.ports.pick(kind); }
         else {
+          await this.initialize();
           const parsed = z.object({ operationId: z.string().uuid() }).strict().parse(kind);
           const result = this.jobs.get(parsed.operationId)?.result;
           if (!result) throw new Error("Check the saved output first.");

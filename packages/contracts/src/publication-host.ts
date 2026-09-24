@@ -17,6 +17,8 @@ export interface PublicationJob {
   status: "interrupted" | "running" | "completed" | "failed" | "cancelled";
   phase: string;
   reason?: string;
+  /** False when recovery requires a new edition instead of repeating the saved operation. */
+  retryable?: boolean;
 }
 export type PublicationReply<T> = { ok: true; value: T } | { ok: false; reason: string; cancelled?: boolean };
 export interface PublicationBridge {

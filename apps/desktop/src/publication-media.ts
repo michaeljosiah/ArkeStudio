@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { parseFfprobeJson, PublicationFileError, type MediaProcessRunner, type VideoPublicationCompilerOptions } from "@arke-studio/coordinator";
+import { usesDrawtext } from "./export-ffmpeg.js";
 
 export function publicationMedia(runner: MediaProcessRunner) {
   const run = async (tool: "ffmpeg" | "ffprobe", args: string[], signal = new AbortController().signal, encode = false) => {
@@ -17,6 +18,9 @@ export function publicationMedia(runner: MediaProcessRunner) {
       return {
         signal, encoderVersion: `ffmpeg:${createHash("sha256").update(version).digest("hex")}`,
         encoder: { slateFont: "", run: async (args, progress, encodeSignal) => {
+          // Video-v1 refuses missing-picture slates and publishes captions as sidecars. Never
+          // let an accidental drawtext graph use an empty font path or a system-font fallback.
+          if (usesDrawtext(args)) throw new PublicationFileError("unsupported-capability", "Video publications do not support drawn text or missing-picture slates.");
           progress(0);
           await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-nostdin", ...args], encodeSignal, true);
           progress(100);
