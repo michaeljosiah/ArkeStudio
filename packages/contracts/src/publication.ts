@@ -9,6 +9,8 @@ import { LanguageTagSchema } from "./subtitles.js";
 export const PUBLICATION_MANIFEST_FILE = "publication.json";
 export const PUBLICATION_VIDEO_CAPABILITIES = ["video-v1", "webvtt-v1"] as const;
 export const MAX_PUBLICATION_ASSETS = 4096;
+/** Editable records can far outnumber the files in the delivered package. */
+export const MAX_PUBLICATION_RECORDS = 65_536;
 
 const DigestSchema = z.string().regex(/^[0-9a-f]{64}$/, "expected a full lowercase SHA-256 digest");
 const SafeIntegerSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -182,7 +184,7 @@ export const PublicationCaptureSchema = z.object({
   version: z.literal(1),
   compiler: CompilerSchema,
   timelineRevision: SafeIntegerSchema.nullable(),
-  records: z.array(CaptureRecordSchema).min(1).max(MAX_PUBLICATION_ASSETS),
+  records: z.array(CaptureRecordSchema).min(1).max(MAX_PUBLICATION_RECORDS),
   // A deliberately blank picture interval can render without reading a media file.
   media: z.array(CaptureMediaSchema).max(MAX_PUBLICATION_ASSETS),
   resolvedPlanSha256: DigestSchema,

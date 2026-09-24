@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, toNamespacedPath } from "node:path";
 import { it, type TestContext } from "node:test";
 import { promisify } from "node:util";
@@ -176,6 +176,47 @@ it("refuses replaced artifact bytes and missing source files before encoding", a
   await assert.rejects(compileVideoPublication(f.store, f.request, f.options));
   assert.equal(f.invocations.length, 0);
   assert.deepEqual(await readdir(f.scratch), []);
+});
+
+it("refuses changed take bytes even when sound is muted, but allows genuinely unmeasured picture", async t => {
+  const f = await fixture(t);
+  const takeId = "tk_01J8F0000000000000000000B2";
+  const takeDir = join(f.world, "productions/saltlight/takes", takeId);
+  await writeFile(join(takeDir, "clip.mp4"), bytes);
+  await writeFile(join(takeDir, "media-info.json"), JSON.stringify({ sourceHash: hash(Buffer.from("reviewed bytes")),
+    probedAt: "2026-09-01T00:00:00Z", mediaInfo: { durationSec: 6, hasVideo: true, hasAudio: true } }));
+  f.timeline.tracks[0]!.clips[0]!.source = { kind: "take", takeId, label: "Selected take" };
+  f.timeline.tracks[0]!.clips[0]!.audio = "mute";
+  await f.store.ownedWrite(() => writeFile(f.timelinePath, JSON.stringify(f.timeline)));
+  await assert.rejects(compileVideoPublication(f.store, f.request, f.options), /Take bytes no longer match/);
+  assert.equal(f.invocations.length, 0);
+  assert.deepEqual(await readdir(f.scratch), []);
+  await f.store.ownedWrite(() => unlink(join(takeDir, "media-info.json")));
+  const result = await compileVideoPublication(f.store, f.request, f.options);
+  await result.dispose();
+});
+
+it("keeps a publication fingerprint when unordered rehearsal records are recreated in another order", async t => {
+  const f = await fixture(t);
+  const ids = ["rh_01J8G0000000000000000000A1", "rh_01J8G0000000000000000000A2"];
+  const root = join(f.world, "productions/saltlight/rehearsals");
+  await mkdir(root, { recursive: true });
+  const sceneId = f.store.getBundle().productions.find(item => item.meta.id === "saltlight")!.scenes[0]!.id;
+  const write = async (order: string[]) => {
+    for (const id of order) await writeFile(join(root, `${id}.json`), JSON.stringify({ id, sceneId, sceneVersionAtStart: 1,
+      notes: {}, createdAt: "2026-09-01T00:00:00Z", updatedAt: "2026-09-01T00:00:00Z" }));
+  };
+  await write([...ids].reverse());
+  const first = await compileVideoPublication(f.store, f.request, f.options);
+  const expected = first.manifest.build.dependencyFingerprint;
+  await first.dispose();
+  for (const id of ids) await unlink(join(root, `${id}.json`));
+  await write(ids);
+  const scanned = await scanWorld(f.world, { includeOperationalState: false });
+  assert.deepEqual(scanned.bundle.productions.find(item => item.meta.id === "saltlight")!.rehearsals.map(item => item.id), ids);
+  const second = await compileVideoPublication(f.store, f.request, f.options);
+  try { assert.equal(second.manifest.build.dependencyFingerprint, expected); }
+  finally { await second.dispose(); }
 });
 
 it("rejects a video overlay whose source ends before its authored window", async t => {

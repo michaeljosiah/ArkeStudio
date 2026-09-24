@@ -698,7 +698,7 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
 
     const takes = [];
     const takeMediaInfo: ProductionBundle["takeMediaInfo"] = {};
-    for (const takeDir of await listDir(join(pdir, "takes"))) {
+    for (const takeDir of (await listDir(join(pdir, "takes"))).sort()) {
       if (!(await exists(join(pdir, "takes", takeDir, "take.json")))) continue;
       const take = await tryParse(`productions/${id}/takes/${takeDir}/take.json`, (raw) =>
         TakeSchema.parse(JSON.parse(raw)),
@@ -832,14 +832,18 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
       : null;
 
     const performances: ProductionBundle["performances"] = [];
-    for (const entry of await readdir(join(pdir, "performances"), { withFileTypes: true }).catch(() => [])) {
+    const performanceEntries = await readdir(join(pdir, "performances"), { withFileTypes: true }).catch(() => []);
+    // These are record inventories, not authored order. Stable path order keeps a copied world
+    // independent of directory enumeration and also breaks equal-time take ordering ties above.
+    performanceEntries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+    for (const entry of performanceEntries) {
       if (!entry.isDirectory() || !/^pf_[0-9A-HJKMNP-TV-Z]{26}$/.test(entry.name)) continue;
       if (!(await exists(join(pdir, "performances", entry.name, "performance.json")))) continue;
       const record = await tryParse(`productions/${id}/performances/${entry.name}/performance.json`, raw => PerformanceRecordSchema.parse(JSON.parse(raw)));
       if (record && record.id === entry.name && record.target.productionId === id) performances.push(record);
     }
     const rehearsals: ProductionBundle["rehearsals"] = [], rehearsalHashes: Record<string, string> = {};
-    for (const file of await readdir(join(pdir, "rehearsals")).catch(() => [])) {
+    for (const file of (await readdir(join(pdir, "rehearsals")).catch(() => [])).sort()) {
       if (!/^rh_[0-9A-HJKMNP-TV-Z]{26}\.json$/.test(file)) continue;
       const path = `productions/${id}/rehearsals/${file}`;
       const rehearsal = await tryParse(path, raw => RehearsalSessionSchema.parse(JSON.parse(raw)));

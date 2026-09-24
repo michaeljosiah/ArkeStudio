@@ -136,6 +136,11 @@ invalidate a build. A second scan checks derived inputs and the inventory, inclu
 absent records, before capture's final file/hash/ownership checks. Consumed artifact bytes must
 match their recorded hash. The preparation/revalidation callbacks must never await another
 operation needing the world gate.
+Editable record receipts have their own 65,536-entry limit, separate from the 4,096 media-asset
+limit. Unordered take/performance/rehearsal inventories are scanned in stable path order, so
+filesystem enumeration does not change the fingerprint. A consumed take with an existing but
+stale media measurement is refused even when sound is muted; a genuinely unmeasured take with
+no measurement sidecar can still supply picture under the shared planner's existing rules.
 
 After capture, the gate is released. Every encoder input (picture, overlay and sound) is rewritten
 to a captured file; the world is no longer used for rendering. The compiler probes temporal

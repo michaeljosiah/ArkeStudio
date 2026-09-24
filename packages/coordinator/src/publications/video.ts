@@ -81,7 +81,7 @@ export async function compileVideoPublication(
     // Conservative discovery includes the scanner's authored inventory, not just existing
     // timeline paths. A second scan catches a newly created timeline/selection/sidecar too.
     // The derived input identity also covers scanner inputs absent from its text manifest.
-    return { plan: projected.plan, manifest: scan.manifest, artifacts: scan.bundle.artifacts,
+    return { plan: projected.plan, manifest: scan.manifest, artifacts: scan.bundle.artifacts, takeMediaInfo: production.takeMediaInfo,
       identity: digest({ production, artifacts: scan.bundle.artifacts, meta: scan.meta, manifest: scan.manifest }) };
   };
   try {
@@ -93,6 +93,14 @@ export async function compileVideoPublication(
       let total = 0;
       const measured = [];
       for (const path of plan.media) {
+        const takePrefix = `productions/${request.productionId}/takes/`;
+        const takeId = path.startsWith(takePrefix) ? path.slice(takePrefix.length).split("/")[0]! : null;
+        if (takeId !== null && Object.hasOwn(before.manifest, `${takePrefix}${takeId}/media-info.json`) &&
+          !Object.hasOwn(before.takeMediaInfo, takeId)) {
+          // The scanner only retains a take measurement when its recorded hash matches the
+          // actual file. Muting sound must not turn replaced picture into a reviewed take.
+          throw new PublicationFileError("source-changed", `Take bytes no longer match their media measurement: ${path}`);
+        }
         const file = await readPublicationFile(store.dir, path, Math.min(limits.assetBytes, limits.totalBytes - total), signal);
         for (const artifact of before.artifacts.filter(item => `artifacts/${item.file}` === path)) {
           if (artifact.hash !== `sha256:${file.sha256}`) {
