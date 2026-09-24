@@ -2,8 +2,8 @@
 
 The implemented foundation of SPEC-048 supplies the shared contract for a portable video
 publication, source capture, directory integrity verification, a video compiler, recoverable local
-publication delivery and bounded ZIP writing/extraction. A player and an export command are not
-yet implemented.
+publication delivery and bounded ZIP writing/extraction. Desktop adds an export-sheet action and
+a world-independent player at `/publications`.
 Track the remaining work in [issue #1228](https://github.com/michaeljosiah/ArkeStudio/issues/1228).
 
 `packages/contracts/src/publication.ts` exports the video manifest schema, compatibility reader,
@@ -253,3 +253,42 @@ caption-semantic validation; the player still owns those checks.
 `test/publications/delivery.test.ts` covers malformed archives, receipts, cancellation, preservation
 of existing output, abrupt process exit and competing processes. `test/publications/video.test.ts`
 includes compiler-to-publisher retry after source edits and opt-in real-media ZIP decode.
+
+## Desktop publishing and playback
+
+In Cut → Export film, **Publish playable edition** chooses title, edition, language, full production
+or episode, ZIP/folder and explicitly selected caption/subtitle tracks. The resolution comes from
+the export sheet. Each selected track has an editable label and kind; only one may be default.
+The shared publication plan refuses gaps, stale/invalid timelines and unsupported source state
+before starting. Native folder selection chooses the output root, outside managed world storage.
+
+Desktop `src/publication-host.ts` flushes an immutable intent under
+`<appRoot>/publications/operations/<operationId>.json` before starting. This preserves the request,
+world id, format, encoder build identity and private output root. IPC exposes only opaque ids and
+status. Jobs show phases, cancellation, retry, Play and Show in folder. On restart saved operations
+appear as **Check or retry**; reconciliation verifies completion before showing success. Prepared
+output can finish without a world or encoder. An unprepared retry needs the source world and same
+encoder build; changed settings require a new edition. Shutdown aborts and drains jobs before
+closing the world provider. The renderer does not own operation lifetime.
+
+Worlds → **Open publication** opens a directory or ZIP without opening a world or making a provider
+call. Coordinator `openPublication` pins it into a private scratch child, verifies the inventory,
+then preflights media and captions. It never serves the original mutable package. Desktop's separate
+authenticated loopback endpoint resolves only session/asset ids, supports byte ranges, checks
+origins, and accepts no query credentials. Main injects the private capability for this window and
+endpoint only. The public bridge contains neither paths nor credentials.
+
+The current native media preflight accepts H.264/AAC MP4 and VP8/VP9 WebM with Opus/Vorbis,
+one video and at most one audio stream, with 8-bit 4:2:0 video. Other codecs get `unsupported-codec`.
+The browser also checks `canPlayType`; later decode/asset errors remain visible. Caption preflight
+accepts bounded UTF-8 WebVTT with cue ids, plain timing lines, native cue text and NOTE blocks.
+It refuses styles, regions, cue settings, invalid/reversed/out-of-order times and cues beyond the
+movie (50 ms rounding tolerance). Each sidecar is limited to 8 MiB. This is deliberately narrower
+than all of WebVTT; future support needs explicit fixtures rather than silently discarding features.
+
+The client uses native media controls and an explicit captions/off selector. Resume time and caption
+choice live in browser storage keyed by publication id and manifest digest, outside immutable files.
+Only the desktop host currently supplies disk opening/export; the reusable HTML player receives
+verified URLs. No browser upload host, book/audio/interactive profile or OTIO adapter is claimed.
+Closing/replacing playback removes its owned copy. Abrupt exit can leave scratch files; no orphan
+sweep or power-loss durability guarantee is added by the UI.

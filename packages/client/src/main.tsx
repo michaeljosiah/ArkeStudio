@@ -16,6 +16,7 @@ import "./theme/tokens/effects.css";
 import "./theme/tokens/launch.css";
 import "./theme/globals.css";
 import "./screens/production-setup.css";
+import "./screens/publications.css";
 // Component styles are gathered here (not in component modules) so the node test runner can
 // import the component graph without a CSS loader.
 import "./components/ui.css";

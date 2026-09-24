@@ -152,7 +152,7 @@ Implemented landing directories include:
 
 ## Publication foundation
 
-Publication foundation services (SPEC-048, issue #1228) are not yet exposed as export commands.
+Publication services (SPEC-048, issue #1228) are exposed through the desktop export sheet and player.
 `capturePublicationInputs` checks declared dependencies under the world's ownership/read gate and
 copies media into a unique `arke-publication-*` child of a host-provided scratch directory. It
 does not edit authored sources or create a completed edition. Cancellation/failure removes that
@@ -185,6 +185,14 @@ verifies the package there. Its `dispose()` removes both temporary forms, never 
 Only the returned portable package path is a delivery artifact; adjacent operation receipts are
 internal state. These services assume trusted local storage and do not promise arbitrary power-loss
 recovery or an atomic fence against hostile external filesystem mutation.
+
+Desktop writes a flushed, exclusively installed intent to
+`<appRoot>/publications/operations/<operationId>.json` before rendering. The native-selected output
+root holds the publisher's receipts and portable output. Cancellation or restart preserves the
+intent for explicit reconciliation. The public bridge never returns these paths. Playback pins a
+verified directory/ZIP under `<appRoot>/publications/playback/player-*`; close/replacement/shutdown
+removes only that copy. Abrupt exit can leave scratch files. Resume time and caption choice are
+browser preferences keyed by publication id and manifest digest; playback never edits the package.
 
 ## Artifacts and extraction
 

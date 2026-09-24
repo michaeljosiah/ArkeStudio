@@ -526,6 +526,7 @@ export function WorldPickerScreen() {
           <p className="fy-hero__lede" style={{ margin: "10px 0 0", maxWidth: 540 }}>
             {lede}
           </p>
+          <Button variant="ghost" onClick={() => navigate("/publications")}>Open publication</Button>
           {archiveNote && (
             <div className="fy-set__why" style={{ marginTop: 10 }}>
               <span className={cx("fy-set__dot", archiveNote.refused ? "fy-set__dot--warn" : "fy-set__dot--ok")} />

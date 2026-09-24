@@ -2,6 +2,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearch
 import { useEffect, useRef } from "react";
 import { isSettingsPath, rememberSettingsReturn, settingsReturnPath } from "./lib/settings-return.js";
 import { ProductionSetupScreen } from "./screens/production-setup.js";
+import { PublicationsScreen } from "./screens/publications.js";
 import { ProductionNarrativeScreen } from "./screens/production-narrative.js";
 import { ProductionArtifactsScreen } from "./screens/production-artifacts.js";
 import { SettingsDownloadsScreen } from "./screens/settings-downloads.js";
@@ -274,6 +275,7 @@ export function App() {
         <Route element={<ShellChrome />}>
           <Route path="/first-run" element={<FirstRunScreen />} />
           <Route path="/worlds" element={<WorldPickerScreen />} />
+          <Route path="/publications" element={<PublicationsScreen />} />
           <Route path="/worlds/new" element={<NewWorldScreen />} />
           {/* The page is retired (design turn 136); its route lands on Home with the panel open. */}
           <Route path="/activity" element={<ActivityRoute />} />

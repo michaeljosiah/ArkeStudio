@@ -1,5 +1,6 @@
 /** The typed preload bridge (SPEC-001 R-9). Mirrors apps/desktop/src/preload.ts. */
 export interface ArkeBridge {
+  publications?: import("@arke-studio/contracts").PublicationBridge;
   stagePerformanceAudio?(input: { name: string; contentType: string; bytes: Uint8Array }): Promise<{ ok: true; spoolId: string } | { ok: false; reason: string }>;
   discardPerformanceAudio?(spoolId: string): Promise<void>;
   appVersion: string;
