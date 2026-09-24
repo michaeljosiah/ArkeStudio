@@ -70,6 +70,16 @@ describe("a world's own models (design turn 153)", () => {
   });
 });
 
+describe("two rows changed at once", () => {
+  it("keeps both — the second change does not erase the first", async () => {
+    // Each change builds its map from the live bundle. Unserialized, both copied the same empty
+    // map and the later commit silently put the first capability back on Settings (Codex, #1237).
+    const store = await open();
+    await Promise.all([store.setWorldModel("image", "chosen"), store.setWorldModel("video", "some-video")]);
+    assert.deepEqual(store.getBundle().meta.models, { image: "chosen", video: "some-video" });
+  });
+});
+
 describe("the image model for world work", () => {
   it("takes the scope's choice over Settings, and a requested id over both", () => {
     assert.equal(imageModelFor(settings(), MANIFEST)?.id, "routed");

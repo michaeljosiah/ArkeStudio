@@ -896,12 +896,28 @@ export function NewWorldScreen() {
   // exactly what the coordinator would refuse the press for. Either change asks the plan
   // again. A look the conversation proposed follows the conversation; words the author edited
   // or chose from a preset stay theirs.
-  const plannedAgainst = useRef<{ blueprint: typeof blueprint; preview: string | null; models: ModelChoices | undefined } | null>(null);
+  // What the build's image route resolves from, as one comparable string: the card's choice or
+  // the Settings default it follows, whether that model is switched off, and its provider's key.
+  // Any of them can change behind an open card — the gear goes to Settings and back — and the
+  // review must be asked again, or it shows one model and price while the press spends on another.
+  const imageRoute = (() => {
+    const id = models?.image ?? state?.app.routing.defaults.image;
+    const model = id === undefined ? undefined : state?.app.manifest?.models.find((m) => m.id === id);
+    const provider = model === undefined ? undefined : state?.app.providers.find((p) => p.id === model.provider);
+    return [
+      id ?? "",
+      model === undefined ? "missing" : "listed",
+      id !== undefined && state?.app.models.disabled.includes(id) ? "off" : "on",
+      provider?.configured === true ? "keyed" : "unkeyed",
+      provider?.validation ?? "",
+    ].join("|");
+  })();
+  const plannedAgainst = useRef<{ blueprint: typeof blueprint; preview: string | null; route: string } | null>(null);
   useEffect(() => {
     if (!buildCardOpen || buildPressed) return;
     const preview = previewJob?.status ?? null;
     const last = plannedAgainst.current;
-    if (last !== null && last.blueprint === blueprint && last.preview === preview && last.models === models) return;
+    if (last !== null && last.blueprint === blueprint && last.preview === preview && last.route === imageRoute) return;
     let lookText = lookForBuild;
     if (lookSource === "conversation" && look.trim() === conversationLookRef.current) {
       lookText = blueprint?.look?.trim() ?? "";
@@ -909,19 +925,19 @@ export function NewWorldScreen() {
       setLook(lookText);
       setLookForBuild(lookText);
     }
-    plannedAgainst.current = { blueprint, preview, models };
+    plannedAgainst.current = { blueprint, preview, route: imageRoute };
     const requestId = ulid();
     setPlanRequestId(requestId);
     setPlanStartedAt(new Date().toISOString());
     // A refusal answered the blueprint that moved; the fresh plan is the review it asked for.
     setBuildRequestId(null);
     planFoundingBuild(genesisId, requestId, lookText, models);
-  }, [buildCardOpen, buildPressed, previewJob?.status, blueprint, lookForBuild, look, lookSource, genesisId, models]);
+  }, [buildCardOpen, buildPressed, previewJob?.status, blueprint, lookForBuild, look, lookSource, genesisId, models, imageRoute]);
 
   const openBuildCard = (lookText: string) => {
     setLookForBuild(lookText);
     setBuildRequestId(null);
-    plannedAgainst.current = { blueprint, preview: previewJob?.status ?? null, models };
+    plannedAgainst.current = { blueprint, preview: previewJob?.status ?? null, route: imageRoute };
     const requestId = ulid();
     setPlanRequestId(requestId);
     setPlanStartedAt(new Date().toISOString());

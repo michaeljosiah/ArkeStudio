@@ -20,10 +20,14 @@ import type { useStore } from "../lib/store.js";
 
 type State = ReturnType<typeof useStore>["state"];
 
-/** What a world's own work makes (design turn 153): its images, its moving pictures, its voices. */
-export const WORLD_MODEL_CAPABILITIES: readonly Capability[] = ["image", "video", "voice-tts"];
-/** What a production makes: the world's three, and its score. */
-export const PRODUCTION_MODEL_CAPABILITIES: readonly Capability[] = ["image", "video", "voice-tts", "music"];
+/**
+ * The rows a card offers are the capabilities something actually reads from that scope (design
+ * turn 153). A row that persists a choice no dispatch consults would say `this world` while
+ * changing nothing — so a world offers what its image and video work read, and a production adds
+ * the voice its lines are read in. Music and a world's voices join when a path reads them.
+ */
+export const WORLD_MODEL_CAPABILITIES: readonly Capability[] = ["image", "video"];
+export const PRODUCTION_MODEL_CAPABILITIES: readonly Capability[] = ["image", "video", "voice-tts"];
 
 /**
  * What a model row says about the model it holds, in the state cell's three words (design turn

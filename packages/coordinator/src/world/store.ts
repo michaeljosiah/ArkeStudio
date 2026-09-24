@@ -17,7 +17,7 @@ import { completesFoundingLook } from "../references/master-look.js";
 import { WorldIndex } from "../index-db/world-index.js";
 import type { DatabaseCtor } from "../index-db/sqlite.js";
 import { restoredSceneContent } from "../productions/scene-record.js";
-import { atomicWriteFile } from "./atomic.js";
+import { atomicWriteFile, serializeFileMutation } from "./atomic.js";
 import { readBible } from "./bible.js";
 import { readChanges } from "./change-writer.js";
 import {
@@ -412,14 +412,19 @@ export class WorldStore {
    * and then emptied, which is not the same as never having chosen.
    */
   async setWorldModel(capability: Capability, modelId: string | null, source = "form"): Promise<CommitResult> {
-    const current: Partial<Record<Capability, string>> = { ...this.getBundle().meta.models };
-    delete current[capability];
-    if (modelId !== null) current[capability] = modelId;
-    return this.commit({
-      kind: "world-metadata-edit",
-      source,
-      files: [],
-      worldFields: { models: Object.keys(current).length > 0 ? current : null },
+    // Read and commit as one step. The map is built from the live bundle, so two rows changed in
+    // one breath would each copy the same map and the second commit would erase the first
+    // capability — the same race the production's choice closes on production.json.
+    return serializeFileMutation(join(this.dir, "world.json"), async () => {
+      const current: Partial<Record<Capability, string>> = { ...this.getBundle().meta.models };
+      delete current[capability];
+      if (modelId !== null) current[capability] = modelId;
+      return this.commit({
+        kind: "world-metadata-edit",
+        source,
+        files: [],
+        worldFields: { models: Object.keys(current).length > 0 ? current : null },
+      });
     });
   }
 

@@ -2147,9 +2147,14 @@ export class Coordinator {
     if (!resolve || !this.opts.manifest) return null;
     const settings = this.appSettings ? await this.appSettings.load() : null;
     const chosen = scope?.[capability];
-    const model =
-      (chosen === undefined ? undefined : this.opts.manifest.models.find((m) => m.id === chosen && m.capability === capability)) ??
-      modelForCapability(this.opts.manifest, settings?.routing, capability);
+    if (chosen !== undefined) {
+      // A kept choice that has left the manifest is not a reason to draft for the default: the
+      // production still names it, and its dispatches refuse rather than substitute (R-78). No
+      // model means general guidance, which is the ordinary outcome R-20 already describes.
+      const model = this.opts.manifest.models.find((m) => m.id === chosen && m.capability === capability);
+      return model ? resolve(purpose, model.family, model.id) : null;
+    }
+    const model = modelForCapability(this.opts.manifest, settings?.routing, capability);
     return resolve(purpose, model?.family, model?.id);
   }
 
