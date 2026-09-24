@@ -56,6 +56,15 @@ function modelState(): ClientState {
         pointCount: 0, openProposalCount: 0, notCarried: [], entryContext: { kind: "production", productionId: "saltlight" },
       }],
     },
+    // Loaded: a thread still loading takes nothing said into it.
+    worldChat: workspaceAt(1),
+  };
+}
+
+function workspaceAt(seq: number): NonNullable<ClientState["worldChat"]> {
+  return {
+    conversationId: CV as never, status: "open", initiative: "collaborate", hasMore: false, runStatus: null,
+    runStartedAt: null, retrievalUnavailable: false, attachments: [], seq, actions: [], messages: [], points: [],
   };
 }
 
@@ -286,6 +295,8 @@ describe("live harness model controls (#1123, #1124)", () => {
     const inherited = sent.findLast((message) => message.kind === "world-chat-send");
     assert.ok(inherited && inherited.kind === "world-chat-send");
     assert.equal(inherited.modelId, undefined, "the coordinator resolves the inherited production choice");
+    // The thread shows the first line before the next is said.
+    await act(async () => __setStateForTest({ ...modelState(), worldChat: workspaceAt(2) }));
     await choose("Language model", OPUS);
     await press("Explain the scene");
     const explicit = sent.findLast((message) => message.kind === "world-chat-send");

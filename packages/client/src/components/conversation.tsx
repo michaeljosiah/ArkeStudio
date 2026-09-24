@@ -745,6 +745,13 @@ export type DockAsk = {
   typed?: string;
 };
 
+/** A sent ask found in the thread: its exact words, said by the author about when it went. */
+function saidIn(messages: ReadonlyArray<{ role: string; text: string; createdAt: string }>, ask: DockAsk): boolean {
+  if (ask.sent === undefined) return false;
+  const sentAt = Date.parse(ask.sent.at);
+  return messages.some((m) => m.role === "user" && m.text === ask.text && Math.abs(Date.parse(m.createdAt) - sentAt) < 120_000);
+}
+
 export function ProductionConversation({
   worldId,
   productionId,
@@ -850,7 +857,7 @@ export function ProductionConversation({
   /** What is selected on the timeline while they talk (SPEC-039 R-26), sent with each turn. */
   subject?: WorldChatSubject;
 }) {
-  const { state, connection } = useStore();
+  const { state, connection, snapshots } = useStore();
   const navigate = useNavigate();
   const [message, setMessage] = useState("");
   const [languageModelId, setLanguageModelId] = useState<string | undefined>();
@@ -1042,6 +1049,9 @@ export function ProductionConversation({
     // Nor over a line just sent that the thread has not shown yet (codex on PR 1232): the runner
     // would refuse it as already working, and nothing would say so.
     if (opening || running || echo !== null) return false;
+    // Nor into a thread still loading (codex on PR 1232): with no sequence to watch, the line
+    // could not be held as just sent, and the next would go out over it.
+    if (conversationId && loaded === null) return false;
     /*
      * No thread yet: the first thing said opens one and is then said into it. Creating does not
      * take a turn — it only names the conversation — so without the send that follows, the
@@ -1067,7 +1077,6 @@ export function ProductionConversation({
     // here would promote that default above the agent and run a different model.
     const requestId = sendWorldChat(worldId, conversationId, text, [], about, languageModelId, replyOnly);
     if (requestId === null) return false;
-    // Held only while there is a thread to watch move; with none loaded there is nothing to wait on.
     if (loaded !== null) setEcho({ seq: loaded.seq });
     setLanguageModelId(undefined);
     onSent?.(requestId);
@@ -1102,9 +1111,11 @@ export function ProductionConversation({
    *
    * Taken or not is the coordinator's answer for that request id (`world-chat.send-result`),
    * given once the runner has made the line a turn, not a guess from the transcript. The store
-   * keeps recent answers, so a dock brought back after its answer arrived still finds it. No
-   * answer within the lapse — the connection lost it — counts as not taken. Not taken, it is
-   * shown beside the prompts to be tried again or dismissed, never written over the composer.
+   * keeps recent answers, so a dock brought back after its answer arrived still finds it. While
+   * the connection holds, the answer always comes, however long admission takes, so it is waited
+   * for; only a connection lost on the way loses it, and then the rejoined thread says. Not
+   * taken, it is shown beside the prompts to be tried again or dismissed, never written over the
+   * composer.
    *
    * A line that only starts an ask (`draft`) stays the page's too, until it is sent or another
    * press replaces it: the dock puts it in an empty composer — again after being brought back —
@@ -1124,8 +1135,6 @@ export function ProductionConversation({
    * never moves it, so the wait also ends on its own after a while.
    */
   const [echo, setEcho] = useState<{ seq: number | null } | null>(null);
-  const loadedRef = useRef(loaded);
-  loadedRef.current = loaded;
   useEffect(() => {
     if (echo === null) return;
     if ((loaded?.seq ?? null) !== echo.seq) {
@@ -1163,18 +1172,22 @@ export function ProductionConversation({
   useEffect(() => {
     if (ask === undefined || ask.draft === true || ask.sent !== undefined) return;
     if (opening !== null || echo !== null || running || languageUnavailableReason !== undefined || connection !== "open") return;
+    if (conversationId && loaded === null) return;
     const pressed = ask;
     say(pressed.text, pressed.replyOnly === true, pressed.subject, (requestId) => onAsk?.({ ...pressed, sent: { requestId, at: new Date().toISOString() } }));
     // say is rebuilt every render; the ask and the dock's readiness are what decide.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ask, opening, echo, running, languageUnavailableReason, connection]);
+  }, [ask, opening, echo, running, languageUnavailableReason, connection, loaded === null]);
   // Answered: taken is done with; not taken is shown.
   useEffect(() => {
     const requestId = ask?.sent?.requestId;
     if (ask === undefined || requestId === undefined) return;
     const settle = (admitted: boolean) => {
       onAsk?.(null);
-      if (!admitted) setDeclinedAsk(ask);
+      if (admitted) return;
+      // Refused outright: nothing later can make it taken, so it is not watched for (below).
+      const { sent: _sent, ...refused } = ask;
+      setDeclinedAsk(refused);
     };
     const already = worldChatSendResult(requestId);
     if (already !== undefined) {
@@ -1184,22 +1197,45 @@ export function ProductionConversation({
     const unsubscribe = subscribeWorldChatSendResults((result) => {
       if (result.requestId === requestId) settle(result.admitted);
     });
-    // No answer at all within the lapse. The answer is not durable, so a connection lost after
-    // the turn was written loses it too (codex on PR 1232): before calling it not taken, look in
-    // the thread, which is, for these exact words said about when this was sent. Found, it was
-    // taken, and offering to send it again would pay for it twice.
-    const lapse = setTimeout(() => {
-      const sentAt = Date.parse(ask.sent!.at);
-      const said = (loadedRef.current?.messages ?? []).some((m) =>
-        m.role === "user" && m.text === ask.text && Math.abs(Date.parse(m.createdAt) - sentAt) < 120_000);
-      settle(said);
-    }, 15_000);
-    return () => {
-      unsubscribe();
-      clearTimeout(lapse);
-    };
+    return unsubscribe;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ask?.sent?.requestId]);
+  /*
+   * The answer is not durable: a connection lost between send and answer loses it, even for a
+   * line the runner took (codex on PR 1232). No clock decides that — admission can be slow with
+   * the socket open, and calling it lost then would offer a second paid turn. The loss is the
+   * connection dropping; the verdict waits for the snapshot that rejoins, and is the thread's,
+   * which is durable: these exact words said about when this was sent.
+   */
+  const droppedAt = useRef<number | null>(null);
+  useEffect(() => {
+    if (ask?.sent === undefined) {
+      droppedAt.current = null;
+      return;
+    }
+    if (connection !== "open") {
+      droppedAt.current ??= snapshots;
+      return;
+    }
+    if (droppedAt.current === null || snapshots === droppedAt.current || loaded === null) return;
+    droppedAt.current = null;
+    onAsk?.(null);
+    if (!saidIn(loaded.messages, ask)) setDeclinedAsk(ask);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ask?.sent?.requestId, connection, snapshots, loaded === null]);
+  // Shown as not sent, and then heard of after all — an answer late past the rejoin, or the line
+  // in the thread — it was taken, and Try again would pay for it twice.
+  useEffect(() => {
+    const requestId = declinedAsk?.sent?.requestId;
+    if (declinedAsk === null || requestId === undefined) return;
+    if (worldChatSendResult(requestId) === true || saidIn(loaded?.messages ?? [], declinedAsk)) {
+      setDeclinedAsk(null);
+      return;
+    }
+    return subscribeWorldChatSendResults((result) => {
+      if (result.requestId === requestId && result.admitted) setDeclinedAsk(null);
+    });
+  }, [declinedAsk, loaded?.messages]);
 
   const points = loaded?.points ?? [];
   const carriedPoints = points.filter((p) => p.kind === "point" && p.settled).length;
