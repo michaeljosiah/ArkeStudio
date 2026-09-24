@@ -16,6 +16,8 @@ import { validatePublicationVtt } from "./captions.js";
 import { PublicationFileError, readPublicationFile } from "./files.js";
 import { publicationFileLimits, verifyPublicationDirectory, type PublicationFileLimits, type VerifiedPublicationDirectory } from "./verify.js";
 
+export const VIDEO_PUBLICATION_COMPILER_VERSION = "2";
+
 export interface VideoPublicationCompilerOptions {
   /** Existing trusted host directory. The returned package is a unique, disposable child. */
   scratchRoot: string;
@@ -71,7 +73,7 @@ export async function prepareVideoPublication(
   signal.throwIfAborted();
   const limits = publicationFileLimits(options.limits);
   if (!options.encoderVersion.trim() || options.encoderVersion.length > 256) throw new Error("A bounded encoder build identity is required.");
-  const compiler = { compiler: "arke-video-publication", compilerVersion: `2; ${options.encoderVersion}` };
+  const compiler = { compiler: "arke-video-publication", compilerVersion: `${VIDEO_PUBLICATION_COMPILER_VERSION}; ${options.encoderVersion}` };
   const scratch = await realpath(toExtendedLength(options.scratchRoot));
   let captured: CapturedPublicationInputs | undefined;
   let plan: VideoPublicationPlan | undefined;

@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import fs from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it, type TestContext } from "node:test";
-import { publishPublication, verifyPublicationDirectory, PublicationFileError, type VideoPublicationCompilerOptions, type WorldProvider } from "@arke-studio/coordinator";
+import { publishPublication, verifyPublicationDirectory, PublicationFileError, VIDEO_PUBLICATION_COMPILER_VERSION, type VideoPublicationCompilerOptions, type WorldProvider } from "@arke-studio/coordinator";
 import { VideoPublicationRequestSchema, type VideoPublicationRequest } from "@arke-studio/contracts";
 import { PublicationHost } from "../src/publication-host.js";
 import { publicationMedia } from "../src/publication-media.js";
@@ -47,10 +49,12 @@ it("serves only pinned inventory IDs with private authorization, origin checks a
   assert.deepEqual(authenticatedMediaHeaders({ url: "https://elsewhere.test/media/x", webContentsId: 7, requestHeaders: injected }, host.session, 7), {});
   await host.close(result.value.sessionId); assert.equal((await fetch(url, { headers })).status, 404);
 });
-it("restart reconciliation returns the prepared edition without a world, encoder or second build", async t => {
+for (const compilerVersion of [undefined, "previous", VIDEO_PUBLICATION_COMPILER_VERSION]) it(`reconciles a prepared edition from compiler ${compilerVersion ?? "legacy"} without a world or second build`, async t => {
   const f = await fixture(t); const operationId = randomUUID();
-  const intent = { worldId: "world", request, encoderVersion: "test-1", format: "directory" as const, outputRoot: f.output, operationId };
-  const requestFingerprint = hash(JSON.stringify({ request: VideoPublicationRequestSchema.parse(request), world: "world", encoder: "test-1" }));
+  const intent = { worldId: "world", request, encoderVersion: "test-1", format: "directory" as const, outputRoot: f.output, operationId,
+    ...(compilerVersion ? { compilerVersion } : {}) };
+  const requestFingerprint = hash(JSON.stringify({ request: VideoPublicationRequestSchema.parse(request), world: "world", encoder: "test-1",
+    ...(compilerVersion ? { compiler: compilerVersion } : {}) }));
   await assert.rejects(publishPublication({ operationId, publicationId: request.id, requestFingerprint, format: "directory" },
     async () => ({ ...await verifyPublicationDirectory(f.source), dispose: async () => {} }),
     { outputRoot: f.output, onPhase: phase => { if (phase === "promoted") throw new Error("simulated crash"); } }), /crash/);
@@ -129,11 +133,12 @@ it("refuses drawtext before encoding a clean publication without rejecting ordin
   assert.equal(calls.length, 2);
 });
 
-for (const cause of ["encoder", "conflict"] as const) it(`requires a new edition after saved ${cause} incompatibility instead of an endless retry`, async t => {
+for (const cause of ["encoder", "compiler", "legacy", "conflict"] as const) it(`requires a new edition after saved ${cause} incompatibility instead of an endless retry`, async t => {
   const f = await fixture(t); const operationId = randomUUID();
   await mkdir(join(f.ports.root, "operations"), { recursive: true });
   await writeFile(join(f.ports.root, "operations", `${operationId}.json`), JSON.stringify({ worldId: "world", request,
-    encoderVersion: cause === "encoder" ? "older-build" : "test-1", format: "directory", outputRoot: f.output, operationId }));
+    encoderVersion: cause === "encoder" ? "older-build" : "test-1", format: "directory", outputRoot: f.output, operationId,
+    ...(cause === "legacy" ? {} : { compilerVersion: cause === "compiler" ? "previous" : VIDEO_PUBLICATION_COMPILER_VERSION }) }));
   if (cause === "conflict") {
     await mkdir(join(f.output, operationId));
     await writeFile(join(f.output, operationId, "operation.json"), JSON.stringify({ version: 1, operationId, publicationId: request.id, format: "zip", requestFingerprint: "0".repeat(64) }));
@@ -144,7 +149,26 @@ for (const cause of ["encoder", "conflict"] as const) it(`requires a new edition
   const state = await host.list(); assert.ok(state.ok);
   assert.equal(state.value[0]!.status, "failed"); assert.equal(state.value[0]!.retryable, false);
   assert.match(state.value[0]!.reason!, /Create a new edition/);
-  assert.match(state.value[0]!.reason!, cause === "encoder" ? /encoder changed/ : /operation-conflict/);
+  assert.match(state.value[0]!.reason!, cause === "encoder" ? /encoder changed/ : cause === "conflict" ? /operation-conflict/ : /publication compiler changed/);
+});
+
+it("keeps an installed intent visible when unlinking its temporary alias fails", async t => {
+  const f = await fixture(t); const remove = fs.rm; let cleanupFailed = false;
+  const mocked = t.mock.method(fs, "rm", async (path, options) => {
+    if (String(path).startsWith(join(f.ports.root, "operations")) && String(path).endsWith(".tmp")) {
+      cleanupFailed = true; throw Object.assign(new Error("busy alias"), { code: "EBUSY" });
+    }
+    return remove(path, options);
+  });
+  syncBuiltinESMExports();
+  t.after(() => { mocked.mock.restore(); syncBuiltinESMExports(); });
+  const host = new PublicationHost({ ...f.ports, pick: async () => f.output,
+    providers: () => ({ starting: null, live: { listWorlds: async () => [], loadWorld: async () => { throw new Error(); }, assertWritingScratch: async () => {} } }) });
+  t.after(() => host.stop());
+  const started = await host.start({ worldId: "world", request, format: "directory" }); assert.ok(started.ok); assert.ok(cleanupFailed);
+  const listed = await host.list(); assert.ok(listed.ok); assert.equal(listed.value[0]!.operationId, started.value.operationId);
+  const saved = JSON.parse(await readFile(join(f.ports.root, "operations", `${started.value.operationId}.json`), "utf8"));
+  assert.equal(saved.compilerVersion, VIDEO_PUBLICATION_COMPILER_VERSION);
 });
 
 it("preserves unreadable recovery records while listing valid jobs, opening packages and starting new work", async t => {

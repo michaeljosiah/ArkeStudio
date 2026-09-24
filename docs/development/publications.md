@@ -266,16 +266,20 @@ includes compiler-to-publisher retry after source edits and opt-in real-media ZI
 In Cut → Export film, **Publish playable edition** chooses title, edition, language, full production
 or episode, ZIP/folder and explicitly selected caption/subtitle tracks. The resolution comes from
 the export sheet. Each selected track has an editable label and kind; only one may be default.
-The shared publication plan refuses gaps, stale/invalid timelines and unsupported source state
-before starting. Native folder selection chooses the output root, outside managed world storage.
+The shared publication plan refuses missing-picture slates, stale/invalid timelines and unsupported
+source state before starting. Deliberate blank gaps publish as black. Native folder selection
+chooses the output root, outside managed world storage.
 
 Desktop `src/publication-host.ts` flushes an immutable intent under
 `<appRoot>/publications/operations/<operationId>.json` before starting. This preserves the request,
-world id, format, encoder build identity and private output root. IPC exposes only opaque ids and
+world id, format, application compiler version, encoder build identity and private output root. IPC exposes only opaque ids and
 status. Jobs show phases, cancellation, retry, Play and Show in folder. On restart saved operations
 appear as **Check or retry**; reconciliation verifies completion before showing success. Prepared
 output can finish without a world or encoder. An unprepared retry needs the source world and same
-encoder build; changed settings require a new edition. Shutdown aborts and drains jobs before
+encoder build and application compiler version; changed settings require a new edition. Legacy
+intents lacking an application compiler version can reconcile prepared output but cannot build.
+After the final intent hard link is installed, temporary-alias cleanup is best effort and cannot
+hide the saved job. Shutdown aborts and drains jobs before
 closing the world provider. Provider access lasts only through capture, so world selection remains
 available during encoding. The renderer does not own operation lifetime.
 Unreadable/incompatible intent files are preserved and reported individually without hiding valid

@@ -5,7 +5,7 @@ import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { z } from "zod";
 import { VideoPublicationRequestSchema, type PublicationBridge, type PublicationJob, type PublicationPlayback, type PublicationReply } from "@arke-studio/contracts";
-import { prepareVideoPublication, openPublication, parseByteRange, publishPublication, PublicationFileError,
+import { prepareVideoPublication, openPublication, parseByteRange, publishPublication, PublicationFileError, VIDEO_PUBLICATION_COMPILER_VERSION,
   type PinnedPublication, type PreparedVideoPublication, type PublishedPublication, type WorldProvider, type VideoPublicationCompilerOptions } from "@arke-studio/coordinator";
 
 const REFUSALS: Record<PublicationFileError["code"], string> = {
@@ -23,9 +23,10 @@ const REFUSALS: Record<PublicationFileError["code"], string> = {
 };
 
 const Start = z.object({ worldId: z.string().min(1), request: VideoPublicationRequestSchema, format: z.enum(["directory", "zip"]) }).strict();
-const Intent = Start.extend({ operationId: z.string().uuid(), outputRoot: z.string().min(1), encoderVersion: z.string().min(1).max(256) }).strict();
+const Intent = Start.extend({ operationId: z.string().uuid(), outputRoot: z.string().min(1), encoderVersion: z.string().min(1).max(256), compilerVersion: z.string().min(1).max(64).optional() }).strict();
 type Intent = z.infer<typeof Intent>;
 class EncoderChanged extends Error {}
+class CompilerChanged extends Error {}
 const UNREADABLE_RECOVERY = "The saved publication job is unreadable or incompatible. Its files have been preserved. Create a new edition.";
 interface Job { intent: Intent; view: PublicationJob; controller?: AbortController; work?: Promise<void>; result?: PublishedPublication }
 interface Ports {
@@ -97,6 +98,7 @@ export class PublicationHost implements PublicationBridge {
   }
   private reason(error: unknown): string {
     if (error instanceof EncoderChanged) return "The media encoder changed since this job was saved. Create a new edition from the source production.";
+    if (error instanceof CompilerChanged) return "The publication compiler changed since this job was saved. Create a new edition from the source production.";
     // Domain wrappers can contain nested filesystem errors too. Only fixed copy crosses IPC.
     if (error instanceof PublicationFileError) return `${error.code}: ${REFUSALS[error.code]}`;
     if (error instanceof Error && error.name === "AbortError") return "Publication cancelled.";
@@ -130,13 +132,15 @@ export class PublicationHost implements PublicationBridge {
         if (!provider?.assertWritingScratch) throw new Error("World storage is unavailable.");
         await provider.assertWritingScratch(outputRoot);
         const compiler = await this.ports.compiler(this.controller.signal);
-        const intent = Intent.parse({ ...parsed, outputRoot, operationId: randomUUID(), encoderVersion: compiler.encoderVersion });
+        const intent = Intent.parse({ ...parsed, outputRoot, operationId: randomUUID(), encoderVersion: compiler.encoderVersion, compilerVersion: VIDEO_PUBLICATION_COMPILER_VERSION });
         const temporary = join(this.ports.root, "operations", `${intent.operationId}.tmp`);
         const handle = await open(temporary, "wx");
         try { await handle.writeFile(JSON.stringify(intent) + "\n"); await handle.sync(); }
         finally { await handle.close(); }
         await link(temporary, join(this.ports.root, "operations", `${intent.operationId}.json`));
-        await rm(temporary);
+        // The final hard link is already durable. Failure to unlink its temporary alias must
+        // not hide the saved job or report failure after acknowledging its identity on disk.
+        await rm(temporary).catch(() => {});
         const job: Job = { intent, view: this.view(intent) };
         this.jobs.set(intent.operationId, job);
         this.launch(job);
@@ -159,8 +163,12 @@ export class PublicationHost implements PublicationBridge {
     const { intent } = job;
     job.work = (async () => {
       try {
-        const requestFingerprint = createHash("sha256").update(JSON.stringify({ request: intent.request, world: intent.worldId, encoder: intent.encoderVersion })).digest("hex");
+        // Keep legacy fingerprints readable so prepared editions still reconcile. A legacy
+        // intent without a compiler identity may never start a new build after an upgrade.
+        const requestFingerprint = createHash("sha256").update(JSON.stringify({ request: intent.request, world: intent.worldId, encoder: intent.encoderVersion,
+          ...(intent.compilerVersion ? { compiler: intent.compilerVersion } : {}) })).digest("hex");
         job.result = await publishPublication({ operationId: intent.operationId, publicationId: intent.request.id, requestFingerprint, format: intent.format }, async scratchRoot => {
+          if (intent.compilerVersion !== VIDEO_PUBLICATION_COMPILER_VERSION) throw new CompilerChanged();
           const compiler = await this.ports.compiler(signal);
           if (compiler.encoderVersion !== intent.encoderVersion) throw new EncoderChanged();
           const provider = this.provider();
@@ -179,7 +187,7 @@ export class PublicationHost implements PublicationBridge {
         job.view = { ...job.view, status: "completed", phase: "Ready to play" };
       } catch (error) {
         const conflict = error instanceof PublicationFileError && error.code === "operation-conflict";
-        const permanent = error instanceof EncoderChanged || error instanceof PublicationFileError && error.code === "incomplete-publication" || conflict;
+        const permanent = error instanceof EncoderChanged || error instanceof CompilerChanged || error instanceof PublicationFileError && error.code === "incomplete-publication" || conflict;
         job.view = { ...job.view, status: signal.aborted ? "cancelled" : "failed", phase: permanent ? "Create a new edition" : "Check or retry",
           reason: this.reason(error) + (conflict ? " Create a new edition." : ""), ...(permanent ? { retryable: false } : {}) };
       } finally { delete job.work; delete job.controller; }
