@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { recipeWithAdapters } from "../comfyui/adapters.js";
 import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts";
 import { COMFYUI_VERSION_FLOOR, compareComfyUiVersions, meetsComfyUiVersion } from "@arke-studio/contracts";
 import {
@@ -125,6 +126,7 @@ export function meetsVersionFloor(version: string, floor: string = COMFYUI_VERSI
  * becomes a terminal failure for work the picker openly offered.
  */
 const INTERNAL_PARAMS = new Set([
+  "adapters",
   /*
    * Everything a voice dispatch carries, taken from a real job rather than guessed.
    *
@@ -274,6 +276,7 @@ export class ComfyUiClient implements ProviderClient {
     private readonly now: () => number = Date.now,
     private readonly allBaseUrls?: () => readonly string[],
     private readonly isEndpointGone?: (url: string) => boolean,
+    private readonly adapterGuard?: (recipeId: string, selections: unknown) => Promise<void>,
   ) {}
 
   /** Latest step count per prompt, fed by the engine's socket and read by `poll`. */
@@ -759,8 +762,13 @@ export class ComfyUiClient implements ProviderClient {
 
   async submit(_key: string, request: SubmitRequest, _context?: ProviderCallContext): Promise<SubmitResult> {
     if (this.disposed) throw new Error("comfyui: the provider client is disposed");
-    const recipe = comfyUiRecipeById(request.model);
-    if (!recipe) throw new Error(`comfyui: "${request.model}" is not a shipped recipe`);
+    const baseRecipe = comfyUiRecipeById(request.model);
+    if (!baseRecipe) throw new Error(`comfyui: "${request.model}" is not a shipped recipe`);
+    const recipe = recipeWithAdapters(baseRecipe, request.params.adapters);
+    if (recipe !== baseRecipe) {
+      if (!this.adapterGuard) throw new ProviderRequestRejectedError("Adapter authorization is unavailable in this host.");
+      await this.adapterGuard(recipe.id, request.params.adapters);
+    }
     if (recipe.capability === "voice-tts" && request.params["audioFormat"] !== "flac") {
       throw new ProviderRequestRejectedError("comfyui: the cloned-voice recipe output format must be FLAC");
     }
@@ -770,10 +778,18 @@ export class ComfyUiClient implements ProviderClient {
     // the silent substitution §2.11 exists to prevent — so a moved catalogue refuses, and
     // says which version the job was made with.
     const frozen = request.recipe;
+    if (recipe.adapters?.length) {
+      if (!frozen || JSON.stringify(frozen.adapters) !== JSON.stringify(recipe.adapters)) throw new ProviderRequestRejectedError("The adapter recipe identity was not frozen with this request.");
+      const live = await this.engineVersion(request.signal, recipe.id);
+      if (!live || meetsComfyUiVersion(live, recipe.engine.minVersion) !== true ||
+        compareComfyUiVersions(live, recipe.engine.exercisedThroughVersion) === 1) {
+        throw new ProviderRequestRejectedError("This adapter pairing has not been verified with the current engine version.");
+      }
+    }
     if (frozen !== undefined) {
       const current = comfyUiRecipeIdentity(recipe);
       if (
-        frozen.version !== current.version ||
+        frozen.id !== current.id || frozen.version !== current.version ||
         frozen.templateDigest !== current.templateDigest ||
         frozen.dependencyDigest !== current.dependencyDigest
       ) {
@@ -874,6 +890,7 @@ export class ComfyUiClient implements ProviderClient {
         { ...audio, name: contentAddressedName(audio.data, audio.contentType) }, "reference audio", request.signal);
     }
     const graph = dropUnusedReferences(recipe, substituteRecipeParams(recipe, values), prepared.length, media.videos.length, media.audio.length);
+    if (recipe !== baseRecipe) await this.adapterGuard!(recipe.id, request.params.adapters);
     const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${base}/prompt`, {
       method: "POST",
       redirect: "manual",

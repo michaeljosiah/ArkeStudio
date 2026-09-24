@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, open, readFile, readdir, rename, rm, stat } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, rm, stat, link, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, parse, resolve } from "node:path";
 import {
@@ -79,6 +79,10 @@ export interface SetupOptions {
   componentLocations?: Record<string, () => string | null | undefined>;
   /** Awaited after a newly installed component becomes ready, before dependants are attempted. */
   onComponentReady?: (componentId: string) => Promise<void>;
+  /** Application policy rechecked for queued/resumed optional downloads. */
+  beforeComponentInstall?: (componentId: string) => Promise<void>;
+  /** Invoked only for bytes this service actually downloaded and verified. */
+  onFileInstalled?: (componentId: string, path: string) => Promise<void>;
 }
 
 interface Live extends SetupComponent {
@@ -833,6 +837,7 @@ export class LocalSetupService {
   private async install(entry: CatalogueEntry): Promise<void> {
     const spec = entry.spec;
     try {
+      await this.opts.beforeComponentInstall?.(entry.id);
       if (spec.kind === "files") {
         const repairBlock = this.repairBlocks.get(entry.id);
         if (repairBlock !== undefined) {
@@ -1274,11 +1279,20 @@ export class LocalSetupService {
         receipt.partialPath,
         () => transfer.abort.signal.aborted || this.abort.signal.aborted || this.disposed,
       );
+      await this.opts.beforeComponentInstall?.(componentId);
       if (transfer.abort.signal.aborted || this.abort.signal.aborted || this.disposed) throw new Error("stopped");
       // Only a verified whole file takes the real name. Rename remains the atomic visibility step.
-      await rm(toExtendedLength(target), { force: true }).catch(() => {});
-      await rename(toExtendedLength(receipt.partialPath), toExtendedLength(target));
+      if (this.components.get(componentId)?.entry.preserveExistingFiles) {
+        // Publishing a hard link fails if a user supplied the destination during transfer.
+        // The verified staging file is on this volume; no overwrite window is introduced.
+        await link(toExtendedLength(receipt.partialPath), toExtendedLength(target));
+        await unlink(toExtendedLength(receipt.partialPath));
+      } else {
+        await rm(toExtendedLength(target), { force: true }).catch(() => {});
+        await rename(toExtendedLength(receipt.partialPath), toExtendedLength(target));
+      }
       landed = true;
+      await this.opts.onFileInstalled?.(componentId, target);
       await rm(toExtendedLength(receiptPath), { force: true }).catch(() => {});
     } catch (err) {
       failure = err;
@@ -1338,6 +1352,15 @@ export class LocalSetupService {
     }
     this.fileProgress.set(target, receipt.durableBytes);
     return receipt.durableBytes;
+  }
+
+  /** Pause only the current ranged HTTP transfer; installers and runtime-owned pulls are untouched. */
+  suspendComponent(componentId: string): void {
+    if (this.activeTransfer?.componentId === componentId) {
+      if (this.activeTransfer.rangeSupported) this.activeTransfer.preserve = "pause";
+      this.activeTransfer.abort.abort();
+    }
+    this.skip(componentId);
   }
 
   /** Pause only the current ranged HTTP transfer; installers and runtime-owned pulls are untouched. */

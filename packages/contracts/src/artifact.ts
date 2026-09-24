@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RecipeIdentitySchema } from "./comfyui.js";
 import { BenchParamsSchema, BenchReferenceTokenSchema } from "./bench.js";
 import { MediaInfoSchema } from "./media.js";
 import { ActualCostSourceSchema, ProvenanceSchema } from "./take.js";
@@ -81,6 +82,7 @@ export const ArtifactBenchGenerationSchema = z
     model: z.string().min(1),
     /** The recipe version, when the model is a local recipe (SPEC-021 R-13) — part of "how the bytes were made". */
     recipeVersion: z.number().int().min(1).optional(),
+    recipe: RecipeIdentitySchema.optional(),
     params: BenchParamsSchema,
     requestedSeed: z.number().int().optional(),
     /** From the matching ledger entry; null when the ledger had no actual figure. */

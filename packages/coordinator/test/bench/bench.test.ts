@@ -30,6 +30,30 @@ import { comfyUiRecipeById, SHIPPED_MANIFEST } from "@arke-studio/providers";
 
 const CLOCK = () => "2026-08-16T12:00:00.000Z";
 
+it("adapter quotes and re-runs retain the same recipe identity and refuse changed graphs", async () => {
+  const { dir, store } = await open();
+  const model = SHIPPED_MANIFEST.models.find(row => row.id === "comfyui-h3-video")!;
+  const opened = await openBenchSession(dir, CLOCK, { fresh: true, defaultModel: { provider: "comfyui", model: model.id } });
+  assert.ok(opened);
+  const adapters = [{ releaseId: "neutral-fixture", sha256: "a".repeat(64), strength: 0.5 }];
+  await opened.store.append({ type: "composer-set", mode: "video", provider: "comfyui", model: model.id,
+    params: { kind: "video", durationSec: 5, aspect: "16:9", resolution: "480p", adapters }, brief: "A red cube moves." }, { at: CLOCK() });
+  const session = (await opened.store.fold())!;
+  const recipe = { id: model.id, version: 1, templateDigest: "b".repeat(64), dependencyDigest: "c".repeat(64), adapters };
+  const options = { worldId: store.worldId, requestId: "adapter-plan", at: CLOCK(), adapterRecipeFor: () => recipe };
+  const plan = planBenchDispatch(session, store.getBundle(), SHIPPED_MANIFEST, options);
+  assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
+  if (!plan.ok) return;
+  assert.deepEqual(plan.reserved[0]!.request.recipe, recipe);
+  assert.deepEqual(plan.inputs[0]!.recipe, recipe);
+  assert.deepEqual(plan.inputs[0]!.params.adapters, adapters);
+  const take = { ...plan.reserved[0]!, status: "succeeded", disposition: "open", createdAt: CLOCK() } as BenchTake;
+  const rerun = planBenchDispatch(session, store.getBundle(), SHIPPED_MANIFEST, { ...options, fromTake: take,
+    adapterRecipeFor: () => ({ ...recipe, templateDigest: "d".repeat(64) }) });
+  assert.equal(rerun.ok, false);
+  if (!rerun.ok) assert.match(rerun.reason, /recipe has changed/);
+});
+
 it("local H3 bench references freeze multimedia identities and use native ordered tags", async () => {
   const { dir, store } = await open();
   const model = SHIPPED_MANIFEST.models.find(row => row.id === "comfyui-h3-reference-video")!;

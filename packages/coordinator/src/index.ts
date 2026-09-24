@@ -389,3 +389,4 @@ export { writePublicationZip, extractPublicationZip, type PublicationArchiveOpti
 export { publishPublication, publishVideoPublication, type PublicationDeliveryRequest, type PublicationPublisherOptions, type PublishedPublication } from "./publications/publish.js";
 export { openPublication, type PinnedPublication } from "./publications/playback.js";
 export { parseByteRange } from "./transport.js";
+export type { AdapterComplianceClient } from "./local-ai/adapter-library.js";

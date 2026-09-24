@@ -50,7 +50,7 @@ function nestedButtons(html: string): string[] {
 }
 
 describe("screen inventory", () => {
-  it("covers the full screen inventory (63 screens)", () => {
+  it("covers the full screen inventory (64 screens)", () => {
     // The number is written three times on purpose — it is a tripwire, not a fact being derived,
     // so `SCREENS.length` on both sides would assert nothing. It does mean two branches that each
     // add a screen merge cleanly and land a count that was right for neither: #268 and #243 did
@@ -59,8 +59,8 @@ describe("screen inventory", () => {
     // Activity left the inventory with design turn 136: it is a panel over every screen, not one.
     // 62 after removing the hosting-choice screen from startup.
     // Publications is independent of any open world (SPEC-048).
-    assert.equal(SCREENS.length, 63);
-    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 63, "screen ids are unique");
+    assert.equal(SCREENS.length, 64);
+    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 64, "screen ids are unique");
   });
 
   for (const screen of SCREENS) {

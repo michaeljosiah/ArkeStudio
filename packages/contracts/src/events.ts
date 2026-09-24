@@ -55,6 +55,7 @@ import {
   SpendStatusSchema,
 } from "./settings.js";
 import { SetupStatusSchema } from "./setup.js";
+import { AdapterLibraryStateSchema } from "./adapters.js";
 import { VendorAuthStatusSchema } from "./vendor-auth.js";
 import { ReviewDecisionSchema, TakeSchema } from "./take.js";
 import {
@@ -1661,6 +1662,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .strict(),
   /** Local-runtime setup progress: one event per change, the whole picture each time. */
   z.object({ ...base, type: z.literal("setup.status"), setup: SetupStatusSchema }).strict(),
+  z.object({ ...base, type: z.literal("adapters.changed"), adapters: AdapterLibraryStateSchema }).strict(),
   /** Genesis conversation turns — before any world exists, in the sandbox (SPEC-005). */
   z
     .object({

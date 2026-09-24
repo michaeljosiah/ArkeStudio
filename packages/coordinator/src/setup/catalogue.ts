@@ -114,6 +114,8 @@ export interface CatalogueEntry {
    * someone asks for it. Big models belong here — the disk is the user's to spend.
    */
   optional?: boolean;
+  /** Never replace a file that appeared while a managed optional download was running. */
+  preserveExistingFiles?: boolean;
 }
 
 const KOKORO = "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main";

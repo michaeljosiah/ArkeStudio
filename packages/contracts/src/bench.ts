@@ -1,4 +1,6 @@
 import { CharacterAudioPlanSchema } from "./audio-reference.js";
+import { AdapterSelectionsSchema } from "./adapters.js";
+import { RecipeIdentitySchema } from "./comfyui.js";
 import { z } from "zod";
 import {
   ArtifactIdSchema,
@@ -80,6 +82,7 @@ export type BenchImageParams = z.infer<typeof BenchImageParamsSchema>;
 export const BenchVideoParamsSchema = z
   .object({
     kind: z.literal("video"),
+    adapters: AdapterSelectionsSchema.optional(),
     aspect: z.string().min(1).optional(),
     /** Video keeps its own words — "720p", never a normalised tier (manifest.ts). */
     resolution: z.string().min(1).optional(),
@@ -399,6 +402,7 @@ export const BenchRequestSnapshotSchema = z
      * catalogue holds now".
      */
     recipeVersion: z.number().int().min(1).optional(),
+    recipe: RecipeIdentitySchema.optional(),
     params: BenchParamsSchema,
     /**
      * The keyframes that rode, in order, with their content hashes — the same self-contained

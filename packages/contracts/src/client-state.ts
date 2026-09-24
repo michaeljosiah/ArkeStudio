@@ -1,4 +1,5 @@
 import { valueSchema } from "./value-schema.js";
+import { AdapterLibraryStateSchema } from "./adapters.js";
 import { BorrowedImageOriginSchema } from "./take.js";
 import { TakeDialogueFeedbackSchema } from "./take-feedback.js";
 import { RehearsalSessionSchema } from "./rehearsal.js";
@@ -510,6 +511,7 @@ export const ClientStateSchema = valueSchema(z
         harness: HarnessStatusSchema.nullable().default(null),
         /** The ComfyUI engine and its recipes (SPEC-021 §2.12) — one result, read everywhere. */
         comfyui: ComfyUiStatusSchema.nullable().default(null),
+        adapters: AdapterLibraryStateSchema.nullable().optional(),
         voiceRuntime: VoiceRuntimeStatusSchema.nullable().default(null),
         drift: z.array(ManifestDriftSchema).default([]),
         /** Per-provider queue state: pauses with reasons, held counts (SPEC-009 R-8, R-11). */

@@ -1,0 +1,24 @@
+.fy-adapters {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px 30px 40px;
+  color: var(--foreground);
+  font: 400 13px var(--font-sans);
+}
+.fy-adapters > .fy-rt__head { margin-bottom: 22px; }
+.fy-adapters > .fy-rt__sechead { margin-top: 24px; }
+.fy-adapters p { max-width: 72ch; margin: 10px 0; line-height: 1.6; color: var(--muted-foreground); }
+.fy-adapters button { margin: 4px 8px 4px 0; }
+.fy-adapters .fy-fact { display: block; padding: 18px 0; border-top: 1px solid var(--border); }
+.fy-adapters .fy-fact:first-of-type { margin-top: 20px; }
+.fy-adapters .fy-fact > label { display: flex; gap: 10px; align-items: center; overflow-wrap: anywhere; font-weight: 600; }
+.fy-adapters input[type="checkbox"] { flex: none; width: 16px; height: 16px; accent-color: var(--foreground); }
+.fy-adapters details { margin: 12px 0; }
+.fy-adapters summary { cursor: pointer; }
+.fy-adapters details p { font-size: 12px; overflow-wrap: anywhere; }
+.fy-adapters .fy-editordialog__panel { padding: 24px; }
+.fy-adapters .fy-editordialog__panel label { display: flex; gap: 12px; align-items: flex-start; color: var(--foreground); }
+.fy-adapters .fy-editordialog__panel input { margin-top: 3px; }
+@media (max-width: 800px) { .fy-adapters { padding: 20px 16px 32px; } }

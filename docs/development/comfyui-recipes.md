@@ -5,6 +5,9 @@ SPEC-021 §2.3 defines the recipe contract. Existing
 examples are [Krea 2](krea2.md) and [H3 reference video](h3-reference-video.md). A graph that
 submits successfully is not yet a verified recipe.
 
+Optional H3 adapter intake, policy and evidence requirements are documented in
+[Local H3 adapter library](h3-adapters.md).
+
 1. **Author the API-format graph in the provider package.** Start with a ComfyUI API export:
    a record of node IDs with `class_type` and `inputs`, whose links are `[nodeId, outputIndex]`.
    The editable UI export with node positions and widgets is not a dispatch graph. Add a focused

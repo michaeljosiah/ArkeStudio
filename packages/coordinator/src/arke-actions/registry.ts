@@ -239,6 +239,7 @@ const CLIENT_COMMAND_METADATA = {
   "draft-with-studio": humanOnly(RECURSIVE_AGENT),
   "authoring-cancel": humanOnly(HUMAN_DECISION),
   "setup-skip": globalOnly(GLOBAL_OPERATION),
+  "adapter-command": humanOnly("Adapter access and content acknowledgements are human controls."),
   "setup-retry": globalOnly(GLOBAL_OPERATION),
   "setup-pause": globalOnly(GLOBAL_OPERATION),
   "setup-resume": globalOnly(GLOBAL_OPERATION),
