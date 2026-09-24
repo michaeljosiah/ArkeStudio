@@ -37,8 +37,8 @@ export type ComponentKind =
   /** A third-party installer: fetched, then run. */
   | { kind: "installer"; file: DownloadFile; silentArgs: readonly string[] }
   /**
-   * A model pulled by a runtime we do not own, through its own CLI. No catalogue entry ships
-   * one — which model Ollama runs is chosen in Settings · Providers, on the disk it costs.
+   * A model pulled by a runtime we do not own, through its own CLI. Offered entries are
+   * optional — which model Ollama runs is chosen in Settings, on the disk it costs.
    */
   | { kind: "pull"; command: string; args: readonly string[] }
   /**
@@ -305,6 +305,23 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     requires: ["ollama-runtime"],
     provides: ["gemma4-12b"],
     spec: { kind: "pull", command: "ollama", args: ["pull", "gemma4:12b"] },
+  },
+  {
+    id: "ollama-gemma4-12b-balanced",
+    engine: "ollama",
+    displayName: "Gemma 4 · 12B Balanced · HauhauCS",
+    purpose: "Text generation · Q4_K_M",
+    // Hugging Face file size checked 2026-09-24; see docs/development/local-language-models.md.
+    sizeMb: 7382,
+    optional: true,
+    requires: ["ollama-runtime"],
+    provides: ["gemma4-12b-balanced"],
+    caveat: "Community variant · Ollama 0.34.3 or newer for download",
+    spec: {
+      kind: "pull",
+      command: "ollama",
+      args: ["pull", "hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M"],
+    },
   },
   {
     id: "ollama-gemma4-26b",

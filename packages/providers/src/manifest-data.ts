@@ -14,9 +14,9 @@ import { FAL_MODELS, FAL_ENDPOINTS, FAL_EDIT_ENDPOINTS } from "./fal-catalogue.g
  * Prices are integer micro-dollars (R-14).
  */
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 26,
+  manifestVersion: 27,
   dialogueGuidance: [],
-  generated: "2026-09-13",
+  generated: "2026-09-24",
   /**
    * Which local model to reach for first, per capability (SPEC-033 R-33). Authored, and about
    * the models rather than about any machine: the gate filters this order by what was measured
@@ -169,6 +169,20 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       limits: { maxContextTokens: 256000 },
       pricing: { kind: "unmetered" },
       requires: { vramMb: 9600, diskMb: 7600 },
+    },
+    {
+      // Optional community variant (SPEC-008 R-9); explicit selection keeps the authored
+      // recommendation order above independent of the availability of these weights.
+      id: "gemma4-12b-balanced",
+      providerModelId: "hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M",
+      provider: "ollama",
+      capability: "llm",
+      displayName: "Gemma 4 12B Balanced · HauhauCS",
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+      limits: { maxContextTokens: 256000 },
+      pricing: { kind: "unmetered" },
+      // 7,381,381,760-byte Q4_K_M download plus working space; context allocations vary.
+      requires: { vramMb: 9600, diskMb: 7382 },
     },
     {
       id: "gemma4-26b",
