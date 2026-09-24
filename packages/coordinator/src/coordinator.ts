@@ -1045,7 +1045,7 @@ export class Coordinator {
    * lost its answer to a dropped connection sends again under the same id; that must not buy a
    * second turn while the first is still being admitted, or after it was.
    */
-  private readonly worldChatSends = new Map<string, "pending" | "admitted">();
+  private readonly worldChatSends = new Map<string, "pending" | { turnId: string }>();
   /**
    * World-chat creates by request id, for the same reason (codex on PR 1232): a window that lost
    * a create to a dropped connection makes it again under the same id, and must not open two
@@ -5728,20 +5728,21 @@ export class Coordinator {
       case "world-chat-send": {
         // Every send is answered for its request (PR 1232): taken as a turn, or not. A decline
         // appends nothing, so without this the sender can only guess from the transcript.
-        const answer = (admitted: boolean) =>
+        const answer = (admitted: boolean, turnId?: string) =>
           this.emit({
             at: new Date().toISOString(),
             type: "world-chat.send-result",
             conversationId: msg.conversationId,
             requestId: msg.requestId,
             admitted,
+            ...(turnId !== undefined ? { turnId } : {}),
           });
         // The same request again is the same line (codex on PR 1232): still being taken, the
         // first's answer is this one's too; taken, it is answered as taken and not said twice.
         const seen = this.worldChatSends.get(msg.requestId);
         if (seen === "pending") return;
-        if (seen === "admitted") {
-          answer(true);
+        if (seen !== undefined) {
+          answer(true, seen.turnId);
           return;
         }
         const declined = () => {
@@ -5760,10 +5761,10 @@ export class Coordinator {
         // still decline after this returns — another window's turn running, the world closing —
         // and then the turn ends without the line ever being appended.
         let admitted = false;
-        const started = await this.conversationAuthoring(store).send(msg, () => {
+        const started = await this.conversationAuthoring(store).send(msg, (turnId) => {
           admitted = true;
-          this.worldChatSends.set(msg.requestId, "admitted");
-          answer(true);
+          this.worldChatSends.set(msg.requestId, { turnId });
+          answer(true, turnId);
         }).catch((error: unknown) => {
           declined();
           throw error;
@@ -5801,7 +5802,8 @@ export class Coordinator {
           type: "world-chat.send-result",
           conversationId: msg.conversationId,
           requestId: msg.requestId,
-          admitted: seen === "admitted",
+          admitted: seen !== undefined,
+          ...(seen !== undefined ? { turnId: seen.turnId } : {}),
         });
         return;
       }

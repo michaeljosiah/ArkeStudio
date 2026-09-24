@@ -440,9 +440,6 @@ export type WorldChatHold = {
   takenAt?: number | null;
   /** Asked where it stands after a rejoin. */
   asked?: boolean;
-  /** The words said and when, to find the line in a thread a rejoin brought whole. */
-  text: string;
-  sentAt: number;
 };
 
 export interface VoiceCandidatesState {
@@ -795,7 +792,7 @@ const sendResultListeners = new Set<(result: WorldChatSendResult) => void>();
  * that was not listening when its answer came — the dock put away and brought back — still finds
  * it. A handful is plenty; nobody is waiting on an old send.
  */
-let sendResults = new Map<string, boolean>();
+let sendResults = new Map<string, WorldChatSendResult>();
 /** Whether a line sent into a conversation was taken as a turn, answered for its request id. */
 export function subscribeWorldChatSendResults(listener: (result: WorldChatSendResult) => void): () => void {
   sendResultListeners.add(listener);
@@ -803,7 +800,7 @@ export function subscribeWorldChatSendResults(listener: (result: WorldChatSendRe
 }
 /** The answer already given for a request, if one has arrived. */
 export function worldChatSendResult(requestId: string): boolean | undefined {
-  return sendResults.get(requestId);
+  return sendResults.get(requestId)?.admitted;
 }
 
 export type CanonContradictions = Extract<DomainEvent, { type: "canon.contradictions" }>;
@@ -931,16 +928,19 @@ function settleHolds(next: StoreState): StoreState {
     const workspace = next.state?.worldChat?.conversationId === conversationId ? next.state.worldChat : null;
     const seq = workspace?.seq ?? null;
     const running = workspace?.runStatus === "running";
-    const answer = sendResults.get(hold.requestId);
+    const result = sendResults.get(hold.requestId);
+    const answer = result?.admitted;
     let settled: WorldChatHold | null = hold;
     if (answer === false) settled = null;
     else if (hold.takenAt !== undefined) settled = running || seq !== hold.takenAt ? null : hold;
     // Taken, and asked after a rejoin that brought the turn whole — the line already in the
-    // thread (codex on PR 1232) — the hold has nothing left to wait for. A thread that has only
-    // moved may have moved for another window's edit, so otherwise the turn itself is awaited.
+    // thread (codex on PR 1232) — the hold has nothing left to wait for. The thread is searched
+    // for the turn the answer names, not for the words: the same words said again in another
+    // window are another turn. A thread that has only moved may have moved for another window's
+    // edit, so otherwise the turn itself is awaited.
     else if (answer === true) {
-      const shown = hold.asked === true && (workspace?.messages ?? []).some((m) =>
-        m.role === "user" && m.text === hold.text && Date.parse(m.createdAt) >= hold.sentAt - 5_000);
+      const shown = hold.asked === true && result?.turnId !== undefined
+        && (workspace?.messages ?? []).some((m) => m.role === "user" && m.turnId === result.turnId);
       settled = running || shown ? null : { ...hold, takenAt: seq };
     }
     else if (next.rejoins !== hold.rejoins && next.connection === "open") {
@@ -1872,7 +1872,7 @@ function handleFrame(json: string): void {
     } else if (event.type === "dictation.result") {
       dictation = { ...dictation, [event.requestId]: { text: event.text, error: event.error } };
     } else if (event.type === "world-chat.send-result") {
-      sendResults = new Map([...sendResults, [event.requestId, event.admitted] as const].slice(-50));
+      sendResults = new Map([...sendResults, [event.requestId, event] as const].slice(-50));
       for (const listener of sendResultListeners) listener(event);
     } else if (event.type === "world-chat.attachment-refused") {
       // The last few only: a refusal is news for a moment, not a list to work through — the same
@@ -4973,7 +4973,7 @@ export function sendWorldChat(
       ...current,
       worldChatHolds: {
         ...current.worldChatHolds,
-        [conversationId]: { requestId, worldId, seq: workspace.seq, rejoins: current.rejoins, text, sentAt: Date.now() },
+        [conversationId]: { requestId, worldId, seq: workspace.seq, rejoins: current.rejoins },
       },
     });
   }

@@ -1311,6 +1311,56 @@ describe("the craft loop (turn 128)", () => {
     assert.ok(prompts().every((b) => !b.disabled), "nothing left to wait for");
   });
 
+  it("a line is found after a rejoin by its turn, not by its words (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const m = await mount(state);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const sent = m.sent.find((message) => message.kind === "world-chat-send") as { requestId: string; text: string };
+    const prompts = () => [...m.container.querySelectorAll("button.fy-arke__prompt")] as HTMLButtonElement[];
+    const line = (id: string, turnId: string) => ({
+      id: id as never, turnId: turnId as never, role: "user" as const, text: sent.text, receipts: [], refusals: [], createdAt: new Date().toISOString(),
+    });
+    // Another window said the same words; this line's own turn has not arrived.
+    const echo = line("msg_01J8F3K2QW9VZX4N7M0RTYB6H3", "turn_01J8F3K2QW9VZX4N7M0RTYB6H4");
+    await act(async () => __setStateForTest(state, { connection: "closed" }));
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 9, messages: [echo] } } as unknown as ClientState, { connection: "open", rejoins: 1 }));
+    await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: sent.requestId, admitted: true, turnId: "turn_01J8F3K2QW9VZX4N7M0RTYB6H5" }));
+    assert.ok(prompts().every((b) => b.disabled), "the same words are another turn: this one is still awaited");
+  });
+
+  it("a line whose turn a rejoin brought whole is free once its answer names that turn (codex on PR 1232)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const m = await mount(state);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const sent = m.sent.find((message) => message.kind === "world-chat-send") as { requestId: string; text: string };
+    const prompts = () => [...m.container.querySelectorAll("button.fy-arke__prompt")] as HTMLButtonElement[];
+    const turnId = "turn_01J8F3K2QW9VZX4N7M0RTYB6H5";
+    const said = {
+      id: "msg_01J8F3K2QW9VZX4N7M0RTYB6H2" as never, turnId: turnId as never, role: "user" as const, text: sent.text, receipts: [], refusals: [], createdAt: new Date().toISOString(),
+    };
+    await act(async () => __setStateForTest(state, { connection: "closed" }));
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 9, messages: [said] } } as unknown as ClientState, { connection: "open", rejoins: 1 }));
+    assert.ok(prompts().every((b) => b.disabled), "held until the coordinator answers");
+    await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: sent.requestId, admitted: true, turnId }));
+    assert.ok(prompts().every((b) => !b.disabled), "its own turn is in the thread: nothing left to wait for");
+  });
+
   it("a line waiting for the thread it opened keeps waiting through a closed connection (codex on PR 1232)", async () => {
     const styled = inkbound([], STYLE);
     const m = await mount(styled);

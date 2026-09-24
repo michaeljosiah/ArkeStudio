@@ -368,7 +368,7 @@ export class WorldChatRunner {
     /** A line that asks for a reply and nothing else (turn 128); any action it returns is refused. */
     replyOnly = false,
     /** Told once the line is durable as a turn; a send declined before that never calls it. */
-    onAdmitted?: () => void,
+    onAdmitted?: (turnId: TurnId) => void,
   ): Promise<TurnOutcome> {
     return this.runTurn(store, conversationId, text, attachmentIds, undefined, subject, modelId, replyOnly, onAdmitted);
   }
@@ -417,7 +417,7 @@ export class WorldChatRunner {
     subject?: WorldChatSubject,
     modelId?: string,
     replyOnly = false,
-    onAdmitted?: () => void,
+    onAdmitted?: (turnId: TurnId) => void,
   ): Promise<TurnOutcome> {
     const adapter = this.deps.adapter;
     if (this.deps.closingSignal?.aborted) {
@@ -454,7 +454,7 @@ export class WorldChatRunner {
     subject: WorldChatSubject | undefined,
     modelId: string | undefined,
     replyOnly: boolean,
-    onAdmitted?: () => void,
+    onAdmitted?: (turnId: TurnId) => void,
   ): Promise<TurnOutcome> {
     const adapter = this.deps.adapter!;
     const at = this.deps.now();
@@ -600,7 +600,7 @@ export class WorldChatRunner {
       { at },
     );
     // Taken, and not before (PR 1232): every refusal above returns without appending.
-    if (!existingTurnId) onAdmitted?.();
+    if (!existingTurnId) onAdmitted?.(turnId);
     if (controller.signal.aborted) {
       await this.finish(store, run, controller.signal.reason === "world-closed" ? "interrupted" : "cancelled", "cancelled before the studio was asked");
       return { status: "cancelled" };

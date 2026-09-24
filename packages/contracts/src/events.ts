@@ -1312,6 +1312,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       conversationId: z.string().min(1),
       requestId: z.string().min(1),
       admitted: z.boolean(),
+      /** The turn the line became, when taken: the transcript names it, so a screen can tell its own line from the same words said again. */
+      turnId: z.string().min(1).optional(),
     })
     .strict(),
 

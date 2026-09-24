@@ -32,7 +32,7 @@ export class ConversationAuthoringService {
   constructor(private readonly store: WorldStore, private readonly deps: ConversationAuthoringDependencies) {}
 
   /** `onAdmitted` is told once the runner has made the line durable as a turn, and only then. */
-  async send(input: ConversationSendInput, onAdmitted?: () => void): Promise<StartedConversationTurn | null> {
+  async send(input: ConversationSendInput, onAdmitted?: (turnId: TurnId) => void): Promise<StartedConversationTurn | null> {
     const service = new WorldChatService(this.store.dir);
     const log = new WorldChatStore(conversationDir(this.store.dir, input.conversationId));
     if (!(await log.readMeta())) return null;

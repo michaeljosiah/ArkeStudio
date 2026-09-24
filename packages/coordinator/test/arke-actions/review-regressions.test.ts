@@ -430,12 +430,12 @@ it("a chat line sent again under the same request is not a second turn (codex on
   // A window lost its answer to a dropped connection and sends again while the first is still
   // being taken, then again once it was.
   let sends = 0;
-  let admit!: () => void;
+  let admit!: (turnId: string) => void;
   let finish!: () => void;
   const completion = new Promise<void>((resolve) => { finish = resolve; });
   Object.assign(w.coordinator, {
     conversationAuthoring: () => ({
-      send: async (_msg: unknown, onAdmitted: () => void) => {
+      send: async (_msg: unknown, onAdmitted: (turnId: string) => void) => {
         sends += 1;
         admit = onAdmitted;
         return { completion, naming: null };
@@ -453,7 +453,7 @@ it("a chat line sent again under the same request is not a second turn (codex on
   await new Promise((resolve) => setImmediate(resolve));
   await send();
   assert.equal(sends, 1, "still being taken: the first's answer is the second's too");
-  admit();
+  admit("turn_again");
   finish();
   await first;
   await send();
@@ -467,6 +467,9 @@ it("a chat line sent again under the same request is not a second turn (codex on
   const answered = (requestId: string) => w.events.filter((event) => event.type === "world-chat.send-result" && event.requestId === requestId).map((event) => (event as { admitted: boolean }).admitted);
   assert.deepEqual(answered("req-again"), [true, true, true]);
   assert.deepEqual(answered("req-never"), [false]);
+  // Each answer names the turn the line became, so a screen can find its own line (codex on PR 1232).
+  const turns = w.events.filter((event) => event.type === "world-chat.send-result" && event.requestId === "req-again").map((event) => (event as { turnId?: string }).turnId);
+  assert.deepEqual(turns, ["turn_again", "turn_again", "turn_again"]);
 });
 
 it("an accept refused because the draft moved on says so, rather than offering a rebase (codex on PR 1232)", async (t) => {
