@@ -25,10 +25,11 @@ export function AdapterPicker({ recipeId, selected, onChange }: {
       const pair = row.release.compatibility.find(item => item.recipeId === recipeId)!;
       const problem = row.reason ?? adapterPolicyProblem(row.release, library.adultContent, row.decision, row.removed, new Date().toISOString()) ??
         (!row.installed ? "Not installed" : adapterCompatibilityProblem(row.release, recipeId, pair.minStrength ?? 0));
-      return <option key={row.release.id} value={row.release.id} disabled={!!problem}>{row.release.displayName}{problem ? ` · ${problem}` : ""}</option>;
+      return <option key={row.release.id} value={row.release.id} disabled={!!problem}>{row.release.displayName}{pair.state === "owner-approved" ? " · Owner approved" : ""}{problem ? ` · ${problem}` : ""}</option>;
     })}
   </select></label>
   {value && !selectedRow && <span>This saved adapter is unavailable for the selected model. Choose None to clear it.</span>}
+  {selectedPair?.state === "owner-approved" && <span>{selectedPair.reason}</span>}
   {selected[0] && selectedPair && <label>Strength <input aria-label="Adapter strength" type="number" min={selectedPair.minStrength ?? 0} max={selectedPair.maxStrength ?? 2} step="0.05" value={selected[0].strength}
     onChange={event => { const strength = Number(event.target.value); if (Number.isFinite(strength)) onChange([{ ...selected[0]!, strength }]); }} /></label>}
   <Link to="/settings/adapters">Manage adapters</Link>

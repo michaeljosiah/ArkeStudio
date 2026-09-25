@@ -28,8 +28,15 @@ export const HEARMEMAN_ADAPTERS = [
     "compatibility": [
       {
         "recipeId": "comfyui-h3-video",
-        "state": "unverified",
-        "reason": "Adapter and recipe pairing has not completed Arke GPU validation."
+        "state": "owner-approved",
+        "reason": "Owner approved for 480p at strength 1. Generation completed; output accepted by owner.",
+        "ownerApproval": {
+          "approvedAt": "2026-09-25T10:02:59.432Z",
+          "generation": "completed"
+        },
+        "evidence": "docs/development/h3-adapter-validation.md",
+        "minStrength": 1,
+        "maxStrength": 1
       },
       {
         "recipeId": "comfyui-h3-video-768",
@@ -67,8 +74,15 @@ export const HEARMEMAN_ADAPTERS = [
     "compatibility": [
       {
         "recipeId": "comfyui-h3-video",
-        "state": "unverified",
-        "reason": "Adapter and recipe pairing has not completed Arke GPU validation."
+        "state": "owner-approved",
+        "reason": "Owner approved for 480p at strength 1. Generation completed; output accepted by owner.",
+        "ownerApproval": {
+          "approvedAt": "2026-09-25T10:02:59.432Z",
+          "generation": "completed"
+        },
+        "evidence": "docs/development/h3-adapter-validation.md",
+        "minStrength": 1,
+        "maxStrength": 1
       },
       {
         "recipeId": "comfyui-h3-video-768",
@@ -106,8 +120,15 @@ export const HEARMEMAN_ADAPTERS = [
     "compatibility": [
       {
         "recipeId": "comfyui-h3-video",
-        "state": "unverified",
-        "reason": "Adapter and recipe pairing has not completed Arke GPU validation."
+        "state": "owner-approved",
+        "reason": "Owner approved for 480p at strength 1. Generation completed; output accepted by owner.",
+        "ownerApproval": {
+          "approvedAt": "2026-09-25T10:02:59.432Z",
+          "generation": "completed"
+        },
+        "evidence": "docs/development/h3-adapter-validation.md",
+        "minStrength": 1,
+        "maxStrength": 1
       },
       {
         "recipeId": "comfyui-h3-video-768",
@@ -147,8 +168,15 @@ export const HEARMEMAN_ADAPTERS = [
     "compatibility": [
       {
         "recipeId": "comfyui-h3-video",
-        "state": "unverified",
-        "reason": "Adapter and recipe pairing has not completed Arke GPU validation."
+        "state": "owner-approved",
+        "reason": "Owner approved for 480p at strength 1. Generation completed; output accepted by owner.",
+        "ownerApproval": {
+          "approvedAt": "2026-09-25T10:02:59.432Z",
+          "generation": "completed"
+        },
+        "evidence": "docs/development/h3-adapter-validation.md",
+        "minStrength": 1,
+        "maxStrength": 1
       },
       {
         "recipeId": "comfyui-h3-video-768",
@@ -186,8 +214,15 @@ export const HEARMEMAN_ADAPTERS = [
     "compatibility": [
       {
         "recipeId": "comfyui-h3-video",
-        "state": "unverified",
-        "reason": "Adapter and recipe pairing has not completed Arke GPU validation."
+        "state": "owner-approved",
+        "reason": "Owner approved for 480p at strength 1. Generation completed; output accepted by owner.",
+        "ownerApproval": {
+          "approvedAt": "2026-09-25T10:02:59.432Z",
+          "generation": "completed"
+        },
+        "evidence": "docs/development/h3-adapter-validation.md",
+        "minStrength": 1,
+        "maxStrength": 1
       },
       {
         "recipeId": "comfyui-h3-video-768",
@@ -225,8 +260,15 @@ export const HEARMEMAN_ADAPTERS = [
     "compatibility": [
       {
         "recipeId": "comfyui-h3-video",
-        "state": "unverified",
-        "reason": "Adapter and recipe pairing has not completed Arke GPU validation."
+        "state": "owner-approved",
+        "reason": "Owner approved for 480p at strength 1. Generation completed; output accepted by owner.",
+        "ownerApproval": {
+          "approvedAt": "2026-09-25T10:02:59.432Z",
+          "generation": "completed"
+        },
+        "evidence": "docs/development/h3-adapter-validation.md",
+        "minStrength": 1,
+        "maxStrength": 1
       },
       {
         "recipeId": "comfyui-h3-video-768",
@@ -266,8 +308,15 @@ export const HEARMEMAN_ADAPTERS = [
     "compatibility": [
       {
         "recipeId": "comfyui-h3-video",
-        "state": "unverified",
-        "reason": "Adapter and recipe pairing has not completed Arke GPU validation."
+        "state": "owner-approved",
+        "reason": "Owner approved for 480p at strength 1. Generation was blocked by free GPU memory; further testing waived by owner.",
+        "ownerApproval": {
+          "approvedAt": "2026-09-25T10:02:59.432Z",
+          "generation": "memory-blocked"
+        },
+        "evidence": "docs/development/h3-adapter-validation.md",
+        "minStrength": 1,
+        "maxStrength": 1
       },
       {
         "recipeId": "comfyui-h3-video-768",
@@ -305,8 +354,15 @@ export const HEARMEMAN_ADAPTERS = [
     "compatibility": [
       {
         "recipeId": "comfyui-h3-video",
-        "state": "unverified",
-        "reason": "Adapter and recipe pairing has not completed Arke GPU validation."
+        "state": "owner-approved",
+        "reason": "Owner approved for 480p at strength 1. Generation completed; output accepted by owner.",
+        "ownerApproval": {
+          "approvedAt": "2026-09-25T10:02:59.432Z",
+          "generation": "completed"
+        },
+        "evidence": "docs/development/h3-adapter-validation.md",
+        "minStrength": 1,
+        "maxStrength": 1
       },
       {
         "recipeId": "comfyui-h3-video-768",
@@ -344,8 +400,15 @@ export const HEARMEMAN_ADAPTERS = [
     "compatibility": [
       {
         "recipeId": "comfyui-h3-video",
-        "state": "unverified",
-        "reason": "Adapter and recipe pairing has not completed Arke GPU validation."
+        "state": "owner-approved",
+        "reason": "Owner approved for 480p at strength 1. Generation completed; output accepted by owner.",
+        "ownerApproval": {
+          "approvedAt": "2026-09-25T10:02:59.432Z",
+          "generation": "completed"
+        },
+        "evidence": "docs/development/h3-adapter-validation.md",
+        "minStrength": 1,
+        "maxStrength": 1
       },
       {
         "recipeId": "comfyui-h3-video-768",
@@ -383,8 +446,15 @@ export const HEARMEMAN_ADAPTERS = [
     "compatibility": [
       {
         "recipeId": "comfyui-h3-video",
-        "state": "unverified",
-        "reason": "Adapter and recipe pairing has not completed Arke GPU validation."
+        "state": "owner-approved",
+        "reason": "Owner approved for 480p at strength 1. Generation was blocked by free GPU memory; further testing waived by owner.",
+        "ownerApproval": {
+          "approvedAt": "2026-09-25T10:02:59.432Z",
+          "generation": "memory-blocked"
+        },
+        "evidence": "docs/development/h3-adapter-validation.md",
+        "minStrength": 1,
+        "maxStrength": 1
       },
       {
         "recipeId": "comfyui-h3-video-768",
@@ -422,8 +492,15 @@ export const HEARMEMAN_ADAPTERS = [
     "compatibility": [
       {
         "recipeId": "comfyui-h3-video",
-        "state": "unverified",
-        "reason": "Adapter and recipe pairing has not completed Arke GPU validation."
+        "state": "owner-approved",
+        "reason": "Owner approved for 480p at strength 1. Generation completed; output accepted by owner.",
+        "ownerApproval": {
+          "approvedAt": "2026-09-25T10:02:59.432Z",
+          "generation": "completed"
+        },
+        "evidence": "docs/development/h3-adapter-validation.md",
+        "minStrength": 1,
+        "maxStrength": 1
       },
       {
         "recipeId": "comfyui-h3-video-768",
@@ -461,8 +538,15 @@ export const HEARMEMAN_ADAPTERS = [
     "compatibility": [
       {
         "recipeId": "comfyui-h3-video",
-        "state": "unverified",
-        "reason": "Adapter and recipe pairing has not completed Arke GPU validation."
+        "state": "owner-approved",
+        "reason": "Owner approved for 480p at strength 1. Generation completed; output accepted by owner.",
+        "ownerApproval": {
+          "approvedAt": "2026-09-25T10:02:59.432Z",
+          "generation": "completed"
+        },
+        "evidence": "docs/development/h3-adapter-validation.md",
+        "minStrength": 1,
+        "maxStrength": 1
       },
       {
         "recipeId": "comfyui-h3-video-768",
@@ -500,8 +584,15 @@ export const HEARMEMAN_ADAPTERS = [
     "compatibility": [
       {
         "recipeId": "comfyui-h3-video",
-        "state": "unverified",
-        "reason": "Adapter and recipe pairing has not completed Arke GPU validation."
+        "state": "owner-approved",
+        "reason": "Owner approved for 480p at strength 1. Generation not run; further testing waived by owner.",
+        "ownerApproval": {
+          "approvedAt": "2026-09-25T10:02:59.432Z",
+          "generation": "not-run"
+        },
+        "evidence": "docs/development/h3-adapter-validation.md",
+        "minStrength": 1,
+        "maxStrength": 1
       },
       {
         "recipeId": "comfyui-h3-video-768",
@@ -539,8 +630,15 @@ export const HEARMEMAN_ADAPTERS = [
     "compatibility": [
       {
         "recipeId": "comfyui-h3-video",
-        "state": "unverified",
-        "reason": "Adapter and recipe pairing has not completed Arke GPU validation."
+        "state": "owner-approved",
+        "reason": "Owner approved for 480p at strength 1. Generation not run; further testing waived by owner.",
+        "ownerApproval": {
+          "approvedAt": "2026-09-25T10:02:59.432Z",
+          "generation": "not-run"
+        },
+        "evidence": "docs/development/h3-adapter-validation.md",
+        "minStrength": 1,
+        "maxStrength": 1
       },
       {
         "recipeId": "comfyui-h3-video-768",

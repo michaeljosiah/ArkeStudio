@@ -277,6 +277,8 @@ export class ComfyUiClient implements ProviderClient {
     private readonly allBaseUrls?: () => readonly string[],
     private readonly isEndpointGone?: (url: string) => boolean,
     private readonly adapterGuard?: (recipeId: string, selections: unknown) => Promise<void>,
+    /** Trusted maintainer harness injection; production composition keeps the verified-only default. */
+    private readonly composeAdapterRecipe: typeof recipeWithAdapters = recipeWithAdapters,
   ) {}
 
   /** Latest step count per prompt, fed by the engine's socket and read by `poll`. */
@@ -764,7 +766,7 @@ export class ComfyUiClient implements ProviderClient {
     if (this.disposed) throw new Error("comfyui: the provider client is disposed");
     const baseRecipe = comfyUiRecipeById(request.model);
     if (!baseRecipe) throw new Error(`comfyui: "${request.model}" is not a shipped recipe`);
-    const recipe = recipeWithAdapters(baseRecipe, request.params.adapters);
+    const recipe = this.composeAdapterRecipe(baseRecipe, request.params.adapters);
     if (recipe !== baseRecipe) {
       if (!this.adapterGuard) throw new ProviderRequestRejectedError("Adapter authorization is unavailable in this host.");
       await this.adapterGuard(recipe.id, request.params.adapters);
@@ -858,6 +860,24 @@ export class ComfyUiClient implements ProviderClient {
     const verified = await this.preflight(recipe.id);
     if (!verified.ok) throw new ProviderRequestRejectedError(verified.reason);
     const base = this.require(recipe.id);
+    const adapterNames: string[] = [];
+    if (recipe.adapters?.length) {
+      const answer = await jsonRequest(this.fetchImpl, this.id, `${base}/object_info/LoraLoaderModelOnly`, {
+        redirect: "manual", signal: request.signal ?? AbortSignal.timeout(10_000),
+      });
+      const input = (answer.body as { LoraLoaderModelOnly?: { input?: { required?: { lora_name?: unknown } } } } | null)?.LoraLoaderModelOnly?.input?.required?.lora_name;
+      const choices: unknown = Array.isArray(input) ? input[0] : null;
+      if (answer.status !== 200 || !Array.isArray(choices)) throw new ProviderRequestRejectedError("The engine's adapter file list is unavailable.");
+      for (const selection of recipe.adapters) {
+        const canonical = `arke/${selection.sha256}.safetensors`;
+        // ComfyUI enumerates nested filenames with its OS separator. Match the exact pinned
+        // relative path, then send the advertised spelling; never infer the server OS from ours.
+        const matches = choices.filter((name): name is string => typeof name === "string" && name.replaceAll("\\", "/") === canonical);
+        const name = matches.includes(canonical) ? canonical : matches.length === 1 ? matches[0] : undefined;
+        if (!name) throw new ProviderRequestRejectedError("The pinned adapter file is not advertised unambiguously by the engine.");
+        adapterNames.push(name);
+      }
+    }
     // The dispatcher serializes the ComfyUI lane. An idle sibling must relinquish cached
     // weights before the selected recipe's independent process measures free memory.
     if (this.engineLocality() === "local") for (const other of this.allBaseUrls?.() ?? []) {
@@ -890,6 +910,7 @@ export class ComfyUiClient implements ProviderClient {
         { ...audio, name: contentAddressedName(audio.data, audio.contentType) }, "reference audio", request.signal);
     }
     const graph = dropUnusedReferences(recipe, substituteRecipeParams(recipe, values), prepared.length, media.videos.length, media.audio.length);
+    for (const [index, name] of adapterNames.entries()) graph[`arke_adapter_${index}`]!.inputs.lora_name = name;
     if (recipe !== baseRecipe) await this.adapterGuard!(recipe.id, request.params.adapters);
     const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${base}/prompt`, {
       method: "POST",

@@ -27,3 +27,22 @@ test("verified pairings require measured evidence; compatibility and compliance 
   assert.match(adapterPolicyProblem(release, { ...on, enabled: false }, allowed, false, "2026-09-24T01:00:00.000Z")!, /off/);
   assert.match(adapterPolicyProblem(release, on, { ...allowed, expiresAt: "2026-09-24T00:30:00.000Z" }, false, "2026-09-24T01:00:00.000Z")!, /renewal/);
 });
+
+test("owner acceptance records actual coverage, bounds execution and leaves policy checks independent", () => {
+  for (const generation of ["completed", "memory-blocked", "not-run"] as const) {
+    const pair = { recipeId: "recipe", state: "owner-approved" as const, reason: "Owner accepted the scope",
+      evidence: "Acceptance record", minStrength: 1, maxStrength: 1,
+      ownerApproval: { approvedAt: "2026-09-25T00:00:00.000Z", generation } };
+    const approved = AdapterReleaseSchema.parse({ ...release, compatibility: [pair] });
+    assert.equal(adapterCompatibilityProblem(approved, "recipe", 1), null);
+    assert.match(adapterCompatibilityProblem(approved, "recipe", 0.5)!, /strength/);
+    assert.match(adapterCompatibilityProblem(approved, "other-recipe", 1)!, /does not support/);
+    assert.equal(approved.compatibility[0]!.ownerApproval!.generation, generation);
+    for (const missing of ["ownerApproval", "evidence", "minStrength", "maxStrength"]) {
+      assert.equal(AdapterReleaseSchema.safeParse({ ...release, compatibility: [{ ...pair, [missing]: undefined }] }).success, false);
+    }
+    const on = { enabled: true, acknowledgedAt: "2026-09-24T00:00:00.000Z", acknowledgementVersion: 1 as const };
+    assert.match(adapterPolicyProblem(approved, on, null, false, "2026-09-25T01:00:00.000Z")!, /Awaiting compliance/);
+    assert.match(adapterPolicyProblem(approved, { ...on, enabled: false }, null, false, "2026-09-25T01:00:00.000Z")!, /off/);
+  }
+});

@@ -29,7 +29,7 @@ export function SettingsAdaptersScreen() {
     {!enabled && <p>Adult adapters and their previews are hidden. Your files and accepted work are kept.</p>}
     {enabled && <>
       <RuntimeSection label="Local H3 adapters" />
-      <p>Install an adapter here, then select it in Generate for a verified recipe pairing.</p>
+      <p>Install an adapter here, then select it in Generate for a verified or owner-approved recipe pairing.</p>
       <p><Link to="/settings/downloads">Download progress and disk usage</Link></p>
       <Button disabled={!connected || !library?.scannerAvailable} onClick={() => adapterCommand({ action: "scan" })}>Run compliance assessment</Button>
       <Button disabled={!connected} onClick={() => adapterCommand({ action: "refresh" })}>Refresh status</Button>

@@ -9,13 +9,16 @@ approves an artifact nor installs weights. The setting is stored outside worlds.
 
 The inventory covers all **14 safetensors artifacts (4,061,177,176 bytes)** in
 `Hearmeman/minimax-h3-loras` at `de4c3bc6122e68b88407c03dfecf521c803f098d`.
-Every recipe pairing is **unverified**. Passing unit tests does not establish GPU compatibility.
+All fourteen have **owner approval** for `comfyui-h3-video` at strength **1**. Ten generated
+neutral videos whose outputs the owner accepted; two were blocked by free GPU memory and two
+were not run. Those outcomes remain distinct from complete GPU verification. The 768p and
+reference-video pairings remain unverified. See the [acceptance and evidence record](h3-adapter-validation.md).
 Other Hearmeman repositories, H3's existing acceleration adapters and Gemma remain separate.
 
 **The default desktop composition has no connected compliance agent.** Supply the user's real
 interface through `CoordinatorOptions.adapterCompliance`. Until then assessments remain pending
-and installation/dispatch are refused. That connection and actual GPU evidence are remaining
-prerequisites for activating a pairing; this is not an end-to-end verified adapter release.
+and installation/dispatch are refused. Catalogue-owner approval satisfies only compatibility;
+it does not grant a compliance verdict, enable adult content, or install files.
 
 ## Inventory and immutable identity
 
@@ -67,9 +70,18 @@ pass the same policy boundary; permission is rechecked before transfer and publi
 A selection extends a shipped H3 recipe only at its declared model slot. No selection returns
 the original recipe unchanged. Combinations are refused until separately validated. A verified
 pairing requires evidence, bounded strength, engine versions and measured total/free RAM/VRAM.
+An `owner-approved` pairing instead records the acceptance date, actual generation outcome,
+evidence reference and bounded strength. It retains the base recipe's resource/version guards
+without inventing measured adapter floors. This is a reviewed catalogue change, not a renderer
+override. Generate labels it **Owner approved** and shows the selected pairing's coverage reason.
 Effective recipes use the stricter floors. Admission checks permission, compatibility, locality,
 memory and bytes; permission/bytes are checked again before submission and immediately before
 `/prompt`. Changed frozen identities are refused rather than substituted.
+
+Adapter identity uses the canonical `arke/<sha256>.safetensors` path. Before submission the
+provider matches that exact path against the engine's advertised loader choices, allowing its
+Windows or POSIX separator spelling. Missing or ambiguous choices are refused before upload;
+the advertised spelling changes only the wire filename, not the frozen recipe identity.
 
 Generate places the optional adapter selector immediately below the model selector. It appears
 only for models with catalogue pairings, while preserving an unavailable saved choice so the
@@ -94,3 +106,43 @@ Promotion needs exact artifact/base/recipe/node/engine versions, a neutral input
 decoded output, observed RAM/VRAM, strength bounds, reference transport where applicable, and
 cancellation evidence for each pairing. Keep untested/incompatible pairings visible with a
 reason. Windows packaged startup and Linux CI are separate from source-level unit tests.
+
+### Maintainer GPU checks
+
+The following commands keep evidence and outputs outside git. The intake's optional `--download`
+fetches only the pinned 14 artifacts into its report directory and verifies their sizes/hashes.
+Without that flag it reads bounded tensor headers only; header inspection does not verify full
+artifact bytes. Supply the actual engine and shared models directories for the machine.
+
+```powershell
+node --import tsx packages/providers/scripts/inspect-h3-adapters.ts D:/AI/ComfyUI/models .dev/h3-adapter-validation/headers --download
+C:/path/to/ComfyUI/venv/Scripts/python.exe packages/providers/scripts/probe-h3-adapter-loader.py C:/path/to/ComfyUI .dev/h3-adapter-validation/headers
+node --import tsx packages/providers/scripts/smoke-h3-adapters.ts C:/path/to/ComfyUI D:/AI/ComfyUI/models .dev/h3-adapter-validation/headers .dev/h3-adapter-validation/fl2va comfyui-h3-video 0
+```
+
+The loader probe checks all keys against both base headers and runs each distinct patch shape
+on CUDA. It reports direct weight patching separately from the optional bypass implementation;
+a bypass failure is not proof that the shipped weight-patching path fails. Neither proves a full
+generation works. The smoke takes comma-separated zero-based inventory indices, or `all`, and a shipped
+recipe ID. It requires an idle engine at localhost:8188 and preserves its base resource guards.
+Each job has a 90-minute deadline and cancellation targets only that job. HTTP calls have a
+30-second limit; interrupted polling reconciles the same prompt until the job deadline. Progress
+reports are replaced atomically throughout the run, and an explicit rerun archives the prior
+report. Reference-video uses a
+synthetic colour reference; all prompts describe geometric objects. Inspect extracted frames and
+audio before treating a generated report as success. Memory minima are sampled, not instrumented
+instantaneous peaks, and a strength-one smoke establishes no broader usable strength range.
+
+The smoke uses the real provider client with an explicitly injected maintainer candidate builder.
+Production hosts retain `recipeWithAdapters`, which refuses unverified pairings and permits
+explicitly recorded owner approvals only within their declared scope. The candidate
+builder shares the same catalogue-bound graph construction; the smoke's host guard verifies its
+exact release/hash choice. It never edits the shipped catalogue, content acknowledgement or
+compliance journal. Candidate execution therefore creates evidence without first fabricating a
+verified catalogue record or a compliance-agent verdict.
+
+Pinned base hashes are cached in the smoke's report directory against file identity, size and
+mtime for repeated tests; remove `verified-files.json` to force rehashing. The smoke places a
+verified test file under the engine's `models/loras/arke` (hard link where possible, exclusive copy
+across volumes) and records whether it created it. Existing files are never overwritten. These
+test files are not app-owned setup downloads and are retained for inspection/repeat runs.
