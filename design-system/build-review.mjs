@@ -142,6 +142,9 @@ const SCREENS = [
   { group: "Around it", screen: "Marker menu (story)", frame: "155f", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drawn", checked: "2026-09-25",
     controls: ["Marker", "whispered", "pause · short", "Phrase…"],
     notes: ["Turn 155: select words and press <code>[</code>, or type it at a caret; deliveries cover a span, cues sit at a point, what the reader cannot do is struck. Not built."] },
+  { group: "Around it", screen: "Chapter · performed reading (story)", frame: "155g", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drawn", checked: "2026-09-25",
+    controls: ["Hear Odile · $0.01", "Read the chapter · 6 blocks · $0.03", "Use both"],
+    notes: ["Turn 155: a third reading, <code>Performed</code> — one narrator reads everything, each speaker's lines carry a performance note set once in Voices, rendered as the line's phrase; <code>Hear</code> previews a line with the note, <code>Sent as</code> shows the rendered text. Not built."] },
 ];
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
