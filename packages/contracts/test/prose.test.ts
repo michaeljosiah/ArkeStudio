@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ProseReadSourceSchema, changedSpan, chapterParagraphs, composePassage, countWords, overviewMoved, passageDiff, passageOf, targetWords } from "../src/prose.js";
 import { ChapterContinuitySchema, ChapterFrontmatterSchema, ChapterImpliesWriteSchema, ChapterSummarySchema, ChapterVoicesSchema, ProseStyleSchema, summariseContinuity, summariseVoices } from "../src/world.js";
-import { occurrencesOf, pinnedLines, voicedBlocks } from "../src/prose.js";
+import { occurrencesOf, pinnedLines, pinTarget, voicedBlocks } from "../src/prose.js";
 import { ClientMessageSchema } from "../src/frames.js";
 
 /**
@@ -307,6 +307,15 @@ describe("pins over the cast (SPEC-012 R-62..R-65)", () => {
     const { blocks } = voicedBlocks(body, { ...twins, pins });
     assert.equal(blocks.filter((block) => block.sheet === "maren-kest").length, 1, "the second “No,” is Maren's; the first stays narration");
   });
+  it("pinTarget names a block, or words selected in it, by paragraph, words and the occurrence the paragraph holds", () => {
+    const { blocks } = voicedBlocks(body, record);
+    const maren = blocks.findIndex((block) => block.sheet === "maren-kest");
+    assert.deepEqual(pinTarget(body, blocks, maren), { paragraph: 0, occurrence: 1, quote: "“No,”" }, "the second No is the second occurrence");
+    const narration = blocks.findIndex((block) => block.speaker === undefined && block.text.startsWith("Odile went"));
+    assert.deepEqual(pinTarget(body, blocks, narration, { from: 0, to: 5 }), { paragraph: 0, occurrence: 0, quote: "Odile" });
+    assert.equal(pinTarget(body, blocks, narration, { from: 3, to: 3 }), null, "an empty selection names nothing");
+  });
+
   it("the schema refuses a pin with neither a speaker nor narration, or both", () => {
     const base = { paragraph: 0, occurrence: 0, quote: "x" };
     assert.ok(!ChapterVoicesSchema.safeParse({ ...record, pins: [base] }).success);
