@@ -58,7 +58,7 @@ export function makeAdapterExtractor(
     await mkdir(toExtendedLength(sandbox), { recursive: true });
     let session: Awaited<ReturnType<typeof createPreparedSession>>;
     try {
-      session = await createPreparedSession(adapter, sandbox, sessionInput({}), {
+      session = await createPreparedSession(adapter, sandbox, sessionInput({ agent: "canon-author" }), {
         purpose: "extraction",
         agent: "canon-author",
       }, undefined, signal);

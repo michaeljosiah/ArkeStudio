@@ -95,7 +95,7 @@ export function makeArtDirector(
       options.signal?.throwIfAborted();
       await mkdir(toExtendedLength(root),{recursive:true});
       await mkdir(toExtendedLength(sandbox));created=true;
-      const session=await createPreparedSession(adapter,sandbox,sessionInput({}),{purpose:"art-prompt",agent:options.agent??"art-director"},undefined,options.signal);
+      const session=await createPreparedSession(adapter,sandbox,sessionInput({agent:options.agent??"art-director"}),{purpose:"art-prompt",agent:options.agent??"art-director"},undefined,options.signal);
       options.signal?.throwIfAborted();
       let finalText="";
       const collected=(async()=>{

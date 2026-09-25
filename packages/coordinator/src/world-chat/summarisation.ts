@@ -107,7 +107,7 @@ export function makeConversationSummariser(
   return async (input) => {
     const scratch = join(scratchRoot, `summary-${newId("run")}`);
     await mkdir(toExtendedLength(scratch), { recursive: true });
-    const sessionConfig: SessionConfigInput = await sessionInput({});
+    const sessionConfig: SessionConfigInput = await sessionInput({ agent: "conversation-summarizer" });
     const session = await createPreparedSession(adapter, scratch, sessionConfig, {
       purpose: "world-chat",
       agent: "conversation-summarizer",

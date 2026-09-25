@@ -194,7 +194,7 @@ export class StageConstructor {
       // for it once discovery settles.
       abort.signal.throwIfAborted();
       const configured = await Promise.race([
-        deps.sessionInput({ model: deps.model, researchWeb: false }),
+        deps.sessionInput({ model: deps.model, researchWeb: false, agent: "stage-designer" }),
         new Promise<never>((_, reject) => abort.signal.addEventListener("abort", () => reject(abort.signal.reason), { once: true })),
       ]);
       configured.agents = {

@@ -229,7 +229,7 @@ export class GenesisService {
       // still works here: `web` is a harness tool the confinement grants, not an MCP one, so the
       // door can go and look something up before there is any world to scope a lookup to.
       try {
-        const session = await createPreparedSession(this.adapter, dir, this.opts.sessionInput({}), {
+        const session = await createPreparedSession(this.adapter, dir, this.opts.sessionInput({ agent: "world-author" }), {
           purpose: "drafting",
           agent: "world-author",
         });

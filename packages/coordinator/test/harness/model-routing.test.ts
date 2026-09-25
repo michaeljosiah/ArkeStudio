@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -11,6 +12,7 @@ import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { Coordinator } from "../../src/coordinator.js";
 import type { Cipher } from "../../src/credentials/store.js";
 import type { DispatchClient } from "../../src/queue/dispatcher.js";
+import type { ChildSupervisor } from "../../src/supervisor.js";
 import { FakeProvider } from "../queue/fake-provider.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { setProductionModel } from "../../src/productions/ops.js";
@@ -90,6 +92,8 @@ async function fixture(options: {
   /** Ollama's answer to each listing, when it is not simply the list above: it may be a refusal. */
   listLocalModels?: () => Promise<Array<{ id: string; tools: boolean; vision: boolean }>>;
   onPublish?: () => void;
+  /** A harness process under supervision, so a test can fail it and bring it back (issue 1247). */
+  supervisor?: ChildSupervisor;
 } = {}) {
   const { root, worldDir } = await makeTempRoot();
   if (options.agents) await writeFile(join(root, "settings.json"), JSON.stringify({ agents: options.agents }), "utf8");
@@ -111,6 +115,7 @@ async function fixture(options: {
       validators: { ollama: { validateKey: async () => [{ capability: "llm" as const, available: true }] } },
     } : {}),
   });
+  if (options.supervisor) coordinator.superviseAs("harness", options.supervisor);
   await coordinator.start(0);
   const send = (message: ClientMessage) => (coordinator as unknown as {
     handleClientMessage(message: ClientMessage): Promise<void>;
@@ -502,6 +507,45 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       assert.equal(await test.chat(), undefined, "a local runtime with only tool-less models is not nothing local");
       assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /None of the local models/);
       assert.equal((await test.chat("ollama/chatty:7b"))?.config.model, "ollama/chatty:7b", "chosen on purpose, it is still admitted");
+    } finally { await test.close(); }
+  });
+
+  it("keeps an agent's own Settings model when no local default qualifies", async () => {
+    const adapter = new CaptureAdapter();
+    adapter.list = async () => [{ provider: "ollama", id: "chatty:7b", tools: false }, ...CLOUD_ONLY];
+    const test = await fixture({ adapter, agents: { "world-builder": { model: CHAT } } });
+    try {
+      const session = await test.chat();
+      assert.ok(session, "a session whose agent has a model of its own is never refused for lacking a default");
+      assert.equal(session.config.agents?.["world-builder"]?.model, CHAT);
+    } finally { await test.close(); }
+  });
+
+  it("re-opens the sign-in gate when a harness that had failed comes back", async () => {
+    const adapter = new CaptureAdapter();
+    adapter.capabilities = () => new Set(["models", "events", "auth"] as const) as unknown as ReturnType<CaptureAdapter["capabilities"]>;
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    Object.assign(adapter, { listIntegrations: async () => {
+      await released;
+      return [{ id: "openai", name: "OpenAI", methods: [], connections: [{ kind: "stored", id: "c1", label: "OpenAI account" }], needsSignIn: false }];
+    } });
+    const supervisor = Object.assign(new EventEmitter(), {
+      id: "harness", status: "stopped", start: async () => {}, stop: async () => {}, restart: async () => {},
+    }) as unknown as ChildSupervisor;
+    const test = await fixture({ adapter, supervisor });
+    try {
+      supervisor.emit("status", { id: "harness", status: "failed", reason: "the child exited" });
+      supervisor.emit("status", { id: "harness", status: "healthy" });
+      await until(() => adapter.initCalls === 1, "the returning harness initialised");
+      let decided = false;
+      const pending = test.chat().finally(() => { decided = true; });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(decided, false, "a keyless session waits for the returning harness's sign-in read, not the failure's settlement");
+      release();
+      const session = await pending;
+      assert.ok(session, "built once the sign-in state was read");
+      assert.equal(session.config.agents?.["world-builder"]?.model, undefined, "the connected account stood the local default down");
     } finally { await test.close(); }
   });
 

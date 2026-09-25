@@ -159,7 +159,7 @@ export class AskService {
       const session = await createPreparedSession(
         this.adapter,
         sandbox,
-        this.opts.sessionInput(worldQueryUrl ? { worldQueryUrl } : {}),
+        this.opts.sessionInput({ ...(worldQueryUrl ? { worldQueryUrl } : {}), agent: "canon-qa" }),
         {
           purpose: "ask",
           agent: "canon-qa",

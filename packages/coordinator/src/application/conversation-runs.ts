@@ -241,6 +241,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
         deps.sessionInput({
           ...(url ? { worldQueryUrl: url } : {}),
           ...(model !== undefined ? { model } : {}),
+          agent: "world-builder",
         }),
         { purpose: "world-chat", agent: "world-builder" },
       );

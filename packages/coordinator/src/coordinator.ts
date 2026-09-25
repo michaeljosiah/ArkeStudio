@@ -1051,8 +1051,9 @@ export class Coordinator {
    * Resolves once the harness catalogue has been fetched for the first time, or once it is
    * known it will not be (issue 1247). What a keyless session waits on before it is built.
    */
-  private readonly catalogueSettled: Promise<void>;
+  private catalogueSettled: Promise<void> = Promise.resolve();
   private settleCatalogue: () => void = () => {};
+  private catalogueGateOpen = false;
   /**
    * Whether the last completed catalogue read succeeded (issue 1247). The published status is
    * transient — a refresh in flight shows `loading` with the old rows still on display — so the
@@ -1068,8 +1069,9 @@ export class Coordinator {
    */
   private localRuntimeListed = false;
   /** Resolves once the harness's sign-in state has been read for the first time, or once it is known it will not be. */
-  private readonly vendorAuthSettled: Promise<void>;
+  private vendorAuthSettled: Promise<void> = Promise.resolve();
   private settleVendorAuth: () => void = () => {};
+  private vendorAuthGateOpen = false;
   private comfyUiSetupWork: Promise<void> = Promise.resolve();
   private comfyUiLifecycleWork: Promise<void> = Promise.resolve();
   /** actionClass per pending permission id, for remember-on-always (R-16). */
@@ -2365,8 +2367,8 @@ export class Coordinator {
   private readonly localGpu: LocalGpu;
 
   constructor(private readonly opts: CoordinatorOptions) {
-    this.catalogueSettled = new Promise<void>((resolve) => { this.settleCatalogue = resolve; });
-    this.vendorAuthSettled = new Promise<void>((resolve) => { this.settleVendorAuth = resolve; });
+    this.armCatalogueGate();
+    this.armVendorAuthGate();
     // No harness, no catalogue and no sign-in state: nothing to wait for. A harness that never
     // comes up settles both from its failure paths below, and a session on it fails at creation.
     if (!opts.adapter) this.settleHarnessGates();
@@ -2874,7 +2876,8 @@ export class Coordinator {
     // captured, so changing a model in Settings applies to the next session, not the next run.
     this.sessionInput = async (input) => ({
       ...input,
-      ...(await this.sessionAgents(input.model !== undefined)),
+      // Chosen for the session, or for its agent in Settings: either way it runs on something.
+      ...(await this.sessionAgents(input.model !== undefined || (input.agent !== undefined && this.agentOverrides?.[input.agent]?.model !== undefined))),
       ...(this.skillFamily !== undefined ? { skillFamily: this.skillFamily } : {}),
       // The model too, or a narrowed skill is recorded and never actually injected.
       ...(this.skillModelId !== undefined ? { skillModelId: this.skillModelId } : {}),
@@ -4022,7 +4025,7 @@ export class Coordinator {
         this.publishLocalHarnessModels(),
         // A sign-in surface whose last read faulted is asked again here (issue 1247): a keyless
         // session is refused while it is unread, and nothing else would read it again.
-        this.vendorAuthUnread() ? this.vendorAuth.refresh().catch(() => {}) : Promise.resolve(),
+        this.vendorAuthUnread() ? this.refreshVendorAuthTracked() : Promise.resolve(),
       ]);
     } finally {
       this.localRuntimeProbeInFlight = false;
@@ -4135,8 +4138,38 @@ export class Coordinator {
 
   /** The harness is up: fetch what a keyless session needs before it is built (issue 1247). */
   private warmHarnessGates(): void {
-    this.warmModelCatalog(!this.localModelsPublishable());
-    void this.vendorAuth.refresh({ patient: true }).catch(() => {}).finally(() => this.settleVendorAuth());
+    // A harness coming back after a failure re-opens what that failure settled: the sign-in
+    // state on display is still "not started", and a session deciding on it would pin local
+    // past a connected account. The catalogue gate re-opens the same way; on that return the
+    // ready-time fetch settles it when the profile already carries the local rows, since no
+    // publication follows an unchanged listing.
+    const returning = !this.catalogueGateOpen || !this.vendorAuthGateOpen;
+    if (!this.catalogueGateOpen) this.armCatalogueGate();
+    if (!this.vendorAuthGateOpen) this.armVendorAuthGate();
+    this.warmModelCatalog(!this.localModelsPublishable() || (returning && this.publishedLocalHarnessModels !== null));
+    void this.refreshVendorAuthTracked({ patient: true }).finally(() => this.settleVendorAuth());
+  }
+
+  /** A sign-in read stop() waits out, rather than one that publishes into a closed coordinator. */
+  private refreshVendorAuthTracked(opts: { patient?: boolean } = {}): Promise<void> {
+    const work = this.vendorAuth.refresh(opts).catch(() => {});
+    this.backgroundWork.add(work);
+    void work.finally(() => this.backgroundWork.delete(work));
+    return work;
+  }
+
+  private armCatalogueGate(): void {
+    this.catalogueGateOpen = true;
+    this.catalogueSettled = new Promise<void>((resolve) => {
+      this.settleCatalogue = () => { this.catalogueGateOpen = false; resolve(); };
+    });
+  }
+
+  private armVendorAuthGate(): void {
+    this.vendorAuthGateOpen = true;
+    this.vendorAuthSettled = new Promise<void>((resolve) => {
+      this.settleVendorAuth = () => { this.vendorAuthGateOpen = false; resolve(); };
+    });
   }
 
   /** The harness will not be up: nothing more is coming for a keyless session to wait on. */

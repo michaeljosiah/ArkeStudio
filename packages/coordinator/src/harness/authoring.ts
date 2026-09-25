@@ -192,7 +192,7 @@ export class AuthoringService {
         const session = await createPreparedSession(
           this.adapter,
           proposalDir,
-          this.opts.sessionInput(worldQueryUrl ? { worldQueryUrl } : {}),
+          this.opts.sessionInput({ ...(worldQueryUrl ? { worldQueryUrl } : {}), agent: this.opts.agentForPurpose(input.purpose) }),
           {
             purpose: input.purpose,
             agent: this.opts.agentForPurpose(input.purpose),
