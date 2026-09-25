@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ZipFile } from "yazl";
 import { it } from "node:test";
@@ -167,6 +167,7 @@ for (const format of ["directory", "zip"] as const) {
     assert.deepEqual(retry, first); assert.equal(builds, 1);
     assert.equal(first.format, format);
     assert.equal(first.manifest.id, publicationId);
+    assert.deepEqual(await readdir(dirname(first.path)), [format === "zip" ? "publication.zip" : "publication"]);
     assert.equal(JSON.parse(await readFile(join(root, operation.operationId, "complete.json"), "utf8")).manifestSha256, first.manifestSha256);
     await assert.rejects(publishPublication({ ...operation, requestFingerprint: hash("different") }, build, { outputRoot: root }), refusal("operation-conflict"));
     assert.equal(builds, 1);
@@ -183,6 +184,7 @@ for (const format of ["directory", "zip"] as const) {
       assert.equal(result.manifest.id, publicationId);
       const again = await publishPublication(operation, async () => { throw new Error("must not rebuild"); }, { outputRoot: root });
       assert.equal(again.path, result.path);
+      assert.deepEqual(await readdir(dirname(result.path)), [format === "zip" ? "publication.zip" : "publication"]);
     });
   }
 }
@@ -251,25 +253,32 @@ async function child(root: string, source: string, operation: PublicationDeliver
   } finally { clearTimeout(timer); }
 }
 
-it("recovers after abrupt process exit on both sides of directory promotion", async () => {
+for (const format of ["directory", "zip"] as const) it(`recovers ${format} after abrupt process exit on both sides of promotion`, async () => {
   for (const phase of ["prepared", "promoted"]) {
     const root = await tempDir("arke-publication-process-crash-");
-    const source = await packageDirectory(root); const operation = request();
+    const source = await packageDirectory(root); const operation = request(format);
     const killed = await child(root, source.directory, operation, phase);
     assert.equal(killed.code, 71, killed.stderr);
     await source.dispose();
     const recovery = await child(root, "source-no-longer-exists", operation);
     assert.equal(recovery.code, 0, recovery.stderr);
-    assert.equal((await verifyPublicationDirectory(JSON.parse(recovery.stdout).path)).manifest.id, publicationId);
+    const path = JSON.parse(recovery.stdout).path;
+    if (format === "zip") {
+      const verified = await extractPublicationZip(path, root);
+      try { assert.equal(verified.manifest.id, publicationId); }
+      finally { await verified.dispose(); }
+    } else assert.equal((await verifyPublicationDirectory(path)).manifest.id, publicationId);
+    assert.deepEqual(await readdir(dirname(path)), [format === "zip" ? "publication.zip" : "publication"]);
   }
 });
 
-it("independent processes select one immutable candidate and reconcile concurrent promotion", async () => {
+for (const format of ["directory", "zip"] as const) it(`independent processes select one immutable ${format} candidate and reconcile concurrent promotion`, async () => {
   const root = await tempDir("arke-publication-process-race-");
-  const source = await packageDirectory(root); const operation = request();
+  const source = await packageDirectory(root); const operation = request(format);
   const children = await Promise.all([child(root, source.directory, operation), child(root, source.directory, operation)]);
   for (const result of children) assert.equal(result.code, 0, result.stderr);
   assert.equal(JSON.parse(children[0]!.stdout).path, JSON.parse(children[1]!.stdout).path);
   const attempts = (await readdir(join(root, operation.operationId))).filter(name => name.startsWith("attempt-"));
   assert.equal(attempts.length, 1);
+  assert.deepEqual(await readdir(dirname(JSON.parse(children[0]!.stdout).path)), [format === "zip" ? "publication.zip" : "publication"]);
 });

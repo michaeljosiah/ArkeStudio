@@ -8,6 +8,7 @@ import { parseHTML } from "linkedom";
 import { applyTimelineCommands, seedEmptyPictureTimeline, type ClientState, type PublicationPlayback, type PublicationBridge } from "@arke-studio/contracts";
 import { PublicationJobs, PublicationVideo, PublicationsScreen } from "../src/screens/publications.js";
 import { PublicationExport } from "../src/screens/publication-export.js";
+import { ExportSheet } from "../src/screens/editor-export.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { readPublicationPreference, savePublicationPreference } from "../src/lib/publication-preferences.js";
 
@@ -112,9 +113,10 @@ it("keeps the current movie on cancelled/invalid opens and releases it only afte
   assert.deepEqual(closed, ["candidate-4", "candidate-5", "first"]);
 });
 
-it("submits a fresh edition identity with the saved revision and explicit publication options", async t => {
+for (const preset of ["master", "vertical-master"] as const) it(`submits ${preset} with the displayed dimensions and production frame rate`, async t => {
   const state = structuredClone(FIXTURE_STATE) as ClientState;
   const production = state.world!.productions[0]!;
+  production.meta.frameRate = 25;
   const timeline = applyTimelineCommands(seedEmptyPictureTimeline(production), [
     { kind: "place", trackId: "tr_picture", clip: { id: "cl_blank", startFrame: 0, durationFrames: 48, sourceInFrames: 0,
       source: { kind: "artifact", artifactId: "ar_01J8G0000000000000000000A1", label: "Blank" } } },
@@ -130,17 +132,39 @@ it("submits a fresh edition identity with the saved revision and explicit public
   } };
   const node = document.createElement("div"); document.body.append(node); const root = createRoot(node);
   t.after(async () => { await act(async () => root.unmount()); node.remove(); window.arke = previous; });
-  await act(async () => root.render(<MemoryRouter><PublicationExport worldId="world" production={production} world={state.world} preset="master" disabled={false} /></MemoryRouter>));
+  await act(async () => root.render(<MemoryRouter><PublicationExport worldId="world" production={production} world={state.world} preset={preset} disabled={false} /></MemoryRouter>));
   const button = (text: string) => Array.from(node.querySelectorAll("button")).find(item => item.textContent === text)!;
   await act(async () => button("Publish playable edition").click());
+  assert.match(node.textContent!, preset === "master" ? /1920 × 1080 · 25 fps · Master quality/ : /1080 × 1920 · 25 fps · Master quality/);
   assert.equal(button("Choose folder and publish").disabled, false, node.textContent!);
   await act(async () => button("Choose folder and publish").click());
   assert.equal(sent.length, 1);
   assert.match(sent[0]!.request.id, /^urn:uuid:/);
   assert.notEqual(sent[0]!.request.id, "urn:uuid:00000000-0000-4000-8000-000000000000");
   assert.equal(sent[0]!.request.timelineRevision, timeline.revision);
-  assert.equal(sent[0]!.request.preset, "master");
+  assert.equal(sent[0]!.request.preset, preset);
   assert.equal(sent[0]!.format, "zip");
   assert.deepEqual(sent[0]!.request.textTracks, [], "ordinary export burn-in choices never leak into publication tracks");
   assert.match(node.textContent!, /Publication started/);
+});
+
+it("uses portrait defaults when production loads and preserves explicit choices until changing production", async t => {
+  const state = structuredClone(FIXTURE_STATE) as ClientState;
+  const production = state.world!.productions[0]!;
+  production.meta.aspect = "9:16";
+  const node = document.createElement("div"); document.body.append(node); const root = createRoot(node);
+  t.after(async () => { await act(async () => root.unmount()); node.remove(); });
+  const draw = async (loaded: boolean, open: boolean, prodId = production.meta.id) => {
+    await act(async () => root.render(<MemoryRouter><ExportSheet open={open} onClose={() => {}} worldId="world" prodId={prodId}
+      production={loaded ? production : null} world={state.world} timelineState={{ status: "absent" }} onMix={() => {}} commandsDisabled={false} /></MemoryRouter>));
+  };
+  await draw(false, false); await draw(true, true);
+  const group = () => node.querySelector('[aria-label="Resolution"]')!;
+  const selected = () => group().querySelector('[aria-pressed="true"]')!.textContent;
+  assert.equal(selected(), "1080 × 1920 · vertical master");
+  await act(async () => Array.from(group().querySelectorAll("button")).find(button => button.textContent!.includes("review"))!.click());
+  await draw(true, false); await draw(true, true);
+  assert.equal(selected(), "1280 × 720 · review");
+  await draw(true, true, "another-production");
+  assert.equal(selected(), "1080 × 1920 · vertical master");
 });

@@ -18,6 +18,21 @@ import {
 
 const GGML_MAGIC = [0x6c, 0x6d, 0x67, 0x67] as const;
 
+it("keeps catalogue requirements in snapshots independently of transfer detail", async () => {
+  const entry = SETUP_CATALOGUE.find(entry => entry.id === "ollama-gemma4-12b-balanced")!;
+  const service = new LocalSetupService(deps(), () => {}, { appRoot: await root(), catalogue: [entry] });
+  try {
+    const component = service.status().components[0]!;
+    assert.equal(component.state, "available");
+    assert.match(component.displayName, /Uncensored/);
+    assert.match(component.caveat!, /Ollama 0.34.3 or newer/);
+    assert.match(component.caveat!, /not verified by Arke/);
+    await service.skip(entry.id);
+    assert.equal(service.status().components[0]!.caveat, component.caveat);
+    assert.notEqual(service.status().components[0]!.detail, component.detail);
+  } finally { await service.dispose(); }
+});
+
 it("optional download policy is rechecked before transfer and before publication", async () => {
   const appRoot = await root();
   const entry = catalogue()[2]!;

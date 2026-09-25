@@ -11,6 +11,7 @@ import { VideoPublicationRequestSchema, type VideoPublicationRequest } from "@ar
 import { PublicationHost } from "../src/publication-host.js";
 import { publicationMedia } from "../src/publication-media.js";
 import { authenticatedMediaHeaders } from "../src/transport-auth.js";
+import { writeZip } from "../../../packages/coordinator/src/productions/zip.js";
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const request: VideoPublicationRequest = { productionId: "film", id: `urn:uuid:${randomUUID()}`, title: "Test film", edition: "1", language: "en",
@@ -149,7 +150,7 @@ for (const cause of ["encoder", "compiler", "legacy", "conflict"] as const) it(`
   const state = await host.list(); assert.ok(state.ok);
   assert.equal(state.value[0]!.status, "failed"); assert.equal(state.value[0]!.retryable, false);
   assert.match(state.value[0]!.reason!, /Create a new edition/);
-  assert.match(state.value[0]!.reason!, cause === "encoder" ? /encoder changed/ : cause === "conflict" ? /operation-conflict/ : /publication compiler changed/);
+  assert.match(state.value[0]!.reason!, cause === "encoder" ? /encoder changed/ : cause === "conflict" ? /conflicts with these settings/ : /publication compiler changed/);
 });
 
 it("keeps an installed intent visible when unlinking its temporary alias fails", async t => {
@@ -207,14 +208,20 @@ it("releases lost renderer sessions and cancels a pending open", async t => {
   assert.ok((await host.list()).ok, "renderer lifetime does not stop the host");
 });
 
-it("keeps an existing player session after cancellation or failed replacement", async t => {
+for (const format of ["directory", "zip"] as const) it(`explains damaged ${format} contents and keeps the current movie`, async t => {
   const f = await fixture(t); let cancelled = false;
-  const host = new PublicationHost({ ...f.ports, pick: async () => cancelled ? null : f.source }); t.after(() => host.stop());
+  const archive = join(f.root, "damaged.zip");
+  const host = new PublicationHost({ ...f.ports, pick: async kind => cancelled ? null : kind === "zip" ? archive : f.source }); t.after(() => host.stop());
   const first = await host.open("directory"); assert.ok(first.ok);
   cancelled = true;
   const cancel = await host.open("zip"); assert.ok(!cancel.ok && cancel.cancelled);
-  cancelled = false; await writeFile(join(f.source, "movie.mp4"), "corrupt");
-  assert.equal((await host.open("directory")).ok, false);
+  cancelled = false;
+  const movie = Buffer.from("Movie-bytes"); // Same length, one changed byte; ZIP CRC remains valid.
+  await writeFile(join(f.source, "movie.mp4"), movie);
+  await writeFile(archive, writeZip([{ name: "publication.json", data: await readFile(join(f.source, "publication.json")) }, { name: "movie.mp4", data: movie }]));
+  const damaged = await host.open(format); assert.ok(!damaged.ok);
+  assert.match(damaged.reason, /edition appears damaged or altered/);
+  assert.doesNotMatch(damaged.reason, /source-changed|capture|movie.mp4/);
   const response = await fetch(first.value.assets.movie!, { headers: { Authorization: `Bearer ${host.session!.token}` } });
   assert.equal(response.status, 200); assert.equal(await response.text(), "movie-bytes");
 });
@@ -224,7 +231,7 @@ it("never forwards nested filesystem paths inside domain refusals", async t => {
   const host = new PublicationHost({ ...f.ports, probe: async () => { throw new PublicationFileError("source-changed", `ENOENT: ${f.root}/private-world/secret-file`); } });
   t.after(() => host.stop());
   const result = await host.open("directory"); assert.ok(!result.ok);
-  assert.match(result.reason, /^source-changed:/);
+  assert.match(result.reason, /edition appears damaged or altered/);
   assert.ok(!result.reason.includes(f.root)); assert.ok(!result.reason.includes("secret-file"));
 });
 

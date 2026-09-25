@@ -311,14 +311,14 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
   {
     id: "ollama-gemma4-12b-balanced",
     engine: "ollama",
-    displayName: "Gemma 4 · 12B Balanced · HauhauCS",
+    displayName: "Gemma 4 · 12B Uncensored Balanced · HauhauCS",
     purpose: "Text generation · Q4_K_M",
     // Hugging Face file size checked 2026-09-24; see docs/development/local-language-models.md.
     sizeMb: 7382,
     optional: true,
     requires: ["ollama-runtime"],
     provides: ["gemma4-12b-balanced"],
-    caveat: "Community variant · Ollama 0.34.3 or newer for download",
+    caveat: "Community Uncensored variant · Requires Ollama 0.34.3 or newer · Installation and inference not verified by Arke · Upstream weights may change",
     spec: {
       kind: "pull",
       command: "ollama",

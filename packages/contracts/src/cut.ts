@@ -332,14 +332,20 @@ function deriveCutOver(production: ProductionBundle, scenes: readonly Production
 // Export assembly (R-19..R-21, D10, D11): one encode, gaps as labelled slates
 // ---------------------------------------------------------------------------
 
-export const ExportPresetSchema = z.enum(["review-cut", "master", "social-excerpt"]);
+export const ExportPresetSchema = z.enum(["review-cut", "master", "vertical-master", "social-excerpt"]);
 export type ExportPreset = z.infer<typeof ExportPresetSchema>;
 
 export const PRESETS: Record<ExportPreset, { width: number; height: number; fps: FrameRate; crf: number }> = {
   "review-cut": { width: 1280, height: 720, fps: 24, crf: 28 },
   master: { width: 1920, height: 1080, fps: 24, crf: 18 },
+  "vertical-master": { width: 1080, height: 1920, fps: 24, crf: 18 },
   "social-excerpt": { width: 1080, height: 1920, fps: 30, crf: 23 },
 };
+
+/** Issue 1252: portrait productions start with a finishing preset, at their own frame rate. */
+export function defaultExportPreset(production: { aspect?: string }): ExportPreset {
+  return production.aspect === "9:16" ? "vertical-master" : "review-cut";
+}
 
 export type ExportItem =
   | { type: "clip"; path: string; inSec?: number; outSec?: number; durationSec: number; label: string }

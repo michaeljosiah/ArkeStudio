@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { VideoPublicationRequestSchema, buildVideoPublicationPlan, type ProductionBundle, type WorldBundle, type VideoPublicationRequest } from "@arke-studio/contracts";
+import { PRESETS, productionFrameRate, VideoPublicationRequestSchema, buildVideoPublicationPlan, type ProductionBundle, type WorldBundle, type VideoPublicationRequest } from "@arke-studio/contracts";
 import { Button } from "../components/ui.js";
 import { subtitleTracksOf } from "./editor-subtitles.js";
 import { PublicationJobs } from "./publications.js";
@@ -45,6 +45,7 @@ export function PublicationExport({ worldId, production, world, preset, disabled
     <Button variant="ghost" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>Publish playable edition</Button>
     {expanded && <>
       <p>A clean movie with selectable caption tracks.</p>
+      <p>Output: {PRESETS[preset].width} × {PRESETS[preset].height} · {productionFrameRate(production.meta)} fps · {preset === "review-cut" ? "Review quality" : preset === "social-excerpt" ? "Social quality" : "Master quality"}. Change the preset in Resolution above.</p>
       <label className="fy-publication-field">Title<input value={title} onChange={e => setTitle(e.target.value)} /></label>
       <label className="fy-publication-field">Edition<input value={edition} onChange={e => setEdition(e.target.value)} /></label>
       <label className="fy-publication-field">Language<input value={language} onChange={e => setLanguage(e.target.value)} placeholder="en-GB" /></label>

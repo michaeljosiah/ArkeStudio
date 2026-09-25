@@ -5,6 +5,7 @@ import {
   resolvePictureTimeline,
   episodeTimelineRange,
   PRESETS,
+  defaultExportPreset,
   productionShape,
   type ProductionBundle,
   type RenderPlan,
@@ -62,7 +63,10 @@ export function ExportSheet({
   commandsDisabled: boolean;
 }) {
   const exportsState = useExports();
-  const [preset, setPreset] = useState<keyof typeof PRESETS>("review-cut");
+  const [selection, setSelection] = useState<{ worldId: string | undefined; prodId: string | undefined; preset: keyof typeof PRESETS } | null>(null);
+  const preset = selection && selection.worldId === worldId && selection.prodId === prodId
+    ? selection.preset : defaultExportPreset(production?.meta ?? {});
+  const setPreset = (value: keyof typeof PRESETS) => setSelection({ worldId, prodId, preset: value });
   const [subtitleTrack, setSubtitleTrack] = useState<string>("");
   const [subtitleMode, setSubtitleMode] = useState<"none" | "burn-in" | "sidecar" | "burn-in+sidecar">("none");
   const [sidecarFormat, setSidecarFormat] = useState<"srt" | "vtt">("srt");
@@ -120,6 +124,7 @@ export function ExportSheet({
   const presetChips: Array<[keyof typeof PRESETS, string]> = [
     ["review-cut", `${PRESETS["review-cut"].width} × ${PRESETS["review-cut"].height} · review`],
     ["master", `${PRESETS.master.width} × ${PRESETS.master.height} · master`],
+    ["vertical-master", `${PRESETS["vertical-master"].width} × ${PRESETS["vertical-master"].height} · vertical master`],
     ["social-excerpt", `${PRESETS["social-excerpt"].width} × ${PRESETS["social-excerpt"].height} · vertical`],
   ];
   const meta =

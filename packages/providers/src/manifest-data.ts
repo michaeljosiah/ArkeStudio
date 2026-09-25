@@ -177,7 +177,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       providerModelId: "hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M",
       provider: "ollama",
       capability: "llm",
-      displayName: "Gemma 4 12B Balanced · HauhauCS",
+      displayName: "Gemma 4 12B Uncensored Balanced · HauhauCS",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false },
       limits: { maxContextTokens: 256000 },
       pricing: { kind: "unmetered" },
