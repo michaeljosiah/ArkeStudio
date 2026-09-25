@@ -79,12 +79,15 @@ it("migrates legacy draft content without giving the harness the conversation jo
   const old = join(root, ".genesis", "gen-old");
   await mkdir(old, { recursive: true });
   await writeFile(join(old, "draft.json"), JSON.stringify({ name: "Old Harbour" }));
+  await writeFile(join(old, "begun.json"), JSON.stringify({ worldId: ulid() }));
+  await writeFile(join(old, "creation.json"), JSON.stringify({ worldId: ulid() }));
   const provider = new FsWorldProvider(root);
   const workspace = await provider.genesisDir("gen-old");
-  assert.equal(workspace, join(old, "workspace"));
+  assert.equal(workspace, join(root, ".genesis-v2", "gen-old", "workspace"));
   const restored = await loadGenesisConversation(workspace, "gen-old");
   assert.equal(restored.blueprint.name, "Old Harbour");
-  assert.equal((await genesisConversation(workspace)).dir, join(old, ".conversation"));
+  assert.equal(restored.worldId, undefined, "legacy agent files cannot assert an application handoff");
+  assert.equal((await genesisConversation(workspace)).dir, join(root, ".genesis-v2", "gen-old", ".conversation"));
   await provider.genesisDir("gen-old");
   assert.equal((await loadGenesisConversation(workspace, "gen-old")).blueprint.name, "Old Harbour");
 });

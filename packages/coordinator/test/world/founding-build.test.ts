@@ -108,7 +108,7 @@ class FakeQueue {
 }
 
 async function makeSandbox(root: string, genesisId: string): Promise<string> {
-  const dir = join(root, ".genesis", genesisId, "workspace");
+  const dir = join(root, ".genesis-v2", genesisId, "workspace");
   await mkdir(join(dir, "draft", "characters"), { recursive: true });
   await mkdir(join(dir, "draft", "locations"), { recursive: true });
   await writeFile(

@@ -456,7 +456,7 @@ import {
   settlePermission,
 } from "./harness/authoring.js";
 import { GenesisService } from "./harness/genesis.js";
-import { carryGenesisConversation, genesisControlDir, loadGenesisConversation, reserveGenesisWorld } from "./harness/genesis-conversation.js";
+import { carryGenesisConversation, foundingMessages, genesisControlDir, loadGenesisConversation, reserveGenesisWorld } from "./harness/genesis-conversation.js";
 import { approvedBlueprintForFounding, decideGenesisContent, reviewGenesisContent } from "./harness/genesis-review.js";
 import { FoundingBuildService } from "./world/founding-build.js";
 import { isAuthShapedFailure, VendorAuthService } from "./harness/vendor-auth.js";
@@ -5706,7 +5706,7 @@ export class Coordinator {
             const carry = (async () => {
               await this.carryGenesisAttachments(genesisId, worldId);
               const store = this.opts.provider.openStore?.();
-              if (sandbox && store?.worldId === worldId) {
+              if (sandbox && store?.worldId === worldId && (await foundingMessages(sandbox)).length) {
                 await store.ensureSchemaVersion(2, "world-chat");
                 await carryGenesisConversation(sandbox, store.dir);
                 this.emit(await loadGenesisConversation(sandbox, genesisId));
@@ -7095,6 +7095,11 @@ export class Coordinator {
         for (const id of ids) {
           try {
             const dir = await this.opts.provider.genesisDir(id);
+            if (msg.kind === "genesis-list") {
+              const completed = await readFile(join(genesisControlDir(dir), "completed.json"), "utf8")
+                .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return null; throw err; });
+              if (completed !== null) continue;
+            }
             const loaded = await loadGenesisConversation(dir, id);
             if (msg.kind === "genesis-load" && loaded.worldId) await this.openWorld(loaded.worldId);
             if (this.genesis?.isRunning(id)) { loaded.status = "running"; delete loaded.detail; }
@@ -7187,7 +7192,12 @@ export class Coordinator {
         // Anything still being carried into the new world finishes first — otherwise Begin
         // races the sweep and the files handed over are the ones that vanish.
         await this.carrying.get(msg.genesisId)?.catch(() => {});
-        await this.opts.provider.discardGenesis?.(msg.genesisId);
+        try {
+          await this.opts.provider.discardGenesis?.(msg.genesisId);
+        } catch (err) {
+          this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: msg.genesisId, status: "failed", detail: describeCoordinatorError(err) });
+          return;
+        }
         this.emit({ type: "genesis.discarded", at: new Date().toISOString(), genesisId: msg.genesisId });
         return;
       }

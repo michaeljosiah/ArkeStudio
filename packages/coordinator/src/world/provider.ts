@@ -674,14 +674,15 @@ export class FsWorldProvider implements WorldProvider {
   /** Genesis sandboxes live beside worlds, never inside one — world-less by construction. */
   async genesisDir(genesisId: string): Promise<string> {
     if (!/^[a-z0-9][a-z0-9-]{2,40}$/.test(genesisId)) throw new Error("invalid genesis id");
-    const root = join(this.appRoot, ".genesis", genesisId);
+    const root = join(this.appRoot, ".genesis-v2", genesisId);
+    const legacy = join(this.appRoot, ".genesis", genesisId);
     return serializeFileMutation(join(root, "layout"), async () => {
       const dir = join(root, "workspace");
       await mkdir(toExtendedLength(dir), { recursive: true });
       // Old drafts had no control directory. Move only their known content; never promote
       // agent-authored files into application receipts or approval records.
       for (const name of ["draft.json", "draft", "attachments", "previews"]) {
-        const source = join(root, name);
+        const source = join(legacy, name);
         const exists = await stat(toExtendedLength(source)).catch((err: NodeJS.ErrnoException) => {
           if (err.code === "ENOENT") return null; throw err;
         });
@@ -699,14 +700,16 @@ export class FsWorldProvider implements WorldProvider {
   }
 
   async listGenesisIds(): Promise<string[]> {
-    const entries = await readdir(toExtendedLength(join(this.appRoot, ".genesis")), { withFileTypes: true })
-      .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return []; throw err; });
-    return entries.filter(entry => entry.isDirectory() && /^[a-z0-9][a-z0-9-]{2,40}$/.test(entry.name)).map(entry => entry.name);
+    const entries = (await Promise.all([".genesis", ".genesis-v2"].map(folder =>
+      readdir(toExtendedLength(join(this.appRoot, folder)), { withFileTypes: true })
+        .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return []; throw err; })))).flat();
+    return [...new Set(entries.filter(entry => entry.isDirectory() && /^[a-z0-9][a-z0-9-]{2,40}$/.test(entry.name)).map(entry => entry.name))];
   }
 
   async discardGenesis(genesisId: string): Promise<void> {
     if (!/^[a-z0-9][a-z0-9-]{2,40}$/.test(genesisId)) return;
     await rm(toExtendedLength(join(this.appRoot, ".genesis", genesisId)), { recursive: true, force: true });
+    await rm(toExtendedLength(join(this.appRoot, ".genesis-v2", genesisId)), { recursive: true, force: true });
   }
 
   async listReferenceImages(slug: string): Promise<WorldImageReference[]> {

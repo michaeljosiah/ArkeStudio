@@ -20,7 +20,7 @@ it("shows resumable drafts and does not duplicate messages replayed after a load
   };
   __applyEventForTest(snapshot);
   __applyEventForTest({ ...snapshot, genesisId: "gen-two", conversationId: newId("cv"),
-    blueprint: { ...snapshot.blueprint, name: "The Mountain" } });
+    turns: [], blueprint: { ...snapshot.blueprint, name: "The Mountain" } });
   __applyEventForTest({ type: "genesis.turn", at, genesisId: "gen-one", role: "user", text: "Remember the closed gate.", messageId });
   const html = renderToString(<MemoryRouter initialEntries={["/new?draft=gen-one"]}><NewWorldScreen /></MemoryRouter>);
   assert.ok(html.includes("Continue a draft"));

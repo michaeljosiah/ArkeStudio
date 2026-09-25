@@ -1122,6 +1122,8 @@ export class FoundingBuildService {
   }
 
   private async runFinalize(active: ActiveBuild): Promise<void> {
+    const workspace = await this.ports.genesisDir(active.record.genesisId);
+    await atomicWriteFile(join(genesisControlDir(workspace), "completed.json"), JSON.stringify({ worldId: active.record.worldId }) + "\n");
     // The harness session ends; durable records remain available for replay and resume.
     this.ports.releaseGenesis(active.record.genesisId);
     // Keep the begun marker and transcript until the durable handoff can be rediscovered.

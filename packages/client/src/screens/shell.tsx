@@ -897,11 +897,11 @@ function NewWorldDraft() {
   // to follow it to the building screen the moment the coordinator names the world.
   useEffect(() => {
     const worldId = myBuild?.worldId ?? g?.worldId;
-    if (worldId && g?.conversationId && myBuild?.status !== "running") {
+    if (worldId && g?.conversationId && (myBuild?.status === "completed" || myBuild?.status === "stopped" || (submittedName && !myBuild))) {
       navigate(`/w/${worldId}/chat/${g.conversationId}`, { replace: true });
     }
     if (buildPressed && myBuild) setStep("draft");
-  }, [buildPressed, myBuild, g?.worldId, g?.conversationId, navigate]);
+  }, [buildPressed, myBuild, g?.worldId, g?.conversationId, submittedName, navigate]);
   // A begin the coordinator refused answers with a reasoned plan; the press un-arms so the
   // refusal can be read and the author can go back — never a button stuck on "Building…".
   useEffect(() => {
@@ -992,7 +992,7 @@ function NewWorldDraft() {
     setStep("draft");
   };
 
-  const canCreate = connection === "open" && shownName.length > 0 && submittedName === null;
+  const canCreate = connection === "open" && shownName.length > 0 && submittedName === null && !chatRunning;
   const entries =
     1 + railCharacters.length + railLocations.length + railFactions.length + (blueprint?.threads.length ?? 0);
 
@@ -1156,18 +1156,18 @@ function NewWorldDraft() {
             </span>
           </div>
           <div className="fy-gate__body" style={{ gap: 14 }}>
-            {Object.entries(drafts).some(([, draft]) => draft.turns.length && !draft.worldId) && (
+            {Object.entries(drafts).some(([, draft]) => (draft.turns.length || draft.blueprint?.name || draft.attachments.length) && !draft.worldId) && (
               <label>
                 Continue a draft
                 <select aria-label="Continue a draft" value={genesisId} disabled={chatRunning || myBuild?.status === "running"}
                   onChange={event => setParams({ draft: event.target.value })}>
                   <option value={genesisId}>{blueprint?.name ?? "This conversation"}</option>
-                  {Object.entries(drafts).filter(([id, draft]) => id !== genesisId && draft.turns.length && !draft.worldId)
+                  {Object.entries(drafts).filter(([id, draft]) => id !== genesisId && (draft.turns.length || draft.blueprint?.name || draft.attachments.length) && !draft.worldId)
                     .map(([id, draft]) => <option key={id} value={id}>{draft.blueprint?.name ?? draft.turns[0]?.text.slice(0, 80) ?? "Untitled world"}</option>)}
                 </select>
               </label>
             )}
-            {turns.length > 0 && !g?.worldId && !myBuild && (
+            {(turns.length > 0 || blueprint?.name || handed.length > 0) && !g?.worldId && !myBuild && (
               <Button variant="ghost" disabled={chatRunning} onClick={() => {
                 if (!confirmDiscard) { setConfirmDiscard(true); return; }
                 genesisDiscard(genesisId);
