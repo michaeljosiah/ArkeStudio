@@ -309,17 +309,17 @@ test("file tools are described compactly, keeping the rule a model must know", a
 
 test("a long session is trimmed to its window: old tool results first, the instructions never", async (t) => {
   const f = await fixture(t, { maxContextTokens: 8192 });
-  await writeFile(join(f.root, "long.md"), "L".repeat(9_000));
+  await writeFile(join(f.root, "long.md"), "the long file ".repeat(640));
   const id = await f.session("sheet-editor");
   f.ollama.script.push(callTool("read", { path: "long.md" }), reply("Read it."), reply("Noted."));
   await f.adapter.sendMessage({ sessionId: id, ...text("Read long.md.") });
-  await f.adapter.sendMessage({ sessionId: id, ...text("Q".repeat(4_500)) });
+  await f.adapter.sendMessage({ sessionId: id, ...text("a long question ".repeat(300)) });
   const last = f.ollama.chats.at(-1)!.messages as Array<{ role: string; content: string }>;
   const first = f.ollama.chats[0]!.messages as Array<{ role: string; content: string }>;
   assert.deepEqual(last[0], first[0], "the system prompt is untouched");
   assert.ok(last.some((m) => m.content === TRIMMED_TOOL_RESULT));
-  assert.ok(!JSON.stringify(last).includes("L".repeat(100)), "the old file read is gone");
-  assert.equal(last.at(-1)!.content, "Q".repeat(4_500));
+  assert.ok(!JSON.stringify(last).includes("the long file the long file"), "the old file read is gone");
+  assert.equal(last.at(-1)!.content, "a long question ".repeat(300));
 });
 
 test("a message that cannot fit the window ends the turn with that reason, and nothing is sent", async (t) => {
@@ -446,4 +446,15 @@ test("a prompt-only role does not fall back to a model whose capabilities Ollama
   assert.equal(f.ollama.chats[0]!.model, "chatty:7b", "the first model seen to complete, not the first row");
   f.ollama.models = [{ name: "plain:12b", context: 262144 }];
   await assert.rejects(f.session("conversation-namer"), /no 256k-context model known to answer/, "offered for choosing, not chosen");
+});
+
+test("when Ollama counts more prompt tokens than the estimate, the session trusts the estimate less from then on", async (t) => {
+  const f = await fixture(t, { maxContextTokens: 8192 });
+  const id = await f.session("canon-qa");
+  // Ollama reports a prompt far larger than anything the estimate would give for this one.
+  f.ollama.script.push(reply("ok", { prompt: 5_000, output: 5 }), reply("again"));
+  await f.adapter.sendMessage({ sessionId: id, ...text("hi") });
+  await writeFile(join(f.root, "notes.md"), "the long file ".repeat(300));
+  // Now a turn that fits on the raw estimate but not once scaled by what Ollama reported.
+  await assert.rejects(f.adapter.sendMessage({ sessionId: id, ...text("a long question ".repeat(200)) }), /do not fit the model's context window/);
 });

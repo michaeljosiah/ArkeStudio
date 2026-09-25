@@ -20,13 +20,24 @@ import type { ChatMessage, ChatTool } from "./ollama.js";
  * instructions.
  *
  * Counted by the shape of the text, not its length, because the same number of characters can
- * be a few tokens or many. A run of letters is a word, and three letters a token over-counts
- * every language written in Latin script; each digit and each symbol is a token of its own,
- * which is what makes hashes, base64 and minified JSON dense; a line break is a token. Any other
- * script is counted from its UTF-8 bytes at a rate that over-counts CJK and emoji, which are
- * often a token a character and sometimes several.
+ * be a few tokens or many. A run of letters shaped like a word — cased as words are, with vowels
+ * in it — is charged three letters a token, which over-counts every language written in Latin
+ * script. Any other run of letters (base64, generated identifiers, a hash's letters) is charged
+ * at a rate close to what random letters cost. Each digit and each symbol is a token of its own;
+ * a line break is a token. Any other script is counted from its UTF-8 bytes at a rate that
+ * over-counts CJK and emoji, which are often a token a character and sometimes several.
+ *
+ * No count made without the model's own tokenizer is a guarantee, and Ollama's native API offers
+ * none to ask. So the loop also corrects itself: each reply says how many prompt tokens Ollama
+ * actually processed, and a session whose estimate came in under that scales every later
+ * estimate up to match (`fitToWindow`'s `scale`). It only ever grows.
  */
 const LETTERS_PER_TOKEN = 3;
+const DENSE_LETTERS_PER_TOKEN = 1.5;
+/** Longer than any word a writer uses, so a run past it is data, not language. */
+const LONGEST_WORD = 24;
+const WORD_SHAPE = /^(?:[A-Z]?[a-z]+|[A-Z]+)$/;
+const VOWELS = /[aeiouyAEIOUY]/g;
 const OTHER_BYTES_PER_TOKEN = 1.5;
 const ASCII_SHAPES = /[A-Za-z]+|[0-9]|\n|[ \t\r]+|[!-/:-@[-`{-~]/g;
 const TOKENS_PER_MESSAGE = 8;
@@ -64,7 +75,7 @@ function textTokens(text: string): number {
     const first = shape.charCodeAt(0);
     const letters = (first >= 0x41 && first <= 0x5a) || (first >= 0x61 && first <= 0x7a);
     // Spaces and tabs ride on the word after them.
-    if (letters) tokens += Math.ceil(shape.length / LETTERS_PER_TOKEN);
+    if (letters) tokens += Math.ceil(shape.length / (wordShaped(shape) ? LETTERS_PER_TOKEN : DENSE_LETTERS_PER_TOKEN));
     else if (shape[0] !== " " && shape[0] !== "\t" && shape[0] !== "\r") tokens += 1;
   }
   let ascii = 0;
@@ -72,6 +83,12 @@ function textTokens(text: string): number {
   // Any other ASCII — control characters — is a token each. ASCII is one UTF-8 byte a
   // character, so the bytes that are not ASCII are the rest.
   return tokens + (ascii - matched) + (Buffer.byteLength(text, "utf8") - ascii) / OTHER_BYTES_PER_TOKEN;
+}
+
+function wordShaped(run: string): boolean {
+  if (run.length > LONGEST_WORD || !WORD_SHAPE.test(run)) return false;
+  // Short runs are words or abbreviations either way; a longer one needs the vowels words have.
+  return run.length <= 4 || (run.match(VOWELS)?.length ?? 0) / run.length >= 0.2;
 }
 
 /**
@@ -96,7 +113,9 @@ export function promptBudget(numCtx: number): number {
  * its tool calls and their answers so no call is left unanswered. The system prompt is never
  * touched. Returns false when the current turn alone does not fit.
  */
-export function fitToWindow(messages: ChatMessage[], tools: readonly ChatTool[], budget: number, turnStart: number): boolean {
+export function fitToWindow(messages: ChatMessage[], tools: readonly ChatTool[], budget: number, turnStart: number, scale = 1): boolean {
+  // The session's learned correction, applied by shrinking the budget rather than every count.
+  budget = Math.floor(budget / Math.max(1, scale));
   if (estimateTokens(messages, tools) <= budget) return true;
   const target = Math.floor(budget * TRIM_TARGET);
   for (let at = 1; at < turnStart && estimateTokens(messages, tools) > target; at++) {

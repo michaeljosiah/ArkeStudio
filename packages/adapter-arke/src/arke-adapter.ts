@@ -12,7 +12,7 @@ import {
   listPulled, listTags, loopbackBaseUrl, OLLAMA_DEFAULT_URL, OllamaUnreachableError, streamChat, unloadModel,
   type ChatMessage, type ChatTool, type ChatToolCall, type PulledModel,
 } from "./ollama.js";
-import { fitToWindow, promptBudget, WITHIN_TURN } from "./context.js";
+import { estimateTokens, fitToWindow, promptBudget, WITHIN_TURN } from "./context.js";
 import { recoverToolCall } from "./tool-calls.js";
 
 /**
@@ -55,6 +55,7 @@ const DEFAULT_CONTEXT = 8_192;
 const CONTEXT_CEILING = 32_768;
 const DEFAULT_STEPS = 24;
 const CATALOGUE_DEADLINE_MS = 15_000;
+const DISPOSE_RELEASE_MS = 2_000;
 /**
  * Only models stating a 256k context are offered, the same rule as the OpenCode lane
  * (`meetsLocalModelMinimum` in contracts). How much of that window a session asks for is
@@ -112,6 +113,11 @@ interface Session extends ToolSession {
   messages: ChatMessage[];
   turn: Turn | null;
   usage: number;
+  /**
+   * How far Ollama's real prompt counts have exceeded the estimate, at most, in this session.
+   * One until a reply shows the estimate was low; never shrinks.
+   */
+  scale: number;
 }
 
 type Ending = { reason: "completed"; text: string } | { reason: "cancelled" | "timeout" | "budget-exceeded" | "error"; detail: string };
@@ -277,7 +283,7 @@ export class ArkeAdapter implements HarnessAdapter {
     // added after that would belong to an adapter that has already been retired.
     if (this.disposed) throw new Error("The Arke harness is disposed.");
     const id = randomUUID();
-    this.sessions.set(id, { ...toolSession, id, model: selected.id, numCtx, tools, known, messages: [system], turn: null, usage: 0 });
+    this.sessions.set(id, { ...toolSession, id, model: selected.id, numCtx, tools, known, messages: [system], turn: null, usage: 0, scale: 1 });
     this.opts.onTrace?.({ at: "arke.session-created", sessionId: id, model: selected.id, agent: member.name, numCtx, tools: tools.map((tool) => tool.function.name) });
     this.emit({ type: "session.created", sessionId: id });
     return { sessionId: id };
@@ -332,7 +338,7 @@ export class ArkeAdapter implements HarnessAdapter {
     let reasked = false;
     try {
       for (let step = 0; step < steps; step++) {
-        if (!fitToWindow(session.messages, session.tools, promptBudget(session.numCtx), session.messages.indexOf(opening))) {
+        if (!fitToWindow(session.messages, session.tools, promptBudget(session.numCtx), session.messages.indexOf(opening), session.scale)) {
           return { reason: "budget-exceeded", detail: "This message and its tool results do not fit the model's context window." };
         }
         await this.releasing;
@@ -345,6 +351,10 @@ export class ArkeAdapter implements HarnessAdapter {
           ...(this.opts.keepAlive !== undefined ? { keepAlive: this.opts.keepAlive } : {}),
         }, signal, (text) => this.emit({ type: "message.delta", sessionId: session.id, correlationId: turn.correlationId, text }));
         session.usage += result.promptTokens + result.outputTokens;
+        // Ollama's count is the truth the estimate stands in for. A cached prefix makes it lower
+        // than the whole prompt, never higher, so a count above the estimate is always evidence.
+        const estimated = estimateTokens(session.messages, session.tools);
+        if (result.promptTokens > estimated) session.scale = Math.max(session.scale, result.promptTokens / estimated);
         // Cut off by the output or context limit: the text, or a tool call's arguments, is only
         // the part that fit. Handing it on as finished would pass half a JSON document downstream.
         if (result.doneReason === "length") return { reason: "budget-exceeded", detail: "The reply reached the model's length limit before it finished." };
@@ -484,8 +494,14 @@ export class ArkeAdapter implements HarnessAdapter {
     await Promise.all(running.map((turn) => turn.settled.catch(() => {})));
     this.sessions.clear();
     // The app is stopping with this harness: hand the memory back rather than leave it to
-    // Ollama's idle timeout. Briefly, since quitting should not wait on it.
-    await this.releaseResidency(AbortSignal.timeout(2_000));
+    // Ollama's idle timeout. Briefly, since quitting should not wait on it — and raced, because
+    // this release queues behind any already on the wire, whose own deadline is not this one.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      this.releaseResidency(AbortSignal.timeout(DISPOSE_RELEASE_MS)).catch(() => {}),
+      new Promise<void>((resolve) => { timer = setTimeout(resolve, DISPOSE_RELEASE_MS); }),
+    ]);
+    clearTimeout(timer);
     for (const queue of this.queues) queue.close();
     this.queues.clear();
     this.ready = { ready: false, reason: "The Arke harness is disposed." };

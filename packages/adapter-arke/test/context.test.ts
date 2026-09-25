@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import { estimateTokens, fitToWindow, promptBudget, TRIMMED_TOOL_RESULT, WITHIN_TURN } from "../src/context.js";
 import type { ChatMessage } from "../src/ollama.js";
 
-const big = (n: number) => "x".repeat(n);
+/** `n` characters of prose, which is what a writing conversation mostly holds. */
+const big = (n: number) => "the bells ring at slack water ".repeat(Math.ceil(n / 30)).slice(0, n);
 const exchange = (i: number, size: number): ChatMessage[] => [
   { role: "user", content: `question ${i} ${big(size)}` },
   { role: "assistant", content: "", tool_calls: [{ function: { name: "read", arguments: { path: `${i}.md` } } }] },
@@ -68,7 +69,7 @@ test("token-dense scripts are estimated from their bytes, so they are never unde
   const emoji = estimateTokens([{ role: "user", content: "🌊".repeat(1_000) }], []);
   assert.ok(han >= 1_000, `a Han character is at least a token (${han})`);
   assert.ok(emoji >= 2_000, `an emoji is at least two (${emoji})`);
-  assert.ok(estimateTokens([{ role: "user", content: "x".repeat(3_000) }], []) < 1_100, "ASCII keeps its three to a token");
+  assert.ok(estimateTokens([{ role: "user", content: big(3_000) }], []) < 1_100, "prose keeps its three letters to a token");
 });
 
 test("every tool result gathered for the current turn is kept; a turn whose evidence cannot fit says so", () => {
@@ -117,4 +118,20 @@ test("a large image counts for what it is, so a turn carrying one is judged agai
   const small = estimateTokens([{ role: "tool", content: "", images: [] }], []);
   const large = estimateTokens([{ role: "tool", content: "", images: [image] }], []);
   assert.ok(large - small >= 16_000, `a 4K screenshot is thousands of tokens, not a flat charge (${large - small})`);
+});
+
+test("letters that are not shaped like words are charged near what random letters cost", () => {
+  const per = (text: string) => (estimateTokens([{ role: "user", content: text }], []) - 8) / text.length;
+  const letters = randomBytes(3_000).toString("base64").replace(/[^A-Za-z]/g, "");
+  assert.ok(per(letters) >= 0.6, `letter-only base64 (${per(letters).toFixed(2)} a character)`);
+  assert.ok(per("xkcdqzvtrwplmnbg".repeat(50)) >= 0.6, "a generated identifier with no vowels");
+  assert.ok(per("SaltlightHarbourBellsRingAtSlackWater") >= 0.5, "camel case is an identifier, not a word");
+});
+
+test("a session's learned correction shrinks the budget, so an estimate shown to be low is not trusted twice", () => {
+  const messages: ChatMessage[] = [{ role: "system", content: "rules" }, ...exchange(1, 3_000), { role: "user", content: "now" }];
+  assert.equal(fitToWindow(structuredClone(messages), [], 3_000, messages.length - 1), true, "fits on the estimate alone");
+  const scaled = structuredClone(messages);
+  assert.equal(fitToWindow(scaled, [], 3_000, scaled.length - 1, 2), true);
+  assert.notDeepEqual(scaled, messages, "at twice the estimate it no longer fits untrimmed");
 });
