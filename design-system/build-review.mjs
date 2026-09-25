@@ -145,6 +145,9 @@ const SCREENS = [
   { group: "Around it", screen: "Chapter · performed reading (story)", frame: "155g", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drawn", checked: "2026-09-25",
     controls: ["Hear Odile · $0.01", "Read the chapter · 6 blocks · $0.03", "Use both"],
     notes: ["Turn 155: a third reading, <code>Performed</code> — one narrator reads everything, each speaker's lines carry a performance note set once in Voices, rendered as the line's phrase; <code>Hear</code> previews a line with the note, <code>Sent as</code> shows the rendered text. Not built."] },
+  { group: "Around it", screen: "Book narrator dialog (story)", frame: "155h", route: "#/w/:worldId/p/:prodId/story/audiobook?narrator=1", status: "drawn", checked: "2026-09-25",
+    controls: ["App narrator · George", "This book", "Hear", "Cancel", "Use for this book"],
+    notes: ["Turn 155: a narrator for one book beside the app default; each voice with a play button, the selected one tried on the selected block with what it cannot do struck, and what the switch costs as data before the press. Not built."] },
 ];
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
