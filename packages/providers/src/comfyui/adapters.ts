@@ -15,6 +15,9 @@ export function recipeWithAdapters(base: ComfyUiRecipe, input: unknown, catalogu
   const recipe = adapterValidationCandidate(base, selected, catalogue);
   for (const selection of selected) {
     const pairing = catalogue.find(row => row.id === selection.releaseId)!.compatibility.find(row => row.recipeId === base.id)!;
+    // An explicit catalogue-owner acceptance retains the base recipe's resource/version guards.
+    // It is not measured pairing evidence and must never invent stricter or looser GPU floors.
+    if (pairing.state === "owner-approved") continue;
     if (!pairing.hardware || !pairing.minEngineVersion || !pairing.exercisedThroughVersion) throw new Error("Adapter validation evidence is incomplete.");
     for (const key of ["minVramMb", "minFreeVramMb", "minMemMb", "minFreeMemMb"] as const) {
       recipe.hardware[key] = Math.max(recipe.hardware[key] ?? 0, pairing.hardware[key]);

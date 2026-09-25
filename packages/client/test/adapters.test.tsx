@@ -68,3 +68,21 @@ test("picker follows the selected model and keeps an incompatible saved selectio
   assert.match(stale, /Choose None to clear it/);
   assert.doesNotMatch(stale, /Adapter strength/);
 });
+
+test("picker identifies owner approval and its untested status without overriding compliance", () => {
+  const approved = AdapterReleaseSchema.parse({ ...release, compatibility: [{ recipeId: "test-recipe", state: "owner-approved",
+    reason: "Owner approved; generation not run.", evidence: "Owner acceptance record", minStrength: 1, maxStrength: 1,
+    ownerApproval: { approvedAt: "2026-09-25T00:00:00.000Z", generation: "not-run" } }] });
+  const entry = { ...library.entries[0]!, release: approved, installed: true, reason: null,
+    decision: { sha256: approved.source.sha256, decision: "allowed" as const, reason: "Fixture approval", policyRevision: "fixture", assessedAt: "2026-09-24T00:00:00.000Z" } };
+  const selected = [{ releaseId: approved.id, sha256: approved.source.sha256, strength: 1 }];
+  const render = () => renderToString(<MemoryRouter><AdapterPicker recipeId="test-recipe" selected={selected} onChange={() => {}} /></MemoryRouter>);
+  set({ ...library, entries: [entry] });
+  const available = render();
+  assert.match(available.replaceAll("<!-- -->", ""), /Fixture adapter · Owner approved/);
+  assert.match(available, /Owner approved; generation not run/);
+  assert.doesNotMatch(available, /<option[^>]*value="test-release"[^>]*disabled/);
+  set({ ...library, entries: [{ ...entry, decision: null }] });
+  assert.match(render(), /<option[^>]*value="test-release"[^>]*disabled/);
+  assert.match(render(), /Awaiting compliance/);
+});

@@ -25,12 +25,17 @@ export const AdapterReleaseSchema = z.object({
   availability: z.enum(["current", "withdrawn"]).default("current"),
   supersedes: z.array(Id), assessedAt: z.string().datetime(),
   compatibility: z.array(z.object({
-    recipeId: Id, state: z.enum(["unverified", "verified", "incompatible"]), reason: z.string().min(1),
+    recipeId: Id, state: z.enum(["unverified", "verified", "owner-approved", "incompatible"]), reason: z.string().min(1),
+    ownerApproval: z.object({ approvedAt: z.string().datetime(), generation: z.enum(["completed", "memory-blocked", "not-run"]) }).strict().optional(),
     evidence: z.string().min(1).optional(), minStrength: z.number().min(0).max(2).optional(), maxStrength: z.number().min(0).max(2).optional(),
     minEngineVersion: z.string().optional(), exercisedThroughVersion: z.string().optional(),
     hardware: z.object({ minVramMb: z.number().int().positive(), minFreeVramMb: z.number().int().positive(),
       minMemMb: z.number().int().positive(), minFreeMemMb: z.number().int().positive() }).strict().optional(),
   }).strict()).superRefine((rows, ctx) => {
+    for (const row of rows) if (row.state === "owner-approved" && (!row.ownerApproval || !row.evidence ||
+      row.minStrength === undefined || row.maxStrength === undefined || row.minStrength > row.maxStrength)) {
+      ctx.addIssue({ code: "custom", message: "Owner approval needs its date, actual generation outcome, evidence and bounded strength." });
+    }
     for (const row of rows) if (row.state === "verified" && (!row.evidence || row.minStrength === undefined || row.maxStrength === undefined ||
       row.minStrength > row.maxStrength || !row.minEngineVersion || !row.exercisedThroughVersion || !row.hardware)) {
       ctx.addIssue({ code: "custom", message: "Verified compatibility needs evidence, engine versions, hardware floors and measured parameter bounds." });
@@ -85,7 +90,7 @@ export function adapterPolicyProblem(release: AdapterRelease, content: z.infer<t
 export function adapterCompatibilityProblem(release: AdapterRelease, recipeId: string, strength: number): string | null {
   const row = release.compatibility.find(item => item.recipeId === recipeId);
   if (!row) return "This adapter does not support the selected recipe.";
-  if (row.state !== "verified") return row.reason;
+  if (row.state !== "verified" && row.state !== "owner-approved") return row.reason;
   if (strength < row.minStrength! || strength > row.maxStrength!) return `Adapter strength must be between ${row.minStrength} and ${row.maxStrength}.`;
   return null;
 }

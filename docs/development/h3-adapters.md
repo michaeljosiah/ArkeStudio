@@ -9,13 +9,16 @@ approves an artifact nor installs weights. The setting is stored outside worlds.
 
 The inventory covers all **14 safetensors artifacts (4,061,177,176 bytes)** in
 `Hearmeman/minimax-h3-loras` at `de4c3bc6122e68b88407c03dfecf521c803f098d`.
-Every recipe pairing is **unverified**. Passing unit tests does not establish GPU compatibility.
+All fourteen have **owner approval** for `comfyui-h3-video` at strength **1**. Ten generated
+neutral videos whose outputs the owner accepted; two were blocked by free GPU memory and two
+were not run. Those outcomes remain distinct from complete GPU verification. The 768p and
+reference-video pairings remain unverified. See the [acceptance and evidence record](h3-adapter-validation.md).
 Other Hearmeman repositories, H3's existing acceleration adapters and Gemma remain separate.
 
 **The default desktop composition has no connected compliance agent.** Supply the user's real
 interface through `CoordinatorOptions.adapterCompliance`. Until then assessments remain pending
-and installation/dispatch are refused. That connection and actual GPU evidence are remaining
-prerequisites for activating a pairing; this is not an end-to-end verified adapter release.
+and installation/dispatch are refused. Catalogue-owner approval satisfies only compatibility;
+it does not grant a compliance verdict, enable adult content, or install files.
 
 ## Inventory and immutable identity
 
@@ -67,6 +70,10 @@ pass the same policy boundary; permission is rechecked before transfer and publi
 A selection extends a shipped H3 recipe only at its declared model slot. No selection returns
 the original recipe unchanged. Combinations are refused until separately validated. A verified
 pairing requires evidence, bounded strength, engine versions and measured total/free RAM/VRAM.
+An `owner-approved` pairing instead records the acceptance date, actual generation outcome,
+evidence reference and bounded strength. It retains the base recipe's resource/version guards
+without inventing measured adapter floors. This is a reviewed catalogue change, not a renderer
+override. Generate labels it **Owner approved** and shows the selected pairing's coverage reason.
 Effective recipes use the stricter floors. Admission checks permission, compatibility, locality,
 memory and bytes; permission/bytes are checked again before submission and immediately before
 `/prompt`. Changed frozen identities are refused rather than substituted.
@@ -127,7 +134,8 @@ audio before treating a generated report as success. Memory minima are sampled, 
 instantaneous peaks, and a strength-one smoke establishes no broader usable strength range.
 
 The smoke uses the real provider client with an explicitly injected maintainer candidate builder.
-Production hosts retain `recipeWithAdapters`, which refuses unverified pairings. The candidate
+Production hosts retain `recipeWithAdapters`, which refuses unverified pairings and permits
+explicitly recorded owner approvals only within their declared scope. The candidate
 builder shares the same catalogue-bound graph construction; the smoke's host guard verifies its
 exact release/hash choice. It never edits the shipped catalogue, content acknowledgement or
 compliance journal. Candidate execution therefore creates evidence without first fabricating a

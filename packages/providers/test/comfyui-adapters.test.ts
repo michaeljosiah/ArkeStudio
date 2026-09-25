@@ -36,19 +36,19 @@ test("selection changes only the declared model slot, freezes exact provenance a
   assert.notEqual(comfyUiRecipeIdentity(composed).templateDigest, comfyUiRecipeIdentity(base).templateDigest);
   assert.notEqual(comfyUiRecipeIdentity(composed).dependencyDigest, comfyUiRecipeIdentity(base).dependencyDigest);
   assert.throws(() => recipeWithAdapters(base, [{ ...selection[0], strength: 1.5 }], [release]), /strength/);
-  assert.throws(() => recipeWithAdapters(base, selection), /validation/);
+  assert.throws(() => recipeWithAdapters(base, selection, [{ ...release, compatibility: [{ recipeId: base.id, state: "unverified", reason: "GPU validation pending" }] }]), /validation/);
   assert.throws(() => recipeWithAdapters(base, [{ ...selection[0], sha256: "f".repeat(64) }], [release]), /changed/);
 });
 
 test("the maintainer candidate does not grant production verification or bypass the host guard", async () => {
   const base = comfyUiRecipeById("comfyui-h3-video")!;
-  const release = HEARMEMAN_ADAPTERS[0]!;
+  const release = { ...HEARMEMAN_ADAPTERS[0]!, compatibility: [{ recipeId: base.id, state: "unverified" as const, reason: "GPU validation pending" }] };
   const selections = [{ releaseId: release.id, sha256: release.source.sha256, strength: 1 }];
   const before = structuredClone(release);
-  const candidate = adapterValidationCandidate(base, selections);
+  const candidate = adapterValidationCandidate(base, selections, [release]);
   assert.deepEqual(release, before);
   assert.deepEqual(candidate.adapters, selections);
-  assert.throws(() => recipeWithAdapters(base, selections), /validation/);
+  assert.throws(() => recipeWithAdapters(base, selections, [release]), /validation/);
   const client = new ComfyUiClient(async () => { throw new Error("Must refuse before HTTP"); }, () => "http://127.0.0.1:8188",
     async () => ({ ok: true }), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
     adapterValidationCandidate);
@@ -56,6 +56,25 @@ test("the maintainer candidate does not grant production verification or bypass 
     await assert.rejects(client.submit("", { model: base.id, capability: "video", recipe: comfyUiRecipeIdentity(candidate),
       params: { adapters: selections } }), /authorization is unavailable/);
   } finally { client.dispose(); }
+});
+
+test("all fourteen owner approvals preserve actual coverage and the base recipe guards", () => {
+  const base = comfyUiRecipeById("comfyui-h3-video")!;
+  const outcomes: Record<string, number> = {};
+  for (const release of HEARMEMAN_ADAPTERS) {
+    const pair = release.compatibility.find(row => row.recipeId === base.id)!;
+    assert.equal(pair.state, "owner-approved");
+    const coverage = pair.ownerApproval!.generation;
+    outcomes[coverage] = (outcomes[coverage] ?? 0) + 1;
+    const selected = [{ releaseId: release.id, sha256: release.source.sha256, strength: 1 }];
+    const composed = recipeWithAdapters(base, selected);
+    assert.deepEqual(composed.hardware, base.hardware);
+    assert.deepEqual(composed.engine, base.engine);
+    assert.throws(() => recipeWithAdapters(base, [{ ...selected[0], strength: 0.5 }]), /strength/);
+    assert.throws(() => recipeWithAdapters(comfyUiRecipeById("comfyui-h3-video-768")!, selected), /validation/);
+    assert.throws(() => recipeWithAdapters(comfyUiRecipeById("comfyui-h3-reference-video")!, selected), /validation/);
+  }
+  assert.deepEqual(outcomes, { completed: 10, "memory-blocked": 2, "not-run": 2 });
 });
 
 test("adapter transport follows the engine's filename spelling and rejects missing or unrelated paths", async () => {
