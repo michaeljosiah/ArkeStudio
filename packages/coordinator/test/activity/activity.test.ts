@@ -540,10 +540,22 @@ describe("spend honesty (R-8, R-10, R-12, D8, D9, §3.2)", () => {
 });
 
 describe("registry attention counts (R-7, T-5, T-6)", () => {
+  // The counts live only in the app index; without it the provider degrades to direct scans by
+  // design (SPEC-003 R-4) and records nothing. An unloadable better-sqlite3 binding — a skipped
+  // install script, or a copy built for another ABI — therefore surfaced here as "attention
+  // missing", which reads as a registry regression. Name the real cause instead.
+  const requireAppIndex = (provider: FsWorldProvider): void => {
+    assert.ok(
+      provider.getAppIndex(),
+      "the app index did not open — check that better-sqlite3 loads under this Node (npm rebuild better-sqlite3)",
+    );
+  };
+
   it("a world passing through records its counts with an as-of stamp", async () => {
     const { root } = await makeTempRoot();
     const provider = new FsWorldProvider(root, {});
     await provider.ensureAppRoot();
+    requireAppIndex(provider);
     const worlds = await provider.listWorlds();
     const target = worlds.find((w) => w.slug === "the-undersong");
     assert.ok(target);
@@ -572,6 +584,7 @@ describe("registry attention counts (R-7, T-5, T-6)", () => {
 
     const provider = new FsWorldProvider(root, {});
     await provider.ensureAppRoot();
+    requireAppIndex(provider);
     const target = (await provider.listWorlds()).find((world) => world.slug === "the-undersong")!;
     await provider.loadWorld(target.worldId);
     await provider.close();
