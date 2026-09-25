@@ -1,6 +1,7 @@
-import { AdapterSelectionsSchema, adapterCompatibilityProblem, compareComfyUiVersions, type AdapterRelease } from "@arke-studio/contracts";
+import { AdapterSelectionsSchema, adapterCombinationProblem, adapterCompatibilityProblem, compareComfyUiVersions, type AdapterRelease } from "@arke-studio/contracts";
 import type { ComfyUiRecipe } from "./recipes.js";
 import { HEARMEMAN_ADAPTERS } from "./hearmeman.generated.js";
+import { H3_ADAPTER_BUNDLES } from "./adapter-bundles.js";
 
 /** Only a catalogue release can extend the authored graph; callers supply no paths or nodes. */
 export function recipeWithAdapters(base: ComfyUiRecipe, input: unknown, catalogue: readonly AdapterRelease[] = HEARMEMAN_ADAPTERS): ComfyUiRecipe {
@@ -35,7 +36,8 @@ export function adapterValidationCandidate(base: ComfyUiRecipe, input: unknown, 
   const selected = AdapterSelectionsSchema.parse(input ?? []);
   if (!selected.length) return base;
   if (!base.adapterSlot) throw new Error("This recipe does not accept adapters.");
-  if (selected.length > 1) throw new Error("Adapter combinations have not completed validation.");
+  const combinationProblem = adapterCombinationProblem(selected, base.id, H3_ADAPTER_BUNDLES);
+  if (combinationProblem) throw new Error(combinationProblem);
   const recipe = structuredClone(base), slot = recipe.adapterSlot!;
   recipe.adapters = selected;
   let previous = recipe.graph[slot[0]]?.inputs[slot[1]];

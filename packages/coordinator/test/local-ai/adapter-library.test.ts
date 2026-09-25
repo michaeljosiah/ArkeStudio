@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AdapterReleaseSchema, type AdapterDecision } from "@arke-studio/contracts";
+import { AdapterReleaseSchema, type AdapterBundle, type AdapterDecision } from "@arke-studio/contracts";
 import { AdapterLibrary, type AdapterComplianceClient } from "../../src/local-ai/adapter-library.js";
 
 const bytes = Buffer.from("neutral adapter test fixture");
@@ -18,6 +18,39 @@ const release = AdapterReleaseSchema.parse({ id: "test-release", adapterId: "tes
 const selection = [{ releaseId: release.id, sha256: sha, strength: 0.5 }];
 const acknowledgement = { adultAge: true, explicitChoice: true, rightsAndConsent: true } as const;
 const allowed = (): AdapterDecision => ({ sha256: sha, decision: "allowed", reason: "Fixture approval", policyRevision: "test-1", assessedAt: new Date().toISOString() });
+
+test("bundle admission checks every member's bytes and policy and rejects altered or unknown combinations", async t => {
+  const f = await fixture(t);
+  const otherBytes = Buffer.from("a different neutral fixture");
+  const otherSha = createHash("sha256").update(otherBytes).digest("hex");
+  const other = { ...release, id: "second-release", source: { ...release.source, sha256: otherSha, bytes: otherBytes.length } };
+  const members = [...selection, { releaseId: other.id, sha256: otherSha, strength: 0.5 }];
+  const bundle: AdapterBundle = { id: "fixture-bundle", displayName: "Fixture bundle", recipeId: "test-recipe", status: "experimental", description: "Not tested", selections: members };
+  const bundled = new AdapterLibrary({ ...f.options, releases: [release, other], bundles: [bundle], scanner: {
+    assess: async () => [allowed(), { ...allowed(), sha256: otherSha }],
+  } });
+  t.after(() => bundled.dispose());
+  assert.deepEqual((await bundled.snapshot()).bundles, []);
+  await bundled.handle({ action: "enable", acknowledgement });
+  await bundled.handle({ action: "scan" });
+  assert.deepEqual((await bundled.snapshot()).bundles, [bundle]);
+  await writeFile(f.file, bytes);
+  const otherFile = join(f.root, "models", "loras", "arke", `${otherSha}.safetensors`);
+  await assert.rejects(bundled.guard("test-recipe", members), /not installed/);
+  await writeFile(otherFile, otherBytes);
+  await bundled.guard("test-recipe", members, true);
+  await assert.rejects(bundled.guard("test-recipe", [...members].reverse()), /bundle/);
+  await assert.rejects(f.library.guard("test-recipe", members), /bundle/);
+  await writeFile(otherFile, Buffer.alloc(otherBytes.length));
+  await assert.rejects(bundled.guard("test-recipe", members, true), /checksum/);
+  await writeFile(otherFile, otherBytes);
+  await bundled.handle({ action: "disable", releaseId: other.id });
+  await assert.rejects(bundled.guard("test-recipe", members, true), /Disabled/);
+  assert.ok(f.revocations.includes(otherSha));
+  await bundled.handle({ action: "disable-content" });
+  assert.deepEqual((await bundled.snapshot()).bundles, []);
+  await assert.rejects(bundled.guard("test-recipe", members), /off/);
+});
 
 async function fixture(t: { after(fn: () => Promise<void>): void }, scanner: AdapterComplianceClient = { assess: async () => [allowed()] }) {
   const root = await mkdtemp(join(tmpdir(), "arke-adapter-"));

@@ -1,7 +1,7 @@
 import { ProductionCreationService } from "./application/production-creation.js";
 import { AdapterLibrary, adapterSetupEntries, type AdapterComplianceClient } from "./local-ai/adapter-library.js";
 import { adapterMediaVisible } from "./local-ai/adapter-media.js";
-import { HEARMEMAN_ADAPTERS, COMFYUI_RECIPES, recipeWithAdapters, comfyUiRecipeById, comfyUiRecipeIdentity } from "@arke-studio/providers";
+import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdapters, comfyUiRecipeById, comfyUiRecipeIdentity } from "@arke-studio/providers";
 import { ConversationActionService } from "./application/conversation-actions.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
 import { ConversationAuthoringService } from "./application/conversation-authoring.js";
@@ -3008,7 +3008,7 @@ export class Coordinator {
           })
         : null;
     this.adapterLibrary = opts.appRoot ? new AdapterLibrary({
-      appRoot: opts.appRoot, releases: HEARMEMAN_ADAPTERS, scanner: opts.adapterCompliance,
+      appRoot: opts.appRoot, releases: HEARMEMAN_ADAPTERS, bundles: H3_ADAPTER_BUNDLES, scanner: opts.adapterCompliance,
       modelsDir: () => opts.comfyui?.service.modelsDir() ?? null,
       local: () => opts.comfyui?.service.engineIdentity()?.locality === "local",
       install: async (ids) => {

@@ -68,7 +68,8 @@ appearing at the destination during transfer is not overwritten. Generic Downloa
 pass the same policy boundary; permission is rechecked before transfer and publication.
 
 A selection extends a shipped H3 recipe only at its declared model slot. No selection returns
-the original recipe unchanged. Combinations are refused until separately validated. A verified
+the original recipe unchanged. Combinations are refused unless they match a trusted experimental
+bundle exactly. A verified
 pairing requires evidence, bounded strength, engine versions and measured total/free RAM/VRAM.
 An `owner-approved` pairing instead records the acceptance date, actual generation outcome,
 evidence reference and bounded strength. It retains the base recipe's resource/version guards
@@ -106,6 +107,24 @@ Promotion needs exact artifact/base/recipe/node/engine versions, a neutral input
 decoded output, observed RAM/VRAM, strength bounds, reference transport where applicable, and
 cancellation evidence for each pairing. Keep untested/incompatible pairings visible with a
 reason. Windows packaged startup and Linux CI are separate from source-level unit tests.
+
+### Manual bundle experiment
+
+Choose **All MiniMax adult adapters · 14 adapters · Experimental** under the H3 480p model.
+It applies the fourteen pinned releases in catalogue order, at strength **1 each**, as a chain
+of model-only loaders. This is one UI preset, not a merged weight file. Expand **View 14 adapters
+and strengths** to inspect its contents; choose **None** to clear the entire bundle.
+
+The combination has not been GPU-tested. Individual owner approvals do not establish combined
+quality or memory fit. Its member order, hashes and strengths are frozen in the provider bundle
+catalogue. Missing members, different order/strength, additional adapters and other recipes are
+refused. Refreshing publisher inventory never silently changes bundle membership.
+
+Every member must be installed, retain an eligible pairing and have a current allowed compliance
+decision. Adult mode must be on. Disabling or revoking any member blocks the whole combination;
+the host rechecks all members and exact files before submission. The default host's pending
+compliance connection therefore still blocks dispatch. No GPU jobs are started by selecting a
+bundle, and this change does not resume the stopped GPU batch or the deferred speed comparison.
 
 ### Maintainer GPU checks
 

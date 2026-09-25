@@ -49,6 +49,7 @@ export { WhisperCppClient, type WhisperTranscribe } from "./clients/whispercpp.j
 export { jsonRequest, tryProbe } from "./clients/http.js";
 export { requireModel, SHIPPED_MANIFEST } from "./manifest-data.js";
 export { HEARMEMAN_ADAPTERS } from "./comfyui/hearmeman.generated.js";
+export { H3_ADAPTER_BUNDLES } from "./comfyui/adapter-bundles.js";
 export { recipeWithAdapters } from "./comfyui/adapters.js";
 export { createProviderClients, PROVIDER_DECLARATIONS, type ProviderClientDeps } from "./registry.js";
 export {
