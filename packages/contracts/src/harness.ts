@@ -92,6 +92,12 @@ export interface LocalHarnessModel {
   readonly tools: boolean;
   /** Whether the runtime says the model reads images. */
   readonly vision: boolean;
+  /**
+   * The capabilities above were assumed, not read: the model's show failed or was cut off by
+   * the listing deadline. Offered for choosing, never chosen unattended — nothing says it
+   * completes, let alone calls tools.
+   */
+  readonly assumed?: true;
 }
 
 /**

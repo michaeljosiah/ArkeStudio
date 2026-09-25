@@ -7,7 +7,7 @@ import type { HarnessAdapter, SessionConfigInput } from "@arke-studio/contracts"
  */
 export function withModelValidation(
   adapter: HarnessAdapter,
-  validate: (reference: string, needsImages: boolean) => Promise<{ reason?: string }>,
+  validate: (reference: string, needsImages: boolean, signal?: AbortSignal) => Promise<{ reason?: string }>,
 ): HarnessAdapter {
   const preparations = new Map<string, SessionConfigInput>();
   const overrides: Partial<HarnessAdapter> = {
@@ -35,7 +35,9 @@ export function withModelValidation(
         input.signal?.throwIfAborted();
         const model = config?.model ?? config?.agents?.[input.agent ?? "sheet-editor"]?.model;
         if (model !== undefined) {
-          const result = await validate(model, input.agent === "stage-designer");
+          // The creation's own signal reaches the check (issue 1247): the catalogue it reads
+          // may be discovery still under way, and a stopped creation must not wait it out.
+          const result = await validate(model, input.agent === "stage-designer", input.signal);
           input.signal?.throwIfAborted();
           if (result.reason) throw new Error(result.reason);
         }

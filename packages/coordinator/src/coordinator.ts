@@ -92,6 +92,8 @@ import {
   estimateMicroUsd,
   modelEligible,
   modelForCapability,
+  harnessModelReference,
+  ROSTER,
   gateLocalRuntimes,
   type EngineLocalities,
   PROVIDERS,
@@ -1043,6 +1045,35 @@ export class Coordinator {
   private localRuntimeProbeInFlight = false;
   /** The local models last handed to the harness, so an unchanged poll rewrites nothing (issue 1247). Null: never published. */
   private publishedLocalHarnessModels: string | null = null;
+  /** The rows behind that fingerprint, for checking a later catalogue read against them. */
+  private publishedLocalHarnessRows: readonly import("@arke-studio/contracts").LocalHarnessModel[] = [];
+  /** Whether any cloud language-model key is stored, read with the harness environment (issue 1247). */
+  private cloudLlmKeyStored = false;
+  /**
+   * Resolves once the harness catalogue has been fetched for the first time, or once it is
+   * known it will not be (issue 1247). What a keyless session waits on before it is built.
+   */
+  private catalogueSettled: Promise<void> = Promise.resolve();
+  private settleCatalogue: () => void = () => {};
+  private catalogueGateOpen = false;
+  /**
+   * Whether the last completed catalogue read succeeded (issue 1247). The published status is
+   * transient — a refresh in flight shows `loading` with the old rows still on display — so the
+   * decision reads the last outcome rather than the moment.
+   */
+  private catalogueReadOk = false;
+  /**
+   * Whether what Ollama last listed is what the harness catalogue now carries (issue 1247). A
+   * runtime that has not started answering yet and one with nothing pulled both publish no
+   * rows; only the second is a machine with no local model, and a keyless session is not
+   * decided on the first. False again from a changed listing until the fetch that follows its
+   * publication: in between, the catalogue on display describes the old rows.
+   */
+  private localRuntimeListed = false;
+  /** Resolves once the harness's sign-in state has been read for the first time, or once it is known it will not be. */
+  private vendorAuthSettled: Promise<void> = Promise.resolve();
+  private settleVendorAuth: () => void = () => {};
+  private vendorAuthGateOpen = false;
   private comfyUiSetupWork: Promise<void> = Promise.resolve();
   private comfyUiLifecycleWork: Promise<void> = Promise.resolve();
   /** actionClass per pending permission id, for remember-on-always (R-16). */
@@ -2173,15 +2204,25 @@ export class Coordinator {
   private modelCatalogValue: HarnessModelCatalog | undefined;
   private get modelCatalog(): HarnessModelCatalog {
     return this.modelCatalogValue ??= new HarnessModelCatalog(this.opts.adapter, (models, status) => {
+      if (status.status === "ready") this.catalogueReadOk = true;
+      else if (status.status === "error") this.catalogueReadOk = false;
       this.readModel.setHarnessModels(models, status);
       if (this.started && !this.stopping) this.transport.broadcastSnapshot();
     });
   }
 
-  private async validateLanguageModel(modelId: string, needsImages = false): Promise<LanguageModelSelection> {
+  private async validateLanguageModel(modelId: string, needsImages = false, signal?: AbortSignal): Promise<LanguageModelSelection> {
+    // The catalogue read may be discovery still under way; a request stopped meanwhile is
+    // answered with its stop, not held to the read's own bound.
+    const stopped = signal === undefined ? null : new Promise<never>((_, reject) => {
+      if (signal.aborted) reject(signal.reason);
+      else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
     try {
-      return selectHarnessModel(modelId, await this.modelCatalog.get(), this.readModel.getState().app, needsImages);
-    } catch {
+      const models = stopped === null ? await this.modelCatalog.get() : await Promise.race([this.modelCatalog.get(), stopped]);
+      return selectHarnessModel(modelId, models, this.readModel.getState().app, needsImages);
+    } catch (error) {
+      if (signal?.aborted) return { modelId, reason: describeCoordinatorError(error) };
       return { modelId, reason: "The running harness's models could not be verified. Retry models in Settings → Harness → Advanced or the production's Develop conversation." };
     }
   }
@@ -2191,6 +2232,7 @@ export class Coordinator {
     context: WorldChatContext | undefined,
     requestedId?: string,
     agent = "world-builder",
+    signal?: AbortSignal,
   ): Promise<LanguageModelSelection> {
     const productionId = context && "productionId" in context ? context.productionId : undefined;
     if (requestedId !== undefined && productionId === undefined && context?.kind !== "production-setup") {
@@ -2201,8 +2243,17 @@ export class Coordinator {
       ?.getBundle()
       .productions.find((candidate) => candidate.meta.id === productionId);
     const modelId = requestedId ?? this.agentOverrides?.[agent]?.model ?? production?.meta.models?.llm;
-    if (modelId === undefined) return {};
-    return this.validateLanguageModel(modelId, agent === "stage-designer");
+    if (modelId !== undefined) return this.validateLanguageModel(modelId, agent === "stage-designer", signal);
+    // Nothing chosen: the local default, where there is one (issue 1247). Stage needs a model
+    // that reads images, and refuses before its session is built when none is chosen — so it
+    // is decided here, where the refusal is, rather than left to the session builder.
+    if (!this.cloudCredentialAvailable()) {
+      try { await this.localDefaultGate(signal); } catch (error) { return { reason: describeCoordinatorError(error) }; }
+    }
+    const local = this.localHarnessDefault(agent === "stage-designer");
+    if (local !== undefined) return this.validateLanguageModel(local, agent === "stage-designer", signal);
+    const refusal = this.keylessSessionRefusal(agent === "stage-designer");
+    return refusal === null ? {} : { reason: refusal };
   }
   /** Per-agent model and brief overrides, as last read from settings. */
   private agentOverrides: Record<string, { model?: string; brief?: string }> | undefined;
@@ -2326,6 +2377,11 @@ export class Coordinator {
   private readonly localGpu: LocalGpu;
 
   constructor(private readonly opts: CoordinatorOptions) {
+    this.armCatalogueGate();
+    this.armVendorAuthGate();
+    // No harness, no catalogue and no sign-in state: nothing to wait for. A harness that never
+    // comes up settles both from its failure paths below, and a session on it fails at creation.
+    if (!opts.adapter) this.settleHarnessGates();
     this.localGpu = new LocalGpu(async (engine, signal) => {
       if (engine === "ComfyUI" && opts.comfyui?.service.engineIdentity()?.locality !== "local") return;
       await opts.dispatchClients?.[engine === "Ollama" ? "ollama" : "comfyui"]?.unload?.(signal);
@@ -2333,7 +2389,7 @@ export class Coordinator {
     });
     if (opts.adapter) opts.adapter = withModelValidation(
       withLocalGpu(opts.adapter, this.localGpu, () => { void this.refreshLocalResidency(); }),
-      (reference, needsImages) => this.validateLanguageModel(reference, needsImages),
+      (reference, needsImages, signal) => this.validateLanguageModel(reference, needsImages, signal),
     );
     const storage = opts.storage ?? createStudioStorage(opts);
     this.secrets = storage.secrets;
@@ -2828,9 +2884,10 @@ export class Coordinator {
     // Every session config goes through here, so a per-agent override reaches genesis,
     // authoring, extraction and ask alike — or none of them. Read at build time rather than
     // captured, so changing a model in Settings applies to the next session, not the next run.
-    this.sessionInput = (input) => ({
+    this.sessionInput = async (input) => ({
       ...input,
-      ...(this.agentOverrides ? { agents: this.agentOverrides } : {}),
+      // Chosen for the session, or for its agent in Settings: either way it runs on something.
+      ...(await this.sessionAgents(input.model !== undefined || (input.agent !== undefined && this.agentOverrides?.[input.agent]?.model !== undefined))),
       ...(this.skillFamily !== undefined ? { skillFamily: this.skillFamily } : {}),
       // The model too, or a narrowed skill is recorded and never actually injected.
       ...(this.skillModelId !== undefined ? { skillModelId: this.skillModelId } : {}),
@@ -3223,17 +3280,28 @@ export class Coordinator {
    * contained: an unreadable key or a relaunch error leaves readiness to say what the
    * harness can actually do, and the other children unaffected.
    */
+  /**
+   * The stored cloud language-model keys, and with them the flag the session builder asks
+   * (issue 1247). Awaited by the commands that store or clear a key before they report done,
+   * so the next session sees the change rather than the queued harness relaunch's later read.
+   */
+  private async readCloudLlmKeys(): Promise<Record<string, string | undefined>> {
+    const credentials: Record<string, string | undefined> = {};
+    for (const provider of LLM_ENV_PROVIDERS) {
+      try {
+        credentials[provider] = (await this.credentials?.get(provider)) ?? undefined;
+      } catch {
+        /* one unreadable key must not cost the other its delivery */
+      }
+    }
+    this.cloudLlmKeyStored = LLM_ENV_PROVIDERS.some((provider) => Boolean(credentials[provider]));
+    return credentials;
+  }
+
   private refreshHarnessEnv(): Promise<void> {
     const run = async (): Promise<void> => {
+      const credentials = await this.readCloudLlmKeys();
       if (!this.opts.relaunchHarness || !this.credentials) return;
-      const credentials: Record<string, string | undefined> = {};
-      for (const provider of LLM_ENV_PROVIDERS) {
-        try {
-          credentials[provider] = (await this.credentials.get(provider)) ?? undefined;
-        } catch {
-          /* one unreadable key must not cost the other its delivery */
-        }
-      }
       try {
         await this.opts.relaunchHarness(credentials);
         this.modelCatalogValue?.invalidate();
@@ -3254,6 +3322,17 @@ export class Coordinator {
     supervisor.on("status", ({ status, reason }: { status: SupervisorStatus; reason?: string }) => {
       // A healthy harness process is probed before it counts (SPEC-005 R-2): the adapter asks
       // /doc what the server can do, and an under-capable one stays unavailable with a reason.
+      // The same gates for a supervised harness whose adapter has nothing to initialise, and
+      // for one that will not come up at all (issue 1247).
+      if (component === "harness" && status === "healthy" && this.opts.adapter && !this.opts.adapter.init) {
+        if (this.opts.adapter.readiness().ready) this.warmHarnessGates(); else this.settleHarnessGates();
+      }
+      // `unhealthy` too: an exit inside the restart budget is a lifecycle ending, and the
+      // gates it settles are what the replacement re-arms — otherwise a read of the old
+      // child could outlive the restart and settle the new one's gate.
+      if (component === "harness" && (status === "failed" || status === "stopped" || status === "unconfigured" || status === "unhealthy")) {
+        this.settleHarnessGates();
+      }
       if (component === "harness" && status === "healthy" && this.opts.adapter?.init) {
         const adapter = this.opts.adapter;
         void adapter.init!()
@@ -3261,6 +3340,10 @@ export class Coordinator {
             if (this.stopping) return;
             this.modelCatalogValue?.invalidate();
             const readiness = adapter.readiness();
+            // Fetched now rather than on first use: the local default below reads the
+            // catalogue synchronously when a session is built, and a session that opens
+            // before anyone has looked at a picker would otherwise see an empty one.
+            if (readiness.ready) this.warmHarnessGates(); else this.settleHarnessGates();
             this.emit({
               at: new Date().toISOString(),
               type: "health.changed",
@@ -3270,11 +3353,11 @@ export class Coordinator {
                 ? {}
                 : { reason: readiness.reason ?? "the harness is missing a required capability" }),
             });
-            // Seed the sign-in surface once the harness answers (SPEC-030 §3.1 step 10) —
+            // The sign-in surface is seeded by warmHarnessGates above (SPEC-030 §3.1 step 10) —
             // patient, because the integration catalog populates a few seconds after spawn.
-            if (readiness.ready) void this.vendorAuth.refresh({ patient: true }).catch(() => {});
           })
           .catch((err: unknown) => {
+            this.settleHarnessGates();
             this.emit({
               at: new Date().toISOString(),
               type: "health.changed",
@@ -3475,13 +3558,20 @@ export class Coordinator {
         this.modelCatalogValue?.invalidate();
         this.emit({ at: this.nowIso(), type: "health.changed", component: "harness",
           status: ready.ready ? "healthy" : "unavailable", ...(ready.reason ? { reason: ready.reason } : {}) });
-        if (ready.ready && this.modelCatalogValue) this.trackBackground(this.modelCatalogValue.get().catch(() => {}));
-        if (ready.ready) void this.vendorAuth.refresh({ patient: true }).catch(() => {});
+        // Warmed whether or not a picker has asked yet: the local default reads it at session
+        // build time (issue 1247), and the first session of a run must see what is installed.
+        if (ready.ready) this.warmHarnessGates(); else this.settleHarnessGates();
       }).catch((error: unknown) => {
+        this.settleHarnessGates();
         if (this.stopping) return;
         this.emit({ at: this.nowIso(), type: "health.changed", component: "harness", status: "unavailable",
           reason: `Harness startup failed: ${describeCoordinatorError(error)}` });
       }));
+    }
+    if (this.opts.adapter && !this.opts.adapter.init && !this.supervisors.has("harness")) {
+      // An adapter with nothing to initialise is as ready as it will be: the catalogue gate
+      // (issue 1247) is settled here, since neither startup path above will reach it.
+      if (this.opts.adapter.readiness().ready) this.warmHarnessGates(); else this.settleHarnessGates();
     }
     if (this.opts.adapter && !this.supervisors.has("harness")) {
       // Own-process failures do not travel through ChildSupervisor. Reflect them even when
@@ -3504,13 +3594,14 @@ export class Coordinator {
           previousReadiness = { ...readiness };
           this.emit({ at: this.nowIso(), type: "health.changed", component: "harness", status,
             ...(readiness.reason ? { reason: readiness.reason } : {}) });
-          if (!readiness.ready) this.modelCatalogValue?.invalidate();
+          // Not ready is a lifecycle ending here as it is under a supervisor (issue 1247): the
+          // gates settle, and the return below re-arms them.
+          if (!readiness.ready) { this.modelCatalogValue?.invalidate(); this.settleHarnessGates(); }
         }
         // Mounted pickers may observe healthy → healthy across a restart. Refresh the catalog
-        // here, where that lifecycle is known, rather than waiting for another UI command.
-        if (readiness.ready && this.modelCatalogValue && (revisionChanged || readinessChanged)) {
-          this.trackBackground(this.modelCatalogValue.get().catch(() => {}));
-        }
+        // here, where that lifecycle is known, rather than waiting for another UI command —
+        // through the gates, so a keyless session on the returned adapter waits for its reads.
+        if (readiness.ready && (revisionChanged || readinessChanged)) this.warmHarnessGates();
       }, 1_000);
       healthTimer.unref();
       this.lifecycleTimers.add(healthTimer);
@@ -3946,6 +4037,9 @@ export class Coordinator {
         ...local.map((id) => this.providerService.validate(id).catch(() => {})),
         this.refreshLocalResidency(),
         this.publishLocalHarnessModels(),
+        // A sign-in surface whose last read faulted is asked again here (issue 1247): a keyless
+        // session is refused while it is unread, and nothing else would read it again.
+        this.vendorAuthUnread() ? this.refreshVendorAuthTracked() : Promise.resolve(),
       ]);
     } finally {
       this.localRuntimeProbeInFlight = false;
@@ -3987,29 +4081,309 @@ export class Coordinator {
     publish: (models: readonly import("@arke-studio/contracts").LocalHarnessModel[]) => Promise<void>,
     list: () => Promise<readonly import("@arke-studio/contracts").LocalHarnessModel[]>,
   ): Promise<void> {
-    const models = await list().catch(() => []);
+    // Not answering is published as nothing pulled — a stale row validates in the picker and
+    // fails on the turn — but remembered apart from it, for the keyless decision below.
+    let models: readonly import("@arke-studio/contracts").LocalHarnessModel[] = [];
+    let listed = true;
+    try {
+      models = await list();
+    } catch {
+      listed = false;
+    }
     const fingerprint = JSON.stringify(models);
-    if (this.stopping || fingerprint === this.publishedLocalHarnessModels) return;
+    if (this.stopping) return;
+    if (fingerprint === this.publishedLocalHarnessModels) {
+      // The catalogue already carries this listing, or the fetch that will is scheduled — unless
+      // that fetch failed, or read the catalogue before the harness had reloaded the profile
+      // (three seconds measured, not promised). Nothing else asks again, and a keyless session
+      // would stay refused past the harness's recovery: asked again on this cadence until the
+      // rows it was handed are the rows it lists.
+      if (this.catalogueReadOk && this.catalogueCarries(models)) { this.localRuntimeListed = listed; return; }
+      this.modelCatalog.invalidate();
+      this.warmModelCatalog(false, () => { this.localRuntimeListed = listed && this.catalogueCarries(models); });
+      return;
+    }
+    // Pending until the catalogue carries the new rows: a session decided in between would read
+    // the old catalogue as the answer, and go unmodelled to the cloud default on it.
+    this.localRuntimeListed = false;
     try {
       await publish(models);
     } catch (error) {
-      // Left unpublished on purpose: the next tick tries again with whatever is true then.
+      // Left unpublished on purpose: the next tick tries again with whatever is true then —
+      // and a keyless session stops waiting, since nothing better is coming before that.
       void this.appLog?.append({ kind: "harness.local-models-unpublished", message: error instanceof Error ? error.message : String(error) });
+      this.settleCatalogue();
       return;
     }
     this.publishedLocalHarnessModels = fingerprint;
+    this.publishedLocalHarnessRows = models;
     // Shutdown may have started during the write; nothing is scheduled past it.
-    if (this.stopping) return;
+    if (this.stopping) { this.settleCatalogue(); return; }
     const timer = setTimeout(() => {
       this.lifecycleTimers.delete(timer);
-      if (this.stopping) return;
+      if (this.stopping) { this.settleCatalogue(); return; }
       this.modelCatalog.invalidate();
-      const work = this.modelCatalog.get(true).catch(() => {});
-      this.backgroundWork.add(work);
-      void work.finally(() => this.backgroundWork.delete(work));
+      // The fetch a keyless session waits on: the first one that can carry the local rows.
+      // Carried only once the fetch lists what was published: a read that beat the reload is
+      // a successful read of the old rows, and the probe above asks again.
+      this.warmModelCatalog(true, () => { this.localRuntimeListed = listed && this.catalogueCarries(models); });
     }, 5_000);
     timer.unref?.();
     this.lifecycleTimers.add(timer);
+  }
+
+  /**
+   * Fetch and publish the harness catalogue now, tracked so stop() waits it out. `settles`
+   * says whether this fetch is the one a keyless session may wait on: the fetch that follows
+   * the first local-model publication is, because only then does the catalogue carry the
+   * local rows; the fetch at harness-ready is only when nothing local will ever be published.
+   * Settled on failure too: a catalogue that cannot be read is an answer, and a session
+   * waiting on it is refused with that reason rather than built on silence.
+   */
+  private warmModelCatalog(settles: boolean, then?: () => void): void {
+    // The gate as it is now: a harness that fails and returns while this fetch is out re-arms
+    // the gate, and this fetch's answer belongs to the lifecycle that asked, not the new one.
+    const settle = this.settleCatalogue;
+    const work = this.modelCatalog.get(true).catch(() => {});
+    this.backgroundWork.add(work);
+    void work.finally(() => {
+      this.backgroundWork.delete(work);
+      then?.();
+      if (settles) settle();
+    });
+  }
+
+  /**
+   * Whether the local rows in the harness catalogue are exactly the models handed to it (issue
+   * 1247). Exactly: a row for a model that was deleted is as stale as a missing row for one
+   * that was pulled, and a default chosen from it would name a model that is not there.
+   */
+  private catalogueCarries(published: readonly import("@arke-studio/contracts").LocalHarnessModel[]): boolean {
+    const rows = new Map(this.readModel.getState().app.harnessModels.filter((model) => model.provider === "ollama").map((model) => [model.id, model]));
+    if (rows.size !== published.length) return false;
+    return published.every((model) => {
+      const row = rows.get(model.id);
+      if (!row) return false;
+      // A re-pulled tag keeps its id and may change what it can do; the row must say what
+      // was written, where it says anything. Tools and images are written as stated and
+      // read back as stated; the context length is not compared, because the harness
+      // derives its own input limit from it rather than echoing it.
+      if (row.tools !== undefined && row.tools !== model.tools) return false;
+      if (row.inputModalities !== undefined && row.inputModalities.includes("image") !== model.vision) return false;
+      return true;
+    });
+  }
+
+  /** Whether a local-model publication will happen at all: both the writer and the runtime client are wired. */
+  private localModelsPublishable(): boolean {
+    return this.opts.publishLocalHarnessModels !== undefined && this.opts.dispatchClients?.["ollama"]?.listModels !== undefined;
+  }
+
+  /** The harness is up: fetch what a keyless session needs before it is built (issue 1247). */
+  private warmHarnessGates(): void {
+    // A harness coming back after a failure re-opens what that failure settled: the sign-in
+    // state on display is still "not started", and a session deciding on it would pin local
+    // past a connected account. The catalogue gate re-opens the same way; on that return the
+    // ready-time fetch settles it when the profile already carries the local rows, since no
+    // publication follows an unchanged listing.
+    const returning = !this.catalogueGateOpen || !this.vendorAuthGateOpen;
+    if (!this.catalogueGateOpen) this.armCatalogueGate();
+    if (!this.vendorAuthGateOpen) this.armVendorAuthGate();
+    const recovering = returning && this.publishedLocalHarnessModels !== null;
+    // The returned harness's catalogue is checked against the rows it was handed like any
+    // post-publication read: its first answer may still be the old one, and what the previous
+    // lifecycle had confirmed says nothing about this one. Until it carries them, the probe
+    // keeps asking, and a keyless session is refused rather than run on a cloud-only read.
+    // The same for the sign-in state: the rows on display are the old lifecycle's until this
+    // one's read lands, and a decision in between must wait for it rather than trust them.
+    if (recovering) this.localRuntimeListed = false;
+    if (returning) this.vendorAuth.markStale();
+    // A re-armed gate is settled by this fetch whenever no publication will: after a first
+    // publication that failed, the next one is a probe tick away, and a session in between is
+    // refused for the rows being unpublished rather than held past its creation timeout.
+    this.warmModelCatalog(!this.localModelsPublishable() || returning, recovering
+      ? () => { this.localRuntimeListed = this.catalogueCarries(this.publishedLocalHarnessRows); }
+      : undefined);
+    const settleVendorAuth = this.settleVendorAuth;
+    void this.refreshVendorAuthTracked({ patient: true }).finally(() => settleVendorAuth());
+  }
+
+  /** A sign-in read stop() waits out, rather than one that publishes into a closed coordinator. */
+  private refreshVendorAuthTracked(opts: { patient?: boolean } = {}): Promise<void> {
+    const work = this.vendorAuth.refresh(opts).catch(() => {});
+    this.backgroundWork.add(work);
+    void work.finally(() => this.backgroundWork.delete(work));
+    return work;
+  }
+
+  private armCatalogueGate(): void {
+    this.catalogueGateOpen = true;
+    this.catalogueSettled = new Promise<void>((resolve) => {
+      this.settleCatalogue = () => { this.catalogueGateOpen = false; resolve(); };
+    });
+  }
+
+  private armVendorAuthGate(): void {
+    this.vendorAuthGateOpen = true;
+    this.vendorAuthSettled = new Promise<void>((resolve) => {
+      this.settleVendorAuth = () => { this.vendorAuthGateOpen = false; resolve(); };
+    });
+  }
+
+  /** The harness will not be up: nothing more is coming for a keyless session to wait on. */
+  private settleHarnessGates(): void {
+    this.settleCatalogue();
+    this.settleVendorAuth();
+  }
+
+  /** What a keyless session waits on before it is built: the catalogue after the local rows, and the sign-in state. */
+  private localDefaultGate(signal?: AbortSignal): Promise<void> {
+    const settled = Promise.all([this.catalogueSettled, this.vendorAuthSettled]).then(() => undefined);
+    if (!signal) return settled;
+    // A request stopped while waiting is not built when discovery settles.
+    return Promise.race([settled, new Promise<never>((_, reject) => {
+      if (signal.aborted) reject(signal.reason);
+      else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    })]);
+  }
+
+  /**
+   * The per-agent settings a session is built with. A Settings override is the agent's own;
+   * the local default (above) fills only the agents left without one, so it sits beneath a
+   * dispatch choice and beneath every override — the same order the config writer keeps —
+   * rather than replacing any of them.
+   */
+  private async sessionAgents(chosen = false): Promise<{ agents?: Record<string, { model?: string; brief?: string }> }> {
+    // A keyless session waits for the catalogue's first fetch rather than reading it empty:
+    // measured or not, an empty read here meant the first session of a run going to the cloud
+    // default — the one outcome this default exists to prevent. A session whose model is
+    // already chosen has nothing to wait for: it runs on that model whatever discovery says.
+    if (!chosen && !this.cloudCredentialAvailable()) await this.localDefaultGate();
+    if (this.stopping) throw new Error("Arke Studio is shutting down.");
+    const local = this.localHarnessDefault();
+    if (local === undefined) {
+      // A session whose model was chosen — by the dispatch, validated before this — runs on
+      // that model; the refusal is for a session that would otherwise run on nothing chosen.
+      const refusal = chosen ? null : this.keylessSessionRefusal();
+      if (refusal !== null) throw new Error(refusal);
+      return this.agentOverrides ? { agents: this.agentOverrides } : {};
+    }
+    const agents: Record<string, { model?: string; brief?: string }> = { ...this.agentOverrides };
+    // The roster as it will run: a host's, when it supplies one, since its agents are the ones
+    // a session can actually be built for.
+    for (const member of this.opts.authoring?.roster ?? ROSTER) {
+      const override = agents[member.name];
+      if (override?.model !== undefined) continue;
+      // Stage reads images; it takes the first local model that can, or none, the same
+      // admission its own override would be held to.
+      const model = member.name === "stage-designer" ? this.localHarnessDefault(true) : local;
+      if (model !== undefined) agents[member.name] = { ...override, model };
+    }
+    return { agents };
+  }
+
+  /**
+   * The model a session runs on when nobody chose one and there is no cloud key to run on
+   * (issue 1247): the local runtime's, so the first session on a fresh install writes rather
+   * than fails on a cloud model nothing can pay for.
+   *
+   * Undefined whenever a cloud key is stored — the harness's own default stands then, as it
+   * always has — and whenever the catalogue lists nothing local. Of what it lists, the first
+   * local row that passes the same admission check an explicit choice would: Ollama lists the
+   * model pulled or used most recently first, and a model the hardware gate refuses is never
+   * chosen quietly. There is no routed text default to prefer — `routing.llm` is retired on
+   * load (see app-settings) — so the person's way to choose is the agent override in Settings,
+   * which sits above this.
+   *
+   * Read synchronously from the published catalogue rather than fetched, because this runs
+   * inside the session builder; the catalogue is warmed when the harness comes up and after
+   * every local-model publication for exactly that reason.
+   */
+  /**
+   * Whether anything cloud could answer a session: a stored key, or an account connected
+   * through the harness's own sign-in (SPEC-030), which lives in the harness rather than in
+   * the credential store and so is read from the published sign-in state.
+   */
+  private cloudCredentialAvailable(): boolean {
+    // Only the connections the harness keeps itself. An `env` connection is Studio's own key as
+    // the harness sees it, and the store is read at the command — the published row outlives a
+    // cleared key by the length of the relaunch, and a session in that gap must not count it.
+    // Rows kept after a faulted read are last time's, not a credential: the unread refusal
+    // below decides then, not the rows. Nor is a connection the harness has said needs signing
+    // in again (R-13): a session on it fails the same way the last one did.
+    return this.cloudLlmKeyStored ||
+      (!this.vendorAuthUnread() && this.readModel.getState().app.vendorAuth.vendors.some((vendor) =>
+        !vendor.needsSignIn && vendor.connections.some((connection) => connection.kind === "stored")));
+  }
+
+  /**
+   * Why a keyless session with nothing chosen cannot go ahead (issue 1247), or null when it
+   * can. A catalogue that was read and holds nothing local is an answer — the harness default
+   * is what such a machine has always run on — but one that failed to read says nothing about
+   * what is installed, and a session built on that silence would run on the cloud default with
+   * a local model possibly sitting right there. Ollama not answering is the same silence one
+   * step earlier: the rows it would have brought are not in the catalogue to read.
+   */
+  /**
+   * Whether the harness's sign-in state could not be read (issue 1247): the surface exists but
+   * its last read faulted, so the connections on display are last time's, or nobody's.
+   */
+  private vendorAuthUnread(): boolean {
+    // The read's own outcome, not the surface's stated reason: a removal that failed after a
+    // successful read states a fault on a surface that was read. Both halves from the service,
+    // so the answer is one lifecycle's, not a published row's against another's read.
+    return this.vendorAuth.current().available && !this.vendorAuth.readOk;
+  }
+
+  private keylessSessionRefusal(needsImages = false): string | null {
+    if (this.cloudCredentialAvailable()) return null;
+    // Unread is not absent: a connected account pinned local by a faulted read would be the
+    // wrong lane chosen quietly, and this is retried on the runtime probe's cadence.
+    if (this.vendorAuthUnread()) {
+      return "The harness's sign-in state could not be read, and no cloud key is stored, so which model would write is unknown. Retry under Settings → Harness, or add a key.";
+    }
+    // A harness with no catalogue to read is not a failed read: nothing local could be listed
+    // by it, and a session on it runs exactly as it did before there was a local default.
+    const adapter = this.opts.adapter;
+    if (!adapter?.listModels || !adapter.capabilities().has("models")) return null;
+    if (!this.catalogueReadOk) {
+      return "The harness's models could not be read, and no cloud key is stored, so which model would write is unknown. Retry models in Settings → Harness → Advanced, or add a key.";
+    }
+    if (this.localModelsPublishable() && !this.localRuntimeListed) {
+      return "The local models are not available to the harness yet, and no cloud key is stored, so nothing can write. Check that Ollama is running and try again in a moment, or add a key.";
+    }
+    // Local rows the default passed over — switched off, or unable to call tools — are not
+    // nothing local: a session going unmodelled past them would run on the cloud default with
+    // a local runtime right there. Stage refuses on its own when no model reads images.
+    if (!needsImages && this.readModel.getState().app.harnessModels.some((model) => model.provider === "ollama")) {
+      return "None of the local models can write here: each is switched off or cannot call tools, and no cloud key is stored. Pull a model that calls tools, switch one on under AI models, or add a key.";
+    }
+    return null;
+  }
+
+  private localHarnessDefault(needsImages = false): string | undefined {
+    if (this.cloudCredentialAvailable()) return undefined;
+    const app = this.readModel.getState().app;
+    // Rows kept from an earlier read are names, not a catalogue: after a failed refresh they
+    // are not chosen from, and the refusal above says why.
+    if (!this.catalogueReadOk) return undefined;
+    if (this.localModelsPublishable() && !this.localRuntimeListed) return undefined;
+    if (this.vendorAuthUnread()) return undefined;
+    // Every roster agent works through tools — reads, edits, world queries — so a model the
+    // runtime says cannot call them would take the session and fail its first turn. Nor is a
+    // model whose capabilities were assumed rather than read (its show failed) chosen
+    // unattended: nothing says it completes. Explicit choices are still admitted: unknown is
+    // offered, and a stated refusal is one the person can read; a default has no reader.
+    const assumed = new Set(this.publishedLocalHarnessRows.filter((model) => model.assumed).map((model) => model.id));
+    const local = app.harnessModels.filter((model) => model.provider === "ollama" && model.tools !== false && !assumed.has(model.id));
+    // Admission lets an unstated modality through — unknown is offered, not withheld — but a
+    // default is a choice nobody is looking at, so for Stage a model that says it reads images
+    // comes before one that merely does not say it cannot.
+    const ordered = needsImages
+      ? [...local.filter((model) => model.inputModalities?.includes("image")), ...local.filter((model) => !model.inputModalities?.includes("image"))]
+      : local;
+    return ordered.map(harnessModelReference)
+      .find((reference) => selectHarnessModel(reference, app.harnessModels, app, needsImages).reason === undefined);
   }
 
   /**
@@ -7543,6 +7917,7 @@ export class Coordinator {
           // An LLM key change re-delivers the spawn environment, which restarts the harness
           // — the honest cost of rotation (SPEC-005 D5). Media/voice keys leave it alone.
           if ((LLM_ENV_PROVIDERS as readonly string[]).includes(msg.provider)) {
+            await this.readCloudLlmKeys();
             void this.refreshHarnessEnv();
           }
           await fingerprint;
@@ -7567,6 +7942,7 @@ export class Coordinator {
           const fingerprint = this.providerService.setConfigured(msg.provider, false);
           this.emit({ at: new Date().toISOString(), type: "provider.status", providers: this.providerService.list() });
           if ((LLM_ENV_PROVIDERS as readonly string[]).includes(msg.provider)) {
+            await this.readCloudLlmKeys();
             void this.refreshHarnessEnv();
           }
           await fingerprint;
@@ -9366,9 +9742,17 @@ export class Coordinator {
         }
         const adapter = this.opts.adapter;
         if (!adapter?.readiness().ready) { fail("The harness is unavailable. Check the running engine in Settings."); return; }
-        const selected = await this.languageModelFor({ kind: "production", productionId: msg.productionId }, undefined, "stage-designer");
+        // Claimed before the model decision, which may wait on discovery: a Stop in that wait
+        // has to find the request, or the build starts after it.
+        let claimed: AbortSignal;
+        try { claimed = this.stageConstructor.begin(msg); } catch (error) { fail(describeCoordinatorError(error)); return; }
+        const selected = await this.languageModelFor({ kind: "production", productionId: msg.productionId }, undefined, "stage-designer", claimed);
         const configured = selected.sessionModel;
-        if (selected.reason || !configured) { fail(selected.reason ?? "Choose Stage designer under Settings → Harness → Advanced, or a language model in this production's Develop conversation."); return; }
+        if (selected.reason || !configured) {
+          this.stageConstructor.abandon(msg.requestId);
+          fail(selected.reason ?? "Choose Stage designer under Settings → Harness → Advanced, or a language model in this production's Develop conversation.");
+          return;
+        }
         this.trackBackground(this.stageConstructor.run(store, msg, {
           adapter, sessionInput: this.sessionInput, model: configured,
           scratchRoot: this.opts.appRoot ? join(this.opts.appRoot, ".stage") : `${this.opts.changeLogPath}.stage`,
@@ -16757,7 +17141,7 @@ export class Coordinator {
         const settings = this.appSettings ? await this.appSettings.load().catch(() => null) : null;
         return settings?.research.web === true;
       },
-      resolveLanguageModel: (input) => this.languageModelFor(input.entryContext, input.modelId),
+      resolveLanguageModel: (input) => this.languageModelFor(input.entryContext, input.modelId, "world-builder", input.signal),
       onTurnFailed: ({ conversationId, runId, cause }) => {
         void this.appLog?.append({ level: "warn", event: "world-chat.turn-failed", conversationId, runId, cause });
         if (isAuthShapedFailure(cause)) void this.vendorAuth.noteAuthFailure().catch(() => {});
@@ -17072,6 +17456,9 @@ export class Coordinator {
     this.stageConstructor.cancel();
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
+    // A keyless command waiting on the catalogue would otherwise hold shutdown open: the
+    // reload timer that would have settled it is cleared below, and nothing else fires.
+    this.settleHarnessGates();
     this.localGpu.stop();
     for (const controller of this.performanceGenerations.values()) controller.abort();
     for (const controller of this.keyArtPromptDrafts.values()) controller.abort();

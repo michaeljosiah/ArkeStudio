@@ -232,7 +232,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     ),
     receiptsFor: (runId) => receipts.get(runId) ?? [],
     resolveLanguageModel: deps.resolveLanguageModel,
-    createSession: ({ cwd, runId, model }) => {
+    createSession: ({ cwd, runId, model, signal }) => {
       const token = tokenByRun.get(runId);
       const url = token ? (deps.query.leasedUrl(token) ?? undefined) : undefined;
       return createPreparedSession(
@@ -241,8 +241,11 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
         deps.sessionInput({
           ...(url ? { worldQueryUrl: url } : {}),
           ...(model !== undefined ? { model } : {}),
+          agent: "world-builder",
         }),
         { purpose: "world-chat", agent: "world-builder" },
+        undefined,
+        signal,
       );
     },
     runCheckPlan: async ({ draft, leaseToken }) => {

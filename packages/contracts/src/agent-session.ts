@@ -11,6 +11,13 @@ import { skillFor, type Skill } from "./skills.js";
 export interface SessionConfigInput {
   /** Opaque one-use correlation between preparation and the session it configures. */
   preparationId?: string;
+  /**
+   * The roster agent the session is built for, when the caller knows it (issue 1247). Read by
+   * the coordinator's session builder to see whether that agent's own Settings override
+   * already names a model, so a session that would run on it is never refused for lacking a
+   * default. Not written into any harness configuration.
+   */
+  agent?: string;
   /** The world-query MCP server URL (loopback), when a world is open. */
   worldQueryUrl?: string;
   /** Concrete model for authoring, e.g. "anthropic/claude-sonnet-5" or "ollama/llama3.3". */

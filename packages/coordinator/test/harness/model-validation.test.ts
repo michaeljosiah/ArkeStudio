@@ -38,6 +38,16 @@ describe("model validation for every roster session", () => {
     assert.deepEqual(validated.at(-1), ["anthropic/helper", false]);
   });
 
+  it("hands the creation's own signal to the check, so a stopped creation does not wait out discovery (issue 1247)", async () => {
+    const capture = captureAdapter();
+    const seen: Array<AbortSignal | undefined> = [];
+    const adapter = withModelValidation(capture.adapter, async (_reference, _images, signal) => { seen.push(signal); return {}; });
+    const stop = new AbortController();
+    adapter.prepareSession!({ preparationId: "stoppable", model: "anthropic/turn" });
+    await adapter.createSession({ purpose: "authoring", agent: "canon-author", preparationId: "stoppable", signal: stop.signal });
+    assert.equal(seen[0], stop.signal, "the check can race the catalogue read against the creation's stop");
+  });
+
   it("keeps default sessions usable when there is no override to discover", async () => {
     const capture = captureAdapter();
     const adapter = withModelValidation(capture.adapter, async () => { throw new Error("must not discover"); });

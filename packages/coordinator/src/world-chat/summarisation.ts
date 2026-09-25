@@ -4,7 +4,6 @@ import { z } from "zod";
 import {
   newId,
   type HarnessAdapter,
-  type SessionConfigInput,
   type WorldChatMessage,
 } from "@arke-studio/contracts";
 import { extractJson } from "../canon/ask.js";
@@ -107,14 +106,20 @@ export function makeConversationSummariser(
   return async (input) => {
     const scratch = join(scratchRoot, `summary-${newId("run")}`);
     await mkdir(toExtendedLength(scratch), { recursive: true });
-    const sessionConfig: SessionConfigInput = sessionInput({});
-    const session = await createPreparedSession(adapter, scratch, sessionConfig, {
-      purpose: "world-chat",
-      agent: "conversation-summarizer",
-    });
     const abort = new AbortController();
-    let finalText = "";
-    const collected = (async () => {
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      // Configured and created inside the cleanup boundary: the configuration may be refused
+      // (issue 1247), and a refused summary that left its directory behind would leave another
+      // on every retry, since no checkpoint is written for it. Handed over still pending, so
+      // the creation timeout bounds the wait on discovery too — a flight stuck ahead of that
+      // timer would hold every later summary behind it.
+      const session = await createPreparedSession(adapter, scratch, sessionInput({ agent: "conversation-summarizer" }), {
+        purpose: "world-chat",
+        agent: "conversation-summarizer",
+      });
+      let finalText = "";
+      const collected = (async () => {
       for await (const event of adapter.streamEvents(abort.signal)) {
         if (!("sessionId" in event) || event.sessionId !== session.sessionId) continue;
         if (event.type === "message.completed") {
@@ -123,19 +128,17 @@ export function makeConversationSummariser(
         }
         if (event.type === "session.error") throw new Error(event.message);
       }
-    })();
-    const prior = input.previousSummary
+      })();
+      const prior = input.previousSummary
       ? `Existing summary:\n${input.previousSummary}\n\n`
       : "";
-    const transcript = input.messages
+      const transcript = input.messages
       .map((message) => `${message.role === "user" ? "User" : "Studio"} [${message.id}]: ${message.text}`)
       .join("\n\n");
-    const prompt = `${prior}New conversation messages to incorporate:\n${transcript}`;
-    let deadline: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => {
+      const prompt = `${prior}New conversation messages to incorporate:\n${transcript}`;
+      const timeout = new Promise<never>((_, reject) => {
       deadline = setTimeout(() => reject(new Error("conversation summarisation timed out")), SUMMARY_TIMEOUT_MS);
-    });
-    try {
+      });
       await adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: prompt }] });
       await Promise.race([collected, timeout]);
       const parsed = SummaryResponseSchema.safeParse(extractJson(finalText));

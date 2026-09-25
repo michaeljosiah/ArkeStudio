@@ -199,6 +199,26 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
     }
   });
 
+  it("retires a session whose agent pin was stopped, rather than leaving it on the server (issue 1247)", async () => {
+    const adapter = makeAdapter();
+    try {
+      await adapter.init();
+      stub.holdAgentPin = true;
+      const stop = new AbortController();
+      const creation = adapter.createSession({ purpose: "authoring", cwd: "C:\\worlds\\proposal-9", agent: "scene-writer", signal: stop.signal });
+      await until(() => stub.lastRequest(/\/agent$/) !== undefined, "the pin to reach the server");
+      const created = stub.lastRequest(/^\/api\/session$/);
+      stop.abort(new Error("stopped"));
+      await assert.rejects(creation);
+      await until(() => stub.requests.some((r) => r.method === "DELETE" && /^\/api\/session\/ses_stub_\d+$/.test(r.path)), "the created session to be retired");
+      const retired = stub.requests.findLast((r) => r.method === "DELETE" && r.path.startsWith("/api/session/"));
+      assert.ok(created && retired, "both the creation and its retirement were seen");
+    } finally {
+      stub.holdAgentPin = false;
+      await adapter.dispose();
+    }
+  });
+
   it("creates the session in its location and pins the agent as session state", async () => {
     const adapter = makeAdapter();
     try {
@@ -507,19 +527,22 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
         { id: "sparse-text", providerID: "openai", capabilities: { input: { text: true } } },
         { id: "sparse-image", providerID: "openai", capabilities: { input: { image: true } } },
         { id: "sparse-false", providerID: "openai", capabilities: { input: { text: false } } },
+        { id: "no-tools", providerID: "ollama", capabilities: { tools: false, input: ["text"] } },
         { id: "disabled", providerID: "openai", disabled: true },
         { id: "unavailable", providerID: "openai", enabled: false },
         { id: "deprecated", providerID: "openai", status: "deprecated" },
       ];
       stub.defaultModel = { id: "gpt-5.4-mini", providerID: "openai" };
       const models = await adapter.listModels();
-      assert.equal(models.length, 5);
+      assert.equal(models.length, 6);
       const def = models.find((m) => m.isDefault);
       assert.equal(def?.id, "gpt-5.4-mini");
       assert.deepEqual(def?.inputModalities, ["text", "image"]);
       assert.deepEqual(models.find(model => model.id === "sparse-text")?.inputModalities, ["text"]);
       assert.deepEqual(models.find(model => model.id === "sparse-image")?.inputModalities, ["image"]);
       assert.deepEqual(models.find(model => model.id === "sparse-false")?.inputModalities, []);
+      assert.equal(models.find(model => model.id === "no-tools")?.tools, false, "a stated tool capability travels with the row");
+      assert.equal(def?.tools, undefined, "unstated stays unknown");
       assert.equal(def?.inputTokenLimit, 272_000);
       assert.equal(adapter.knownInputTokenLimit(), 272_000, "input beats context when the provider states both");
       stub.models = [];

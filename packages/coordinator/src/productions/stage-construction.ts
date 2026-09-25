@@ -42,12 +42,29 @@ export class StageConstructor {
     round: number;
     receive?: (frames: StageInspectionFrame[]) => void;
   } | null = null;
+  /** Requests claimed before their run: the model decision ahead of it may wait on discovery (issue 1247). */
+  private readonly pending = new Map<string, { request: Request; abort: AbortController }>();
+  /**
+   * Claim a request so a Stop can reach it before `run` does; `run` adopts the claim, `abandon`
+   * drops it. One at a time, as `run` is: two claims waiting on discovery would become one run
+   * and one failure, with the screen following the newer, failed one.
+   */
+  begin(request: Request): AbortSignal {
+    if (this.active || this.pending.size > 0) throw new Error("Another Stage construction is running. Stop it first.");
+    const abort = new AbortController();
+    this.pending.set(request.requestId, { request, abort });
+    return abort.signal;
+  }
+  abandon(requestId: string) {
+    this.pending.delete(requestId);
+  }
   cancel(worldId?: string, requestId?: string) {
-    if (
-      this.active &&
-      (!worldId || this.active.request.worldId === worldId) &&
-      (!requestId || this.active.request.requestId === requestId)
-    )
+    const matches = (request: Request) =>
+      (!worldId || request.worldId === worldId) && (!requestId || request.requestId === requestId);
+    for (const claim of this.pending.values()) {
+      if (matches(claim.request)) claim.abort.abort(new Error("Stage construction stopped."));
+    }
+    if (this.active && matches(this.active.request))
       this.active.abort.abort(new Error("Stage construction stopped."));
   }
   inspect(worldId: string, requestId: string, round: number, frames: StageInspectionFrame[]) {
@@ -76,7 +93,9 @@ export class StageConstructor {
     },
   ): Promise<void> {
     if (this.active) throw new Error("Another Stage construction is running. Stop it first.");
-    const abort = new AbortController();
+    const claimed = this.pending.get(request.requestId);
+    this.pending.delete(request.requestId);
+    const abort = claimed?.abort ?? new AbortController();
     const active: NonNullable<StageConstructor["active"]> = { request, abort, round: 0 };
     this.active = active;
     const dir = join(deps.scratchRoot, `stage-${request.requestId}`);
@@ -175,7 +194,14 @@ export class StageConstructor {
         await writeFile(join(dir, name), reference.data);
         sourceImages.push({ name, source: path });
       }
-      const configured = deps.sessionInput({ model: deps.model, researchWeb: false });
+      // The configuration may wait on model discovery (issue 1247), outside the creation
+      // timeout below — so a build stopped during that wait must not find a session created
+      // for it once discovery settles.
+      abort.signal.throwIfAborted();
+      const configured = await Promise.race([
+        deps.sessionInput({ model: deps.model, researchWeb: false, agent: "stage-designer" }),
+        new Promise<never>((_, reject) => abort.signal.addEventListener("abort", () => reject(abort.signal.reason), { once: true })),
+      ]);
       configured.agents = {
         ...configured.agents,
         "stage-designer": { ...configured.agents?.["stage-designer"], model: deps.model },
@@ -184,7 +210,7 @@ export class StageConstructor {
       const session = await createPreparedSession(deps.adapter, dir, configured, {
         purpose: "art-prompt",
         agent: "stage-designer",
-      });
+      }, undefined, abort.signal);
       sessionId = session.sessionId;
       const turn = async (
         prompt: string,

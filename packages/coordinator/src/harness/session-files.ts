@@ -40,8 +40,18 @@ async function serialized<T>(dir: string, work: () => Promise<T>): Promise<T> {
 export async function writeSessionFiles(
   adapter: Pick<HarnessAdapter, "sessionFiles" | "prepareSession" | "abandonSessionPreparation">,
   dir: string,
-  input: SessionConfigInput = {},
+  pending: SessionConfigInput | Promise<SessionConfigInput> = {},
+  signal?: AbortSignal,
 ): Promise<string> {
+  // A configuration still being decided (issue 1247) is bounded like the creation it feeds:
+  // a caller that gave up must not find a session created for it once discovery settles.
+  const input = signal === undefined ? await pending : await Promise.race([
+    pending,
+    new Promise<never>((_, reject) => {
+      if (signal.aborted) reject(signal.reason);
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    }),
+  ]);
   const preparationId = randomUUID();
   const prepared = { ...input, preparationId, skillBodies: await loadSkillBodies(input) };
   // Both seams, always. A harness takes its settings as files or as call options, and a
@@ -62,22 +72,36 @@ export async function writeSessionFiles(
 export async function createPreparedSession(
   adapter: HarnessAdapter,
   dir: string,
-  input: SessionConfigInput,
+  input: SessionConfigInput | Promise<SessionConfigInput>,
   session: CreateSessionInput,
   timeoutMs = 30_000,
+  signal?: AbortSignal,
 ): Promise<SessionRef> {
   return serialized(dir, async () => {
-    const preparationId = await writeSessionFiles(adapter, dir, input);
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(new Error("session creation timed out")), timeoutMs);
+    // The caller's stop, combined with the bound: a run stopped while its configuration waits
+    // on discovery (issue 1247) must not find a session created for it once discovery settles.
+    const stop = () => abort.abort(signal!.reason);
+    if (signal?.aborted) stop();
+    else signal?.addEventListener("abort", stop, { once: true });
     try {
-      return await adapter.createSession({ ...session, cwd: dir, preparationId, signal: abort.signal });
+      const preparationId = await writeSessionFiles(adapter, dir, input, abort.signal);
+      try {
+        // A stop that landed while the files were written creates nothing: not every adapter
+        // refuses an already-fired signal, and a session opened for a stopped run is an orphan.
+        abort.signal.throwIfAborted();
+        return await adapter.createSession({ ...session, cwd: dir, preparationId, signal: abort.signal });
+      } finally {
+        adapter.abandonSessionPreparation?.(preparationId);
+      }
     } catch (error) {
+      if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new Error("session creation stopped", { cause: error });
       if (abort.signal.aborted) throw new Error("session creation timed out", { cause: error });
       throw error;
     } finally {
       clearTimeout(timer);
-      adapter.abandonSessionPreparation?.(preparationId);
+      signal?.removeEventListener("abort", stop);
     }
   });
 }
@@ -88,5 +112,10 @@ export async function createPreparedSession(
  * Read at call time rather than captured, so changing a model or a brief in Settings applies to
  * the next session rather than the next run — the property the old `buildConfig` wrapper had and
  * the reason this is a function rather than a value.
+ *
+ * May answer later rather than now (issue 1247): the local default it fills in is read from the
+ * harness catalogue, and a session that opens before the catalogue's first fetch has to wait for
+ * it — the alternative was that first session quietly running on the cloud default. The writers
+ * above take the promise, so a caller that only hands the input on has nothing to await.
  */
-export type SessionInput = (input: SessionConfigInput) => SessionConfigInput;
+export type SessionInput = (input: SessionConfigInput) => SessionConfigInput | Promise<SessionConfigInput>;

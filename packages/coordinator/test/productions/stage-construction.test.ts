@@ -230,6 +230,83 @@ it(`${ending} while awaiting inspection preserves the partial draft and never wr
   }
 });
 
+it("a build stopped while its configuration is still being decided creates no session (issue 1247)", async () => {
+  // The configuration may wait on model discovery, outside the creation timeout — so a stop
+  // during that wait has to be observed by the wait itself, not by the first turn.
+  const dir = await makeTempWorld();
+  const store = await WorldStore.open(dir);
+  try {
+    const scene = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes.find((s) => s.id === "sc_04")!;
+    const shot = orderedShots(scene)[0]!;
+    let created = 0;
+    const adapter: HarnessAdapter = {
+      id: "test",
+      readiness: () => ({ ready: true }),
+      capabilities: () => new Set(["events"]),
+      createSession: async () => { created++; return { sessionId: "test" }; },
+      sendMessage: async () => ({ sessionId: "test", correlationId: "1" }),
+      dispatchAsync: async () => ({ sessionId: "test", correlationId: "1" }),
+      async *streamEvents() {},
+    };
+    const constructor = new StageConstructor();
+    let terminal: Extract<DomainEvent, { type: "stage.construction" }> | undefined;
+    let decide!: (input: Parameters<Parameters<StageConstructor["run"]>[2]["sessionInput"]>[0]) => void;
+    const deciding = new Promise<Parameters<Parameters<StageConstructor["run"]>[2]["sessionInput"]>[0]>((resolve) => { decide = resolve; });
+    const run = constructor.run(
+      store,
+      { kind: "stage-construct", worldId: store.worldId, productionId: "saltlight", sceneId: scene.id, shotId: shot.id,
+        baseVersion: scene.version, requestId: randomUUID(), instruction: "", preserve: "none" },
+      {
+        adapter,
+        sessionInput: () => deciding,
+        model: "test/vision",
+        scratchRoot: join(dir, ".scratch"),
+        current: () => true,
+        emit: (event) => { if (event.status === "failed" || event.status === "ready") terminal = event; },
+      },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    constructor.cancel();
+    await run;
+    assert.equal(terminal?.status, "failed");
+    assert.match(terminal?.detail ?? "", /stopped/);
+    decide({ model: "test/vision" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(created, 0, "discovery settling after the stop must not create a session for it");
+    // A Stop that arrives before the run, while the model decision upstream is still waiting,
+    // has to find the request: the claim is what it finds, and the run adopts it.
+    const request = { kind: "stage-construct" as const, worldId: store.worldId, productionId: "saltlight", sceneId: scene.id, shotId: shot.id,
+      baseVersion: scene.version, requestId: randomUUID(), instruction: "", preserve: "none" as const };
+    const claimed = constructor.begin(request);
+    assert.throws(() => constructor.begin({ ...request, requestId: randomUUID() }), /Another Stage construction is running/, "one claim at a time, as one run at a time");
+    constructor.cancel(store.worldId, request.requestId);
+    assert.ok(claimed.aborted, "the claim carried the stop");
+    let second: Extract<DomainEvent, { type: "stage.construction" }> | undefined;
+    await constructor.run(store, request, {
+      adapter, sessionInput: (input) => input, model: "test/vision", scratchRoot: join(dir, ".scratch"), current: () => true,
+      emit: (event) => { if (event.status === "failed" || event.status === "ready") second = event; },
+    });
+    assert.match(second?.detail ?? "", /stopped/);
+    assert.equal(created, 0, "a run that adopts a stopped claim creates nothing");
+    // A Stop while the session itself is being opened ends the opening, not the turn after it.
+    const opening: HarnessAdapter = {
+      ...adapter,
+      createSession: (input) => new Promise((_, reject) => input.signal?.addEventListener("abort", () => reject(input.signal!.reason), { once: true })),
+    };
+    let third: Extract<DomainEvent, { type: "stage.construction" }> | undefined;
+    const third_run = constructor.run(store, { ...request, requestId: randomUUID() }, {
+      adapter: opening, sessionInput: (input) => input, model: "test/vision", scratchRoot: join(dir, ".scratch"), current: () => true,
+      emit: (event) => { if (event.status === "failed" || event.status === "ready") third = event; },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    constructor.cancel();
+    await third_run;
+    assert.match(third?.detail ?? "", /stopped/, "the stop reached the session being opened");
+  } finally {
+    await store.close();
+  }
+});
+
 for (const mode of ["protected-blocking", "source-changed", "unread-images", "refused-images"] as const)
   it(`refuses ${mode} without applying a model draft`, async () => {
     const dir = await makeTempWorld();

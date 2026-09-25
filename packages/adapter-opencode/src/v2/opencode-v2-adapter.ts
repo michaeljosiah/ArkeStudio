@@ -266,7 +266,15 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     // backing carried (the `build` fallback that silently ate turns). 204 on success;
     // confirmation arrives as session.agent.selected on the stream.
     if (input.agent) {
-      await this.http.req("POST", `/api/session/${sessionId}/agent`, { agent: input.agent }, { signal: input.signal });
+      try {
+        await this.http.req("POST", `/api/session/${sessionId}/agent`, { agent: input.agent }, { signal: input.signal });
+      } catch (error) {
+        // The session exists on the server and nobody upstream has its id: a stop between the
+        // two requests would otherwise leave one behind per stop. Retired best-effort, bounded,
+        // and off the caller's signal, which has already fired.
+        await this.http.req<void>("DELETE", `/api/session/${sessionId}`, undefined, { signal: AbortSignal.timeout(5_000) }).catch(() => {});
+        throw error;
+      }
     }
     this.sessions.set(sessionId, {
       purpose: input.purpose,

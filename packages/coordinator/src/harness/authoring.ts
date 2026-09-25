@@ -43,6 +43,8 @@ export interface RunInput {
 interface ActiveRun {
   sessionId: string | null;
   cancelled: boolean;
+  /** The session's setup, while there is no session to interrupt yet (issue 1247): a Stop ends it here. */
+  setup?: AbortController;
 }
 
 /**
@@ -112,6 +114,7 @@ export class AuthoringService {
     const run = this.runs.get(proposalId);
     if (!run) return;
     run.cancelled = true;
+    run.setup?.abort(new Error("cancelled by you"));
     const interrupt = (this.adapter as { interrupt?: (id: string) => Promise<void> }).interrupt;
     if (interrupt && run.sessionId) await interrupt.call(this.adapter, run.sessionId).catch(() => {});
   }
@@ -187,23 +190,31 @@ export class AuthoringService {
     let sessionId = this.sessions.get(input.proposalId);
     if (sessionId === undefined) {
       // Studio writes the session's configuration — roster, tool denials, the world-query MCP
-      // registration — into the working directory (R-5). Never a credential (R-6).
+      // registration — into the working directory (R-5). Never a credential (R-6). The
+      // configuration may wait on model discovery (issue 1247), so a Stop during setup ends
+      // the setup rather than the turn that would have followed it.
+      run.setup = new AbortController();
       try {
         const session = await createPreparedSession(
           this.adapter,
           proposalDir,
-          this.opts.sessionInput(worldQueryUrl ? { worldQueryUrl } : {}),
+          this.opts.sessionInput({ ...(worldQueryUrl ? { worldQueryUrl } : {}), agent: this.opts.agentForPurpose(input.purpose) }),
           {
             purpose: input.purpose,
             agent: this.opts.agentForPurpose(input.purpose),
           },
+          undefined,
+          run.setup.signal,
         );
         sessionId = session.sessionId;
         this.sessions.set(input.proposalId, sessionId);
       } catch (err) {
         this.runs.delete(input.proposalId);
+        if (run.cancelled) { status("cancelled", "cancelled by you"); return; }
         status("failed", `could not create a session: ${err instanceof Error ? err.message : String(err)}`);
         return;
+      } finally {
+        delete run.setup;
       }
     }
     run.sessionId = sessionId;
