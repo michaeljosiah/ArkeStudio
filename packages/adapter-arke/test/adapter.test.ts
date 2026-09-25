@@ -7,7 +7,7 @@ import { HarnessEventSchema, type HarnessEvent } from "@arke-studio/contracts";
 import { ArkeAdapter, loopbackBaseUrl } from "../src/index.js";
 import { callTool, FakeOllama, reply } from "./fake-ollama.js";
 
-async function fixture(t: test.TestContext, options: { maxStepsPerTurn?: number } = {}) {
+async function fixture(t: test.TestContext, options: { maxStepsPerTurn?: number; catalogueDeadlineMs?: number } = {}) {
   const ollama = new FakeOllama(); await ollama.start();
   const base = await mkdtemp(join(tmpdir(), "arke-harness-")); const root = join(base, "proposal");
   await mkdir(root); await writeFile(join(base, "secret.txt"), "SECRET_MUST_NOT_LEAK");
@@ -247,7 +247,30 @@ test("one model whose inspection stalls is listed with assumed capabilities; the
   ];
   await f.adapter.init();
   assert.deepEqual(await f.adapter.listModels(), [
-    { id: "stuck:1b", provider: "ollama", displayName: "stuck:1b", inputModalities: ["text"], inputTokenLimit: 8192, tools: true, isDefault: true },
-    { id: "gemma4:12b", provider: "ollama", displayName: "gemma4:12b", inputModalities: ["text", "image"], inputTokenLimit: 8192, tools: true },
-  ]);
+    { id: "stuck:1b", provider: "ollama", displayName: "stuck:1b", inputModalities: ["text"], inputTokenLimit: 8192 },
+    { id: "gemma4:12b", provider: "ollama", displayName: "gemma4:12b", inputModalities: ["text", "image"], inputTokenLimit: 8192, tools: true, isDefault: true },
+  ], "an unread model claims no tools and is never the default");
+});
+
+test("the catalogue's own deadline lists what it has not read as unknown instead of failing", async (t) => {
+  const f = await fixture(t, { catalogueDeadlineMs: 300 });
+  f.ollama.models = [
+    ...Array.from({ length: 9 }, (_, i) => ({ name: `stuck-${i}:1b`, stall: true })),
+    { name: "gemma4:12b", capabilities: ["completion", "tools"], context: 8192 },
+  ];
+  const models = await f.adapter.listModels();
+  assert.equal(models.length, 10);
+  assert.ok(models.every((model) => model.tools === undefined && !model.isDefault), "nothing unread is claimed or chosen");
+});
+
+test("a research preparation is not granted web tools this harness cannot provide", async (t) => {
+  const f = await fixture(t);
+  for (const config of [{ researchWeb: true }, {}]) {
+    const id = await f.session("world-builder", config);
+    f.ollama.script.push(reply("ok"));
+    await f.adapter.sendMessage({ sessionId: id, parts: [{ type: "text", text: "hi" }] });
+  }
+  const [asked, plain] = f.ollama.chats as Array<{ tools?: unknown; messages: Array<{ content: string }> }>;
+  assert.deepEqual(asked!.tools, plain!.tools);
+  assert.equal(asked!.messages[0]!.content, plain!.messages[0]!.content, "the prompt promises nothing the plain session lacks");
 });

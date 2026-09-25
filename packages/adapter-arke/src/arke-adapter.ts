@@ -36,6 +36,8 @@ export interface ArkeAdapterOptions {
   maxContextTokens?: number;
   /** Model calls one turn may make before it is ended. Each tool round is one. */
   maxStepsPerTurn?: number;
+  /** How long one catalogue pass inspects models before listing the rest as unread. */
+  catalogueDeadlineMs?: number;
   /** Passed to Ollama as `keep_alive`, when set. */
   keepAlive?: string | number;
   onTrace?: (line: Record<string, unknown>) => void;
@@ -44,6 +46,7 @@ export interface ArkeAdapterOptions {
 const DEFAULT_CONTEXT = 8_192;
 const CONTEXT_CEILING = 32_768;
 const DEFAULT_STEPS = 24;
+const CATALOGUE_DEADLINE_MS = 15_000;
 const PROVIDER = "ollama";
 /**
  * Roles that answer with one JSON document and never touch a file. The coordinator lets them run
@@ -133,7 +136,7 @@ export class ArkeAdapter implements HarnessAdapter {
   }
 
   async listModels(): Promise<ModelInfo[]> {
-    return this.catalog(AbortSignal.timeout(15_000)).then(({ models }) => models);
+    return this.catalog(new AbortController().signal).then(({ models }) => models);
   }
 
   /**
@@ -142,8 +145,10 @@ export class ArkeAdapter implements HarnessAdapter {
    * chose should be one that can do the work.
    */
   private async catalog(signal: AbortSignal): Promise<{ models: ModelInfo[]; pulled: PulledModel[] }> {
-    const pulled = await listPulled(this.fetchImpl, this.baseUrl, signal);
-    const fallback = pulled.find((model) => model.tools)?.id;
+    const pulled = await listPulled(this.fetchImpl, this.baseUrl, signal, this.opts.catalogueDeadlineMs ?? CATALOGUE_DEADLINE_MS);
+    // Only a model seen to call tools: one whose details could not be read might be an
+    // embedding model, and a default nobody chose must be one that can do the work.
+    const fallback = pulled.find((model) => model.tools && !model.assumed)?.id;
     const models = pulled.map((model): ModelInfo => ({
       id: model.id, provider: PROVIDER, displayName: model.id,
       inputModalities: model.vision ? ["text", "image"] : ["text"],
@@ -151,8 +156,9 @@ export class ArkeAdapter implements HarnessAdapter {
       // context from this before a session exists, and a prompt sized to 131,072 tokens sent
       // into a 32,768 window loses its beginning without an error.
       inputTokenLimit: this.contextFor(model.contextLength),
-      // Stated either way. Absent reads as unknown, and unknown is offered to tool-using roles.
-      tools: model.tools,
+      // Stated when it was seen. A model whose details could not be read says nothing, which the
+      // contract reads as unknown; claiming tools for it would be a guess presented as a fact.
+      ...(model.assumed ? {} : { tools: model.tools }),
       ...(model.id === fallback ? { isDefault: true } : {}),
     }));
     return { models, pulled };
@@ -180,7 +186,7 @@ export class ArkeAdapter implements HarnessAdapter {
     const root = await resolveRoot(input.cwd);
     const override = prepared.agents?.[member.name];
     const requested = prepared.model ?? override?.model;
-    const { models, pulled } = await this.catalog(input.signal ?? AbortSignal.timeout(15_000));
+    const { models, pulled } = await this.catalog(input.signal ?? new AbortController().signal);
     input.signal?.throwIfAborted();
     const selected = requested === undefined ? models.find((model) => model.isDefault) : findHarnessModel(requested, models);
     if (requested !== undefined && !selected) throw new Error("The selected model is not pulled in Ollama. Refresh the model list and choose an available model.");
@@ -188,7 +194,10 @@ export class ArkeAdapter implements HarnessAdapter {
     const missingInput = harnessModelMissingInput(selected, member.name === "stage-designer");
     if (missingInput === "text") throw new Error("This model cannot accept the text instructions required by Arke.");
     if (missingInput === "image") throw new Error("This model cannot inspect Stage images.");
-    const researchWeb = member.name !== "stage-designer" && prepared.researchWeb === true;
+    // Not offered yet, whatever the preparation asks: this harness has no web search, and the
+    // prompt for a research session promises one. Granting the intent would describe a tool the
+    // model cannot call; web research on local models is later work of its own.
+    const researchWeb = false;
     const toolSession: ToolSession = {
       root, rootIdentity: await captureRootIdentity(root, input.signal), confinement: confinementFor(member, { web: researchWeb }),
       ...(prepared.worldQueryUrl !== undefined ? { worldQueryUrl: prepared.worldQueryUrl } : {}),
