@@ -155,6 +155,7 @@ import {
   isComfyUiWeightsComponent,
   orderedShots,
   characterAudioRoute,
+  meetsLocalModelMinimum,
 } from "@arke-studio/contracts";
 import { BenchStore, sessionDir as benchSessionDir, sessionMediaDir } from "./bench/store.js";
 import {
@@ -1054,6 +1055,8 @@ export class Coordinator {
   private publishedLocalHarnessModels: string | null = null;
   /** The rows behind that fingerprint, for checking a later catalogue read against them. */
   private publishedLocalHarnessRows: readonly import("@arke-studio/contracts").LocalHarnessModel[] = [];
+  /** Pulled models the last listing held back for stating less than a 256k context. */
+  private localModelsBelowMinimum = 0;
   /** Whether any cloud language-model key is stored, read with the harness environment (issue 1247). */
   private cloudLlmKeyStored = false;
   /**
@@ -4104,7 +4107,13 @@ export class Coordinator {
     let models: readonly import("@arke-studio/contracts").LocalHarnessModel[] = [];
     let listed = true;
     try {
-      models = await list();
+      // Only models stating a 256k context are offered to the harness at all (issue 1247). The
+      // filter is here, before the profile is written, so the picker, the catalogue and the
+      // unattended default all see the same set, and a pulled model under the minimum is simply
+      // not a writing model rather than one that is listed and then refused.
+      const pulled = await list();
+      models = pulled.filter(meetsLocalModelMinimum);
+      this.localModelsBelowMinimum = pulled.length - models.length;
     } catch {
       listed = false;
     }
@@ -4384,6 +4393,11 @@ export class Coordinator {
     // a local runtime right there. Stage refuses on its own when no model reads images.
     if (!needsImages && this.readModel.getState().app.harnessModels.some((model) => model.provider === "ollama")) {
       return "None of the local models can write here: each is switched off or cannot call tools, and no cloud key is stored. Pull a model that calls tools, switch one on under AI models, or add a key.";
+    }
+    // Pulled, but held back by the 256k minimum: without this the session would go to a cloud
+    // default with no key and fail without saying that the models were there all along.
+    if (!needsImages && this.localModelsBelowMinimum > 0) {
+      return "None of the pulled local models has a 256k context window, and no cloud key is stored. Pull one that does, such as Gemma 4 12B, or add a key.";
     }
     return null;
   }

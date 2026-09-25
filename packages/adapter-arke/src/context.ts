@@ -14,16 +14,20 @@ import type { ChatMessage, ChatTool } from "./ollama.js";
  */
 
 /**
- * A deliberately cautious estimate. Tokenisers differ by model and none is available here;
- * three characters a token over-counts English prose and JSON, which is the safe direction —
- * trimming a little early costs a cache miss, trimming late costs the system prompt.
+ * A deliberately cautious estimate. Tokenisers differ by model and none is available here, so
+ * the count errs high — trimming a little early costs a cache miss, trimming late costs the
+ * instructions.
  *
- * Only for ASCII. Other scripts are token-dense — a CJK character or an emoji is often a token
- * of its own, sometimes several — so they are counted from their UTF-8 bytes instead, at a rate
- * that over-counts every script a writer is likely to use.
+ * Counted by the shape of the text, not its length, because the same number of characters can
+ * be a few tokens or many. A run of letters is a word, and three letters a token over-counts
+ * every language written in Latin script; each digit and each symbol is a token of its own,
+ * which is what makes hashes, base64 and minified JSON dense; a line break is a token. Any other
+ * script is counted from its UTF-8 bytes at a rate that over-counts CJK and emoji, which are
+ * often a token a character and sometimes several.
  */
-const ASCII_PER_TOKEN = 3;
+const LETTERS_PER_TOKEN = 3;
 const OTHER_BYTES_PER_TOKEN = 1.5;
+const ASCII_SHAPES = /[A-Za-z]+|[0-9]|\n|[ \t\r]+|[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
 const TOKENS_PER_MESSAGE = 8;
 /** What an image costs a vision model, roughly, whatever its size on disk. */
 const TOKENS_PER_IMAGE = 768;
@@ -42,11 +46,18 @@ export function estimateTokens(messages: readonly ChatMessage[], tools: readonly
 }
 
 function textTokens(text: string): number {
-  // ASCII is one UTF-8 byte a character, so the bytes that are not ASCII are the rest.
-  const bytes = Buffer.byteLength(text, "utf8");
+  let tokens = 0;
   let ascii = 0;
-  for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) < 0x80) ascii++;
-  return ascii / ASCII_PER_TOKEN + (bytes - ascii) / OTHER_BYTES_PER_TOKEN;
+  for (const [shape] of text.matchAll(ASCII_SHAPES)) {
+    ascii += shape.length;
+    const first = shape.charCodeAt(0);
+    const letters = (first >= 0x41 && first <= 0x5a) || (first >= 0x61 && first <= 0x7a);
+    // Spaces and tabs ride on the word after them.
+    if (letters) tokens += Math.ceil(shape.length / LETTERS_PER_TOKEN);
+    else if (shape[0] !== " " && shape[0] !== "\t" && shape[0] !== "\r") tokens += 1;
+  }
+  // ASCII is one UTF-8 byte a character, so the bytes that are not ASCII are the rest.
+  return tokens + (Buffer.byteLength(text, "utf8") - ascii) / OTHER_BYTES_PER_TOKEN;
 }
 
 /**

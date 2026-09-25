@@ -1,4 +1,5 @@
 import test from "node:test";
+import { randomBytes } from "node:crypto";
 import assert from "node:assert/strict";
 import { estimateTokens, fitToWindow, promptBudget, TRIMMED_TOOL_RESULT, WITHIN_TURN } from "../src/context.js";
 import type { ChatMessage } from "../src/ollama.js";
@@ -98,4 +99,12 @@ test("a re-ask the loop wrote inside a turn is dropped with that turn, never lef
   assert.equal(fitToWindow(messages, [], 1_000, 5), true);
   assert.deepEqual(messages.map((m) => m.role), ["system", "user"], "the whole first turn went, correction and all");
   assert.equal(messages[1]!.content, "now");
+});
+
+test("dense ASCII — base64, hashes, minified JSON — is counted by its shape, not its length", () => {
+  const per = (text: string) => (estimateTokens([{ role: "user", content: text }], []) - 8) / text.length;
+  assert.ok(per(randomBytes(3_000).toString("base64")) >= 0.45, "base64");
+  assert.ok(per(randomBytes(2_000).toString("hex")) >= 0.6, "hex");
+  assert.ok(per(JSON.stringify(Array.from({ length: 200 }, (_, i) => ({ id: i, v: i * 3.14 })))) >= 0.6, "minified JSON");
+  assert.ok(per("The harbour town is Saltlight, and the bells ring at slack water.") < 0.5, "prose stays cheap");
 });

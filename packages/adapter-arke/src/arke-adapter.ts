@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  agentPromptFor, confinementFor, findHarnessModel, harnessModelMissingInput, HarnessEventSchema, ROSTER, sessionSkillForAgent,
+  agentPromptFor, confinementFor, findHarnessModel, harnessModelMissingInput, HarnessEventSchema, meetsLocalModelMinimum, ROSTER, sessionSkillForAgent,
   type CreateSessionInput, type HarnessAdapter, type HarnessCapability, type HarnessEvent, type ModelInfo,
   type Readiness, type SendMessageInput, type SendReceipt, type SessionConfigInput, type SessionRef,
 } from "@arke-studio/contracts";
@@ -56,13 +56,10 @@ const CONTEXT_CEILING = 32_768;
 const DEFAULT_STEPS = 24;
 const CATALOGUE_DEADLINE_MS = 15_000;
 /**
- * The smallest context a model must state to be offered at all (256k). A product decision
- * (issue 1247): the roster's prompts, world context and long sessions are written for long
- * windows, and a model trained on less degrades well before its window fills. How much of that
- * window a session asks for is separate — `maxContextTokens`, set from what the GPU can hold.
- * A model whose details could not be read states nothing, so it is not offered either.
+ * Only models stating a 256k context are offered, the same rule as the OpenCode lane
+ * (`meetsLocalModelMinimum` in contracts). How much of that window a session asks for is
+ * separate — `maxContextTokens`, set from what the GPU can hold.
  */
-export const MIN_MODEL_CONTEXT = 262_144;
 const PROVIDER = "ollama";
 /**
  * Roles that answer with one JSON document and never touch a file. The coordinator lets them run
@@ -131,6 +128,11 @@ export class ArkeAdapter implements HarnessAdapter {
   private readonly queues = new Set<EventQueue>();
   /** Models this adapter has had Ollama load since it last released them. */
   private readonly resident = new Set<string>();
+  /**
+   * A release in progress. A turn waits for it before asking Ollama for anything: a model loaded
+   * while its unload is on the wire would be unloaded under the turn, or loaded twice.
+   */
+  private releasing: Promise<void> = Promise.resolve();
 
   constructor(private readonly opts: ArkeAdapterOptions = {}) {
     this.fetchImpl = opts.fetch ?? fetch;
@@ -186,7 +188,8 @@ export class ArkeAdapter implements HarnessAdapter {
   private async catalog(signal: AbortSignal): Promise<{ models: ModelInfo[]; pulled: PulledModel[]; all: PulledModel[] }> {
     const all = await listPulled(this.fetchImpl, this.baseUrl, signal, this.opts.catalogueDeadlineMs ?? CATALOGUE_DEADLINE_MS);
     const pulled = all.filter(supported);
-    const fallback = pulled.find((model) => model.tools)?.id;
+    // Only a model seen to call tools: a default nobody chose must be one that can do the work.
+    const fallback = pulled.find((model) => model.tools === true)?.id;
     const models = pulled.map((model): ModelInfo => ({
       id: model.id, provider: PROVIDER, displayName: model.id,
       inputModalities: model.vision ? ["text", "image"] : ["text"],
@@ -194,8 +197,8 @@ export class ArkeAdapter implements HarnessAdapter {
       // context from this before a session exists, and a prompt sized to 131,072 tokens sent
       // into a 32,768 window loses its beginning without an error.
       inputTokenLimit: this.contextFor(model.contextLength),
-      // Always seen, never assumed: a model whose details could not be read is not offered.
-      tools: model.tools,
+      // Stated when Ollama says; absent reads as unknown, which the contract offers for choosing.
+      ...(model.tools !== undefined ? { tools: model.tools } : {}),
       ...(model.id === fallback ? { isDefault: true } : {}),
     }));
     return { models, pulled, all };
@@ -331,6 +334,8 @@ export class ArkeAdapter implements HarnessAdapter {
         if (!fitToWindow(session.messages, session.tools, promptBudget(session.numCtx), session.messages.indexOf(opening))) {
           return { reason: "budget-exceeded", detail: "This message and its tool results do not fit the model's context window." };
         }
+        await this.releasing;
+        signal.throwIfAborted();
         // Before the request, not after: Ollama may load the model and then the turn be stopped,
         // and a model loaded but not remembered could never be released.
         this.resident.add(session.model);
@@ -419,14 +424,21 @@ export class ArkeAdapter implements HarnessAdapter {
    * Ollama's own timeout, and it is remembered so a later release tries again.
    */
   async releaseResidency(signal: AbortSignal = AbortSignal.timeout(10_000)): Promise<void> {
-    const busy = new Set([...this.sessions.values()].flatMap((session) => session.turn ? [session.model] : []));
-    // A snapshot: a failed unload is added back, and a live Set would visit it again, forever.
-    for (const model of Array.from(this.resident)) {
-      if (busy.has(model)) continue;
-      this.resident.delete(model);
-      try { await unloadModel(this.fetchImpl, this.baseUrl, model, signal); }
-      catch { this.resident.add(model); }
-    }
+    // Serialised with itself and with every turn's next request, so the busy check below is
+    // still true when the unload arrives.
+    const release = this.releasing.then(async () => {
+      for (const model of Array.from(this.resident)) {
+        // Checked per model, at the moment of its unload. A turn that starts after this check
+        // waits for the release before its first request, so it loads the model afresh rather
+        // than having it unloaded under it.
+        if ([...this.sessions.values()].some((session) => session.turn !== null && session.model === model)) continue;
+        this.resident.delete(model);
+        try { await unloadModel(this.fetchImpl, this.baseUrl, model, signal); }
+        catch { this.resident.add(model); }
+      }
+    });
+    this.releasing = release.catch(() => {});
+    await release;
   }
 
   /** Stops the generation itself: the request is aborted, so Ollama stops producing tokens. */
@@ -481,5 +493,5 @@ export class ArkeAdapter implements HarnessAdapter {
 }
 
 function supported(model: PulledModel): boolean {
-  return !model.assumed && (model.contextLength ?? 0) >= MIN_MODEL_CONTEXT;
+  return meetsLocalModelMinimum(model);
 }

@@ -149,8 +149,11 @@ function argumentsOf(raw: unknown): JsonObject {
 
 /** A pulled model, as the harness catalogue describes it. */
 export interface PulledModel {
-  id: string; contextLength?: number; tools: boolean; vision: boolean;
-  /** Its details could not be read, so tools and completion are assumed rather than seen. */
+  id: string; contextLength?: number;
+  /** Whether the model calls tools, when Ollama says; undefined when it lists no capabilities. */
+  tools: boolean | undefined;
+  vision: boolean;
+  /** Its details could not be read at all: nothing about it — not even its window — is known. */
   assumed?: boolean;
 }
 
@@ -176,7 +179,7 @@ export async function listPulled(fetchImpl: typeof fetch, baseUrl: string, signa
   return rows.filter((row): row is PulledModel => row !== null);
 }
 
-function assumedRow(id: string): PulledModel { return { id, tools: true, vision: false, assumed: true }; }
+function assumedRow(id: string): PulledModel { return { id, tools: undefined, vision: false, assumed: true }; }
 
 /** Whether Ollama answers at all: the model list, without inspecting each model. */
 export async function listTags(fetchImpl: typeof fetch, baseUrl: string, signal: AbortSignal): Promise<unknown[]> {
@@ -209,9 +212,10 @@ async function inspect(fetchImpl: typeof fetch, baseUrl: string, id: string, sig
   return {
     id,
     ...(typeof context === "number" && Number.isSafeInteger(context) && context > 0 ? { contextLength: context } : {}),
-    tools: capabilities ? capabilities.includes("tools") : true,
+    // An Ollama that lists no capabilities still states the window: the model is read, only
+    // what it can do is unknown.
+    tools: capabilities ? capabilities.includes("tools") : undefined,
     vision: capabilities ? capabilities.includes("vision") : false,
-    ...(capabilities ? {} : { assumed: true }),
   };
 }
 

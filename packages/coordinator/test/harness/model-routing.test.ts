@@ -34,7 +34,7 @@ const CLOUD_ONLY = MODELS.filter((model) => model.provider !== "ollama");
 const LOCAL = "ollama/gemma4:12b";
 const LOCAL_SMALL = "ollama/gemma4:e2b-it-qat";
 /** What Ollama has pulled when the catalogue is MODELS: the harness lists exactly what it was handed (issue 1247). */
-const PULLED = MODELS.filter((model) => model.provider === "ollama").map((model) => ({ id: model.id, tools: true, vision: model.inputModalities?.includes("image") ?? false }));
+const PULLED = MODELS.filter((model) => model.provider === "ollama").map((model) => ({ id: model.id, contextLength: 262144, tools: true, vision: model.inputModalities?.includes("image") ?? false }));
 
 /** A reversible fake cipher that is very visibly not the plaintext. */
 const fakeCipher: Cipher = {
@@ -90,9 +90,9 @@ async function fixture(options: {
   /** The shipped manifest, with Ollama answering as a running local runtime so its rows pass the gate. */
   manifest?: boolean;
   /** What Ollama has pulled, with a publication hook: the first-run path the local default waits on (issue 1247). */
-  localModels?: Array<{ id: string; tools: boolean; vision: boolean; assumed?: true }>;
+  localModels?: Array<{ id: string; contextLength?: number; tools: boolean; vision: boolean; assumed?: true }>;
   /** Ollama's answer to each listing, when it is not simply the list above: it may be a refusal. */
-  listLocalModels?: () => Promise<Array<{ id: string; tools: boolean; vision: boolean; assumed?: true }>>;
+  listLocalModels?: () => Promise<Array<{ id: string; contextLength?: number; tools: boolean; vision: boolean; assumed?: true }>>;
   onPublish?: () => void | Promise<void>;
   /** A harness process under supervision, so a test can fail it and bring it back (issue 1247). */
   supervisor?: ChildSupervisor;
@@ -592,7 +592,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
   it("ends a keyless chat at its Stop while its configuration is still waiting on discovery", async () => {
     const adapter = new CaptureAdapter();
     adapter.list = async () => CLOUD_ONLY;
-    const test = await fixture({ adapter, localModels: [{ id: "gemma4:12b", tools: true, vision: false }] });
+    const test = await fixture({ adapter, localModels: [{ id: "gemma4:12b", contextLength: 262144, tools: true, vision: false }] });
     try {
       await test.send({ kind: "world-chat-create", worldId: WORLD_ID, requestId: randomUUID(), title: "Stopped early",
         entryContext: { kind: "production", productionId: "saltlight" } });
@@ -644,7 +644,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     const adapter = new CaptureAdapter();
     const stated = (tools: boolean) => [...CLOUD_ONLY, { ...MODELS.find((model) => model.id === "gemma4:12b")!, tools }];
     adapter.list = async () => stated(true);
-    const test = await fixture({ adapter, localModels: [{ id: "gemma4:12b", tools: false, vision: false }] });
+    const test = await fixture({ adapter, localModels: [{ id: "gemma4:12b", contextLength: 262144, tools: false, vision: false }] });
     try {
       assert.equal(await test.chat(), undefined, "a row stating what was not written is not carried");
       assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /not available to the harness yet/);
@@ -781,14 +781,34 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     } finally { release(); await test.close(); }
   });
 
-  it("does not choose unattended a local model whose capabilities were assumed rather than read", async () => {
-    // A show that failed lists the model with tools assumed; it is offered, but the default
-    // takes the first row the runtime actually described.
-    const test = await fixture({ localModels: [{ id: "gemma4:12b", tools: true, vision: false, assumed: true }, ...PULLED.slice(1)] });
+  it("does not offer a local model whose capabilities were assumed rather than read", async () => {
+    // A show that failed lists the model with nothing read. Its window cannot be confirmed, so
+    // the 256k minimum holds it back, and the default takes the first row the runtime described.
+    // The harness lists what was published, which no longer includes the held-back row.
+    const adapter = new CaptureAdapter();
+    adapter.list = async () => MODELS.filter((model) => model.id !== "gemma4:12b");
+    const test = await fixture({ adapter, localModels: [{ id: "gemma4:12b", contextLength: 262144, tools: true, vision: false, assumed: true }, ...PULLED.slice(1)] });
     try {
       assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL_SMALL, "the first described row, not the first row");
-      assert.equal((await test.chat(LOCAL))?.config.model, LOCAL, "chosen on purpose, the assumed row is still admitted");
     } finally { await test.close(); }
+  });
+
+  it("does not offer a local model stating less than a 256k context, and says so when that leaves none", async () => {
+    const adapter = new CaptureAdapter();
+    adapter.list = async () => MODELS.filter((model) => model.id !== "gemma4:12b");
+    const test = await fixture({ adapter, localModels: [{ id: "gemma4:12b", contextLength: 131072, tools: true, vision: false }, ...PULLED.slice(1)] });
+    try {
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL_SMALL, "the 128k model is passed over for one that states 256k");
+    } finally { await test.close(); }
+    const cloudOnly = new CaptureAdapter();
+    cloudOnly.list = async () => CLOUD_ONLY;
+    const none = await fixture({ adapter: cloudOnly, localModels: PULLED.map((model) => ({ ...model, contextLength: 131072 })) });
+    try {
+      await untilAsync(async () => {
+        assert.equal(await none.chat(), undefined, "no session goes to a cloud default nobody can pay for");
+        return /None of the pulled local models has a 256k context window/.test(none.coordinator.getState().worldChat?.lastFailure?.detail ?? "");
+      }, "refused, naming the minimum");
+    } finally { await none.close(); }
   });
 
   it("does not hold a session with a chosen model behind discovery", async () => {
@@ -945,7 +965,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
   it("lets shutdown through while a keyless session is waiting on the reload after a publication", async () => {
     const adapter = new CaptureAdapter();
     adapter.list = async () => CLOUD_ONLY;
-    const test = await fixture({ adapter, localModels: [{ id: "gemma4:12b", tools: true, vision: false }] });
+    const test = await fixture({ adapter, localModels: [{ id: "gemma4:12b", contextLength: 262144, tools: true, vision: false }] });
     const pending = test.chat().catch(() => undefined);
     const stopped = Promise.race([test.close().then(() => "stopped"), new Promise<string>((resolve) => setTimeout(() => resolve("hung"), 4_000).unref?.())]);
     assert.equal(await stopped, "stopped", "the cleared reload timer settled the gate rather than leaving the command waiting on it");

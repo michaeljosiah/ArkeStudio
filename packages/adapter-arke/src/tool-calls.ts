@@ -22,6 +22,7 @@ export type RecoveredCall =
 
 const TAGGED = /^<tool_call>\s*([\s\S]*?)\s*<\/tool_call>$/;
 const FENCED = /^```(?:json)?\s*\n([\s\S]*?)\n?```$/;
+const NAMED = /"(?:name|tool)"\s*:\s*"([^"]+)"/;
 
 /**
  * `known` is every tool name that could be meant — offered or not — so that an untagged JSON
@@ -34,7 +35,14 @@ export function recoverToolCall(content: string, known: ReadonlySet<string>): Re
   const body = tagged?.[1] ?? FENCED.exec(text)?.[1] ?? (text.startsWith("{") && text.endsWith("}") ? text : null);
   if (body === null) return null;
   let parsed: JsonObject;
-  try { parsed = object(JSON.parse(body)); } catch { return tagged ? { unreadable: "the text inside <tool_call> is not valid JSON" } : null; }
+  try { parsed = object(JSON.parse(body)); } catch {
+    if (tagged) return { unreadable: "the text inside <tool_call> is not valid JSON" };
+    // Untagged, broken JSON is only ours when it plainly names a tool: a structured reply the
+    // model botched is the reply's problem, but a botched call to `write` is a call, and the
+    // model should be told it did not run rather than have the JSON shown as its answer.
+    const named = NAMED.exec(body)?.[1];
+    return named !== undefined && known.has(named) ? { unreadable: `the call to ${named} is not valid JSON` } : null;
+  }
   const inner = object(parsed.function);
   const name = [inner.name, parsed.name, parsed.tool].find((value): value is string => typeof value === "string" && value.length > 0);
   if (name === undefined) return tagged ? { unreadable: "the call does not name a tool" } : null;

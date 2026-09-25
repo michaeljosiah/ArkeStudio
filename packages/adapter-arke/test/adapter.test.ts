@@ -309,17 +309,17 @@ test("file tools are described compactly, keeping the rule a model must know", a
 
 test("a long session is trimmed to its window: old tool results first, the instructions never", async (t) => {
   const f = await fixture(t, { maxContextTokens: 8192 });
-  await writeFile(join(f.root, "long.md"), "L".repeat(12_000));
+  await writeFile(join(f.root, "long.md"), "L".repeat(9_000));
   const id = await f.session("sheet-editor");
   f.ollama.script.push(callTool("read", { path: "long.md" }), reply("Read it."), reply("Noted."));
   await f.adapter.sendMessage({ sessionId: id, ...text("Read long.md.") });
-  await f.adapter.sendMessage({ sessionId: id, ...text("Q".repeat(3_000)) });
+  await f.adapter.sendMessage({ sessionId: id, ...text("Q".repeat(4_500)) });
   const last = f.ollama.chats.at(-1)!.messages as Array<{ role: string; content: string }>;
   const first = f.ollama.chats[0]!.messages as Array<{ role: string; content: string }>;
   assert.deepEqual(last[0], first[0], "the system prompt is untouched");
   assert.ok(last.some((m) => m.content === TRIMMED_TOOL_RESULT));
   assert.ok(!JSON.stringify(last).includes("L".repeat(100)), "the old file read is gone");
-  assert.equal(last.at(-1)!.content, "Q".repeat(3_000));
+  assert.equal(last.at(-1)!.content, "Q".repeat(4_500));
 });
 
 test("a message that cannot fit the window ends the turn with that reason, and nothing is sent", async (t) => {
@@ -410,4 +410,29 @@ test("a model loaded by a turn that was then stopped is still released", async (
   await f.adapter.interrupt(id); await sent;
   await f.adapter.releaseResidency();
   assert.deepEqual(f.ollama.generates, [{ model: "gemma4:12b", keep_alive: 0 }]);
+});
+
+test("a model that states its 256k window but no capability list is offered, as unknown, and never the default", async (t) => {
+  const f = await fixture(t);
+  f.ollama.models = [
+    { name: "plain:12b", context: 262144 },
+    { name: "gemma4:12b", capabilities: ["completion", "tools"], context: 262144 },
+  ];
+  assert.deepEqual(await f.adapter.listModels(), [
+    { id: "plain:12b", provider: "ollama", displayName: "plain:12b", inputModalities: ["text"], inputTokenLimit: 32768 },
+    { id: "gemma4:12b", provider: "ollama", displayName: "gemma4:12b", inputModalities: ["text"], inputTokenLimit: 32768, tools: true, isDefault: true },
+  ]);
+});
+
+test("a turn that starts while a release is on the wire waits for it, so its model is not unloaded under it", async (t) => {
+  const f = await fixture(t);
+  const id = await f.session("world-builder");
+  f.ollama.script.push(reply("first"), reply("second"));
+  await f.adapter.sendMessage({ sessionId: id, ...text("one") });
+  f.ollama.generateDelayMs = 150;
+  const releasing = f.adapter.releaseResidency();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await f.adapter.sendMessage({ sessionId: id, ...text("two") });
+  await releasing;
+  assert.deepEqual(f.ollama.log, ["chat", "unload:start", "unload:end", "chat"]);
 });

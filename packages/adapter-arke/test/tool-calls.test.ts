@@ -32,3 +32,11 @@ test("a tagged call to a tool that is not offered is still a call, so the confin
   assert.deepEqual(recoverToolCall('<tool_call>{"name":"bash","arguments":{"command":"ls"}}</tool_call>', known),
     { call: { function: { name: "bash", arguments: { command: "ls" } } } });
 });
+
+test("a fenced or bare call to a known tool that is not valid JSON is unreadable, not a reply", () => {
+  assert.deepEqual(recoverToolCall('```json\n{"name":"write","arguments":{"path":"a.md","content":"x",}}\n```', known), { unreadable: "the call to write is not valid JSON" });
+  assert.deepEqual(recoverToolCall('{"name": "edit", "arguments": {"path": "a.md"', known), null, "not a whole object, so not a call at all");
+  assert.deepEqual(recoverToolCall('{"name": "edit", "arguments": {path: "a.md"}}', known), { unreadable: "the call to edit is not valid JSON" });
+  assert.equal(recoverToolCall('```json\n{"reply": "Saltlight",}\n```', known), null, "a botched structured reply names no tool");
+  assert.equal(recoverToolCall('```json\n{"name": "Saltlight",}\n```', known), null, "nor does one with a name that is not a tool");
+});
