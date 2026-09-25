@@ -158,7 +158,7 @@ export interface PulledModel { id: string; contextLength?: number; tools: boolea
 export async function listPulled(fetchImpl: typeof fetch, baseUrl: string, signal: AbortSignal): Promise<PulledModel[]> {
   const listed = await listTags(fetchImpl, baseUrl, signal);
   const ids = listed.flatMap((raw) => { const id = object(raw).name; return typeof id === "string" && id ? [id] : []; });
-  const rows: Array<PulledModel | null> = new Array(ids.length).fill(null);
+  const rows: Array<PulledModel | null> = Array.from({ length: ids.length }, () => null);
   // A few at a time, each with its own deadline: one model whose inspection stalls is listed with
   // assumed capabilities rather than taking the whole catalogue down with it. Only the caller's
   // own cancellation ends the pass.
