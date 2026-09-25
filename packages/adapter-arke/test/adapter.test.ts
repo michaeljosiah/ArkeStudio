@@ -458,3 +458,100 @@ test("when Ollama counts more prompt tokens than the estimate, the session trust
   // Now a turn that fits on the raw estimate but not once scaled by what Ollama reported.
   await assert.rejects(f.adapter.sendMessage({ sessionId: id, ...text("a long question ".repeat(200)) }), /do not fit the model's context window/);
 });
+
+test("a turn waiting on a stalled release stops when it is interrupted, so dispose is not held behind it", async (t) => {
+  const f = await fixture(t);
+  const id = await f.session("world-builder");
+  f.ollama.script.push(reply("first"));
+  await f.adapter.sendMessage({ sessionId: id, ...text("one") });
+  f.ollama.generateDelayMs = 5_000;
+  const releasing = f.adapter.releaseResidency(AbortSignal.timeout(6_000)).catch(() => {});
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const waiting = f.adapter.sendMessage({ sessionId: id, ...text("two") }).catch((error: Error) => error.message);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const started = Date.now();
+  await f.adapter.interrupt(id);
+  assert.equal(await waiting, "Stopped.");
+  assert.ok(Date.now() - started < 1_000, "the stopped turn did not wait out the release");
+  f.ollama.generateDelayMs = 0;
+  void releasing;
+});
+
+test("an unready harness picks Ollama back up on its own once it answers again", async (t) => {
+  const ollama = new FakeOllama(); await ollama.start();
+  let down = true;
+  const adapter = new ArkeAdapter({
+    baseUrl: ollama.url, reprobeMs: 0,
+    fetch: (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      if (down) throw new TypeError("fetch failed");
+      return fetch(input, init);
+    }) as typeof fetch,
+  });
+  t.after(async () => { await adapter.dispose(); await ollama.stop(); });
+  await assert.rejects(adapter.init(), /not answering/);
+  assert.equal(adapter.readiness().ready, false);
+  const revision = adapter.lifecycleRevision();
+  down = false;
+  const deadline = Date.now() + 3_000;
+  while (!adapter.readiness().ready && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(adapter.readiness().ready, true, "polling readiness alone was enough; nothing restarted the app");
+  assert.ok(adapter.lifecycleRevision() > revision, "and the change is visible to a health loop");
+});
+
+test("reaching Ollama is not enough to be ready: it must hold a model this harness can write with", async (t) => {
+  const f = await fixture(t);
+  f.ollama.models = [{ name: "short:8b", capabilities: ["completion", "tools"], context: 131072 }];
+  await assert.rejects(f.adapter.init(), /No pulled model has a 256k context window and calls tools/);
+  const readiness = f.adapter.readiness();
+  assert.equal(readiness.ready, false);
+  assert.match(readiness.reason ?? "", /256k/);
+  f.ollama.models = [{ name: "gemma4:12b", capabilities: ["completion", "tools"], context: 262144 }];
+  await f.adapter.init();
+  assert.equal(f.adapter.readiness().ready, true);
+});
+
+test("startup and recovery share one check, and a check in flight never outlives dispose", async (t) => {
+  const ollama = new FakeOllama(); await ollama.start();
+  let tags = 0;
+  let stall = false;
+  const adapter = new ArkeAdapter({
+    baseUrl: ollama.url, reprobeMs: 0,
+    fetch: (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      if (String(input).endsWith("/api/show")) tags++;
+      if (String(input).endsWith("/api/tags")) {
+        if (stall) return new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true }));
+      }
+      return fetch(input, init);
+    }) as typeof fetch,
+  });
+  t.after(async () => { await ollama.stop(); });
+  await Promise.all([adapter.init(), adapter.init(), adapter.init()]);
+  assert.equal(tags, 1, "three callers, one check: the one pulled model inspected once");
+  assert.equal(adapter.readiness().ready, true);
+
+  const idle = new ArkeAdapter({ baseUrl: ollama.url, reprobeMs: 0, fetch: (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    if (String(input).endsWith("/api/tags") && stall) return new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true }));
+    return fetch(input, init);
+  }) as typeof fetch });
+  stall = true;
+  const probing = idle.init().catch(() => {});
+  const started = Date.now();
+  await idle.dispose();
+  await probing;
+  assert.ok(Date.now() - started < 1_000, "dispose stopped the check rather than waiting out its deadline");
+  assert.equal(idle.readiness().ready, false, "and nothing it found afterwards could mark a disposed adapter ready");
+  await adapter.dispose();
+});
+
+test("removing the last usable model while running is seen at the next catalogue read", async (t) => {
+  const f = await fixture(t);
+  await f.adapter.init();
+  assert.equal(f.adapter.readiness().ready, true);
+  const revision = f.adapter.lifecycleRevision();
+  f.ollama.models = [{ name: "short:8b", capabilities: ["completion", "tools"], context: 131072 }];
+  assert.deepEqual(await f.adapter.listModels(), []);
+  const readiness = f.adapter.readiness();
+  assert.equal(readiness.ready, false, "no longer reported healthy");
+  assert.match(readiness.reason ?? "", /256k/);
+  assert.ok(f.adapter.lifecycleRevision() > revision);
+});

@@ -40,3 +40,7 @@ test("a fenced or bare call to a known tool that is not valid JSON is unreadable
   assert.equal(recoverToolCall('```json\n{"reply": "Saltlight",}\n```', known), null, "a botched structured reply names no tool");
   assert.equal(recoverToolCall('```json\n{"name": "Saltlight",}\n```', known), null, "nor does one with a name that is not a tool");
 });
+
+test("a fence labelled in capitals is still a fence", () => {
+  assert.deepEqual(recoverToolCall('```JSON\n{"name":"list","arguments":{}}\n```', known), { call: { function: { name: "list", arguments: {} } } });
+});

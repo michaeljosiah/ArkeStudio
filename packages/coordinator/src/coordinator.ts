@@ -56,6 +56,7 @@ import {
   stagedReferenceKey,
   LedgerEntrySchema,
   OPENCODE_AVAILABILITY,
+  arkeAvailability,
   type Capability,
   type ClientMessage,
   type HarnessAvailability,
@@ -751,7 +752,7 @@ export interface CoordinatorOptions {
    * into app state so Settings can name it (issue 327 §9, SPEC-005 R-1).
    */
   harnessInfo?: {
-    generation: "v2" | "v1" | "claude" | "codex";
+    generation: "v2" | "v1" | "claude" | "codex" | "arke";
     source: "configured" | "path" | "bundled";
     version: string | null;
     beta: boolean;
@@ -4341,6 +4342,11 @@ export class Coordinator {
    * the credential store and so is read from the published sign-in state.
    */
   private cloudCredentialAvailable(): boolean {
+    // Arke's local harness cannot spend a cloud key, so for it none is ever available: every
+    // session without an explicit model gets the application-validated local default — disabled
+    // models, hardware eligibility and Stage's image input all checked — rather than whatever
+    // model the adapter would pick for itself (issue 1247).
+    if (this.opts.adapter?.id === "arke") return false;
     // Only the connections the harness keeps itself. An `env` connection is Studio's own key as
     // the harness sees it, and the store is read at the command — the published row outlives a
     // cleared key by the length of the relaunch, and a session in that gap must not count it.
@@ -4458,7 +4464,7 @@ export class Coordinator {
     // Capture this before commands can change the saved preference. Failed discovery has no
     // harnessInfo, but Settings must still attach its health failure to the engine we tried.
     const generation = this.opts.harnessInfo?.generation;
-    this.launchEngine = generation === "claude" || generation === "codex" ? generation
+    this.launchEngine = generation === "claude" || generation === "codex" || generation === "arke" ? generation
       : generation === "v1" || generation === "v2" ? "opencode"
       : this.opts.harnessLaunchEngine ?? this.opts.harnessEngineOverride ?? settings?.harness.engine ?? "opencode";
     // Read once here so the first session of the run already carries the user's choices —
@@ -17427,7 +17433,27 @@ export class Coordinator {
     const detected = this.opts.detectHarnesses
       ? await this.opts.detectHarnesses(claudePath, codexPath).catch(() => [])
       : [];
-    return [OPENCODE_AVAILABILITY, ...detected];
+    return [OPENCODE_AVAILABILITY, await this.arkeHarnessAvailability(), ...detected];
+  }
+
+  /**
+   * Whether the local harness could write right now (issue 1247). Nothing to install: it is part
+   * of the app, so the only questions are whether Ollama answers and whether it holds a model the
+   * harness can write with — one that states the 256k window and calls tools. Asked of the same
+   * Ollama client the rest of the coordinator uses, so this and the local-model listing agree.
+   */
+  private async arkeHarnessAvailability(): Promise<HarnessAvailability> {
+    const list = this.opts.dispatchClients?.["ollama"]?.listModels;
+    if (!list) return arkeAvailability("Local writing needs Ollama, which is not set up on this machine.");
+    let pulled: readonly import("@arke-studio/contracts").LocalHarnessModel[];
+    try {
+      pulled = await list.call(this.opts.dispatchClients!["ollama"]!);
+    } catch {
+      return arkeAvailability("Ollama is not answering on this machine.");
+    }
+    const usable = pulled.some((model) => meetsLocalModelMinimum(model) && model.tools && model.assumed !== true);
+    return arkeAvailability(usable ? null
+      : "No pulled model has a 256k context window and calls tools. Pull one, such as Gemma 4 12B.");
   }
 
   /**

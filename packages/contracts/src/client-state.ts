@@ -475,7 +475,7 @@ export const ClientStateSchema = valueSchema(z
          */
         harnessInfo: z
           .object({
-            generation: z.enum(["v2", "v1", "claude", "codex"]),
+            generation: z.enum(["v2", "v1", "claude", "codex", "arke"]),
             source: z.enum(["configured", "path", "bundled"]),
             version: z.string().nullable(),
             beta: z.boolean(),

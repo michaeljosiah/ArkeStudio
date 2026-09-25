@@ -14,7 +14,7 @@ import { z } from "zod";
  * screen given only a boolean would have to invent the difference or hide it.
  */
 
-export const HarnessEngineSchema = z.enum(["opencode", "claude", "codex"]);
+export const HarnessEngineSchema = z.enum(["opencode", "claude", "codex", "arke"]);
 export type HarnessEngine = z.infer<typeof HarnessEngineSchema>;
 
 export const HarnessAvailabilitySchema = z
@@ -117,6 +117,16 @@ export const LOCAL_MODEL_MIN_CONTEXT = 256_000;
  */
 export function meetsLocalModelMinimum(model: { readonly contextLength?: number }): boolean {
   return (model.contextLength ?? 0) >= LOCAL_MODEL_MIN_CONTEXT;
+}
+
+/**
+ * Arke's own local harness (issue 1247). Nothing to install or find: it is part of the app and
+ * talks to Ollama directly, so it is bundled — and never asks for an executable — but it is only
+ * usable when Ollama answers with a model it can write with. `blocked` says which of those is
+ * missing, in words a person can act on.
+ */
+export function arkeAvailability(blocked: string | null): HarnessAvailability {
+  return { id: "arke", label: "Local", installed: blocked === null, version: null, source: null, blocked, bundled: true };
 }
 
 /**

@@ -44,6 +44,8 @@ export interface ArkeAdapterOptions {
   maxContextTokens?: number;
   /** Model calls one turn may make before it is ended. Each tool round is one. */
   maxStepsPerTurn?: number;
+  /** How often an unready harness asks Ollama again, at most. */
+  reprobeMs?: number;
   /** How long one catalogue pass inspects models before listing the rest as unread. */
   catalogueDeadlineMs?: number;
   /** Passed to Ollama as `keep_alive`, when set. */
@@ -56,6 +58,8 @@ const CONTEXT_CEILING = 32_768;
 const DEFAULT_STEPS = 24;
 const CATALOGUE_DEADLINE_MS = 15_000;
 const DISPOSE_RELEASE_MS = 2_000;
+const REPROBE_MS = 5_000;
+const NO_USABLE_MODEL = "No pulled model has a 256k context window and calls tools. Pull one, such as Gemma 4 12B.";
 /**
  * Only models stating a 256k context are offered, the same rule as the OpenCode lane
  * (`meetsLocalModelMinimum` in contracts). How much of that window a session asks for is
@@ -139,6 +143,10 @@ export class ArkeAdapter implements HarnessAdapter {
    * while its unload is on the wire would be unloaded under the turn, or loaded twice.
    */
   private releasing: Promise<void> = Promise.resolve();
+  private probing: Promise<void> | null = null;
+  /** Aborted by dispose, so a check in flight stops rather than outliving the adapter. */
+  private readonly lifetime = new AbortController();
+  private lastProbe = 0;
 
   constructor(private readonly opts: ArkeAdapterOptions = {}) {
     this.fetchImpl = opts.fetch ?? fetch;
@@ -146,7 +154,18 @@ export class ArkeAdapter implements HarnessAdapter {
   }
 
   capabilities(): ReadonlySet<HarnessCapability> { return new Set(["events", "models"]); }
-  readiness(): Readiness { return this.ready; }
+  /**
+   * Also how the harness recovers. The coordinator initialises an adapter it does not supervise
+   * once, then only polls this; with no process to restart, Ollama starting (or coming back)
+   * would otherwise go unnoticed until the app restarted. So while unready, a poll starts a fresh
+   * probe — one at a time, and no more often than `reprobeMs` — and the next poll sees the answer.
+   */
+  readiness(): Readiness {
+    if (!this.ready.ready && !this.disposed && this.probing === null && Date.now() - this.lastProbe >= (this.opts.reprobeMs ?? REPROBE_MS)) {
+      void this.init().catch(() => {});
+    }
+    return this.ready;
+  }
   lifecycleRevision(): number { return this.revision; }
   /** Nothing on disk: configuration arrives through `prepareSession`. */
   sessionFiles(): [] { return []; }
@@ -167,19 +186,40 @@ export class ArkeAdapter implements HarnessAdapter {
     this.ready = { ready: false, reason };
   }
 
-  /** Ready when Ollama answers. There is nothing else to start. */
+  /**
+   * Ready when Ollama answers and holds a model this harness can write with — the same test
+   * Settings applies before offering it, so "running" never means "reachable but useless".
+   * There is nothing else to start.
+   */
   async init(): Promise<void> {
     if (this.disposed) throw new Error("The Arke harness is disposed.");
+    // One check at a time, whoever asks: startup and recovery share it, so an older answer can
+    // never land after a newer one.
+    this.probing ??= this.probe().finally(() => { this.probing = null; });
+    return this.probing;
+  }
+
+  private async probe(): Promise<void> {
+    this.lastProbe = Date.now();
+    const signal = this.lifetime.signal;
+    const unready = (reason: string): never => {
+      if (!this.disposed) this.markUnready(reason);
+      throw new Error(reason);
+    };
+    let models: ModelInfo[];
     try {
-      // Reachability only: inspecting every pulled model is the catalogue's work, and one slow
-      // inspection must not read as Ollama being down.
-      await listTags(this.fetchImpl, this.baseUrl, AbortSignal.timeout(8_000));
-      if (!this.ready.ready) this.revision++;
-      this.ready = { ready: true };
+      // Reachability first, on its own deadline: a slow model inspection must not read as
+      // Ollama being down. The catalogue then has its own deadline for the inspections.
+      await listTags(this.fetchImpl, this.baseUrl, AbortSignal.any([signal, AbortSignal.timeout(8_000)]));
+      ({ models } = await this.catalog(signal));
     } catch {
-      this.markUnready("Ollama is not answering on this machine.");
-      throw new Error("Ollama is not answering on this machine.");
+      return unready("Ollama is not answering on this machine.");
     }
+    // A check that finishes after disposal says nothing about an adapter that no longer exists.
+    if (this.disposed) throw new Error("The Arke harness is disposed.");
+    if (!models.some((model) => model.isDefault)) return unready(NO_USABLE_MODEL);
+    if (!this.ready.ready) this.revision++;
+    this.ready = { ready: true };
   }
 
   async listModels(): Promise<ModelInfo[]> {
@@ -196,6 +236,10 @@ export class ArkeAdapter implements HarnessAdapter {
     const pulled = all.filter(supported);
     // Only a model seen to call tools: a default nobody chose must be one that can do the work.
     const fallback = pulled.find((model) => model.tools === true)?.id;
+    // Every read of the catalogue is also a check of readiness: the last usable model can be
+    // removed while the app runs, and a harness that cannot start a writing session must not go
+    // on reporting itself healthy. The recovery probe restores it when one is pulled again.
+    if (fallback === undefined && this.ready.ready) this.markUnready(NO_USABLE_MODEL);
     const models = pulled.map((model): ModelInfo => ({
       id: model.id, provider: PROVIDER, displayName: model.id,
       inputModalities: model.vision ? ["text", "image"] : ["text"],
@@ -341,7 +385,11 @@ export class ArkeAdapter implements HarnessAdapter {
         if (!fitToWindow(session.messages, session.tools, promptBudget(session.numCtx), session.messages.indexOf(opening), session.scale)) {
           return { reason: "budget-exceeded", detail: "This message and its tool results do not fit the model's context window." };
         }
-        await this.releasing;
+        // Raced with the turn's own signal: a release stalled on Ollama must not hold a stopped
+        // turn, or a dispose waiting on that turn, past its own deadline.
+        await Promise.race([this.releasing, new Promise<void>((resolve) => {
+          if (signal.aborted) resolve(); else signal.addEventListener("abort", () => resolve(), { once: true });
+        })]);
         signal.throwIfAborted();
         // Before the request, not after: Ollama may load the model and then the turn be stopped,
         // and a model loaded but not remembered could never be released.
@@ -488,6 +536,8 @@ export class ArkeAdapter implements HarnessAdapter {
 
   async dispose(): Promise<void> {
     this.disposed = true;
+    this.lifetime.abort();
+    await this.probing?.catch(() => {});
     this.preparations.clear();
     const running = [...this.sessions.values()].flatMap((session) => session.turn ? [session.turn] : []);
     for (const turn of running) turn.abort.abort();

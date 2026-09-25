@@ -15,7 +15,7 @@ import { eligibilityInputs } from "./dispatch-bar.js";
 /** The catalog is supplied by the running harness, even while a restart is pending. */
 export function runningHarnessLabel(state: ClientState | null): string {
   const generation = state?.app.harnessInfo?.generation;
-  return generation === "claude" ? "Claude Code" : generation === "codex" ? "Codex"
+  return generation === "claude" ? "Claude Code" : generation === "codex" ? "Codex" : generation === "arke" ? "Local"
     : generation === "v1" || generation === "v2" ? "OpenCode" : "the running harness";
 }
 

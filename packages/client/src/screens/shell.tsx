@@ -1984,7 +1984,7 @@ export function SettingsHarnessScreen() {
   const harnesses = harness?.harnesses ?? [OPENCODE_AVAILABILITY];
   const engine = harness?.engine ?? "opencode";
   const generation = state?.app.harnessInfo?.generation;
-  const runningEngine = generation === "claude" || generation === "codex"
+  const runningEngine = generation === "claude" || generation === "codex" || generation === "arke"
     ? generation
     : generation === "v1" || generation === "v2" ? "opencode" : harness?.launchEngine ?? null;
   const harnessHealth = state?.app.health.harness;
@@ -2022,7 +2022,7 @@ export function SettingsHarnessScreen() {
               <span>{h.label}</span>
               <span style={{ flex: 1 }} />
               <span className="fy-rt__count">
-                {h.id === runningEngine ? activeStatus : h.blocked ? (h.version !== null || h.source !== null ? "needs attention" : "not here") : h.id === engine ? "next restart" : h.installed ? "available" : "not here"}
+                {h.id === runningEngine ? activeStatus : h.blocked ? (h.bundled ? "unavailable" : h.version !== null || h.source !== null ? "needs attention" : "not here") : h.id === engine ? "next restart" : h.installed ? "available" : "not here"}
               </span>
             </button>
           ))}
@@ -2071,7 +2071,9 @@ export function SettingsHarnessScreen() {
             </button>
             <div>
               <strong>Search online</strong>
-              <p>{researchOn ? "Searches, reads, and cites pages." : "Stays offline."}</p>
+              {/* The setting is global, but Local has no web tools yet, so it never searches. */}
+              <p>{runningEngine === "arke" ? researchOn ? "On, but Local stays offline." : "Stays offline."
+                : researchOn ? "Searches, reads, and cites pages." : "Stays offline."}</p>
             </div>
           </div>
           {/*
@@ -2135,7 +2137,7 @@ function HarnessPane({
         title={harness.label}
         caps={harness.bundled ? "BUNDLED" : "YOUR INSTALLATION"}
         tone={active && !running && health?.status !== "starting" ? "warn" : running ? "ok" : harness.installed ? "idle" : "warn"}
-        state={active ? running ? "running now" : health?.status === "starting" ? "starting" : "unavailable" : harness.blocked ? (harness.version !== null || harness.source !== null ? "needs attention" : "not here") : selected ? "next restart" : harness.installed ? "available" : "not here"}
+        state={active ? running ? "running now" : health?.status === "starting" ? "starting" : "unavailable" : harness.blocked ? (harness.bundled ? "unavailable" : harness.version !== null || harness.source !== null ? "needs attention" : "not here") : selected ? "next restart" : harness.installed ? "available" : "not here"}
       />
       <RuntimeSection label="ON THIS MACHINE" />
       <div className="fy-set__row">
@@ -2190,7 +2192,7 @@ function HarnessPane({
               ? running ? "new sessions use this harness" : "restart Arke Studio to switch"
               : harness.installed
                 ? "switching takes effect on the next restart"
-                : "unavailable until it is installed"}
+                : harness.bundled ? "unavailable for now" : "unavailable until it is installed"}
           </div>
         </div>
         <Button

@@ -24,11 +24,12 @@ import {
   type RunProbeTurn,
 } from "@arke-studio/adapter-claude";
 import { CodexAdapter, codexCredentialEnv, discoverCodex, type CodexDiscoveryOptions } from "@arke-studio/adapter-codex";
+import { ArkeAdapter } from "@arke-studio/adapter-arke";
 import { ChildSupervisor, type SupervisorDeps } from "../supervisor.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { ownedChildHooks } from "./owned-child.js";
 
-// This package owns shared desktop/dev composition, so both adapters are runtime dependencies.
+// This package owns shared desktop/dev composition, so every adapter is a runtime dependency.
 // Keep concrete adapter imports here; Coordinator itself consumes the HarnessAdapter contract.
 export { describeClaudeAvailability } from "@arke-studio/adapter-claude";
 export { describeCodexAvailability } from "@arke-studio/adapter-codex";
@@ -123,7 +124,7 @@ export function harnessProfileConfigPath(appRoot: string): string {
 
 /** What Settings names about the wired harness (issue 327 §9, SPEC-005 R-1). */
 export interface AssembledHarnessInfo {
-  generation: "v2" | "v1" | "claude" | "codex";
+  generation: "v2" | "v1" | "claude" | "codex" | "arke";
   source: "configured" | "path" | "bundled";
   version: string | null;
   beta: boolean;
@@ -169,6 +170,11 @@ export interface AssembleHarnessOptions {
     cache?: ConfinementCache;
   };
   codex?: CodexDiscoveryOptions & { enabled?: boolean };
+  /**
+   * Arke's own local harness (issue 1247). No discovery and no process: it is part of the app
+   * and talks to Ollama on this machine. `maxContextTokens` is the window a session asks for.
+   */
+  arke?: { enabled?: boolean; maxContextTokens?: number };
   /** The adapter's trace sink — logs/harness.jsonl at the host's root. */
   onTrace?: (line: Record<string, unknown>) => void;
 }
@@ -177,7 +183,7 @@ export interface AssembledHarness {
   harness: DiscoveredHarness | null;
   isV2: boolean;
   supervisor: ChildSupervisor | null;
-  adapter: OpenCodeAdapter | OpenCodeV2Adapter | ClaudeAdapter | CodexAdapter | null;
+  adapter: OpenCodeAdapter | OpenCodeV2Adapter | ClaudeAdapter | CodexAdapter | ArkeAdapter | null;
   harnessInfo?: AssembledHarnessInfo;
   unavailableReason?: string;
   relaunchHarness: (credentials: Record<string, string | undefined>) => Promise<void>;
@@ -203,7 +209,23 @@ export interface AssembledHarness {
  * after review found the two copies already drifting in their first week.
  */
 export async function assembleHarness(opts: AssembleHarnessOptions): Promise<AssembledHarness> {
-  const engine = opts.engine ?? (opts.codex?.enabled ? "codex" : opts.claude?.enabled ? "claude" : "opencode");
+  const engine = opts.engine ?? (opts.arke?.enabled ? "arke" : opts.codex?.enabled ? "codex" : opts.claude?.enabled ? "claude" : "opencode");
+  if (engine === "arke") {
+    // Nothing to discover, supervise or authenticate: the adapter reaches Ollama on loopback and
+    // says itself, through readiness, whether it is answering. Only a loopback address is ever
+    // used here — a remote runtime would be an explicit setting, and there is none yet.
+    const adapter = new ArkeAdapter({
+      ...(opts.arke?.maxContextTokens !== undefined ? { maxContextTokens: opts.arke.maxContextTokens } : {}),
+      ...(opts.onTrace ? { onTrace: opts.onTrace } : {}),
+    });
+    return {
+      harness: null, isV2: false, supervisor: null, adapter,
+      harnessInfo: { generation: "arke", source: "bundled", version: null, beta: false },
+      // No credentials anywhere in this lane: a saved key changes nothing it does.
+      relaunchHarness: async () => {},
+      logLines: ["Arke local harness: Ollama on this machine, confined Arke tools"],
+    };
+  }
   // A selected bring-your-own engine has its own lifecycle. An unrelated OpenCode installation
   // must neither gate initialization nor be launched as an invisible fallback after failure.
   if (engine === "claude") {
