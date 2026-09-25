@@ -203,6 +203,8 @@ export interface AssembledContext {
   /** Live propositions, so the model can correct rather than repeat them. */
   registry: string;
   recentTurns: string;
+  /** Whole messages behind recentTurns, so a local adapter can discard complete old exchanges. */
+  recentMessages: WorldChatMessage[];
   worldContext: string;
   /** The bible with its framing line, or "" when there is none. Never trimmed. */
   bible: string;
@@ -416,6 +418,7 @@ function renderTombstones(tombstones: readonly CandidateTombstone[]): string {
 export function assembleContext(input: ContextInput): AssembledContext {
   const budget = input.budgetChars ?? FALLBACK_BUDGET_CHARS;
   const trimmed: string[] = [];
+  const recentMessages = input.messages.slice(-RECENT_TURN_COUNT * 2);
 
   /*
    * Everything, whole, before anything is measured.
@@ -425,7 +428,7 @@ export function assembleContext(input: ContextInput): AssembledContext {
    * cut here until the total is known to be too big.
    */
   const sections: Record<(typeof SACRIFICE_ORDER)[number], string> = {
-    recentTurns: renderTurns(input.messages.slice(-RECENT_TURN_COUNT * 2)),
+    recentTurns: renderTurns(recentMessages),
     worldContext: input.worldContext ?? "",
     summary: input.summary ?? "",
     registry: renderRegistry(input.candidates, input.groups ?? []),
@@ -442,7 +445,8 @@ export function assembleContext(input: ContextInput): AssembledContext {
    * Cut only as far as it takes, and in the order stated above.
    *
    * Each section gives up what the total is over by, not all of it: a prompt 200 characters too
-   * long loses 200 characters of the oldest turns rather than every turn it had.
+   * long loses the oldest exchange rather than every turn it had. Keep exchanges whole so a
+   * harness can also trim them against its token budget without cutting someone's words.
    */
   for (const name of SACRIFICE_ORDER) {
     const over = fixed + spent() - budget;
@@ -450,6 +454,15 @@ export function assembleContext(input: ContextInput): AssembledContext {
     const text = sections[name];
     if (text.length === 0) continue;
     const keep = Math.max(0, text.length - over);
+    if (name === "recentTurns") {
+      do {
+        recentMessages.shift();
+        while (recentMessages[0]?.role === "studio") recentMessages.shift();
+      } while (recentMessages.length && renderTurns(recentMessages).length > keep);
+      sections.recentTurns = renderTurns(recentMessages);
+      trimmed.push(name);
+      continue;
+    }
     sections[name] =
       name === "attachments"
         ? renderAttachments(input.attachments ?? [], keep)
@@ -463,6 +476,7 @@ export function assembleContext(input: ContextInput): AssembledContext {
     summary: sections.summary,
     registry: sections.registry,
     recentTurns: sections.recentTurns,
+    recentMessages,
     worldContext: sections.worldContext,
     bible,
     attachments: sections.attachments,

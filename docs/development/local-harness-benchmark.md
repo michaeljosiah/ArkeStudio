@@ -25,9 +25,14 @@ port and Ollama moves one port up for the run. Nothing leaves the machine.
 ## Before you start
 
 - Quit Arke Studio: it would otherwise hold port 11434's traffic and the GPU.
-- Pull the models to compare, each stating a 256k context (both lanes refuse less):
+- Pull the models to compare, each stating a 256k context for OpenCode (Local requires 64k):
   `ollama pull gemma4:12b`, `ollama pull gemma4:26b`, and optionally the Uncensored Balanced
   variant (`hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M`).
+- Local defaults to a 65,536-token allocation, reserving 4,096 for the reply. This is a bounded
+  default, not GPU auto-sizing. The host can set `maxContextTokens` explicitly; requests remain
+  capped by the model's stated window. World Chat hands older exchanges over separately so they
+  can be trimmed after accounting for the instructions and actual tool schemas. A current ask
+  that still cannot fit ends visibly with guidance to start a new thread or ask about less (#1265).
 - For the OpenCode lane, the bundled OpenCode v2: `npm run prepare:opencode2 -w apps/desktop`,
   then pass the binary's path with `--opencode` if discovery does not find it.
 - `npm ci` at the repository root, so `tsx` and the workspaces are installed.

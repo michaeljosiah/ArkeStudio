@@ -347,9 +347,9 @@ describe("choosing a harness", () => {
 });
 
 describe("choosing the local harness (issue 1247)", () => {
-  const GEMMA = { id: "gemma4:12b", contextLength: 262_144, tools: true, vision: true };
+  const GEMMA = { id: "gemma4:12b", contextLength: 65_536, tools: true, vision: true };
 
-  it("is selectable once Ollama answers with a 256k model that calls tools, and is never an executable to find", async () => {
+  it("is selectable once Ollama answers with a 64k model that calls tools, and is never an executable to find", async () => {
     await withCoordinator(CLAUDE_PRESENT, async (client, root) => {
       client.send({ kind: "detect-harnesses" });
       await client.until((f) => f.kind === "event" && f.event.type === "harness.status", "the harness list");
@@ -365,8 +365,8 @@ describe("choosing the local harness (issue 1247)", () => {
     const cases: Array<[string, (() => Promise<Array<typeof GEMMA>>) | undefined, RegExp]> = [
       ["no Ollama client", undefined, /not set up on this machine/],
       ["Ollama not answering", async () => { throw new Error("down"); }, /not answering/],
-      ["only a 128k model", async () => [{ ...GEMMA, contextLength: 131_072 }], /256k context window and calls tools/],
-      ["only a model that cannot call tools", async () => [{ ...GEMMA, tools: false }], /256k context window and calls tools/],
+      ["only a 16k model", async () => [{ ...GEMMA, contextLength: 16_384 }], /64k context window and calls tools/],
+      ["only a model that cannot call tools", async () => [{ ...GEMMA, tools: false }], /64k context window and calls tools/],
     ];
     for (const [label, ollama, reason] of cases) {
       await withCoordinator(CLAUDE_PRESENT, async (client, root) => {

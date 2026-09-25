@@ -157,6 +157,7 @@ import {
   orderedShots,
   characterAudioRoute,
   meetsLocalModelMinimum,
+  meetsArkeModelMinimum,
 } from "@arke-studio/contracts";
 import { BenchStore, sessionDir as benchSessionDir, sessionMediaDir } from "./bench/store.js";
 import {
@@ -6409,7 +6410,12 @@ export class Coordinator {
         // The title may have just changed, and the screen shows the message immediately.
         await this.refreshConversations(store);
         await this.openWorldChat(store, msg.conversationId);
-        await inFlight;
+        try { await inFlight; }
+        finally {
+          // Terminal conversation state must reach the asker even if cleanup or a later world
+          // refresh fails. Loading its durable log does not depend on scanning the world.
+          await this.openWorldChat(store, msg.conversationId, msg.conversationId);
+        }
         await this.refreshWorldSnapshot(msg.worldId);
         await this.refreshConversations(store);
         await this.openWorldChat(store, msg.conversationId);
@@ -6443,7 +6449,8 @@ export class Coordinator {
         const inFlight = started.completion;
         // The spinner replaces the failure notice immediately, so pressing it looks like it worked.
         await this.openWorldChat(store, msg.conversationId);
-        await inFlight;
+        try { await inFlight; }
+        finally { await this.openWorldChat(store, msg.conversationId, msg.conversationId); }
         await this.refreshWorldSnapshot(msg.worldId);
         await this.refreshConversations(store);
         await this.openWorldChat(store, msg.conversationId);
@@ -17444,7 +17451,7 @@ export class Coordinator {
   /**
    * Whether the local harness could write right now (issue 1247). Nothing to install: it is part
    * of the app, so the only questions are whether Ollama answers and whether it holds a model the
-   * harness can write with — one that states the 256k window and calls tools. Asked of the same
+   * harness can write with — one that supports its 64k window and calls tools. Asked of the same
    * Ollama client the rest of the coordinator uses, so this and the local-model listing agree.
    */
   private async arkeHarnessAvailability(): Promise<HarnessAvailability> {
@@ -17456,9 +17463,9 @@ export class Coordinator {
     } catch {
       return arkeAvailability("Ollama is not answering on this machine.");
     }
-    const usable = pulled.some((model) => meetsLocalModelMinimum(model) && model.tools && model.assumed !== true);
+    const usable = pulled.some((model) => meetsArkeModelMinimum(model) && model.tools && model.assumed !== true);
     return arkeAvailability(usable ? null
-      : "No pulled model has a 256k context window and calls tools. Pull one, such as Gemma 4 12B.");
+      : "No pulled model has a 64k context window and calls tools. Pull one, such as Gemma 4 12B.");
   }
 
   /**

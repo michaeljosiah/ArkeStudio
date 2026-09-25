@@ -34,16 +34,16 @@ test("lists pulled models in the contract's terms, and names a tool-calling one 
   const f = await fixture(t);
   f.ollama.models = [
     { name: "nomic-embed-text", capabilities: ["embedding"] },
-    { name: "short:8b", capabilities: ["completion", "tools"], context: 131072 },
+    { name: "short:8b", capabilities: ["completion", "tools"], context: 16384 },
     { name: "chatty:7b", capabilities: ["completion"], context: 262144 },
     { name: "qwen3-vl:8b", capabilities: ["completion", "tools", "vision"], context: 1048576 },
   ];
   await f.adapter.init();
   assert.equal(f.adapter.readiness().ready, true);
   assert.deepEqual(await f.adapter.listModels(), [
-    { id: "chatty:7b", provider: "ollama", displayName: "chatty:7b", inputModalities: ["text"], inputTokenLimit: 32768, tools: false },
-    { id: "qwen3-vl:8b", provider: "ollama", displayName: "qwen3-vl:8b", inputModalities: ["text", "image"], inputTokenLimit: 32768, tools: true, isDefault: true },
-  ], "only models stating 256k or more; the limit is the window a session will get; a model that cannot call tools says so");
+    { id: "chatty:7b", provider: "ollama", displayName: "chatty:7b", inputModalities: ["text"], inputTokenLimit: 65536, tools: false },
+    { id: "qwen3-vl:8b", provider: "ollama", displayName: "qwen3-vl:8b", inputModalities: ["text", "image"], inputTokenLimit: 65536, tools: true, isDefault: true },
+  ], "only models stating 64k or more; the limit is the window a session will get; a model that cannot call tools says so");
 });
 
 test("a turn streams, completes, and ends with a stated reason; every event parses", async (t) => {
@@ -62,8 +62,8 @@ test("a turn streams, completes, and ends with a stated reason; every event pars
   const request = f.ollama.chats[0]!;
   assert.equal(request.model, "gemma4:12b");
   assert.equal(request.stream, true);
-  assert.deepEqual(request.options, { num_ctx: 32768 }, "the model's own context, held to the ceiling");
-  assert.equal(f.adapter.knownInputTokenLimit(id), 32768);
+  assert.deepEqual(request.options, { num_ctx: 65536 }, "the model's own context, held to the ceiling");
+  assert.equal(f.adapter.knownInputTokenLimit(id), 65536);
   const messages = request.messages as Array<{ role: string; content: string }>;
   assert.equal(messages[0]!.role, "system");
   assert.deepEqual(messages.at(-1), { role: "user", content: "Name the town." });
@@ -140,16 +140,16 @@ test("a refused request is a session error with Ollama's reason, and a stream th
   await assert.rejects(f.adapter.sendMessage({ sessionId: id, parts: [{ type: "text", text: "again" }] }), /before it finished/);
 });
 
-test("the chosen model is the one asked for; one not pulled, or under 256k, is refused before any session exists", async (t) => {
+test("the chosen model is the one asked for; one not pulled, or under 64k, is refused before any session exists", async (t) => {
   const f = await fixture(t);
-  f.ollama.models.push({ name: "qwen3:8b", capabilities: ["completion", "tools"], context: 262144 }, { name: "short:8b", capabilities: ["completion", "tools"], context: 131072 });
+  f.ollama.models.push({ name: "qwen3:8b", capabilities: ["completion", "tools"], context: 262144 }, { name: "short:8b", capabilities: ["completion", "tools"], context: 16384 });
   const id = await f.session("canon-qa", { model: "ollama/qwen3:8b" });
   f.ollama.script.push(reply("ok"));
   await f.adapter.sendMessage({ sessionId: id, parts: [{ type: "text", text: "hi" }] });
   assert.equal(f.ollama.chats[0]!.model, "qwen3:8b");
-  assert.deepEqual(f.ollama.chats[0]!.options, { num_ctx: 32768 });
+  assert.deepEqual(f.ollama.chats[0]!.options, { num_ctx: 65536 });
   await assert.rejects(f.session("world-builder", { model: "ollama/absent:1b" }), /not pulled/);
-  await assert.rejects(f.session("canon-qa", { model: "ollama/short:8b" }), /under 256k tokens/, "pulled, but not offered, and told why");
+  await assert.rejects(f.session("canon-qa", { model: "ollama/short:8b" }), /under 64k tokens/, "pulled, but not offered, and told why");
 });
 
 test("a window that cannot hold the role's prompt is refused before a session exists, not truncated on every turn", async (t) => {
@@ -255,7 +255,7 @@ test("a model whose inspection stalls is not offered, since its window cannot be
   ];
   await f.adapter.init();
   assert.deepEqual(await f.adapter.listModels(), [
-    { id: "gemma4:12b", provider: "ollama", displayName: "gemma4:12b", inputModalities: ["text", "image"], inputTokenLimit: 32768, tools: true, isDefault: true },
+    { id: "gemma4:12b", provider: "ollama", displayName: "gemma4:12b", inputModalities: ["text", "image"], inputTokenLimit: 65536, tools: true, isDefault: true },
   ]);
 });
 
@@ -283,6 +283,23 @@ test("a research preparation is not granted web tools this harness cannot provid
 });
 
 const text = (value: string) => ({ parts: [{ type: "text" as const, text: value }] });
+
+test("a new session trims restored conversation history before its first model call", async t => {
+  const f = await fixture(t);
+  f.ollama.models = [{ name: "local:small", capabilities: ["completion", "tools"], context: 65536 }];
+  const id = await f.session("world-builder");
+  const history = Array.from({ length: 10 }, (_, index) => ({ role: "user" as const, text: `Earlier ${index}: ` + "The old harbour story. ".repeat(3500) }));
+  const current = "Tighten the selected passage. Keep its meaning and the chapter context.";
+  f.ollama.script.push(reply("Tightened."));
+  await f.adapter.sendMessage({ sessionId: id, ...text(history.map(message => message.text).join("\n") + current), contextMessages: { history, current } });
+  assert.equal(f.ollama.chats.length, 1);
+  const messages = f.ollama.chats[0]!.messages as Array<{ role: string; content: string }>;
+  assert.equal(messages[0]!.role, "system");
+  assert.deepEqual(messages.at(-1), { role: "user", content: current });
+  assert.ok(messages.length < history.length + 2);
+  assert.ok(!messages.some(message => message.content.startsWith("Earlier 0:")));
+  assert.equal(f.adapter.knownInputTokenLimit(id), 65536);
+});
 
 test("each request begins with the previous one's bytes, so Ollama's prompt cache stays warm", async (t) => {
   const f = await fixture(t);
@@ -388,7 +405,7 @@ test("a prompt-only role falls back to a model seen to answer when none calls to
   f.ollama.script.push(reply('{"title":"Saltlight"}'));
   await f.adapter.sendMessage({ sessionId: id, ...text("Name it.") });
   assert.equal(f.ollama.chats[0]!.model, "chatty:7b");
-  await assert.rejects(f.session("sheet-editor"), /no model with a 256k context window that calls tools/);
+  await assert.rejects(f.session("sheet-editor"), /no model with a 64k context window that calls tools/);
 });
 
 test("a session still being created when the adapter is disposed is never published", async (t) => {
@@ -412,15 +429,15 @@ test("a model loaded by a turn that was then stopped is still released", async (
   assert.deepEqual(f.ollama.generates, [{ model: "gemma4:12b", keep_alive: 0 }]);
 });
 
-test("a model that states its 256k window but no capability list is offered, as unknown, and never the default", async (t) => {
+test("a model that states its 64k window but no capability list is offered, as unknown, and never the default", async (t) => {
   const f = await fixture(t);
   f.ollama.models = [
     { name: "plain:12b", context: 262144 },
     { name: "gemma4:12b", capabilities: ["completion", "tools"], context: 262144 },
   ];
   assert.deepEqual(await f.adapter.listModels(), [
-    { id: "plain:12b", provider: "ollama", displayName: "plain:12b", inputModalities: ["text"], inputTokenLimit: 32768 },
-    { id: "gemma4:12b", provider: "ollama", displayName: "gemma4:12b", inputModalities: ["text"], inputTokenLimit: 32768, tools: true, isDefault: true },
+    { id: "plain:12b", provider: "ollama", displayName: "plain:12b", inputModalities: ["text"], inputTokenLimit: 65536 },
+    { id: "gemma4:12b", provider: "ollama", displayName: "gemma4:12b", inputModalities: ["text"], inputTokenLimit: 65536, tools: true, isDefault: true },
   ]);
 });
 
@@ -445,7 +462,7 @@ test("a prompt-only role does not fall back to a model whose capabilities Ollama
   await f.adapter.sendMessage({ sessionId: id, ...text("Name it.") });
   assert.equal(f.ollama.chats[0]!.model, "chatty:7b", "the first model seen to complete, not the first row");
   f.ollama.models = [{ name: "plain:12b", context: 262144 }];
-  await assert.rejects(f.session("conversation-namer"), /no 256k-context model known to answer/, "offered for choosing, not chosen");
+  await assert.rejects(f.session("conversation-namer"), /no 64k-context model known to answer/, "offered for choosing, not chosen");
 });
 
 test("when Ollama counts more prompt tokens than the estimate, the session trusts the estimate less from then on", async (t) => {
@@ -500,11 +517,11 @@ test("an unready harness picks Ollama back up on its own once it answers again",
 
 test("reaching Ollama is not enough to be ready: it must hold a model this harness can write with", async (t) => {
   const f = await fixture(t);
-  f.ollama.models = [{ name: "short:8b", capabilities: ["completion", "tools"], context: 131072 }];
-  await assert.rejects(f.adapter.init(), /No pulled model has a 256k context window and calls tools/);
+  f.ollama.models = [{ name: "short:8b", capabilities: ["completion", "tools"], context: 16384 }];
+  await assert.rejects(f.adapter.init(), /No pulled model has a 64k context window and calls tools/);
   const readiness = f.adapter.readiness();
   assert.equal(readiness.ready, false);
-  assert.match(readiness.reason ?? "", /256k/);
+  assert.match(readiness.reason ?? "", /64k/);
   f.ollama.models = [{ name: "gemma4:12b", capabilities: ["completion", "tools"], context: 262144 }];
   await f.adapter.init();
   assert.equal(f.adapter.readiness().ready, true);
@@ -548,11 +565,11 @@ test("removing the last usable model while running is seen at the next catalogue
   await f.adapter.init();
   assert.equal(f.adapter.readiness().ready, true);
   const revision = f.adapter.lifecycleRevision();
-  f.ollama.models = [{ name: "short:8b", capabilities: ["completion", "tools"], context: 131072 }];
+  f.ollama.models = [{ name: "short:8b", capabilities: ["completion", "tools"], context: 16384 }];
   assert.deepEqual(await f.adapter.listModels(), []);
   const readiness = f.adapter.readiness();
   assert.equal(readiness.ready, false, "no longer reported healthy");
-  assert.match(readiness.reason ?? "", /256k/);
+  assert.match(readiness.reason ?? "", /64k/);
   assert.ok(f.adapter.lifecycleRevision() > revision);
 });
 

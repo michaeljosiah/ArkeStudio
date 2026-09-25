@@ -429,13 +429,13 @@ describe("live harness model controls (#1123, #1124)", () => {
 
   it("says why the local harness cannot be chosen, in the coordinator's words", async () => {
     const state = modelState();
-    const reason = "No pulled model has a 256k context window and calls tools. Pull one, such as Gemma 4 12B.";
+    const reason = "No pulled model has a 64k context window and calls tools. Pull one, such as Gemma 4 12B.";
     state.app.harness = {
       engine: "opencode", claudePath: null, codexPath: null, launchOverride: null,
       harnesses: [OPENCODE_AVAILABILITY, arkeAvailability(reason)],
     };
     await mount(state, <SettingsHarnessScreen />, "/settings/harness?harness=arke");
-    assert.match(container.textContent!, /No pulled model has a 256k context window/);
+    assert.match(container.textContent!, /No pulled model has a 64k context window/);
     assert.match(container.textContent!, /unavailable for now/);
     const tab = [...container.querySelectorAll('[role="tab"]')].find((item) => item.textContent!.includes("Local"))!;
     assert.match(tab.textContent!, /unavailable/);

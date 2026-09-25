@@ -225,7 +225,18 @@ export type TurnOutcome =
   | { status: "failed"; reason: string; problems?: readonly TurnProblem[] }
   | { status: "cancelled" }
   | { status: "timeout" }
+  | { status: "budget-exceeded"; reason: string }
   | { status: "unavailable"; reason: string };
+
+class HarnessTurnEnded extends Error {
+  constructor(readonly reason: "cancelled" | "timeout" | "budget-exceeded" | "error") {
+    super(reason === "budget-exceeded"
+      ? "This conversation is too long for the model's window, or the turn reached its limit. Start a new thread, or ask about less."
+      : reason === "timeout" ? "The studio took too long to answer. Try that again, or ask about less."
+      : reason === "cancelled" ? "The turn was stopped."
+      : "The studio could not complete this turn. Try that again, or choose another model.");
+  }
+}
 
 /**
  * Ask the model, once, and return whatever it finally said.
@@ -242,6 +253,7 @@ async function askOnce(
   onProgress?: (label: string) => void,
   /** Every tool the confinement refused this turn, by harness name, as it happens (#506). */
   onRefused?: (tool: string) => void,
+  contextMessages?: import("@arke-studio/contracts").SendMessageInput["contextMessages"],
 ): Promise<string> {
   if (signal.aborted) throw new Error("cancelled");
   let finalText = "";
@@ -280,10 +292,15 @@ async function askOnce(
         onProgress?.(WRITING_LABEL);
       }
       if (event.type === "session.error") throw new Error(event.message);
+      if (event.type === "session.ended") {
+        if (event.reason !== "completed") throw new HarnessTurnEnded(event.reason);
+        throw new HarnessTurnEnded("error"); // A completion without a reply is not an answer.
+      }
     }
   })();
 
-  await adapter.dispatchAsync({ sessionId, parts: [{ type: "text", text: prompt }] });
+  // The stream can reject before dispatch acknowledges. Attach a handler immediately.
+  void collected.catch(() => {});
 
   // Refed deliberately: an unref'd deadline never fires in a process with nothing else pending,
   // which is exactly the case a timeout is for.
@@ -303,7 +320,8 @@ async function askOnce(
     signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true });
   });
   try {
-    await Promise.race([collected, timeout, cancelled]);
+    const dispatched = adapter.dispatchAsync({ sessionId, parts: [{ type: "text", text: prompt }], ...(contextMessages ? { contextMessages } : {}) });
+    await Promise.race([dispatched.then(() => collected), timeout, cancelled]);
   } finally {
     clearTimeout(deadline);
     abort.abort();
@@ -676,7 +694,13 @@ export class WorldChatRunner {
       const refused = (tool: string) => refusedTools.add(tool);
 
       const prompt = renderPrompt(assembled) + (brief ? `\n\n${brief}` : "");
-      let raw = await askOnce(adapter, session.sessionId, prompt, timeoutMs, controller.signal, progress, refused);
+      const firstUser = assembled.recentMessages.findIndex(message => message.role === "user");
+      const contextMessages = adapter.capabilities().has("structured-context") ? {
+        history: (firstUser < 0 ? [] : assembled.recentMessages.slice(firstUser)).map(message => ({ role: message.role === "user" ? "user" as const : "assistant" as const,
+          text: message.role === "user" ? `User [${message.id}]: ${message.text}` : message.text })),
+        current: renderPrompt({ ...assembled, recentTurns: "" }) + (brief ? `\n\n${brief}` : ""),
+      } : undefined;
+      let raw = await askOnce(adapter, session.sessionId, prompt, timeoutMs, controller.signal, progress, refused, contextMessages);
 
       let outcome = await this.applyResult(
         store,
@@ -769,11 +793,12 @@ export class WorldChatRunner {
       }
       return { status: "completed", reply: outcome.reply };
     } catch (err) {
-      const cancelled = controller.signal.aborted;
-      const timedOut = err instanceof Error && err.message === "timeout";
+      const cancelled = controller.signal.aborted || err instanceof HarnessTurnEnded && err.reason === "cancelled";
+      const timedOut = err instanceof Error && err.message === "timeout" || err instanceof HarnessTurnEnded && err.reason === "timeout";
+      const overBudget = err instanceof HarnessTurnEnded && err.reason === "budget-exceeded";
       const status = cancelled
         ? controller.signal.reason === "world-closed" ? "interrupted" : "cancelled"
-        : timedOut ? "timeout" : "failed";
+        : timedOut ? "timeout" : overBudget ? "budget-exceeded" : "failed";
       if (status === "failed") {
         // The raw error, once, where an operator can read it. It never leaves this process and it
         // never reaches the screen — `safeDetail` still decides what the person is told.
@@ -786,6 +811,7 @@ export class WorldChatRunner {
       await this.finish(store, run, status, safeDetail(err));
       if (cancelled) return { status: "cancelled" };
       if (timedOut) return { status: "timeout" };
+      if (overBudget) return { status: "budget-exceeded", reason: safeDetail(err) };
       return { status: "failed", reason: safeDetail(err) };
     } finally {
       // `prepare` may fail after minting a lease; release is idempotent and owns partial cleanup.
@@ -1210,6 +1236,7 @@ function runFrom(events: ReadonlyArray<{ event: { type: string } }>, runId: RunI
  * person who was talking.
  */
 function safeDetail(err: unknown): string {
+  if (err instanceof HarnessTurnEnded) return err.message;
   if (!(err instanceof Error)) return "the turn did not complete";
   if (err.message === "timeout") return "the studio took too long to answer";
   // The one cause worth naming (SPEC-030 R-13): a vendor token the harness could not refresh
