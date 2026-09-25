@@ -223,7 +223,7 @@ describe("the sign-in surface (R-7, R-10, R-12)", () => {
     service.markStale();
     await patient;
     assert.ok(Date.now() - started < 1_000, "the sleep ends with the lifecycle, not after it");
-    assert.ok(calls <= 2, "no further asks of a harness that is gone");
+    assert.equal(calls, 1, "no further asks of a harness that is gone, not even the one the wake was heading for");
     assert.equal(service.readOk, false);
   });
 

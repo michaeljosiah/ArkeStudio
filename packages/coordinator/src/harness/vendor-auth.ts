@@ -162,6 +162,9 @@ export class VendorAuthService {
       // serialised behind this one, and five more sleeps would spend its creation timeout.
       for (let tries = 0; patient && listed.length === 0 && tries < 5 && !this.stopped && lifecycle === this.lifecycle; tries++) {
         await sleep(3_000, ended);
+        // Woken because the lifecycle ended: the adapter in hand is the retired harness's,
+        // and one more ask of it would spend its request timeout ahead of the replacement.
+        if (lifecycle !== this.lifecycle) break;
         listed = await adapter.listIntegrations();
       }
       // Answered for a harness that ended while this read was out: not this lifecycle's
