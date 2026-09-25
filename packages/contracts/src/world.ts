@@ -711,6 +711,25 @@ export const ChapterVoiceLineSchema = z
     quote: z.string().min(1),
   })
   .strict();
+/**
+ * A correction to the cast (design turn 155, SPEC-012 R-62): the author's word on who speaks a
+ * span, beside the derived lines and outliving `Cast again`. A speaker (a name, with the sheet
+ * when it has one) or narration — never both, never neither.
+ */
+export const ChapterVoicePinSchema = z
+  .object({
+    paragraph: z.number().int().min(0),
+    occurrence: z.number().int().min(0),
+    quote: z.string().min(1).max(600),
+    speaker: z.string().min(1).optional(),
+    sheet: SlugSchema.optional(),
+    narration: z.literal(true).optional(),
+  })
+  .strict()
+  .refine((pin) => (pin.narration === true) !== (pin.speaker !== undefined), "a pin names a speaker or narration")
+  .refine((pin) => pin.sheet === undefined || pin.speaker !== undefined, "a sheet goes with a speaker");
+export type ChapterVoicePin = z.infer<typeof ChapterVoicePinSchema>;
+
 export const ChapterVoicesSchema = z
   .object({
     version: z.number().int().min(1),
@@ -724,6 +743,10 @@ export const ChapterVoicesSchema = z
     omitted: z.number().int().min(0),
     /** At most four hundred (R-45): a record holding more is not one this build wrote, and reads as unreadable. */
     lines: z.array(ChapterVoiceLineSchema).max(400),
+    /** The author's corrections (SPEC-012 R-62), written only when there are some: a record without them keeps the shape earlier builds read. */
+    pins: z.array(ChapterVoicePinSchema).max(400).optional(),
+    /** Pins the last `Cast again` found gone from their words and dropped (R-64), said in the stamp. */
+    lost: z.number().int().min(1).optional(),
   })
   .strict();
 export type ChapterVoices = z.infer<typeof ChapterVoicesSchema>;
@@ -740,6 +763,9 @@ export const ChapterVoicesSummarySchema = z
     omitted: z.number().int().min(0),
     lines: z.number().int().min(0),
     speakers: z.array(z.object({ speaker: z.string().min(1), sheet: SlugSchema.optional(), lines: z.number().int().min(1) }).strict()),
+    /** How many corrections the author made (`1 set by you`), and how many the last cast lost. */
+    pins: z.number().int().min(1).optional(),
+    lost: z.number().int().min(1).optional(),
   })
   .strict();
 export type ChapterVoicesSummary = z.infer<typeof ChapterVoicesSummarySchema>;
@@ -748,7 +774,17 @@ export type ChapterVoicesState = z.infer<typeof ChapterVoicesStateSchema>;
 
 export function summariseVoices(record: ChapterVoices): ChapterVoicesSummary {
   const speakers = new Map<string, { speaker: string; sheet?: string; lines: number }>();
-  for (const line of record.lines) {
+  // The stamp has no body to hold a pin to, so a pin stands here by its words: it takes the
+  // derived line it shares a paragraph and words with, and a pin to narration takes it away.
+  // The chapter's open answer applies them exactly (`pinnedLines`).
+  const pins = record.pins ?? [];
+  const covered = (line: ChapterVoices["lines"][number]) =>
+    pins.some((pin) => pin.paragraph === line.paragraph && (pin.quote.includes(line.quote) || line.quote.includes(pin.quote)));
+  const lines = [
+    ...record.lines.filter((line) => !covered(line)),
+    ...pins.flatMap((pin) => (pin.speaker === undefined ? [] : [{ speaker: pin.speaker, ...(pin.sheet !== undefined ? { sheet: pin.sheet } : {}) }])),
+  ];
+  for (const line of lines) {
     const key = line.sheet ?? line.speaker;
     const held = speakers.get(key);
     if (held !== undefined) held.lines += 1;
@@ -761,8 +797,10 @@ export function summariseVoices(record: ChapterVoices): ChapterVoicesSummary {
     passes: record.passes,
     dropped: record.dropped,
     omitted: record.omitted,
-    lines: record.lines.length,
+    lines: lines.length,
     speakers: [...speakers.values()].sort((a, b) => b.lines - a.lines || a.speaker.localeCompare(b.speaker)),
+    ...(pins.length > 0 ? { pins: pins.length } : {}),
+    ...(record.lost !== undefined ? { lost: record.lost } : {}),
   };
 }
 

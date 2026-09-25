@@ -493,6 +493,33 @@ describe("the Audiobook view (turn 146)", () => {
     assert.ok(all(m, ".fy-ab__block").every((row) => !row.className.includes("fy-ab__block--dim")), "a second press clears it");
   });
 
+  it("the speaker's chip opens a menu; a choice writes a pin, and the answer marks the block as set by hand (SPEC-012 R-62, R-63)", async () => {
+    const m = await mount(inkbound("cast"));
+    await answerOpen(m, { voices: CAST });
+    const line = all(m, ".fy-ab__block").find((row) => row.getAttribute("data-speaker") === "maren-kest")!;
+    const chip = line.querySelector("button.fy-ab__speaker") as HTMLElement;
+    assert.ok(chip, "the speaker is a press while the cast is current");
+    await act(async () => chip.click());
+    const options = [...line.querySelectorAll(".fy-ab__menu-opt")].map((option) => option.textContent);
+    assert.equal(options[0], "Narration");
+    assert.ok(options.some((label) => label?.includes("✓")), "the current speaker is ticked");
+    await act(async () => (line.querySelector(".fy-ab__menu-opt") as HTMLElement).click());
+    const asked = m.sent.findLast((message) => message.kind === "set-voice-pin") as Extract<ClientMessage, { kind: "set-voice-pin" }>;
+    assert.ok(asked, "the choice writes a pin");
+    assert.deepEqual(
+      { paragraph: asked.paragraph, occurrence: asked.occurrence, quote: asked.quote, narration: asked.narration },
+      { paragraph: 1, occurrence: 0, quote: "“You hear it too,”", narration: true },
+      "named by the paragraph, the words and the occurrence the saved prose holds",
+    );
+    const pinned = { ...CAST, lines: [], pins: [{ paragraph: 1, occurrence: 0, quote: "“You hear it too,”", speaker: "Tam Rusk" }] };
+    await act(async () => __applyEventForTest({ at: AT, type: "voices.record", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", record: pinned }));
+    const again = all(m, ".fy-ab__block").find((row) => row.getAttribute("data-speaker") === "Tam Rusk");
+    assert.ok(again, "the record as it now stands is read");
+    assert.ok(again!.querySelector(".fy-ab__pin"), "and the block is marked as set by hand");
+    await act(async () => __applyEventForTest({ at: AT, type: "voices.record", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", refused: "cast moved · cast again" }));
+    assert.match(text(m), /cast moved · cast again/, "a refusal is one clause");
+  });
+
   it("a retired character keeps its name in the margin and loses its voice, so the narrator's take for it is made, not stale (codex on PR 1180)", async () => {
     const state = inkbound("cast");
     const world = state.world!;

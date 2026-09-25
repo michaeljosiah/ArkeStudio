@@ -240,6 +240,8 @@ interface StoreState {
       omitted: number;
       record?: import("@arke-studio/contracts").ChapterVoices;
       reason?: string;
+      /** A pin refused (SPEC-012 R-62), in its one clause; cleared by the next record. */
+      pinRefused?: string;
     }
   >;
   /**
@@ -1645,6 +1647,18 @@ function handleFrame(json: string): void {
       casting = {
         ...casting,
         [`${event.worldId}/${event.productionId}/${event.chapterId}`]: { state: "casting", lines: 0, dropped: 0, omitted: 0 },
+      };
+    } else if (event.type === "voices.record") {
+      // A pin written or refused (turn 155): the record as it stands now, which the chapter takes
+      // as it takes a finished cast's, or the refusal beside whatever the cast was.
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      const held = casting[key];
+      casting = {
+        ...casting,
+        [key]:
+          event.record !== undefined
+            ? { state: "cast", lines: event.record.lines.length, dropped: event.record.dropped, omitted: event.record.omitted, record: event.record }
+            : { ...(held ?? { state: "cast" as const, lines: 0, dropped: 0, omitted: 0 }), pinRefused: event.refused ?? "refused" },
       };
     } else if (event.type === "voices.finished") {
       casting = {
@@ -4506,6 +4520,16 @@ export function useDeriving(): StoreState["deriving"] {
 /** Cast a chapter's lines (turn 130): a press, never a save. */
 export function castVoices(worldId: string, productionId: string, chapterFile: string): boolean {
   return send({ kind: "cast-voices", worldId, productionId, chapterFile });
+}
+
+/** A correction to the cast (design turn 155, SPEC-012 R-62): the span given a speaker, narration, or cleared. */
+export function setVoicePin(
+  worldId: string,
+  productionId: string,
+  chapterFile: string,
+  pin: { paragraph: number; occurrence: number; quote: string } & ({ speaker: string; sheet?: string } | { narration: true } | { clear: true }),
+): boolean {
+  return send({ kind: "set-voice-pin", worldId, productionId, chapterFile, ...pin });
 }
 
 export function stopVoices(worldId: string, productionId: string, chapterFile: string): void {

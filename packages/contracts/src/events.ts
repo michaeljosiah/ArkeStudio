@@ -1031,6 +1031,18 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       reason: z.string().optional(),
     })
     .strict(),
+  /** A pin written or refused (SPEC-012 R-62): the record as it now stands, or why not, in one clause. */
+  z
+    .object({
+      ...base,
+      type: z.literal("voices.record"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      record: ChapterVoicesSchema.optional(),
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
 
   /**
    * A chapter read into kept takes (design turn 146, SPEC-047 R-16..R-18): started with what

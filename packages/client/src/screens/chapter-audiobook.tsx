@@ -34,7 +34,7 @@ import {
   type ManifestModel,
 } from "@arke-studio/contracts";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
-import { Waveform } from "../components/icons.js";
+import { Pin, Waveform } from "../components/icons.js";
 import { Button } from "../components/ui.js";
 import { clearQueue, dismissPlayback, enqueueClip, jumpQueue, playClip, playbackSnapshot, usePlayback, useQueueAt } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
@@ -498,7 +498,87 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
 }
 
 /** The manuscript column in the Audiobook view: a row a block, the reader in the margin, the state as a dot. */
-export function AudiobookBlocks({ rows, sounding, selected, onSelect, onPlayOne, slug, filter = null }: {
+/** Who a block can be given to (SPEC-012 R-63): the chapter's speakers first, then the rest of the cast. */
+export interface SpeakerChoices {
+  chapter: { key: string; label: string; sheet?: string; colour: number | null }[];
+  cast: { sheet: string; label: string; voice: string | null; colour: number | null }[];
+}
+
+/** What a choice in the speaker menu writes: a speaker, narration, or the correction taken back. */
+export type SpeakerPick = { speaker: string; sheet?: string } | { narration: true } | { clear: true };
+
+/** The raw offsets of a selection inside a block's text, which holds the text alone. */
+function rawSelection(host: HTMLElement): { from: number; to: number } | null {
+  const selection = typeof window === "undefined" ? null : window.getSelection?.();
+  if (selection === null || selection === undefined || selection.rangeCount === 0 || selection.isCollapsed) return null;
+  const range = selection.getRangeAt(0);
+  if (!host.contains(range.startContainer) || !host.contains(range.endContainer)) return null;
+  const offset = (node: Node, at: number) => {
+    const before = document.createRange();
+    before.selectNodeContents(host);
+    before.setEnd(node, at);
+    return before.toString().length;
+  };
+  const a = offset(range.startContainer, range.startOffset);
+  const b = offset(range.endContainer, range.endOffset);
+  return a === b ? null : { from: Math.min(a, b), to: Math.max(a, b) };
+}
+
+/** The speaker menu (design turn 155b, SPEC-012 R-63): a search, this chapter's speakers, the rest of the cast. */
+function SpeakerMenu({ row, choices, onPick, onClose }: {
+  row: BlockRow;
+  choices: SpeakerChoices;
+  onPick: (pick: SpeakerPick) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const match = (label: string) => label.toLowerCase().includes(query.trim().toLowerCase());
+  const typed = query.trim();
+  const known = [...choices.chapter.map((who) => who.label), ...choices.cast.map((who) => who.label)].some((label) => label.toLowerCase() === typed.toLowerCase());
+  const option = (key: string, label: string, tone: string, current: boolean, pick: SpeakerPick, meta?: string) => (
+    <button key={key} type="button" role="menuitem" className="fy-ab__menu-opt" onClick={() => onPick(pick)}>
+      <i className={`fy-ab__speaker-dot fy-voice--${tone}`} aria-hidden="true" />
+      <span className="fy-ab__menu-label">{label}</span>
+      {meta !== undefined && <span className="fy-ab__menu-meta">{meta}</span>}
+      {current && <span className="fy-ab__menu-tick" aria-label="current">✓</span>}
+    </button>
+  );
+  return (
+    <div className="fy-ab__menu" role="menu" aria-label="Speaker" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.key === "Escape" && onClose()}>
+      <input
+        className="fy-ab__menu-search"
+        placeholder="Speaker"
+        aria-label="Speaker"
+        value={query}
+        autoFocus
+        onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && typed !== "" && !known) onPick({ speaker: typed });
+        }}
+      />
+      <div className="fy-ab__menu-eb">In this chapter</div>
+      {match("Narration") && option("narration", "Narration", "narrator", row.speakerKey === null, { narration: true })}
+      {choices.chapter.filter((who) => match(who.label)).map((who) =>
+        option(`c:${who.key}`, who.label, who.sheet === undefined ? "none" : String(who.colour ?? "none"), row.speakerKey === who.key, { speaker: who.label, ...(who.sheet !== undefined ? { sheet: who.sheet } : {}) }),
+      )}
+      {choices.cast.some((who) => match(who.label)) && <div className="fy-ab__menu-eb">Cast</div>}
+      {choices.cast.filter((who) => match(who.label)).map((who) =>
+        option(`s:${who.sheet}`, who.label, who.colour === null ? "plain" : String(who.colour), false, { speaker: who.label, sheet: who.sheet }, who.voice ?? "no voice"),
+      )}
+      {typed !== "" && !known && option("typed", `“${typed}”`, "none", false, { speaker: typed }, "no sheet")}
+      {row.block.pinned === true && (
+        <>
+          <div className="fy-ab__menu-sep" />
+          <button type="button" role="menuitem" className="fy-ab__menu-opt" onClick={() => onPick({ clear: true })}>
+            <span className="fy-ab__menu-label">Undo correction</span>
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+export function AudiobookBlocks({ rows, sounding, selected, onSelect, onPlayOne, slug, filter = null, choices, onPin }: {
   rows: BlockRow[];
   sounding: BlockRow | null;
   selected: string | null;
@@ -506,8 +586,20 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelect, onPlayOne,
   onPlayOne: (row: BlockRow) => void;
   slug: string | undefined;
   filter?: AudiobookFilter;
+  /** Offered only while the cast is current and can be written (SPEC-012 R-62): who a block can be given to. */
+  choices?: SpeakerChoices;
+  /** A choice made for a block, or for words selected inside a narration block. */
+  onPin?: (row: BlockRow, pick: SpeakerPick, selection?: { from: number; to: number }) => void;
 }) {
+  const [menu, setMenu] = useState<{ key: string; selection?: { from: number; to: number } } | null>(null);
+  useEffect(() => {
+    if (menu === null) return;
+    const close = () => setMenu(null);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [menu]);
   if (rows.length === 0) return <p className="fy-bible__empty">Nothing to read yet.</p>;
+  const pinnable = choices !== undefined && onPin !== undefined;
   return (
     <div className="fy-ab__blocks" data-testid="audiobook-blocks">
       {rows.map((row) => {
@@ -523,12 +615,60 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelect, onPlayOne,
             data-speaker={row.speakerKey ?? "narrator"}
             onClick={() => onSelect(row.block.key)}
           >
-            <span className="fy-ab__speaker" title={row.markWarn ? `${row.mark} · narrator` : row.mark}>
-              <i className="fy-ab__speaker-dot" aria-hidden="true" />
-              <span className={`fy-ab__mark${row.markWarn ? " fy-ab__mark--warn" : ""}`}>{row.mark}</span>
+            {pinnable && row.block.paragraph >= 0 ? (
+              <button
+                type="button"
+                className={`fy-ab__speaker fy-ab__speaker--press${menu?.key === row.block.key && menu.selection === undefined ? " fy-ab__speaker--open" : ""}`}
+                title={row.markWarn ? `${row.mark} · narrator` : row.mark}
+                aria-haspopup="menu"
+                aria-expanded={menu?.key === row.block.key}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setMenu(menu?.key === row.block.key ? null : { key: row.block.key });
+                }}
+              >
+                <i className="fy-ab__speaker-dot" aria-hidden="true" />
+                <span className={`fy-ab__mark${row.markWarn ? " fy-ab__mark--warn" : ""}`}>{row.mark}</span>
+              </button>
+            ) : (
+              <span className="fy-ab__speaker" title={row.markWarn ? `${row.mark} · narrator` : row.mark}>
+                <i className="fy-ab__speaker-dot" aria-hidden="true" />
+                <span className={`fy-ab__mark${row.markWarn ? " fy-ab__mark--warn" : ""}`}>{row.mark}</span>
+              </span>
+            )}
+            <span
+              className="fy-ab__text"
+              onMouseUp={(event) => {
+                // Words selected in narration can be made a line (SPEC-012 R-63): within one block,
+                // between 1 and 600 characters; the menu opens for the selection.
+                if (!pinnable || row.speakerKey !== null || row.block.paragraph < 0) return;
+                const span = rawSelection(event.currentTarget);
+                if (span === null) return;
+                const words = row.block.text.slice(span.from, span.to);
+                if (words.trim() === "" || words.length > 600) return;
+                event.stopPropagation();
+                setMenu({ key: row.block.key, selection: span });
+              }}
+            >
+              {row.block.text}
             </span>
-            <span className="fy-ab__text">{row.block.text}</span>
+            {menu?.key === row.block.key && choices !== undefined && onPin !== undefined && (
+              <SpeakerMenu
+                row={row}
+                choices={choices}
+                onClose={() => setMenu(null)}
+                onPick={(pick) => {
+                  setMenu(null);
+                  onPin(row, pick, menu.selection);
+                }}
+              />
+            )}
             <span className="fy-ab__marks">
+              {row.block.pinned === true && (
+                <span className="fy-ab__pin" title="set by you" aria-label="set by you">
+                  <Pin size={11} />
+                </span>
+              )}
               {row.artifact !== null && (
                 <span className="fy-ab__source" title="made by a voice" aria-label="made by a voice">
                   <Waveform size={11} />

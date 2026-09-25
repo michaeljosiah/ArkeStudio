@@ -16,6 +16,8 @@ import {
   type ChapterAudiobook,
   DEFAULT_NARRATOR,
   audiobookSpeakerColours,
+  pinTarget,
+  pinnedLines,
   legacyVoiceModel,
   voicedBlocks,
   type ProductionBundle,
@@ -38,7 +40,7 @@ import { continuityStamp } from "../lib/continuity.js";
 import { passageAction, passageActions, type PassageAction } from "../lib/passage-actions.js";
 import { useProduction } from "../lib/selectors.js";
 import { EditableText, SceneTitle } from "./storyboard.js";
-import { AudiobookBlocks, AudiobookFilterRow, AudiobookSide, DirectionCard, useChapterAudiobook, type AudiobookIntent } from "./chapter-audiobook.js";
+import { AudiobookBlocks, AudiobookFilterRow, AudiobookSide, DirectionCard, useChapterAudiobook, type AudiobookIntent, type BlockRow, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
 import { playClip } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
 import {
@@ -55,6 +57,7 @@ import {
   stopContinuity,
   useDeriving,
   castVoices,
+  setVoicePin,
   requestVoiceCatalogue,
   stopVoices,
   useCasting,
@@ -993,16 +996,18 @@ export function ChapterWorkspace({
     castVoices(worldId, prodId, chapter.file);
   };
   /** Who speaks, by lines, the narration first: the Voices panel's rows. */
+  // The lines as read, the author's pins applied (SPEC-012 R-64): what the panel counts is what is voiced.
+  const castLinesRead = useMemo(() => (voicesRecord === null ? [] : pinnedLines(voicesRecord.lines, voicesRecord.pins, live).lines), [voicesRecord, live]);
   const speakers = useMemo(() => {
     const counts = new Map<string, { speaker: string; sheet?: string; lines: number }>();
-    for (const line of voicesRecord?.lines ?? []) {
+    for (const line of castLinesRead) {
       const key = line.sheet ?? line.speaker;
       const held = counts.get(key);
       if (held !== undefined) held.lines += 1;
       else counts.set(key, { speaker: line.speaker, ...(line.sheet !== undefined ? { sheet: line.sheet } : {}), lines: 1 });
     }
     return [...counts.values()].sort((a, b) => b.lines - a.lines || a.speaker.localeCompare(b.speaker));
-  }, [voicesRecord]);
+  }, [castLinesRead]);
   const narrationBlocks = voiced.blocks.filter((block) => block.speaker === undefined).length;
   // The Voices dot is the Audiobook view's speaker colour (SPEC-047 R-33), one a speaker across the book.
   const speakerColours = useMemo(
@@ -1108,6 +1113,26 @@ export function ChapterWorkspace({
       return true;
     },
   });
+  // Who a block can be given to (design turn 155b, SPEC-012 R-63): offered only while the cast is
+  // current and can be written — a pin names a paragraph and an occurrence in the saved prose.
+  const pinChoices = useMemo((): SpeakerChoices | null => {
+    if (voicesRecord === null || voicesStale || castingNow || locked || record === null || connection !== "open") return null;
+    const chapterSpeakers = new Map<string, SpeakerChoices["chapter"][number]>();
+    for (const row of audiobook.rows) {
+      if (row.speakerKey === null || chapterSpeakers.has(row.speakerKey)) continue;
+      chapterSpeakers.set(row.speakerKey, { key: row.speakerKey, label: row.mark, ...(row.block.sheet !== undefined ? { sheet: row.block.sheet } : {}), colour: row.colour });
+    }
+    const cast = world.sheets
+      .filter((sheet) => sheet.type === "character" && !sheet.retired && (sheet.production === undefined || sheet.production === prodId) && !chapterSpeakers.has(sheet.id))
+      .map((sheet) => ({ sheet: sheet.id, label: sheet.name, voice: sheet.voice === undefined ? null : (sheet.voice.label ?? sheet.voice.voiceId), colour: null }));
+    return { chapter: [...chapterSpeakers.values()], cast };
+  }, [voicesRecord, voicesStale, castingNow, locked, record, connection, audiobook.rows, world.sheets, prodId]);
+  const pinBlock = (row: BlockRow, pick: SpeakerPick, selection?: { from: number; to: number }) => {
+    const index = audiobook.rows.indexOf(row);
+    const target = pinTarget(record?.body ?? "", audiobook.rows.map((candidate) => candidate.block), index, selection);
+    if (target === null) return;
+    setVoicePin(worldId, prodId, chapter.file, { ...target, ...pick });
+  };
   const audiobookColumn = useRef<HTMLDivElement | null>(null);
   audiobookResume.current = audiobook.resume;
   const directionStands = audiobook.directedBlocks > 0;
@@ -1610,6 +1635,7 @@ export function ChapterWorkspace({
                 <>
                 <AudiobookFilterRow filters={audiobook.filters} filter={audiobook.filter} onFilter={audiobook.setFilter} />
                 <AudiobookBlocks
+                  {...(pinChoices !== null ? { choices: pinChoices, onPin: pinBlock } : {})}
                   filter={audiobook.filter}
                   rows={audiobook.rows}
                   sounding={audiobook.sounding}
@@ -1627,6 +1653,7 @@ export function ChapterWorkspace({
                 <span>{`Saved · v${record?.version ?? chapter.version} · ${words.toLocaleString()} words`}</span>
                 <span className="fy-ab__foot-push" />
                 {audiobook.note !== null && <span className="fy-ch__who-where--warn">{audiobook.note}</span>}
+                {castingState?.pinRefused !== undefined && <span className="fy-ch__who-where--warn">{castingState.pinRefused}</span>}
                 <span>
                   {[
                     `${audiobook.counts.total} block${audiobook.counts.total === 1 ? "" : "s"}`,
@@ -1981,11 +2008,13 @@ export function ChapterWorkspace({
                 <p className="fy-ch__stamp fy-mono">
                   {[
                     `cast · v${voicesRecord.version}`,
-                    `${voicesRecord.lines.length} line${voicesRecord.lines.length === 1 ? "" : "s"}`,
+                    `${castLinesRead.length} line${castLinesRead.length === 1 ? "" : "s"}`,
                     `${speakers.length} speaker${speakers.length === 1 ? "" : "s"}`,
                     voicesRecord.dropped === 0 ? "every line is the chapter’s own words" : `${voicesRecord.dropped} line${voicesRecord.dropped === 1 ? "" : "s"} dropped, not in the chapter`,
                     ...(voicesRecord.omitted > 0 ? [`${voicesRecord.omitted} line${voicesRecord.omitted === 1 ? "" : "s"} over the cap`] : []),
                     ...(voiced.ambiguous > 0 ? [`${voiced.ambiguous} ambiguous`] : []),
+                    ...((voicesRecord.pins?.length ?? 0) > 0 ? [`${voicesRecord.pins!.length} set by you`] : []),
+                    ...(voicesRecord.lost !== undefined ? [`${voicesRecord.lost} correction${voicesRecord.lost === 1 ? "" : "s"} lost`] : []),
                   ].join(" · ")}
                 </p>
               )}
