@@ -71,6 +71,7 @@ export interface DispatchClient {
   resetTransport?(): void;
   unload?(signal?: AbortSignal): Promise<void>;
   residency?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").ModelResidency[]>;
+  listModels?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").LocalHarnessModel[]>;
   /** Release optional long-lived transports when the queue shuts down. */
   dispose?(): void;
   submit(

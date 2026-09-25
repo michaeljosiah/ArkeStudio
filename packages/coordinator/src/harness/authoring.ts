@@ -230,7 +230,7 @@ export class AuthoringService {
     const wallClock = this.opts.wallClockMs ?? DEFAULT_WALL_CLOCK_MS;
     const tokenBudget =
       this.opts.tokenBudget ??
-      sessionTokenBudget(this.adapter.knownInputTokenLimit?.(), FALLBACK_TOKEN_BUDGET);
+      sessionTokenBudget(this.adapter.knownInputTokenLimit?.(sessionId), FALLBACK_TOKEN_BUDGET);
     const abort = new AbortController();
     let ending: { state: "completed" | "cancelled" | "timeout" | "budget-exceeded" | "failed"; detail?: string } | null =
       null;

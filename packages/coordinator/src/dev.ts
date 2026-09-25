@@ -171,6 +171,7 @@ const { coordinator, server } = createStudioHost({
   ...(wiring.unavailableReason ? { harnessUnavailableReason: wiring.unavailableReason } : {}),
   ...(process.env["ARKE_HARNESS"] === chosenHarness ? { harnessEngineOverride: chosenHarness } : {}),
   relaunchHarness: wiring.relaunchHarness,
+  ...(wiring.publishLocalModels ? { publishLocalHarnessModels: wiring.publishLocalModels } : {}),
   // SPEC-030 R-6: no Electron shell here, so the platform opener carries the vendor's page.
   openExternal: (url) => {
     if (!url.startsWith("https://")) return;

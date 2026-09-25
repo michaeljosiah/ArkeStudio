@@ -62,6 +62,7 @@ export async function createNodeStudioHost(options: NodeStudioHostOptions) {
       secretRegistry: secrets, providerCalls: calls, validators: clients, dispatchClients: clients, manifest: SHIPPED_MANIFEST,
       setup: nodeSetupDeps(), authoring: { agentForPurpose, roster: ROSTER, skillFor },
       harnessLaunchEngine: chosen, relaunchHarness: wiring?.relaunchHarness,
+      ...(wiring?.publishLocalModels ? { publishLocalHarnessModels: wiring.publishLocalModels } : {}),
       ...(wiring?.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
       harnessUnavailableReason: wiring?.unavailableReason ?? (options.adapter === null ? "AI is disabled for this server." : undefined),
     });

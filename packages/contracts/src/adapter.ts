@@ -293,8 +293,12 @@ export interface HarnessAdapter {
    * A safe input-token window when the adapter can name one without a selected model (§8.5).
    * Model-specific limits belong on listModels() entries. This fallback must not return the
    * last session's window when another model may be selected; unknown limits use a floor.
+   *
+   * Given a session, the window of the model that session was pinned to, where the adapter
+   * knows it (issue 1247): a budget drawn from the default model's window bounds a session
+   * running on a different one wrongly in both directions.
    */
-  knownInputTokenLimit?(): number | null;
+  knownInputTokenLimit?(sessionId?: string): number | null;
   /** Synchronous send: resolves when the turn completes. */
   sendMessage(input: SendMessageInput): Promise<SendReceipt>;
   /** Fire-and-watch: must not block while the turn runs. */

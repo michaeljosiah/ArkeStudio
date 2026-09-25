@@ -27,6 +27,16 @@ export class PreparedSessionPolicies {
     return input === undefined ? null : sessionPermissionPolicy(agentName, input);
   }
 
+  /**
+   * The model this session was prepared for, in the same precedence the config writer gives it:
+   * a dispatch choice over the agent's own default. Read before `take`, which retires the entry.
+   */
+  model(agentName: string | undefined, preparationId: string | undefined): string | undefined {
+    if (preparationId === undefined) return undefined;
+    const input = this.byId.get(preparationId);
+    return input?.model ?? (agentName !== undefined ? input?.agents?.[agentName]?.model : undefined);
+  }
+
   abandon(preparationId: string): void {
     this.byId.delete(preparationId);
   }

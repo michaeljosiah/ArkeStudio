@@ -74,6 +74,27 @@ export function effectiveHarnessEngine(stored: HarnessEngine, override?: string)
 }
 
 /**
+ * A language model the local runtime has pulled, as the coordinator observed it (issue 1247).
+ *
+ * OpenCode never asks Ollama what it holds. Measured against the pinned v2 build with Ollama
+ * answering on its port: no probe, no row, and a `provider` block in the old v1 grammar is
+ * ignored without a warning. A local model reaches the harness's catalogue only when Arke
+ * lists it by name in the harness's own configuration — so this is what the coordinator learns
+ * from Ollama and hands to the assembly that writes that file. Nothing here is a manifest entry:
+ * which models are *offered* stays SPEC-028's business; this is only what is *installed*.
+ */
+export interface LocalHarnessModel {
+  /** Ollama's own name, tag included — `gemma4:12b`. The id the harness will be asked for. */
+  readonly id: string;
+  /** Context length from the model's metadata, when Ollama states one. */
+  readonly contextLength?: number;
+  /** Whether the runtime says the model calls tools. Unknown reads as true: a refusal beats a hidden model. */
+  readonly tools: boolean;
+  /** Whether the runtime says the model reads images. */
+  readonly vision: boolean;
+}
+
+/**
  * The bundled harness, stated once. It cannot be missing, so nothing detects it — a detector
  * that reported OpenCode absent would be describing a broken installation, not a choice.
  */

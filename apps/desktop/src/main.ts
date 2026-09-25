@@ -1198,6 +1198,8 @@ async function initialize(): Promise<{ port: number }> {
     // Stored LLM keys reach the harness as spawn environment (SPEC-005 D5) — under v2's
     // redirected profile this is the only credential path there is (issue 327 §2).
     relaunchHarness: wiring.relaunchHarness,
+    // The local models the bundled harness cannot see on its own (issue 1247).
+    ...(wiring.publishLocalModels ? { publishLocalHarnessModels: wiring.publishLocalModels } : {}),
     cipher,
     secretRegistry: providerSecrets,
     providerCalls,

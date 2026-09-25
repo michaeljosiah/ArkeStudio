@@ -761,6 +761,12 @@ export interface CoordinatorOptions {
    * the shared store v1 silently leaned on is closed by design (issue 327 §2).
    */
   relaunchHarness?: (credentials: Record<string, string | undefined>) => Promise<void>;
+  /**
+   * Put the local runtime's pulled models in front of the writing harness (issue 1247). Called
+   * with the full list whenever the local-runtime poll finds it changed, including the empty
+   * list when Ollama has stopped. Absent for harnesses that read their own configuration.
+   */
+  publishLocalHarnessModels?: (models: readonly import("@arke-studio/contracts").LocalHarnessModel[]) => Promise<void>;
   harnessUnavailableReason?: string;
   harnessEngineOverride?: import("@arke-studio/contracts").HarnessEngine;
   /** The host's effective launch choice, even if discovery failed before producing metadata. */
@@ -1035,6 +1041,8 @@ export class Coordinator {
   private comfyUiRefreshRevision = 0;
   /** A local-runtime pass already in flight. A probe that stalls must not stack up behind itself. */
   private localRuntimeProbeInFlight = false;
+  /** The local models last handed to the harness, so an unchanged poll rewrites nothing (issue 1247). Null: never published. */
+  private publishedLocalHarnessModels: string | null = null;
   private comfyUiSetupWork: Promise<void> = Promise.resolve();
   private comfyUiLifecycleWork: Promise<void> = Promise.resolve();
   /** actionClass per pending permission id, for remember-on-always (R-16). */
@@ -3934,7 +3942,11 @@ export class Coordinator {
     this.localRuntimeProbeInFlight = true;
     const local = (Object.keys(PROVIDERS) as ProviderId[]).filter((id) => PROVIDERS[id].credential === "none");
     try {
-      await Promise.all([...local.map((id) => this.providerService.validate(id).catch(() => {})), this.refreshLocalResidency()]);
+      await Promise.all([
+        ...local.map((id) => this.providerService.validate(id).catch(() => {})),
+        this.refreshLocalResidency(),
+        this.publishLocalHarnessModels(),
+      ]);
     } finally {
       this.localRuntimeProbeInFlight = false;
     }
@@ -3944,6 +3956,60 @@ export class Coordinator {
     if (fingerprint === this.lastLocalRuntimeStatuses) return;
     this.lastLocalRuntimeStatuses = fingerprint;
     this.emit({ at: new Date().toISOString(), type: "provider.status", providers: statuses });
+  }
+
+  /**
+   * What Ollama has pulled, handed to the writing harness when it changes (issue 1247).
+   *
+   * The harness never asks Ollama, so a model somebody pulled from a terminal reaches the
+   * picker only through here. Same cadence as the runtime probe: a pull finishes between
+   * ticks, and a person who just watched one finish will look for the model at once. The
+   * first pass always writes, because the file may still describe last run's models — and
+   * the catalogue is refreshed a moment after the write rather than at once, because the
+   * harness takes about three seconds (measured) to reload its configuration; an immediate
+   * refresh would read the old rows and then cache them. Refreshed and published, not only
+   * invalidated: the screens that show models ask for them on mount and on a harness change,
+   * so a pull that lands while a picker is open would otherwise wait for a Retry.
+   */
+  private publishLocalHarnessModels(): Promise<void> {
+    const publish = this.opts.publishLocalHarnessModels;
+    const client = this.opts.dispatchClients?.["ollama"];
+    if (!publish || !client?.listModels || this.stopping) return Promise.resolve();
+    // Tracked, because the probe that calls this is fire-and-forget: stop() must wait out a
+    // profile write in flight rather than return under it.
+    const work = this.publishLocalHarnessModelsNow(publish, client.listModels.bind(client)).catch(() => {});
+    this.backgroundWork.add(work);
+    void work.finally(() => this.backgroundWork.delete(work));
+    return work;
+  }
+
+  private async publishLocalHarnessModelsNow(
+    publish: (models: readonly import("@arke-studio/contracts").LocalHarnessModel[]) => Promise<void>,
+    list: () => Promise<readonly import("@arke-studio/contracts").LocalHarnessModel[]>,
+  ): Promise<void> {
+    const models = await list().catch(() => []);
+    const fingerprint = JSON.stringify(models);
+    if (this.stopping || fingerprint === this.publishedLocalHarnessModels) return;
+    try {
+      await publish(models);
+    } catch (error) {
+      // Left unpublished on purpose: the next tick tries again with whatever is true then.
+      void this.appLog?.append({ kind: "harness.local-models-unpublished", message: error instanceof Error ? error.message : String(error) });
+      return;
+    }
+    this.publishedLocalHarnessModels = fingerprint;
+    // Shutdown may have started during the write; nothing is scheduled past it.
+    if (this.stopping) return;
+    const timer = setTimeout(() => {
+      this.lifecycleTimers.delete(timer);
+      if (this.stopping) return;
+      this.modelCatalog.invalidate();
+      const work = this.modelCatalog.get(true).catch(() => {});
+      this.backgroundWork.add(work);
+      void work.finally(() => this.backgroundWork.delete(work));
+    }, 5_000);
+    timer.unref?.();
+    this.lifecycleTimers.add(timer);
   }
 
   /**

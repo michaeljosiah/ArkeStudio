@@ -504,6 +504,8 @@ export function captureProviderClient(
     ...(client.resetTransport ? { resetTransport: () => client.resetTransport!() } : {}),
     ...(client.unload ? { unload: (signal?: AbortSignal) => client.unload!(signal) } : {}),
     ...(client.residency ? { residency: (signal?: AbortSignal) => client.residency!(signal) } : {}),
+    // A listing, not a call: nothing is charged and nothing is journalled, like residency.
+    ...(client.listModels ? { listModels: (signal?: AbortSignal) => client.listModels!(signal) } : {}),
     ...(client.dispose ? { dispose: () => client.dispose!() } : {}),
     ...(client.release
       ? {

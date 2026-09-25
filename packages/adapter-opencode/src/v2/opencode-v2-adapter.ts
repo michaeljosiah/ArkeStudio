@@ -79,6 +79,13 @@ const STREAM_SILENCE_MS = 45_000;
  */
 const WARMUP_MS = 30_000;
 
+/** `provider/model` as v2's session model reference. Null when no provider is named: the server decides. */
+export function wireModelRef(reference: string): { providerID: string; id: string } | null {
+  const slash = reference.indexOf("/");
+  if (slash <= 0 || slash === reference.length - 1) return null;
+  return { providerID: reference.slice(0, slash), id: reference.slice(slash + 1) };
+}
+
 /** v2 rejects client message ids outside the msg_ namespace, and ids are globally durable. */
 let wireIdCounter = 0;
 function freshWireId(): string {
@@ -172,8 +179,17 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   // ---- the model window (§8.5) ---------------------------------------------
 
   private lastKnownWindow: number | null = null;
+  /** Every catalogue row's window by `provider/id`, so a pinned session can be budgeted from its own model. */
+  private readonly modelWindows = new Map<string, number>();
+  /**
+   * The pinned model's window per session, taken at creation from the catalogue as it stood
+   * then. Null is a pinned model whose window the catalogue did not state: the caller's floor
+   * is the right budget for it, and the default model's window is the wrong one twice over.
+   */
+  private readonly sessionWindows = new Map<string, number | null>();
 
-  knownInputTokenLimit(): number | null {
+  knownInputTokenLimit(sessionId?: string): number | null {
+    if (sessionId !== undefined && this.sessionWindows.has(sessionId)) return this.sessionWindows.get(sessionId)!;
     return this.lastKnownWindow;
   }
 
@@ -215,19 +231,30 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   }
 
   async createSession(input: CreateSessionInput): Promise<SessionRef> {
+    const model = wireModelRef(this.preparedPolicies.model(input.agent, input.preparationId) ?? "");
     const permissionPolicy = this.preparedPolicies.take(input.agent, input.preparationId);
     if (input.preparationId !== undefined && permissionPolicy === null) {
       throw new Error("session preparation is missing or was already consumed");
     }
     const location = input.cwd;
+    // The model is session state, pinned at creation (issue 1247). Measured against the pinned
+    // build: an agent's `model` in opencode.json shows on GET /api/agent and is never consulted
+    // for a turn — the runner reads only the session's own model, and a session without one
+    // answers with the server default. So every choice Studio wrote into the config was being
+    // read back as the default model, a cloud one, whatever the person had picked. Split at
+    // the first slash, because a model id may carry its own (`openrouter/vendor/model`).
     const session = await this.http.reqData<{ id?: string; location?: { directory?: string } }>(
       "POST",
       "/api/session",
-      location ? { location: { directory: wireDirectory(location) } } : {},
+      {
+        ...(location ? { location: { directory: wireDirectory(location) } } : {}),
+        ...(model !== null ? { model } : {}),
+      },
       { signal: input.signal },
     );
     const sessionId = session?.id ?? "";
     if (!sessionId) throw new Error("OpenCode v2 did not return a session id");
+    if (model !== null) this.sessionWindows.set(sessionId, this.modelWindows.get(`${model.providerID}/${model.id}`) ?? null);
     // The envelope assertion in reqData covers scoped GETs; session create echoes the location
     // inside data, so assert here too — a session in the wrong directory writes the wrong world.
     if (location && session?.location?.directory !== undefined && !sameDirectory(session.location.directory, location)) {
@@ -483,10 +510,12 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     }
     const out: ModelInfo[] = [];
     this.lastKnownWindow = null;
+    this.modelWindows.clear();
     for (const row of rows) {
       if (!row.id || !row.providerID || !modelEnabled(row)) continue;
       const key = `${row.providerID}/${row.id}`;
       const metadata = modelMetadata(row);
+      if (metadata.inputTokenLimit !== undefined) this.modelWindows.set(key, metadata.inputTokenLimit);
       if (key === defaultKey) this.lastKnownWindow = metadata.inputTokenLimit ?? null;
       out.push({
         id: row.id,
@@ -712,6 +741,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
 
   async dispose(): Promise<void> {
     this.disposed = true;
+    this.sessionWindows.clear();
     this.pumpAbort.abort();
     for (const sub of this.subscribers) {
       sub.wake?.();
