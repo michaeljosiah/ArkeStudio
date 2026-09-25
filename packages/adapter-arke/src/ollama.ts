@@ -190,15 +190,20 @@ export async function listTags(fetchImpl: typeof fetch, baseUrl: string, signal:
   return listed;
 }
 
+/**
+ * The same concurrency as the coordinator's Ollama listing, which decides whether Settings offers
+ * this harness, and no per-model deadline of its own — only the pass's, which is longer than the
+ * listing's. So any model the listing managed to read, this reads too: a harness Settings let
+ * someone choose cannot then fail to start for want of the same inspection.
+ */
 const INSPECTION_CONCURRENCY = 4;
-const INSPECTION_TIMEOUT_MS = 5_000;
 
 async function inspect(fetchImpl: typeof fetch, baseUrl: string, id: string, signal: AbortSignal, cutoff: AbortSignal): Promise<PulledModel | null> {
   signal.throwIfAborted();
   let details: JsonObject | null = null;
   try {
     const shown = await fetchImpl(`${baseUrl}/api/show`, {
-      method: "POST", redirect: "error", signal: AbortSignal.any([cutoff, AbortSignal.timeout(INSPECTION_TIMEOUT_MS)]),
+      method: "POST", redirect: "error", signal: cutoff,
       headers: { "content-type": "application/json" }, body: JSON.stringify({ model: id }),
     });
     if (shown.ok) details = object(await shown.json());

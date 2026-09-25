@@ -4379,6 +4379,9 @@ export class Coordinator {
 
   private keylessSessionRefusal(needsImages = false): string | null {
     if (this.cloudCredentialAvailable()) return null;
+    // On Arke's own lane a stored key is not missing, only unusable, so the refusal must not tell
+    // the person to add one; what it can say is about Ollama and its models.
+    const localLane = this.opts.adapter?.id === "arke";
     // Unread is not absent: a connected account pinned local by a faulted read would be the
     // wrong lane chosen quietly, and this is retried on the runtime probe's cadence.
     if (this.vendorAuthUnread()) {
@@ -4389,6 +4392,7 @@ export class Coordinator {
     const adapter = this.opts.adapter;
     if (!adapter?.listModels || !adapter.capabilities().has("models")) return null;
     if (!this.catalogueReadOk) {
+      if (localLane) return "Local's models could not be read, so which model would write is unknown. Check that Ollama is running, then retry models in Settings → Harness → Advanced.";
       return "The harness's models could not be read, and no cloud key is stored, so which model would write is unknown. Retry models in Settings → Harness → Advanced, or add a key.";
     }
     if (this.localModelsPublishable() && !this.localRuntimeListed) {
@@ -4406,6 +4410,7 @@ export class Coordinator {
     // nothing local: a session going unmodelled past them would run on the cloud default with
     // a local runtime right there. Stage refuses on its own when no model reads images.
     if (!needsImages && offered) {
+      if (localLane) return "None of the local models can write here: each is switched off or cannot call tools. Pull a model that calls tools, or switch one on under AI models.";
       return "None of the local models can write here: each is switched off or cannot call tools, and no cloud key is stored. Pull a model that calls tools, switch one on under AI models, or add a key.";
     }
     return null;

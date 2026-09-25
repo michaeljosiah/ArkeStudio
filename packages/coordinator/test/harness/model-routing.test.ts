@@ -393,6 +393,21 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     } finally { await test.close(); }
   });
 
+  it("never tells a person on the Local lane to add a key it cannot use", async () => {
+    const adapter = new CaptureAdapter();
+    Object.defineProperty(adapter, "id", { value: "arke" });
+    adapter.list = async () => { throw new Error("Ollama is not answering"); };
+    const test = await fixture({ adapter, cipher: fakeCipher });
+    try {
+      await test.send({ kind: "set-credential", provider: "anthropic", key: "sk-ant-test-key" });
+      await untilAsync(async () => {
+        assert.equal(await test.chat(), undefined);
+        return /Local's models could not be read/.test(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "");
+      }, "the Local refusal");
+      assert.doesNotMatch(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /cloud key|add a key/);
+    } finally { await test.close(); }
+  });
+
   it("waits for the first local-model publication and its reload before deciding, on a fresh start", async () => {
     // Before publication the harness lists only cloud rows; the publication is what makes the
     // local rows appear on the next fetch — as the profile write does for the real harness.
