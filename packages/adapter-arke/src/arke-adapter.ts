@@ -44,6 +44,8 @@ export interface ArkeAdapterOptions {
   maxContextTokens?: number;
   /** Model calls one turn may make before it is ended. Each tool round is one. */
   maxStepsPerTurn?: number;
+  /** How often an unready harness asks Ollama again, at most. */
+  reprobeMs?: number;
   /** How long one catalogue pass inspects models before listing the rest as unread. */
   catalogueDeadlineMs?: number;
   /** Passed to Ollama as `keep_alive`, when set. */
@@ -56,6 +58,7 @@ const CONTEXT_CEILING = 32_768;
 const DEFAULT_STEPS = 24;
 const CATALOGUE_DEADLINE_MS = 15_000;
 const DISPOSE_RELEASE_MS = 2_000;
+const REPROBE_MS = 5_000;
 /**
  * Only models stating a 256k context are offered, the same rule as the OpenCode lane
  * (`meetsLocalModelMinimum` in contracts). How much of that window a session asks for is
@@ -139,6 +142,8 @@ export class ArkeAdapter implements HarnessAdapter {
    * while its unload is on the wire would be unloaded under the turn, or loaded twice.
    */
   private releasing: Promise<void> = Promise.resolve();
+  private probing: Promise<void> | null = null;
+  private lastProbe = 0;
 
   constructor(private readonly opts: ArkeAdapterOptions = {}) {
     this.fetchImpl = opts.fetch ?? fetch;
@@ -146,7 +151,19 @@ export class ArkeAdapter implements HarnessAdapter {
   }
 
   capabilities(): ReadonlySet<HarnessCapability> { return new Set(["events", "models"]); }
-  readiness(): Readiness { return this.ready; }
+  /**
+   * Also how the harness recovers. The coordinator initialises an adapter it does not supervise
+   * once, then only polls this; with no process to restart, Ollama starting (or coming back)
+   * would otherwise go unnoticed until the app restarted. So while unready, a poll starts a fresh
+   * probe — one at a time, and no more often than `reprobeMs` — and the next poll sees the answer.
+   */
+  readiness(): Readiness {
+    if (!this.ready.ready && !this.disposed && this.probing === null && Date.now() - this.lastProbe >= (this.opts.reprobeMs ?? REPROBE_MS)) {
+      this.lastProbe = Date.now();
+      this.probing = this.init().catch(() => {}).finally(() => { this.probing = null; });
+    }
+    return this.ready;
+  }
   lifecycleRevision(): number { return this.revision; }
   /** Nothing on disk: configuration arrives through `prepareSession`. */
   sessionFiles(): [] { return []; }
@@ -167,19 +184,29 @@ export class ArkeAdapter implements HarnessAdapter {
     this.ready = { ready: false, reason };
   }
 
-  /** Ready when Ollama answers. There is nothing else to start. */
+  /**
+   * Ready when Ollama answers and holds a model this harness can write with — the same test
+   * Settings applies before offering it, so "running" never means "reachable but useless".
+   * There is nothing else to start.
+   */
   async init(): Promise<void> {
     if (this.disposed) throw new Error("The Arke harness is disposed.");
+    this.lastProbe = Date.now();
+    const unready = (reason: string): never => { this.markUnready(reason); throw new Error(reason); };
+    let models: ModelInfo[];
     try {
-      // Reachability only: inspecting every pulled model is the catalogue's work, and one slow
-      // inspection must not read as Ollama being down.
+      // Reachability first, on its own deadline: a slow model inspection must not read as
+      // Ollama being down. The catalogue then has its own deadline for the inspections.
       await listTags(this.fetchImpl, this.baseUrl, AbortSignal.timeout(8_000));
-      if (!this.ready.ready) this.revision++;
-      this.ready = { ready: true };
+      ({ models } = await this.catalog(new AbortController().signal));
     } catch {
-      this.markUnready("Ollama is not answering on this machine.");
-      throw new Error("Ollama is not answering on this machine.");
+      return unready("Ollama is not answering on this machine.");
     }
+    if (!models.some((model) => model.isDefault)) {
+      return unready("No pulled model has a 256k context window and calls tools. Pull one, such as Gemma 4 12B.");
+    }
+    if (!this.ready.ready) this.revision++;
+    this.ready = { ready: true };
   }
 
   async listModels(): Promise<ModelInfo[]> {

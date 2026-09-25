@@ -91,8 +91,13 @@ An unavailable selected engine remains unavailable until you repair it or choose
 it does not silently switch engines.
 Codex's confined file tools support local Windows volumes and Linux with `/proc/self/fd`
 available. Windows uses its built-in PowerShell for the private file-access helper.
+Local is Arke's own harness for writing with a model on this machine through Ollama: nothing to
+install or sign in to, no separate process. It is selectable when Ollama answers on loopback
+(`127.0.0.1:11434`) and has pulled a model that states a context of at least 256k tokens and
+calls tools, such as Gemma 4 12B; Settings names what is missing otherwise, and the harness
+picks Ollama back up on its own when it starts answering again.
 
-For development, `ARKE_HARNESS=opencode|claude|codex` overrides the saved engine as a whole.
+For development, `ARKE_HARNESS=opencode|claude|codex|arke` overrides the saved engine as a whole.
 `ARKE_CLAUDE_CMD` and `ARKE_CODEX_CMD` override executable discovery. Settings discloses an
 active engine override; clear it to use the saved preference on restart. The Codex app-server
 uses private stdio and the user's Codex login store; no renderer connection to it is exposed.

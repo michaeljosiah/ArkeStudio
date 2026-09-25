@@ -476,3 +476,36 @@ test("a turn waiting on a stalled release stops when it is interrupted, so dispo
   f.ollama.generateDelayMs = 0;
   void releasing;
 });
+
+test("an unready harness picks Ollama back up on its own once it answers again", async (t) => {
+  const ollama = new FakeOllama(); await ollama.start();
+  let down = true;
+  const adapter = new ArkeAdapter({
+    baseUrl: ollama.url, reprobeMs: 0,
+    fetch: (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      if (down) throw new TypeError("fetch failed");
+      return fetch(input, init);
+    }) as typeof fetch,
+  });
+  t.after(async () => { await adapter.dispose(); await ollama.stop(); });
+  await assert.rejects(adapter.init(), /not answering/);
+  assert.equal(adapter.readiness().ready, false);
+  const revision = adapter.lifecycleRevision();
+  down = false;
+  const deadline = Date.now() + 3_000;
+  while (!adapter.readiness().ready && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(adapter.readiness().ready, true, "polling readiness alone was enough; nothing restarted the app");
+  assert.ok(adapter.lifecycleRevision() > revision, "and the change is visible to a health loop");
+});
+
+test("reaching Ollama is not enough to be ready: it must hold a model this harness can write with", async (t) => {
+  const f = await fixture(t);
+  f.ollama.models = [{ name: "short:8b", capabilities: ["completion", "tools"], context: 131072 }];
+  await assert.rejects(f.adapter.init(), /No pulled model has a 256k context window and calls tools/);
+  const readiness = f.adapter.readiness();
+  assert.equal(readiness.ready, false);
+  assert.match(readiness.reason ?? "", /256k/);
+  f.ollama.models = [{ name: "gemma4:12b", capabilities: ["completion", "tools"], context: 262144 }];
+  await f.adapter.init();
+  assert.equal(f.adapter.readiness().ready, true);
+});
