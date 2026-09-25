@@ -4363,10 +4363,12 @@ export class Coordinator {
     if (this.localModelsPublishable() && !this.localRuntimeListed) return undefined;
     if (this.vendorAuthUnread()) return undefined;
     // Every roster agent works through tools — reads, edits, world queries — so a model the
-    // runtime says cannot call them would take the session and fail its first turn. Explicit
-    // choices are still admitted: unknown is offered, and a stated refusal is one the person
-    // can read; a default has no reader.
-    const local = app.harnessModels.filter((model) => model.provider === "ollama" && model.tools !== false);
+    // runtime says cannot call them would take the session and fail its first turn. Nor is a
+    // model whose capabilities were assumed rather than read (its show failed) chosen
+    // unattended: nothing says it completes. Explicit choices are still admitted: unknown is
+    // offered, and a stated refusal is one the person can read; a default has no reader.
+    const assumed = new Set(this.publishedLocalHarnessRows.filter((model) => model.assumed).map((model) => model.id));
+    const local = app.harnessModels.filter((model) => model.provider === "ollama" && model.tools !== false && !assumed.has(model.id));
     // Admission lets an unstated modality through — unknown is offered, not withheld — but a
     // default is a choice nobody is looking at, so for Stage a model that says it reads images
     // comes before one that merely does not say it cannot.

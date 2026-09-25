@@ -490,6 +490,10 @@ export class WorldChatRunner {
           signal: controller.signal,
         })
       : modelId !== undefined ? { modelId } : {};
+    // A Stop that landed while the model was being decided (issue 1247) still ends as a
+    // recorded cancelled turn (#1030), but the reads that only feed a prompt nobody will send
+    // are skipped on the way there, so the stop is not held behind them.
+    const stoppedAlready = controller.signal.aborted;
     // On a retry the words being asked again are already in the log under their original id, and
     // that id is the one evidence must cite — the fresh `message` above is never appended then.
     const original = existingTurnId
@@ -499,7 +503,7 @@ export class WorldChatRunner {
     // What was handed over goes into the prompt (§13.2). Without this the model is never told an
     // attachment exists, and answers "I can't see an attached document" — truthfully, from where
     // it is standing, which is the worst kind of wrong answer to debug.
-    const handed = await this.readAttachments(view, attachmentIds);
+    const handed = await this.readAttachments(view, stoppedAlready ? [] : attachmentIds);
     /*
      * The look the model is about to be shown, pinned now.
      *
@@ -516,7 +520,7 @@ export class WorldChatRunner {
      * checked against. Reading the text now and the version later would let an edit made in a
      * text editor between the two be silently overwritten by an answer that never saw it.
      */
-    const bible = (await this.deps.bible?.()) ?? { version: 1, text: "" };
+    const bible = (stoppedAlready ? undefined : await this.deps.bible?.()) ?? { version: 1, text: "" };
     // The scene the thread is about, pinned by version now for the same reason as the bible: a
     // rename this turn returns is checked against what the model was shown, not what is there
     // by the time it answers.

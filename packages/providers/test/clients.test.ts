@@ -73,9 +73,9 @@ it("Ollama lists what is pulled with what each model can do, and leaves out what
   assert.deepEqual(await client.listModels(), [
     { id: "gemma4:12b", contextLength: 131072, tools: true, vision: true },
     // No capabilities stated: listed, tools assumed, nothing about images claimed.
-    { id: "old-model", tools: true, vision: false },
+    { id: "old-model", tools: true, vision: false, assumed: true },
     // A show that fails still lists the model — hidden is worse than refused.
-    { id: "broken", tools: true, vision: false },
+    { id: "broken", tools: true, vision: false, assumed: true },
   ]);
   await assert.rejects(new OllamaClient(fakeFetch([])).listModels(), "Ollama down is an error: nothing pulled and not yet answering must not read the same");
 });
@@ -91,7 +91,7 @@ it("Ollama's listing pass ends at one deadline, listing what the shows never ans
   const listed = await hanging.listModels();
   assert.ok(Date.now() - started < 2_000, "six hanging shows must not cost six timeouts");
   assert.deepEqual(listed.map((m) => m.id), ["a", "b", "c", "d", "e", "f"]);
-  assert.ok(listed.every((m) => m.tools && !m.vision && m.contextLength === undefined));
+  assert.ok(listed.every((m) => m.tools && !m.vision && m.contextLength === undefined && m.assumed === true), "cut off by the deadline: listed with assumed capabilities");
 });
 
 it("the provider registry forwards the Ollama listing through the capture wrapper (issue 1247)", async () => {

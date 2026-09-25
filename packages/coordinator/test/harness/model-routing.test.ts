@@ -90,9 +90,9 @@ async function fixture(options: {
   /** The shipped manifest, with Ollama answering as a running local runtime so its rows pass the gate. */
   manifest?: boolean;
   /** What Ollama has pulled, with a publication hook: the first-run path the local default waits on (issue 1247). */
-  localModels?: Array<{ id: string; tools: boolean; vision: boolean }>;
+  localModels?: Array<{ id: string; tools: boolean; vision: boolean; assumed?: true }>;
   /** Ollama's answer to each listing, when it is not simply the list above: it may be a refusal. */
-  listLocalModels?: () => Promise<Array<{ id: string; tools: boolean; vision: boolean }>>;
+  listLocalModels?: () => Promise<Array<{ id: string; tools: boolean; vision: boolean; assumed?: true }>>;
   onPublish?: () => void;
   /** A harness process under supervision, so a test can fail it and bring it back (issue 1247). */
   supervisor?: ChildSupervisor;
@@ -779,6 +779,16 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       await pending;
       assert.equal(test.adapter.sessions.filter((session) => session.agent === "world-builder").length, 0, "no session was built for a stopped turn");
     } finally { release(); await test.close(); }
+  });
+
+  it("does not choose unattended a local model whose capabilities were assumed rather than read", async () => {
+    // A show that failed lists the model with tools assumed; it is offered, but the default
+    // takes the first row the runtime actually described.
+    const test = await fixture({ localModels: [{ id: "gemma4:12b", tools: true, vision: false, assumed: true }, ...PULLED.slice(1)] });
+    try {
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL_SMALL, "the first described row, not the first row");
+      assert.equal((await test.chat(LOCAL))?.config.model, LOCAL, "chosen on purpose, the assumed row is still admitted");
+    } finally { await test.close(); }
   });
 
   it("skips a local model the runtime says cannot call tools", async () => {

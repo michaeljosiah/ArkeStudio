@@ -168,6 +168,7 @@ export class OllamaClient implements ProviderClient {
         ...(typeof context === "number" && Number.isSafeInteger(context) && context > 0 ? { contextLength: context } : {}),
         tools: capabilities ? capabilities.includes("tools") : true,
         vision: capabilities ? capabilities.includes("vision") : false,
+        ...(capabilities ? {} : { assumed: true as const }),
       });
     }
     return models;
