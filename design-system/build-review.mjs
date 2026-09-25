@@ -124,6 +124,18 @@ const SCREENS = [
   { group: "Around it", screen: "Export audiobook sheet (story)", frame: "146d", route: "#/w/:worldId/p/:prodId/story/audiobook?export=1", status: "drawn", checked: "2026-09-13",
     controls: ["Chapter files", "Book", "Retail", "As made", "Read the rest · 9 chapters · $0.94", "Show in folder", "Export 6 chapters"],
     notes: ["Turn 146: chapter files or a book, the retail profile as data, chapters left out counted with the dashed door, the delivered folder. Not built."] },
+  { group: "Around it", screen: "Chapter · who reads what (story)", frame: "155a", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drawn", checked: "2026-09-25",
+    controls: ["Everyone", "Play", "Read the chapter · 5 blocks · $0.02", "Cast again", "Upload"],
+    notes: ["Turn 155: the Audiobook view marks every block with its speaker — a colour a speaker, grey for the narrator, a dashed dot for a name no sheet carries; lines tinted, narration plain; a waveform or a microphone for how the take was made; a speaker filter; a recorded speaker's block <code>awaiting recording</code>. Not built."] },
+  { group: "Around it", screen: "Chapter · speaker menu (story)", frame: "155b", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drawn", checked: "2026-09-25",
+    controls: ["Speaker", "Narration", "Bram Tull"],
+    notes: ["Turn 155: a press on a block's speaker, or words selected in narration, opens the menu; a correction is a pin on the cast that outlives <code>Cast again</code>. Not built."] },
+  { group: "Around it", screen: "Upload a take dialog (story)", frame: "155c", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook&upload=:block", status: "drawn", checked: "2026-09-25",
+    controls: ["Replace", "My voice", "Authorized", "Licensed", "Cancel", "Keep as take"],
+    notes: ["Turn 155: one file for one block — the words over the file, the checks as data, a warning that does not refuse, the performer and rights once. Not built."] },
+  { group: "Around it", screen: "Speaker lines sheet (story)", frame: "155d", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook&lines=:sheet", status: "drawn", checked: "2026-09-25",
+    controls: ["Awaiting", "All 31", "Export", "Add files", "Cancel", "Keep 4 takes"],
+    notes: ["Turn 155: a recorded speaker's script out as a PDF with ids and direction, recordings back in matched by id and checked; refused files in one clause. Not built."] },
 ];
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
