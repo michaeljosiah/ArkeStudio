@@ -93,7 +93,7 @@ async function fixture(options: {
   localModels?: Array<{ id: string; tools: boolean; vision: boolean; assumed?: true }>;
   /** Ollama's answer to each listing, when it is not simply the list above: it may be a refusal. */
   listLocalModels?: () => Promise<Array<{ id: string; tools: boolean; vision: boolean; assumed?: true }>>;
-  onPublish?: () => void;
+  onPublish?: () => void | Promise<void>;
   /** A harness process under supervision, so a test can fail it and bring it back (issue 1247). */
   supervisor?: ChildSupervisor;
 } = {}) {
@@ -110,7 +110,7 @@ async function fixture(options: {
     ...(options.cipher ? { cipher: options.cipher } : {}),
     ...(options.localModels || options.listLocalModels ? {
       dispatchClients: { ollama: Object.assign(new FakeProvider(), { listModels: options.listLocalModels ?? (async () => options.localModels!) }) as DispatchClient },
-      publishLocalHarnessModels: async () => { options.onPublish?.(); },
+      publishLocalHarnessModels: async () => { await options.onPublish?.(); },
     } : {}),
     ...(options.manifest ? {
       manifest: SHIPPED_MANIFEST,
@@ -788,6 +788,77 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     try {
       assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL_SMALL, "the first described row, not the first row");
       assert.equal((await test.chat(LOCAL))?.config.model, LOCAL, "chosen on purpose, the assumed row is still admitted");
+    } finally { await test.close(); }
+  });
+
+  it("does not hold a session with a chosen model behind discovery", async () => {
+    const adapter = new CaptureAdapter();
+    adapter.list = async () => CLOUD_ONLY;
+    // The gate waits on the publication and its reload; a session whose agent has a model of
+    // its own runs on it whatever discovery says, so it does not wait.
+    const test = await fixture({ adapter, localModels: PULLED, agents: { "world-builder": { model: CHAT } } });
+    try {
+      // The send also awaits the conversation's naming pass, which is not a chosen session and
+      // does wait; the turn's own session is what must not.
+      const pending = test.chat();
+      await until(() => test.adapter.sessions.some((session) => session.agent === "world-builder"), "the turn's session, before the reload delay", 3_000);
+      assert.equal((await pending)?.config.agents?.["world-builder"]?.model, CHAT);
+    } finally { await test.close(); }
+  });
+
+  it("does not trust a previous lifecycle's sign-in read on a returned harness", async () => {
+    const adapter = new CaptureAdapter();
+    adapter.capabilities = () => new Set(["models", "events", "auth"] as const) as unknown as ReturnType<CaptureAdapter["capabilities"]>;
+    let hold: Promise<void> = Promise.resolve();
+    let release: () => void = () => {};
+    Object.assign(adapter, { listIntegrations: async () => {
+      await hold;
+      return [{ id: "openai", name: "OpenAI", methods: [], connections: [{ kind: "stored", id: "c1", label: "OpenAI account" }], needsSignIn: false }];
+    } });
+    const supervisor = Object.assign(new EventEmitter(), {
+      id: "harness", status: "stopped", start: async () => {}, stop: async () => {}, restart: async () => {},
+    }) as unknown as ChildSupervisor;
+    const test = await fixture({ adapter, supervisor });
+    try {
+      supervisor.emit("status", { id: "harness", status: "healthy" });
+      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === undefined && test.adapter.sessions.length > 0, "the first lifecycle's read decides for the connected account");
+      hold = new Promise<void>((resolve) => { release = resolve; });
+      supervisor.emit("status", { id: "harness", status: "unhealthy", reason: "the child exited" });
+      supervisor.emit("status", { id: "harness", status: "healthy" });
+      await until(() => adapter.initCalls === 2, "the returning harness initialised");
+      let decided = false;
+      const pending = test.chat().finally(() => { decided = true; });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(decided, false, "the old lifecycle's rows are not a credential while this one's read is out");
+      release();
+      assert.equal((await pending)?.config.agents?.["world-builder"]?.model, undefined, "decided on the returned harness's own read");
+    } finally { release(); await test.close(); }
+  });
+
+  it("settles a re-armed gate when the first publication failed before the harness came up", async () => {
+    const adapter = new CaptureAdapter();
+    adapter.list = async () => CLOUD_ONLY;
+    let publishFails = true;
+    const supervisor = Object.assign(new EventEmitter(), {
+      id: "harness", status: "stopped", start: async () => {}, stop: async () => {}, restart: async () => {},
+    }) as unknown as ChildSupervisor;
+    const test = await fixture({ adapter, supervisor, localModels: PULLED, onPublish: async () => {
+      if (publishFails) throw new Error("the profile could not be written");
+      adapter.list = async () => MODELS;
+    } });
+    try {
+      await until(() => (test.coordinator as unknown as { catalogueGateOpen: boolean }).catalogueGateOpen === false, "the failed publication settled the gate");
+      supervisor.emit("status", { id: "harness", status: "healthy" });
+      await until(() => adapter.initCalls === 1, "the harness came up");
+      const started = Date.now();
+      const before = test.adapter.sessions.length;
+      await test.chat();
+      assert.ok(Date.now() - started < 10_000, "refused promptly rather than held to the creation timeout");
+      assert.equal(test.adapter.sessions.length, before, "and not run unmodelled: the rows are unpublished");
+      assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /not available to the harness yet/);
+      publishFails = false;
+      await test.probeLocalRuntimes();
+      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the publication succeeds");
     } finally { await test.close(); }
   });
 

@@ -85,6 +85,14 @@ export class VendorAuthService {
     return this.lastReadOk;
   }
 
+  /**
+   * The connections on display are a previous harness lifecycle's (issue 1247): what this one
+   * holds is unknown until it has been read, and a decision must not trust the old rows.
+   */
+  markStale(): void {
+    this.lastReadOk = false;
+  }
+
   constructor(private readonly opts: VendorAuthServiceOptions) {}
 
   current(): VendorAuthStatus {

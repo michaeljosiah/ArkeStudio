@@ -4194,8 +4194,14 @@ export class Coordinator {
     // post-publication read: its first answer may still be the old one, and what the previous
     // lifecycle had confirmed says nothing about this one. Until it carries them, the probe
     // keeps asking, and a keyless session is refused rather than run on a cloud-only read.
+    // The same for the sign-in state: the rows on display are the old lifecycle's until this
+    // one's read lands, and a decision in between must wait for it rather than trust them.
     if (recovering) this.localRuntimeListed = false;
-    this.warmModelCatalog(!this.localModelsPublishable() || recovering, recovering
+    if (returning) this.vendorAuth.markStale();
+    // A re-armed gate is settled by this fetch whenever no publication will: after a first
+    // publication that failed, the next one is a probe tick away, and a session in between is
+    // refused for the rows being unpublished rather than held past its creation timeout.
+    this.warmModelCatalog(!this.localModelsPublishable() || returning, recovering
       ? () => { this.localRuntimeListed = this.catalogueCarries(this.publishedLocalHarnessRows); }
       : undefined);
     const settleVendorAuth = this.settleVendorAuth;
@@ -4250,8 +4256,9 @@ export class Coordinator {
   private async sessionAgents(chosen = false): Promise<{ agents?: Record<string, { model?: string; brief?: string }> }> {
     // A keyless session waits for the catalogue's first fetch rather than reading it empty:
     // measured or not, an empty read here meant the first session of a run going to the cloud
-    // default — the one outcome this default exists to prevent.
-    if (!this.cloudCredentialAvailable()) await this.localDefaultGate();
+    // default — the one outcome this default exists to prevent. A session whose model is
+    // already chosen has nothing to wait for: it runs on that model whatever discovery says.
+    if (!chosen && !this.cloudCredentialAvailable()) await this.localDefaultGate();
     if (this.stopping) throw new Error("Arke Studio is shutting down.");
     const local = this.localHarnessDefault();
     if (local === undefined) {
