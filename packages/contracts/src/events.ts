@@ -741,6 +741,20 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       confirmationToken: z.string().min(1).optional(),
       /** The cloud voices a priced page would send its words to, by label and provider (R-47). */
       voices: z.array(z.object({ label: z.string().min(1), provider: z.string().min(1) }).strict()).optional(),
+      /**
+       * A cloned voice reads what is priced (issue 1215): its recording goes to the reader with
+       * the words, and the confirmation says so before the price is answered. On a quote only —
+       * a read the cache holds sends nothing.
+       */
+      voiceReference: z.boolean().optional(),
+      /**
+       * What a first read through a slot-keeping reader adds (SPEC-046 R-14, R-34), said on the
+       * read that incurs it rather than only on the candidate row that named it — one entry a
+       * voice, never joined and cut (codex on PR 1221): a vendor's clone charge is not in the
+       * estimate, so this is the whole of its disclosure. Bounded by a page's blocks, since a
+       * voice needs a block to be on the page (`read-prose-page` takes a thousand sources).
+       */
+      notices: z.array(z.string().min(1).max(512)).max(1000).optional(),
       error: z.string().optional(),
     })
     .strict(),
@@ -1075,6 +1089,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       voices: z.array(
         z.object({ label: z.string().min(1), provider: z.string().min(1), characters: z.number().int().min(0), estimatedMicroUsd: z.number().int().min(0) }).strict(),
       ),
+      /** What a first read through a slot-keeping reader adds (SPEC-046 R-14), a line a voice and vendor, said on the read that incurs it (codex on PR 1221). Unbounded like `voices`: a chapter's voices are its cast's. */
+      notices: z.array(z.string().min(1).max(512)).optional(),
     })
     .strict(),
   z
@@ -1171,6 +1187,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       estimatedMicroUsd: z.number().int().min(0),
       confirmationToken: z.string().min(1),
       voices: z.array(AudiobookPriceLineSchema),
+      /** As on `audiobook.priced`: a first read's clone charge, a line a voice and vendor, across the book's chapters (codex on PR 1221). Unbounded like `voices`: a book has no cap on its cast. */
+      notices: z.array(z.string().min(1).max(512)).optional(),
     })
     .strict(),
   z

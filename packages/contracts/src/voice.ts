@@ -290,13 +290,20 @@ export function hostedReaderKeepsSlot(provider: string): boolean {
  * Breeze charges a flat per-clone fee its docs do not quantify, so the amount is the vendor's
  * to state; Fish makes the model for nothing (probed 2026-09-13), so only the making is said.
  * Null once the library records the slot — the second read is a read — and for a reader that
- * keeps nothing.
+ * keeps nothing. A recorded slot was made from one recording (R-13): given the current
+ * recording's hash, a slot made from another is one the next read remakes, and the charge is
+ * said again as a re-recording's (codex on PR 1221). A slot the vendor's console deleted is
+ * found at the read (§2.4), not here.
  */
-export function firstReadNotice(voice: Pick<ClonedVoice, "remote">, provider: string): string | null {
-  if (!hostedReaderKeepsSlot(provider) || voice.remote?.[provider]?.voiceId !== undefined) return null;
+export function firstReadNotice(voice: Pick<ClonedVoice, "remote">, provider: string, clipHash?: string): string | null {
+  if (!hostedReaderKeepsSlot(provider)) return null;
+  const held = voice.remote?.[provider];
+  const remade = held?.voiceId !== undefined && clipHash !== undefined && held.clipHash !== undefined && held.clipHash !== clipHash;
+  if (held?.voiceId !== undefined && !remade) return null;
+  const when = remade ? "re-recorded" : "first read";
   return provider === "breezeblue"
-    ? "first read · clone charge, priced by BreezeBlue"
-    : `first read · voice made on ${HOSTED_READER_LABELS[provider] ?? provider}`;
+    ? `${when} · clone charge, priced by BreezeBlue`
+    : `${when} · voice made on ${HOSTED_READER_LABELS[provider] ?? provider}`;
 }
 
 /**
@@ -340,17 +347,23 @@ export function readerPriceLabel(row: Pick<ManifestModel, "pricing"> | null | un
 }
 
 /**
- * Cloned voice narration is intentionally unsupported until long-form queue chunking exists —
- * through any reader: a hosted reader's library candidate says so with `readsClone`, and the
- * narrator path queues without a voice reference, so a clone it accepted would reach the vendor
- * as a preset id it has never heard of (codex on PR 1153).
+ * Whether a voice can take a use — and every use but narration takes every voice.
+ *
+ * A cloned voice narrates through a hosted reader (issue 1215; SPEC-046 §1.12). It was held out
+ * of narration for two reasons: a long read went to the reader whole, and the narrator path
+ * queued without the recording, so a clone it accepted would have reached the vendor as a preset
+ * id it had never heard of (codex on PR 1153). PR 1210 made a read over the row's cap pieces,
+ * and the narrator path now runs the voiced page's cloned-voice flow — the vendor's question
+ * before the price, the recording with the job. The local recipe stays out: IndexTTS answers in
+ * flac at a 400-character line (SPEC-022), and flac has no join, so a bible section through it
+ * would go as the one request the cap exists to prevent. A stored narrator carries no `model`
+ * from before models were durable; the recipe's provider with no model is still the recipe.
  */
 export function supportsVoiceUse(
-  candidate: { provider: string; model?: string; readsClone?: string },
+  candidate: { provider: string; model?: string },
   use: "preview" | "line" | "bench" | "narration",
 ): boolean {
   if (use !== "narration") return true;
-  if (candidate.readsClone !== undefined) return false;
   return candidate.provider !== CLONED_VOICE_PROVIDER ||
     (candidate.model !== undefined && candidate.model !== CLONED_VOICE_MODEL);
 }
@@ -718,6 +731,42 @@ export interface NarratorChoice {
   label: string | undefined;
   /** True when nobody chose this — the shipped local voice, and free. */
   fallback: boolean;
+}
+
+/**
+ * Whether a stored narrator is this world's to read with (issue 1215; codex on PR 1221). A
+ * cloned voice is the world's — `mintVoiceId` is unique within one world only — so a clone
+ * chosen as the narrator in one world is not the voice of the same id in another: that is
+ * somebody else's recording, and it must not leave the machine under a choice made elsewhere.
+ * `set-narrator` records the world on a cloned choice; a choice with no world is a preset and
+ * reads wherever its reader does. Isomorphic: the coordinator applies it before resolving, the
+ * screens before naming the narrator.
+ */
+export function narratorAppliesTo(stored: { voiceId: string; worldId?: string } | null, worldId: string | undefined): boolean {
+  return stored === null || stored.worldId === undefined || stored.worldId === worldId;
+}
+
+/**
+ * What a screen calls the narrator: before a read lands, the stored choice's name where the
+ * choice can narrate and applies to this world, the shipped voice's otherwise — the two
+ * fallbacks a screen can judge; and once it has landed, the name of the voice that spoke
+ * (codex on PR 1221), because the coordinator falls back for reasons a screen cannot see — a
+ * recording gone, a key withdrawn — and the player must never say the stored name over another
+ * voice. `spoke` is the landed event's voice: the choice's name when it is the choice, the
+ * shipped voice's when it is that, its id otherwise.
+ */
+export function narratorLabelFor(
+  stored: { provider: string; model?: string; voiceId: string; label?: string; worldId?: string } | null,
+  worldId: string | undefined,
+  spoke?: { provider: string; voiceId: string },
+): string {
+  const chosen = stored !== null && supportsVoiceUse(stored, "narration") && narratorAppliesTo(stored, worldId) ? stored : null;
+  if (spoke !== undefined) {
+    if (chosen !== null && spoke.provider === chosen.provider && spoke.voiceId === chosen.voiceId) return chosen.label ?? chosen.voiceId;
+    if (spoke.provider === DEFAULT_NARRATOR.provider && spoke.voiceId === DEFAULT_NARRATOR.voiceId) return DEFAULT_NARRATOR.label;
+    return spoke.voiceId;
+  }
+  return chosen === null ? DEFAULT_NARRATOR.label : (chosen.label ?? chosen.voiceId);
 }
 
 /**

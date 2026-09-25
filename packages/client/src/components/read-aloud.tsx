@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { DEFAULT_NARRATOR, supportsVoiceUse, type ProseReadSource } from "@arke-studio/contracts";
+import { narratorLabelFor, type ProseReadSource } from "@arke-studio/contracts";
 import { readProse, useStore, useVoiceAudio, useVoiceParts } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
 import { clearQueue, enqueueClip, playClip, type Clip } from "../lib/audio.js";
 import { TextActions } from "./player.js";
 import { ReadAloudConfirmation } from "./read-aloud-confirmation.js";
+import { RemoteVoiceUploadConfirmation, useVoiceUploadAsk } from "./remote-voice-upload-confirmation.js";
 
 /**
  * Read-aloud, for every screen that shows prose (issue 857).
@@ -28,16 +29,16 @@ function useProseRead(source: ProseReadSource, title: string) {
   const [request, setRequest] = useState<string | null>(null);
   const result = request === null ? undefined : voiceAudio[request];
   const slug = world?.meta.slug;
-  /*
-   * The app's narrator, and never a cloned voice: `supportsVoiceUse` is the rule that keeps the
-   * app's reading voice from becoming somebody's cloned identity, and a narrator that fails it
-   * falls back to the shipped local one rather than naming a voice that will not be used.
-   */
-  const narrator = state?.app.narrator ?? null;
-  const narratorLabel =
-    narrator && !supportsVoiceUse(narrator, "narration")
-      ? DEFAULT_NARRATOR.label
-      : (narrator?.label ?? narrator?.voiceId ?? DEFAULT_NARRATOR.label);
+  // A cloned narrator's recording is asked about before the price (issue 1215); the answer rides
+  // on every later frame of this read.
+  const live = useRef<string | null>(null);
+  live.current = request;
+  const upload = useVoiceUploadAsk(() => live.current);
+  // The app's narrator as this world will hear it (issue 1215): a cloned voice through a hosted
+  // reader may be one, the local recipe's may not, and a clone is its own world's; a choice that
+  // fails either rule is named as the shipped local voice it falls to, never as itself — and once
+  // the read lands, the voice that read it is what is named (codex on PR 1221).
+  const narratorLabel = narratorLabelFor(state?.app.narrator ?? null, world?.meta.worldId, result?.status === "ready" ? result : undefined);
   const sub = `read aloud · ${narratorLabel}`;
 
   /*
@@ -76,15 +77,16 @@ function useProseRead(source: ProseReadSource, title: string) {
       ? { id: result.requestId, url: mediaUrl(slug, result.file), title, sub }
       : null;
 
-  /** Fresh when nothing is passed; the same request again when a charge has been confirmed. */
-  const ask = (again?: { requestId: string; confirmationToken: string }) => {
+  /** Fresh when nothing is passed; the same request again when a charge, or the vendor, has been confirmed. */
+  const ask = (again?: { requestId: string; confirmationToken?: string }) => {
     const worldId = world?.meta.worldId;
     if (worldId === undefined) return;
     queued.current = 0;
     // A second read replaces the first outright: two voices over one another is never what
     // anybody meant.
     clearQueue();
-    setRequest(readProse(worldId, source, again?.requestId, again?.confirmationToken));
+    if (again === undefined) upload.drop();
+    setRequest(readProse(worldId, source, again?.requestId, again?.confirmationToken, upload.allowed()));
   };
 
   /*
@@ -94,8 +96,15 @@ function useProseRead(source: ProseReadSource, title: string) {
   const quote = `${request}:${result?.confirmationToken ?? ""}`;
   const preparing = request !== null && (result === undefined || (result.status === "confirmation-required" && submitted === quote));
   const note = preparing ? <span className="fy-textactions__note">Preparing audio…</span> : undefined;
-  const confirmation = result?.status === "confirmation-required" && submitted !== quote ? (
-    <ReadAloudConfirmation title={title} result={result} onCancel={() => setRequest(null)} onConfirm={confirmationToken => {
+  const confirmation = upload.asked !== null && request !== null ? (
+    <RemoteVoiceUploadConfirmation
+      destinationLabel={upload.asked.destination}
+      destinationNotice={upload.asked.notice}
+      onCancel={() => { upload.drop(); setRequest(null); }}
+      onConfirm={() => { if (upload.answer() !== null) ask({ requestId: request }); }}
+    />
+  ) : result?.status === "confirmation-required" && submitted !== quote ? (
+    <ReadAloudConfirmation title={title} result={result} onCancel={() => { upload.drop(); setRequest(null); }} onConfirm={confirmationToken => {
       if (request === null) return;
       setSubmitted(quote);
       ask({ requestId: request, confirmationToken });

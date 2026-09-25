@@ -143,6 +143,30 @@ const INTERNAL_PARAMS = new Set([
   "sheetVersion",
   "characterCount",
   "audioFormat",
+  /*
+   * What the read paths carry beside the line (PR 1221, found in passing): the clone's language
+   * and a direction's settings, which the hosted readers take and the recipe has no slot for;
+   * a page block's heading and its place among the parts; a chunked read's piece; an audiobook
+   * part's chapter, block, words and direction. None is a control of IndexTTS, and every one
+   * refused a cloned voice on this machine from the Voice page's preview (`language`, since
+   * issue 1163), the voiced page (`sectionHeading`, turn 130) and the audiobook (`productionId`,
+   * PR 1180) with `"…" is not a parameter of Local · Cloned Voice`.
+   */
+  "language",
+  "voiceSettings",
+  "instructions",
+  "delivery",
+  "sectionHeading",
+  "part",
+  "parts",
+  "blockIndex",
+  "piece",
+  "pieces",
+  "productionId",
+  "chapterId",
+  "block",
+  "textHash",
+  "directionHash",
   "references",
   "videoReferences",
   "audioReferences",

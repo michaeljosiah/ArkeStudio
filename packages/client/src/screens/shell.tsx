@@ -1585,7 +1585,9 @@ export function SettingsLayout() {
             </NavLink>
           ))}
           <div style={{ flex: 1 }} />
-          <div className="fy-settings__version">v{state?.app.version ?? (typeof window === "undefined" ? undefined : window.arke?.appVersion) ?? "—"}</div>
+          {/* Bare, as the rail is drawn (turns 125, 149, 150; issue 1216): the `v` is the release
+              tag's and stays on About and the update dialog, where the tag is what is named. */}
+          <div className="fy-settings__version">{state?.app.version ?? (typeof window === "undefined" ? undefined : window.arke?.appVersion) ?? "—"}</div>
         </nav>
         <div className="fy-settings__pane">
           {/* Most panes in here draw from the coordinator's snapshot, and with no snapshot they
@@ -2363,6 +2365,7 @@ export function SettingsGeneralScreen() {
       <VoicePickerDialog
         open={narratorOpen}
         use="narration"
+        confirmLabel="Use this voice"
         {...(worldIdForVoices !== undefined ? { worldId: worldIdForVoices } : {})}
         chosenId={narrator?.voiceId}
         chosenProvider={narrator?.provider}

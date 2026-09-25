@@ -16,7 +16,7 @@ import {
 import type { WorldStore } from "../world/store.js";
 import { checkDirection, directionPlan, effectiveReader, readAudiobookBook, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
 import { conformInput, directableBlocks, type DirectableBlock } from "./audiobook-direction.js";
-import { chapterPriceToken, missIdentity, prepareChapter, type ChapterPreparation, type ReadingRoom, type Speaking } from "./audiobook-run.js";
+import { chapterPriceToken, firstReadNotices, missIdentity, prepareChapter, type ChapterPreparation, type ReadingRoom, type Speaking } from "./audiobook-run.js";
 
 /**
  * The book (design turn 146, SPEC-047 R-15..R-17, R-29): every chapter prepared as its own
@@ -207,7 +207,7 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
 
 export type AudiobookBookEvent =
   | { type: "started"; chapters: number; blocks: number }
-  | { type: "priced"; chapters: number; blocks: number; cloudBlocks: number; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: AudiobookPriceLine[] }
+  | { type: "priced"; chapters: number; blocks: number; cloudBlocks: number; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: AudiobookPriceLine[]; notices: string[] }
   | { type: "progress"; chapterId: string; done: number; chapters: number }
   | { type: "finished"; outcome: "read" | "stopped" | "unavailable" | "failed"; chaptersRead: number; chaptersRefused: number; made: number; flagged: number; reason?: string };
 
@@ -286,6 +286,9 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
         estimatedMicroUsd: estimate,
         confirmationToken: token,
         voices: bookPriceLines(room.narrator, speaking, misses, priceOf, (id) => sheets.find((sheet) => sheet.id === id)?.name ?? id),
+        // Across the book's chapters, each voice and vendor once: the first chapter's read is
+        // the one that makes the slot, and the book asks once for all of them.
+        notices: firstReadNotices(toRead.flatMap((entry) => entry.prepared.clones)),
       });
       return;
     }

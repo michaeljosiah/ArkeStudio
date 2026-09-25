@@ -14,8 +14,8 @@ import {
   type ChapterSummary,
   type ChapterVoices,
   type ChapterAudiobook,
-  DEFAULT_NARRATOR,
   legacyVoiceModel,
+  narratorLabelFor,
   voicedBlocks,
   type ProductionBundle,
   type ProseReadSource,
@@ -1003,7 +1003,7 @@ export function ChapterWorkspace({
     return [...counts.values()].sort((a, b) => b.lines - a.lines || a.speaker.localeCompare(b.speaker));
   }, [voicesRecord]);
   const narrationBlocks = voiced.blocks.filter((block) => block.speaker === undefined).length;
-  const narratorName = useStore().state?.app.narrator?.label ?? DEFAULT_NARRATOR.label;
+  const narratorName = narratorLabelFor(useStore().state?.app.narrator ?? null, world.meta.worldId);
   // The catalogue says whether an assigned voice can speak now (turn 130's rule, codex on PR
   // 914): asked for once a cast is shown, and a voice it lacks or marks reads in the
   // narrator's, said so in the row rather than found out when the block fails.

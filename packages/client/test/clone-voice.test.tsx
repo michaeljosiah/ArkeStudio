@@ -173,18 +173,60 @@ describe("voice picker identity", () => {
     assert.match(markup, /fy-voices__picked">Cloud v3/);
   });
 
-  it("filters cloned voices out of narration until that use is implemented", () => {
+  it("says what the press does in the caller's word: a read on the bench, a setting elsewhere (issue 1216)", () => {
+    // The Narrator row states a per-character price beside the value; a button under that price
+    // saying it would read looked like a spend, and it was not one — picking only sets. The bench
+    // keeps its verb (design 70's rule: a voice that reads is not a voice that belongs to anyone).
+    __setStateForTest(FIXTURE_STATE, {
+      voiceCatalogue: [{ provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george", label: "George", attributes: [], local: true, canClone: false, usedBy: [] }],
+    });
+    const bench = renderToString(<VoicePickerDialog open chosenId={undefined} onClose={noop} onPick={noop} />);
+    assert.match(bench, /data-testid="voice-use"[^>]*>Read with this voice</);
+    const narrator = renderToString(<VoicePickerDialog open use="narration" confirmLabel="Use this voice" chosenId={undefined} onClose={noop} onPick={noop} />);
+    assert.match(narrator, /data-testid="voice-use"[^>]*>Use this voice</);
+    assert.doesNotMatch(narrator, /Read with this voice/);
+  });
+
+  it("offers a cloned voice for narration through its hosted readers, and not through the recipe (issue 1215)", () => {
     __setStateForTest(FIXTURE_STATE, {
       voiceCatalogue: [
         { provider: "kokoro", model: "kokoro-82m", voiceId: "same", label: "Preset", attributes: [], local: true, canClone: false, usedBy: [] },
-        { provider: "comfyui", model: "comfyui-cloned-voice", voiceId: "clone", label: "Clone", attributes: [], local: true, canClone: false, usedBy: [] },
+        { provider: "comfyui", model: "comfyui-cloned-voice", voiceId: "clone", label: "Clone", attributes: ["low"], local: true, canClone: false, readsClone: "clone", usedBy: [] },
+        { provider: "mistral", model: "voxtral-mini-tts", voiceId: "clone", label: "Clone", attributes: ["low"], local: false, canClone: false, readsClone: "clone", usedBy: [] },
       ],
     });
     const markup = renderToString(
       <VoicePickerDialog open use="narration" chosenId={undefined} onClose={noop} onPick={noop} />,
     );
     assert.match(markup, /Preset/);
-    assert.doesNotMatch(markup, />Clone</);
+    assert.equal((markup.match(/data-testid="voice-clone-row"/g) ?? []).length, 1, "the clone is a row");
+    assert.match(markup, /data-testid="voice-reader-mistral"/, "read through Voxtral");
+    assert.doesNotMatch(markup, /data-testid="voice-reader-comfyui"/, "flac has no join: the recipe stays out of narration");
+  });
+
+  it("draws a cloned voice once, with a chip per reader, and counts it once (SPEC-046 R-30)", () => {
+    __setStateForTest(FIXTURE_STATE, {
+      voiceCatalogue: [
+        { provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george", label: "George", attributes: [], local: true, canClone: false, usedBy: [] },
+        { provider: "comfyui", model: "comfyui-cloned-voice", voiceId: "harbour", label: "Harbour", attributes: ["low", "coastal"], local: true, canClone: false, readsClone: "harbour", usedBy: ["Corvin"] },
+        { provider: "mistral", model: "voxtral-mini-tts", voiceId: "harbour", label: "Harbour", attributes: ["low", "coastal"], local: false, canClone: false, readsClone: "harbour", usedBy: [] },
+        { provider: "breezeblue", model: "breeze-tts-2", voiceId: "harbour", label: "Harbour", attributes: ["low", "coastal"], local: false, canClone: false, readsClone: "harbour", usedBy: [], unavailableReason: "the key was refused" },
+      ],
+    });
+    const markup = renderToString(
+      <VoicePickerDialog open chosenId="harbour" chosenProvider="mistral" chosenModel="voxtral-mini-tts" onClose={noop} onPick={noop} />,
+    );
+    assert.equal((markup.match(/data-testid="voice-clone-row"/g) ?? []).length, 1, "one row for the voice, not three");
+    assert.equal((markup.match(/>Harbour</g) ?? []).length, 1, "named once");
+    for (const provider of ["comfyui", "mistral", "breezeblue"]) assert.match(markup, new RegExp(`data-testid="voice-reader-${provider}"`), `a chip for ${provider}`);
+    assert.match(markup, /aria-pressed="true"[^>]*data-testid="voice-reader-mistral"/, "the chosen reader's chip is pressed");
+    assert.match(markup, /disabled=""[^>]*data-testid="voice-reader-breezeblue"/, "a reader that cannot speak now is a chip that cannot be pressed");
+    assert.match(markup, /Corvin/, "whom the world gives the voice to, on the one row");
+    assert.match(markup, /fy-voices__picked">Harbour · Voxtral</, "the footer names the reader with the voice");
+    // The tabs count voices as the rows draw them: George and Harbour, not George and three Harbours.
+    assert.match(markup, /All 2/);
+    assert.match(markup, /Cloud 1/);
+    assert.match(markup, /On this machine 2/);
   });
 });
 

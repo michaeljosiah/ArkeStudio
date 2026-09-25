@@ -157,6 +157,11 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        */
       sectionHeading: z.string().min(1),
       confirmationToken: z.string().min(1).optional(),
+      /**
+       * A cloned narrator (issue 1215): the vendor its recording may go to, answered once per
+       * voice and vendor and carried back on the frame that asked — as the voiced page carries it.
+       */
+      voiceUploadConfirmedFor: z.string().min(1).optional(),
     })
     .strict(),
   /**
@@ -187,6 +192,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        */
       sections: z.array(z.string().min(1)).min(1).max(12),
       confirmationToken: z.string().min(1).optional(),
+      /** A cloned narrator's vendor, answered (issue 1215). */
+      voiceUploadConfirmedFor: z.string().min(1).optional(),
     })
     .strict(),
   /**
@@ -226,6 +233,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       source: ProseReadSourceSchema,
       confirmationToken: z.string().min(1).optional(),
+      /** A cloned narrator's vendor, answered (issue 1215). */
+      voiceUploadConfirmedFor: z.string().min(1).optional(),
     })
     .strict(),
   /**
@@ -257,7 +266,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        */
       sources: z.array(ProseReadSourceSchema).min(1).max(1000),
       confirmationToken: z.string().min(1).optional(),
-      /** A cloned voice on a voiced page (turn 130): the remote engine its recording may go to. */
+      /** A cloned voice on a voiced page (turn 130), or a cloned narrator (issue 1215): where its recording may go. */
       voiceUploadConfirmedFor: z.string().min(1).optional(),
     })
     .strict(),
@@ -282,6 +291,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       // text because `splitBible` takes the author's own `## ` headings as it finds them.
       sectionHeading: z.string().min(1),
       confirmationToken: z.string().min(1).optional(),
+      /** A cloned narrator's vendor, answered (issue 1215). */
+      voiceUploadConfirmedFor: z.string().min(1).optional(),
     })
     .strict(),
   /**
