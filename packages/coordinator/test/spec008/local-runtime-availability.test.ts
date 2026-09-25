@@ -48,7 +48,7 @@ it("samples a newly running ComfyUI job after a coalesced Ollama residency probe
 it("hands the harness the local models when they change, and only then (issue 1247)", async () => {
   const { root } = await makeTempRoot();
   const provider = new FsWorldProvider(root);
-  let pulled: Array<{ id: string; tools: boolean; vision: boolean }> = [{ id: "gemma4:12b", tools: true, vision: false }];
+  let pulled: Array<{ id: string; contextLength?: number; tools: boolean; vision: boolean }> = [{ id: "gemma4:12b", contextLength: 262144, tools: true, vision: false }];
   let failListing = false;
   const published: unknown[] = [];
   const ollama: DispatchClient = Object.assign(new FakeProvider(), { listModels: async () => { if (failListing) throw new Error("down"); return pulled; } });
@@ -59,7 +59,7 @@ it("hands the harness the local models when they change, and only then (issue 12
     await seam.publishLocalHarnessModels();
     await seam.publishLocalHarnessModels();
     assert.equal(published.length, 1, "an unchanged list rewrites nothing");
-    pulled = [...pulled, { id: "qwen3:8b", tools: true, vision: false }];
+    pulled = [...pulled, { id: "qwen3:8b", contextLength: 262144, tools: true, vision: false }];
     await seam.publishLocalHarnessModels();
     assert.deepEqual((published[1] as Array<{ id: string }>).map((m) => m.id), ["gemma4:12b", "qwen3:8b"]);
     // Ollama gone is a fact worth publishing: a stale row validates in the picker and fails on the turn.

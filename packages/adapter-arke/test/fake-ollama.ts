@@ -9,6 +9,7 @@ export type ChatScript =
   | { drop: true; chunks: Record<string, unknown>[] };
 
 export interface FakeModel { name: string; capabilities?: string[]; context?: number; stall?: boolean }
+// `capabilities` left out entirely models an Ollama whose show states no capability list.
 
 /**
  * A scripted Ollama: `/api/tags` and `/api/show` from a model list, and `/api/chat` answering
@@ -16,8 +17,14 @@ export interface FakeModel { name: string; capabilities?: string[]; context?: nu
  */
 export class FakeOllama {
   readonly chats: Array<Record<string, unknown>> = [];
+  /** `/api/generate` bodies: the only use here is an unload. */
+  readonly generates: Array<Record<string, unknown>> = [];
+  /** How long an unload takes to answer. */
+  generateDelayMs = 0;
+  /** Request order, for the tests that are about what happens before what. */
+  readonly log: string[] = [];
   readonly script: ChatScript[] = [];
-  models: FakeModel[] = [{ name: "gemma4:12b", capabilities: ["completion", "tools"], context: 131072 }];
+  models: FakeModel[] = [{ name: "gemma4:12b", capabilities: ["completion", "tools"], context: 262144 }];
   aborted = 0;
   private server: Server | null = null;
   url = "";
@@ -38,8 +45,18 @@ export class FakeOllama {
           }));
           return;
         }
+        if (req.url === "/api/generate") {
+          this.generates.push(JSON.parse(body) as Record<string, unknown>);
+          this.log.push("unload:start");
+          setTimeout(() => {
+            this.log.push("unload:end");
+            res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ done: true, done_reason: "unload" }));
+          }, this.generateDelayMs);
+          return;
+        }
         if (req.url === "/api/chat") {
           this.chats.push(JSON.parse(body) as Record<string, unknown>);
+          this.log.push("chat");
           const next = this.script.shift() ?? { chunks: [{ message: { role: "assistant", content: "" }, done: true }] };
           if ("status" in next) { res.writeHead(next.status, { "content-type": "application/json" }).end(JSON.stringify({ error: next.error })); return; }
           res.writeHead(200, { "content-type": "application/x-ndjson" });
@@ -77,5 +94,13 @@ export function callTool(name: string, args: Record<string, unknown>): ChatScrip
   return { chunks: [
     { message: { role: "assistant", content: "", tool_calls: [{ function: { name, arguments: args } }] }, done: false },
     { message: { role: "assistant", content: "" }, done: true, done_reason: "stop", prompt_eval_count: 50, eval_count: 5 },
+  ] };
+}
+
+/** A reply whose text is `content` exactly, in one piece. */
+export function say(content: string): ChatScript {
+  return { chunks: [
+    { message: { role: "assistant", content }, done: false },
+    { message: { role: "assistant", content: "" }, done: true, done_reason: "stop", prompt_eval_count: 20, eval_count: 5 },
   ] };
 }

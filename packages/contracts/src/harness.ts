@@ -94,10 +94,29 @@ export interface LocalHarnessModel {
   readonly vision: boolean;
   /**
    * The capabilities above were assumed, not read: the model's show failed or was cut off by
-   * the listing deadline. Offered for choosing, never chosen unattended — nothing says it
-   * completes, let alone calls tools.
+   * the listing deadline, or it listed no capabilities. Offered for choosing when its window is
+   * stated ({@link meetsLocalModelMinimum}), never chosen unattended — nothing says it completes,
+   * let alone calls tools.
    */
   readonly assumed?: true;
+}
+
+/**
+ * The shortest context a local model must state to be offered to any writing harness: 256k
+ * (issue 1247). A product decision, not a measurement — the roster's prompts, world context
+ * and long sessions are written for long windows, and a model trained on less degrades well
+ * before its window fills. Ollama reports what the weights declare, so Gemma 4 12B and 26B pass
+ * and Gemma 4 E2B (128k) does not. 256,000 rather than 262,144: both are published as "256K".
+ */
+export const LOCAL_MODEL_MIN_CONTEXT = 256_000;
+
+/**
+ * Whether a pulled model may be offered for writing: whether it states the window. A model whose
+ * details could not be read states none, so it is not; one whose window was read but whose
+ * capabilities Ollama did not list is, and `assumed` still keeps it from being chosen unattended.
+ */
+export function meetsLocalModelMinimum(model: { readonly contextLength?: number }): boolean {
+  return (model.contextLength ?? 0) >= LOCAL_MODEL_MIN_CONTEXT;
 }
 
 /**

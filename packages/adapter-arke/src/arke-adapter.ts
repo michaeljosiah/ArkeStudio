@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  agentPromptFor, confinementFor, findHarnessModel, harnessModelMissingInput, HarnessEventSchema, ROSTER, sessionSkillForAgent,
+  agentPromptFor, confinementFor, findHarnessModel, harnessModelMissingInput, HarnessEventSchema, meetsLocalModelMinimum, ROSTER, sessionSkillForAgent,
   type CreateSessionInput, type HarnessAdapter, type HarnessCapability, type HarnessEvent, type ModelInfo,
   type Readiness, type SendMessageInput, type SendReceipt, type SessionConfigInput, type SessionRef,
 } from "@arke-studio/contracts";
@@ -9,9 +9,11 @@ import {
   type ToolResult, type ToolSession,
 } from "@arke-studio/confined-tools";
 import {
-  listPulled, listTags, loopbackBaseUrl, OLLAMA_DEFAULT_URL, OllamaUnreachableError, streamChat,
-  type ChatMessage, type ChatTool, type PulledModel,
+  listPulled, listTags, loopbackBaseUrl, OLLAMA_DEFAULT_URL, OllamaUnreachableError, streamChat, unloadModel,
+  type ChatMessage, type ChatTool, type ChatToolCall, type PulledModel,
 } from "./ollama.js";
+import { estimateTokens, fitToWindow, promptBudget, WITHIN_TURN } from "./context.js";
+import { recoverToolCall } from "./tool-calls.js";
 
 /**
  * Arke's own local writing harness (issue 1247, Phase 2).
@@ -22,9 +24,11 @@ import {
  * confinement is never put in front of the model, and a call to one anyway is refused and
  * reported as `tool.refused`. There is no shell, no delegation and no credential anywhere here.
  *
- * Deliberately minimal for this phase: the prompt-prefix stability, context sizing, residency
- * and tool-call tolerance that make it worth having are Phase 3, and nothing in the app selects
- * it until Phase 4.
+ * What makes it worth owning is local performance (Phase 3): a prompt prefix that stays
+ * byte-identical across turns so Ollama's cache stays warm, compact tool descriptions, a context
+ * window the conversation is kept inside, a model released the moment the GPU is wanted
+ * elsewhere, and tolerance for the ways small models write a tool call. Nothing in the app
+ * selects it until Phase 4.
  */
 export interface ArkeAdapterOptions {
   /** Ollama's address. Loopback only unless `allowRemoteHost` is set by an explicit setting. */
@@ -32,7 +36,11 @@ export interface ArkeAdapterOptions {
   allowRemoteHost?: boolean;
   /** Replaced in tests. */
   fetch?: typeof fetch;
-  /** The context window asked for when a model does not state one, and the ceiling otherwise. */
+  /**
+   * The context window asked for when a model does not state one, and the ceiling otherwise.
+   * The host sets it from what the GPU can hold: a window the card cannot fit is one Ollama
+   * splits onto the CPU, which is slower than a smaller window that fits.
+   */
   maxContextTokens?: number;
   /** Model calls one turn may make before it is ended. Each tool round is one. */
   maxStepsPerTurn?: number;
@@ -47,6 +55,12 @@ const DEFAULT_CONTEXT = 8_192;
 const CONTEXT_CEILING = 32_768;
 const DEFAULT_STEPS = 24;
 const CATALOGUE_DEADLINE_MS = 15_000;
+const DISPOSE_RELEASE_MS = 2_000;
+/**
+ * Only models stating a 256k context are offered, the same rule as the OpenCode lane
+ * (`meetsLocalModelMinimum` in contracts). How much of that window a session asks for is
+ * separate — `maxContextTokens`, set from what the GPU can hold.
+ */
 const PROVIDER = "ollama";
 /**
  * Roles that answer with one JSON document and never touch a file. The coordinator lets them run
@@ -54,6 +68,21 @@ const PROVIDER = "ollama";
  * reject outright.
  */
 const PROMPT_ONLY_AGENTS = new Set(["conversation-namer", "conversation-summarizer"]);
+/**
+ * The file tools as a local model is told them. Every token of a tool description is prompt
+ * processed on the person's own hardware on every cold turn, and the shared descriptions are
+ * written for hosted models with prompt to spare. The rules the tools enforce are kept — the
+ * model should know a write is limited to proposal files — and the explanation is dropped;
+ * the confinement preamble in the system prompt is never shortened.
+ */
+const COMPACT_DESCRIPTIONS: Readonly<Record<string, string>> = {
+  read: "Read a file. Images return as images. offset/limit page through long text.",
+  list: "List one directory.",
+  search: "Find literal text in files. Returns file and line.",
+  write: "Write a whole UTF-8 text file. Creates folders. Only proposal files may be changed.",
+  edit: "Replace one exact passage in a text file. oldText must match exactly once.",
+};
+const FILE_TOOLS = Object.keys(COMPACT_DESCRIPTIONS);
 
 class EventQueue {
   private readonly values: HarnessEvent[] = [];
@@ -73,11 +102,22 @@ interface Session extends ToolSession {
   id: string;
   model: string;
   numCtx: number;
+  /** Built once. The same objects every call, so the serialised prefix cannot drift. */
   tools: ChatTool[];
-  /** The conversation so far, system prompt first. Only ever appended to. */
+  /** Every tool name a call written as text could mean, offered or not. */
+  known: ReadonlySet<string>;
+  /**
+   * The conversation so far, system prompt first. Appended to, so each request begins with the
+   * last one's bytes; changed in place only when it must be trimmed to fit the window.
+   */
   messages: ChatMessage[];
   turn: Turn | null;
   usage: number;
+  /**
+   * How far Ollama's real prompt counts have exceeded the estimate, at most, in this session.
+   * One until a reply shows the estimate was low; never shrinks.
+   */
+  scale: number;
 }
 
 type Ending = { reason: "completed"; text: string } | { reason: "cancelled" | "timeout" | "budget-exceeded" | "error"; detail: string };
@@ -92,6 +132,13 @@ export class ArkeAdapter implements HarnessAdapter {
   private readonly preparations = new Map<string, SessionConfigInput>();
   private readonly sessions = new Map<string, Session>();
   private readonly queues = new Set<EventQueue>();
+  /** Models this adapter has had Ollama load since it last released them. */
+  private readonly resident = new Set<string>();
+  /**
+   * A release in progress. A turn waits for it before asking Ollama for anything: a model loaded
+   * while its unload is on the wire would be unloaded under the turn, or loaded twice.
+   */
+  private releasing: Promise<void> = Promise.resolve();
 
   constructor(private readonly opts: ArkeAdapterOptions = {}) {
     this.fetchImpl = opts.fetch ?? fetch;
@@ -144,11 +191,11 @@ export class ArkeAdapter implements HarnessAdapter {
    * the default, because every roster agent but two works through them and a default nobody
    * chose should be one that can do the work.
    */
-  private async catalog(signal: AbortSignal): Promise<{ models: ModelInfo[]; pulled: PulledModel[] }> {
-    const pulled = await listPulled(this.fetchImpl, this.baseUrl, signal, this.opts.catalogueDeadlineMs ?? CATALOGUE_DEADLINE_MS);
-    // Only a model seen to call tools: one whose details could not be read might be an
-    // embedding model, and a default nobody chose must be one that can do the work.
-    const fallback = pulled.find((model) => model.tools && !model.assumed)?.id;
+  private async catalog(signal: AbortSignal): Promise<{ models: ModelInfo[]; pulled: PulledModel[]; all: PulledModel[] }> {
+    const all = await listPulled(this.fetchImpl, this.baseUrl, signal, this.opts.catalogueDeadlineMs ?? CATALOGUE_DEADLINE_MS);
+    const pulled = all.filter(supported);
+    // Only a model seen to call tools: a default nobody chose must be one that can do the work.
+    const fallback = pulled.find((model) => model.tools === true)?.id;
     const models = pulled.map((model): ModelInfo => ({
       id: model.id, provider: PROVIDER, displayName: model.id,
       inputModalities: model.vision ? ["text", "image"] : ["text"],
@@ -156,12 +203,11 @@ export class ArkeAdapter implements HarnessAdapter {
       // context from this before a session exists, and a prompt sized to 131,072 tokens sent
       // into a 32,768 window loses its beginning without an error.
       inputTokenLimit: this.contextFor(model.contextLength),
-      // Stated when it was seen. A model whose details could not be read says nothing, which the
-      // contract reads as unknown; claiming tools for it would be a guess presented as a fact.
-      ...(model.assumed ? {} : { tools: model.tools }),
+      // Stated when Ollama says; absent reads as unknown, which the contract offers for choosing.
+      ...(model.tools !== undefined ? { tools: model.tools } : {}),
       ...(model.id === fallback ? { isDefault: true } : {}),
     }));
-    return { models, pulled };
+    return { models, pulled, all };
   }
 
   /** The context window asked of Ollama: the model's own, held to the ceiling. */
@@ -186,11 +232,22 @@ export class ArkeAdapter implements HarnessAdapter {
     const root = await resolveRoot(input.cwd);
     const override = prepared.agents?.[member.name];
     const requested = prepared.model ?? override?.model;
-    const { models, pulled } = await this.catalog(input.signal ?? new AbortController().signal);
+    const { models, pulled, all } = await this.catalog(input.signal ?? new AbortController().signal);
     input.signal?.throwIfAborted();
-    const selected = requested === undefined ? models.find((model) => model.isDefault) : findHarnessModel(requested, models);
-    if (requested !== undefined && !selected) throw new Error("The selected model is not pulled in Ollama. Refresh the model list and choose an available model.");
-    if (!selected) throw new Error("Ollama has no model that calls tools. Pull one, or choose a model before starting this agent.");
+    const promptOnly = PROMPT_ONLY_AGENTS.has(member.name);
+    // A role that sends no tools needs no model that calls them: a model seen to complete will do
+    // when none that calls tools is pulled. One whose capabilities Ollama did not list stays a
+    // choice for a person to make — nothing says it completes, and nobody would see it fail.
+    const selected = requested !== undefined ? findHarnessModel(requested, models)
+      : models.find((model) => model.isDefault) ?? (promptOnly ? models.find((model) => model.tools !== undefined) : undefined);
+    if (requested !== undefined && !selected) {
+      // Pulled but not offered says something different from not pulled: the person can act on it.
+      const present = all.some((row) => findHarnessModel(requested, [{ id: row.id, provider: PROVIDER, displayName: row.id }]));
+      throw new Error(present
+        ? "This model's context window is under 256k tokens. Arke's local harness needs 256k or more."
+        : "The selected model is not pulled in Ollama. Refresh the model list and choose an available model.");
+    }
+    if (!selected) throw new Error(promptOnly ? "Ollama has no 256k-context model known to answer. Pull one, or choose a model." : "Ollama has no model with a 256k context window that calls tools. Pull one, or choose a model before starting this agent.");
     const missingInput = harnessModelMissingInput(selected, member.name === "stage-designer");
     if (missingInput === "text") throw new Error("This model cannot accept the text instructions required by Arke.");
     if (missingInput === "image") throw new Error("This model cannot inspect Stage images.");
@@ -211,9 +268,22 @@ export class ArkeAdapter implements HarnessAdapter {
     const numCtx = this.contextFor(stated);
     // Only what the confinement permits is ever offered: the tool list IS the confinement here,
     // rather than a list of tools a harness already has with some of them denied.
-    const tools: ChatTool[] = PROMPT_ONLY_AGENTS.has(member.name) ? [] : toolsFor(toolSession).map((tool) => ({ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.parameters } }));
+    const tools: ChatTool[] = promptOnly ? [] : toolsFor(toolSession).map((tool) => ({
+      type: "function", function: { name: tool.name, description: COMPACT_DESCRIPTIONS[tool.name] ?? tool.description, parameters: tool.parameters },
+    }));
+    const known = new Set([...FILE_TOOLS, ...toolSession.worldTools.keys()]);
+    // The instructions must fit before anything else can. A window smaller than the role's own
+    // prompt would have Ollama cut the prompt's beginning — the confinement statement — on every
+    // turn, so the session is refused here, where the person can still choose another model.
+    const system: ChatMessage = { role: "system", content: prompt };
+    if (!fitToWindow([system], tools, promptBudget(numCtx), 1)) {
+      throw new Error(`This model's context window (${numCtx} tokens) is too small for this role's instructions. Choose a model with a larger window.`);
+    }
+    // Every await above can straddle a dispose, which clears the sessions it knows of; a session
+    // added after that would belong to an adapter that has already been retired.
+    if (this.disposed) throw new Error("The Arke harness is disposed.");
     const id = randomUUID();
-    this.sessions.set(id, { ...toolSession, id, model: selected.id, numCtx, tools, messages: [{ role: "system", content: prompt }], turn: null, usage: 0 });
+    this.sessions.set(id, { ...toolSession, id, model: selected.id, numCtx, tools, known, messages: [system], turn: null, usage: 0, scale: 1 });
     this.opts.onTrace?.({ at: "arke.session-created", sessionId: id, model: selected.id, agent: member.name, numCtx, tools: tools.map((tool) => tool.function.name) });
     this.emit({ type: "session.created", sessionId: id });
     return { sessionId: id };
@@ -264,19 +334,54 @@ export class ArkeAdapter implements HarnessAdapter {
   private async runTurn(session: Session, turn: Turn): Promise<Ending> {
     const steps = this.opts.maxStepsPerTurn ?? DEFAULT_STEPS;
     const signal = turn.abort.signal;
+    const opening = session.messages.at(-1)!;
+    let reasked = false;
     try {
       for (let step = 0; step < steps; step++) {
+        if (!fitToWindow(session.messages, session.tools, promptBudget(session.numCtx), session.messages.indexOf(opening), session.scale)) {
+          return { reason: "budget-exceeded", detail: "This message and its tool results do not fit the model's context window." };
+        }
+        await this.releasing;
+        signal.throwIfAborted();
+        // Before the request, not after: Ollama may load the model and then the turn be stopped,
+        // and a model loaded but not remembered could never be released.
+        this.resident.add(session.model);
         const result = await streamChat(this.fetchImpl, this.baseUrl, {
           model: session.model, messages: session.messages, tools: session.tools, numCtx: session.numCtx,
           ...(this.opts.keepAlive !== undefined ? { keepAlive: this.opts.keepAlive } : {}),
         }, signal, (text) => this.emit({ type: "message.delta", sessionId: session.id, correlationId: turn.correlationId, text }));
         session.usage += result.promptTokens + result.outputTokens;
+        // Ollama's count is the truth the estimate stands in for. A cached prefix makes it lower
+        // than the whole prompt, never higher, so a count above the estimate is always evidence.
+        const estimated = estimateTokens(session.messages, session.tools);
+        if (result.promptTokens > estimated) session.scale = Math.max(session.scale, result.promptTokens / estimated);
         // Cut off by the output or context limit: the text, or a tool call's arguments, is only
         // the part that fit. Handing it on as finished would pass half a JSON document downstream.
         if (result.doneReason === "length") return { reason: "budget-exceeded", detail: "The reply reached the model's length limit before it finished." };
-        session.messages.push({ role: "assistant", content: result.content, ...(result.toolCalls.length > 0 ? { tool_calls: result.toolCalls } : {}) });
-        if (result.toolCalls.length === 0) return { reason: "completed", text: result.content };
-        for (const call of result.toolCalls) {
+        let content = result.content;
+        let calls: ChatToolCall[] = result.toolCalls;
+        if (calls.length === 0 && session.tools.length > 0) {
+          const recovered = recoverToolCall(content, session.known);
+          if (recovered && "unreadable" in recovered) {
+            // One chance to say it again, with the reason; a second unreadable call ends the turn
+            // rather than looping on a model that cannot produce the format.
+            if (reasked) return { reason: "error", detail: "The model's tool call could not be read." };
+            reasked = true;
+            this.opts.onTrace?.({ at: "arke.tool-call-unreadable", sessionId: session.id, reason: recovered.unreadable });
+            const reask: ChatMessage = { role: "user", content: `Your tool call could not be read: ${recovered.unreadable}. Send it again as a tool call, or reply in plain text.` };
+            WITHIN_TURN.add(reask);
+            session.messages.push({ role: "assistant", content }, reask);
+            continue;
+          }
+          if (recovered) {
+            this.opts.onTrace?.({ at: "arke.tool-call-recovered", sessionId: session.id, tool: recovered.call.function.name });
+            calls = [recovered.call];
+            content = "";
+          }
+        }
+        session.messages.push({ role: "assistant", content, ...(calls.length > 0 ? { tool_calls: calls } : {}) });
+        if (calls.length === 0) return { reason: "completed", text: content };
+        for (const call of calls) {
           signal.throwIfAborted();
           session.messages.push(await this.runTool(session, call.function.name, call.function.arguments, signal));
         }
@@ -322,6 +427,31 @@ export class ArkeAdapter implements HarnessAdapter {
     }
   }
 
+  /**
+   * Gives the GPU back now. Ollama otherwise holds a model for its idle timeout after the last
+   * request, which an image or video job waiting on the card would sit through. The host calls
+   * this when the GPU is wanted by another engine. A model a turn is using right now stays: the
+   * turn would only load it again. Best effort by nature — a failed unload leaves the model to
+   * Ollama's own timeout, and it is remembered so a later release tries again.
+   */
+  async releaseResidency(signal: AbortSignal = AbortSignal.timeout(10_000)): Promise<void> {
+    // Serialised with itself and with every turn's next request, so the busy check below is
+    // still true when the unload arrives.
+    const release = this.releasing.then(async () => {
+      for (const model of Array.from(this.resident)) {
+        // Checked per model, at the moment of its unload. A turn that starts after this check
+        // waits for the release before its first request, so it loads the model afresh rather
+        // than having it unloaded under it.
+        if ([...this.sessions.values()].some((session) => session.turn !== null && session.model === model)) continue;
+        this.resident.delete(model);
+        try { await unloadModel(this.fetchImpl, this.baseUrl, model, signal); }
+        catch { this.resident.add(model); }
+      }
+    });
+    this.releasing = release.catch(() => {});
+    await release;
+  }
+
   /** Stops the generation itself: the request is aborted, so Ollama stops producing tokens. */
   async interrupt(sessionId: string): Promise<void> {
     const turn = this.sessions.get(sessionId)?.turn;
@@ -363,9 +493,22 @@ export class ArkeAdapter implements HarnessAdapter {
     for (const turn of running) turn.abort.abort();
     await Promise.all(running.map((turn) => turn.settled.catch(() => {})));
     this.sessions.clear();
+    // The app is stopping with this harness: hand the memory back rather than leave it to
+    // Ollama's idle timeout. Briefly, since quitting should not wait on it — and raced, because
+    // this release queues behind any already on the wire, whose own deadline is not this one.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      this.releaseResidency(AbortSignal.timeout(DISPOSE_RELEASE_MS)).catch(() => {}),
+      new Promise<void>((resolve) => { timer = setTimeout(resolve, DISPOSE_RELEASE_MS); }),
+    ]);
+    clearTimeout(timer);
     for (const queue of this.queues) queue.close();
     this.queues.clear();
     this.ready = { ready: false, reason: "The Arke harness is disposed." };
     this.revision++;
   }
+}
+
+function supported(model: PulledModel): boolean {
+  return meetsLocalModelMinimum(model);
 }
