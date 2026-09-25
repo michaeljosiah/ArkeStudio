@@ -58,7 +58,15 @@ if (!values.models) {
   process.exit(2);
 }
 const MODELS = values.models.split(",").map((m) => m.trim()).filter(Boolean);
-const LANES = values.lanes.split(",").map((l) => l.trim()).filter((l) => l === "arke" || l === "opencode");
+const ASKED_LANES = values.lanes.split(",").map((l) => l.trim()).filter(Boolean);
+const LANES = ASKED_LANES.filter((l) => l === "arke" || l === "opencode");
+// A mistyped option must not produce an empty "successful" report someone pastes into the issue.
+if (MODELS.length === 0) { console.error("--models named no model."); process.exit(2); }
+const unknownLanes = ASKED_LANES.filter((l) => !LANES.includes(l));
+if (LANES.length === 0 || unknownLanes.length > 0) {
+  console.error(`--lanes takes arke, opencode or both${unknownLanes.length ? `; not ${unknownLanes.join(", ")}` : ""}.`);
+  process.exit(2);
+}
 const TURNS = Number(values.turns);
 const RUNS = Number(values.runs);
 const UPSTREAM = new URL(values.upstream);
@@ -222,6 +230,7 @@ async function untilUnloaded(limitMs) {
 const { assembleHarness } = await import("../packages/coordinator/src/harness/v2-launch.ts");
 const { OllamaClient } = await import("../packages/providers/src/clients/ollama.ts");
 const { meetsLocalModelMinimum } = await import("../packages/contracts/src/harness.ts");
+const { createPreparedSession } = await import("../packages/coordinator/src/harness/session-files.ts");
 
 async function openLane(lane, appRoot) {
   if (lane === "arke") {
@@ -238,17 +247,24 @@ async function openLane(lane, appRoot) {
   // reaches Ollama at 127.0.0.1:11434, which is the proxy.
   const pulled = await new OllamaClient((url, init) => fetch(url, init), PROXY_URL).listModels();
   await wiring.publishLocalModels(pulled.filter(meetsLocalModelMinimum));
-  await wiring.supervisor.start();
   const adapter = wiring.adapter;
-  const deadline = Date.now() + 90_000;
-  while (!adapter.readiness().ready) {
-    if (Date.now() > deadline) throw new Error(`OpenCode did not become ready: ${adapter.readiness().reason ?? "no reason given"}`);
-    await adapter.init?.().catch(() => {});
-    if (!adapter.readiness().ready) await new Promise((resolve) => setTimeout(resolve, 1_000));
+  const close = async () => { await adapter.dispose?.().catch(() => {}); await wiring.supervisor.stop(); };
+  await wiring.supervisor.start();
+  // From here the child is running: any failure stops it, or every later run would add another.
+  try {
+    const deadline = Date.now() + 90_000;
+    while (!adapter.readiness().ready) {
+      if (Date.now() > deadline) throw new Error(`OpenCode did not become ready: ${adapter.readiness().reason ?? "no reason given"}`);
+      await adapter.init?.().catch(() => {});
+      if (!adapter.readiness().ready) await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+  } catch (error) {
+    await close().catch(() => {});
+    throw error;
   }
   return {
     adapter,
-    close: async () => { await adapter.dispose?.(); await wiring.supervisor.stop(); },
+    close,
     // What the coordinator's GPU hand-back does for this lane: unload whatever Ollama holds.
     release: unloadAll,
   };
@@ -268,29 +284,43 @@ async function runConversation(lane, model, run) {
     Object.assign(context, { lane, model, run, turn: 0 });
     opened = await openLane(lane, appRoot);
     const { adapter } = opened;
-    const preparationId = randomUUID();
-    adapter.prepareSession?.({ preparationId, agent: "sheet-editor", model: `ollama/${model}` });
-    const { sessionId } = await adapter.createSession({ purpose: "authoring", agent: "sheet-editor", cwd, preparationId });
+    // The app's own session path, for both lanes: it writes whatever files the harness reads
+    // (OpenCode's session config — agent, prompt, tools, confinement) and loads skill bodies,
+    // so each lane runs the conversation exactly as configured in use.
+    const reference = `ollama/${model}`;
+    const { sessionId } = await createPreparedSession(adapter, cwd,
+      { agent: "sheet-editor", model: reference, agents: { "sheet-editor": { model: reference } } },
+      { purpose: "authoring", agent: "sheet-editor" });
+    // Failures that arrive as events rather than as a rejected send — OpenCode reports a provider
+    // or model failure this way — are pinned to the turn they happen in.
     const listening = new AbortController();
-    const firstDelta = new Map();
+    let failure = null;
     void (async () => {
       for await (const event of adapter.streamEvents(listening.signal)) {
-        if (event.type === "message.delta" && event.sessionId === sessionId && event.correlationId && !firstDelta.has(event.correlationId)) {
-          firstDelta.set(event.correlationId, performance.now());
-        }
+        if (event.sessionId !== sessionId || failure !== null) continue;
+        if (event.type === "session.error") failure = event.message;
+        else if (event.type === "session.ended" && event.reason !== "completed") failure = event.detail ?? event.reason;
       }
     })().catch(() => {});
     for (let turn = 1; turn <= TURNS; turn++) {
       context.turn = turn;
-      const correlationId = randomUUID();
+      failure = null;
       const started = performance.now();
       let error = null;
       try {
-        await adapter.sendMessage({ sessionId, correlationId, parts: [{ type: "text", text: PROMPTS[(turn - 1) % PROMPTS.length] }] });
+        await adapter.sendMessage({ sessionId, correlationId: randomUUID(), parts: [{ type: "text", text: PROMPTS[(turn - 1) % PROMPTS.length] }] });
       } catch (caught) { error = String(caught?.message ?? caught); }
+      // Events can trail the send's own settling by a moment.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      error ??= failure;
       const ended = performance.now();
-      const first = firstDelta.get(correlationId);
-      result.turns.push({ turn, firstTokenMs: first === undefined ? null : first - started, wallMs: ended - started, error });
+      // First output of the turn, as seen at Ollama: the same ruler for both lanes, and no
+      // reliance on how each adapter labels its events.
+      const firsts = calls
+        .filter((c) => c.lane === lane && c.model?.replace(/^ollama\//, "") === model && c.run === run && c.turn === turn && c.firstTokenMs !== null)
+        .map((c) => c.started + c.firstTokenMs);
+      const first = firsts.length > 0 ? Math.min(...firsts) : null;
+      result.turns.push({ turn, firstTokenMs: first === null ? null : first - started, wallMs: ended - started, error });
       process.stdout.write(`  ${lane} ${model} run ${run} turn ${turn}: ${error ? `error: ${error}` : `${Math.round(ended - started)} ms`}\n`);
     }
     listening.abort();
