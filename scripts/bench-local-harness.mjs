@@ -22,7 +22,7 @@
  *        node --import tsx scripts/bench-local-harness.mjs --models gemma4:12b,gemma4:26b
  *
  * Options:
- *   --models <a,b>        Ollama models to run (required). Each should state a 256k context.
+ *   --models <a,b>        Ollama models to run (required). Local needs 64k; OpenCode needs 256k.
  *   --lanes <a,b>         arke, opencode, or both (default both).
  *   --turns <n>           Turns per conversation (default 6; the script cycles its prompts).
  *   --runs <n>            Repeat each lane x model this many times (default 1).
@@ -229,7 +229,7 @@ async function untilUnloaded(limitMs) {
 
 const { assembleHarness } = await import("../packages/coordinator/src/harness/v2-launch.ts");
 const { OllamaClient } = await import("../packages/providers/src/clients/ollama.ts");
-const { meetsLocalModelMinimum } = await import("../packages/contracts/src/harness.ts");
+const { meetsArkeModelMinimum, meetsLocalModelMinimum } = await import("../packages/contracts/src/harness.ts");
 const { createPreparedSession } = await import("../packages/coordinator/src/harness/session-files.ts");
 
 async function openLane(lane, appRoot) {
@@ -411,7 +411,10 @@ for (const model of MODELS) {
   const arch = info["general.architecture"];
   const context = arch ? info[`${arch}.context_length`] : undefined;
   if (!shown) console.warn(`warning: ${model} is not pulled at ${UPSTREAM.origin}`);
-  else if (!meetsLocalModelMinimum({ contextLength: context })) console.warn(`warning: ${model} states a context of ${context ?? "nothing"}; both lanes require 256k and will refuse it`);
+  else {
+    if (LANES.includes("opencode") && !meetsLocalModelMinimum({ contextLength: context })) console.warn(`warning: ${model} states a context of ${context ?? "nothing"}; OpenCode requires 256k and will refuse it`);
+    if (LANES.includes("arke") && !meetsArkeModelMinimum({ contextLength: context })) console.warn(`warning: ${model} states a context of ${context ?? "nothing"}; Local requires 64k and will refuse it`);
+  }
 }
 
 let proxy;
