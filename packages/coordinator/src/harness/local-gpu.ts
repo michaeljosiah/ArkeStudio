@@ -35,10 +35,11 @@ export function withLocalGpu(adapter: HarnessAdapter, gpu: LocalGpu, settled: ()
       // A failed default lookup can still return a catalogue. When none is marked, an
       // available Ollama model may be the actual default; an explicit cloud choice never waits.
       let catalog: ModelInfo[] | undefined;
-      try { catalog = canUseOllama && model === undefined ? await adapter.listModels?.() : undefined; }
+      try { catalog = canUseOllama && adapter.id !== "arke" && model === undefined ? await adapter.listModels?.() : undefined; }
       catch { /* Discovery is optional; an unknown catalogue must still allow the turn. */ }
       const hasDefault = catalog?.some((row) => row.isDefault) === true;
-      const local = canUseOllama && (model !== undefined ? model.startsWith("ollama/") :
+      // Arke's own harness reaches nothing but Ollama, so every one of its turns is local.
+      const local = adapter.id === "arke" || canUseOllama && (model !== undefined ? model.startsWith("ollama/") :
         catalog === undefined || catalog.some((row) => row.provider === "ollama" && (row.isDefault || !hasDefault)));
       const signal = AbortSignal.any([turn.abort.signal, closed.signal]);
       if (local) release = await gpu.acquire("Ollama", signal, (reason) => publish({

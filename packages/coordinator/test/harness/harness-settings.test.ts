@@ -6,6 +6,8 @@ import WebSocket from "ws";
 import { FrameSchema, type Frame, type HarnessAvailability, type HarnessStatus } from "@arke-studio/contracts";
 import { Coordinator, type CoordinatorOptions } from "../../src/coordinator.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
+import type { DispatchClient } from "../../src/queue/dispatcher.js";
+import { FakeProvider } from "../queue/fake-provider.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
 /**
@@ -109,6 +111,8 @@ async function withCoordinator(
     harnessEngineOverride?: CoordinatorOptions["harnessEngineOverride"];
     harnessLaunchEngine?: CoordinatorOptions["harnessLaunchEngine"];
     harnessInfo?: CoordinatorOptions["harnessInfo"];
+    /** What Ollama lists, for the local harness's availability; absent means no Ollama client. */
+    ollama?: () => Promise<Array<{ id: string; contextLength?: number; tools: boolean; vision: boolean; assumed?: true }>>;
   } = {},
 ): Promise<string> {
   const root = reuseRoot ?? (await makeTempRoot()).root;
@@ -123,6 +127,7 @@ async function withCoordinator(
     ...(opts.harnessEngineOverride ? { harnessEngineOverride: opts.harnessEngineOverride } : {}),
     ...(opts.harnessLaunchEngine ? { harnessLaunchEngine: opts.harnessLaunchEngine } : {}),
     ...(opts.harnessInfo ? { harnessInfo: opts.harnessInfo } : {}),
+    ...(opts.ollama ? { dispatchClients: { ollama: Object.assign(new FakeProvider(), { listModels: opts.ollama }) as DispatchClient } } : {}),
     detectHarnesses: async (configuredPath, codexPath) => {
       opts.sawPath?.(configuredPath);
       opts.sawCodexPath?.(codexPath);
@@ -153,8 +158,8 @@ describe("choosing a harness", () => {
       const status = lastStatus(client.frames);
       assert.deepEqual(
         status?.harnesses.map((h) => h.id),
-        ["opencode", "claude"],
-        "OpenCode is never detected — it ships in the installer",
+        ["opencode", "arke", "claude"],
+        "OpenCode and the local harness are never detected — they ship in the installer",
       );
       assert.equal(status?.engine, "opencode", "and runs until somebody chooses otherwise");
     });
@@ -338,5 +343,41 @@ describe("choosing a harness", () => {
       assert.equal(lastStatus(client.frames)?.harnesses.find(harness => harness.id === "codex")?.blocked, blocked.blocked);
       assert.equal(await storedEngine(root), undefined);
     });
+  });
+});
+
+describe("choosing the local harness (issue 1247)", () => {
+  const GEMMA = { id: "gemma4:12b", contextLength: 262_144, tools: true, vision: true };
+
+  it("is selectable once Ollama answers with a 256k model that calls tools, and is never an executable to find", async () => {
+    await withCoordinator(CLAUDE_PRESENT, async (client, root) => {
+      client.send({ kind: "detect-harnesses" });
+      await client.until((f) => f.kind === "event" && f.event.type === "harness.status", "the harness list");
+      assert.deepEqual(lastStatus(client.frames)?.harnesses.find((h) => h.id === "arke"),
+        { id: "arke", label: "Local", installed: true, version: null, source: null, blocked: null, bundled: true });
+      client.send({ kind: "set-harness-engine", engine: "arke" });
+      await client.until((f) => f.kind === "event" && f.event.type === "harness.status" && f.event.harness.engine === "arke", "the local engine");
+      assert.equal(await storedEngine(root), "arke");
+    }, undefined, { ollama: async () => [GEMMA] });
+  });
+
+  it("is refused, with the reason, when Ollama is missing, silent, or holds nothing it can write with", async () => {
+    const cases: Array<[string, (() => Promise<Array<typeof GEMMA>>) | undefined, RegExp]> = [
+      ["no Ollama client", undefined, /not set up on this machine/],
+      ["Ollama not answering", async () => { throw new Error("down"); }, /not answering/],
+      ["only a 128k model", async () => [{ ...GEMMA, contextLength: 131_072 }], /256k context window and calls tools/],
+      ["only a model that cannot call tools", async () => [{ ...GEMMA, tools: false }], /256k context window and calls tools/],
+    ];
+    for (const [label, ollama, reason] of cases) {
+      await withCoordinator(CLAUDE_PRESENT, async (client, root) => {
+        client.send({ kind: "set-harness-engine", engine: "arke" });
+        await client.until((f) => f.kind === "event" && f.event.type === "harness.status", `${label}: the refusal`);
+        const arke = lastStatus(client.frames)?.harnesses.find((h) => h.id === "arke");
+        assert.equal(arke?.installed, false, label);
+        assert.match(arke?.blocked ?? "", reason, label);
+        assert.equal(lastStatus(client.frames)?.engine, "opencode", label);
+        assert.equal(await storedEngine(root), undefined, `${label}: the saved engine is untouched`);
+      }, undefined, ollama ? { ollama } : {});
+    }
   });
 });

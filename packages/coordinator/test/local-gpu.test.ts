@@ -166,6 +166,41 @@ it("sends repeated default-model Claude turns without discovery or waiting for t
   }
 });
 
+it("holds every Arke turn for the graphics card without asking its catalogue (issue 1247)", async () => {
+  const gpu = new LocalGpu(async () => {});
+  const generation = await gpu.acquire("ComfyUI", new AbortController().signal);
+  let discoveries = 0;
+  const sent: string[] = [];
+  const raw: HarnessAdapter = {
+    id: "arke", capabilities: () => new Set(["models", "events"]), readiness: () => ({ ready: true }),
+    listModels: async () => { discoveries++; return []; },
+    createSession: async () => ({ sessionId: "local-default" }),
+    sendMessage: async input => {
+      sent.push(input.sessionId);
+      return { sessionId: input.sessionId, correlationId: "test" };
+    },
+    dispatchAsync: async () => { throw new Error("sendMessage owns completion"); },
+    streamEvents: () => ({ async *[Symbol.asyncIterator]() {} }),
+  };
+  const adapter = withLocalGpu(raw, gpu);
+  let turn: Promise<unknown> | undefined;
+  try {
+    const session = await adapter.createSession({ purpose: "ask" });
+    turn = adapter.sendMessage({ sessionId: session.sessionId, parts: [] });
+    void turn.catch(() => {});
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(sent, [], "a default-model Arke turn waits for the card ComfyUI holds");
+    generation();
+    await turn;
+    assert.deepEqual(sent, [session.sessionId]);
+    assert.equal(discoveries, 0, "the lane is local by construction, so nothing is looked up to decide it");
+  } finally {
+    generation(); gpu.stop();
+    await turn?.catch(() => {});
+    await adapter.dispose!();
+  }
+});
+
 it("keeps pending recovery reservations alive when cancellation is not acknowledged", async () => {
   for (const held of [false, true]) {
     const dir = await tempDir("arke-gpu-recovery-cancel-");

@@ -341,7 +341,11 @@ export class ArkeAdapter implements HarnessAdapter {
         if (!fitToWindow(session.messages, session.tools, promptBudget(session.numCtx), session.messages.indexOf(opening), session.scale)) {
           return { reason: "budget-exceeded", detail: "This message and its tool results do not fit the model's context window." };
         }
-        await this.releasing;
+        // Raced with the turn's own signal: a release stalled on Ollama must not hold a stopped
+        // turn, or a dispose waiting on that turn, past its own deadline.
+        await Promise.race([this.releasing, new Promise<void>((resolve) => {
+          if (signal.aborted) resolve(); else signal.addEventListener("abort", () => resolve(), { once: true });
+        })]);
         signal.throwIfAborted();
         // Before the request, not after: Ollama may load the model and then the turn be stopped,
         // and a model loaded but not remembered could never be released.

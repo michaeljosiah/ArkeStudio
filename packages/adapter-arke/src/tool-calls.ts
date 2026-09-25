@@ -21,7 +21,7 @@ export type RecoveredCall =
   | null;
 
 const TAGGED = /^<tool_call>\s*([\s\S]*?)\s*<\/tool_call>$/;
-const FENCED = /^```(?:json)?\s*\n([\s\S]*?)\n?```$/;
+const FENCED = /^```(?:json)?\s*\n([\s\S]*?)\n?```$/i;
 const NAMED = /"(?:name|tool)"\s*:\s*"([^"]+)"/;
 
 /**

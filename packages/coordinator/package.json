@@ -14,6 +14,7 @@
     "test": "node --import tsx --test \"test/**/*.test.ts\""
   },
   "dependencies": {
+    "@arke-studio/adapter-arke": "*",
     "@arke-studio/adapter-claude": "*",
     "@arke-studio/adapter-codex": "*",
     "@arke-studio/adapter-opencode": "*",

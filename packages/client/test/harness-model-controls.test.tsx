@@ -4,7 +4,7 @@ import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { OPENCODE_AVAILABILITY, type ClientMessage, type ClientState } from "@arke-studio/contracts";
+import { arkeAvailability, OPENCODE_AVAILABILITY, type ClientMessage, type ClientState } from "@arke-studio/contracts";
 import { AgentsPanel } from "../src/screens/agents.js";
 import { SettingsHarnessScreen, SettingsLayout } from "../src/screens/shell.js";
 import { ProductionConversation } from "../src/components/conversation.js";
@@ -406,6 +406,36 @@ describe("live harness model controls (#1123, #1124)", () => {
     assert.ok(sent.some((message) => message.kind === "clear-codex-executable"));
     await press("Advanced · which model runs each writing agent");
     assert.match(container.textContent!, /models from Claude Code/, "the pending selection must not relabel the running catalog");
+  });
+
+  it("shows the local harness as built in: named Local, running, with no executable to choose (issue 1247)", async () => {
+    const state = modelState();
+    state.app.harnessInfo = { generation: "arke", source: "bundled", version: null, beta: false };
+    state.app.harness = {
+      engine: "arke", claudePath: null, codexPath: null, launchOverride: null,
+      harnesses: [OPENCODE_AVAILABILITY, arkeAvailability(null)],
+    };
+    await mount(state, <SettingsHarnessScreen />);
+    const tabs = [...container.querySelectorAll('[role="tab"]')];
+    assert.match(tabs.find((tab) => tab.textContent!.includes("Local"))!.textContent!, /running now/);
+    assert.match(container.textContent!, /Ships with Arke Studio/);
+    assert.doesNotMatch(container.textContent!, /Choose…/, "nothing to locate: the harness is part of the app");
+    await press("Advanced · which model runs each writing agent");
+    assert.match(container.textContent!, /models from Local/);
+  });
+
+  it("says why the local harness cannot be chosen, in the coordinator's words", async () => {
+    const state = modelState();
+    const reason = "No pulled model has a 256k context window and calls tools. Pull one, such as Gemma 4 12B.";
+    state.app.harness = {
+      engine: "opencode", claudePath: null, codexPath: null, launchOverride: null,
+      harnesses: [OPENCODE_AVAILABILITY, arkeAvailability(reason)],
+    };
+    await mount(state, <SettingsHarnessScreen />, "/settings/harness?harness=arke");
+    assert.match(container.textContent!, /No pulled model has a 256k context window/);
+    assert.match(container.textContent!, /unavailable for now/);
+    const use = [...container.querySelectorAll("button")].find((button) => button.textContent === "Use this")!;
+    assert.equal(use.disabled, true);
   });
 
   it("shows a failed launch without metadata on its attempted engine after the saved choice changes", async () => {

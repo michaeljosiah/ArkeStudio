@@ -18,6 +18,8 @@ it("an explicit launch override chooses one engine and an invalid override prese
   assert.equal(effectiveHarnessEngine("opencode", "codex"), "codex");
   assert.equal(effectiveHarnessEngine("claude", "unknown"), "claude");
   assert.equal(effectiveHarnessEngine("codex"), "codex");
+  assert.equal(effectiveHarnessEngine("opencode", "arke"), "arke", "the local harness is selectable by override too");
+  assert.equal(effectiveHarnessEngine("arke"), "arke");
 });
 
 describe("harness model identity", () => {

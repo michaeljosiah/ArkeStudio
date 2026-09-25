@@ -458,3 +458,21 @@ test("when Ollama counts more prompt tokens than the estimate, the session trust
   // Now a turn that fits on the raw estimate but not once scaled by what Ollama reported.
   await assert.rejects(f.adapter.sendMessage({ sessionId: id, ...text("a long question ".repeat(200)) }), /do not fit the model's context window/);
 });
+
+test("a turn waiting on a stalled release stops when it is interrupted, so dispose is not held behind it", async (t) => {
+  const f = await fixture(t);
+  const id = await f.session("world-builder");
+  f.ollama.script.push(reply("first"));
+  await f.adapter.sendMessage({ sessionId: id, ...text("one") });
+  f.ollama.generateDelayMs = 5_000;
+  const releasing = f.adapter.releaseResidency(AbortSignal.timeout(6_000)).catch(() => {});
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const waiting = f.adapter.sendMessage({ sessionId: id, ...text("two") }).catch((error: Error) => error.message);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const started = Date.now();
+  await f.adapter.interrupt(id);
+  assert.equal(await waiting, "Stopped.");
+  assert.ok(Date.now() - started < 1_000, "the stopped turn did not wait out the release");
+  f.ollama.generateDelayMs = 0;
+  void releasing;
+});

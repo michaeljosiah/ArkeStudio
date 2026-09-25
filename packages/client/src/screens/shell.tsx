@@ -1984,7 +1984,7 @@ export function SettingsHarnessScreen() {
   const harnesses = harness?.harnesses ?? [OPENCODE_AVAILABILITY];
   const engine = harness?.engine ?? "opencode";
   const generation = state?.app.harnessInfo?.generation;
-  const runningEngine = generation === "claude" || generation === "codex"
+  const runningEngine = generation === "claude" || generation === "codex" || generation === "arke"
     ? generation
     : generation === "v1" || generation === "v2" ? "opencode" : harness?.launchEngine ?? null;
   const harnessHealth = state?.app.health.harness;
@@ -2190,7 +2190,7 @@ function HarnessPane({
               ? running ? "new sessions use this harness" : "restart Arke Studio to switch"
               : harness.installed
                 ? "switching takes effect on the next restart"
-                : "unavailable until it is installed"}
+                : harness.bundled ? "unavailable for now" : "unavailable until it is installed"}
           </div>
         </div>
         <Button
