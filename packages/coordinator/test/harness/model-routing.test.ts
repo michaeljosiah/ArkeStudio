@@ -388,6 +388,18 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     } finally { await test.close(); }
   });
 
+  it("leaves a harness with no catalogue alone: no local default, and no refusal either", async () => {
+    const adapter = new CaptureAdapter();
+    adapter.capabilities = () => new Set(["events"] as const) as unknown as ReturnType<CaptureAdapter["capabilities"]>;
+    Object.defineProperty(adapter, "listModels", { value: undefined });
+    const test = await fixture({ adapter });
+    try {
+      const session = await test.chat();
+      assert.ok(session, "a keyless session on a catalogue-less harness still opens, as it always did");
+      assert.deepEqual(session.config.agents ?? {}, {});
+    } finally { await test.close(); }
+  });
+
   it("counts an account connected through the harness's own sign-in as a cloud credential", async () => {
     const test = await fixture();
     try {

@@ -4124,6 +4124,10 @@ export class Coordinator {
    */
   private unreadCatalogueRefusal(): string | null {
     if (this.cloudCredentialAvailable()) return null;
+    // A harness with no catalogue to read is not a failed read: nothing local could be listed
+    // by it, and a session on it runs exactly as it did before there was a local default.
+    const adapter = this.opts.adapter;
+    if (!adapter?.listModels || !adapter.capabilities().has("models")) return null;
     if (this.readModel.getState().app.harnessModelStatus.status !== "error") return null;
     return "The harness's models could not be read, and no cloud key is stored, so which model would write is unknown. Retry models in Settings → Harness → Advanced, or add a key.";
   }
