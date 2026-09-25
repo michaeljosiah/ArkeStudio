@@ -1670,6 +1670,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
   z.object({
     ...base, type: z.literal("genesis.loaded"), genesisId: z.string().min(1),
     conversationId: ConversationIdSchema, worldId: UlidSchema.optional(),
+    founding: z.boolean().optional(),
+    formHandoff: z.enum(["pending", "completed"]).optional(),
     turns: z.array(z.object({ id: z.string(), role: z.enum(["user", "gate"]), text: z.string(), at: IsoDateTimeSchema }).strict()),
     blueprint: GenesisBlueprintSchema,
     attachments: z.array(z.object({ name: z.string(), kind: ArtifactKindSchema }).strict()),

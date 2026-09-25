@@ -1,3 +1,4 @@
+export const FOUNDING_IMAGES_SCHEMA_VERSION = 30;
 import { z } from "zod";
 
 export const GenesisImageTargetSchema = z.string().regex(/^(character|location):[a-z0-9][a-z0-9-]*$/);
