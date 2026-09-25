@@ -15,6 +15,7 @@ import {
   type ChapterVoices,
   type ChapterAudiobook,
   DEFAULT_NARRATOR,
+  audiobookSpeakerColours,
   legacyVoiceModel,
   voicedBlocks,
   type ProductionBundle,
@@ -37,7 +38,7 @@ import { continuityStamp } from "../lib/continuity.js";
 import { passageAction, passageActions, type PassageAction } from "../lib/passage-actions.js";
 import { useProduction } from "../lib/selectors.js";
 import { EditableText, SceneTitle } from "./storyboard.js";
-import { AudiobookBlocks, AudiobookSide, DirectionCard, useChapterAudiobook, type AudiobookIntent } from "./chapter-audiobook.js";
+import { AudiobookBlocks, AudiobookFilterRow, AudiobookSide, DirectionCard, useChapterAudiobook, type AudiobookIntent } from "./chapter-audiobook.js";
 import { playClip } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
 import {
@@ -1003,6 +1004,11 @@ export function ChapterWorkspace({
     return [...counts.values()].sort((a, b) => b.lines - a.lines || a.speaker.localeCompare(b.speaker));
   }, [voicesRecord]);
   const narrationBlocks = voiced.blocks.filter((block) => block.speaker === undefined).length;
+  // The Voices dot is the Audiobook view's speaker colour (SPEC-047 R-33), one a speaker across the book.
+  const speakerColours = useMemo(
+    () => audiobookSpeakerColours(production?.chapters ?? [], speakers.flatMap((who) => (who.sheet !== undefined ? [who.sheet] : []))),
+    [production?.chapters, speakers],
+  );
   const narratorName = useStore().state?.app.narrator?.label ?? DEFAULT_NARRATOR.label;
   // The catalogue says whether an assigned voice can speak now (turn 130's rule, codex on PR
   // 914): asked for once a cast is shown, and a voice it lacks or marks reads in the
@@ -1601,7 +1607,10 @@ export function ChapterWorkspace({
               ) : record === null ? (
                 <p className="fy-bible__empty">Opening…</p>
               ) : (
+                <>
+                <AudiobookFilterRow filters={audiobook.filters} filter={audiobook.filter} onFilter={audiobook.setFilter} />
                 <AudiobookBlocks
+                  filter={audiobook.filter}
                   rows={audiobook.rows}
                   sounding={audiobook.sounding}
                   selected={audiobook.selected}
@@ -1612,6 +1621,7 @@ export function ChapterWorkspace({
                     void playClip({ id: row.artifact.id, url: mediaUrl(worldSlug, `artifacts/${row.artifact.file}`), title: `${chapter.title} · ${row.mark}`, sub: "audiobook · one block" });
                   }}
                 />
+                </>
               )}
               <div className="fy-ab__foot" data-testid="audiobook-foot">
                 <span>{`Saved · v${record?.version ?? chapter.version} · ${words.toLocaleString()} words`}</span>
@@ -1936,7 +1946,7 @@ export function ChapterWorkspace({
                 <ul className="fy-ch__who">
                   <li>
                     <div className="fy-ch__who-head">
-                      <span className="fy-ch__who-name">Narration</span>
+                      <span className="fy-ch__who-name"><i className="fy-ab__speaker-dot fy-voice--narrator" aria-hidden="true" /><span>Narration</span></span>
                       <span className="fy-ch__who-where fy-mono">{narratorName} · narrator</span>
                       <span className="fy-ch__who-count fy-mono">{narrationBlocks} blocks</span>
                     </div>
@@ -1947,7 +1957,10 @@ export function ChapterWorkspace({
                     return (
                       <li key={who.sheet ?? who.speaker}>
                         <div className="fy-ch__who-head">
-                          <span className="fy-ch__who-name">{sheet?.name ?? who.speaker}</span>
+                          <span className="fy-ch__who-name">
+                            <i className={`fy-ab__speaker-dot fy-voice--${who.sheet === undefined ? "none" : (speakerColours.get(who.sheet) ?? "none")}`} aria-hidden="true" />
+                            <span>{sheet?.name ?? who.speaker}</span>
+                          </span>
                           {voice !== undefined && voiceUnavailable(voice) ? (
                             <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">voice unavailable · narrator</span>
                           ) : voice !== undefined ? (

@@ -57,6 +57,49 @@ export function audiobookBlocks(
   return { blocks, ambiguous: voiced.ambiguous };
 }
 
+/** How many speaker colours there are (SPEC-047 R-33): `--voice-1` to `--voice-6`, repeated past the sixth. */
+export const AUDIOBOOK_VOICE_COLOURS = 6;
+
+/** Who speaks a block, as the cast keys a speaker (`summariseVoices`): the sheet, else the name; null for narration and the title. */
+export function audiobookSpeakerKey(block: Pick<VoicedBlock, "speaker" | "sheet">): string | null {
+  return block.sheet ?? block.speaker ?? null;
+}
+
+/** What a chapter summary holds that the colours are read from: its order, whether it is retired, and its cast's stamp. */
+export interface SpeakerColourChapter {
+  order: number;
+  retired?: boolean;
+  voices?: { speakers: readonly { speaker: string; sheet?: string }[] } | { unreadable: true };
+}
+
+/**
+ * A colour for every speaker with a sheet, the same in every chapter (SPEC-047 R-33): the book's
+ * speakers numbered in the order they first speak in it — chapter by chapter, and within a chapter
+ * in its cast stamp's order — then wrapped past the sixth. The stamp is what every chapter summary
+ * carries, so the door, the chapter and another chapter all count the same list; `extra` names
+ * speakers the stamps do not hold yet (a cast derived in this window, a chapter with no stamp),
+ * numbered after them. A name no sheet carries takes no colour: it is drawn as a dashed dot.
+ */
+export function audiobookSpeakerColours(
+  chapters: readonly SpeakerColourChapter[],
+  extra: readonly string[] = [],
+): Map<string, number> {
+  const order: string[] = [];
+  const seen = new Set<string>();
+  const add = (sheet: string | undefined): void => {
+    if (sheet === undefined || seen.has(sheet)) return;
+    seen.add(sheet);
+    order.push(sheet);
+  };
+  for (const chapter of [...chapters].filter((c) => c.retired !== true).sort((a, b) => a.order - b.order)) {
+    const voices = chapter.voices;
+    if (voices === undefined || "unreadable" in voices) continue;
+    for (const who of voices.speakers) add(who.sheet);
+  }
+  for (const sheet of extra) add(sheet);
+  return new Map(order.map((sheet, index) => [sheet, (index % AUDIOBOOK_VOICE_COLOURS) + 1]));
+}
+
 /** The fingerprint a take is keyed to: the block's text with whitespace folded, as it was spoken. */
 export function audiobookTextHash(text: string): string {
   return textDigest(text.replace(/\s+/g, " ").trim());

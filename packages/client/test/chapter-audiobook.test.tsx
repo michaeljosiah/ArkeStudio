@@ -471,6 +471,28 @@ describe("the Audiobook view (turn 146)", () => {
     assert.deepEqual(all(m, ".fy-ab__block").map((row) => row.getAttribute("data-state")), ["made", "made", "made", "made"], "the run's record is newer, and what it found gone it has made again");
   });
 
+  it("the margin names who speaks in a colour of their own, and the filter dims the rest and plays only them (SPEC-047 R-33)", async () => {
+    const m = await mount(inkbound("cast"));
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": "“You hear it too,”", "p1.1": "she said.", "p3.0": "Six, and the tide <br> not yet called." };
+    await answerOpen(m, { audiobook: record(Object.keys(texts), texts), voices: CAST });
+    const rows = all(m, ".fy-ab__block");
+    assert.deepEqual(rows.map((row) => row.getAttribute("data-speaker")), ["narrator", "narrator", "maren-kest", "narrator", "narrator"]);
+    assert.ok(rows[2]!.className.includes("fy-voice--1") && rows[2]!.className.includes("fy-ab__block--line"), "Maren's line takes the first colour and the line's tint");
+    assert.ok(rows[1]!.className.includes("fy-voice--narrator") && !rows[1]!.className.includes("fy-ab__block--line"), "narration is grey and untinted");
+    assert.ok(rows[2]!.querySelector(".fy-ab__source"), "a made take shows how it was made");
+    const chips = all(m, ".fy-ab__fchip");
+    assert.deepEqual(chips.map((chip) => chip.textContent), ["Everyone5", "Narrator4", `${rows[2]!.querySelector(".fy-ab__mark")!.textContent}1`]);
+    await act(async () => chips[2]!.click());
+    assert.deepEqual(
+      all(m, ".fy-ab__block").map((row) => row.className.includes("fy-ab__block--dim")),
+      [true, true, false, true, true],
+      "one speaker chosen, everyone else is dimmed",
+    );
+    assert.equal(all(m, ".fy-ab__fchip")[2]!.getAttribute("aria-pressed"), "true");
+    await act(async () => all(m, ".fy-ab__fchip")[2]!.click());
+    assert.ok(all(m, ".fy-ab__block").every((row) => !row.className.includes("fy-ab__block--dim")), "a second press clears it");
+  });
+
   it("a retired character keeps its name in the margin and loses its voice, so the narrator's take for it is made, not stale (codex on PR 1180)", async () => {
     const state = inkbound("cast");
     const world = state.world!;
