@@ -1,9 +1,9 @@
 {
-  "name": "@arke-studio/adapter-codex",
+  "name": "@arke-studio/confined-tools",
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "private": true,
-  "description": "Bring-your-own Codex app-server with application-owned confined tools.",
+  "description": "Application-owned file and world-query tools confined to a pinned session directory, shared by the harnesses that execute tools themselves.",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -11,6 +11,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test \"test/**/*.test.ts\""
   },
-  "dependencies": { "@arke-studio/confined-tools": "*", "@arke-studio/contracts": "*" },
+  "dependencies": { "@arke-studio/contracts": "*" },
   "devDependencies": { "@types/node": "^22.0.0", "tsx": "^4.19.0", "typescript": "^5.6.0" }
 }
