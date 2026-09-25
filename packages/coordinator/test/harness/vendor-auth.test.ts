@@ -189,6 +189,29 @@ describe("the sign-in surface (R-7, R-10, R-12)", () => {
     assert.equal(last.reason, "the catalog is on fire");
   });
 
+  it("disowns a read that outlived its harness, so the old rows cannot stand back up under the new one (issue 1247)", async () => {
+    const adapter = fakeAdapter();
+    let release: () => void = () => {};
+    let held = true;
+    const listed = adapter.listIntegrations!.bind(adapter);
+    adapter.listIntegrations = async () => {
+      if (held) await new Promise<void>((resolve) => { release = resolve; });
+      return listed();
+    };
+    const { service } = makeService(adapter);
+    const first = service.refresh();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // The harness ended while the read was out; the replacement's read is what counts.
+    service.markStale();
+    held = false;
+    release();
+    await first;
+    assert.equal(service.readOk, false, "the answer for a harness that is gone is not this lifecycle's read");
+    assert.equal(service.current().vendors.length, 0, "and its rows are not published");
+    await service.refresh();
+    assert.equal(service.readOk, true, "the read under the new lifecycle is");
+  });
+
   it("states the carry limitation only to somebody with personal harness state (R-4)", async () => {
     const adapter = fakeAdapter();
     adapter.integrations = [vendor({ id: "v", name: "V", methods: [OAUTH_METHOD] })];

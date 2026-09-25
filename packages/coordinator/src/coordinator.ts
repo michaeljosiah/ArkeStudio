@@ -2389,7 +2389,7 @@ export class Coordinator {
     });
     if (opts.adapter) opts.adapter = withModelValidation(
       withLocalGpu(opts.adapter, this.localGpu, () => { void this.refreshLocalResidency(); }),
-      (reference, needsImages) => this.validateLanguageModel(reference, needsImages),
+      (reference, needsImages, signal) => this.validateLanguageModel(reference, needsImages, signal),
     );
     const storage = opts.storage ?? createStudioStorage(opts);
     this.secrets = storage.secrets;

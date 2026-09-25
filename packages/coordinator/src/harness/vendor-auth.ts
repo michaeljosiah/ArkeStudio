@@ -79,6 +79,8 @@ export class VendorAuthService {
    * failed after a successful read is a stated fault on a surface that was read.
    */
   private lastReadOk = false;
+  /** Bumped by `markStale`: a read begun under an older value answered for a harness that is gone. */
+  private lifecycle = 0;
 
   /** Whether the connections on display come from a read that succeeded. */
   get readOk(): boolean {
@@ -87,10 +89,13 @@ export class VendorAuthService {
 
   /**
    * The connections on display are a previous harness lifecycle's (issue 1247): what this one
-   * holds is unknown until it has been read, and a decision must not trust the old rows.
+   * holds is unknown until it has been read, and a decision must not trust the old rows. A
+   * read still out against the old harness is disowned too: its answer, landing after this,
+   * would otherwise stand the rows back up under the new harness's own read.
    */
   markStale(): void {
     this.lastReadOk = false;
+    this.lifecycle++;
   }
 
   constructor(private readonly opts: VendorAuthServiceOptions) {}
@@ -143,6 +148,7 @@ export class VendorAuthService {
       this.publish();
       return;
     }
+    const lifecycle = this.lifecycle;
     try {
       let listed = await adapter.listIntegrations();
       // The catalog populates a few seconds after spawn; an empty answer from a healthy
@@ -151,12 +157,16 @@ export class VendorAuthService {
         await sleep(3_000);
         listed = await adapter.listIntegrations();
       }
+      // Answered for a harness that ended while this read was out: not this lifecycle's
+      // state, and the read that follows (serialised behind this one) is.
+      if (lifecycle !== this.lifecycle) return;
       this.available = true;
       this.reason = null;
       this.vendors = this.surfaceOf(listed);
       this.lastReadOk = true;
       this.updateCarry();
     } catch (err) {
+      if (lifecycle !== this.lifecycle) return;
       // The capability exists but the call failed: the surface stays, the fault is stated.
       this.available = true;
       this.reason = messageOf(err);
