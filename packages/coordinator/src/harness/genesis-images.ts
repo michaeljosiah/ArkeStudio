@@ -12,6 +12,7 @@ import { genesisControlDir, genesisConversation } from "./genesis-conversation.j
 import { sandboxAttachments } from "../artifacts/genesis-attachments.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 import { referenceBudgetFor } from "../references/generate.js";
+import { imageFormatOf } from "../queue/verify.js";
 
 const hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 const statePath = (dir: string) => join(genesisControlDir(dir), "images.json");
@@ -46,6 +47,7 @@ async function freezeImage(dir: string, path: string, info: Omit<GenesisImageCan
   const bytes = await containedBytes(dir, path);
   const ext = extname(path).toLowerCase().replace(".jpeg", ".jpg");
   if (![".png", ".jpg", ".webp"].includes(ext)) throw new Error("Use a PNG, JPEG or WebP image.");
+  if (imageFormatOf(bytes)?.extension !== ext) throw new Error("The image bytes do not match a supported image format.");
   const digest = hash(bytes), file = `media/${digest}${ext}`;
   const destination = join(genesisControlDir(dir), file);
   await atomicWriteFile(destination, bytes);

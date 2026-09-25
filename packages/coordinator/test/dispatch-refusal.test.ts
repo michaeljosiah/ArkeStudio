@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import WebSocket from "ws";
-import { FrameSchema, type Frame } from "@arke-studio/contracts";
+import { FrameSchema, ulid, type Frame } from "@arke-studio/contracts";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { createStudioCoordinator } from "../src/application/studio-host.js";
 import type { JobQueue } from "../src/queue/dispatcher.js";
@@ -12,6 +12,58 @@ import { FsWorldProvider } from "../src/world/provider.js";
 import { makeTempRoot, WORLD_ID } from "./world/helpers.js";
 import { FakeProvider, pngBytes } from "./queue/fake-provider.js";
 import { devCipher } from "../src/credentials/dev-cipher.js";
+
+it("founding image commands authorize generation separately from exact image approval", async () => {
+  const { root } = await makeTempRoot();
+  const provider = new FsWorldProvider(root);
+  const genesisId = "gen-image-wire";
+  const sandbox = await provider.genesisDir(genesisId);
+  await writeFile(join(sandbox, "draft.json"), JSON.stringify({
+    name: "Harbour", characters: [{ name: "Maren", line: "The keeper" }],
+    images: [{ id: "portrait", target: "character:maren", prompt: "A keeper by the water", references: [] }],
+  }));
+  const remote = new FakeProvider();
+  remote.inlineArtifacts = [{ name: "portrait.png", contentType: "image/png", data: pngBytes() }];
+  const model = SHIPPED_MANIFEST.models.find(m => m.provider === "fal" && m.capability === "image")!;
+  const coordinator = new Coordinator({ provider, adapter: null, appRoot: root, cipher: devCipher(),
+    dispatchClients: { fal: remote }, manifest: { ...SHIPPED_MANIFEST, models: [model] },
+    changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test" });
+  const { port, token } = await coordinator.start(0);
+  const client = new TestClient(port);
+  await client.open();
+  try {
+    client.send({ kind: "hello", token, lastSeq: 0 });
+    await client.until(f => f.kind === "snapshot", "snapshot");
+    client.send({ kind: "set-credential", provider: "fal", key: "test-key" });
+    await client.until(f => f.kind === "event" && f.event.type === "provider.status", "credential");
+    client.send({ kind: "genesis-images", genesisId });
+    const review = await client.until(f => f.kind === "event" && f.event.type === "genesis.images", "image plan");
+    assert.ok(review.kind === "event" && review.event.type === "genesis.images");
+    const plan = review.event.images.plans[0]!;
+    assert.equal(plan.intent.target, "character:maren");
+    const staleId = ulid();
+    client.send({ kind: "genesis-image-generate", genesisId, requestId: staleId, intentId: "portrait", digest: "outdated" });
+    const refused = await client.until(f => f.kind === "event" && f.event.type === "queue.enqueue-result" && f.event.requestId === staleId, "stale refusal");
+    assert.ok(refused.kind === "event" && refused.event.type === "queue.enqueue-result");
+    assert.equal(refused.event.disposition, "rejected");
+    assert.equal(remote.submitCount, 0);
+    const request = { kind: "genesis-image-generate", genesisId, requestId: ulid(), intentId: "portrait", digest: plan.digest };
+    client.send(request);
+    await client.until(f => f.kind === "event" && f.event.type === "job.updated" && f.event.job.status === "succeeded", "generated portrait");
+    client.send({ kind: "genesis-images", genesisId });
+    const preview = await client.until(f => f.kind === "event" && f.event.type === "genesis.images" && f.event.images.candidates.length === 1, "inline candidate");
+    assert.ok(preview.kind === "event" && preview.event.type === "genesis.images");
+    assert.equal(preview.event.images.selections.length, 0, "generation never selects the image");
+    const candidate = preview.event.images.candidates[0]!;
+    client.send({ kind: "genesis-image-decide", genesisId, requestId: ulid(), target: "character:maren",
+      candidateId: candidate.id, hash: candidate.hash, decision: "approve" });
+    await client.until(f => f.kind === "event" && f.event.type === "genesis.images" && f.event.images.selections.length === 1, "approved portrait");
+    client.frames.length = 0;
+    client.send(request);
+    await client.until(f => f.kind === "event" && f.event.type === "genesis.images", "generation replay");
+    assert.equal(remote.submitCount, 1);
+  } finally { client.close(); await coordinator.stop(); await provider.close(); }
+});
 
 it("See the look lands a preview and answers unexpected failures (#926, #904)", async () => {
   const { root } = await makeTempRoot();
