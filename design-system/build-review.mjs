@@ -136,6 +136,12 @@ const SCREENS = [
   { group: "Around it", screen: "Speaker lines sheet (story)", frame: "155d", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook&lines=:sheet", status: "drawn", checked: "2026-09-25",
     controls: ["Awaiting", "All 31", "Export", "Add files", "Cancel", "Keep 4 takes"],
     notes: ["Turn 155: a recorded speaker's script out as a PDF with ids and direction, recordings back in matched by id and checked; refused files in one clause. Not built."] },
+  { group: "Around it", screen: "Chapter · markers, narrator reading (story)", frame: "155e", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drawn", checked: "2026-09-25",
+    controls: ["Play", "Read the chapter · 4 blocks · $0.03", "Direct again"],
+    notes: ["Turn 155: the narrator reads everything; markers such as <code>[whispered]</code> sit in the Audiobook view over spans or at points, kept on the audiobook record and never in the prose; the side shows the text the reader is sent. Not built."] },
+  { group: "Around it", screen: "Marker menu (story)", frame: "155f", route: "#/w/:worldId/p/:prodId/story/chapters/:id?view=audiobook", status: "drawn", checked: "2026-09-25",
+    controls: ["Marker", "whispered", "pause · short", "Phrase…"],
+    notes: ["Turn 155: select words and press <code>[</code>, or type it at a caret; deliveries cover a span, cues sit at a point, what the reader cannot do is struck. Not built."] },
 ];
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
