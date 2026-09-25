@@ -57,3 +57,26 @@ test("the maintainer candidate does not grant production verification or bypass 
       params: { adapters: selections } }), /authorization is unavailable/);
   } finally { client.dispose(); }
 });
+
+test("adapter transport follows the engine's filename spelling and rejects missing or unrelated paths", async () => {
+  const base = comfyUiRecipeById("comfyui-h3-video")!, release = HEARMEMAN_ADAPTERS[0]!;
+  const selected = [{ releaseId: release.id, sha256: release.source.sha256, strength: 1 }];
+  const candidate = adapterValidationCandidate(base, selected);
+  for (const name of [`arke/${release.source.sha256}.safetensors`, `arke\\${release.source.sha256}.safetensors`, `other/${release.source.sha256}.safetensors`]) {
+    let sent: unknown;
+    const client = new ComfyUiClient(async (url, init) => {
+      if (url.endsWith("/system_stats")) return Response.json({ system: { comfyui_version: "0.33.1" } });
+      if (url.endsWith("/object_info/LoraLoaderModelOnly")) return Response.json({ LoraLoaderModelOnly: { input: { required: { lora_name: [[name]] } } } });
+      if (url.endsWith("/prompt")) { sent = JSON.parse(String(init?.body)).prompt.arke_adapter_0.inputs.lora_name; return Response.json({ prompt_id: "fixture-prompt" }); }
+      throw new Error(`Unexpected request: ${url}`);
+    }, () => "http://127.0.0.1:8188", async () => ({ ok: true }), undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined, async () => {}, adapterValidationCandidate);
+    try {
+      const dispatch = client.submit("", { model: base.id, capability: "video", recipe: comfyUiRecipeIdentity(candidate),
+        params: { prompt: "A red cube moves.", seed: 1, durationSec: 5, aspect: "16:9", adapters: selected } });
+      if (name.startsWith("other/")) { await assert.rejects(dispatch, /not advertised/); assert.equal(sent, undefined); }
+      else { await dispatch; assert.equal(sent, name); }
+      assert.equal(candidate.graph.arke_adapter_0!.inputs.lora_name, `arke/${release.source.sha256}.safetensors`);
+    } finally { client.dispose(); }
+  }
+});

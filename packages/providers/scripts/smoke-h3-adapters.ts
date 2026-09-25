@@ -112,12 +112,12 @@ for (const release of releases) {
       const result = await client.poll("", remoteId);
       lowestRamMb = Math.min(lowestRamMb, freemem() / 2 ** 20);
       lowestVramMb = Math.min(lowestVramMb, await gpu());
+      report.lowestRamMb = lowestRamMb; report.lowestVramMb = lowestVramMb;
       if (Date.now() >= nextLog) { console.log(`${release!.displayName}: ${Math.round((Date.now() - started) / 1000)}s ${result.state}`); nextLog = Date.now() + 30_000; }
       if (result.state === "failed" || result.state === "cancelled") throw new Error(JSON.stringify(result));
       if (result.state === "succeeded") break;
       await setTimeout(5000, undefined, { signal: deadline });
     }
-    report.lowestRamMb = lowestRamMb; report.lowestVramMb = lowestVramMb;
     const artifacts = await client.fetchArtifacts("", remoteId, { model: recipeId });
     for (const artifact of artifacts) {
       const file = join(directory, artifact.name);

@@ -71,6 +71,11 @@ Effective recipes use the stricter floors. Admission checks permission, compatib
 memory and bytes; permission/bytes are checked again before submission and immediately before
 `/prompt`. Changed frozen identities are refused rather than substituted.
 
+Adapter identity uses the canonical `arke/<sha256>.safetensors` path. Before submission the
+provider matches that exact path against the engine's advertised loader choices, allowing its
+Windows or POSIX separator spelling. Missing or ambiguous choices are refused before upload;
+the advertised spelling changes only the wire filename, not the frozen recipe identity.
+
 Generate places the optional adapter selector immediately below the model selector. It appears
 only for models with catalogue pairings, while preserving an unavailable saved choice so the
 user can clear it deliberately. Choices are filtered to that model; unavailable entries show
