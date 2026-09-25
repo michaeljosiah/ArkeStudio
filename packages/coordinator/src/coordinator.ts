@@ -7092,7 +7092,7 @@ export class Coordinator {
         try {
           const dir = await this.opts.provider.genesisDir(msg.genesisId);
           if ((await loadGenesisConversation(dir, msg.genesisId)).worldId) throw new Error("This world has already begun.");
-          const previous = await readFile(join(dir, "draft.json"), "utf8").then(raw => JSON.parse(raw) as Record<string, unknown>)
+          const previous: Record<string, unknown> = await readFile(join(dir, "draft.json"), "utf8").then(raw => JSON.parse(raw) as Record<string, unknown>)
             .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return {}; throw err; });
           const combine = (old: unknown, added: Array<{ name: string; line: string }>) =>
             [...new Map([...(Array.isArray(old) ? old as Array<{ name: string; line: string }> : []), ...added].map(entity => [entity.name, entity])).values()];
