@@ -77,7 +77,7 @@ it("Ollama lists what is pulled with what each model can do, and leaves out what
     // A show that fails still lists the model — hidden is worse than refused.
     { id: "broken", tools: true, vision: false },
   ]);
-  assert.deepEqual(await new OllamaClient(fakeFetch([])).listModels(), [], "Ollama down is an empty list");
+  await assert.rejects(new OllamaClient(fakeFetch([])).listModels(), "Ollama down is an error: nothing pulled and not yet answering must not read the same");
 });
 
 it("Ollama's listing pass ends at one deadline, listing what the shows never answered for", async () => {

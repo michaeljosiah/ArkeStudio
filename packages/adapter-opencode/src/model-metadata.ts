@@ -9,14 +9,14 @@ export interface WireModel {
   disabled?: boolean;
   enabled?: boolean;
   limit?: { context?: number; input?: number };
-  capabilities?: { input?: string[] | Record<string, boolean | undefined> };
+  capabilities?: { tools?: boolean; input?: string[] | Record<string, boolean | undefined> };
 }
 
 export function modelEnabled(model: WireModel): boolean {
   return model.disabled !== true && model.enabled !== false && model.status !== "deprecated";
 }
 
-export function modelMetadata(model: WireModel): Pick<ModelInfo, "displayName" | "inputModalities" | "inputTokenLimit"> {
+export function modelMetadata(model: WireModel): Pick<ModelInfo, "displayName" | "inputModalities" | "inputTokenLimit" | "tools"> {
   const input = model.capabilities?.input;
   const inputModalities = Array.isArray(input)
     ? input.filter((value): value is "text" | "image" => value === "text" || value === "image")
@@ -29,6 +29,9 @@ export function modelMetadata(model: WireModel): Pick<ModelInfo, "displayName" |
   return {
     ...(model.name ? { displayName: model.name } : {}),
     ...(inputModalities !== undefined ? { inputModalities } : {}),
+    // Stated either way or not at all: the local profile writes `tools: false` for a model the
+    // runtime says cannot call them, and a default chosen without a reader must not land there.
+    ...(typeof model.capabilities?.tools === "boolean" ? { tools: model.capabilities.tools } : {}),
     ...(typeof limit === "number" && Number.isSafeInteger(limit) && limit > 0 ? { inputTokenLimit: limit } : {}),
   };
 }

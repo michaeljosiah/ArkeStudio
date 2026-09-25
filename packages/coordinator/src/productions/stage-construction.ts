@@ -175,7 +175,14 @@ export class StageConstructor {
         await writeFile(join(dir, name), reference.data);
         sourceImages.push({ name, source: path });
       }
-      const configured = await deps.sessionInput({ model: deps.model, researchWeb: false });
+      // The configuration may wait on model discovery (issue 1247), outside the creation
+      // timeout below — so a build stopped during that wait must not find a session created
+      // for it once discovery settles.
+      abort.signal.throwIfAborted();
+      const configured = await Promise.race([
+        deps.sessionInput({ model: deps.model, researchWeb: false }),
+        new Promise<never>((_, reject) => abort.signal.addEventListener("abort", () => reject(abort.signal.reason), { once: true })),
+      ]);
       configured.agents = {
         ...configured.agents,
         "stage-designer": { ...configured.agents?.["stage-designer"], model: deps.model },

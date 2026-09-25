@@ -1059,6 +1059,12 @@ export class Coordinator {
    * decision reads the last outcome rather than the moment.
    */
   private catalogueReadOk = false;
+  /**
+   * Whether Ollama answered the last listing (issue 1247). A runtime that has not started
+   * answering yet and one with nothing pulled both publish no rows; only the second is a
+   * machine with no local model, and a keyless session is not decided on the first.
+   */
+  private localRuntimeListed = false;
   /** Resolves once the harness's sign-in state has been read for the first time, or once it is known it will not be. */
   private readonly vendorAuthSettled: Promise<void>;
   private settleVendorAuth: () => void = () => {};
@@ -2229,7 +2235,7 @@ export class Coordinator {
     if (!this.cloudCredentialAvailable()) await this.localDefaultGate();
     const local = this.localHarnessDefault(agent === "stage-designer");
     if (local !== undefined) return this.validateLanguageModel(local, agent === "stage-designer");
-    const refusal = this.unreadCatalogueRefusal();
+    const refusal = this.keylessSessionRefusal();
     return refusal === null ? {} : { reason: refusal };
   }
   /** Per-agent model and brief overrides, as last read from settings. */
@@ -4050,7 +4056,15 @@ export class Coordinator {
     publish: (models: readonly import("@arke-studio/contracts").LocalHarnessModel[]) => Promise<void>,
     list: () => Promise<readonly import("@arke-studio/contracts").LocalHarnessModel[]>,
   ): Promise<void> {
-    const models = await list().catch(() => []);
+    // Not answering is published as nothing pulled — a stale row validates in the picker and
+    // fails on the turn — but remembered apart from it, for the keyless decision below.
+    let models: readonly import("@arke-studio/contracts").LocalHarnessModel[] = [];
+    try {
+      models = await list();
+      this.localRuntimeListed = true;
+    } catch {
+      this.localRuntimeListed = false;
+    }
     const fingerprint = JSON.stringify(models);
     if (this.stopping || fingerprint === this.publishedLocalHarnessModels) return;
     try {
@@ -4129,7 +4143,7 @@ export class Coordinator {
     if (this.stopping) throw new Error("Arke Studio is shutting down.");
     const local = this.localHarnessDefault();
     if (local === undefined) {
-      const refusal = this.unreadCatalogueRefusal();
+      const refusal = this.keylessSessionRefusal();
       if (refusal !== null) throw new Error(refusal);
       return this.agentOverrides ? { agents: this.agentOverrides } : {};
     }
@@ -4173,20 +4187,26 @@ export class Coordinator {
   }
 
   /**
-   * Why a keyless session with nothing chosen cannot go ahead when the catalogue could not be
-   * read (issue 1247), or null when it can. A catalogue that was read and holds nothing local
-   * is an answer — the harness default is what such a machine has always run on — but one
-   * that failed to read says nothing about what is installed, and a session built on that
-   * silence would run on the cloud default with a local model possibly sitting right there.
+   * Why a keyless session with nothing chosen cannot go ahead (issue 1247), or null when it
+   * can. A catalogue that was read and holds nothing local is an answer — the harness default
+   * is what such a machine has always run on — but one that failed to read says nothing about
+   * what is installed, and a session built on that silence would run on the cloud default with
+   * a local model possibly sitting right there. Ollama not answering is the same silence one
+   * step earlier: the rows it would have brought are not in the catalogue to read.
    */
-  private unreadCatalogueRefusal(): string | null {
+  private keylessSessionRefusal(): string | null {
     if (this.cloudCredentialAvailable()) return null;
     // A harness with no catalogue to read is not a failed read: nothing local could be listed
     // by it, and a session on it runs exactly as it did before there was a local default.
     const adapter = this.opts.adapter;
     if (!adapter?.listModels || !adapter.capabilities().has("models")) return null;
-    if (this.catalogueReadOk) return null;
-    return "The harness's models could not be read, and no cloud key is stored, so which model would write is unknown. Retry models in Settings → Harness → Advanced, or add a key.";
+    if (!this.catalogueReadOk) {
+      return "The harness's models could not be read, and no cloud key is stored, so which model would write is unknown. Retry models in Settings → Harness → Advanced, or add a key.";
+    }
+    if (this.localModelsPublishable() && !this.localRuntimeListed) {
+      return "Ollama is not answering, and no cloud key is stored, so nothing can write. Start Ollama and try again in a moment, or add a key.";
+    }
+    return null;
   }
 
   private localHarnessDefault(needsImages = false): string | undefined {
@@ -4195,7 +4215,12 @@ export class Coordinator {
     // Rows kept from an earlier read are names, not a catalogue: after a failed refresh they
     // are not chosen from, and the refusal above says why.
     if (!this.catalogueReadOk) return undefined;
-    const local = app.harnessModels.filter((model) => model.provider === "ollama");
+    if (this.localModelsPublishable() && !this.localRuntimeListed) return undefined;
+    // Every roster agent works through tools — reads, edits, world queries — so a model the
+    // runtime says cannot call them would take the session and fail its first turn. Explicit
+    // choices are still admitted: unknown is offered, and a stated refusal is one the person
+    // can read; a default has no reader.
+    const local = app.harnessModels.filter((model) => model.provider === "ollama" && model.tools !== false);
     // Admission lets an unstated modality through — unknown is offered, not withheld — but a
     // default is a choice nobody is looking at, so for Stage a model that says it reads images
     // comes before one that merely does not say it cannot.
@@ -17268,6 +17293,9 @@ export class Coordinator {
     this.stageConstructor.cancel();
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
+    // A keyless command waiting on the catalogue would otherwise hold shutdown open: the
+    // reload timer that would have settled it is cleared below, and nothing else fires.
+    this.settleHarnessGates();
     this.localGpu.stop();
     for (const controller of this.performanceGenerations.values()) controller.abort();
     for (const controller of this.keyArtPromptDrafts.values()) controller.abort();

@@ -84,6 +84,8 @@ export const ModelInfoSchema = z.object({
   /** Absent means unknown; an explicit text-only model cannot inspect a Stage preview. */
   inputModalities: z.array(z.enum(["text", "image"])).optional(),
   inputTokenLimit: z.number().int().positive().optional(),
+  /** Whether the model calls tools, when the harness states it. Absent means unknown, and unknown is offered. */
+  tools: z.boolean().optional(),
 }).strict();
 export type ModelInfo = z.infer<typeof ModelInfoSchema>;
 

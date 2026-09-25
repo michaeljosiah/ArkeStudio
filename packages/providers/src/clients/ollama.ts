@@ -109,8 +109,10 @@ export class OllamaClient implements ProviderClient {
    * and reads images, and how long its context is. A model that does not complete (an embedding
    * model) is left out — the harness would list it and every turn on it would fail. A show that
    * fails still lists the model, with tools assumed: a wrong assumption is a refused call the
-   * person can read, where an omitted model is one they cannot find. Ollama down is an empty
-   * list, not an error — the caller publishes whatever the runtime holds, and that is nothing.
+   * person can read, where an omitted model is one they cannot find. Ollama not answering is
+   * an error, never an empty list: a runtime that has nothing pulled and one that has not
+   * started answering yet look the same as `[]`, and the caller decides differently on them —
+   * the first is a machine with no local model, the second is a moment to wait out.
    *
    * One deadline covers the whole pass, and the shows run a few at a time under it: the caller
    * holds the local-runtime probe open while this answers, so twenty pulled models against a
@@ -130,13 +132,8 @@ export class OllamaClient implements ProviderClient {
   }
 
   private async listUnder(deadline: AbortSignal): Promise<LocalHarnessModel[]> {
-    let tags: { status: number; body: unknown };
-    try {
-      tags = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/api/tags`, { signal: deadline });
-    } catch {
-      return [];
-    }
-    if (tags.status >= 400) return [];
+    const tags = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/api/tags`, { signal: deadline });
+    if (tags.status >= 400) throw new Error(`ollama: listing failed (HTTP ${tags.status})`);
     const names = ((tags.body as { models?: Array<{ name?: unknown }> } | null)?.models ?? [])
       .map((model) => model.name).filter((name): name is string => typeof name === "string" && name.length > 0);
     const shown = Array.from({ length: names.length }, (): { capabilities?: unknown; model_info?: Record<string, unknown> } | null => null);

@@ -87,6 +87,8 @@ async function fixture(options: {
   manifest?: boolean;
   /** What Ollama has pulled, with a publication hook: the first-run path the local default waits on (issue 1247). */
   localModels?: Array<{ id: string; tools: boolean; vision: boolean }>;
+  /** Ollama's answer to each listing, when it is not simply the list above: it may be a refusal. */
+  listLocalModels?: () => Promise<Array<{ id: string; tools: boolean; vision: boolean }>>;
   onPublish?: () => void;
 } = {}) {
   const { root, worldDir } = await makeTempRoot();
@@ -100,8 +102,8 @@ async function fixture(options: {
     provider, adapter, appRoot: root, appVersion: "test", authoring: { agentForPurpose },
     changeLogPath: join(root, "changes.jsonl"), observeEvent: event => events.push(event),
     ...(options.cipher ? { cipher: options.cipher } : {}),
-    ...(options.localModels ? {
-      dispatchClients: { ollama: Object.assign(new FakeProvider(), { listModels: async () => options.localModels! }) as DispatchClient },
+    ...(options.localModels || options.listLocalModels ? {
+      dispatchClients: { ollama: Object.assign(new FakeProvider(), { listModels: options.listLocalModels ?? (async () => options.localModels!) }) as DispatchClient },
       publishLocalHarnessModels: async () => { options.onPublish?.(); },
     } : {}),
     ...(options.manifest ? {
@@ -117,6 +119,8 @@ async function fixture(options: {
   // The catalogue is fetched as soon as the harness is ready (issue 1247), so a test that wants
   // the next validation to find discovery pending first makes what is cached stale.
   const staleCatalogue = () => (coordinator as unknown as { modelCatalog: { invalidate(): void } }).modelCatalog.invalidate();
+  // The runtime probe runs on a thirty-second timer; a test that wants the next tick asks for it.
+  const probeLocalRuntimes = () => (coordinator as unknown as { revalidateLocalRuntimes(): Promise<void> }).revalidateLocalRuntimes();
   const settings = async () => JSON.parse(await readFile(join(root, "settings.json"), "utf8")) as { agents?: Record<string, { model?: string; brief?: string }> };
   const chat = async (modelId?: string) => {
     await send({ kind: "world-chat-create", worldId: WORLD_ID, requestId: randomUUID(), title: "Model routing",
@@ -134,7 +138,7 @@ async function fixture(options: {
     await until(() => events.some(event => event.type === "stage.construction" && event.requestId === requestId && event.status === "failed"), "Stage's terminal test result");
     return events.findLast(event => event.type === "stage.construction" && event.requestId === requestId);
   };
-  return { root, worldDir, coordinator, adapter, provider, events, send, settings, chat, stage, close, staleCatalogue };
+  return { root, worldDir, coordinator, adapter, provider, events, send, settings, chat, stage, close, staleCatalogue, probeLocalRuntimes };
 }
 
 describe("coordinator harness/model routing (#1122)", () => {
@@ -457,6 +461,46 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     try {
       assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL);
     } finally { await test.close(); }
+  });
+
+  it("refuses a keyless session while Ollama is not answering, and decides once it has listed", async () => {
+    // Not answering and nothing pulled both publish no rows. Only the second is a machine with
+    // no local model; the first is the bundled runtime still starting, and a session decided
+    // on it would run on the cloud default with a pulled model a few seconds away.
+    const adapter = new CaptureAdapter();
+    adapter.list = async () => CLOUD_ONLY;
+    let answering = false;
+    const test = await fixture({ adapter, listLocalModels: async () => {
+      if (!answering) throw new Error("ECONNREFUSED 127.0.0.1:11434");
+      return [{ id: "gemma4:12b", tools: true, vision: false }];
+    }, onPublish: () => { if (answering) adapter.list = async () => MODELS; } });
+    try {
+      assert.equal(await test.chat(), undefined, "no session is built while the runtime has not answered");
+      assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /Ollama is not answering/);
+      answering = true;
+      await test.probeLocalRuntimes();
+      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the runtime has listed", 10_000);
+    } finally { await test.close(); }
+  });
+
+  it("skips a local model the runtime says cannot call tools", async () => {
+    const adapter = new CaptureAdapter();
+    adapter.list = async () => [{ provider: "ollama", id: "chatty:7b", tools: false }, ...MODELS];
+    const test = await fixture({ adapter });
+    try {
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL, "the first row that can call tools, not the first row");
+      assert.equal((await test.chat("ollama/chatty:7b"))?.config.model, "ollama/chatty:7b", "chosen on purpose, it is still admitted");
+    } finally { await test.close(); }
+  });
+
+  it("lets shutdown through while a keyless session is waiting on the reload after a publication", async () => {
+    const adapter = new CaptureAdapter();
+    adapter.list = async () => CLOUD_ONLY;
+    const test = await fixture({ adapter, localModels: [{ id: "gemma4:12b", tools: true, vision: false }] });
+    const pending = test.chat().catch(() => undefined);
+    const stopped = Promise.race([test.close().then(() => "stopped"), new Promise<string>((resolve) => setTimeout(() => resolve("hung"), 4_000).unref?.())]);
+    assert.equal(await stopped, "stopped", "the cleared reload timer settled the gate rather than leaving the command waiting on it");
+    await pending;
   });
 
   it("chooses nothing when the catalogue lists nothing local", async () => {
