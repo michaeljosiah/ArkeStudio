@@ -309,6 +309,14 @@ export const WORLD_MODELS_SCHEMA_VERSION = 27;
  * (worldbuilding chat, approvals, images), so this takes the next number clear of them.
  */
 export const VOICE_PINS_SCHEMA_VERSION = 31;
+/**
+ * A take a person recorded (design turn 155c, SPEC-047 R-34..R-36): `source` and `recording` on
+ * the chapter's audiobook take, `recording` on the take's sidecar generation, and the
+ * `recorded-take` rights scope in `audio/rights.jsonl`. All three are read strictly by the builds
+ * before it — a take record unreadable, a sidecar dropped with its take, the rights log refused
+ * as damaged — so the world is raised before the first of them is written.
+ */
+export const RECORDED_TAKE_SCHEMA_VERSION = 32;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {
@@ -316,11 +324,12 @@ function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: strin
   for (const file of files) {
     if (!file.newContent || !file.path.endsWith(".json")) continue;
     try {
-      const record = JSON.parse(file.newContent) as { mediaInfo?: Record<string, unknown>; retiredAt?: unknown; generation?: { source?: unknown; directionHash?: unknown; remakeOf?: unknown } } | null;
+      const record = JSON.parse(file.newContent) as { mediaInfo?: Record<string, unknown>; retiredAt?: unknown; generation?: { source?: unknown; directionHash?: unknown; remakeOf?: unknown; recording?: unknown } } | null;
       if (file.path.startsWith("artifacts/") && record?.retiredAt !== undefined) boundary = Math.max(boundary, ARTIFACT_RETIREMENT_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook") boundary = Math.max(boundary, AUDIOBOOK_TAKE_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook" && record.generation.directionHash !== undefined) boundary = Math.max(boundary, AUDIOBOOK_DIRECTION_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook" && record.generation.remakeOf !== undefined) boundary = Math.max(boundary, AUDIOBOOK_REMAKE_SCHEMA_VERSION);
+      if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook" && record.generation.recording !== undefined) boundary = Math.max(boundary, RECORDED_TAKE_SCHEMA_VERSION);
       const info = record?.mediaInfo;
       if (info == null) continue;
       if ("hasVideo" in info) boundary = Math.max(boundary, MEDIA_HAS_VIDEO_SCHEMA_VERSION);

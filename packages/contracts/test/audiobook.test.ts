@@ -6,6 +6,7 @@ import {
   audiobookBlocks,
   audiobookSpeakerColours,
   audiobookSpeakerKey,
+  retailLevel,
   audiobookBlockState,
   audiobookChapterComplete,
   audiobookCounts,
@@ -249,5 +250,13 @@ describe("speaker colours (SPEC-047 R-33)", () => {
     assert.equal(audiobookSpeakerKey({}), null);
     assert.equal(audiobookSpeakerKey({ speaker: "the harbourmaster" }), "the harbourmaster");
     assert.equal(audiobookSpeakerKey({ speaker: "Odile", sheet: "odile-sarn" }), "odile-sarn");
+  });
+});
+
+describe("a recording's level against Retail (SPEC-047 R-23, R-35)", () => {
+  it("passes within the window, warns outside it, and says nothing of what was not measured", () => {
+    assert.deepEqual(retailLevel({ rmsDbfs: -20, samplePeakDbfs: -4 }), { loudness: "pass", peak: "pass" });
+    assert.deepEqual(retailLevel({ rmsDbfs: -35, samplePeakDbfs: -1 }), { loudness: "warning", peak: "warning" });
+    assert.deepEqual(retailLevel({ rmsDbfs: null, samplePeakDbfs: null }), { loudness: "unavailable", peak: "unavailable" });
   });
 });

@@ -10,6 +10,7 @@ import {
   audiobookHeading,
   audiobookSpeakerColours,
   audiobookSpeakerKey,
+  retailLevel,
   billableCharacters,
   cadenceSupport,
   estimateMicroUsd,
@@ -34,7 +35,8 @@ import {
   type ManifestModel,
 } from "@arke-studio/contracts";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
-import { Pin, Waveform } from "../components/icons.js";
+import { Mic, Pin, Waveform } from "../components/icons.js";
+import { EditorDialog } from "../components/editor-dialog.js";
 import { Button } from "../components/ui.js";
 import { clearQueue, dismissPlayback, enqueueClip, jumpQueue, playClip, playbackSnapshot, usePlayback, useQueueAt } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
@@ -42,7 +44,11 @@ import {
   acceptDirection,
   directChapter,
   dismissAudiobookRun,
+  discardAudiobookTake,
   dismissDirection,
+  keepAudiobookTake,
+  stageAudiobookTake,
+  useStagedTakes,
   readAudiobookBlocks,
   readAudiobookChapter,
   requestVoiceCatalogue,
@@ -107,6 +113,8 @@ export interface BlockRow {
   speakerKey: string | null;
   /** The speaker's colour, `--voice-N`, the same in every chapter; null for the narrator and a name no sheet carries. */
   colour: number | null;
+  /** The kept take was recorded by a person (SPEC-047 R-34), not made by a voice. */
+  recorded: boolean;
 }
 
 /** The filter over the blocks (R-33): everyone, the narrator, or one speaker by key. */
@@ -201,7 +209,8 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       const language = spokenSource.kind === "cloned" ? spokenSource.voice.language : undefined;
       const speakerKey = audiobookSpeakerKey(block);
       const colour = block.sheet === undefined ? null : (colours.get(block.sheet) ?? null);
-      return { block, state: audiobookBlockState(block, recordOrNull, assigned, hasArtifact), mark, markWarn, assigned, speaker, ...(language !== undefined ? { language } : {}), artifact, speakerKey, colour };
+      const recorded = take?.source === "recorded";
+      return { block, state: audiobookBlockState(block, recordOrNull, assigned, hasArtifact), mark, markWarn, assigned, speaker, ...(language !== undefined ? { language } : {}), artifact, speakerKey, colour, recorded };
     });
   }, [derived.blocks, narrator, reading, world, recordOrNull, hasArtifact, catalogue, modelOf, colours]);
   // The filter is the page's (R-33): not kept, and gone with the chapter.
@@ -382,6 +391,38 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     [locked, connection, worldId, prodId, chapter.file],
   );
   const lastRecord = useAudiobookRecords()[`${worldId}/${prodId}/${chapter.id}`];
+  // A take a person recorded (turn 155c): the host's picker opens for the block, the checks come
+  // back as a dialog, and the keep answers as the block's record does.
+  const [uploadId, setUploadId] = useState<string | null>(null);
+  const staged = useStagedTakes()[uploadId ?? ""];
+  useEffect(() => setUploadId(null), [chapter.id]);
+  const uploadTake = useCallback(
+    (key: string) => {
+      if (locked || connection !== "open") return;
+      if (uploadId !== null) discardAudiobookTake(worldId, uploadId);
+      setUploadId(stageAudiobookTake(worldId, prodId, chapter.file, key));
+    },
+    [locked, connection, uploadId, worldId, prodId, chapter.file],
+  );
+  const closeUpload = useCallback(() => {
+    if (uploadId !== null) discardAudiobookTake(worldId, uploadId);
+    setUploadId(null);
+  }, [uploadId, worldId]);
+  const uploadRow = staged === undefined ? null : (rows.find((row) => row.block.key === staged.block) ?? null);
+  const uploadDialog =
+    uploadId !== null && staged !== undefined && staged.state !== "choosing" && uploadRow !== null ? (
+      <RecordedTakeDialog
+        staged={staged}
+        row={uploadRow}
+        onCancel={closeUpload}
+        onReplace={() => uploadTake(uploadRow.block.key)}
+        onKeep={(basis, performer) => keepAudiobookTake(worldId, uploadId, basis, performer)}
+      />
+    ) : null;
+  // Kept: the store lets the entry go when the record answers, and the dialog with it.
+  useEffect(() => {
+    if (uploadId !== null && staged === undefined) setUploadId(null);
+  }, [uploadId, staged]);
 
   const head = (() => {
     if (upload !== null && run?.state !== "read") {
@@ -494,6 +535,8 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     setDirection,
     /** The last write outside a run — a block's direction set or refused (R-9): the refusal is said on the panel. */
     lastRecord,
+    uploadTake,
+    uploadDialog,
   };
 }
 
@@ -669,11 +712,16 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelect, onPlayOne,
                   <Pin size={11} />
                 </span>
               )}
-              {row.artifact !== null && (
-                <span className="fy-ab__source" title="made by a voice" aria-label="made by a voice">
-                  <Waveform size={11} />
-                </span>
-              )}
+              {row.artifact !== null &&
+                (row.recorded ? (
+                  <span className="fy-ab__source fy-ab__source--recorded" title="recorded" aria-label="recorded">
+                    <Mic size={11} />
+                  </span>
+                ) : (
+                  <span className="fy-ab__source" title="made by a voice" aria-label="made by a voice">
+                    <Waveform size={11} />
+                  </span>
+                ))}
               <button
                 type="button"
                 className={`fy-ab__dot fy-ab__dot--${row.state.replace(" ", "-")}`}
@@ -780,7 +828,7 @@ function reportLine(plan: CadencePlan, controls: ReturnType<typeof mapCadence>["
 }
 
 /** The side in the Audiobook view: the block pressed, its direction, then its takes. */
-export function AudiobookSide({ rows, selected, record, artifacts, slug, productionId, chapterId, chapterTitle, modelOf, onSetDirection, onMakeAgain, refused, blockHost }: {
+export function AudiobookSide({ rows, selected, record, artifacts, slug, productionId, chapterId, chapterTitle, modelOf, onSetDirection, onMakeAgain, onUpload, refused, blockHost }: {
   rows: BlockRow[];
   selected: string | null;
   record: ChapterAudiobook | null;
@@ -792,6 +840,8 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
   modelOf: (reader: AudiobookReader) => ManifestModel | null;
   onSetDirection: (key: string, direction: AudiobookDirectionInput | null) => void;
   onMakeAgain: (key: string) => void;
+  /** A recording for the block, from the host's picker (SPEC-047 R-35). */
+  onUpload?: (key: string) => void;
   /** The last write's refusal (R-9), said on the panel until the next write answers. */
   refused: string | null;
   /** The element the block's words are shown in, for a cue placed at the selection. */
@@ -1022,9 +1072,15 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
                     </button>
                     <span className="fy-ch__who-name">v{takes.length - index}</span>
                     <span className="fy-ch__who-where fy-mono">
-                      {generation !== null ? `${generation.voiceLabel ?? generation.voiceId} · ${generation.provider}` : ""}
-                      {generation?.delivery !== undefined ? ` · ${generation.delivery}` : ""}
-                      {generation !== null ? ` · ${generation.costMicroUsd === null ? formatMicroUsd(generation.estimatedMicroUsd) : formatMicroUsd(generation.costMicroUsd)}` : ""}
+                      {generation?.recording !== undefined
+                        ? `recorded${generation.voiceLabel !== undefined ? ` · ${generation.voiceLabel}` : ""}`
+                        : (
+                          <>
+                            {generation !== null ? `${generation.voiceLabel ?? generation.voiceId} · ${generation.provider}` : ""}
+                            {generation?.delivery !== undefined ? ` · ${generation.delivery}` : ""}
+                            {generation !== null ? ` · ${generation.costMicroUsd === null ? formatMicroUsd(generation.estimatedMicroUsd) : formatMicroUsd(generation.costMicroUsd)}` : ""}
+                          </>
+                        )}
                     </span>
                     <span className="fy-ch__who-count fy-mono">{chosen ? "✓" : ""}</span>
                   </div>
@@ -1033,14 +1089,19 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
             })}
           </ul>
         )}
-        {takes.length > 0 && (
-          <div className="fy-ab__again">
+        <div className="fy-ab__again">
+          {takes.length > 0 && (
             <Button variant="ghost" onClick={() => onMakeAgain(row.block.key)} data-testid="audiobook-make-again">
               Make again
               {model !== null && row.speaker.provider !== "kokoro" ? ` · ${formatMicroUsd(estimateMicroUsd(model, { characters: billableCharacters(model, row.block.text) }))}` : ""}
             </Button>
-          </div>
-        )}
+          )}
+          {onUpload !== undefined && (
+            <Button variant="ghost" onClick={() => onUpload(row.block.key)} data-testid="audiobook-upload" title="a recording of these words, from a file">
+              <Mic size={11} /> Upload
+            </Button>
+          )}
+        </div>
       </section>
     </>
   );
@@ -1091,5 +1152,108 @@ export function DirectionCard({ run, chapterOrder, onAccept, onDiscard }: {
         </>
       )}
     </section>
+  );
+}
+
+/** A figure the checks measured, or a dash. */
+const db = (value: number | null | undefined, unit: string) => (value === null || value === undefined ? "—" : `${value.toFixed(1).replace("-", "\u2212")} ${unit}`);
+
+/**
+ * Upload a take (design turn 155c, SPEC-047 R-35, R-36): the block's words in its speaker's
+ * colour over the file and what it is, the checks as data — a warning never refuses — then the
+ * performer and the rights, given once, and `Keep as take`.
+ */
+export function RecordedTakeDialog({ staged, row, onCancel, onReplace, onKeep }: {
+  staged: import("../lib/store.js").StagedTake;
+  row: BlockRow;
+  onCancel: () => void;
+  onReplace: () => void;
+  onKeep: (basis: "self" | "authorized" | "licensed", performer?: string) => void;
+}) {
+  const [performer, setPerformer] = useState("");
+  const [basis, setBasis] = useState<"self" | "authorized" | "licensed" | null>(null);
+  const tone = row.speakerKey === null ? "narrator" : row.colour === null ? "none" : String(row.colour);
+  const checks = staged.checks;
+  // Level against Retail's figures (R-23, R-35): the foundation measures RMS and peak on every file.
+  const level = checks === undefined ? null : retailLevel(checks);
+  const noise = checks?.noiseFloor ?? "unavailable";
+  const rows: { key: string; label: string; value: string; outcome: string }[] = [
+    {
+      key: "words",
+      label: "Words",
+      value: checks === undefined || checks.words === "unchecked" ? "unchecked" : checks.words === "match" ? "match" : `${checks.differences} differ`,
+      outcome: checks === undefined || checks.words === "unchecked" ? "unavailable" : checks.words === "match" ? "pass" : "warning",
+    },
+    { key: "loudness", label: "Loudness", value: db(checks?.rmsDbfs, "dBFS"), outcome: level?.loudness ?? "unavailable" },
+    { key: "peak", label: "Peak", value: db(checks?.samplePeakDbfs, "dBFS"), outcome: level?.peak ?? "unavailable" },
+    { key: "noise", label: "Noise floor", value: noise === "unavailable" ? "—" : noise, outcome: noise },
+  ];
+  const source = checks;
+  const technical = source === undefined ? "" : [
+    source.durationSec !== null ? `${source.durationSec.toFixed(1)} s` : null,
+    source.sampleRateHz !== null ? `${Math.round(source.sampleRateHz / 100) / 10} kHz` : null,
+    source.channels === 1 ? "mono" : source.channels === 2 ? "stereo" : source.channels !== null ? `${source.channels} ch` : null,
+  ].filter((part) => part !== null).join(" · ");
+  const refused = staged.state === "refused" ? staged.refused : undefined;
+  return (
+    <EditorDialog open title="Upload a take" subtitle={`${row.mark} · ${row.block.key}`} onClose={onCancel} width={540}>
+      <div className="fy-rectake" data-testid="recorded-take-dialog">
+        <div className={`fy-rectake__quote fy-voice--${tone}`}>{row.block.text}</div>
+        {refused !== undefined ? (
+          <p className="fy-rectake__refused">{refused}</p>
+        ) : (
+          <>
+            <div className="fy-rectake__file">
+              <span className="fy-rectake__name">{staged.file ?? ""}</span>
+              <span className="fy-mono fy-rectake__tech">{technical}</span>
+              <Button variant="ghost" onClick={onReplace}>Replace</Button>
+            </div>
+            <div className="fy-rectake__checks" data-testid="recorded-take-checks">
+              {rows.map((item) => (
+                <div key={item.key} className={`fy-rectake__check fy-rectake__check--${item.outcome}`}>
+                  <span className="fy-rectake__check-label">{item.label}</span>
+                  <span className="fy-mono fy-rectake__check-value">{item.value}</span>
+                </div>
+              ))}
+            </div>
+            <div className="fy-rectake__who">
+              <label className="fy-rectake__field">
+                <span>Performer</span>
+                <input className="fy-rectake__input" value={performer} maxLength={80} onChange={(event) => setPerformer(event.target.value)} />
+              </label>
+              <div className="fy-rectake__field">
+                <span>Rights</span>
+                <span className="fy-seg" role="group" aria-label="Rights">
+                  {([["self", "My voice"], ["authorized", "Authorized"], ["licensed", "Licensed"]] as const).map(([value, label]) => (
+                    <button key={value} type="button" className={`fy-seg__item${basis === value ? " fy-seg__item--active" : ""}`} aria-pressed={basis === value} onClick={() => setBasis(value)}>
+                      {label}
+                    </button>
+                  ))}
+                </span>
+              </div>
+            </div>
+            {staged.refused !== undefined && <p className="fy-rectake__refused">{staged.refused}</p>}
+          </>
+        )}
+        <div className="fy-rectake__foot">
+          <span className="fy-mono fy-rectake__tech">{refused === undefined ? "wav · mono" : ""}</span>
+          <span className="fy-rectake__push" />
+          <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+          {refused !== undefined ? (
+            <Button variant="primary" onClick={onReplace}>Choose another</Button>
+          ) : (
+            <Button
+              variant="primary"
+              disabled={basis === null || staged.state === "keeping"}
+              title={basis === null ? "say whose voice it is" : undefined}
+              onClick={() => basis !== null && onKeep(basis, performer.trim() === "" ? undefined : performer.trim())}
+              data-testid="recorded-take-keep"
+            >
+              Keep as take
+            </Button>
+          )}
+        </div>
+      </div>
+    </EditorDialog>
   );
 }

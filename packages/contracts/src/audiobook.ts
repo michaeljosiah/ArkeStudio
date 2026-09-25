@@ -57,6 +57,22 @@ export function audiobookBlocks(
   return { blocks, ambiguous: voiced.ambiguous };
 }
 
+/**
+ * A recording's level against `Retail`'s figures (SPEC-047 R-23, R-35): RMS between −23 and −18
+ * dBFS and a peak at or under −3 dB. The foundation measures RMS and sample peak on every file;
+ * outside the window is a warning, never a refusal, and an unmeasured figure is neither.
+ */
+export const RETAIL_RMS_DBFS = { min: -23, max: -18 } as const;
+export const RETAIL_PEAK_DBFS = -3;
+export function retailLevel(measurements: { rmsDbfs: number | null; samplePeakDbfs: number | null }): { loudness: "pass" | "warning" | "unavailable"; peak: "pass" | "warning" | "unavailable" } {
+  const rms = measurements.rmsDbfs;
+  const peak = measurements.samplePeakDbfs;
+  return {
+    loudness: rms === null ? "unavailable" : rms >= RETAIL_RMS_DBFS.min && rms <= RETAIL_RMS_DBFS.max ? "pass" : "warning",
+    peak: peak === null ? "unavailable" : peak <= RETAIL_PEAK_DBFS ? "pass" : "warning",
+  };
+}
+
 /** How many speaker colours there are (SPEC-047 R-33): `--voice-1` to `--voice-6`, repeated past the sixth. */
 export const AUDIOBOOK_VOICE_COLOURS = 6;
 
@@ -143,6 +159,22 @@ export const AudiobookTakeSchema = z
     costMicroUsd: z.number().int().min(0).nullable(),
     /** True when the take was adopted from the speech cache rather than made (R-19). */
     adopted: z.literal(true).optional(),
+    /**
+     * `recorded` for a take a person recorded (SPEC-047 R-34); absent for one a voice made. A
+     * recording is current while its words are: no reader or direction made it, so neither can
+     * make it stale.
+     */
+    source: z.literal("recorded").optional(),
+    /** What the recording was kept with (R-35, R-36): the performer's own label, the checks' warnings, the words' check. */
+    recording: z
+      .object({
+        acknowledgementId: z.string().min(1),
+        performer: z.string().min(1).max(80).optional(),
+        warnings: z.array(z.string().min(1)).max(20),
+        words: z.enum(["match", "differ", "unchecked"]),
+      })
+      .strict()
+      .optional(),
     /** The direction the take was made under (R-6, R-14), as `audiobookDirectionHash` names it; absent for a take made with none. */
     directionHash: z.string().min(1).optional(),
     madeAt: IsoDateTimeSchema,
@@ -292,6 +324,8 @@ export function audiobookBlockState(
   if (take === undefined) return "not made";
   if (hasArtifact !== undefined && !hasArtifact(take.artifactId)) return "not made";
   if (take.textHash !== audiobookTextHash(block.text)) return "stale";
+  // A recording is current while its words are (R-34): no reader and no direction made it.
+  if (take.source === "recorded") return "made";
   if (!sameReader(take.assigned ?? take.reader, assigned)) return "stale";
   // The direction the take was made under against the one that stands (R-14): a direction
   // added, changed or dropped since is a different take; one authored for other words is none.

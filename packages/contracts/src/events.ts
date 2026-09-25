@@ -1125,6 +1125,35 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...base,
+      type: z.literal("audiobook.take-staged"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      block: z.string().min(1),
+      requestId: UlidSchema,
+      /**
+       * The file's own name and what it is, as brought in, and the checks on the prepared file
+       * as the dialog shows them (SPEC-047 R-35) — figures and outcomes, never a refusal unless a
+       * check is a hard incompatibility. Deliberately flat: the foundation's own report and
+       * comparison schemas make the event union too large for the engine's declaration build.
+       */
+      file: z.string().min(1).optional(),
+      durationSec: z.number().min(0).nullable().optional(),
+      sampleRateHz: z.number().int().positive().nullable().optional(),
+      channels: z.number().int().positive().nullable().optional(),
+      rmsDbfs: z.number().nullable().optional(),
+      samplePeakDbfs: z.number().nullable().optional(),
+      noiseFloor: z.enum(["pass", "informational", "warning", "hard-incompatibility", "unavailable", "not-applicable"]).optional(),
+      /** The words heard against the block's: `match`, `differ` with how many, or `unchecked`. */
+      words: z.enum(["match", "differ", "unchecked"]).optional(),
+      differences: z.number().int().min(0).optional(),
+      /** Why the file cannot be a take, in one clause. */
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
       type: z.literal("audiobook.record"),
       worldId: UlidSchema,
       productionId: SlugSchema,
