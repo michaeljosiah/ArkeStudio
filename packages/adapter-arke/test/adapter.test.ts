@@ -39,9 +39,9 @@ test("lists pulled models in the contract's terms, and names a tool-calling one 
   await f.adapter.init();
   assert.equal(f.adapter.readiness().ready, true);
   assert.deepEqual(await f.adapter.listModels(), [
-    { id: "chatty:7b", provider: "ollama", displayName: "chatty:7b", inputModalities: ["text"], inputTokenLimit: 8192 },
-    { id: "qwen3-vl:8b", provider: "ollama", displayName: "qwen3-vl:8b", inputModalities: ["text", "image"], inputTokenLimit: 65536, isDefault: true },
-  ]);
+    { id: "chatty:7b", provider: "ollama", displayName: "chatty:7b", inputModalities: ["text"], inputTokenLimit: 8192, tools: false },
+    { id: "qwen3-vl:8b", provider: "ollama", displayName: "qwen3-vl:8b", inputModalities: ["text", "image"], inputTokenLimit: 32768, tools: true, isDefault: true },
+  ], "the limit is the window a session will get, and a model that cannot call tools says so");
 });
 
 test("a turn streams, completes, and ends with a stated reason; every event parses", async (t) => {
@@ -182,4 +182,48 @@ test("a turn stopped between tool calls leaves every call answered, so the next 
     { role: "tool", tool_name: "read", content: "Not run: the turn was stopped first." },
     { role: "user", content: "Again." },
   ]);
+});
+
+test("a prompt-only role is sent no tools, so a model that cannot call them can still answer", async (t) => {
+  const f = await fixture(t);
+  const id = await f.session("conversation-namer");
+  f.ollama.script.push(reply('{"title":"Saltlight"}'));
+  await f.adapter.sendMessage({ sessionId: id, parts: [{ type: "text", text: "Name it." }] });
+  assert.equal(f.ollama.chats[0]!.tools, undefined);
+});
+
+test("a reply cut off at the length limit is not a finished reply", async (t) => {
+  const f = await fixture(t);
+  const id = await f.session("world-builder");
+  f.ollama.script.push({ chunks: [
+    { message: { role: "assistant", content: '{"reply":"The town' }, done: false },
+    { message: { role: "assistant", content: "" }, done: true, done_reason: "length", prompt_eval_count: 10, eval_count: 10 },
+  ] });
+  await assert.rejects(f.adapter.sendMessage({ sessionId: id, parts: [{ type: "text", text: "hi" }] }), /length limit/);
+  const ending = await f.ended(id);
+  assert.equal(ending.type === "session.ended" && ending.reason, "budget-exceeded");
+  assert.ok(!f.events.some((e) => e.type === "message.completed" && e.sessionId === id));
+});
+
+test("losing Ollama mid-session is visible in readiness and the revision", async (t) => {
+  const f = await fixture(t);
+  await f.adapter.init();
+  const id = await f.session("world-builder");
+  const revision = f.adapter.lifecycleRevision();
+  await f.ollama.stop();
+  await assert.rejects(f.adapter.sendMessage({ sessionId: id, parts: [{ type: "text", text: "hi" }] }), /not answering/);
+  assert.equal(f.adapter.readiness().ready, false);
+  assert.ok(f.adapter.lifecycleRevision() > revision, "a health loop polling the revision sees the change");
+});
+
+test("events emitted before the first pull still reach a subscriber", async (t) => {
+  const f = await fixture(t);
+  const id = await f.session("world-builder");
+  const listening = new AbortController(); t.after(() => listening.abort());
+  const stream = f.adapter.streamEvents(listening.signal);
+  f.ollama.script.push(reply("Quick."));
+  await f.adapter.sendMessage({ sessionId: id, parts: [{ type: "text", text: "hi" }] });
+  const seen: string[] = [];
+  for await (const event of stream) { seen.push(event.type); if (event.type === "session.ended") break; }
+  assert.deepEqual(seen, ["message.delta", "message.delta", "message.completed", "session.ended"]);
 });

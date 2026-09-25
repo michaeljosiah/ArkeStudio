@@ -59,6 +59,7 @@ export interface ChatResult {
 }
 
 export class OllamaChatError extends Error {}
+export class OllamaUnreachableError extends Error {}
 
 /**
  * Stream one chat call. `onText` receives the answer so far after every chunk that adds to it.
@@ -71,16 +72,24 @@ export class OllamaChatError extends Error {}
 export async function streamChat(
   fetchImpl: typeof fetch, baseUrl: string, request: ChatRequest, signal: AbortSignal, onText: (text: string) => void,
 ): Promise<ChatResult> {
-  const response = await fetchImpl(`${baseUrl}/api/chat`, {
-    method: "POST", redirect: "error", signal,
-    headers: { "content-type": "application/json", accept: "application/x-ndjson" },
-    body: JSON.stringify({
-      model: request.model, messages: request.messages, stream: true,
-      ...(request.tools.length > 0 ? { tools: request.tools } : {}),
-      options: { num_ctx: request.numCtx },
-      ...(request.keepAlive !== undefined ? { keep_alive: request.keepAlive } : {}),
-    }),
-  });
+  let response: Response;
+  try {
+    response = await fetchImpl(`${baseUrl}/api/chat`, {
+      method: "POST", redirect: "error", signal,
+      headers: { "content-type": "application/json", accept: "application/x-ndjson" },
+      body: JSON.stringify({
+        model: request.model, messages: request.messages, stream: true,
+        ...(request.tools.length > 0 ? { tools: request.tools } : {}),
+        options: { num_ctx: request.numCtx },
+        ...(request.keepAlive !== undefined ? { keep_alive: request.keepAlive } : {}),
+      }),
+    });
+  } catch (error) {
+    // A request that never reached Ollama says the runtime is gone, not that this turn went
+    // wrong: the adapter reports that as readiness, which is all a health loop can see.
+    if (signal.aborted) throw error;
+    throw new OllamaUnreachableError("Ollama is not answering on this machine.", { cause: error });
+  }
   if (!response.ok) {
     const detail = object(await response.json().catch(() => ({}))).error;
     throw new OllamaChatError(typeof detail === "string" && detail ? `Ollama refused the request: ${detail}` : `Ollama refused the request (HTTP ${response.status}).`);

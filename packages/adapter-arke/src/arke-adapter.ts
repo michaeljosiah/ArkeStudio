@@ -9,7 +9,7 @@ import {
   type ToolResult, type ToolSession,
 } from "@arke-studio/confined-tools";
 import {
-  listPulled, loopbackBaseUrl, OLLAMA_DEFAULT_URL, streamChat,
+  listPulled, loopbackBaseUrl, OLLAMA_DEFAULT_URL, OllamaUnreachableError, streamChat,
   type ChatMessage, type ChatTool, type PulledModel,
 } from "./ollama.js";
 
@@ -45,6 +45,12 @@ const DEFAULT_CONTEXT = 8_192;
 const CONTEXT_CEILING = 32_768;
 const DEFAULT_STEPS = 24;
 const PROVIDER = "ollama";
+/**
+ * Roles that answer with one JSON document and never touch a file. The coordinator lets them run
+ * on a model that cannot call tools, so they must not be sent tool definitions such a model may
+ * reject outright.
+ */
+const PROMPT_ONLY_AGENTS = new Set(["conversation-namer", "conversation-summarizer"]);
 
 class EventQueue {
   private readonly values: HarnessEvent[] = [];
@@ -102,6 +108,15 @@ export class ArkeAdapter implements HarnessAdapter {
   }
   abandonSessionPreparation(id: string): void { this.preparations.delete(id); }
 
+  /**
+   * There is no child process to supervise, so a health loop learns Ollama has gone only from
+   * readiness and the revision; a lost connection mid-turn changes both, and `init` restores them.
+   */
+  private markUnready(reason: string): void {
+    if (this.ready.ready) this.revision++;
+    this.ready = { ready: false, reason };
+  }
+
   /** Ready when Ollama answers. There is nothing else to start. */
   async init(): Promise<void> {
     if (this.disposed) throw new Error("The Arke harness is disposed.");
@@ -110,8 +125,8 @@ export class ArkeAdapter implements HarnessAdapter {
       if (!this.ready.ready) this.revision++;
       this.ready = { ready: true };
     } catch {
-      this.ready = { ready: false, reason: "Ollama is not answering on this machine." };
-      throw new Error(this.ready.reason);
+      this.markUnready("Ollama is not answering on this machine.");
+      throw new Error("Ollama is not answering on this machine.");
     }
   }
 
@@ -130,10 +145,21 @@ export class ArkeAdapter implements HarnessAdapter {
     const models = pulled.map((model): ModelInfo => ({
       id: model.id, provider: PROVIDER, displayName: model.id,
       inputModalities: model.vision ? ["text", "image"] : ["text"],
-      ...(model.contextLength !== undefined ? { inputTokenLimit: model.contextLength } : {}),
+      // The window a session will actually get, not the model's own: the coordinator sizes
+      // context from this before a session exists, and a prompt sized to 131,072 tokens sent
+      // into a 32,768 window loses its beginning without an error.
+      inputTokenLimit: this.contextFor(model.contextLength),
+      // Stated either way. Absent reads as unknown, and unknown is offered to tool-using roles.
+      tools: model.tools,
       ...(model.id === fallback ? { isDefault: true } : {}),
     }));
     return { models, pulled };
+  }
+
+  /** The context window asked of Ollama: the model's own, held to the ceiling. */
+  private contextFor(stated: number | undefined): number {
+    const ceiling = this.opts.maxContextTokens ?? CONTEXT_CEILING;
+    return Math.min(stated ?? this.opts.maxContextTokens ?? DEFAULT_CONTEXT, ceiling);
   }
 
   knownInputTokenLimit(sessionId?: string): number | null {
@@ -171,11 +197,10 @@ export class ArkeAdapter implements HarnessAdapter {
     const skill = sessionSkillForAgent(member.name, prepared);
     const prompt = agentPromptFor({ ...member, researchWeb, ...(override?.brief !== undefined ? { brief: override.brief } : {}), ...(skill ? { skill } : {}) });
     const stated = pulled.find((model) => model.id === selected.id)?.contextLength;
-    const ceiling = this.opts.maxContextTokens ?? CONTEXT_CEILING;
-    const numCtx = Math.min(stated ?? this.opts.maxContextTokens ?? DEFAULT_CONTEXT, ceiling);
+    const numCtx = this.contextFor(stated);
     // Only what the confinement permits is ever offered: the tool list IS the confinement here,
     // rather than a list of tools a harness already has with some of them denied.
-    const tools: ChatTool[] = toolsFor(toolSession).map((tool) => ({ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.parameters } }));
+    const tools: ChatTool[] = PROMPT_ONLY_AGENTS.has(member.name) ? [] : toolsFor(toolSession).map((tool) => ({ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.parameters } }));
     const id = randomUUID();
     this.sessions.set(id, { ...toolSession, id, model: selected.id, numCtx, tools, messages: [{ role: "system", content: prompt }], turn: null, usage: 0 });
     this.opts.onTrace?.({ at: "arke.session-created", sessionId: id, model: selected.id, agent: member.name, numCtx, tools: tools.map((tool) => tool.function.name) });
@@ -235,6 +260,9 @@ export class ArkeAdapter implements HarnessAdapter {
           ...(this.opts.keepAlive !== undefined ? { keepAlive: this.opts.keepAlive } : {}),
         }, signal, (text) => this.emit({ type: "message.delta", sessionId: session.id, correlationId: turn.correlationId, text }));
         session.usage += result.promptTokens + result.outputTokens;
+        // Cut off by the output or context limit: the text, or a tool call's arguments, is only
+        // the part that fit. Handing it on as finished would pass half a JSON document downstream.
+        if (result.doneReason === "length") return { reason: "budget-exceeded", detail: "The reply reached the model's length limit before it finished." };
         session.messages.push({ role: "assistant", content: result.content, ...(result.toolCalls.length > 0 ? { tool_calls: result.toolCalls } : {}) });
         if (result.toolCalls.length === 0) return { reason: "completed", text: result.content };
         for (const call of result.toolCalls) {
@@ -245,6 +273,7 @@ export class ArkeAdapter implements HarnessAdapter {
       return { reason: "budget-exceeded", detail: `The turn reached its limit of ${steps} model calls.` };
     } catch (error) {
       if (signal.aborted) return { reason: "cancelled", detail: "Stopped." };
+      if (error instanceof OllamaUnreachableError) this.markUnready(error.message);
       return { reason: "error", detail: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -297,12 +326,23 @@ export class ArkeAdapter implements HarnessAdapter {
     for (const queue of this.queues) queue.push(valid);
   }
 
-  async *streamEvents(signal?: AbortSignal): AsyncIterable<HarnessEvent> {
-    if (signal?.aborted || this.disposed) return;
+  /**
+   * Subscribes when called, not on the first pull. Callers take the iterable, dispatch a turn,
+   * then start iterating; a local reply can finish in between, and a generator body would only
+   * register after its events were already gone.
+   */
+  streamEvents(signal?: AbortSignal): AsyncIterable<HarnessEvent> {
+    if (signal?.aborted || this.disposed) return { [Symbol.asyncIterator]: () => ({ next: async () => ({ value: undefined as never, done: true }) }) };
     const queue = new EventQueue(); this.queues.add(queue);
-    const stop = () => queue.close(); signal?.addEventListener("abort", stop, { once: true });
-    try { for await (const event of queue) yield event; }
-    finally { signal?.removeEventListener("abort", stop); this.queues.delete(queue); }
+    const stop = () => { queue.close(); signal?.removeEventListener("abort", stop); this.queues.delete(queue); };
+    signal?.addEventListener("abort", stop, { once: true });
+    const iterator = queue[Symbol.asyncIterator]();
+    return {
+      [Symbol.asyncIterator]: () => ({
+        next: async () => { const step = await iterator.next(); if (step.done) stop(); return step; },
+        return: async () => { stop(); return { value: undefined as never, done: true }; },
+      }),
+    };
   }
 
   async dispose(): Promise<void> {
