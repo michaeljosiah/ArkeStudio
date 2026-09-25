@@ -4,7 +4,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
-  agentForPurpose, type ClientMessage, type CreateSessionInput, type DomainEvent,
+  agentForPurpose, VendorAuthStatusSchema, type ClientMessage, type CreateSessionInput, type DomainEvent,
   type HarnessAdapter, type ModelInfo, type SessionConfigInput,
 } from "@arke-studio/contracts";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
@@ -370,6 +370,44 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       assert.equal(stage.config.agents?.["stage-designer"]?.model, LOCAL_VISION);
       assert.equal(stage.config.agents?.["world-builder"]?.model, LOCAL, "text agents keep the first text-capable row");
       assert.equal((await test.chat())?.config.model, LOCAL, "chat with nothing chosen is decided the same way");
+    } finally { await test.close(); }
+  });
+
+  it("refuses a keyless session when the catalogue could not be read, rather than running on the cloud default", async () => {
+    const adapter = new CaptureAdapter();
+    adapter.list = async () => { throw new Error("discovery is down"); };
+    const test = await fixture({ adapter });
+    try {
+      assert.equal(await test.chat(), undefined, "no session is built on a catalogue nobody could read");
+      assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /could not be read/);
+      // The catalogue read and holding nothing local is a different answer: the harness default.
+      adapter.list = async () => CLOUD_ONLY;
+      await test.send({ kind: "list-harness-models" });
+      await until(() => test.coordinator.getState().app.harnessModelStatus.status === "ready", "the catalogue read");
+      assert.deepEqual((await test.chat())?.config.agents ?? {}, {});
+    } finally { await test.close(); }
+  });
+
+  it("counts an account connected through the harness's own sign-in as a cloud credential", async () => {
+    const test = await fixture();
+    try {
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL);
+      (test.coordinator as unknown as { emit(event: DomainEvent): void }).emit({
+        at: new Date().toISOString(), type: "vendor-auth.status",
+        auth: VendorAuthStatusSchema.parse({ available: true, vendors: [
+          { id: "openai", name: "OpenAI", methods: [], connections: [{ kind: "stored", id: "c1", label: "OpenAI account" }] },
+        ] }),
+      });
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, undefined, "a connected vendor stands the local default down");
+    } finally { await test.close(); }
+  });
+
+  it("settles the catalogue gate for an adapter with nothing to initialise", async () => {
+    const adapter = new CaptureAdapter();
+    Object.defineProperty(adapter, "init", { value: undefined });
+    const test = await fixture({ adapter });
+    try {
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL);
     } finally { await test.close(); }
   });
 

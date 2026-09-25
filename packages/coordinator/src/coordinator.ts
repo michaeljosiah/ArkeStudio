@@ -2215,9 +2215,11 @@ export class Coordinator {
     // Nothing chosen: the local default, where there is one (issue 1247). Stage needs a model
     // that reads images, and refuses before its session is built when none is chosen — so it
     // is decided here, where the refusal is, rather than left to the session builder.
-    if (!this.cloudLlmKeyStored) await this.catalogueSettled;
+    if (!this.cloudCredentialAvailable()) await this.catalogueSettled;
     const local = this.localHarnessDefault(agent === "stage-designer");
-    return local === undefined ? {} : this.validateLanguageModel(local, agent === "stage-designer");
+    if (local !== undefined) return this.validateLanguageModel(local, agent === "stage-designer");
+    const refusal = this.unreadCatalogueRefusal();
+    return refusal === null ? {} : { reason: refusal };
   }
   /** Per-agent model and brief overrides, as last read from settings. */
   private agentOverrides: Record<string, { model?: string; brief?: string }> | undefined;
@@ -3513,6 +3515,11 @@ export class Coordinator {
           reason: `Harness startup failed: ${describeCoordinatorError(error)}` });
       }));
     }
+    if (this.opts.adapter && !this.opts.adapter.init && !this.supervisors.has("harness")) {
+      // An adapter with nothing to initialise is as ready as it will be: the catalogue gate
+      // (issue 1247) is settled here, since neither startup path above will reach it.
+      if (this.opts.adapter.readiness().ready) this.warmModelCatalog(); else this.settleCatalogue();
+    }
     if (this.opts.adapter && !this.supervisors.has("harness")) {
       // Own-process failures do not travel through ChildSupervisor. Reflect them even when
       // no authoring session happens to be listening to the adapter's event stream.
@@ -4062,9 +4069,13 @@ export class Coordinator {
     // A keyless session waits for the catalogue's first fetch rather than reading it empty:
     // measured or not, an empty read here meant the first session of a run going to the cloud
     // default — the one outcome this default exists to prevent.
-    if (!this.cloudLlmKeyStored) await this.catalogueSettled;
+    if (!this.cloudCredentialAvailable()) await this.catalogueSettled;
     const local = this.localHarnessDefault();
-    if (local === undefined) return this.agentOverrides ? { agents: this.agentOverrides } : {};
+    if (local === undefined) {
+      const refusal = this.unreadCatalogueRefusal();
+      if (refusal !== null) throw new Error(refusal);
+      return this.agentOverrides ? { agents: this.agentOverrides } : {};
+    }
     const agents: Record<string, { model?: string; brief?: string }> = { ...this.agentOverrides };
     for (const member of ROSTER) {
       const override = agents[member.name];
@@ -4094,8 +4105,31 @@ export class Coordinator {
    * inside the session builder; the catalogue is warmed when the harness comes up and after
    * every local-model publication for exactly that reason.
    */
+  /**
+   * Whether anything cloud could answer a session: a stored key, or an account connected
+   * through the harness's own sign-in (SPEC-030), which lives in the harness rather than in
+   * the credential store and so is read from the published sign-in state.
+   */
+  private cloudCredentialAvailable(): boolean {
+    return this.cloudLlmKeyStored ||
+      this.readModel.getState().app.vendorAuth.vendors.some((vendor) => vendor.connections.length > 0);
+  }
+
+  /**
+   * Why a keyless session with nothing chosen cannot go ahead when the catalogue could not be
+   * read (issue 1247), or null when it can. A catalogue that was read and holds nothing local
+   * is an answer — the harness default is what such a machine has always run on — but one
+   * that failed to read says nothing about what is installed, and a session built on that
+   * silence would run on the cloud default with a local model possibly sitting right there.
+   */
+  private unreadCatalogueRefusal(): string | null {
+    if (this.cloudCredentialAvailable()) return null;
+    if (this.readModel.getState().app.harnessModelStatus.status !== "error") return null;
+    return "The harness's models could not be read, and no cloud key is stored, so which model would write is unknown. Retry models in Settings → Harness → Advanced, or add a key.";
+  }
+
   private localHarnessDefault(needsImages = false): string | undefined {
-    if (this.cloudLlmKeyStored) return undefined;
+    if (this.cloudCredentialAvailable()) return undefined;
     const app = this.readModel.getState().app;
     const local = app.harnessModels.filter((model) => model.provider === "ollama");
     // Admission lets an unstated modality through — unknown is offered, not withheld — but a
