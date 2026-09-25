@@ -301,6 +301,14 @@ export const AUDIOBOOK_REMAKE_SCHEMA_VERSION = 25;
  * Fenced with the first write that carries it, including a world founded with a choice.
  */
 export const WORLD_MODELS_SCHEMA_VERSION = 27;
+/**
+ * A chapter's cast carries the author's corrections (design turn 155, SPEC-012 R-62): `pins`
+ * and `lost` on `.voices/<chapter>.json`, a strict record the builds before it read as
+ * unreadable — which makes a chapter refused under `Cast` until it is cast again, paid again.
+ * Raised before the first record with pins is written. 28–30 are claimed by unmerged branches
+ * (worldbuilding chat, approvals, images), so this takes the next number clear of them.
+ */
+export const VOICE_PINS_SCHEMA_VERSION = 31;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {

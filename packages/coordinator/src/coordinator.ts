@@ -270,7 +270,7 @@ import {
 import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachments.js";
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { deriveContinuity, makeAdapterContinuityDeriver, type ContinuityDeriver } from "./productions/continuity.js";
-import { castLines, makeAdapterVoicesDeriver, readVoices, type VoicesDeriver } from "./productions/voices.js";
+import { castLines, makeAdapterVoicesDeriver, readVoices, setVoicePin, VoicePinRefusal, type VoicesDeriver } from "./productions/voices.js";
 import { acceptDirections, directChapter, directableBlocks, makeAdapterDirectionDeriver, type DirectionDeriver } from "./productions/audiobook-direction.js";
 import { audiobookDoor, conformDirections, runAudiobookBook } from "./productions/audiobook-book.js";
 import { checkDirection, directionPlan, writeAudiobookBook, writeBlockDirection } from "./productions/audiobook.js";
@@ -12627,6 +12627,41 @@ export class Coordinator {
         } finally {
           store.closingSignal.removeEventListener("abort", onClose);
           this.castingVoices.delete(key);
+        }
+        return;
+      }
+      case "set-voice-pin": {
+        // A correction to the cast (design turn 155, SPEC-012 R-62..R-65): written beside the
+        // derived lines, never into the world, refused in one clause while a cast is running or
+        // when the words, the cast or the character are not what the pin says, and answered to
+        // every window with the record as it now stands.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const answer = (extra: { record?: ChapterVoices; refused?: string }) =>
+          this.emit({ at: new Date().toISOString(), type: "voices.record", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, ...extra });
+        if (this.castingVoices.has(`${msg.worldId}/${msg.productionId}/${chapter.file}`)) {
+          answer({ refused: "casting… · wait for the cast" });
+          return;
+        }
+        try {
+          const record = await setVoicePin(store, msg.productionId, chapter.id, {
+            paragraph: msg.paragraph,
+            occurrence: msg.occurrence,
+            quote: msg.quote,
+            ...(msg.speaker !== undefined ? { speaker: msg.speaker } : {}),
+            ...(msg.sheet !== undefined ? { sheet: msg.sheet } : {}),
+            ...(msg.narration === true ? { narration: true as const } : {}),
+            ...(msg.clear === true ? { clear: true as const } : {}),
+          });
+          // A pin changes who reads the block (SPEC-047 R-13): the chapter's standing directions
+          // are re-checked against the reader that speaks it now, as a new cast's are.
+          await this.conformAudiobookDirections(store, msg.worldId, [msg.productionId]);
+          this.refreshIfStillOpen(store);
+          answer({ record });
+        } catch (err) {
+          answer({ refused: err instanceof VoicePinRefusal ? err.message : describeCoordinatorError(err) });
         }
         return;
       }

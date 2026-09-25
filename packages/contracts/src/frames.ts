@@ -2948,6 +2948,26 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({ kind: z.literal("stop-voices"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
     .strict(),
   /**
+   * A correction to the cast (design turn 155, SPEC-012 R-62..R-65): the span — its paragraph,
+   * words and occurrence — given a speaker, given to narration, or cleared of the author's pin.
+   * Answered with `voices.record`, the record or the refusal in one clause.
+   */
+  z
+    .object({
+      kind: z.literal("set-voice-pin"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      paragraph: z.number().int().min(0),
+      occurrence: z.number().int().min(0),
+      quote: z.string().min(1).max(600),
+      speaker: z.string().min(1).max(120).optional(),
+      sheet: SlugSchema.optional(),
+      narration: z.literal(true).optional(),
+      clear: z.literal(true).optional(),
+    })
+    .strict(),
+  /**
    * The audiobook (design turn 146, SPEC-047): read a chapter into kept takes — every block
    * that is not made, in reading order, priced once and confirmed by token when any of it is a
    * cloud voice — stop the run, leaving the takes made so far standing, and choose the book's

@@ -6775,6 +6775,22 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ch__who-name:has(.fy-ab__speaker-dot) { display: flex; align-items: baseline; gap: 7px; }
 .fy-ch__who-name .fy-ab__speaker-dot { align-self: center; }
 .fy-voice--none .fy-ab__speaker, .fy-voice--narrator .fy-ab__speaker { color: var(--muted-foreground); }
+.fy-ab__block { position: relative; }
+.fy-ab__speaker--press { border: 0; background: transparent; padding: 0 7px 0 6px; margin-left: -6px; border-radius: 6px; cursor: pointer; }
+.fy-ab__speaker--press:hover, .fy-ab__speaker--open { background: var(--background); box-shadow: 0 0 0 1px var(--ring); }
+.fy-voice--plain { --fy-voice: var(--neutral-300); }
+.fy-ab__pin { display: inline-flex; color: var(--muted-foreground); }
+/* The speaker menu (design turn 155b, SPEC-012 R-63): 236 wide, under the chip. */
+.fy-ab__menu { position: absolute; left: 0; top: 32px; z-index: 5; width: 236px; padding: 6px; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-lg); box-sizing: border-box; cursor: default; }
+.fy-ab__menu-search { width: 100%; height: 30px; box-sizing: border-box; margin-bottom: 4px; padding: 0 8px; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--foreground); font: 400 12px/1.4 var(--font-sans); outline: none; }
+.fy-ab__menu-eb { padding: 6px 8px 3px; font: 500 11px/1.2 var(--font-sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted-foreground); }
+.fy-ab__menu-opt { display: flex; align-items: center; gap: 9px; width: 100%; height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--foreground); font: 400 13px/1.4 var(--font-sans); text-align: left; cursor: pointer; box-sizing: border-box; }
+.fy-ab__menu-opt:hover, .fy-ab__menu-opt:focus-visible { background: var(--secondary); outline: none; }
+.fy-ab__menu-opt .fy-ab__speaker-dot { background: var(--fy-voice); }
+.fy-ab__menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-ab__menu-meta { flex: none; font: 400 11px/1 var(--font-mono); color: var(--muted-foreground); }
+.fy-ab__menu-tick { flex: none; width: 14px; color: var(--foreground); }
+.fy-ab__menu-sep { height: 1px; margin: 5px -6px; background: var(--border); }
 .fy-ab__marks { display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding-top: 9px; }
 .fy-ab__source { display: inline-flex; color: var(--neutral-400); }
 .fy-ab__marks .fy-ab__dot { margin-top: 0; }

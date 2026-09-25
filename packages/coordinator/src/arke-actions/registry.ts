@@ -473,6 +473,9 @@ const CLIENT_COMMAND_METADATA = {
   // The cast of lines (turn 130): the same discipline, turned on speech.
   "cast-voices": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),
   "stop-voices": action("production", "command", "extraction", "external-network-action", ["chapters"]),
+  // A correction to the cast (turn 155): the author's word on who speaks, written beside the
+  // derived lines and never into the world.
+  "set-voice-pin": action("production", "command", "extraction", "authored-change", ["chapters", "sheets"]),
   // The audiobook (design turn 146, SPEC-047): a chapter read into kept takes is a generation
   // that may leave the machine; stopping it and choosing the reading are commands on the record.
   "read-audiobook-chapter": action("production", "generation", "voice", "external-network-action", ["chapters", "sheets"]),
