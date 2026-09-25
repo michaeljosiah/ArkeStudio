@@ -4,6 +4,8 @@ import {
   AUDIOBOOK_TITLE_KEY,
   AudiobookDirectionSchema,
   audiobookBlocks,
+  audiobookSpeakerColours,
+  audiobookSpeakerKey,
   audiobookBlockState,
   audiobookChapterComplete,
   audiobookCounts,
@@ -225,5 +227,27 @@ describe("the door's words (turn 146, R-15, R-29)", () => {
     assert.ok(AudiobookDoorSchema.safeParse(door).success);
     assert.ok(!AudiobookDoorSchema.safeParse({ ...door, export: {} }).success, "strict: the export waits for its slice");
     assert.ok(!AudiobookDoorSchema.safeParse({ ...door, voices: [{ name: "x", state: "reads", blocks: -1 }] }).success);
+  });
+});
+
+describe("speaker colours (SPEC-047 R-33)", () => {
+  const stamp = (...sheets: (string | undefined)[]) => ({ speakers: sheets.map((sheet, i) => ({ speaker: sheet ?? `name-${i}`, ...(sheet !== undefined ? { sheet } : {}) })) });
+  it("numbers the book's speakers by chapter order and keeps one colour a speaker across chapters", () => {
+    const colours = audiobookSpeakerColours([
+      { order: 2, voices: stamp("odile", "maren") },
+      { order: 1, voices: stamp("maren") },
+      { order: 3, retired: true, voices: stamp("tam") },
+      { order: 4, voices: { unreadable: true } },
+    ]);
+    assert.deepEqual([...colours], [["maren", 1], ["odile", 2]], "chapter 1 speaks first; a retired or unreadable chapter adds nobody");
+  });
+  it("leaves a name with no sheet uncoloured, wraps past six, and numbers extra speakers last", () => {
+    const colours = audiobookSpeakerColours([{ order: 1, voices: stamp("a", undefined, "b", "c", "d", "e", "f", "g") }], ["h", "a"]);
+    assert.equal(colours.size, 8);
+    assert.equal(colours.get("g"), 1, "the seventh wraps to the first colour");
+    assert.equal(colours.get("h"), 2, "a speaker the stamps do not hold yet comes after them");
+    assert.equal(audiobookSpeakerKey({}), null);
+    assert.equal(audiobookSpeakerKey({ speaker: "the harbourmaster" }), "the harbourmaster");
+    assert.equal(audiobookSpeakerKey({ speaker: "Odile", sheet: "odile-sarn" }), "odile-sarn");
   });
 });
