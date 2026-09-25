@@ -175,6 +175,18 @@ describe("the story overview through the gate (issue 385)", () => {
     assert.match(draft.instruction, /accepted story overview/, "scene drafting carries the overview");
   });
 
+  it("the steer carries the dramatic question and the ending the Overview shows", () => {
+    const steer = overviewSteer({
+      version: 2,
+      logline: "A bell-keeper hears a bell no one rang.",
+      question: "Will Maren wake the god?",
+      ending: "She wakes it, and the harbour pays.",
+    });
+    assert.match(steer, /- dramatic question: Will Maren wake the god\?/);
+    assert.match(steer, /- ending: She wakes it, and the harbour pays\./);
+    assert.doesNotMatch(overviewSteer({ version: 1, logline: "x" }), /dramatic question|ending:/, "absent fields add no line");
+  });
+
   it("mergeJson keeps the machine version field from the live side", () => {
     const base = JSON.stringify({ version: 3, logline: "a" });
     const mine = JSON.stringify({ version: 3, logline: "b" });
