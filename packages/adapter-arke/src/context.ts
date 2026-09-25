@@ -21,11 +21,17 @@ import type { ChatMessage, ChatTool } from "./ollama.js";
  *
  * Counted by the shape of the text, not its length, because the same number of characters can
  * be a few tokens or many. A run of letters shaped like a word — cased as words are, with vowels
- * in it — is charged three letters a token, which over-counts every language written in Latin
- * script. Any other run of letters (base64, generated identifiers, a hash's letters) is charged
- * at a rate close to what random letters cost. Each digit and each symbol is a token of its own;
- * a line break is a token. Any other script is counted from its UTF-8 bytes at a rate that
- * over-counts CJK and emoji, which are often a token a character and sometimes several.
+ * in it — is one token up to six letters and more beyond; any other run of letters (base64,
+ * generated identifiers, a hash's letters) is charged at a rate close to what random letters
+ * cost. Each digit is a token of its own, a run of punctuation is two marks a token, and a line
+ * break is a token. Any other script is counted from its UTF-8 bytes at a rate that over-counts
+ * CJK and emoji, which are often a token a character and sometimes several.
+ *
+ * Measured against Gemma 4's own counts (issue 1265): a chapter of prose at 1.07 of the real
+ * count, the world-builder's instructions at 1.33. The rule it replaced charged a word three
+ * letters a token and every mark a token, and came out at 1.5 and 1.8 — so the instructions
+ * alone took half of a 32k window on paper, and a chapter ask was refused before the model saw
+ * it. High is still the safe direction; that was too high to be safe.
  *
  * No count made without the model's own tokenizer is a guarantee, and Ollama's native API offers
  * none to ask. So the loop also corrects itself: each reply says how many prompt tokens Ollama
@@ -33,13 +39,15 @@ import type { ChatMessage, ChatTool } from "./ollama.js";
  * estimate up to match (`fitToWindow`'s `scale`). It only ever grows.
  */
 const LETTERS_PER_TOKEN = 3;
+const WHOLE_WORD_LETTERS = 6;
+const SYMBOLS_PER_TOKEN = 2;
 const DENSE_LETTERS_PER_TOKEN = 1.5;
 /** Longer than any word a writer uses, so a run past it is data, not language. */
 const LONGEST_WORD = 24;
 const WORD_SHAPE = /^(?:[A-Z]?[a-z]+|[A-Z]+)$/;
 const VOWELS = /[aeiouyAEIOUY]/g;
 const OTHER_BYTES_PER_TOKEN = 1.5;
-const ASCII_SHAPES = /[A-Za-z]+|[0-9]|\n|[ \t\r]+|[!-/:-@[-`{-~]/g;
+const ASCII_SHAPES = /[A-Za-z]+|[0-9]|\n|[ \t\r]+|[!-/:-@[-`{-~]+/g;
 const TOKENS_PER_MESSAGE = 8;
 /** Each message's images, estimated once: decoding the same image on every call would add up. */
 const IMAGE_COST = new WeakMap<ChatMessage, number>();
@@ -75,14 +83,20 @@ function textTokens(text: string): number {
     const first = shape.charCodeAt(0);
     const letters = (first >= 0x41 && first <= 0x5a) || (first >= 0x61 && first <= 0x7a);
     // Spaces and tabs ride on the word after them.
-    if (letters) tokens += Math.ceil(shape.length / (wordShaped(shape) ? LETTERS_PER_TOKEN : DENSE_LETTERS_PER_TOKEN));
-    else if (shape[0] !== " " && shape[0] !== "\t" && shape[0] !== "\r") tokens += 1;
+    if (letters) tokens += wordShaped(shape) ? wordTokens(shape.length) : Math.ceil(shape.length / DENSE_LETTERS_PER_TOKEN);
+    else if (shape[0] === "\n" || (first >= 0x30 && first <= 0x39)) tokens += 1;
+    // Punctuation comes in runs a tokenizer merges (`":"`, `},{"`, `**`): two marks a token.
+    else if (shape[0] !== " " && shape[0] !== "\t" && shape[0] !== "\r") tokens += Math.ceil(shape.length / SYMBOLS_PER_TOKEN);
   }
   let ascii = 0;
   for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) < 0x80) ascii++;
   // Any other ASCII — control characters — is a token each. ASCII is one UTF-8 byte a
   // character, so the bytes that are not ASCII are the rest.
   return tokens + (ascii - matched) + (Buffer.byteLength(text, "utf8") - ascii) / OTHER_BYTES_PER_TOKEN;
+}
+
+function wordTokens(length: number): number {
+  return length <= WHOLE_WORD_LETTERS ? 1 : length <= 10 ? 2 : Math.ceil(length / LETTERS_PER_TOKEN);
 }
 
 function wordShaped(run: string): boolean {

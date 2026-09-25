@@ -225,7 +225,23 @@ export type TurnOutcome =
   | { status: "failed"; reason: string; problems?: readonly TurnProblem[] }
   | { status: "cancelled" }
   | { status: "timeout" }
+  | { status: "budget-exceeded"; reason: string }
   | { status: "unavailable"; reason: string };
+
+/** The harness ended the turn because it would not fit the model's window (issue 1265). */
+class TurnOverBudget extends Error {
+  constructor(detail?: string) { super(detail ?? "This turn does not fit the model's context window."); this.name = "TurnOverBudget"; }
+}
+
+/**
+ * What the person is told about a turn the harness ended over budget: what to do next, plainly.
+ * The harness's own words say which budget; none of them carries world content.
+ */
+function overBudgetReason(detail: string): string {
+  if (/length limit/i.test(detail)) return "the reply ran past this model's length limit — ask for less at once";
+  if (/model calls/i.test(detail)) return "the turn took too many steps — ask a narrower question";
+  return "too long for this model's window — start a new conversation, or ask about less";
+}
 
 /**
  * Ask the model, once, and return whatever it finally said.
@@ -280,6 +296,11 @@ async function askOnce(
         onProgress?.(WRITING_LABEL);
       }
       if (event.type === "session.error") throw new Error(event.message);
+      // A turn the harness ended itself, and why (issue 1265). Without this the only trace of a
+      // turn refused for its size was the error a wrapper made of it, and the person was told
+      // "did not go through" and offered a retry that fails the same way.
+      if (event.type === "session.ended" && event.reason === "budget-exceeded") throw new TurnOverBudget(event.detail);
+      if (event.type === "session.ended" && event.reason === "timeout") throw new Error("timeout");
     }
   })();
 
@@ -544,7 +565,10 @@ export class WorldChatRunner {
       develop:
         " The creator has set this conversation to Develop: drive the work forward — surface gaps, propose next candidates unprompted, and keep momentum. Proposing is still all this changes; nothing lands without their explicit acceptance.",
     };
-    const budgetChars = budgetFor(modelChoice.inputTokenLimit ?? adapter.knownInputTokenLimit?.() ?? undefined);
+    const window = modelChoice.inputTokenLimit ?? adapter.knownInputTokenLimit?.() ?? undefined;
+    // The harness's own count of what the world-builder spends before this message, where it
+    // keeps one (issue 1265): a 32k local window with the reserve below was refused every time.
+    const budgetChars = budgetFor(window, window !== undefined ? adapter.promptReserveTokens?.("world-builder", window) : undefined);
     const chapterSubject = subject?.kind === "chapter" || subject?.kind === "passage" ? subject : undefined;
     const briefBudget = chapterSubject && this.deps.chapterBrief ? Math.min(60_000, Math.floor(budgetChars / 2)) : 0;
     const setupBudget = view.entryContext?.kind === "production-setup" ? Math.floor(budgetChars * 0.65) : 0;
@@ -771,6 +795,12 @@ export class WorldChatRunner {
     } catch (err) {
       const cancelled = controller.signal.aborted;
       const timedOut = err instanceof Error && err.message === "timeout";
+      if (!cancelled && err instanceof TurnOverBudget) {
+        this.deps.onTurnFailed?.({ conversationId, runId, cause: `${err.name}: ${err.message}` });
+        const reason = overBudgetReason(err.message);
+        await this.finish(store, run, "budget-exceeded", reason);
+        return { status: "budget-exceeded", reason };
+      }
       const status = cancelled
         ? controller.signal.reason === "world-closed" ? "interrupted" : "cancelled"
         : timedOut ? "timeout" : "failed";

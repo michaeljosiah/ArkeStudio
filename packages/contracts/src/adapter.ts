@@ -301,6 +301,15 @@ export interface HarnessAdapter {
    * running on a different one wrongly in both directions.
    */
   knownInputTokenLimit?(sessionId?: string): number | null;
+  /**
+   * What a session for `agent` spends of a `window`-token window before the person's message:
+   * the role's instructions, the tool schemas it is sent and the room kept for the reply, in the
+   * adapter's own count (issue 1265). For a harness that owns its prompt and checks the fit
+   * itself — a caller sizing a message by some other rule can be refused before the model is
+   * ever asked. Absent where the harness keeps its own prompt out of sight; callers then fall
+   * back to their own reserve.
+   */
+  promptReserveTokens?(agent: string, window: number): number | undefined;
   /** Synchronous send: resolves when the turn completes. */
   sendMessage(input: SendMessageInput): Promise<SendReceipt>;
   /** Fire-and-watch: must not block while the turn runs. */

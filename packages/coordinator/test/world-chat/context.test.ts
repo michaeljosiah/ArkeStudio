@@ -206,6 +206,21 @@ describe("context assembly", () => {
    * `max(FALLBACK, …)` handed a 32,000-token model 120,000 characters — over its limit before a
    * single section was measured, which is the same overflow arriving by way of the safety net.
    */
+  /**
+   * Issue 1265: on Arke's local harness a 32k window holds the world-builder's 34,600-character
+   * instructions, seventeen tool schemas and a reply reserve — about 18,000 tokens as the harness
+   * counts them. Sized against a 12,000-token reserve at three and a half characters a token,
+   * every chapter ask was refused before the model saw it.
+   */
+  it("sizes to a harness's stated reserve, in the harness's own count, with room left for reads", () => {
+    const window = 32_768;
+    const reserve = 18_000;
+    const budget = budgetFor(window, reserve);
+    assert.ok(budget < budgetFor(window), "a harness that states more than the default reserve gets less");
+    assert.ok(budget / 3 + reserve + window * 0.1 <= window, `${budget} characters overflow the harness's own check`);
+    assert.ok(budget >= 25_000, `still room for a chapter brief (${budget})`);
+  });
+
   it("does not force the fallback onto a window that is simply small", () => {
     assert.ok(budgetFor(32_000) < FALLBACK_BUDGET_CHARS, "a small window gets a small budget");
   });

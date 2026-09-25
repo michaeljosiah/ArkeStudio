@@ -21,6 +21,13 @@ describe("a turn that produced nothing says which kind of nothing", () => {
     assert.match(failureLine({ status: "budget-exceeded" }), /past its budget/);
   });
 
+  it("a turn too big for the model's window says what to do instead of offering the same again (issue 1265)", () => {
+    const line = failureLine({ status: "budget-exceeded", detail: "too long for this model's window — start a new conversation, or ask about less" });
+    assert.match(line, /^Too long for this model's window — start a new conversation, or ask about less\./);
+    assert.match(line, /Nothing was lost/);
+    assert.doesNotMatch(line, /did not go through/);
+  });
+
   it("a refused answer says what was refused, and does not promise a retry will help", () => {
     const line = failureLine({
       status: "failed",

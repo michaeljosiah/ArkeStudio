@@ -470,6 +470,7 @@ import {
   SETUP_CATALOGUE,
   VOXA_SETUP_COMPONENT_IDS,
   voxaSetupCompleted,
+  localModelPolicy,
   type CatalogueEntry,
 } from "./setup/catalogue.js";
 import { sanitizeComfyUiMedia } from "./comfyui/sanitize.js";
@@ -1062,6 +1063,8 @@ export class Coordinator {
   private publishedLocalHarnessModels: string | null = null;
   /** The rows behind that fingerprint, for checking a later catalogue read against them. */
   private publishedLocalHarnessRows: readonly import("@arke-studio/contracts").LocalHarnessModel[] = [];
+  /** Ollama models a local harness turn named in this run, for quitting's release. */
+  private readonly harnessOllamaModels = new Set<string>();
   /** Pulled models the last listing held back for stating less than a 256k context. */
   private localModelsBelowMinimum = 0;
   /** Whether any cloud language-model key is stored, read with the harness environment (issue 1247). */
@@ -2415,7 +2418,7 @@ export class Coordinator {
       this.clearLocalResidency(engine === "Ollama" ? "ollama" : "comfyui");
     });
     if (opts.adapter) opts.adapter = withModelValidation(
-      withLocalGpu(opts.adapter, this.localGpu, () => { void this.refreshLocalResidency(); }),
+      withLocalGpu(opts.adapter, this.localGpu, () => { void this.refreshLocalResidency(); }, (model) => this.harnessOllamaModels.add(model)),
       (reference, needsImages, signal) => this.validateLanguageModel(reference, needsImages, signal),
     );
     const storage = opts.storage ?? createStudioStorage(opts);
@@ -4417,6 +4420,12 @@ export class Coordinator {
     // Local rows the default passed over — switched off, or unable to call tools — are not
     // nothing local: a session going unmodelled past them would run on the cloud default with
     // a local runtime right there. Stage refuses on its own when no model reads images.
+    // Held back by name, not by what it can do: the person's move is to choose it, and "pull a
+    // model that calls tools" would send them to replace a model that already does (issue 1289).
+    const waiting = this.readModel.getState().app.harnessModels.filter((model) => model.provider === "ollama" && localModelPolicy(model.id)?.explicitChoiceOnly === true);
+    if (offered && waiting.length > 0) {
+      return `${localModelPolicy(waiting[0]!.id)!.displayName} runs only where you choose it. Choose it for this agent in Settings → Harness → Advanced, or install Gemma 4 12B.`;
+    }
     if (!needsImages && offered) {
       if (localLane) return "None of the local models can write here: each is switched off or cannot call tools. Pull a model that calls tools, or switch one on under AI models.";
       return "None of the local models can write here: each is switched off or cannot call tools, and no cloud key is stored. Pull a model that calls tools, switch one on under AI models, or add a key.";
@@ -4438,7 +4447,10 @@ export class Coordinator {
     // unattended: nothing says it completes. Explicit choices are still admitted: unknown is
     // offered, and a stated refusal is one the person can read; a default has no reader.
     const assumed = new Set(this.publishedLocalHarnessRows.filter((model) => model.assumed).map((model) => model.id));
-    const local = app.harnessModels.filter((model) => model.provider === "ollama" && (!needsTools || model.tools !== false) && !assumed.has(model.id));
+    // Nor a model the catalogue says waits to be chosen by name: installing a community
+    // uncensored variant made it every agent's writer, Content & safety off (issue 1289).
+    const local = app.harnessModels.filter((model) => model.provider === "ollama" && (!needsTools || model.tools !== false) &&
+      !assumed.has(model.id) && localModelPolicy(model.id)?.explicitChoiceOnly !== true);
     // Admission lets an unstated modality through — unknown is offered, not withheld — but a
     // default is a choice nobody is looking at, so for Stage a model that says it reads images
     // comes before one that merely does not say it cannot.
@@ -17696,12 +17708,17 @@ export class Coordinator {
   private async releaseOllama(): Promise<void> {
     const client = this.opts.dispatchClients?.["ollama"];
     if (!client?.unload || !this.localGpu.hasRun("Ollama")) return;
+    // Only what this run named: the dispatches' models and the harness turns'. A whole-runtime
+    // unload also emptied models another application had loaded into the same Ollama (issue
+    // 1289). The Arke harness hands back its own on dispose, whatever it was asked for by.
+    const only = new Set([...client.usedModels?.() ?? [], ...this.harnessOllamaModels]);
+    if (only.size === 0) return;
     const signal = AbortSignal.timeout(OLLAMA_SHUTDOWN_RELEASE_MS);
     let timer: ReturnType<typeof setTimeout> | undefined;
     // Raced as well as signalled: the signal bounds the requests, the timer bounds a client
     // that does not honour it.
     await Promise.race([
-      client.unload(signal).catch(() => {}),
+      client.unload(signal, only).catch(() => {}),
       new Promise<void>((resolve) => { timer = setTimeout(resolve, OLLAMA_SHUTDOWN_RELEASE_MS); }),
     ]);
     clearTimeout(timer);

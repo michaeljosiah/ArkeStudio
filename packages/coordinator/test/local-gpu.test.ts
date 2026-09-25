@@ -308,26 +308,73 @@ it("retains a fault-held generation's GPU through resumed polling and unacknowle
   }
 });
 
-it("hands Ollama's models back when quitting after a run that used it, and never waits long on it", async () => {
-  for (const scenario of ["used", "unused", "unresponsive"] as const) {
+it("hands back the Ollama models this run used when quitting, only those, and never waits long on it", async () => {
+  for (const scenario of ["used", "unused", "named-nothing", "unresponsive"] as const) {
     const { root } = await makeTempRoot();
     const provider = new FsWorldProvider(root);
-    const unloads: AbortSignal[] = [];
-    const ollama: DispatchClient = Object.assign(new FakeProvider(), { unload: (signal?: AbortSignal) => {
-      unloads.push(signal!);
-      // A server that never answers, and a client that ignores the abort: only the race ends it.
-      return scenario === "unresponsive" ? new Promise<void>(() => {}) : Promise.resolve();
-    } });
+    const unloads: Array<{ signal: AbortSignal; only: ReadonlySet<string> | undefined }> = [];
+    const ollama: DispatchClient = Object.assign(new FakeProvider(), {
+      unload: (signal?: AbortSignal, only?: ReadonlySet<string>) => {
+        unloads.push({ signal: signal!, only });
+        // A server that never answers, and a client that ignores the abort: only the race ends it.
+        return scenario === "unresponsive" ? new Promise<void>(() => {}) : Promise.resolve();
+      },
+      // What the dispatches asked for. Another application's model is loaded too, and is not here.
+      usedModels: () => new Set(scenario === "named-nothing" ? [] : ["gemma4:12b"]),
+    });
     const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "changes.jsonl"), appVersion: "test", dispatchClients: { ollama } });
     const gpu = (coordinator as unknown as { localGpu: LocalGpu }).localGpu;
     if (scenario !== "unused") (await gpu.acquire("Ollama", new AbortController().signal))();
     const handovers = unloads.length;
     const started = Date.now();
     try { await coordinator.stop(); } finally { await provider.close(); }
-    assert.equal(unloads.length - handovers, scenario === "unused" ? 0 : 1, scenario);
+    assert.equal(unloads.length - handovers, scenario === "unused" || scenario === "named-nothing" ? 0 : 1, scenario);
+    if (scenario === "used") assert.deepEqual([...unloads.at(-1)!.only!], ["gemma4:12b"], "only what this run named (issue 1289)");
     if (scenario === "unresponsive") {
       assert.ok(Date.now() - started < 5_000, "quitting is not held by an unresponsive Ollama");
-      assert.equal(unloads.at(-1)!.aborted, true);
+      assert.equal(unloads.at(-1)!.signal.aborted, true);
     }
   }
+});
+
+it("reports the local model a harness turn names, and the adapter's own ending reaches a listener before the wrapper's error", async () => {
+  const named: string[] = [];
+  const heard: HarnessEvent[] = [];
+  const listeners = new Set<(event: HarnessEvent) => void>();
+  // Arke's adapter, as far as the wrapper sees it: the turn ends with a stated reason, then
+  // its send rejects with the same words.
+  const raw: HarnessAdapter = {
+    id: "arke", capabilities: () => new Set(), readiness: () => ({ ready: true }),
+    createSession: async () => ({ sessionId: "s" }),
+    sendMessage: async (input) => {
+      const detail = "This message and its tool results do not fit the model's context window.";
+      for (const listener of listeners) listener({ type: "session.ended", sessionId: input.sessionId, reason: "budget-exceeded", detail });
+      throw new Error(detail);
+    },
+    dispatchAsync: async () => { throw new Error("sendMessage owns completion"); },
+    streamEvents: (signal) => ({ async *[Symbol.asyncIterator]() {
+      const queue: HarnessEvent[] = []; let wake: (() => void) | null = null;
+      const listener = (event: HarnessEvent) => { queue.push(event); wake?.(); };
+      listeners.add(listener);
+      try {
+        while (!signal?.aborted) {
+          if (queue.length === 0) await new Promise<void>((resolve) => { wake = resolve; signal?.addEventListener("abort", () => resolve(), { once: true }); });
+          while (queue.length > 0) yield queue.shift()!;
+        }
+      } finally { listeners.delete(listener); }
+    } }),
+  };
+  const gpu = new LocalGpu(async () => {});
+  const adapter = withLocalGpu(raw, gpu, () => {}, (model) => named.push(model));
+  adapter.prepareSession?.({ preparationId: "p", model: "ollama/gemma4:12b" });
+  const { sessionId } = await adapter.createSession({ purpose: "authoring", agent: "sheet-editor", preparationId: "p" });
+  const stop = new AbortController();
+  const observe = (async () => { for await (const event of adapter.streamEvents(stop.signal)) { heard.push(event); if (event.type === "session.error") return; } })();
+  try {
+    await adapter.dispatchAsync({ sessionId, parts: [{ type: "text", text: "too long" }] });
+    await observe;
+    assert.deepEqual(named, ["gemma4:12b"], "the model the turn named, for quitting's release");
+    const types = heard.map((event) => event.type);
+    assert.ok(types.indexOf("session.ended") >= 0 && types.indexOf("session.ended") < types.indexOf("session.error"), types.join(", "));
+  } finally { stop.abort(); gpu.stop(); await adapter.dispose?.(); }
 });
