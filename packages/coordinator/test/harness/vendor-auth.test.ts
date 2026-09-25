@@ -212,6 +212,21 @@ describe("the sign-in surface (R-7, R-10, R-12)", () => {
     assert.equal(service.readOk, true, "the read under the new lifecycle is");
   });
 
+  it("gives up a patient retry as soon as its harness has gone, rather than sleeping out the rest (issue 1247)", async () => {
+    const adapter = fakeAdapter();
+    let calls = 0;
+    adapter.listIntegrations = async () => { calls++; return []; };
+    const { service } = makeService(adapter);
+    const started = Date.now();
+    const patient = service.refresh({ patient: true });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    service.markStale();
+    await patient;
+    assert.ok(Date.now() - started < 1_000, "the sleep ends with the lifecycle, not after it");
+    assert.ok(calls <= 2, "no further asks of a harness that is gone");
+    assert.equal(service.readOk, false);
+  });
+
   it("states the carry limitation only to somebody with personal harness state (R-4)", async () => {
     const adapter = fakeAdapter();
     adapter.integrations = [vendor({ id: "v", name: "V", methods: [OAUTH_METHOD] })];

@@ -988,6 +988,13 @@ function worldOpenFailureKind(err: unknown): string {
   return "unknown";
 }
 
+/**
+ * Roster agents whose sessions call no tools — a prompt and a JSON answer (issue 1247). A local
+ * model that states it cannot call tools is still a fit default for these, where it would fail
+ * every other agent's first turn.
+ */
+const PROMPT_ONLY_AGENTS: ReadonlySet<string> = new Set(["conversation-summarizer", "conversation-namer"]);
+
 export class Coordinator {
   private readonly engine: ReturnType<typeof createEngine>;
   private readonly readModel: ReadModel;
@@ -2218,8 +2225,16 @@ export class Coordinator {
       if (signal.aborted) reject(signal.reason);
       else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
     });
+    const read = this.modelCatalog.get();
+    if (stopped !== null) {
+      // Kept in the lifecycle when the caller stops waiting for it: stop() must not dispose
+      // the harness under a read still out against it.
+      const tracked = read.catch(() => {});
+      this.backgroundWork.add(tracked);
+      void tracked.finally(() => this.backgroundWork.delete(tracked));
+    }
     try {
-      const models = stopped === null ? await this.modelCatalog.get() : await Promise.race([this.modelCatalog.get(), stopped]);
+      const models = stopped === null ? await read : await Promise.race([read, stopped]);
       return selectHarnessModel(modelId, models, this.readModel.getState().app, needsImages);
     } catch (error) {
       if (signal?.aborted) return { modelId, reason: describeCoordinatorError(error) };
@@ -2887,7 +2902,7 @@ export class Coordinator {
     this.sessionInput = async (input) => ({
       ...input,
       // Chosen for the session, or for its agent in Settings: either way it runs on something.
-      ...(await this.sessionAgents(input.model !== undefined || (input.agent !== undefined && this.agentOverrides?.[input.agent]?.model !== undefined))),
+      ...(await this.sessionAgents(input.model !== undefined || (input.agent !== undefined && this.agentOverrides?.[input.agent]?.model !== undefined), input.agent)),
       ...(this.skillFamily !== undefined ? { skillFamily: this.skillFamily } : {}),
       // The model too, or a narrowed skill is recorded and never actually injected.
       ...(this.skillModelId !== undefined ? { skillModelId: this.skillModelId } : {}),
@@ -3601,6 +3616,9 @@ export class Coordinator {
         // Mounted pickers may observe healthy → healthy across a restart. Refresh the catalog
         // here, where that lifecycle is known, rather than waiting for another UI command —
         // through the gates, so a keyless session on the returned adapter waits for its reads.
+        // A new revision is a new process, even healthy to healthy: its predecessor's
+        // lifecycle ends here, so the gates re-arm and its reads cannot answer for this one.
+        if (readiness.ready && revisionChanged) this.settleHarnessGates();
         if (readiness.ready && (revisionChanged || readinessChanged)) this.warmHarnessGates();
       }, 1_000);
       healthTimer.unref();
@@ -4237,14 +4255,19 @@ export class Coordinator {
   }
 
   /** What a keyless session waits on before it is built: the catalogue after the local rows, and the sign-in state. */
-  private localDefaultGate(signal?: AbortSignal): Promise<void> {
-    const settled = Promise.all([this.catalogueSettled, this.vendorAuthSettled]).then(() => undefined);
-    if (!signal) return settled;
+  private async localDefaultGate(signal?: AbortSignal): Promise<void> {
     // A request stopped while waiting is not built when discovery settles.
-    return Promise.race([settled, new Promise<never>((_, reject) => {
+    const stopped = signal === undefined ? null : new Promise<never>((_, reject) => {
       if (signal.aborted) reject(signal.reason);
       else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
-    })]);
+    });
+    for (;;) {
+      const settled = Promise.all([this.catalogueSettled, this.vendorAuthSettled]);
+      await (stopped === null ? settled : Promise.race([settled, stopped]));
+      // Re-armed while waiting: the harness ended and came back, and the reads that decide
+      // now are the returned one's. Settled with nothing re-armed, or shutting down, is final.
+      if (this.stopping || (!this.catalogueGateOpen && !this.vendorAuthGateOpen)) return;
+    }
   }
 
   /**
@@ -4253,14 +4276,16 @@ export class Coordinator {
    * dispatch choice and beneath every override — the same order the config writer keeps —
    * rather than replacing any of them.
    */
-  private async sessionAgents(chosen = false): Promise<{ agents?: Record<string, { model?: string; brief?: string }> }> {
+  private async sessionAgents(chosen = false, agent?: string): Promise<{ agents?: Record<string, { model?: string; brief?: string }> }> {
     // A keyless session waits for the catalogue's first fetch rather than reading it empty:
     // measured or not, an empty read here meant the first session of a run going to the cloud
     // default — the one outcome this default exists to prevent. A session whose model is
     // already chosen has nothing to wait for: it runs on that model whatever discovery says.
     if (!chosen && !this.cloudCredentialAvailable()) await this.localDefaultGate();
     if (this.stopping) throw new Error("Arke Studio is shutting down.");
-    const local = this.localHarnessDefault();
+    // Decided for the agent this session is built for: a prompt-only agent can run on a local
+    // model that calls no tools, where every other agent would fail its first turn on one.
+    const local = this.localHarnessDefault(false, agent === undefined || !PROMPT_ONLY_AGENTS.has(agent));
     if (local === undefined) {
       // A session whose model was chosen — by the dispatch, validated before this — runs on
       // that model; the refusal is for a session that would otherwise run on nothing chosen.
@@ -4275,8 +4300,10 @@ export class Coordinator {
       const override = agents[member.name];
       if (override?.model !== undefined) continue;
       // Stage reads images; it takes the first local model that can, or none, the same
-      // admission its own override would be held to.
-      const model = member.name === "stage-designer" ? this.localHarnessDefault(true) : local;
+      // admission its own override would be held to. The others take the first that can do
+      // what they do: tools for the agents that work through them, text for the rest.
+      const model = member.name === "stage-designer" ? this.localHarnessDefault(true)
+        : this.localHarnessDefault(false, !PROMPT_ONLY_AGENTS.has(member.name));
       if (model !== undefined) agents[member.name] = { ...override, model };
     }
     return { agents };
@@ -4361,7 +4388,7 @@ export class Coordinator {
     return null;
   }
 
-  private localHarnessDefault(needsImages = false): string | undefined {
+  private localHarnessDefault(needsImages = false, needsTools = true): string | undefined {
     if (this.cloudCredentialAvailable()) return undefined;
     const app = this.readModel.getState().app;
     // Rows kept from an earlier read are names, not a catalogue: after a failed refresh they
@@ -4375,7 +4402,7 @@ export class Coordinator {
     // unattended: nothing says it completes. Explicit choices are still admitted: unknown is
     // offered, and a stated refusal is one the person can read; a default has no reader.
     const assumed = new Set(this.publishedLocalHarnessRows.filter((model) => model.assumed).map((model) => model.id));
-    const local = app.harnessModels.filter((model) => model.provider === "ollama" && model.tools !== false && !assumed.has(model.id));
+    const local = app.harnessModels.filter((model) => model.provider === "ollama" && (!needsTools || model.tools !== false) && !assumed.has(model.id));
     // Admission lets an unstated modality through — unknown is offered, not withheld — but a
     // default is a choice nobody is looking at, so for Stage a model that says it reads images
     // comes before one that merely does not say it cannot.

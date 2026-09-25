@@ -78,6 +78,11 @@ it("Ollama lists what is pulled with what each model can do, and leaves out what
     { id: "broken", tools: true, vision: false, assumed: true },
   ]);
   await assert.rejects(new OllamaClient(fakeFetch([])).listModels(), "Ollama down is an error: nothing pulled and not yet answering must not read the same");
+  // An answer that is not a model list is not an empty one.
+  for (const body of [{}, null, { models: "none" }]) {
+    await assert.rejects(new OllamaClient(async () => Response.json(body)).listModels(), /did not return a model list/);
+  }
+  assert.deepEqual(await new OllamaClient(async () => Response.json({ models: [] })).listModels(), [], "a model list with nothing in it is nothing pulled");
 });
 
 it("Ollama's listing pass ends at one deadline, listing what the shows never answered for", async () => {
