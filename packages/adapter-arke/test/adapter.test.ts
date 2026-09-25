@@ -400,3 +400,14 @@ test("a session still being created when the adapter is disposed is never publis
   await assert.rejects(creating, /disposed/);
   assert.ok(!f.events.some((e) => e.type === "session.created"));
 });
+
+test("a model loaded by a turn that was then stopped is still released", async (t) => {
+  const f = await fixture(t);
+  const id = await f.session("world-builder");
+  f.ollama.script.push({ hang: true });
+  const sent = f.adapter.sendMessage({ sessionId: id, ...text("Tell me.") }).catch(() => {});
+  while (f.ollama.chats.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+  await f.adapter.interrupt(id); await sent;
+  await f.adapter.releaseResidency();
+  assert.deepEqual(f.ollama.generates, [{ model: "gemma4:12b", keep_alive: 0 }]);
+});

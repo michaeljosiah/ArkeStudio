@@ -12,7 +12,7 @@ import {
   listPulled, listTags, loopbackBaseUrl, OLLAMA_DEFAULT_URL, OllamaUnreachableError, streamChat, unloadModel,
   type ChatMessage, type ChatTool, type ChatToolCall, type PulledModel,
 } from "./ollama.js";
-import { fitToWindow, promptBudget } from "./context.js";
+import { fitToWindow, promptBudget, WITHIN_TURN } from "./context.js";
 import { recoverToolCall } from "./tool-calls.js";
 
 /**
@@ -331,11 +331,13 @@ export class ArkeAdapter implements HarnessAdapter {
         if (!fitToWindow(session.messages, session.tools, promptBudget(session.numCtx), session.messages.indexOf(opening))) {
           return { reason: "budget-exceeded", detail: "This message and its tool results do not fit the model's context window." };
         }
+        // Before the request, not after: Ollama may load the model and then the turn be stopped,
+        // and a model loaded but not remembered could never be released.
+        this.resident.add(session.model);
         const result = await streamChat(this.fetchImpl, this.baseUrl, {
           model: session.model, messages: session.messages, tools: session.tools, numCtx: session.numCtx,
           ...(this.opts.keepAlive !== undefined ? { keepAlive: this.opts.keepAlive } : {}),
         }, signal, (text) => this.emit({ type: "message.delta", sessionId: session.id, correlationId: turn.correlationId, text }));
-        this.resident.add(session.model);
         session.usage += result.promptTokens + result.outputTokens;
         // Cut off by the output or context limit: the text, or a tool call's arguments, is only
         // the part that fit. Handing it on as finished would pass half a JSON document downstream.
@@ -350,7 +352,9 @@ export class ArkeAdapter implements HarnessAdapter {
             if (reasked) return { reason: "error", detail: "The model's tool call could not be read." };
             reasked = true;
             this.opts.onTrace?.({ at: "arke.tool-call-unreadable", sessionId: session.id, reason: recovered.unreadable });
-            session.messages.push({ role: "assistant", content }, { role: "user", content: `Your tool call could not be read: ${recovered.unreadable}. Send it again as a tool call, or reply in plain text.` });
+            const reask: ChatMessage = { role: "user", content: `Your tool call could not be read: ${recovered.unreadable}. Send it again as a tool call, or reply in plain text.` };
+            WITHIN_TURN.add(reask);
+            session.messages.push({ role: "assistant", content }, reask);
             continue;
           }
           if (recovered) {

@@ -17,8 +17,13 @@ import type { ChatMessage, ChatTool } from "./ollama.js";
  * A deliberately cautious estimate. Tokenisers differ by model and none is available here;
  * three characters a token over-counts English prose and JSON, which is the safe direction —
  * trimming a little early costs a cache miss, trimming late costs the system prompt.
+ *
+ * Only for ASCII. Other scripts are token-dense — a CJK character or an emoji is often a token
+ * of its own, sometimes several — so they are counted from their UTF-8 bytes instead, at a rate
+ * that over-counts every script a writer is likely to use.
  */
-const CHARS_PER_TOKEN = 3;
+const ASCII_PER_TOKEN = 3;
+const OTHER_BYTES_PER_TOKEN = 1.5;
 const TOKENS_PER_MESSAGE = 8;
 /** What an image costs a vision model, roughly, whatever its size on disk. */
 const TOKENS_PER_IMAGE = 768;
@@ -28,15 +33,27 @@ const TRIM_TARGET = 0.7;
 export const TRIMMED_TOOL_RESULT = "[Earlier tool result removed to fit the context window.]";
 
 export function estimateTokens(messages: readonly ChatMessage[], tools: readonly ChatTool[]): number {
-  let chars = JSON.stringify(tools).length;
-  let extra = 0;
+  let total = textTokens(JSON.stringify(tools));
   for (const message of messages) {
-    chars += message.content.length;
-    if (message.tool_calls) chars += JSON.stringify(message.tool_calls).length;
-    extra += TOKENS_PER_MESSAGE + (message.images?.length ?? 0) * TOKENS_PER_IMAGE;
+    total += textTokens(message.content) + TOKENS_PER_MESSAGE + (message.images?.length ?? 0) * TOKENS_PER_IMAGE;
+    if (message.tool_calls) total += textTokens(JSON.stringify(message.tool_calls));
   }
-  return Math.ceil(chars / CHARS_PER_TOKEN) + extra;
+  return Math.ceil(total);
 }
+
+function textTokens(text: string): number {
+  // ASCII is one UTF-8 byte a character, so the bytes that are not ASCII are the rest.
+  const bytes = Buffer.byteLength(text, "utf8");
+  let ascii = 0;
+  for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) < 0x80) ascii++;
+  return ascii / ASCII_PER_TOKEN + (bytes - ascii) / OTHER_BYTES_PER_TOKEN;
+}
+
+/**
+ * Messages the loop wrote itself inside a turn — the re-ask after an unreadable tool call. They
+ * are not the start of an exchange, so trimming takes them with the turn that produced them.
+ */
+export const WITHIN_TURN = new WeakSet<ChatMessage>();
 
 /** The part of the window a prompt may use: the rest is left for the reply. */
 export function promptBudget(numCtx: number): number {
@@ -45,7 +62,9 @@ export function promptBudget(numCtx: number): number {
 
 /**
  * Brings `messages` under `budget`, in place. `turnStart` is the index of the current turn's
- * user message: nothing from it onward is dropped, because it is what is being answered.
+ * user message: nothing from it onward is dropped or shortened, because it — the request and
+ * every tool result gathered for it — is what is being answered. A turn whose own evidence does
+ * not fit ends as over budget rather than answering from part of it.
  *
  * Old tool results go first — a file read three turns ago is the bulkiest and least needed
  * thing in a writing conversation — then whole earlier exchanges, oldest first, each taken with
@@ -55,19 +74,15 @@ export function promptBudget(numCtx: number): number {
 export function fitToWindow(messages: ChatMessage[], tools: readonly ChatTool[], budget: number, turnStart: number): boolean {
   if (estimateTokens(messages, tools) <= budget) return true;
   const target = Math.floor(budget * TRIM_TARGET);
-  // The current turn's latest round is what the model is about to reason from; a round from an
-  // earlier turn is history like any other.
-  const lastRound = messages.findLastIndex((message) => message.role === "assistant" && message.tool_calls !== undefined);
-  const keepFrom = lastRound > turnStart ? lastRound : messages.length;
-  for (let at = 1; at < messages.length && estimateTokens(messages, tools) > target; at++) {
+  for (let at = 1; at < turnStart && estimateTokens(messages, tools) > target; at++) {
     const message = messages[at]!;
-    if (message.role !== "tool" || at > keepFrom || message.content === TRIMMED_TOOL_RESULT) continue;
+    if (message.role !== "tool" || message.content === TRIMMED_TOOL_RESULT) continue;
     messages[at] = { role: "tool", ...(message.tool_name !== undefined ? { tool_name: message.tool_name } : {}), content: TRIMMED_TOOL_RESULT };
   }
   let start = turnStart;
   while (estimateTokens(messages, tools) > target) {
     // One exchange: from the first user message after the system prompt up to the next one.
-    const next = messages.findIndex((message, index) => index > 1 && message.role === "user");
+    const next = messages.findIndex((message, index) => index > 1 && message.role === "user" && !WITHIN_TURN.has(message));
     if (next < 0 || next > start || messages[1]?.role !== "user") break;
     messages.splice(1, next - 1);
     start -= next - 1;
