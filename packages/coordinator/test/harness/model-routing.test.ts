@@ -606,6 +606,22 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     } finally { await test.close(); }
   });
 
+  it("keeps asking for the catalogue until it lists the rows that were published, when the reload outlasts the delay", async () => {
+    // The harness reloads its profile in about three seconds (measured); a fetch that lands
+    // before it has is a successful read of the old rows, and must not count as carried.
+    const adapter = new CaptureAdapter();
+    adapter.list = async () => CLOUD_ONLY;
+    const test = await fixture({ adapter, localModels: [{ id: "gemma4:12b", tools: true, vision: false }] });
+    try {
+      assert.equal(await test.chat(), undefined, "the read that beat the reload does not open local routing");
+      assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /not available to the harness yet/);
+      adapter.list = async () => MODELS;
+      // The listing is unchanged, so nothing is published; the catalogue is asked again.
+      await test.probeLocalRuntimes();
+      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the catalogue lists the published rows");
+    } finally { await test.close(); }
+  });
+
   it("skips a local model the runtime says cannot call tools", async () => {
     const adapter = new CaptureAdapter();
     adapter.list = async () => [{ provider: "ollama", id: "chatty:7b", tools: false }, ...MODELS];

@@ -4080,11 +4080,13 @@ export class Coordinator {
     if (this.stopping) return;
     if (fingerprint === this.publishedLocalHarnessModels) {
       // The catalogue already carries this listing, or the fetch that will is scheduled — unless
-      // that fetch failed, in which case nothing else asks again, and a keyless session would
-      // stay refused past the harness's recovery. Asked again on this cadence until it reads.
-      if (this.catalogueReadOk) { this.localRuntimeListed = listed; return; }
+      // that fetch failed, or read the catalogue before the harness had reloaded the profile
+      // (three seconds measured, not promised). Nothing else asks again, and a keyless session
+      // would stay refused past the harness's recovery: asked again on this cadence until the
+      // rows it was handed are the rows it lists.
+      if (this.catalogueReadOk && this.catalogueCarries(models)) { this.localRuntimeListed = listed; return; }
       this.modelCatalog.invalidate();
-      this.warmModelCatalog(false, () => { this.localRuntimeListed = listed; });
+      this.warmModelCatalog(false, () => { this.localRuntimeListed = listed && this.catalogueCarries(models); });
       return;
     }
     // Pending until the catalogue carries the new rows: a session decided in between would read
@@ -4107,7 +4109,9 @@ export class Coordinator {
       if (this.stopping) { this.settleCatalogue(); return; }
       this.modelCatalog.invalidate();
       // The fetch a keyless session waits on: the first one that can carry the local rows.
-      this.warmModelCatalog(true, () => { this.localRuntimeListed = listed; });
+      // Carried only once the fetch lists what was published: a read that beat the reload is
+      // a successful read of the old rows, and the probe above asks again.
+      this.warmModelCatalog(true, () => { this.localRuntimeListed = listed && this.catalogueCarries(models); });
     }, 5_000);
     timer.unref?.();
     this.lifecycleTimers.add(timer);
@@ -4132,6 +4136,12 @@ export class Coordinator {
       then?.();
       if (settles) settle();
     });
+  }
+
+  /** Whether every local model handed to the harness is now a row in its catalogue (issue 1247). */
+  private catalogueCarries(published: readonly import("@arke-studio/contracts").LocalHarnessModel[]): boolean {
+    const listed = new Set(this.readModel.getState().app.harnessModels.filter((model) => model.provider === "ollama").map((model) => model.id));
+    return published.every((model) => listed.has(model.id));
   }
 
   /** Whether a local-model publication will happen at all: both the writer and the runtime client are wired. */

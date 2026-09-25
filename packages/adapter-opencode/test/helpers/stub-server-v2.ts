@@ -24,6 +24,8 @@ export class StubOpenCodeV2 {
   private server: Server | null = null;
   port = 0;
   readonly requests: CapturedV2Request[] = [];
+  /** Hold the agent pin open, never answering: a stop between the two creation requests (issue 1247). */
+  holdAgentPin = false;
   private sseClients = new Set<ServerResponse>();
   private sessionCounter = 0;
   private turnCounter = 0;
@@ -125,6 +127,12 @@ export class StubOpenCodeV2 {
 
         let m = /^\/api\/session\/([^/]+)\/agent$/.exec(url.pathname);
         if (m && req.method === "POST") {
+          if (this.holdAgentPin) return;
+          res.writeHead(204).end();
+          return;
+        }
+        m = /^\/api\/session\/([^/]+)$/.exec(url.pathname);
+        if (m && req.method === "DELETE") {
           res.writeHead(204).end();
           return;
         }

@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { newId, type ConversationId, type MessageId } from "@arke-studio/contracts";
-import { refreshConversationSummary } from "../../src/world-chat/summarisation.js";
+import { readdir } from "node:fs/promises";
+import type { HarnessAdapter } from "@arke-studio/contracts";
+import { makeConversationSummariser, refreshConversationSummary } from "../../src/world-chat/summarisation.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { tempDir } from "../tmp.js";
@@ -183,5 +185,23 @@ describe("conversation summarisation", () => {
     const latest = events.at(-1)!.event;
     assert.equal(events.filter((envelope) => envelope.event.type === "summary.updated").length, 2);
     assert.equal(latest.type === "summary.updated" ? latest.text : null, "Summary 2");
+  });
+});
+
+describe("the summariser's scratch directory (issue 1247)", () => {
+  it("is removed when the session's configuration is refused, not only after a turn", async () => {
+    const root = await tempDir("arke-summary-scratch-");
+    const adapter = {
+      id: "refused",
+      readiness: () => ({ ready: true }),
+      capabilities: () => new Set(),
+      createSession: async () => ({ sessionId: "unexpected" }),
+      sendMessage: async () => { throw new Error("unused"); },
+      dispatchAsync: async () => { throw new Error("unused"); },
+      streamEvents() { return { [Symbol.asyncIterator]: async function* () {} }; },
+    } as unknown as HarnessAdapter;
+    const summarise = makeConversationSummariser(adapter, async () => { throw new Error("The harness's models could not be read."); }, root);
+    assert.equal(await summarise({ messages: [] }), null, "a refused configuration is no summary, not an error");
+    assert.deepEqual(await readdir(root), [], "and leaves no directory behind for the next retry to add to");
   });
 });
