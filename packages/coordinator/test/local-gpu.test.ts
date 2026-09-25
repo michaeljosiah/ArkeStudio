@@ -5,8 +5,11 @@ import { readFile } from "node:fs/promises";
 import type { HarnessAdapter, HarnessEvent } from "@arke-studio/contracts";
 import { LocalGpu } from "../src/local-ai/gpu.js";
 import { withLocalGpu } from "../src/harness/local-gpu.js";
-import { JobQueue } from "../src/queue/dispatcher.js";
+import { JobQueue, type DispatchClient } from "../src/queue/dispatcher.js";
+import { Coordinator } from "../src/coordinator.js";
+import { FsWorldProvider } from "../src/world/provider.js";
 import { FakeProvider, pngBytes } from "./queue/fake-provider.js";
+import { makeTempRoot } from "./world/helpers.js";
 import { tempDir } from "./tmp.js";
 import { until } from "./wait.js";
 
@@ -302,5 +305,29 @@ it("retains a fault-held generation's GPU through resumed polling and unacknowle
       assert.equal(client.submitCount,1);
       assert.deepEqual(unloaded,outcome==="recovery"?["Ollama","Ollama","ComfyUI"]:["Ollama","ComfyUI"]);
     } finally {gpu.stop();queue.dispose();await queue.waitForIdle();await queue.drain();}
+  }
+});
+
+it("hands Ollama's models back when quitting after a run that used it, and never waits long on it", async () => {
+  for (const scenario of ["used", "unused", "unresponsive"] as const) {
+    const { root } = await makeTempRoot();
+    const provider = new FsWorldProvider(root);
+    const unloads: AbortSignal[] = [];
+    const ollama: DispatchClient = Object.assign(new FakeProvider(), { unload: (signal?: AbortSignal) => {
+      unloads.push(signal!);
+      // A server that never answers, and a client that ignores the abort: only the race ends it.
+      return scenario === "unresponsive" ? new Promise<void>(() => {}) : Promise.resolve();
+    } });
+    const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "changes.jsonl"), appVersion: "test", dispatchClients: { ollama } });
+    const gpu = (coordinator as unknown as { localGpu: LocalGpu }).localGpu;
+    if (scenario !== "unused") (await gpu.acquire("Ollama", new AbortController().signal))();
+    const handovers = unloads.length;
+    const started = Date.now();
+    try { await coordinator.stop(); } finally { await provider.close(); }
+    assert.equal(unloads.length - handovers, scenario === "unused" ? 0 : 1, scenario);
+    if (scenario === "unresponsive") {
+      assert.ok(Date.now() - started < 5_000, "quitting is not held by an unresponsive Ollama");
+      assert.equal(unloads.at(-1)!.aborted, true);
+    }
   }
 });

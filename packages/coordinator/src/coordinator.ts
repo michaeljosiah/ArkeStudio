@@ -310,6 +310,11 @@ const BENCH_POSTER_BACKFILL_MS = 5_000;
  * open-world snapshot so the Library's first render already has its pictures.
  */
 const ARTIFACT_POSTER_BACKFILL_MS = 5_000;
+/**
+ * How long quitting waits for Ollama to hand back its models. The unload is a request Ollama
+ * answers at once, so this only bounds an unresponsive server — quitting must not wait on it.
+ */
+const OLLAMA_SHUTDOWN_RELEASE_MS = 2_000;
 
 /** Stable per candidate revision, so a retried handoff reopens instead of creating duplicates. */
 function mediaSessionId(candidateId: string, revision: number): SessionId {
@@ -17522,6 +17527,28 @@ export class Coordinator {
     });
   }
 
+  /**
+   * Ollama is its own service and outlives Arke, so the models this run loaded would otherwise
+   * hold memory until Ollama's idle timeout: five minutes for dispatch requests, and whatever
+   * OpenCode or Codex asked for. The Arke harness releases its own on dispose; this covers the
+   * rest. It is the same whole-runtime unload a GPU handover makes, so it runs only after a run
+   * that used Ollama — one that never did has no claim on another application's models. Called
+   * once the queue, harness children and adapter have stopped, so nothing can load after it.
+   */
+  private async releaseOllama(): Promise<void> {
+    const client = this.opts.dispatchClients?.["ollama"];
+    if (!client?.unload || !this.localGpu.hasRun("Ollama")) return;
+    const signal = AbortSignal.timeout(OLLAMA_SHUTDOWN_RELEASE_MS);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Raced as well as signalled: the signal bounds the requests, the timer bounds a client
+    // that does not honour it.
+    await Promise.race([
+      client.unload(signal).catch(() => {}),
+      new Promise<void>((resolve) => { timer = setTimeout(resolve, OLLAMA_SHUTDOWN_RELEASE_MS); }),
+    ]);
+    clearTimeout(timer);
+  }
+
   async stop(): Promise<void> {
     if (this.legacyServer) return this.legacyServer.stop();
     return this.stopApplication(Promise.resolve());
@@ -17584,6 +17611,7 @@ export class Coordinator {
       await this.jobQueue?.drain();
       await Promise.all([...this.supervisors.values()].map((s) => s.stop()));
       await this.opts.adapter?.dispose?.().catch(() => {});
+      await this.releaseOllama();
       await this.worldQuery.stop();
       // Provider close is the critical gate: it saves pending state and releases the world lock.
       this.engineClosed = true;
