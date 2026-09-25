@@ -862,6 +862,76 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     } finally { await test.close(); }
   });
 
+  it("gives a prompt-only agent a local model that calls no tools, where a tool-using agent is refused", async () => {
+    const adapter = new CaptureAdapter();
+    adapter.list = async () => [{ provider: "ollama", id: "chatty:7b", tools: false }, ...CLOUD_ONLY];
+    const test = await fixture({ adapter });
+    try {
+      const sessionInput = (test.coordinator as unknown as { sessionInput(input: { agent?: string }): Promise<{ agents?: Record<string, { model?: string }> }> }).sessionInput;
+      const summary = await sessionInput({ agent: "conversation-summarizer" });
+      assert.equal(summary.agents?.["conversation-summarizer"]?.model, "ollama/chatty:7b", "the summarizer calls no tools, so a tool-less local model fits it");
+      assert.equal(summary.agents?.["world-builder"]?.model, undefined, "and is not handed to an agent that needs tools");
+      await assert.rejects(Promise.resolve(sessionInput({ agent: "world-builder" })), /None of the local models/);
+    } finally { await test.close(); }
+  });
+
+  it("re-arms the gates on every new process of an adapter with no supervisor, and a waiting session follows them", async () => {
+    const adapter = new CaptureAdapter();
+    adapter.capabilities = () => new Set(["models", "events", "auth"] as const) as unknown as ReturnType<CaptureAdapter["capabilities"]>;
+    const releases: Array<() => void> = [];
+    let holding = false;
+    const connected = [{ id: "openai", name: "OpenAI", methods: [], connections: [{ kind: "stored", id: "c1", label: "OpenAI account" }], needsSignIn: false }];
+    Object.assign(adapter, { listIntegrations: async () => {
+      if (holding) await new Promise<void>((resolve) => releases.push(resolve));
+      return connected;
+    } });
+    const test = await fixture({ adapter });
+    try {
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, undefined, "read once: the connected account decides");
+      holding = true;
+      adapter.revision++;
+      await until(() => releases.length === 1, "the first new process's read is out");
+      let decided = false;
+      const pending = test.chat().finally(() => { decided = true; });
+      // Healthy to healthy again, while that read is still out. The service serialises its
+      // reads, so the newest process's read starts once the superseded one has answered.
+      adapter.revision++;
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      releases[0]!();
+      await until(() => releases.length === 2, "the second new process's read is out");
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(decided, false, "the superseded process's answer neither settles the gate nor releases the waiting session");
+      releases[1]!();
+      assert.equal((await pending)?.config.agents?.["world-builder"]?.model, undefined, "decided on the newest process's read");
+    } finally { holding = false; for (const release of releases) release(); await test.close(); }
+  });
+
+  it("keeps a catalogue read a stopped chat stopped waiting for in the lifecycle, so shutdown waits it out", async () => {
+    const adapter = new CaptureAdapter();
+    let release: () => void = () => {};
+    const test = await fixture({ adapter });
+    let closed = false;
+    try {
+      await test.send({ kind: "world-chat-create", worldId: WORLD_ID, requestId: randomUUID(), title: "Stopped while verifying",
+        entryContext: { kind: "production", productionId: "saltlight" } });
+      const conversationId = test.coordinator.getState().worldChat!.conversationId;
+      adapter.list = () => new Promise((resolve) => { release = () => resolve(MODELS); });
+      test.staleCatalogue();
+      const pending = test.send({ kind: "world-chat-send", worldId: WORLD_ID, requestId: randomUUID(), conversationId,
+        text: "Explain the current production.", attachmentIds: [], modelId: CHAT });
+      await until(() => test.coordinator.getState().worldChat?.runStatus !== null, "the turn admitted and verifying its model");
+      await test.send({ kind: "world-chat-cancel", worldId: WORLD_ID, conversationId });
+      await until(() => test.coordinator.getState().worldChat?.runStatus === null, "the turn ended at the Stop", 2_000);
+      await Promise.race([pending, new Promise((resolve) => setTimeout(resolve, 500))]);
+      const closing = test.close().then(() => { closed = true; });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(closed, false, "shutdown waits for the read the stopped chat left behind");
+      release();
+      await closing;
+      assert.equal(closed, true);
+    } finally { release(); if (!closed) await test.close(); }
+  });
+
   it("skips a local model the runtime says cannot call tools", async () => {
     const adapter = new CaptureAdapter();
     adapter.list = async () => [{ provider: "ollama", id: "chatty:7b", tools: false }, ...MODELS];

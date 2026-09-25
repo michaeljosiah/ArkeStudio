@@ -134,8 +134,12 @@ export class OllamaClient implements ProviderClient {
   private async listUnder(deadline: AbortSignal): Promise<LocalHarnessModel[]> {
     const tags = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/api/tags`, { signal: deadline });
     if (tags.status >= 400) throw new Error(`ollama: listing failed (HTTP ${tags.status})`);
-    const names = ((tags.body as { models?: Array<{ name?: unknown }> } | null)?.models ?? [])
-      .map((model) => model.name).filter((name): name is string => typeof name === "string" && name.length > 0);
+    // A body that is not a model list is not an empty one: publishing it as nothing pulled
+    // would read as an answer the runtime never gave.
+    const listed = (tags.body as { models?: unknown } | null)?.models;
+    if (!Array.isArray(listed)) throw new Error("ollama: listing did not return a model list");
+    const names = (listed as Array<{ name?: unknown } | null>)
+      .map((model) => model?.name).filter((name): name is string => typeof name === "string" && name.length > 0);
     const shown = Array.from({ length: names.length }, (): { capabilities?: unknown; model_info?: Record<string, unknown> } | null => null);
     let next = 0;
     const worker = async () => {

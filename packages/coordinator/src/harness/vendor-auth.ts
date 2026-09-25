@@ -81,6 +81,8 @@ export class VendorAuthService {
   private lastReadOk = false;
   /** Bumped by `markStale`: a read begun under an older value answered for a harness that is gone. */
   private lifecycle = 0;
+  /** Fired by `markStale`, so a patient retry's sleep ends with the lifecycle it was waiting in. */
+  private lifecycleEnded = new AbortController();
 
   /** Whether the connections on display come from a read that succeeded. */
   get readOk(): boolean {
@@ -96,6 +98,8 @@ export class VendorAuthService {
   markStale(): void {
     this.lastReadOk = false;
     this.lifecycle++;
+    this.lifecycleEnded.abort();
+    this.lifecycleEnded = new AbortController();
   }
 
   constructor(private readonly opts: VendorAuthServiceOptions) {}
@@ -149,12 +153,18 @@ export class VendorAuthService {
       return;
     }
     const lifecycle = this.lifecycle;
+    const ended = this.lifecycleEnded.signal;
     try {
       let listed = await adapter.listIntegrations();
       // The catalog populates a few seconds after spawn; an empty answer from a healthy
       // server usually means "not yet", so the seed path waits it out, bounded.
-      for (let tries = 0; patient && listed.length === 0 && tries < 5 && !this.stopped; tries++) {
-        await sleep(3_000);
+      // Given up as soon as the harness it is asking has gone: the replacement's read is
+      // serialised behind this one, and five more sleeps would spend its creation timeout.
+      for (let tries = 0; patient && listed.length === 0 && tries < 5 && !this.stopped && lifecycle === this.lifecycle; tries++) {
+        await sleep(3_000, ended);
+        // Woken because the lifecycle ended: the adapter in hand is the retired harness's,
+        // and one more ask of it would spend its request timeout ahead of the replacement.
+        if (lifecycle !== this.lifecycle) break;
         listed = await adapter.listIntegrations();
       }
       // Answered for a harness that ended while this read was out: not this lifecycle's
@@ -487,10 +497,14 @@ function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function sleep(ms: number): Promise<void> {
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
+    if (signal?.aborted) { resolve(); return; }
+    const timer = setTimeout(() => { signal?.removeEventListener("abort", end); resolve(); }, ms);
     (timer as { unref?: () => void }).unref?.();
+    // Woken early rather than rejected: the loop's own check decides what an ended wait means.
+    const end = () => { clearTimeout(timer); resolve(); };
+    signal?.addEventListener("abort", end, { once: true });
   });
 }
 
