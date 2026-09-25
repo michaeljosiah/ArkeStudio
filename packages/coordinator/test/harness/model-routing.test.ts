@@ -573,7 +573,8 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     try {
       supervisor.emit("status", { id: "harness", status: "healthy" });
       await until(() => releases.length === 1, "the first lifecycle's sign-in read is out");
-      supervisor.emit("status", { id: "harness", status: "failed", reason: "the child exited" });
+      // An exit inside the restart budget: `unhealthy`, then the replacement's `healthy`.
+      supervisor.emit("status", { id: "harness", status: "unhealthy", reason: "the child exited" });
       supervisor.emit("status", { id: "harness", status: "healthy" });
       await until(() => adapter.initCalls === 2, "the returning harness initialised");
       let decided = false;
@@ -651,6 +652,54 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       await test.probeLocalRuntimes();
       // Carried now — and passed over, since it cannot call tools: refused for that reason instead.
       await untilAsync(async () => { await test.chat(); return /None of the local models/.test(test.coordinator.getState().worldChat?.lastFailure?.detail ?? ""); }, "the row read back as written, then judged on it");
+    } finally { await test.close(); }
+  });
+
+  it("does not count a sign-in row kept after a faulted read as a credential", async () => {
+    const adapter = new CaptureAdapter();
+    adapter.capabilities = () => new Set(["models", "events", "auth"] as const) as unknown as ReturnType<CaptureAdapter["capabilities"]>;
+    let faulted = false;
+    Object.assign(adapter, { listIntegrations: async () => {
+      if (faulted) throw new Error("the auth catalog is not answering");
+      return [{ id: "openai", name: "OpenAI", methods: [], connections: [{ kind: "stored", id: "c1", label: "OpenAI account" }], needsSignIn: false }];
+    } });
+    const test = await fixture({ adapter });
+    try {
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, undefined, "the connected account stands the local default down");
+      faulted = true;
+      await test.send({ kind: "refresh-vendor-auth" });
+      await until(() => test.coordinator.getState().app.vendorAuth.reason !== null, "the faulted read");
+      assert.ok(test.coordinator.getState().app.vendorAuth.vendors.some((vendor) => vendor.connections.length > 0), "the row from last time is still on display");
+      const before = test.adapter.sessions.length;
+      await test.chat();
+      assert.equal(test.adapter.sessions.length, before, "but it is not a credential: refused, not run unmodelled");
+      assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /sign-in state could not be read/);
+    } finally { await test.close(); }
+  });
+
+  it("re-opens the gates when an adapter with no supervisor comes back after losing readiness", async () => {
+    const adapter = new CaptureAdapter();
+    adapter.capabilities = () => new Set(["models", "events", "auth"] as const) as unknown as ReturnType<CaptureAdapter["capabilities"]>;
+    let hold: Promise<void> = Promise.resolve();
+    let release: () => void = () => {};
+    Object.assign(adapter, { listIntegrations: async () => {
+      await hold;
+      return [{ id: "openai", name: "OpenAI", methods: [], connections: [{ kind: "stored", id: "c1", label: "OpenAI account" }], needsSignIn: false }];
+    } });
+    const test = await fixture({ adapter });
+    try {
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, undefined, "read once: the connected account decides");
+      adapter.ready = false;
+      await until(() => test.coordinator.getState().app.health.harness.status === "unavailable", "readiness lost");
+      hold = new Promise<void>((resolve) => { release = resolve; });
+      adapter.ready = true;
+      await until(() => test.coordinator.getState().app.health.harness.status === "healthy", "readiness back");
+      let decided = false;
+      const pending = test.chat().finally(() => { decided = true; });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(decided, false, "a keyless session waits for the returned adapter's own sign-in read");
+      release();
+      assert.equal((await pending)?.config.agents?.["world-builder"]?.model, undefined, "decided on that read");
     } finally { await test.close(); }
   });
 

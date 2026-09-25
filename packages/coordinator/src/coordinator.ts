@@ -3317,7 +3317,10 @@ export class Coordinator {
       if (component === "harness" && status === "healthy" && this.opts.adapter && !this.opts.adapter.init) {
         if (this.opts.adapter.readiness().ready) this.warmHarnessGates(); else this.settleHarnessGates();
       }
-      if (component === "harness" && (status === "failed" || status === "stopped" || status === "unconfigured")) {
+      // `unhealthy` too: an exit inside the restart budget is a lifecycle ending, and the
+      // gates it settles are what the replacement re-arms — otherwise a read of the old
+      // child could outlive the restart and settle the new one's gate.
+      if (component === "harness" && (status === "failed" || status === "stopped" || status === "unconfigured" || status === "unhealthy")) {
         this.settleHarnessGates();
       }
       if (component === "harness" && status === "healthy" && this.opts.adapter?.init) {
@@ -3581,13 +3584,14 @@ export class Coordinator {
           previousReadiness = { ...readiness };
           this.emit({ at: this.nowIso(), type: "health.changed", component: "harness", status,
             ...(readiness.reason ? { reason: readiness.reason } : {}) });
-          if (!readiness.ready) this.modelCatalogValue?.invalidate();
+          // Not ready is a lifecycle ending here as it is under a supervisor (issue 1247): the
+          // gates settle, and the return below re-arms them.
+          if (!readiness.ready) { this.modelCatalogValue?.invalidate(); this.settleHarnessGates(); }
         }
         // Mounted pickers may observe healthy → healthy across a restart. Refresh the catalog
-        // here, where that lifecycle is known, rather than waiting for another UI command.
-        if (readiness.ready && this.modelCatalogValue && (revisionChanged || readinessChanged)) {
-          this.trackBackground(this.modelCatalogValue.get().catch(() => {}));
-        }
+        // here, where that lifecycle is known, rather than waiting for another UI command —
+        // through the gates, so a keyless session on the returned adapter waits for its reads.
+        if (readiness.ready && (revisionChanged || readinessChanged)) this.warmHarnessGates();
       }, 1_000);
       healthTimer.unref();
       this.lifecycleTimers.add(healthTimer);
@@ -4278,8 +4282,10 @@ export class Coordinator {
     // Only the connections the harness keeps itself. An `env` connection is Studio's own key as
     // the harness sees it, and the store is read at the command — the published row outlives a
     // cleared key by the length of the relaunch, and a session in that gap must not count it.
+    // Rows kept after a faulted read are last time's, not a credential: the unread refusal
+    // below decides then, not the rows.
     return this.cloudLlmKeyStored ||
-      this.readModel.getState().app.vendorAuth.vendors.some((vendor) => vendor.connections.some((connection) => connection.kind === "stored"));
+      (!this.vendorAuthUnread() && this.readModel.getState().app.vendorAuth.vendors.some((vendor) => vendor.connections.some((connection) => connection.kind === "stored")));
   }
 
   /**
