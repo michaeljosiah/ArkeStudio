@@ -219,6 +219,13 @@ export function foldConversation(
           attachmentIds: [], createdAt: e.decision.at }, envelope.seq);
         break;
       }
+      case "founding.image-decision": {
+        const action = e.decision === "unassign" ? "removed an image assignment" : e.decision === "approve" ? "selected" : "rejected";
+        addMessage({ id: envelope.eventId.replace("wce_", "msg_"), turnId: envelope.eventId.replace("wce_", "turn_"),
+          role: "studio", text: `You ${action}${e.candidate ? ` ${e.candidate.label}` : ""} during founding.`,
+          attachmentIds: [], createdAt: envelope.at }, envelope.seq);
+        break;
+      }
       case "production-setup.updated":
         productionSetup = e.state;
         break;

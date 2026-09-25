@@ -161,6 +161,7 @@ interface StoreState {
       conversationId?: string;
       worldId?: string;
       review?: import("@arke-studio/contracts").GenesisContentReview;
+      images?: import("@arke-studio/contracts").GenesisImages;
       /** The plan so far, folded from the sandbox directory (SPEC-031 R-2). */
       blueprint: import("@arke-studio/contracts").GenesisBlueprint | null;
       status: "running" | "completed" | "cancelled" | "timeout" | "budget-exceeded" | "failed" | null;
@@ -1499,6 +1500,8 @@ function handleFrame(json: string): void {
       };
     } else if (event.type === "setup.status") {
       setupStatus = event.setup;
+    } else if (event.type === "genesis.images") {
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], images: event.images } };
     } else if (event.type === "genesis.review") {
       genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], review: event.review } };
     } else if (event.type === "genesis.discarded") {
@@ -2689,6 +2692,15 @@ export function genesisChat(genesisId: string, text: string): void {
 export function listGenesisDrafts(): void { send({ kind: "genesis-list" }); }
 export function loadGenesisDraft(genesisId: string): void { send({ kind: "genesis-load", genesisId }); }
 export function reviewGenesisDraft(genesisId: string): void { send({ kind: "genesis-review", genesisId }); }
+export function reviewGenesisImages(genesisId: string, models?: Partial<Record<import("@arke-studio/contracts").Capability, string>>): void {
+  send({ kind: "genesis-images", genesisId, ...(models ? { models } : {}) });
+}
+export function generateGenesisImage(genesisId: string, intentId: string, digest: string, models?: Partial<Record<import("@arke-studio/contracts").Capability, string>>): void {
+  send({ kind: "genesis-image-generate", genesisId, intentId, digest, requestId: ulid(), ...(models ? { models } : {}) });
+}
+export function decideGenesisImage(genesisId: string, target: string, decision: "approve" | "reject" | "unassign", candidate?: import("@arke-studio/contracts").GenesisImageCandidate): void {
+  send({ kind: "genesis-image-decide", genesisId, requestId: ulid(), target, decision, ...(candidate ? { candidateId: candidate.id, hash: candidate.hash } : {}) });
+}
 export function decideGenesisDraft(genesisId: string, choices: Array<{ key: string; digest: string }>, decision: "approve" | "reject"): void {
   send({ kind: "genesis-decide", genesisId, choices, decision, requestId: ulid() });
 }

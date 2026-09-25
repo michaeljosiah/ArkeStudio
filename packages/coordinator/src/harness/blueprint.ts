@@ -141,6 +141,7 @@ export async function foldBlueprint(dir: string): Promise<GenesisBlueprint> {
 
   const folded = GenesisBlueprintSchema.safeParse({
     ...(draft.canon !== undefined ? { canon: draft.canon } : {}),
+    ...(draft.images !== undefined ? { images: draft.images } : {}),
     ...(draft.name !== undefined ? { name: draft.name } : {}),
     ...(draft.logline !== undefined ? { logline: draft.logline } : {}),
     ...(draft.tone !== undefined ? { tone: draft.tone } : {}),

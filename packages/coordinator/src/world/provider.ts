@@ -1,5 +1,5 @@
 import { mkdir, readdir, rm, stat, realpath } from "node:fs/promises";
-import { basename, join, relative, isAbsolute, sep } from "node:path";
+import { basename, dirname, join, relative, isAbsolute, sep } from "node:path";
 import {
   BIBLE_PATH,
   DEFAULT_AUDIO_POLICY,
@@ -771,8 +771,13 @@ export class FsWorldProvider implements WorldProvider {
     const ext = portable.slice(portable.lastIndexOf(".")).toLowerCase();
     const contentType = FsWorldProvider.MEDIA_TYPES[ext];
     if (contentType === undefined) return null;
-    const abs = join(await this.genesisDir(genesisId), fromPortable(portable));
+    const workspace = await this.genesisDir(genesisId);
+    const privateMedia = /^media\/[a-f0-9]{64}\.(png|jpg|webp)$/.test(portable);
+    const root = privateMedia ? join(dirname(workspace), "media") : workspace;
+    const abs = privateMedia ? join(root, basename(portable)) : join(root, fromPortable(portable));
     try {
+      const rel = relative(await realpath(root), await realpath(abs));
+      if (rel.startsWith("..") || isAbsolute(rel)) return null;
       const info = await stat(toExtendedLength(abs));
       if (!info.isFile()) return null;
     } catch {

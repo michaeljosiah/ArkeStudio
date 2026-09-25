@@ -26,6 +26,7 @@ export * from "./frame-run.js";
 export * from "./change.js";
 export * from "./genesis.js";
 export * from "./genesis-review.js";
+export * from "./genesis-images.js";
 export * from "./founding-build.js";
 export * from "./events.js";
 export * from "./client-state.js";

@@ -42,6 +42,7 @@ import { fromPortable, toExtendedLength } from "./paths.js";
 import { foldBlueprint } from "../harness/blueprint.js";
 import { carryGenesisConversation, genesisConversation, genesisControlDir, reserveGenesisWorld } from "../harness/genesis-conversation.js";
 import { reviewGenesisContent } from "../harness/genesis-review.js";
+import { carryGenesisImageArtifacts, installGenesisImage } from "../harness/genesis-image-carry.js";
 import { openThread, stageCanonEntry } from "../canon/authoring.js";
 import { MarkdownFile, sha256 } from "./text-files.js";
 import { buildSheetContent, createSheetFromSentence } from "../sheets/authoring.js";
@@ -594,7 +595,7 @@ export class FoundingBuildService {
         }
         continue;
       }
-      if (item.kind === "world" || item.kind === "author-sheet" || item.kind === "thread" || item.kind === "canon" || item.kind === "finalize") {
+      if (item.kind === "world" || item.kind === "author-sheet" || item.kind === "thread" || item.kind === "canon" || item.kind === "selected-image" || item.kind === "finalize") {
         // Local work re-runs idempotently through the driver; an intent alone is enough.
         continue;
       }
@@ -869,6 +870,13 @@ export class FoundingBuildService {
         case "canon":
           await this.runCanon(active, item, store, gate);
           break;
+        case "selected-image": {
+          const selection = active.record.blueprint.selectedImages?.find(selection => selection.target === `${item.sheetType}:${item.subject}`);
+          if (!selection) throw new Error("The approved image selection is missing.");
+          await installGenesisImage(await this.ports.genesisDir(active.record.genesisId), selection, active.record.blueprint, store);
+          await this.ports.refreshWorldSnapshot(active.record.worldId);
+          break;
+        }
         case "finalize":
           await this.runFinalize(active);
           break;
@@ -909,6 +917,11 @@ export class FoundingBuildService {
     // The world files were written by the press itself (they hold this record); what is left
     // is what the conversation was handed. Filing dedups by hash, so a crashed pass re-runs.
     await this.ports.carryAttachments(active.record.genesisId, active.record.worldId);
+    const imageStore = this.ports.openStore();
+    if (imageStore?.worldId === active.record.worldId && active.record.blueprint.reviewed) {
+      await carryGenesisImageArtifacts(await this.ports.genesisDir(active.record.genesisId), active.record.genesisId,
+        active.record.blueprint, imageStore, jobId => this.ports.ledgerEntryFor(jobId));
+    }
     // A preview still generating at Begin is cancelled, not waited for: its landing could
     // arrive after the sandbox sweep and resurrect the directory, and an image that was not
     // on disk when the author pressed is not an image the author approved (R-54).

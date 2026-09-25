@@ -3,7 +3,7 @@ import { BlueprintCharacterSchema, BlueprintFactionSchema, BlueprintLocationSche
 import { SHEET_SHAPES } from "./sheet-shapes.js";
 
 export const GenesisContentSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("world"), value: GenesisBlueprintSchema.omit({ characters: true, locations: true, factions: true, canon: true, threads: true, dropped: true, reviewed: true }) }).strict(),
+  z.object({ kind: z.literal("world"), value: GenesisBlueprintSchema.omit({ characters: true, locations: true, factions: true, canon: true, threads: true, dropped: true, reviewed: true, images: true, selectedImages: true }) }).strict(),
   z.object({ kind: z.literal("character"), value: BlueprintCharacterSchema }).strict(),
   z.object({ kind: z.literal("location"), value: BlueprintLocationSchema }).strict(),
   z.object({ kind: z.literal("faction"), value: BlueprintFactionSchema }).strict(),
@@ -57,8 +57,8 @@ export function completeGenesisSheet<T extends { name: string; line?: string; de
 }
 
 export function genesisContentRows(blueprint: GenesisBlueprint): Array<{ key: string; title: string; content: GenesisContent }> {
-  const { characters, locations, factions, threads, canon, dropped, reviewed, ...world } = blueprint;
-  void dropped; void reviewed;
+  const { characters, locations, factions, threads, canon, dropped, reviewed, images, selectedImages, ...world } = blueprint;
+  void dropped; void reviewed; void images; void selectedImages;
   return [
     { key: "world", title: world.name ?? "World identity and bible", content: { kind: "world", value: world } as GenesisContent },
     ...(["character", "location", "faction"] as const).flatMap((kind, index) =>

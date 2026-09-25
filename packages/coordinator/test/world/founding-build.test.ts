@@ -25,6 +25,10 @@ import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { readKit } from "../../src/references/kit.js";
 import { assembleKeyArt, readKeyArtBrief } from "../../src/references/key-art-references.js";
 import { approvedBlueprintForFounding, decideGenesisContent, reviewGenesisContent } from "../../src/harness/genesis-review.js";
+import { decideGenesisImage, reviewGenesisImages, reviewedGenesisImages } from "../../src/harness/genesis-images.js";
+import { installGenesisImage } from "../../src/harness/genesis-image-carry.js";
+import { fileArtifact } from "../../src/artifacts/filing.js";
+import { sandboxAttachments } from "../../src/artifacts/genesis-attachments.js";
 
 /**
  * The founding build, end to end against a real world on disk (SPEC-031 §4). The queue is
@@ -266,6 +270,66 @@ function lastPlan(h: Harness): BuildReview {
 const BUILD_MS = 45_000;
 
 describe("the founding build (SPEC-031)", () => {
+  it("reuses uploaded and generated selections, preserves alternatives as artifacts, and replays without duplicates", async t => {
+    let h!: Harness;
+    h = await makeHarness(t, { manifest: MANIFEST,
+      reviewedBlueprint: async id => reviewedGenesisImages(await h.provider.genesisDir(id),
+        await approvedBlueprintForFounding(await h.provider.genesisDir(id)), [...h.queue.jobs.values()]),
+      carryAttachments: async id => {
+        for (const sourcePath of await sandboxAttachments(await h.provider.genesisDir(id))) {
+          await fileArtifact(h.provider.openStore()!, { sourcePath });
+        }
+      },
+    });
+    const dir = await h.provider.genesisDir("gen-selected");
+    await mkdir(join(dir, "draft", "characters"), { recursive: true });
+    await mkdir(join(dir, "draft", "locations"), { recursive: true });
+    await mkdir(join(dir, "attachments"), { recursive: true });
+    await mkdir(join(dir, "generated"), { recursive: true });
+    await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Harbour" }));
+    await writeFile(join(dir, "draft", "characters", "maren.json"), JSON.stringify({ name: "Maren" }));
+    await writeFile(join(dir, "draft", "locations", "vigil.json"), JSON.stringify({ name: "The Vigil" }));
+    await writeFile(join(dir, "attachments", "portrait.png"), PNG);
+    await writeFile(join(dir, "attachments", "unassigned.png"), Buffer.concat([PNG, Buffer.from("alternative")]));
+    await writeFile(join(dir, "attachments", "notes.txt"), "The gate is closed.");
+    await writeFile(join(dir, "generated", "vigil.png"), PNG);
+    const review = await reviewGenesisContent(dir);
+    await decideGenesisContent(dir, review.cards, "approve", ulid());
+    const approved = await approvedBlueprintForFounding(dir);
+    const now = new Date().toISOString();
+    const job = JobSchema.parse({ id: newId("jb"), idempotencyKey: ulid(), worldId: "gen-selected",
+      target: { kind: "genesis-image", id: "location:vigil" }, capability: "image", provider: "fal", model: "test-image",
+      params: { prompt: "The lighthouse at dusk.", label: "The Vigil" }, estimatedMicroUsd: 40000, status: "succeeded",
+      providerJobId: null, attempt: 1, error: null, landedFiles: ["generated/vigil.png"], createdAt: now, updatedAt: now });
+    h.queue.jobs.set(job.id, job);
+    const images = await reviewGenesisImages(dir, approved, [job], MODEL);
+    const portrait = images.candidates.find(candidate => candidate.label === "portrait.png")!;
+    const view = images.candidates.find(candidate => candidate.jobId === job.id)!;
+    for (const [target, candidate] of [["character:maren", portrait], ["location:vigil", view]] as const) {
+      await decideGenesisImage(dir, approved, { target, candidateId: candidate.id, hash: candidate.hash, decision: "approve", requestId: ulid() });
+    }
+    await h.service.begin("gen-selected", ulid());
+    await until(() => h.lastState()?.status === "completed", "selected images to land", BUILD_MS);
+    assert.ok(h.lastState()?.items.filter(item => item.authorized).every(item => item.state === "landed"), JSON.stringify(h.lastState()?.items));
+    const store = h.provider.openStore()!, bundle = store.getBundle();
+    const character = bundle.sheets.find(sheet => sheet.type === "character")!, location = bundle.sheets.find(sheet => sheet.type === "location")!;
+    assert.ok((await readKit(store, character.id))?.kit.mainPhoto?.sourceTakeId);
+    assert.ok((await readKit(store, location.id))?.kit.establishingViewId);
+    assert.equal(bundle.artifacts.length, 4);
+    assert.ok(bundle.artifacts.some(artifact => artifact.links.includes(character.id)));
+    assert.ok(bundle.artifacts.some(artifact => artifact.links.includes(location.id) && artifact.generation?.source === "founding"));
+    assert.ok(bundle.artifacts.some(artifact => artifact.file === "unassigned.png" && !artifact.links.length));
+    assert.equal(h.queue.jobs.size, 2, "only the downstream character sheet was generated");
+    assert.ok([...h.queue.jobs.values()].some(job => job.target.kind === "character-sheet" &&
+      Array.isArray(job.params["references"]) && job.params["references"].some(reference => String(reference).includes(character.id))));
+    assert.ok(![...h.queue.jobs.values()].some(job => job.target.kind === "main-photo-candidate" || job.target.kind === "location-view-candidate"));
+    const selected = await reviewedGenesisImages(dir, approved, [job]);
+    for (const selection of selected.selectedImages ?? []) await installGenesisImage(dir, selection, selected, store);
+    await h.service.begin("gen-selected", ulid());
+    assert.equal(store.getBundle().artifacts.length, 4);
+    assert.equal(store.getBundle().referenceTakes.length, 3);
+  });
+
   it("saves approved sheets, relationships and canon verbatim without reauthoring", async (t) => {
     let h!: Harness;
     h = await makeHarness(t, {

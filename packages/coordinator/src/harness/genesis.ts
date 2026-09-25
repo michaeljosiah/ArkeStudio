@@ -132,6 +132,17 @@ open question; other types propose settled facts. Nothing becomes accepted until
 approves its content card. Do not write approval records. ./approved-content.json is an
 application-supplied snapshot of the author's choices, not an editable source of decisions.
 
+When the author asks for a character or location image, prepare a typed generation request in
+draft.json "images": [{"id":"maren-portrait","target":"character:maren","prompt":"Complete image
+prompt including the agreed look and visible subject","references":["uploaded-photo.png"]}].
+Use location:<stable-slug> for an establishing view. Keep the request id stable while revising
+its prompt. References name uploaded images in attachments/; use [] when none are needed.
+The conversation shows the target, full prompt, references, model and price for the author to
+authorize. Generation then runs in chat and displays the result for a separate Use/Reject
+decision. Never claim an image is generated or selected just because you proposed it. Revise
+the prompt when asked for changes. To use an existing upload, tell the author which character
+or location and role it is intended for; the image card offers that explicit assignment.
+
 When the author says a character is unseen, never shown, or must never be pictured, set
 "neverDepicted": true on that character's file. This is a rule, not an appearance description:
 the build keeps the character's sheet and skips both their main photo and character-sheet image.

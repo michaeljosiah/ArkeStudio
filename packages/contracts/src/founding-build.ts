@@ -46,6 +46,7 @@ export const BuildItemKindSchema = z.enum([
   /** One canon thread opened. */
   "thread",
   "canon",
+  "selected-image",
   /** One main photo, generated at count 1, landing as the identity anchor (R-21, R-26). */
   "main-photo",
   /** One establishing view per location, landing as the location's anchor (R-28). */
@@ -267,6 +268,7 @@ export function buildWorkingLine(item: Pick<BuildItem, "kind" | "name">): string
     "author-sheet": "sheet",
     thread: "thread",
     canon: "canon",
+    "selected-image": "approved image",
     "main-photo": "main photo",
     "establishing-view": "establishing view",
     "sheet-image": "character sheet",
@@ -539,6 +541,11 @@ export function compileBuildItems(
       authorized: true,
     });
     if (character.neverDepicted === true) continue;
+    if (blueprint.selectedImages?.some(selection => selection.target === `character:${character.slug}`)) {
+      items.push({ key: `main-photo:${character.slug}`, kind: "selected-image", stage: 2, subject: character.slug,
+        sheetType: "character", name: character.name, estimatedMicroUsd: 0, authorized: true });
+      continue;
+    }
     items.push({
       key: `main-photo:${character.slug}`,
       kind: "main-photo",
@@ -552,6 +559,11 @@ export function compileBuildItems(
     });
   }
   for (const location of blueprint.locations) {
+    if (blueprint.selectedImages?.some(selection => selection.target === `location:${location.slug}`)) {
+      items.push({ key: `establishing-view:${location.slug}`, kind: "selected-image", stage: 2, subject: location.slug,
+        sheetType: "location", name: location.name, estimatedMicroUsd: 0, authorized: true });
+      continue;
+    }
     items.push({
       key: `establishing-view:${location.slug}`,
       kind: "establishing-view",

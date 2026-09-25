@@ -106,7 +106,7 @@ export async function carryGenesisConversation(dir: string, worldDir: string): P
   const target = new WorldChatStore(conversationDir(worldDir, meta.id));
   await target.create(meta.id, meta.createdAt);
   for (const envelope of events) {
-    if (envelope.event.type !== "founding.message" && envelope.event.type !== "founding.blueprint" && envelope.event.type !== "founding.decision" && envelope.event.type !== "conversation.created") {
+    if (envelope.event.type !== "founding.message" && envelope.event.type !== "founding.image-decision" && envelope.event.type !== "founding.blueprint" && envelope.event.type !== "founding.decision" && envelope.event.type !== "conversation.created") {
       throw new Error("The founding sandbox contains an unsupported conversation event.");
     }
     await target.append(envelope.event, { at: envelope.at, requestId: `founding:${envelope.eventId}` });

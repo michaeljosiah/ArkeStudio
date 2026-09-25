@@ -7,6 +7,7 @@ import { settingsReturnPath } from "../lib/settings-return.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import { renderInlineMarkdown } from "../components/inline-markdown.js";
 import { GenesisContentCards } from "../components/genesis-review.js";
+import { GenesisImageCards } from "../components/genesis-images.js";
 import { Archive, ChartLine, ChevronDown, ChevronRight, Pencil, Plus, RotateCcw, Sparkle, X } from "../components/icons.js";
 import { AgentsPanel } from "./agents.js";
 import {
@@ -51,6 +52,10 @@ import {
   loadGenesisDraft,
   reviewGenesisDraft,
   decideGenesisDraft,
+  reviewGenesisImages,
+  generateGenesisImage,
+  decideGenesisImage,
+  cancelJob,
   genesisDiscard,
   stopFoundingBuild,
   hostCanAttach,
@@ -943,12 +948,17 @@ function NewWorldDraft() {
       provider?.validation ?? "",
     ].join("|");
   })();
-  const plannedAgainst = useRef<{ blueprint: typeof blueprint; review: (typeof drafts)[string]["review"]; preview: string | null; route: string } | null>(null);
+  const imageJobs = (state?.app.jobs ?? []).filter(job => job.worldId === genesisId && job.target.kind === "genesis-image");
+  const imageJobsKey = imageJobs.map(job => `${job.id}:${job.status}`).join("|");
+  useEffect(() => {
+    if (connection === "open" && blueprint && !chatRunning && !g?.worldId) reviewGenesisImages(genesisId, models);
+  }, [connection, blueprint, chatRunning, g?.worldId, g?.attachments, genesisId, models, imageJobsKey, imageRoute]);
+  const plannedAgainst = useRef<{ blueprint: typeof blueprint; review: (typeof drafts)[string]["review"]; images: (typeof drafts)[string]["images"]; preview: string | null; route: string } | null>(null);
   useEffect(() => {
     if (!buildCardOpen || buildPressed) return;
     const preview = previewJob?.status ?? null;
     const last = plannedAgainst.current;
-    if (last !== null && last.blueprint === blueprint && last.review === g?.review && last.preview === preview && last.route === imageRoute) return;
+    if (last !== null && last.blueprint === blueprint && last.review === g?.review && last.images === g?.images && last.preview === preview && last.route === imageRoute) return;
     let lookText = lookForBuild;
     if (lookSource === "conversation" && look.trim() === conversationLookRef.current) {
       lookText = blueprint?.look?.trim() ?? "";
@@ -956,19 +966,19 @@ function NewWorldDraft() {
       setLook(lookText);
       setLookForBuild(lookText);
     }
-    plannedAgainst.current = { blueprint, review: g?.review, preview, route: imageRoute };
+    plannedAgainst.current = { blueprint, review: g?.review, images: g?.images, preview, route: imageRoute };
     const requestId = ulid();
     setPlanRequestId(requestId);
     setPlanStartedAt(new Date().toISOString());
     // A refusal answered the blueprint that moved; the fresh plan is the review it asked for.
     setBuildRequestId(null);
     planFoundingBuild(genesisId, requestId, lookText, models);
-  }, [buildCardOpen, buildPressed, previewJob?.status, blueprint, g?.review, lookForBuild, look, lookSource, genesisId, models, imageRoute]);
+  }, [buildCardOpen, buildPressed, previewJob?.status, blueprint, g?.review, g?.images, lookForBuild, look, lookSource, genesisId, models, imageRoute]);
 
   const openBuildCard = (lookText: string) => {
     setLookForBuild(lookText);
     setBuildRequestId(null);
-    plannedAgainst.current = { blueprint, review: g?.review, preview: previewJob?.status ?? null, route: imageRoute };
+    plannedAgainst.current = { blueprint, review: g?.review, images: g?.images, preview: previewJob?.status ?? null, route: imageRoute };
     const requestId = ulid();
     setPlanRequestId(requestId);
     setPlanStartedAt(new Date().toISOString());
@@ -1193,6 +1203,11 @@ function NewWorldDraft() {
                 {g?.review && <GenesisContentCards review={g.review} busy={chatRunning || buildPressed || myBuild?.status === "running"}
                   onDecide={(cards, decision) => decideGenesisDraft(genesisId, cards.map(card => ({ key: card.key, digest: card.digest })), decision)}
                   onRevise={title => setMessage(`Please revise ${title}: `)} />}
+                {g?.images && blueprint && <GenesisImageCards genesisId={genesisId} blueprint={blueprint} images={g.images} jobs={imageJobs}
+                  busy={chatRunning || buildPressed || myBuild?.status === "running" || !!g.worldId}
+                  onGenerate={(intentId, digest) => generateGenesisImage(genesisId, intentId, digest, models)}
+                  onDecide={(target, decision, candidate) => decideGenesisImage(genesisId, target, decision, candidate)}
+                  onCancel={cancelJob} onRevise={setMessage} />}
                 {/* The look, previewable while the conversation is still a conversation (SPEC-031
                     §1.10): the agent proposed the words; the press and the spend are the author's.
                     Asked in the thread, not in the rail beside it — spend is decided where every

@@ -497,6 +497,14 @@ function generatedIdentity(
       links: [],
     };
   }
+  if (generation.source === "founding") {
+    return {
+      producedBy: "founding",
+      isSame: artifact => artifact.generation?.source === "founding" && artifact.generation.jobId === generation.jobId,
+      stem: `${slugify(generation.label).slice(0, 60) || "founding"}-${generation.jobId.slice(-6)}`,
+      links: generation.links,
+    };
+  }
   if (generation.source === "audiobook") {
     // One take per block per run: the same block read again is a new take with a new job, so
     // the identity is the job when there is one and the block's words, voice and direction

@@ -22,6 +22,7 @@ import { DiagnosticsSnapshotSchema } from "./diagnostics.js";
 import { BuildReviewSchema, FoundingBuildStateSchema } from "./founding-build.js";
 import { GenesisBlueprintSchema } from "./genesis.js";
 import { GenesisContentReviewSchema } from "./genesis-review.js";
+import { GenesisImagesSchema } from "./genesis-images.js";
 import { FrameRunQuoteSchema, FrameRunStateSchema } from "./frame-run.js";
 import { HarnessStatusSchema } from "./harness.js";
 import {
@@ -101,6 +102,7 @@ export const QueueCommandSchema = z.enum([
   "upload-world-image",
   "generate-master-look",
   "generate-look-preview",
+  "genesis-image-generate",
   "upload-master-look",
   "pick-staged-reference",
   "establish-look",
@@ -1675,6 +1677,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
   }).strict(),
   z.object({ ...base, type: z.literal("genesis.discarded"), genesisId: z.string().min(1) }).strict(),
   z.object({ ...base, type: z.literal("genesis.review"), genesisId: z.string().min(1), review: GenesisContentReviewSchema }).strict(),
+  z.object({ ...base, type: z.literal("genesis.images"), genesisId: z.string().min(1), images: GenesisImagesSchema }).strict(),
   z
     .object({
       ...base,

@@ -458,6 +458,7 @@ import {
 import { GenesisService } from "./harness/genesis.js";
 import { carryGenesisConversation, foundingMessages, genesisControlDir, loadGenesisConversation, reserveGenesisWorld } from "./harness/genesis-conversation.js";
 import { approvedBlueprintForFounding, decideGenesisContent, reviewGenesisContent } from "./harness/genesis-review.js";
+import { decideGenesisImage, genesisImageRequest, reviewGenesisImages, reviewedGenesisImages } from "./harness/genesis-images.js";
 import { FoundingBuildService } from "./world/founding-build.js";
 import { isAuthShapedFailure, VendorAuthService } from "./harness/vendor-auth.js";
 import { NoArkeCloud, type AccountService } from "./account.js";
@@ -2554,6 +2555,11 @@ export class Coordinator {
               return prepare(store);
             },
             readImageReferences: async (worldId, paths) => {
+              if (!UlidSchema.safeParse(worldId).success) {
+                const workspace = await this.opts.provider.genesisDir?.(worldId);
+                if (!workspace || paths.some(path => !/^media\/[a-f0-9]{64}\.(png|jpg|webp)$/.test(path))) throw new Error("The founding references are unavailable.");
+                return readContainedImageReferences(genesisControlDir(workspace), paths);
+              }
               const read = async (store: WorldStore) => {
                 assertStageReferencesCurrent(store,paths);
                 const references=await readContainedImageReferences(store.dir,paths);
@@ -2953,7 +2959,12 @@ export class Coordinator {
               this.credentials ? this.credentials.get(provider as ProviderId) : null,
             harnessReady: () => this.opts.adapter?.readiness().ready === true && this.authoring !== null,
             genesisDir: (genesisId) => this.opts.provider.genesisDir!(genesisId),
-            reviewedBlueprint: async (genesisId) => approvedBlueprintForFounding(await this.opts.provider.genesisDir!(genesisId)),
+            reviewedBlueprint: async (genesisId) => {
+              const dir = await this.opts.provider.genesisDir!(genesisId);
+              const jobs = (this.jobQueue?.listJobs() ?? []).filter(job => job.worldId === genesisId);
+              await reviewGenesisImages(dir, await foldBlueprint(dir), jobs, null);
+              return reviewedGenesisImages(dir, await approvedBlueprintForFounding(dir), jobs);
+            },
             reviewNotes: async (genesisId) => {
               const review = await reviewGenesisContent(await this.opts.provider.genesisDir!(genesisId));
               const pending = review.cards.filter(card => card.status === "pending");
@@ -7084,6 +7095,37 @@ export class Coordinator {
         } catch {
           this.transport.broadcastSnapshot();
         }
+        return;
+      }
+      case "genesis-images":
+      case "genesis-image-generate":
+      case "genesis-image-decide": {
+        const reading = msg.kind === "genesis-images";
+        if (!this.opts.provider.genesisDir || this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || (!reading && this.genesisDeciding.has(msg.genesisId))) return;
+        if (!reading) this.genesisDeciding.add(msg.genesisId);
+        try {
+          const dir = await this.opts.provider.genesisDir(msg.genesisId);
+          if ((await loadGenesisConversation(dir, msg.genesisId)).worldId) throw new Error("Continue image work in the founded world's conversation.");
+          const blueprint = await foldBlueprint(dir);
+          const jobs = (this.jobQueue?.listJobs() ?? []).filter(job => job.worldId === msg.genesisId);
+          const model = this.opts.manifest ? imageModelFor(this.appSettings ? await this.appSettings.load() : null,
+            this.opts.manifest, undefined, "models" in msg ? msg.models : undefined) : null;
+          let images = await reviewGenesisImages(dir, blueprint, jobs, model);
+          if (msg.kind === "genesis-image-generate") {
+            if (!jobs.some(job => job.idempotencyKey === msg.requestId)) {
+              const plan = images.plans.find(plan => plan.intent.id === msg.intentId && plan.digest === msg.digest);
+              if (!plan) throw new Error("The generation proposal changed. Review the current prompt and cost.");
+              if (jobs.some(job => job.target.kind === "genesis-image" && job.target.id === plan.intent.target && !["succeeded", "failed", "cancelled"].includes(job.status))) throw new Error("An image for this character or location is already in progress.");
+              await this.enqueueBatch(msg.requestId, msg.kind, [genesisImageRequest(msg.genesisId, plan, msg.requestId)]);
+            }
+          } else if (msg.kind === "genesis-image-decide") {
+            images = await decideGenesisImage(dir, blueprint, msg);
+          }
+          this.emit({ type: "genesis.images", at: new Date().toISOString(), genesisId: msg.genesisId, images });
+        } catch (err) {
+          this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: msg.genesisId, status: "failed", detail: describeCoordinatorError(err) });
+          if (msg.kind === "genesis-image-generate") this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(err));
+        } finally { if (!reading) this.genesisDeciding.delete(msg.genesisId); }
         return;
       }
       case "genesis-review":
