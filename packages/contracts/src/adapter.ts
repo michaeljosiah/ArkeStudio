@@ -16,6 +16,7 @@ export const HarnessCapability = z.enum([
   "models", // listModels() — the backend exposes a model catalog
   "permissions", // respondToPermission()
   "auth", // vendor sign-in over the harness's API (SPEC-030)
+  "structured-context", // accepts separately trimmable history in SendMessageInput
 ]);
 export type HarnessCapability = z.infer<typeof HarnessCapability>;
 
@@ -53,6 +54,11 @@ export interface MessagePart {
 export interface SendMessageInput {
   sessionId: string;
   parts: MessagePart[];
+  /** Alternative to parts for adapters advertising structured-context. Only history may be dropped. */
+  contextMessages?: {
+    history: Array<{ role: "user" | "assistant"; text: string }>;
+    current: string;
+  };
   /**
    * Caller-supplied correlation id so later events attribute to the originating request.
    * If omitted, the adapter generates one and returns it on the receipt.

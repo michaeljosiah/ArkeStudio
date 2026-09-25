@@ -664,8 +664,8 @@ export function failureLine(failure: { status: string; detail?: string }): strin
       : failure.status === "interrupted"
         ? "That turn was interrupted. You can retry it."
         : failure.status === "budget-exceeded"
-          ? "That turn ran past its budget and stopped."
-          : "That did not go through.";
+          ? "This conversation is too long for the model's window, or the turn reached its limit. Start a new thread, or ask about less."
+          : "That did not go through. Try that again, or choose another model.";
   return `${opening} Nothing was lost — your message is still here.`;
 }
 

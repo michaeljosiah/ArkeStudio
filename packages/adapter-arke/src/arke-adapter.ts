@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  agentPromptFor, confinementFor, findHarnessModel, harnessModelMissingInput, HarnessEventSchema, meetsLocalModelMinimum, ROSTER, sessionSkillForAgent,
+  agentPromptFor, ARKE_CONTEXT_WINDOW, confinementFor, findHarnessModel, harnessModelMissingInput, HarnessEventSchema, meetsArkeModelMinimum, ROSTER, sessionSkillForAgent,
   type CreateSessionInput, type HarnessAdapter, type HarnessCapability, type HarnessEvent, type ModelInfo,
   type Readiness, type SendMessageInput, type SendReceipt, type SessionConfigInput, type SessionRef,
 } from "@arke-studio/contracts";
@@ -38,7 +38,7 @@ export interface ArkeAdapterOptions {
   fetch?: typeof fetch;
   /**
    * The context window asked for when a model does not state one, and the ceiling otherwise.
-   * The host sets it from what the GPU can hold: a window the card cannot fit is one Ollama
+   * Defaults to 64k. A host may override the allocation: a window the card cannot fit is one Ollama
    * splits onto the CPU, which is slower than a smaller window that fits.
    */
   maxContextTokens?: number;
@@ -54,16 +54,15 @@ export interface ArkeAdapterOptions {
 }
 
 const DEFAULT_CONTEXT = 8_192;
-const CONTEXT_CEILING = 32_768;
+const CONTEXT_CEILING = ARKE_CONTEXT_WINDOW;
 const DEFAULT_STEPS = 24;
 const CATALOGUE_DEADLINE_MS = 15_000;
 const DISPOSE_RELEASE_MS = 2_000;
 const REPROBE_MS = 5_000;
-const NO_USABLE_MODEL = "No pulled model has a 256k context window and calls tools. Pull one, such as Gemma 4 12B.";
+const NO_USABLE_MODEL = "No pulled model has a 64k context window and calls tools. Pull one, such as Gemma 4 12B.";
 /**
- * Only models stating a 256k context are offered, the same rule as the OpenCode lane
- * (`meetsLocalModelMinimum` in contracts). How much of that window a session asks for is
- * separate — `maxContextTokens`, set from what the GPU can hold.
+ * Admission matches the default window. A host can explicitly set a smaller or larger
+ * allocation; the model's own stated window still caps it, and role instructions must fit.
  */
 const PROVIDER = "ollama";
 /**
@@ -153,7 +152,7 @@ export class ArkeAdapter implements HarnessAdapter {
     this.baseUrl = loopbackBaseUrl(opts.baseUrl ?? OLLAMA_DEFAULT_URL, opts.allowRemoteHost === true);
   }
 
-  capabilities(): ReadonlySet<HarnessCapability> { return new Set(["events", "models"]); }
+  capabilities(): ReadonlySet<HarnessCapability> { return new Set(["events", "models", "structured-context"]); }
   /**
    * Also how the harness recovers. The coordinator initialises an adapter it does not supervise
    * once, then only polls this; with no process to restart, Ollama starting (or coming back)
@@ -296,10 +295,10 @@ export class ArkeAdapter implements HarnessAdapter {
       // Pulled but not offered says something different from not pulled: the person can act on it.
       const present = all.some((row) => findHarnessModel(requested, [{ id: row.id, provider: PROVIDER, displayName: row.id }]));
       throw new Error(present
-        ? "This model's context window is under 256k tokens. Arke's local harness needs 256k or more."
+        ? "This model's context window is under 64k tokens. Arke's local harness needs 64k or more."
         : "The selected model is not pulled in Ollama. Refresh the model list and choose an available model.");
     }
-    if (!selected) throw new Error(promptOnly ? "Ollama has no 256k-context model known to answer. Pull one, or choose a model." : "Ollama has no model with a 256k context window that calls tools. Pull one, or choose a model before starting this agent.");
+    if (!selected) throw new Error(promptOnly ? "Ollama has no 64k-context model known to answer. Pull one, or choose a model." : "Ollama has no model with a 64k context window that calls tools. Pull one, or choose a model before starting this agent.");
     const missingInput = harnessModelMissingInput(selected, member.name === "stage-designer");
     if (missingInput === "text") throw new Error("This model cannot accept the text instructions required by Arke.");
     if (missingInput === "image") throw new Error("This model cannot inspect Stage images.");
@@ -362,7 +361,12 @@ export class ArkeAdapter implements HarnessAdapter {
     settled.catch(() => {});
     const turn: Turn = { correlationId, abort, settled };
     session.turn = turn;
-    session.messages.push({ role: "user", content: input.parts.map((part) => part.text).join("\n") });
+    if (input.contextMessages) {
+      // A fresh World Chat session receives the transcript as history, not inside the new ask.
+      // The normal fitter can now remove old exchanges while preserving the current request.
+      session.messages.push(...input.contextMessages.history.map(message => ({ role: message.role, content: message.text })));
+    }
+    session.messages.push({ role: "user", content: input.contextMessages?.current ?? input.parts.map((part) => part.text).join("\n") });
     void this.runTurn(session, turn).then((ending) => {
       if (session.turn === turn) session.turn = null;
       if (ending.reason !== "completed") this.answerUnrun(session);
@@ -568,5 +572,5 @@ export class ArkeAdapter implements HarnessAdapter {
 }
 
 function supported(model: PulledModel): boolean {
-  return meetsLocalModelMinimum(model);
+  return meetsArkeModelMinimum(model);
 }

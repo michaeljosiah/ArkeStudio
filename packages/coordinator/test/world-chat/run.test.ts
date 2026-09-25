@@ -158,6 +158,24 @@ function goodAnswer(said: string, quote: string, messageId: string): string {
 }
 
 describe("taking a turn", () => {
+  for (const reason of ["budget-exceeded", "timeout", "error"] as const) it(`records a ${reason} session ending promptly without a corrective model call`, async () => {
+    let dispatched = 0;
+    const adapter = fakeAdapter([]);
+    adapter.dispatchAsync = async () => { dispatched++; return { sessionId: "s1", correlationId: "test" }; };
+    adapter.streamEvents = () => (async function* () {
+      yield { type: "session.ended" as const, sessionId: "s1", reason, detail: "PRIVATE WORLD CONTENT" };
+    })();
+    const { runner, store, conversationId, view } = await setup(adapter, { timeoutMs: 10_000 });
+    const outcome = await runner.send(store, conversationId, "Tighten this passage.");
+    assert.equal(outcome.status, reason === "error" ? "failed" : reason);
+    assert.equal(dispatched, 1);
+    const loaded = await view();
+    assert.equal(loaded.activeRun, null);
+    assert.equal(loaded.lastFailedRun?.status, outcome.status);
+    assert.doesNotMatch(loaded.lastFailedRun?.safeDetail ?? "", /PRIVATE WORLD CONTENT/);
+    if (reason === "budget-exceeded") assert.match(loaded.lastFailedRun!.safeDetail!, /Start a new thread, or ask about less/);
+  });
+
   it("a turn held to a passage, or to a reply, fences the world and writes its constraints before the words (codex on PR 903, round three)", async () => {
     const raised: number[] = [];
     const reply = JSON.stringify({ reply: "Noted.", candidateOperations: [], groupOperations: [] });

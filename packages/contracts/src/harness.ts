@@ -102,7 +102,7 @@ export interface LocalHarnessModel {
 }
 
 /**
- * The shortest context a local model must state to be offered to any writing harness: 256k
+ * The shortest context a local model must state to be offered through OpenCode: 256k
  * (issue 1247). A product decision, not a measurement — the roster's prompts, world context
  * and long sessions are written for long windows, and a model trained on less degrades well
  * before its window fills. Ollama reports what the weights declare, so Gemma 4 12B and 26B pass
@@ -111,7 +111,17 @@ export interface LocalHarnessModel {
 export const LOCAL_MODEL_MIN_CONTEXT = 256_000;
 
 /**
- * Whether a pulled model may be offered for writing: whether it states the window. A model whose
+ * Local's configured window and admission floor agree (#1265). Its world-builder instructions
+ * and tools alone consume about 27k estimated tokens; 64k leaves room for chapter context and
+ * the reply. Other harnesses retain their own allocation and admission policy.
+ */
+export const ARKE_CONTEXT_WINDOW = 65_536;
+export function meetsArkeModelMinimum(model: { readonly contextLength?: number }): boolean {
+  return (model.contextLength ?? 0) >= ARKE_CONTEXT_WINDOW;
+}
+
+/**
+ * Whether a pulled model may be offered through OpenCode: whether it states the window. A model whose
  * details could not be read states none, so it is not; one whose window was read but whose
  * capabilities Ollama did not list is, and `assumed` still keeps it from being chosen unattended.
  */

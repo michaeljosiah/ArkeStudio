@@ -14,6 +14,14 @@ import {
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { RowMenuPanel, byPendingConsequence } from "../src/screens/world-chat.js";
+import { failureLine } from "../src/components/conversation.js";
+
+it("explains a context limit with a way forward without exposing harness details", () => {
+  const line = failureLine({ status: "budget-exceeded", detail: "PRIVATE raw tool content" });
+  assert.match(line, /Start a new thread, or ask about less/);
+  assert.match(line, /message is still here/);
+  assert.doesNotMatch(line, /PRIVATE/);
+});
 
 /**
  * The World Chat workspace (#70 phase 3).
@@ -252,6 +260,17 @@ describe("saying that the studio is working", () => {
   it("shows nothing at all once the turn is done", () => {
     const html = renderWorking({ runStatus: null, runStartedAt: null });
     assert.doesNotMatch(html, /fy-working/, "the line belongs to the turn, not to the screen");
+  });
+
+  for (const status of ["budget-exceeded", "timeout", "failed"] as const) it(`replaces progress with a retryable ${status} notice beside the retained ask`, () => {
+    const html = renderWorking({ runStatus: null, runStartedAt: null,
+      messages: [{ id: "msg_test", turnId: "turn_test", role: "user", text: "Tighten this passage.", createdAt: AT, attachmentIds: [] }],
+      lastFailure: { turnId: "turn_test", status, detail: "PRIVATE raw tool content" },
+    });
+    assert.match(html, /Tighten this passage/);
+    assert.match(html, /Try that again/);
+    assert.doesNotMatch(html, /fy-working|PRIVATE raw tool content/);
+    if (status === "budget-exceeded") assert.match(html, /Start a new thread, or ask about less/);
   });
 
   /**
