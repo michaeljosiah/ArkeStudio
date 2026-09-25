@@ -56,6 +56,7 @@ import {
   generateGenesisImage,
   decideGenesisImage,
   cancelJob,
+  proposeGenesisWorld,
   genesisDiscard,
   stopFoundingBuild,
   hostCanAttach,
@@ -836,7 +837,7 @@ function NewWorldDraft() {
   const railFactions = (blueprint?.factions ?? []).map((f) => ({ name: f.name, sentence: oneLine(f) }));
   const coverage = blueprint ? blueprintCoverage(blueprint) : null;
   // A conversation that settled a name builds; anything less creates and seeds the old way.
-  const buildMode = blueprint?.name !== undefined || turns.length > 0;
+  const buildMode = blueprint?.name !== undefined;
   const buildPlans = useBuildPlans();
   const reviewPlan = planRequestId === null ? undefined : buildPlans[genesisId]?.[planRequestId];
   const buildResponse = buildRequestId === null ? undefined : buildPlans[genesisId]?.[buildRequestId];
@@ -1007,6 +1008,19 @@ function NewWorldDraft() {
     1 + railCharacters.length + railLocations.length + railFactions.length + (blueprint?.threads.length ?? 0);
 
   const begin = (artDirection?: string) => {
+    if (turns.length) {
+      proposeGenesisWorld(genesisId, {
+        name: shownName, ...(shownLogline ? { logline: shownLogline } : {}),
+        ...(shownTone ? { tone: shownTone } : {}), ...(shownGenre ? { genre: shownGenre } : {}),
+        ...(artDirection?.trim() ? { look: artDirection.trim() } : {}),
+        characters: charSeed ? [{ name: charSeed.name, line: charSeed.sentence }] : [],
+        locations: locSeed ? [{ name: locSeed.name, line: locSeed.sentence }] : [],
+        threads: blueprint?.threads ?? [],
+      });
+      setGenMode("chat");
+      setStep("draft");
+      return;
+    }
     setSubmittedName(shownName);
     createWorld({
       name: shownName,

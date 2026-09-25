@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import {
-  GenesisContentReviewSchema, SHEET_SHAPES, approvedGenesisBlueprint, approvedGenesisContent, genesisContentRows,
+  CHARACTER_ROLE_MAX, GenesisContentReviewSchema, SHEET_SHAPES, approvedGenesisBlueprint, approvedGenesisContent, genesisContentRows,
   type GenesisContentReview, type GenesisDecision, type GenesisReviewCard,
 } from "@arke-studio/contracts";
 import { conversationActionDigest } from "../arke-actions/digest.js";
@@ -23,16 +23,18 @@ export async function reviewGenesisContent(dir: string): Promise<GenesisContentR
   }
   const cards: GenesisReviewCard[] = rows.map(row => {
     const digest = conversationActionDigest(row.content);
-    const lastDecision = decisions.findLast(one => one.key === row.key);
-    const decision = lastDecision?.digest === digest ? lastDecision : undefined;
+    const decision = decisions.findLast(one => one.key === row.key && one.digest === digest);
     const previous = selected.get(row.key);
-    return { ...row, digest, ...(previous ? { previous } : {}), status: decision?.decision === "approve" ? "approved" : decision ? "rejected" : "pending" };
+    const isSelected = previous && conversationActionDigest(previous) === digest;
+    const removed = row.content.kind === "remove" && !previous && decision?.decision === "approve";
+    return { ...row, digest, ...(previous ? { previous } : {}), status: decision?.decision === "reject" ? "rejected" : isSelected || removed ? "approved" : "pending" };
   });
   const approved = approvedGenesisBlueprint(selected);
   const problems = blueprint.dropped.map(file => `Cannot read ${file}; repair it before founding.`);
   const ids = new Set([...approved.characters.map(c => `character:${c.slug}`), ...approved.locations.map(c => `location:${c.slug}`), ...approved.factions.map(c => `faction:${c.slug}`)]);
   for (const [kind, entities] of [["character", approved.characters], ["location", approved.locations], ["faction", approved.factions]] as const) {
     for (const entity of entities) {
+      if ((entity.sheet?.role?.length ?? 0) > CHARACTER_ROLE_MAX) problems.push(`${entity.name}: shorten the character role to ${CHARACTER_ROLE_MAX} characters before founding.`);
       for (const field of ["role", "billing", "region"] as const) {
         if (entity.sheet?.[field] && !SHEET_SHAPES[kind].extraFields.includes(field)) problems.push(`${entity.name}: ${field} is not a field on a ${kind} sheet.`);
       }

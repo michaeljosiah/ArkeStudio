@@ -7,6 +7,7 @@ import { tempDir } from "../tmp.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { approvedBlueprintForFounding, decideGenesisContent, reviewGenesisContent } from "../../src/harness/genesis-review.js";
 import { genesisConversation } from "../../src/harness/genesis-conversation.js";
+import { parseDraftFrom } from "../../src/harness/genesis.js";
 
 async function draft() {
   const provider = new FsWorldProvider(await tempDir("genesis-review-"));
@@ -17,6 +18,40 @@ async function draft() {
   await writeFile(path, JSON.stringify({ name: "Maren", sheet: { sections: { Essence: "She keeps the gate.", Appearance: "A red coat." } } }));
   return { dir, path };
 }
+
+it("recovery keeps omitted canon, and a canon-only proposal is meaningful", () => {
+  const canon = [{ slug: "closed", type: "rule", title: "Closed", statement: "The gate stays closed." }];
+  assert.deepEqual(parseDraftFrom(JSON.stringify({ canon }))?.canon, canon);
+  assert.deepEqual(parseDraftFrom('{"name":"Harbour"}', { canon })?.canon, canon);
+  assert.deepEqual(parseDraftFrom('{"canon":[]}', { canon })?.canon, []);
+});
+
+it("reverting to the selected version is approved, while an older superseded version needs approval", async () => {
+  const { dir, path } = await draft();
+  const first = (await reviewGenesisContent(dir)).cards.find(card => card.key === "character:maren")!;
+  await decideGenesisContent(dir, [first], "approve", ulid());
+  await writeFile(path, JSON.stringify({ name: "Maren the Second" }));
+  const second = (await reviewGenesisContent(dir)).cards.find(card => card.key === first.key)!;
+  await decideGenesisContent(dir, [second], "reject", ulid());
+  assert.equal(first.content.kind, "character");
+  await writeFile(path, JSON.stringify(first.content.value));
+  assert.equal((await reviewGenesisContent(dir)).cards.find(card => card.key === first.key)?.status, "approved");
+  await writeFile(path, JSON.stringify(second.content.value));
+  await decideGenesisContent(dir, [second], "approve", ulid());
+  await writeFile(path, JSON.stringify(first.content.value));
+  assert.equal((await reviewGenesisContent(dir)).cards.find(card => card.key === first.key)?.status, "pending");
+});
+
+it("duplicate canon identities and oversized character roles block founding", async () => {
+  const { dir, path } = await draft();
+  const canon = { slug: "same", type: "rule", title: "One", statement: "One fact" };
+  await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Harbour", canon: [canon, { ...canon, title: "Two" }] }));
+  assert.ok((await reviewGenesisContent(dir)).problems.some(problem => problem.includes("draft.json")));
+  await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Harbour" }));
+  await writeFile(path, JSON.stringify({ name: "Maren", sheet: { sections: { Essence: "Keeper", Appearance: "Red coat" }, role: "A".repeat(29) } }));
+  await decideGenesisContent(dir, (await reviewGenesisContent(dir)).cards, "approve", ulid());
+  await assert.rejects(approvedBlueprintForFounding(dir), /28 characters/);
+});
 
 it("founding refuses unapproved content and keeps the exact approved version after a rejected edit", async () => {
   const { dir, path } = await draft();

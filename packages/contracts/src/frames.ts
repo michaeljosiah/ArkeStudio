@@ -1,4 +1,5 @@
 import { valueSchema } from "./value-schema.js";
+import { GenesisDraftSchema } from "./genesis.js";
 import { AccountPageSchema } from "./account.js";
 import { StageReferenceFrameSchema } from "./scene.js";
 import { isManuscriptLanguage } from "./manuscript.js";
@@ -888,6 +889,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     intentId: z.string().min(1), digest: z.string().min(1), models: ModelChoicesSchema.optional() }).strict(),
   z.object({ kind: z.literal("genesis-image-decide"), genesisId: GenesisIdSchema, requestId: UlidSchema, target: z.string().regex(/^(character|location):[a-z0-9][a-z0-9-]*$/),
     candidateId: z.string().optional(), hash: z.string().optional(), decision: z.enum(["approve", "reject", "unassign"]) }).strict(),
+  z.object({ kind: z.literal("genesis-propose-world"), genesisId: GenesisIdSchema, draft: GenesisDraftSchema }).strict(),
   z.object({
     kind: z.literal("genesis-decide"), genesisId: GenesisIdSchema, requestId: UlidSchema,
     choices: z.array(z.object({ key: z.string().min(1), digest: z.string().regex(/^sha256:[a-f0-9]{64}$/) }).strict()).min(1).max(300),

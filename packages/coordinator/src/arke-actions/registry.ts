@@ -252,6 +252,7 @@ const CLIENT_COMMAND_METADATA = {
   "genesis-images": globalOnly("Images belong to a pre-world conversation."),
   "genesis-image-generate": globalOnly("Generation belongs to a pre-world conversation."),
   "genesis-image-decide": globalOnly("Image decisions belong to a pre-world conversation."),
+  "genesis-propose-world": globalOnly("Form values become reviewable founding proposals."),
   "genesis-decide": globalOnly("Founding content decisions belong to the author."),
   "genesis-discard": globalOnly("Genesis sandbox lifecycle is outside an open world."),
   "plan-founding-build": globalOnly("Founding plans create a world and are outside an open-world scope."),

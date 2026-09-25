@@ -2701,6 +2701,9 @@ export function generateGenesisImage(genesisId: string, intentId: string, digest
 export function decideGenesisImage(genesisId: string, target: string, decision: "approve" | "reject" | "unassign", candidate?: import("@arke-studio/contracts").GenesisImageCandidate): void {
   send({ kind: "genesis-image-decide", genesisId, requestId: ulid(), target, decision, ...(candidate ? { candidateId: candidate.id, hash: candidate.hash } : {}) });
 }
+export function proposeGenesisWorld(genesisId: string, draft: import("@arke-studio/contracts").GenesisDraft): void {
+  send({ kind: "genesis-propose-world", genesisId, draft });
+}
 export function decideGenesisDraft(genesisId: string, choices: Array<{ key: string; digest: string }>, decision: "approve" | "reject"): void {
   send({ kind: "genesis-decide", genesisId, choices, decision, requestId: ulid() });
 }
