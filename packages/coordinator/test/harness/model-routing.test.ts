@@ -10,6 +10,8 @@ import {
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { Coordinator } from "../../src/coordinator.js";
 import type { Cipher } from "../../src/credentials/store.js";
+import type { DispatchClient } from "../../src/queue/dispatcher.js";
+import { FakeProvider } from "../queue/fake-provider.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { setProductionModel } from "../../src/productions/ops.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
@@ -83,6 +85,9 @@ async function fixture(options: {
   cipher?: Cipher;
   /** The shipped manifest, with Ollama answering as a running local runtime so its rows pass the gate. */
   manifest?: boolean;
+  /** What Ollama has pulled, with a publication hook: the first-run path the local default waits on (issue 1247). */
+  localModels?: Array<{ id: string; tools: boolean; vision: boolean }>;
+  onPublish?: () => void;
 } = {}) {
   const { root, worldDir } = await makeTempRoot();
   if (options.agents) await writeFile(join(root, "settings.json"), JSON.stringify({ agents: options.agents }), "utf8");
@@ -95,6 +100,10 @@ async function fixture(options: {
     provider, adapter, appRoot: root, appVersion: "test", authoring: { agentForPurpose },
     changeLogPath: join(root, "changes.jsonl"), observeEvent: event => events.push(event),
     ...(options.cipher ? { cipher: options.cipher } : {}),
+    ...(options.localModels ? {
+      dispatchClients: { ollama: Object.assign(new FakeProvider(), { listModels: async () => options.localModels! }) as DispatchClient },
+      publishLocalHarnessModels: async () => { options.onPublish?.(); },
+    } : {}),
     ...(options.manifest ? {
       manifest: SHIPPED_MANIFEST,
       validators: { ollama: { validateKey: async () => [{ capability: "llm" as const, available: true }] } },
@@ -353,10 +362,37 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     const test = await fixture({ cipher: fakeCipher });
     try {
       assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL);
+      // The very next session after the command reports done, not one after the harness relaunch.
       await test.send({ kind: "set-credential", provider: "anthropic", key: "sk-ant-test-key" });
-      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === undefined, "the harness default once a key exists");
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, undefined, "the harness default once a key exists");
       await test.send({ kind: "clear-credential", provider: "anthropic" });
-      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "local again once the key is gone");
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL, "local again once the key is gone");
+    } finally { await test.close(); }
+  });
+
+  it("waits for the first local-model publication and its reload before deciding, on a fresh start", async () => {
+    // Before publication the harness lists only cloud rows; the publication is what makes the
+    // local rows appear on the next fetch — as the profile write does for the real harness.
+    const adapter = new CaptureAdapter();
+    adapter.list = async () => CLOUD_ONLY;
+    const test = await fixture({ adapter, localModels: [{ id: "gemma4:12b", tools: true, vision: false }], onPublish: () => { adapter.list = async () => MODELS; } });
+    try {
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL, "the first session saw the rows the publication brought");
+    } finally { await test.close(); }
+  });
+
+  it("does not choose from rows kept after a failed refresh", async () => {
+    const test = await fixture();
+    try {
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL);
+      test.adapter.list = async () => { throw new Error("discovery is down"); };
+      await test.send({ kind: "list-harness-models" });
+      await until(() => test.coordinator.getState().app.harnessModelStatus.status === "error", "the failed refresh");
+      assert.ok(test.coordinator.getState().app.harnessModels.length > 0, "the old rows are still on display");
+      const before = test.adapter.sessions.length;
+      await test.chat();
+      assert.equal(test.adapter.sessions.length, before, "but not chosen from: no session was built");
+      assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /could not be read/);
     } finally { await test.close(); }
   });
 

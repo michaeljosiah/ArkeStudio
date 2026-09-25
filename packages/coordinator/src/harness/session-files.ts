@@ -41,8 +41,17 @@ export async function writeSessionFiles(
   adapter: Pick<HarnessAdapter, "sessionFiles" | "prepareSession" | "abandonSessionPreparation">,
   dir: string,
   pending: SessionConfigInput | Promise<SessionConfigInput> = {},
+  signal?: AbortSignal,
 ): Promise<string> {
-  const input = await pending;
+  // A configuration still being decided (issue 1247) is bounded like the creation it feeds:
+  // a caller that gave up must not find a session created for it once discovery settles.
+  const input = signal === undefined ? await pending : await Promise.race([
+    pending,
+    new Promise<never>((_, reject) => {
+      if (signal.aborted) reject(signal.reason);
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    }),
+  ]);
   const preparationId = randomUUID();
   const prepared = { ...input, preparationId, skillBodies: await loadSkillBodies(input) };
   // Both seams, always. A harness takes its settings as files or as call options, and a
@@ -68,17 +77,20 @@ export async function createPreparedSession(
   timeoutMs = 30_000,
 ): Promise<SessionRef> {
   return serialized(dir, async () => {
-    const preparationId = await writeSessionFiles(adapter, dir, input);
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(new Error("session creation timed out")), timeoutMs);
     try {
-      return await adapter.createSession({ ...session, cwd: dir, preparationId, signal: abort.signal });
+      const preparationId = await writeSessionFiles(adapter, dir, input, abort.signal);
+      try {
+        return await adapter.createSession({ ...session, cwd: dir, preparationId, signal: abort.signal });
+      } finally {
+        adapter.abandonSessionPreparation?.(preparationId);
+      }
     } catch (error) {
       if (abort.signal.aborted) throw new Error("session creation timed out", { cause: error });
       throw error;
     } finally {
       clearTimeout(timer);
-      adapter.abandonSessionPreparation?.(preparationId);
     }
   });
 }
