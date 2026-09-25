@@ -157,7 +157,9 @@ interface StoreState {
   genesis: Record<
     string,
     {
-      turns: Array<{ role: "user" | "gate"; text: string; at: string }>;
+      turns: Array<{ id?: string; role: "user" | "gate"; text: string; at: string }>;
+      conversationId?: string;
+      worldId?: string;
       /** The plan so far, folded from the sandbox directory (SPEC-031 R-2). */
       blueprint: import("@arke-studio/contracts").GenesisBlueprint | null;
       status: "running" | "completed" | "cancelled" | "timeout" | "budget-exceeded" | "failed" | null;
@@ -1496,13 +1498,29 @@ function handleFrame(json: string): void {
       };
     } else if (event.type === "setup.status") {
       setupStatus = event.setup;
+    } else if (event.type === "genesis.discarded") {
+      genesis = { ...genesis };
+      delete genesis[event.genesisId];
+    } else if (event.type === "genesis.loaded") {
+      const messages = new Map(event.turns.map(turn => [turn.id, turn]));
+      for (const turn of genesis[event.genesisId]?.turns ?? []) {
+        if (turn.id && !messages.has(turn.id)) messages.set(turn.id, { ...turn, id: turn.id });
+      }
+      genesis = { ...genesis, [event.genesisId]: {
+        ...emptyGenesis(), ...genesis[event.genesisId],
+        turns: [...messages.values()].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)), blueprint: event.blueprint,
+        attachments: event.attachments, status: event.status, conversationId: event.conversationId,
+        ...(event.detail ? { detail: event.detail } : {}),
+        ...(event.worldId ? { worldId: event.worldId } : {}),
+      } };
     } else if (event.type === "genesis.turn") {
       const g = genesis[event.genesisId] ?? emptyGenesis();
       genesis = {
         ...genesis,
         [event.genesisId]: {
           ...g,
-          turns: [...g.turns, { role: event.role, text: event.text, at: event.at }],
+          turns: event.messageId && g.turns.some(t => t.id === event.messageId) ? g.turns :
+            [...g.turns, { ...(event.messageId ? { id: event.messageId } : {}), role: event.role, text: event.text, at: event.at }],
         },
       };
     } else if (event.type === "genesis.blueprint") {
@@ -2664,6 +2682,9 @@ export function refreshDiagnostics(): void {
 export function genesisChat(genesisId: string, text: string): void {
   send({ kind: "genesis-chat", genesisId, text });
 }
+
+export function listGenesisDrafts(): void { send({ kind: "genesis-list" }); }
+export function loadGenesisDraft(genesisId: string): void { send({ kind: "genesis-load", genesisId }); }
 
 export function genesisDiscard(genesisId: string): void {
   send({ kind: "genesis-discard", genesisId });

@@ -18,7 +18,7 @@ import { WORLD_MODELS_SCHEMA_VERSION } from "./commit.js";
 import { AppIndex } from "../index-db/app-index.js";
 import type { DatabaseCtor } from "../index-db/sqlite.js";
 import type { WorldProvider } from "../world-provider.js";
-import { atomicWriteFile, renameWithRetry, type AtomicDeps } from "./atomic.js";
+import { atomicWriteFile, serializeFileMutation, renameWithRetry, type AtomicDeps } from "./atomic.js";
 import { initialBible } from "./bible.js";
 import { appendChanges } from "./change-writer.js";
 import { checkPathBudget, fromPortable, toExtendedLength, type PathBudget } from "./paths.js";
@@ -34,6 +34,8 @@ import { WorldStore } from "./store.js";
  */
 
 export interface CreateWorldInput {
+  /** Server-reserved identity for recoverable founding; never accepted from a client frame. */
+  creationId?: string;
   name: string;
   logline?: string;
   tone?: string;
@@ -289,12 +291,22 @@ export class FsWorldProvider implements WorldProvider {
 
   /** Create a world folder: slug, world.json, first change line (SPEC-002 §2.2). */
   async createWorld(input: CreateWorldInput): Promise<{ worldId: string; slug: string }> {
+    return serializeFileMutation(join(this.appRoot, ".world-creations", "writer"), () => this.createWorldWork(input));
+  }
+
+  private async createWorldWork(input: CreateWorldInput): Promise<{ worldId: string; slug: string }> {
     await this.ensureAppRoot();
+    if (input.creationId) {
+      if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(input.creationId)) throw new Error("invalid creation identity");
+      const existing = await this.findWorldDir(input.creationId).catch(() => null);
+      if (existing) return { worldId: input.creationId, slug: basename(existing) };
+    }
     const taken = await readdir(toExtendedLength(this.worldsDir())).catch(() => [] as string[]);
+    const worldId = input.creationId ?? ulid();
     const slug = uniqueSlug(input.name, "world", taken);
-    const worldId = ulid();
     const at = this.clock();
-    const dir = join(this.worldsDir(), slug);
+    const destination = join(this.worldsDir(), slug);
+    const dir = input.creationId ? join(this.appRoot, ".world-creations", worldId) : destination;
     await mkdir(toExtendedLength(dir), { recursive: true });
     const meta = {
       worldId,
@@ -341,14 +353,20 @@ export class FsWorldProvider implements WorldProvider {
     if (input.bible) {
       await atomicWriteFile(join(dir, fromPortable(BIBLE_PATH)), initialBible(input.bible, at));
     }
-    await appendChanges(join(dir, "changes.jsonl"), [
+    const initialChanges = [
       { ts: at, entity: "world", created: true, source: "form", canonRevisionAfter: 0 },
       // The shape a commit would have written for the same file (`commit.ts:401`), so the
       // history screen reads a born bible and an edited one the same way.
       ...(input.bible
         ? [{ ts: at, entity: "bible", fromVersion: null, toVersion: 1, source: "genesis", canonRevisionAfter: 0 }]
         : []),
-    ]);
+    ];
+    if (input.creationId) {
+      await atomicWriteFile(join(dir, "changes.jsonl"), initialChanges.map(change => JSON.stringify(change)).join("\n") + "\n");
+      await renameWithRetry(dir, destination);
+    } else {
+      await appendChanges(join(dir, "changes.jsonl"), initialChanges);
+    }
     this.appIndex?.upsertWorld({
       worldId,
       slug,
@@ -656,9 +674,34 @@ export class FsWorldProvider implements WorldProvider {
   /** Genesis sandboxes live beside worlds, never inside one — world-less by construction. */
   async genesisDir(genesisId: string): Promise<string> {
     if (!/^[a-z0-9][a-z0-9-]{2,40}$/.test(genesisId)) throw new Error("invalid genesis id");
-    const dir = join(this.appRoot, ".genesis", genesisId);
-    await mkdir(toExtendedLength(dir), { recursive: true });
-    return dir;
+    const root = join(this.appRoot, ".genesis", genesisId);
+    return serializeFileMutation(join(root, "layout"), async () => {
+      const dir = join(root, "workspace");
+      await mkdir(toExtendedLength(dir), { recursive: true });
+      // Old drafts had no control directory. Move only their known content; never promote
+      // agent-authored files into application receipts or approval records.
+      for (const name of ["draft.json", "draft", "attachments", "previews"]) {
+        const source = join(root, name);
+        const exists = await stat(toExtendedLength(source)).catch((err: NodeJS.ErrnoException) => {
+          if (err.code === "ENOENT") return null; throw err;
+        });
+        if (exists) {
+          const target = join(dir, name);
+          const occupied = await stat(toExtendedLength(target)).catch((err: NodeJS.ErrnoException) => {
+            if (err.code === "ENOENT") return null; throw err;
+          });
+          if (occupied) throw new Error("Both old and new founding draft files exist; neither was overwritten.");
+          await renameWithRetry(source, target);
+        }
+      }
+      return dir;
+    });
+  }
+
+  async listGenesisIds(): Promise<string[]> {
+    const entries = await readdir(toExtendedLength(join(this.appRoot, ".genesis")), { withFileTypes: true })
+      .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return []; throw err; });
+    return entries.filter(entry => entry.isDirectory() && /^[a-z0-9][a-z0-9-]{2,40}$/.test(entry.name)).map(entry => entry.name);
   }
 
   async discardGenesis(genesisId: string): Promise<void> {
@@ -725,7 +768,7 @@ export class FsWorldProvider implements WorldProvider {
     const ext = portable.slice(portable.lastIndexOf(".")).toLowerCase();
     const contentType = FsWorldProvider.MEDIA_TYPES[ext];
     if (contentType === undefined) return null;
-    const abs = join(this.appRoot, ".genesis", genesisId, fromPortable(portable));
+    const abs = join(await this.genesisDir(genesisId), fromPortable(portable));
     try {
       const info = await stat(toExtendedLength(abs));
       if (!info.isFile()) return null;

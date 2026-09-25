@@ -134,6 +134,14 @@ For persistence work read WorldStore → Committer → `world/atomic.ts` and the
 
 ## Workflow traces
 
+### Resume a founding conversation
+
+Client `screens/shell.tsx` and `lib/store.ts` send `genesis-list` / `genesis-load`.
+Coordinator `harness/genesis-conversation.ts` uses the existing world-chat journal for
+the transcript and `harness/blueprint.ts` for the current draft. `world/founding-build.ts`
+transfers the same conversation into the created world with idempotent appends.
+See [founding chat](founding-chat.md) for lifecycle and recovery checks.
+
 ### Accept a proposal
 
 Client `screens/proposals.tsx` and `domain/connected.tsx` use `lib/store.ts`'s `acceptProposal`. It sends `proposal-accept` from contracts `frames.ts`. Coordinator's matching handler checks active drafting and calls `ProposalManager.accept` in `gate/proposals.ts`. The gate checks whether the candidate can land; the world commit path owns file/version changes. The handler records conversation resolution for a landed result, emits `proposal.resolved` or `proposal.blocked` as appropriate and refreshes the world snapshot.

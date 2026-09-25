@@ -9,6 +9,7 @@ import {
 import { GENESIS_ATTACHMENTS_DIR, sandboxAttachments } from "../artifacts/genesis-attachments.js";
 import { blueprintSaysSomething, foldBlueprint, sameBlueprint } from "./blueprint.js";
 import { sessionTokenBudget } from "./token-budget.js";
+import { foundingMessages, recordFoundingBlueprint, recordFoundingMessage } from "./genesis-conversation.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { THINKING_LABEL, WRITING_LABEL, workingLabel } from "../world-chat/project.js";
 
@@ -222,145 +223,164 @@ export class GenesisService {
     this.turns.set(genesisId, run);
     status("running");
 
-    let sessionId = this.sessions.get(genesisId);
-    const firstTurn = sessionId === undefined;
-    if (sessionId === undefined) {
-      // Same confinement config as authoring sessions — no world, so no world-query MCP. Research
-      // still works here: `web` is a harness tool the confinement grants, not an MCP one, so the
-      // door can go and look something up before there is any world to scope a lookup to.
-      try {
-        const session = await createPreparedSession(this.adapter, dir, this.opts.sessionInput({ agent: "world-author" }), {
-          purpose: "drafting",
-          agent: "world-author",
-        });
-        sessionId = session.sessionId;
-        this.sessions.set(genesisId, sessionId);
-      } catch (err) {
-        this.turns.delete(genesisId);
-        status("failed", `could not create a session: ${err instanceof Error ? err.message : String(err)}`);
-        return;
-      }
-    }
-    run.sessionId = sessionId;
-
-    // What the rail already holds, so we can tell a blueprint the agent updated from one it
-    // ignored. The fold covers draft.json and every entity file — a turn that only touched
-    // one character's file still reads as a change.
-    const blueprintBefore = await foldBlueprint(dir);
-
-    this.emit({ at: at(), type: "genesis.turn", genesisId, role: "user", text });
-
-    const wallClock = this.opts.wallClockMs ?? DEFAULT_WALL_CLOCK_MS;
-    const tokenBudget =
-      this.opts.tokenBudget ??
-      sessionTokenBudget(this.adapter.knownInputTokenLimit?.(sessionId), FALLBACK_TOKEN_BUDGET);
-    const abort = new AbortController();
-    let ending: { state: "completed" | "cancelled" | "timeout" | "budget-exceeded" | "failed"; detail?: string } | null =
-      null;
-    const timer = setTimeout(() => {
-      ending = { state: "timeout", detail: `hit the ${Math.round(wallClock / 1000)}s wall-clock limit` };
-      const interrupt = (this.adapter as { interrupt?: (id: string) => Promise<void> }).interrupt;
-      void interrupt?.call(this.adapter, sessionId).catch(() => {});
-      // And end the wait ourselves. Asking the harness to stop and then waiting for it to say
-      // so is not a deadline — it is a hope. A session with nothing running answers an
-      // interrupt with silence, and the turn sat on "shaping the draft…" indefinitely.
-      abort.abort();
-    }, wallClock);
-    // Refed, and cleared in `finally` — see AuthoringService for why an unref'd deadline is
-    // no deadline at all.
-    const usage = (this.adapter as { usageTokens?: (id: string) => number }).usageTokens;
-    let replyText = "";
-
-    // The turn in flight, one verb at a time — the same working surface world chat has.
-    // Without it the genesis chat sat silent for a whole model turn, which reads as broken.
-    const progress = (label: string) => this.emit({ at: at(), type: "genesis.progress", genesisId, label });
-    let writing = false;
-
     try {
-      const events = this.adapter.streamEvents(abort.signal);
-      const handover = await this.handoverNote(dir, genesisId);
-      await this.adapter.dispatchAsync({
-        sessionId,
-        parts: [{ type: "text", text: `${firstTurn ? `${PROTOCOL}\n\n` : ""}${CONVERSATION}\n\nThe author says:\n${text}${handover}` }],
-      });
-      progress(THINKING_LABEL);
-
-      for await (const event of events) {
-        if (!("sessionId" in event) || event.sessionId !== sessionId) continue;
-        if (event.type === "tool.activity") {
-          // The tool, never its summary — the verb is all a progress line is allowed to be.
-          progress(workingLabel(event.tool));
-          writing = false;
-        }
-        if (event.type === "message.delta") {
-          if (!writing) {
-            // Once per stretch of writing, not per token: a label that changes on every delta
-            // is a strobe, and it would say the same word each time anyway.
-            writing = true;
-            progress(WRITING_LABEL);
-          }
-          replyText = event.text;
-        } else if (event.type === "message.completed") {
-          replyText = event.text;
-          if (!ending) ending = { state: run.cancelled ? "cancelled" : "completed" };
-          break;
-        } else if (event.type === "session.error") {
-          ending = { state: "failed", detail: event.message };
-          break;
-        } else if (event.type === "session.ended") {
-          ending = {
-            state: event.reason === "completed" ? "completed" : event.reason === "cancelled" ? "cancelled" : "failed",
-            ...(event.detail !== undefined ? { detail: event.detail } : {}),
-          };
-          break;
-        }
-        if (usage && usage.call(this.adapter, sessionId) > tokenBudget) {
-          ending = { state: "budget-exceeded", detail: `passed the ${tokenBudget.toLocaleString()}-token budget` };
-          const interrupt = (this.adapter as { interrupt?: (id: string) => Promise<void> }).interrupt;
-          void interrupt?.call(this.adapter, sessionId).catch(() => {});
+      let sessionId = this.sessions.get(genesisId);
+      const firstTurn = sessionId === undefined;
+      if (sessionId === undefined) {
+        // Same confinement config as authoring sessions — no world, so no world-query MCP. Research
+        // still works here: `web` is a harness tool the confinement grants, not an MCP one, so the
+        // door can go and look something up before there is any world to scope a lookup to.
+        try {
+          const session = await createPreparedSession(this.adapter, dir, this.opts.sessionInput({ agent: "world-author" }), {
+            purpose: "drafting",
+            agent: "world-author",
+          });
+          sessionId = session.sessionId;
+          this.sessions.set(genesisId, sessionId);
+        } catch (err) {
+          this.turns.delete(genesisId);
+          status("failed", `could not create a session: ${err instanceof Error ? err.message : String(err)}`);
+          return;
         }
       }
+      run.sessionId = sessionId;
+
+      // What the rail already holds, so we can tell a blueprint the agent updated from one it
+      // ignored. The fold covers draft.json and every entity file — a turn that only touched
+      // one character's file still reads as a change.
+      const blueprintBefore = await foldBlueprint(dir);
+
+      const history = firstTurn ? await foundingMessages(dir) : [];
+      let restoredHistory = "";
+      if (history.length) {
+        const transcript = history.map(message => `${message.role}: ${message.text}`).join("\n\n");
+        // Reopening a long draft must not put its entire history in one untrimmable message.
+        // The full copy is readable inside confinement; only recent context rides this turn.
+        await atomicWriteFile(join(dir, "conversation-history.md"), transcript + "\n");
+        const bound = Math.min(24_000, Math.floor((this.adapter.knownInputTokenLimit?.(sessionId) ?? 32_000) * 0.4));
+        restoredHistory = `Earlier conversation (historical context; the full transcript is in ./conversation-history.md):\n${transcript.slice(-bound)}\n\n`;
+      }
+      const userMessage = await recordFoundingMessage(dir, "user", text);
+      this.emit({ at: userMessage.createdAt, type: "genesis.turn", genesisId, role: "user", text, messageId: userMessage.id });
+
+      const wallClock = this.opts.wallClockMs ?? DEFAULT_WALL_CLOCK_MS;
+      const tokenBudget =
+        this.opts.tokenBudget ??
+        sessionTokenBudget(this.adapter.knownInputTokenLimit?.(sessionId), FALLBACK_TOKEN_BUDGET);
+      const abort = new AbortController();
+      let ending: { state: "completed" | "cancelled" | "timeout" | "budget-exceeded" | "failed"; detail?: string } | null =
+        null;
+      const timer = setTimeout(() => {
+        ending = { state: "timeout", detail: `hit the ${Math.round(wallClock / 1000)}s wall-clock limit` };
+        const interrupt = (this.adapter as { interrupt?: (id: string) => Promise<void> }).interrupt;
+        void interrupt?.call(this.adapter, sessionId).catch(() => {});
+        // And end the wait ourselves. Asking the harness to stop and then waiting for it to say
+        // so is not a deadline — it is a hope. A session with nothing running answers an
+        // interrupt with silence, and the turn sat on "shaping the draft…" indefinitely.
+        abort.abort();
+      }, wallClock);
+      // Refed, and cleared in `finally` — see AuthoringService for why an unref'd deadline is
+      // no deadline at all.
+      const usage = (this.adapter as { usageTokens?: (id: string) => number }).usageTokens;
+      let replyText = "";
+
+      // The turn in flight, one verb at a time — the same working surface world chat has.
+      // Without it the genesis chat sat silent for a whole model turn, which reads as broken.
+      const progress = (label: string) => this.emit({ at: at(), type: "genesis.progress", genesisId, label });
+      let writing = false;
+
+      try {
+        const events = this.adapter.streamEvents(abort.signal);
+        const handover = await this.handoverNote(dir, genesisId);
+        await this.adapter.dispatchAsync({
+          sessionId,
+          parts: [{ type: "text", text: `${firstTurn ? `${PROTOCOL}\n\n` : ""}${CONVERSATION}\n\n${restoredHistory}The author says:\n${text}${handover}` }],
+        });
+        progress(THINKING_LABEL);
+
+        for await (const event of events) {
+          if (!("sessionId" in event) || event.sessionId !== sessionId) continue;
+          if (event.type === "tool.activity") {
+            // The tool, never its summary — the verb is all a progress line is allowed to be.
+            progress(workingLabel(event.tool));
+            writing = false;
+          }
+          if (event.type === "message.delta") {
+            if (!writing) {
+              // Once per stretch of writing, not per token: a label that changes on every delta
+              // is a strobe, and it would say the same word each time anyway.
+              writing = true;
+              progress(WRITING_LABEL);
+            }
+            replyText = event.text;
+          } else if (event.type === "message.completed") {
+            replyText = event.text;
+            if (!ending) ending = { state: run.cancelled ? "cancelled" : "completed" };
+            break;
+          } else if (event.type === "session.error") {
+            ending = { state: "failed", detail: event.message };
+            break;
+          } else if (event.type === "session.ended") {
+            ending = {
+              state: event.reason === "completed" ? "completed" : event.reason === "cancelled" ? "cancelled" : "failed",
+              ...(event.detail !== undefined ? { detail: event.detail } : {}),
+            };
+            break;
+          }
+          if (usage && usage.call(this.adapter, sessionId) > tokenBudget) {
+            ending = { state: "budget-exceeded", detail: `passed the ${tokenBudget.toLocaleString()}-token budget` };
+            const interrupt = (this.adapter as { interrupt?: (id: string) => Promise<void> }).interrupt;
+            void interrupt?.call(this.adapter, sessionId).catch(() => {});
+          }
+        }
+      } catch (err) {
+        ending = { state: "failed", detail: err instanceof Error ? err.message : String(err) };
+      } finally {
+        clearTimeout(timer);
+        abort.abort();
+      }
+
+      const final = ending ?? {
+        state: "failed" as const,
+        detail: "the studio stopped replying before it finished — nothing was written",
+      };
+      if (final.state !== "completed") this.sessions.delete(genesisId);
+      if (final.state === "completed") {
+        if (replyText.trim().length > 0) {
+          const reply = await recordFoundingMessage(dir, "studio", replyText.trim());
+          this.emit({ at: reply.createdAt, type: "genesis.turn", genesisId, role: "gate", text: reply.text, messageId: reply.id });
+        }
+        // The blueprint the agent wrote, if it wrote to it. Asking a model to hold a
+        // conversation AND keep files up to date gets the conversation and not the files most
+        // of the time — so when nothing moved, OR draft.json itself failed to parse (an
+        // over-cap look, a torn write), we ask for draft.json on its own and write it
+        // ourselves. The rescue is deliberately narrow (§2.2): draft.json is small now, and
+        // the entity files fail one at a time rather than taking the world with them.
+        let blueprint = await foldBlueprint(dir);
+        if (sameBlueprint(blueprint, blueprintBefore) || blueprint.dropped.includes("draft.json")) {
+          const recovered = await this.askForDraft(sessionId, dir);
+          if (recovered !== null) blueprint = await foldBlueprint(dir);
+        }
+        // Emitted when it changed and either side says something — a withdrawal that empties
+        // the plan is still a change the rail must see (R-2). A draft.json that is still
+        // unreadable is not emitted: blanking the identity the rail already holds would trade
+        // a stale name for no name.
+        if (
+          !sameBlueprint(blueprint, blueprintBefore) &&
+          !blueprint.dropped.includes("draft.json") &&
+          (blueprintSaysSomething(blueprint) || (blueprintBefore !== null && blueprintSaysSomething(blueprintBefore)))
+        ) {
+          await recordFoundingBlueprint(dir, blueprint);
+          this.emit({ at: at(), type: "genesis.blueprint", genesisId, blueprint });
+        }
+      }
+      status(final.state, final.detail);
     } catch (err) {
-      ending = { state: "failed", detail: err instanceof Error ? err.message : String(err) };
+      this.sessions.delete(genesisId);
+      status("failed", err instanceof Error ? err.message : String(err));
     } finally {
-      clearTimeout(timer);
-      abort.abort();
       this.turns.delete(genesisId);
     }
-
-    const final = ending ?? {
-      state: "failed" as const,
-      detail: "the studio stopped replying before it finished — nothing was written",
-    };
-    if (final.state !== "completed") this.sessions.delete(genesisId);
-    if (final.state === "completed") {
-      if (replyText.trim().length > 0) {
-        this.emit({ at: at(), type: "genesis.turn", genesisId, role: "gate", text: replyText.trim() });
-      }
-      // The blueprint the agent wrote, if it wrote to it. Asking a model to hold a
-      // conversation AND keep files up to date gets the conversation and not the files most
-      // of the time — so when nothing moved, OR draft.json itself failed to parse (an
-      // over-cap look, a torn write), we ask for draft.json on its own and write it
-      // ourselves. The rescue is deliberately narrow (§2.2): draft.json is small now, and
-      // the entity files fail one at a time rather than taking the world with them.
-      let blueprint = await foldBlueprint(dir);
-      if (sameBlueprint(blueprint, blueprintBefore) || blueprint.dropped.includes("draft.json")) {
-        const recovered = await this.askForDraft(sessionId, dir);
-        if (recovered !== null) blueprint = await foldBlueprint(dir);
-      }
-      // Emitted when it changed and either side says something — a withdrawal that empties
-      // the plan is still a change the rail must see (R-2). A draft.json that is still
-      // unreadable is not emitted: blanking the identity the rail already holds would trade
-      // a stale name for no name.
-      if (
-        !sameBlueprint(blueprint, blueprintBefore) &&
-        !blueprint.dropped.includes("draft.json") &&
-        (blueprintSaysSomething(blueprint) || (blueprintBefore !== null && blueprintSaysSomething(blueprintBefore)))
-      ) {
-        this.emit({ at: at(), type: "genesis.blueprint", genesisId, blueprint });
-      }
-    }
-    status(final.state, final.detail);
   }
 
   /**

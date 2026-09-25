@@ -38,6 +38,7 @@ import type { WorldStore } from "./store.js";
 import { atomicWriteFile } from "./atomic.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { foldBlueprint } from "../harness/blueprint.js";
+import { carryGenesisConversation, genesisControlDir, reserveGenesisWorld } from "../harness/genesis-conversation.js";
 import { openThread } from "../canon/authoring.js";
 import { MarkdownFile, sha256 } from "./text-files.js";
 import { createSheetFromSentence } from "../sheets/authoring.js";
@@ -84,6 +85,7 @@ export interface FoundingBuildPorts {
   discardGenesis(genesisId: string): Promise<void>;
   releaseGenesis(genesisId: string): void;
   createWorld(input: {
+    creationId?: string;
     name: string;
     logline?: string;
     tone?: string;
@@ -199,6 +201,8 @@ export class FoundingBuildService {
   private readonly jobWakers = new Map<string, Set<() => void>>();
 
   constructor(private readonly ports: FoundingBuildPorts) {}
+
+  isBeginning(genesisId: string): boolean { return this.beginning.has(genesisId); }
 
   // -------------------------------------------------------------------------
   // Preconditions and the review (R-10..R-12)
@@ -378,10 +382,10 @@ export class FoundingBuildService {
     models?: Partial<Record<Capability, string>>,
   ): Promise<void> {
     const sandbox = await this.ports.genesisDir(genesisId);
-    const markerPath = join(sandbox, BEGUN_MARKER);
+    const markerPath = join(genesisControlDir(sandbox), BEGUN_MARKER);
     const marker = await readFile(toExtendedLength(markerPath), "utf8")
       .then((raw) => JSON.parse(raw) as { worldId?: string })
-      .catch(() => null);
+      .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return null; throw err; });
     if (marker?.worldId !== undefined) {
       // A second press, a replayed frame or a resumed session joins the existing run (R-16).
       // A world builds once (R-37): there is no path here that builds it again. A marker
@@ -426,11 +430,13 @@ export class FoundingBuildService {
     // Wave 0 is the world itself: world.json, art direction v1 from the look the conversation
     // proposed, and the bible it wrote (R-18). The marker is written the moment the world's
     // identity exists and BEFORE the record — every window after that write re-enters the
-    // same founding. One residual sliver remains, between createWorld resolving and the
-    // marker landing; a crash exactly there can orphan one empty world (R-16, noted).
+    // same founding. The reserved identity closes the gap between world creation and the
+    // marker: the filesystem provider publishes the staged world once under that identity.
     let worldId = marker?.worldId;
     if (worldId === undefined) {
+      const reservedWorldId = await reserveGenesisWorld(sandbox);
       const created = await this.ports.createWorld({
+        creationId: reservedWorldId,
         name: blueprint.name,
         ...(blueprint.logline !== undefined ? { logline: blueprint.logline } : {}),
         ...(blueprint.tone !== undefined ? { tone: blueprint.tone.toLowerCase() } : {}),
@@ -445,6 +451,9 @@ export class FoundingBuildService {
     await this.ports.openWorld(worldId);
     const store = this.ports.openStore();
     if (!store || store.worldId !== worldId) throw new Error("the new world did not open");
+
+    await store.ensureSchemaVersion(2, "world-chat");
+    await carryGenesisConversation(sandbox, store.dir);
 
     const record: FoundingBuildRecord = FoundingBuildRecordSchema.parse({
       buildId: newId("fb"),
@@ -1065,10 +1074,10 @@ export class FoundingBuildService {
   }
 
   private async runFinalize(active: ActiveBuild): Promise<void> {
-    // The sandbox goes with the conversation, and the world stands on its own (R-9): what
-    // was carried was carried; abandoning nothing, deleting one directory.
+    // The harness session ends; durable records remain available for replay and resume.
     this.ports.releaseGenesis(active.record.genesisId);
-    await this.ports.discardGenesis(active.record.genesisId).catch(() => {});
+    // Keep the begun marker and transcript until the durable handoff can be rediscovered.
+    // Deleting the marker made a replayed Begin create another world.
     await this.ports.refreshWorldSnapshot(active.record.worldId).catch(() => {});
     await this.ports.refreshWorldList().catch(() => {});
   }

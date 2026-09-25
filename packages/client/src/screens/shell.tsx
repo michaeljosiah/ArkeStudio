@@ -46,7 +46,10 @@ import {
   createWorld,
   genesisAttachFiles,
   genesisChat,
+  listGenesisDrafts,
+  loadGenesisDraft,
   genesisDiscard,
+  stopFoundingBuild,
   hostCanAttach,
   chooseClaudeExecutable,
   clearClaudeExecutable,
@@ -728,8 +731,14 @@ function BuildCard({
 
 /** World genesis (prototype 12a): the whole window is the surface — form beside the world-so-far rail. */
 export function NewWorldScreen() {
+  const [params] = useSearchParams();
+  return <NewWorldDraft key={params.get("draft") ?? "new"} />;
+}
+
+function NewWorldDraft() {
   const { state, connection } = useStore();
   const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
   const [name, setName] = useState("");
   const [logline, setLogline] = useState("");
   const [tone, setTone] = useState("");
@@ -765,11 +774,18 @@ export function NewWorldScreen() {
   const [models, setModels] = useState<ModelChoices | undefined>(undefined);
   const [genMode, setGenMode] = useState<"form" | "chat">("form");
   const modeTouchedRef = useRef(false);
-  const genesisIdRef = useRef(`gen-${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`);
+  const genesisIdRef = useRef(params.get("draft") ?? `gen-${ulid().toLowerCase()}`);
   const genesisId = genesisIdRef.current;
   const [message, setMessage] = useState("");
   const harnessReady = state?.app.health.harness.status === "healthy";
-  const g = useGenesis()[genesisId];
+  const drafts = useGenesis();
+  const g = drafts[genesisId];
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  useEffect(() => {
+    if (connection !== "open") return;
+    listGenesisDrafts();
+    if (params.has("draft")) loadGenesisDraft(genesisId);
+  }, [connection, genesisId]);
   const turns = g?.turns ?? [];
   const chatRunning = g?.status === "running";
   const blueprint = g?.blueprint ?? null;
@@ -839,8 +855,9 @@ export function NewWorldScreen() {
     return estimateImageMicroUsd(routed, { landscape: true });
   })();
   const sendGenesis = () => {
-    if (!harnessReady || chatRunning || message.trim().length === 0) return;
+    if (!harnessReady || chatRunning || myBuild?.status === "running" || g?.worldId || message.trim().length === 0) return;
     genesisChat(genesisId, message.trim());
+    if (!params.has("draft")) setParams({ draft: genesisId }, { replace: true });
     setMessage("");
   };
 
@@ -865,16 +882,20 @@ export function NewWorldScreen() {
       for (const t of (blueprint?.threads ?? []).slice(0, 4)) {
         openThread(worldId, t.length > 80 ? `${t.slice(0, 77)}…` : t, t, []);
       }
-      genesisDiscard(genesisId);
+      if (!turns.length) genesisDiscard(genesisId);
     }
-    navigate(`/w/${worldId}`, { replace: true });
+    if (!turns.length) navigate(`/w/${worldId}`, { replace: true });
   }, [submittedName, state?.world, navigate, railCharacters, railLocations, railFactions, blueprint, genesisId]);
 
   // The build begins server-side from one frame (SPEC-031 R-17); the screen's whole job is
   // to follow it to the building screen the moment the coordinator names the world.
   useEffect(() => {
-    if (buildPressed && myBuild) navigate(`/building/${myBuild.worldId}`, { replace: true });
-  }, [buildPressed, myBuild, navigate]);
+    const worldId = myBuild?.worldId ?? g?.worldId;
+    if (worldId && g?.conversationId && myBuild?.status !== "running") {
+      navigate(`/w/${worldId}/chat/${g.conversationId}`, { replace: true });
+    }
+    if (buildPressed && myBuild) setStep("draft");
+  }, [buildPressed, myBuild, g?.worldId, g?.conversationId, navigate]);
   // A begin the coordinator refused answers with a reasoned plan; the press un-arms so the
   // refusal can be read and the author can go back — never a button stuck on "Building…".
   useEffect(() => {
@@ -1129,6 +1150,28 @@ export function NewWorldScreen() {
             </span>
           </div>
           <div className="fy-gate__body" style={{ gap: 14 }}>
+            {Object.entries(drafts).some(([, draft]) => draft.turns.length && !draft.worldId) && (
+              <label>
+                Continue a draft
+                <select aria-label="Continue a draft" value={genesisId} disabled={chatRunning || myBuild?.status === "running"}
+                  onChange={event => setParams({ draft: event.target.value })}>
+                  <option value={genesisId}>{blueprint?.name ?? "This conversation"}</option>
+                  {Object.entries(drafts).filter(([id, draft]) => id !== genesisId && draft.turns.length && !draft.worldId)
+                    .map(([id, draft]) => <option key={id} value={id}>{draft.blueprint?.name ?? draft.turns[0]?.text.slice(0, 80) ?? "Untitled world"}</option>)}
+                </select>
+              </label>
+            )}
+            {turns.length > 0 && !g?.worldId && !myBuild && (
+              <Button variant="ghost" disabled={chatRunning} onClick={() => {
+                if (!confirmDiscard) { setConfirmDiscard(true); return; }
+                genesisDiscard(genesisId);
+                setParams({});
+              }}>{confirmDiscard ? "Discard this conversation and its uploads" : "Discard draft"}</Button>
+            )}
+            {myBuild?.status === "running" && <Callout title={`Building ${myBuild.worldName}`}>
+              {myBuild.progress.terminal} of {myBuild.progress.authorized} complete. {myBuild.working.join(", ")}
+              <Button onClick={() => stopFoundingBuild(myBuild.worldId)}>Stop</Button>
+            </Callout>}
             {genMode === "chat" ? (
               <>
                 {/* 12a opens with Arke already talking. It opened here with sixty-six words of
@@ -1240,7 +1283,7 @@ export function NewWorldScreen() {
                     onSubmit={sendGenesis}
                     placeholder="Keep going, or ask it to surprise you…"
                     agentLabel="world author"
-                    busy={chatRunning || buildPressed || sizingBuild}
+                    busy={chatRunning || buildPressed || myBuild?.status === "running" || sizingBuild}
                     busyLabel={buildPressed ? "founding the world…" : sizingBuild ? "sizing the build…" : "shaping the draft…"}
                     onAttach={() => genesisAttachFiles(genesisId)}
                     onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}

@@ -16,6 +16,7 @@ export interface WorldProvider {
   listReferenceImages?(slug: string): Promise<WorldImageReference[]>;
   loadWorld(worldId: string): Promise<WorldBundle>;
   createWorld?(input: {
+    creationId?: string;
     name: string;
     logline?: string;
     tone?: string;
@@ -66,6 +67,7 @@ export interface WorldProvider {
   worldDir?(worldId: string): Promise<string>;
   /** A sandbox directory for a genesis conversation — created on first use, world-less. */
   genesisDir?(genesisId: string): Promise<string>;
+  listGenesisIds?(): Promise<string[]>;
   /** Remove a genesis sandbox — the conversation began a world or was abandoned. */
   discardGenesis?(genesisId: string): Promise<void>;
   close?(): Promise<void>;

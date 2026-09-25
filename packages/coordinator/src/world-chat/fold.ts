@@ -206,6 +206,9 @@ export function foldConversation(
     updatedAt = envelope.at;
     const e = envelope.event;
     switch (e.type) {
+      case "founding.message":
+        addMessage(e.message, envelope.seq);
+        break;
       case "production-setup.updated":
         productionSetup = e.state;
         break;

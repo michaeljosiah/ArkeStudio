@@ -246,6 +246,8 @@ const CLIENT_COMMAND_METADATA = {
   "setup-repair": globalOnly(GLOBAL_OPERATION),
   "setup-cancel": globalOnly(GLOBAL_OPERATION),
   "genesis-chat": globalOnly("Genesis is a pre-world conversation and cannot be targeted from an open world."),
+  "genesis-list": globalOnly("Founding drafts are app-scoped."),
+  "genesis-load": globalOnly("Founding drafts are app-scoped."),
   "genesis-discard": globalOnly("Genesis sandbox lifecycle is outside an open world."),
   "plan-founding-build": globalOnly("Founding plans create a world and are outside an open-world scope."),
   "begin-founding-build": globalOnly("Founding creates a world and cannot be approved by Arke inside one."),

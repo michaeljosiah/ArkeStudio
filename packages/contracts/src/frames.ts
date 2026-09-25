@@ -880,6 +880,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** The genesis conversation is over (begun or abandoned) — the sandbox is removed. */
   z.object({ kind: z.literal("genesis-discard"), genesisId: GenesisIdSchema }).strict(),
+  z.object({ kind: z.literal("genesis-list") }).strict(),
+  z.object({ kind: z.literal("genesis-load"), genesisId: GenesisIdSchema }).strict(),
   /**
    * The review before the press (SPEC-031 R-10..R-12): fold the blueprint, check every
    * precondition, compile the plan. Answered by a `build.plan` event; nothing is created.

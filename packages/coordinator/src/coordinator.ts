@@ -456,6 +456,7 @@ import {
   settlePermission,
 } from "./harness/authoring.js";
 import { GenesisService } from "./harness/genesis.js";
+import { carryGenesisConversation, genesisControlDir, loadGenesisConversation, reserveGenesisWorld } from "./harness/genesis-conversation.js";
 import { FoundingBuildService } from "./world/founding-build.js";
 import { isAuthShapedFailure, VendorAuthService } from "./harness/vendor-auth.js";
 import { NoArkeCloud, type AccountService } from "./account.js";
@@ -5677,7 +5678,11 @@ export class Coordinator {
         const create = this.opts.provider.createWorld?.bind(this.opts.provider);
         if (!create) return;
         try {
+          const sandbox = msg.genesisId ? await this.opts.provider.genesisDir?.(msg.genesisId) : undefined;
+          if (msg.genesisId && (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId))) return;
+          const creationId = sandbox ? await reserveGenesisWorld(sandbox) : undefined;
           const { worldId } = await create({
+            ...(creationId ? { creationId } : {}),
             name: msg.name,
             ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
             ...(msg.tone !== undefined ? { tone: msg.tone } : {}),
@@ -5686,6 +5691,7 @@ export class Coordinator {
             ...(msg.bible !== undefined ? { bible: msg.bible } : {}),
             ...(msg.models !== undefined ? { models: msg.models } : {}),
           });
+          if (sandbox) await atomicWriteFile(join(genesisControlDir(sandbox), "begun.json"), JSON.stringify({ worldId }) + "\n");
           this.readModel.setWorlds(await this.opts.provider.listWorlds());
           await this.openWorld(worldId);
           // After the world is open, so filing has a store to commit into. Whatever was handed
@@ -5694,7 +5700,15 @@ export class Coordinator {
           if (genesisId !== undefined) {
             // Held so a discard cannot delete the sandbox out from under the copy. The screen
             // discards as soon as the world opens, which is while this is still running.
-            const carry = this.carryGenesisAttachments(genesisId, worldId);
+            const carry = (async () => {
+              await this.carryGenesisAttachments(genesisId, worldId);
+              const store = this.opts.provider.openStore?.();
+              if (sandbox && store?.worldId === worldId) {
+                await store.ensureSchemaVersion(2, "world-chat");
+                await carryGenesisConversation(sandbox, store.dir);
+                this.emit(await loadGenesisConversation(sandbox, genesisId));
+              }
+            })();
             this.carrying.set(genesisId, carry);
             await carry.finally(() => this.carrying.delete(genesisId));
           }
@@ -7054,6 +7068,23 @@ export class Coordinator {
         }
         return;
       }
+      case "genesis-list":
+      case "genesis-load": {
+        if (!this.opts.provider.genesisDir) return;
+        const ids = msg.kind === "genesis-load" ? [msg.genesisId] : await this.opts.provider.listGenesisIds?.() ?? [];
+        for (const id of ids) {
+          try {
+            const dir = await this.opts.provider.genesisDir(id);
+            const loaded = await loadGenesisConversation(dir, id);
+            if (msg.kind === "genesis-load" && loaded.worldId) await this.openWorld(loaded.worldId);
+            if (this.genesis?.isRunning(id)) { loaded.status = "running"; delete loaded.detail; }
+            this.emit(loaded);
+          } catch (err) {
+            this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: id, status: "failed", detail: describeCoordinatorError(err) });
+          }
+        }
+        return;
+      }
       case "genesis-chat": {
         const failed = (detail: string) =>
           this.emit({
@@ -7068,9 +7099,13 @@ export class Coordinator {
           return;
         }
         try {
+          if (this.foundingBuild?.isBeginning(msg.genesisId)) { failed("The world is beginning. Wait for it to finish."); return; }
           const dir = await this.opts.provider.genesisDir(msg.genesisId);
+          const draft = await loadGenesisConversation(dir, msg.genesisId, this.genesis.isRunning(msg.genesisId));
+          if (draft.worldId) { failed("This world has begun. Continue in its world conversation."); return; }
+          this.emit(draft);
           // Fire and watch: turns, the draft and the final status arrive as events.
-          this.trackBackground(this.genesis.run(dir, msg.genesisId, msg.text));
+          this.trackBackground(this.genesis.run(dir, msg.genesisId, msg.text).catch(err => failed(describeCoordinatorError(err))));
         } catch (err) {
           failed(describeCoordinatorError(err));
         }
@@ -7110,6 +7145,11 @@ export class Coordinator {
         return;
       }
       case "genesis-discard": {
+        if (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId)) return;
+        if (this.opts.provider.genesisDir) {
+          const draft = await loadGenesisConversation(await this.opts.provider.genesisDir(msg.genesisId), msg.genesisId);
+          if (draft.worldId) return;
+        }
         this.genesis?.release(msg.genesisId);
         // A conversation-scoped job still in flight is cancelled with its conversation
         // (SPEC-031 row 16): the queue then discards a late delivery rather than landing it
@@ -7127,6 +7167,7 @@ export class Coordinator {
         // races the sweep and the files handed over are the ones that vanish.
         await this.carrying.get(msg.genesisId)?.catch(() => {});
         await this.opts.provider.discardGenesis?.(msg.genesisId)?.catch(() => {});
+        this.emit({ type: "genesis.discarded", at: new Date().toISOString(), genesisId: msg.genesisId });
         return;
       }
       case "generate-look-preview": {
@@ -7203,6 +7244,7 @@ export class Coordinator {
       case "begin-founding-build": {
         if (!this.foundingBuild) return;
         try {
+          if (this.genesis?.isRunning(msg.genesisId)) throw new Error("Wait for the current reply before beginning the world.");
           await this.foundingBuild.begin(msg.genesisId, msg.requestId, msg.look, msg.models);
         } catch (err) {
           this.emit({
