@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { refusalLabel, wordRefusals } from "../../src/world-chat/project.js";
+import { refusalLabel, wordRefusals, workingLabel } from "../../src/world-chat/project.js";
 
 /**
  * What a person is shown when the confinement refused something (SPEC-005 R-10b, R-16, issue 506).
@@ -58,5 +58,12 @@ describe("wording a refusal", () => {
       "run a command on your computer",
       "search online",
     ]);
+  });
+
+  it("words a tool the Arke harnesses ran as the shared tool it names", () => {
+    assert.equal(refusalLabel("arke.write"), "write a file outside this conversation");
+    assert.equal(refusalLabel("arke.edit"), "change a file outside this conversation");
+    assert.equal(workingLabel("arke.read"), "Reading a file");
+    assert.equal(workingLabel("arke.world_search_canon"), "Searching canon");
   });
 });
