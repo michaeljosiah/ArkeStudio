@@ -229,10 +229,11 @@ export class ArkeAdapter implements HarnessAdapter {
     const { models, pulled, all } = await this.catalog(input.signal ?? new AbortController().signal);
     input.signal?.throwIfAborted();
     const promptOnly = PROMPT_ONLY_AGENTS.has(member.name);
-    // A role that sends no tools needs no model that calls them: any offered model will do when
-    // none that calls tools is pulled. Unread models are never offered, so never chosen.
+    // A role that sends no tools needs no model that calls them: a model seen to complete will do
+    // when none that calls tools is pulled. One whose capabilities Ollama did not list stays a
+    // choice for a person to make — nothing says it completes, and nobody would see it fail.
     const selected = requested !== undefined ? findHarnessModel(requested, models)
-      : models.find((model) => model.isDefault) ?? (promptOnly ? models[0] : undefined);
+      : models.find((model) => model.isDefault) ?? (promptOnly ? models.find((model) => model.tools !== undefined) : undefined);
     if (requested !== undefined && !selected) {
       // Pulled but not offered says something different from not pulled: the person can act on it.
       const present = all.some((row) => findHarnessModel(requested, [{ id: row.id, provider: PROVIDER, displayName: row.id }]));
@@ -240,7 +241,7 @@ export class ArkeAdapter implements HarnessAdapter {
         ? "This model's context window is under 256k tokens. Arke's local harness needs 256k or more."
         : "The selected model is not pulled in Ollama. Refresh the model list and choose an available model.");
     }
-    if (!selected) throw new Error(promptOnly ? "Ollama has no model with a 256k context window. Pull one, or choose a model." : "Ollama has no model with a 256k context window that calls tools. Pull one, or choose a model before starting this agent.");
+    if (!selected) throw new Error(promptOnly ? "Ollama has no 256k-context model known to answer. Pull one, or choose a model." : "Ollama has no model with a 256k context window that calls tools. Pull one, or choose a model before starting this agent.");
     const missingInput = harnessModelMissingInput(selected, member.name === "stage-designer");
     if (missingInput === "text") throw new Error("This model cannot accept the text instructions required by Arke.");
     if (missingInput === "image") throw new Error("This model cannot inspect Stage images.");

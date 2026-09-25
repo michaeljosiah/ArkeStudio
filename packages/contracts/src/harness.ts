@@ -94,8 +94,9 @@ export interface LocalHarnessModel {
   readonly vision: boolean;
   /**
    * The capabilities above were assumed, not read: the model's show failed or was cut off by
-   * the listing deadline. Not offered for writing — nothing says it completes, and its window
-   * cannot be confirmed against {@link LOCAL_MODEL_MIN_CONTEXT}.
+   * the listing deadline, or it listed no capabilities. Offered for choosing when its window is
+   * stated ({@link meetsLocalModelMinimum}), never chosen unattended — nothing says it completes,
+   * let alone calls tools.
    */
   readonly assumed?: true;
 }
@@ -110,11 +111,12 @@ export interface LocalHarnessModel {
 export const LOCAL_MODEL_MIN_CONTEXT = 256_000;
 
 /**
- * Whether a pulled model may be offered for writing. A model whose details could not be read
- * states no context at all, and an unconfirmed window is not a supported one.
+ * Whether a pulled model may be offered for writing: whether it states the window. A model whose
+ * details could not be read states none, so it is not; one whose window was read but whose
+ * capabilities Ollama did not list is, and `assumed` still keeps it from being chosen unattended.
  */
-export function meetsLocalModelMinimum(model: { readonly contextLength?: number; readonly assumed?: boolean }): boolean {
-  return model.assumed !== true && (model.contextLength ?? 0) >= LOCAL_MODEL_MIN_CONTEXT;
+export function meetsLocalModelMinimum(model: { readonly contextLength?: number }): boolean {
+  return (model.contextLength ?? 0) >= LOCAL_MODEL_MIN_CONTEXT;
 }
 
 /**

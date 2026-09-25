@@ -781,15 +781,23 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     } finally { release(); await test.close(); }
   });
 
-  it("does not offer a local model whose capabilities were assumed rather than read", async () => {
-    // A show that failed lists the model with nothing read. Its window cannot be confirmed, so
-    // the 256k minimum holds it back, and the default takes the first row the runtime described.
-    // The harness lists what was published, which no longer includes the held-back row.
-    const adapter = new CaptureAdapter();
-    adapter.list = async () => MODELS.filter((model) => model.id !== "gemma4:12b");
-    const test = await fixture({ adapter, localModels: [{ id: "gemma4:12b", contextLength: 262144, tools: true, vision: false, assumed: true }, ...PULLED.slice(1)] });
+  it("does not choose unattended a local model whose capabilities were assumed rather than read", async () => {
+    // A show that listed no capabilities still states the window, so the model is offered, but
+    // the default takes the first row the runtime actually described.
+    const test = await fixture({ localModels: [{ id: "gemma4:12b", contextLength: 262144, tools: true, vision: false, assumed: true }, ...PULLED.slice(1)] });
     try {
       assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL_SMALL, "the first described row, not the first row");
+      assert.equal((await test.chat(LOCAL))?.config.model, LOCAL, "chosen on purpose, the assumed row is still admitted");
+    } finally { await test.close(); }
+  });
+
+  it("does not offer a local model that states no window", async () => {
+    // A show that failed outright reads nothing, not even the window, and the minimum holds it back.
+    const adapter = new CaptureAdapter();
+    adapter.list = async () => MODELS.filter((model) => model.id !== "gemma4:12b");
+    const test = await fixture({ adapter, localModels: [{ id: "gemma4:12b", tools: true, vision: false, assumed: true }, ...PULLED.slice(1)] });
+    try {
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL_SMALL);
     } finally { await test.close(); }
   });
 
@@ -808,6 +816,8 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
         assert.equal(await none.chat(), undefined, "no session goes to a cloud default nobody can pay for");
         return /None of the pulled local models has a 256k context window/.test(none.coordinator.getState().worldChat?.lastFailure?.detail ?? "");
       }, "refused, naming the minimum");
+      const staged = await none.stage();
+      assert.match(staged?.type === "stage.construction" ? staged.detail : "", /256k context window/, "Stage is told the same, not sent to choose a model that reads images");
     } finally { await none.close(); }
   });
 

@@ -7,6 +7,5 @@ test("a local model is offered for writing only when it states a 256k context", 
   assert.equal(meetsLocalModelMinimum({ contextLength: 256_000 }), true, "published as 256K");
   assert.equal(meetsLocalModelMinimum({ contextLength: 262_144 }), true, "also published as 256K");
   assert.equal(meetsLocalModelMinimum({ contextLength: 131_072 }), false, "128K, like Gemma 4 E2B");
-  assert.equal(meetsLocalModelMinimum({}), false, "a window that is not stated is not confirmed");
-  assert.equal(meetsLocalModelMinimum({ contextLength: 262_144, assumed: true }), false, "nor is one whose details were never read");
+  assert.equal(meetsLocalModelMinimum({}), false, "a window that is not stated — an unread model — is not confirmed");
 });

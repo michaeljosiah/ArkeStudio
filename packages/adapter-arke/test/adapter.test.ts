@@ -436,3 +436,14 @@ test("a turn that starts while a release is on the wire waits for it, so its mod
   await releasing;
   assert.deepEqual(f.ollama.log, ["chat", "unload:start", "unload:end", "chat"]);
 });
+
+test("a prompt-only role does not fall back to a model whose capabilities Ollama did not list", async (t) => {
+  const f = await fixture(t);
+  f.ollama.models = [{ name: "plain:12b", context: 262144 }, { name: "chatty:7b", capabilities: ["completion"], context: 262144 }];
+  const id = await f.session("conversation-namer");
+  f.ollama.script.push(reply('{"title":"Saltlight"}'));
+  await f.adapter.sendMessage({ sessionId: id, ...text("Name it.") });
+  assert.equal(f.ollama.chats[0]!.model, "chatty:7b", "the first model seen to complete, not the first row");
+  f.ollama.models = [{ name: "plain:12b", context: 262144 }];
+  await assert.rejects(f.session("conversation-namer"), /no 256k-context model known to answer/, "offered for choosing, not chosen");
+});

@@ -1,3 +1,4 @@
+import { imageTokens } from "./images.js";
 import type { ChatMessage, ChatTool } from "./ollama.js";
 
 /**
@@ -29,8 +30,8 @@ const LETTERS_PER_TOKEN = 3;
 const OTHER_BYTES_PER_TOKEN = 1.5;
 const ASCII_SHAPES = /[A-Za-z]+|[0-9]|\n|[ \t\r]+|[!-/:-@[-`{-~]/g;
 const TOKENS_PER_MESSAGE = 8;
-/** What an image costs a vision model, roughly, whatever its size on disk. */
-const TOKENS_PER_IMAGE = 768;
+/** Each message's images, estimated once: decoding the same image on every call would add up. */
+const IMAGE_COST = new WeakMap<ChatMessage, number>();
 /** How far under the budget a trim aims, so that one trim buys several turns. */
 const TRIM_TARGET = 0.7;
 
@@ -39,10 +40,20 @@ export const TRIMMED_TOOL_RESULT = "[Earlier tool result removed to fit the cont
 export function estimateTokens(messages: readonly ChatMessage[], tools: readonly ChatTool[]): number {
   let total = textTokens(JSON.stringify(tools));
   for (const message of messages) {
-    total += textTokens(message.content) + TOKENS_PER_MESSAGE + (message.images?.length ?? 0) * TOKENS_PER_IMAGE;
+    total += textTokens(message.content) + TOKENS_PER_MESSAGE + imagesCost(message);
     if (message.tool_calls) total += textTokens(JSON.stringify(message.tool_calls));
   }
   return Math.ceil(total);
+}
+
+function imagesCost(message: ChatMessage): number {
+  if (!message.images?.length) return 0;
+  let cost = IMAGE_COST.get(message);
+  if (cost === undefined) {
+    cost = message.images.reduce((sum, image) => sum + imageTokens(image), 0);
+    IMAGE_COST.set(message, cost);
+  }
+  return cost;
 }
 
 function textTokens(text: string): number {

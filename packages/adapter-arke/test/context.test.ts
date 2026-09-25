@@ -108,3 +108,13 @@ test("dense ASCII — base64, hashes, minified JSON — is counted by its shape,
   assert.ok(per(JSON.stringify(Array.from({ length: 200 }, (_, i) => ({ id: i, v: i * 3.14 })))) >= 0.6, "minified JSON");
   assert.ok(per("The harbour town is Saltlight, and the bells ring at slack water.") < 0.5, "prose stays cheap");
 });
+
+test("a large image counts for what it is, so a turn carrying one is judged against the real cost", () => {
+  const header = Buffer.alloc(33);
+  Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(header, 0);
+  header.write("IHDR", 12, "latin1"); header.writeUInt32BE(3840, 16); header.writeUInt32BE(2160, 20);
+  const image = header.toString("base64");
+  const small = estimateTokens([{ role: "tool", content: "", images: [] }], []);
+  const large = estimateTokens([{ role: "tool", content: "", images: [image] }], []);
+  assert.ok(large - small >= 16_000, `a 4K screenshot is thousands of tokens, not a flat charge (${large - small})`);
+});

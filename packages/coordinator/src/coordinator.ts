@@ -4388,16 +4388,19 @@ export class Coordinator {
     if (this.localModelsPublishable() && !this.localRuntimeListed) {
       return "The local models are not available to the harness yet, and no cloud key is stored, so nothing can write. Check that Ollama is running and try again in a moment, or add a key.";
     }
+    const offered = this.readModel.getState().app.harnessModels.some((model) => model.provider === "ollama");
+    // Pulled, but every one held back by the 256k minimum: without this the session would go to
+    // a cloud default with no key and fail without saying the models were there all along. Stage
+    // included — its own fallback would send the person to choose a model that reads images,
+    // when what is wrong is the window.
+    if (!offered && this.localModelsBelowMinimum > 0) {
+      return "None of the pulled local models has a 256k context window, and no cloud key is stored. Pull one that does, such as Gemma 4 12B, or add a key.";
+    }
     // Local rows the default passed over — switched off, or unable to call tools — are not
     // nothing local: a session going unmodelled past them would run on the cloud default with
     // a local runtime right there. Stage refuses on its own when no model reads images.
-    if (!needsImages && this.readModel.getState().app.harnessModels.some((model) => model.provider === "ollama")) {
+    if (!needsImages && offered) {
       return "None of the local models can write here: each is switched off or cannot call tools, and no cloud key is stored. Pull a model that calls tools, switch one on under AI models, or add a key.";
-    }
-    // Pulled, but held back by the 256k minimum: without this the session would go to a cloud
-    // default with no key and fail without saying that the models were there all along.
-    if (!needsImages && this.localModelsBelowMinimum > 0) {
-      return "None of the pulled local models has a 256k context window, and no cloud key is stored. Pull one that does, such as Gemma 4 12B, or add a key.";
     }
     return null;
   }
