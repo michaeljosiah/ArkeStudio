@@ -248,7 +248,7 @@ test("Ollama dropping the connection mid-reply is the runtime lost, not a turn g
 });
 
 test("a model whose inspection stalls is not offered, since its window cannot be confirmed; the others are read", async (t) => {
-  const f = await fixture(t);
+  const f = await fixture(t, { catalogueDeadlineMs: 500 });
   f.ollama.models = [
     { name: "stuck:1b", stall: true },
     { name: "gemma4:12b", capabilities: ["completion", "tools", "vision"], context: 262144 },
@@ -554,4 +554,15 @@ test("removing the last usable model while running is seen at the next catalogue
   assert.equal(readiness.ready, false, "no longer reported healthy");
   assert.match(readiness.reason ?? "", /256k/);
   assert.ok(f.adapter.lifecycleRevision() > revision);
+});
+
+test("Ollama stopping while ready is seen at the next catalogue read, not at the next failed turn", async (t) => {
+  const f = await fixture(t);
+  await f.adapter.init();
+  assert.equal(f.adapter.readiness().ready, true);
+  await f.ollama.stop();
+  await assert.rejects(f.adapter.listModels());
+  const readiness = f.adapter.readiness();
+  assert.equal(readiness.ready, false);
+  assert.match(readiness.reason ?? "", /not answering/);
 });

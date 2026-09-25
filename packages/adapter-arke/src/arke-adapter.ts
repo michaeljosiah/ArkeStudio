@@ -232,7 +232,15 @@ export class ArkeAdapter implements HarnessAdapter {
    * chose should be one that can do the work.
    */
   private async catalog(signal: AbortSignal): Promise<{ models: ModelInfo[]; pulled: PulledModel[]; all: PulledModel[] }> {
-    const all = await listPulled(this.fetchImpl, this.baseUrl, signal, this.opts.catalogueDeadlineMs ?? CATALOGUE_DEADLINE_MS);
+    let all: PulledModel[];
+    try {
+      all = await listPulled(this.fetchImpl, this.baseUrl, signal, this.opts.catalogueDeadlineMs ?? CATALOGUE_DEADLINE_MS);
+    } catch (error) {
+      // Ollama stopping is seen here first, by the coordinator's catalogue reads, well before any
+      // turn fails. A caller's own cancellation says nothing about Ollama.
+      if (!signal.aborted && this.ready.ready) this.markUnready("Ollama is not answering on this machine.");
+      throw error;
+    }
     const pulled = all.filter(supported);
     // Only a model seen to call tools: a default nobody chose must be one that can do the work.
     const fallback = pulled.find((model) => model.tools === true)?.id;
