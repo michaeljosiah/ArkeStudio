@@ -27,7 +27,7 @@ import type { ChatMessage, ChatTool } from "./ollama.js";
  */
 const LETTERS_PER_TOKEN = 3;
 const OTHER_BYTES_PER_TOKEN = 1.5;
-const ASCII_SHAPES = /[A-Za-z]+|[0-9]|\n|[ \t\r]+|[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
+const ASCII_SHAPES = /[A-Za-z]+|[0-9]|\n|[ \t\r]+|[!-/:-@[-`{-~]/g;
 const TOKENS_PER_MESSAGE = 8;
 /** What an image costs a vision model, roughly, whatever its size on disk. */
 const TOKENS_PER_IMAGE = 768;
@@ -47,17 +47,20 @@ export function estimateTokens(messages: readonly ChatMessage[], tools: readonly
 
 function textTokens(text: string): number {
   let tokens = 0;
-  let ascii = 0;
+  let matched = 0;
   for (const [shape] of text.matchAll(ASCII_SHAPES)) {
-    ascii += shape.length;
+    matched += shape.length;
     const first = shape.charCodeAt(0);
     const letters = (first >= 0x41 && first <= 0x5a) || (first >= 0x61 && first <= 0x7a);
     // Spaces and tabs ride on the word after them.
     if (letters) tokens += Math.ceil(shape.length / LETTERS_PER_TOKEN);
     else if (shape[0] !== " " && shape[0] !== "\t" && shape[0] !== "\r") tokens += 1;
   }
-  // ASCII is one UTF-8 byte a character, so the bytes that are not ASCII are the rest.
-  return tokens + (Buffer.byteLength(text, "utf8") - ascii) / OTHER_BYTES_PER_TOKEN;
+  let ascii = 0;
+  for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) < 0x80) ascii++;
+  // Any other ASCII — control characters — is a token each. ASCII is one UTF-8 byte a
+  // character, so the bytes that are not ASCII are the rest.
+  return tokens + (ascii - matched) + (Buffer.byteLength(text, "utf8") - ascii) / OTHER_BYTES_PER_TOKEN;
 }
 
 /**
