@@ -2993,6 +2993,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({ kind: z.literal("set-audiobook-reading"), worldId: UlidSchema, productionId: SlugSchema, reading: AudiobookReadingSchema })
     .strict(),
   /**
+   * A speaker recorded by a person, or given back to their voice (design turn 155, SPEC-047
+   * R-37): `narrator`, a sheet id, or a name no sheet carries. The book's choice, kept beside
+   * `reading`; their blocks wait for a recording rather than being made.
+   */
+  z
+    .object({ kind: z.literal("set-audiobook-recorded"), worldId: UlidSchema, productionId: SlugSchema, speaker: z.string().min(1).max(120), recorded: z.boolean() })
+    .strict(),
+  /**
    * Direction beside the prose (SPEC-047 R-6..R-10): one block's plan set by hand, or cleared;
    * a chapter directed by the model — a derivation in the cast's discipline whose result is a
    * card accepted whole or discarded; and the acceptance, which writes the record and nothing

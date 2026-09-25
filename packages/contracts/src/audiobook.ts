@@ -291,11 +291,26 @@ export type AudiobookReading = z.infer<typeof AudiobookReadingSchema>;
  * chapters' records sit under `chapters/`, since a chapter's file stem is unconstrained and one
  * named `book` would otherwise share this path (codex on PR 1180).
  */
-export const AudiobookBookSchema = z.object({ schemaVersion: z.literal(1), reading: AudiobookReadingSchema }).strict();
+export const AudiobookBookSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    reading: AudiobookReadingSchema,
+    /**
+     * The speakers a person records (SPEC-047 R-37): `narrator`, a sheet id, or a name no sheet
+     * carries. The book's choice, never the sheet's; their blocks are made only by a recording.
+     */
+    recorded: z.array(z.string().min(1).max(120)).max(200).optional(),
+  })
+  .strict();
 export type AudiobookBook = z.infer<typeof AudiobookBookSchema>;
 export const DEFAULT_AUDIOBOOK_BOOK: AudiobookBook = { schemaVersion: 1, reading: "narrator" };
 
-export type AudiobookBlockState = "not made" | "made" | "stale" | "flagged";
+export type AudiobookBlockState = "not made" | "made" | "stale" | "flagged" | "awaiting";
+
+/** Who records a block, as the book's `recorded` names them (R-37): the narrator for narration and the title, else the sheet, else the name. */
+export function audiobookRecordingKey(block: Pick<AudiobookBlock, "speaker" | "sheet"> & { text?: string }): string {
+  return block.speaker === undefined ? "narrator" : (block.sheet ?? block.speaker);
+}
 
 const sameReader = (a: AudiobookReader, b: AudiobookReader): boolean =>
   a.provider === b.provider && a.voiceId === b.voiceId && a.model === b.model;
@@ -316,7 +331,15 @@ export function audiobookBlockState(
   record: ChapterAudiobook | null,
   assigned: AudiobookReader,
   hasArtifact?: (artifactId: string) => boolean,
+  /** The block's speaker is recorded by a person (R-37, R-38): made only by a current recording, `awaiting` until then. */
+  recorded = false,
 ): AudiobookBlockState {
+  if (recorded) {
+    const take = record?.takes[block.key];
+    const current =
+      take !== undefined && take.source === "recorded" && (hasArtifact === undefined || hasArtifact(take.artifactId)) && take.textHash === audiobookTextHash(block.text);
+    return current ? "made" : "awaiting";
+  }
   if (record === null) return "not made";
   const take = record.takes[block.key];
   const flag = record.flags[block.key];
@@ -340,7 +363,9 @@ export interface AudiobookCounts {
   stale: number;
   flagged: number;
   notMade: number;
-  /** The keys a run makes (R-16): everything that is not `made`, in reading order. */
+  /** Blocks waiting on a person's recording (R-38): never made by a run, never priced. */
+  awaiting: number;
+  /** The keys a run makes (R-16): everything that is not `made` or `awaiting`, in reading order. */
   toMake: string[];
 }
 
@@ -349,11 +374,13 @@ export function audiobookCounts(
   record: ChapterAudiobook | null,
   assignedOf: (block: AudiobookBlock) => AudiobookReader,
   hasArtifact?: (artifactId: string) => boolean,
+  recordedOf: (block: AudiobookBlock) => boolean = () => false,
 ): AudiobookCounts {
-  const counts: AudiobookCounts = { total: blocks.length, made: 0, stale: 0, flagged: 0, notMade: 0, toMake: [] };
+  const counts: AudiobookCounts = { total: blocks.length, made: 0, stale: 0, flagged: 0, notMade: 0, awaiting: 0, toMake: [] };
   for (const block of blocks) {
-    const state = audiobookBlockState(block, record, assignedOf(block), hasArtifact);
+    const state = audiobookBlockState(block, record, assignedOf(block), hasArtifact, recordedOf(block));
     if (state === "made") counts.made += 1;
+    else if (state === "awaiting") counts.awaiting += 1;
     else {
       if (state === "stale") counts.stale += 1;
       else if (state === "flagged") counts.flagged += 1;
@@ -389,6 +416,8 @@ export const AudiobookRowSchema = z
     stale: z.number().int().min(0),
     flagged: z.number().int().min(0),
     notMade: z.number().int().min(0),
+    /** Blocks waiting on a person's recording (R-38); absent when none. */
+    awaiting: z.number().int().min(1).optional(),
     /** The made takes' running time, summed from their measurements; null while any made take is unmeasured. */
     seconds: z.number().min(0).nullable(),
     /** Under `cast`, the run's refusal (R-12) when the cast is not current — said on the row. */
@@ -403,9 +432,11 @@ export const AudiobookVoiceRowSchema = z
     sheet: SlugSchema.optional(),
     name: z.string().min(1),
     voice: z.object({ label: z.string().min(1), provider: z.string().min(1), local: z.boolean() }).strict().optional(),
-    state: z.enum(["narrator", "reads", "no voice", "voice unavailable"]),
+    state: z.enum(["narrator", "reads", "no voice", "voice unavailable", "recorded"]),
     /** Blocks this reader has across the book: the narrator's narration, a speaker's lines. */
     blocks: z.number().int().min(0),
+    /** A recorded speaker's blocks still waiting on a recording (R-38). */
+    awaiting: z.number().int().min(0).optional(),
   })
   .strict();
 export type AudiobookVoiceRow = z.infer<typeof AudiobookVoiceRowSchema>;
@@ -469,9 +500,15 @@ export function audiobookRowLabel(row: AudiobookRow): string {
   if (row.planned) return "planned";
   if (row.castTrouble !== undefined) return row.castTrouble;
   if (row.total > 0 && row.made === row.total) return row.seconds === null ? "read" : `read · ${formatRunningTime(row.seconds)}`;
-  if (row.made === 0 && row.stale === 0 && row.flagged === 0) return "not read";
-  if (row.flagged === 0 && row.notMade === 0 && row.stale > 0) return `moved · ${row.stale} of ${row.total} stale`;
-  return [`${row.made} of ${row.total} made`, ...(row.stale > 0 ? [`${row.stale} stale`] : []), ...(row.flagged > 0 ? [`${row.flagged} flagged`] : [])].join(" · ");
+  const awaiting = row.awaiting ?? 0;
+  if (row.made === 0 && row.stale === 0 && row.flagged === 0 && awaiting === 0) return "not read";
+  if (row.flagged === 0 && row.notMade === 0 && awaiting === 0 && row.stale > 0) return `moved · ${row.stale} of ${row.total} stale`;
+  return [
+    `${row.made} of ${row.total} made`,
+    ...(row.stale > 0 ? [`${row.stale} stale`] : []),
+    ...(row.flagged > 0 ? [`${row.flagged} flagged`] : []),
+    ...(awaiting > 0 ? [`${awaiting} awaiting`] : []),
+  ].join(" · ");
 }
 
 /** The door's line and the rail's count (R-29): chapters read of those with prose, the running time, the planned ones apart. */

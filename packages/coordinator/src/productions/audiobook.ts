@@ -6,6 +6,7 @@ import {
   DEFAULT_AUDIOBOOK_BOOK,
   audiobookBlocks,
   audiobookBlockState,
+  audiobookRecordingKey,
   audiobookHeading,
   audiobookTextHash,
   legacyVoiceModel,
@@ -362,6 +363,8 @@ export interface PlannedBlock {
   sheetVersion?: number;
   /** Set when the block was meant for a speaker but falls to the narrator before the run even asks the catalogue. */
   substituted?: AudiobookSubstitution;
+  /** The block's speaker is recorded by a person (SPEC-047 R-37): made only by a recording. */
+  recorded?: true;
   state: AudiobookBlockState;
 }
 
@@ -379,6 +382,8 @@ export function assignReaders(
   clonedVoices: readonly ClonedVoice[],
   record: ChapterAudiobook | null,
   hasArtifact?: (artifactId: string) => boolean,
+  /** The book's recorded speakers (R-37), by `audiobookRecordingKey`. */
+  recorded: ReadonlySet<string> = new Set(),
 ): PlannedBlock[] {
   return blocks.map((block) => {
     const planned = ((): Omit<PlannedBlock, "state" | "block"> => {
@@ -395,7 +400,8 @@ export function assignReaders(
         sheetVersion: voice.assignedAtVersion,
       };
     })();
-    return { block, ...planned, state: audiobookBlockState(block, record, planned.assigned, hasArtifact) };
+    const byPerson = recorded.has(audiobookRecordingKey(block));
+    return { block, ...planned, ...(byPerson ? { recorded: true as const } : {}), state: audiobookBlockState(block, record, planned.assigned, hasArtifact, byPerson) };
   });
 }
 
@@ -455,7 +461,8 @@ export async function planAudiobook(
   const derived = audiobookBlocks(opened.body, cast === "unreadable" ? null : cast, audiobookHeading(summary.order, summary.title));
   const sheets = store.getBundle().sheets.filter((sheet) => sheet.type === "character" && !sheet.retired);
   const present = await presentTakes(store, record === "unreadable" ? null : record);
-  const blocks = assignReaders(derived.blocks, reading, input.narrator, sheets, store.getBundle().clonedVoices ?? [], record === "unreadable" ? null : record, (artifactId) => present.has(artifactId));
+  const recorded = new Set(book === null || book === "unreadable" ? [] : (book.recorded ?? []));
+  const blocks = assignReaders(derived.blocks, reading, input.narrator, sheets, store.getBundle().clonedVoices ?? [], record === "unreadable" ? null : record, (artifactId) => present.has(artifactId), recorded);
   return {
     chapter: { id: summary.id, file: summary.file, title: summary.title, order: summary.order, version: opened.version, hash: sha256(opened.body) },
     body: opened.body,

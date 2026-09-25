@@ -563,6 +563,28 @@ describe("the Audiobook view (turn 146)", () => {
     assert.ok(all(m, ".fy-ab__block")[1]!.querySelector(".fy-ab__source--recorded"), "the block says it was recorded");
   });
 
+  it("a speaker a person records waits for a recording: the block says so, the press leaves it out, and the toggle writes the book (SPEC-047 R-37, R-38)", async () => {
+    const state = inkbound();
+    const world = state.world!;
+    const m = await mount({
+      ...state,
+      world: {
+        ...world,
+        productions: world.productions.map((p) => (p.meta.id === "inkbound" ? { ...p, audiobook: { schemaVersion: 1 as const, reading: "narrator" as const, recorded: ["narrator"] } } : p)),
+      },
+    });
+    await answerOpen(m);
+    assert.deepEqual(all(m, ".fy-ab__block").map((row) => row.getAttribute("data-state")), ["awaiting", "awaiting", "awaiting", "awaiting"], "every block is the narrator's, and the narrator is recorded");
+    assert.equal(q(m, '[data-testid="read-audiobook"]'), null, "nothing for a run to make");
+    assert.match(text(m), /4 awaiting recording/);
+    await act(async () => all(m, ".fy-ab__block")[1]!.click());
+    const toggle = q(m, '[data-testid="audiobook-recorded"] input') as HTMLInputElement;
+    assert.ok(toggle.checked);
+    await act(async () => toggle.click());
+    const sent = m.sent.findLast((message) => message.kind === "set-audiobook-recorded") as Extract<ClientMessage, { kind: "set-audiobook-recorded" }>;
+    assert.deepEqual({ speaker: sent.speaker, recorded: sent.recorded }, { speaker: "narrator", recorded: false });
+  });
+
   it("a retired character keeps its name in the margin and loses its voice, so the narrator's take for it is made, not stale (codex on PR 1180)", async () => {
     const state = inkbound("cast");
     const world = state.world!;
