@@ -459,6 +459,7 @@ function saysSomething(draft: GenesisDraft): boolean {
     draft.look !== undefined ||
     draft.keyArt !== undefined ||
     (draft.canon?.length ?? 0) > 0 ||
+    (draft.images?.length ?? 0) > 0 ||
     draft.characters.length > 0 ||
     draft.locations.length > 0 ||
     draft.threads.length > 0 ||

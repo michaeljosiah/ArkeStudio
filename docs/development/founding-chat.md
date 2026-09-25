@@ -35,6 +35,26 @@ conversation ID in World Chat. Other entry points can still use the Building scr
 
 Relevant checks:
 
+Image proposals in `draft.json` name a stable character or location slug, prompt and optional
+uploaded references. The chat shows the prompt, model, reference images and estimated cost
+before generation. Generating creates a candidate; it never approves the result. Use image,
+Reject and Remove assignment operate on the exact preview hash.
+
+Uploads and generated candidates are frozen in application-owned storage outside the harness
+workspace. Begin files them in Artifacts, then installs approved selections through the existing
+main-photo and establishing-view services. Existing selections cost nothing to reuse and replace
+the corresponding generation in the build plan. Alternatives remain artifacts. Generated
+artifacts retain their producing job, provider, model, parameters, cost and entity links.
+
+Founding image decisions and generated-image provenance require schema version 30. Artifact
+writes that introduce location reference provenance raise this boundary atomically as well.
+
+- Coordinator `test/harness/genesis-images.test.ts`: immutable previews, exact decisions,
+  renames, reference plans and recovery.
+- Coordinator `test/dispatch-refusal.test.ts`: authenticated image command flow, stale proposal
+  refusal, separate result approval and generation replay.
+- Client `test/genesis-images.test.tsx`: preview and entity-specific approval controls.
+
 - Coordinator `test/harness/genesis-conversation.test.ts`: disk resume, separate draft identities,
   interrupted/replayed transcript transfer and reserved world creation.
 - Coordinator `test/harness/genesis.test.ts`: restored model context and existing turn lifecycle.
