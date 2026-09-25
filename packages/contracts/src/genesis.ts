@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { KeyArtIntentSchema } from "./art-direction.js";
+export const FOUNDING_CONVERSATION_SCHEMA_VERSION = 28;
 
 export const GenesisSheetContentSchema = z.object({
   sections: z.record(z.string().max(80), z.string().max(8000)),

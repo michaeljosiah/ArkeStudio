@@ -4,7 +4,8 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ulid } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
-import { carryGenesisConversation, genesisConversation, loadGenesisConversation, recordFoundingMessage } from "../../src/harness/genesis-conversation.js";
+import { carryGenesisConversation, genesisConversation, genesisControlDir, loadGenesisConversation, recordFoundingBlueprint, recordFoundingMessage } from "../../src/harness/genesis-conversation.js";
+import { foldBlueprint } from "../../src/harness/blueprint.js";
 import { WorldChatStore, conversationDir } from "../../src/world-chat/store.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -14,6 +15,38 @@ async function sandboxDir(prefix: string): Promise<string> {
   await mkdir(dir);
   return dir;
 }
+
+it("restores only unreadable entities while keeping valid edits and removals", async () => {
+  const dir = await sandboxDir("founding-partial-");
+  await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Harbour" }));
+  await mkdir(join(dir, "draft", "characters"), { recursive: true });
+  await writeFile(join(dir, "draft", "characters", "maren.json"), JSON.stringify({ name: "Maren", line: "Old keeper" }));
+  await writeFile(join(dir, "draft", "characters", "rue.json"), JSON.stringify({ name: "Rue", line: "Old sailor" }));
+  await recordFoundingBlueprint(dir, await foldBlueprint(dir));
+  await writeFile(join(dir, "draft", "characters", "maren.json"), "{");
+  await writeFile(join(dir, "draft", "characters", "rue.json"), JSON.stringify({ name: "Rue", line: "New captain" }));
+  const loaded = await loadGenesisConversation(dir, "gen-partial");
+  assert.equal(loaded.blueprint.characters.find(c => c.slug === "maren")?.line, "Old keeper");
+  assert.equal(loaded.blueprint.characters.find(c => c.slug === "rue")?.line, "New captain");
+  assert.deepEqual(loaded.blueprint.dropped, ["draft/characters/maren.json"]);
+});
+
+it("keeps the frozen founding input after creation starts and marks form handoff completion", async () => {
+  const dir = await sandboxDir("founding-frozen-");
+  await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Original" }));
+  const blueprint = await foldBlueprint(dir);
+  await writeFile(join(genesisControlDir(dir), "founding-input.json"), JSON.stringify({ blueprint }));
+  await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Changed after crash" }));
+  let loaded = await loadGenesisConversation(dir, "gen-frozen");
+  assert.equal(loaded.founding, true);
+  assert.equal(loaded.blueprint.name, "Original");
+  const worldId = ulid();
+  await writeFile(join(genesisControlDir(dir), "begun.json"), JSON.stringify({ worldId, form: true }));
+  loaded = await loadGenesisConversation(dir, "gen-frozen");
+  assert.equal(loaded.formHandoff, "pending");
+  await writeFile(join(genesisControlDir(dir), "completed.json"), JSON.stringify({ worldId, form: true }));
+  assert.equal((await loadGenesisConversation(dir, "gen-frozen")).formHandoff, "completed");
+});
 
 it("reopens a draft with its transcript, current blueprint and attachments", async () => {
   const dir = await sandboxDir("founding-resume-");

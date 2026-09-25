@@ -736,10 +736,12 @@ function BuildCard({
 /** World genesis (prototype 12a): the whole window is the surface — form beside the world-so-far rail. */
 export function NewWorldScreen() {
   const [params] = useSearchParams();
-  return <NewWorldDraft key={params.get("draft") ?? "new"} />;
+  const freshId = useRef(`gen-${ulid().toLowerCase()}`);
+  const draftId = params.get("draft") ?? freshId.current;
+  return <NewWorldDraft key={draftId} draftId={draftId} />;
 }
 
-function NewWorldDraft() {
+function NewWorldDraft({ draftId }: { draftId: string }) {
   const { state, connection } = useStore();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -778,7 +780,7 @@ function NewWorldDraft() {
   const [models, setModels] = useState<ModelChoices | undefined>(undefined);
   const [genMode, setGenMode] = useState<"form" | "chat">("form");
   const modeTouchedRef = useRef(false);
-  const genesisIdRef = useRef(params.get("draft") ?? `gen-${ulid().toLowerCase()}`);
+  const genesisIdRef = useRef(draftId);
   const genesisId = genesisIdRef.current;
   const [message, setMessage] = useState("");
   const harnessReady = state?.app.health.harness.status === "healthy";
@@ -898,11 +900,13 @@ function NewWorldDraft() {
   // to follow it to the building screen the moment the coordinator names the world.
   useEffect(() => {
     const worldId = myBuild?.worldId ?? g?.worldId;
-    if (worldId && g?.conversationId && (myBuild?.status === "completed" || myBuild?.status === "stopped" || (submittedName && !myBuild))) {
+    if (worldId && g?.formHandoff === "completed" && !turns.length) {
+      navigate(`/w/${worldId}`, { replace: true });
+    } else if (worldId && g?.conversationId && (myBuild?.status === "completed" || myBuild?.status === "stopped" || g?.formHandoff === "completed")) {
       navigate(`/w/${worldId}/chat/${g.conversationId}`, { replace: true });
     }
     if (buildPressed && myBuild) setStep("draft");
-  }, [buildPressed, myBuild, g?.worldId, g?.conversationId, submittedName, navigate]);
+  }, [buildPressed, myBuild, g?.worldId, g?.conversationId, g?.formHandoff, turns.length, navigate]);
   // A begin the coordinator refused answers with a reasoned plan; the press un-arms so the
   // refusal can be read and the author can go back — never a button stuck on "Building…".
   useEffect(() => {
@@ -1181,11 +1185,11 @@ function NewWorldDraft() {
                 </select>
               </label>
             )}
-            {(turns.length > 0 || blueprint?.name || handed.length > 0) && !g?.worldId && !myBuild && (
+            {(turns.length > 0 || blueprint?.name || handed.length > 0) && !g?.worldId && !g?.founding && !myBuild && (
               <Button variant="ghost" disabled={chatRunning} onClick={() => {
                 if (!confirmDiscard) { setConfirmDiscard(true); return; }
                 genesisDiscard(genesisId);
-                setParams({});
+                setParams({ draft: `gen-${ulid().toLowerCase()}` });
               }}>{confirmDiscard ? "Discard this conversation and its uploads" : "Discard draft"}</Button>
             )}
             {myBuild?.status === "running" && <Callout title={`Building ${myBuild.worldName}`}>
@@ -1306,7 +1310,7 @@ function NewWorldDraft() {
                     onSubmit={sendGenesis}
                     placeholder="Keep going, or ask it to surprise you…"
                     agentLabel="world author"
-                    busy={chatRunning || buildPressed || myBuild?.status === "running" || sizingBuild}
+                    busy={chatRunning || buildPressed || !!g?.founding || myBuild?.status === "running" || sizingBuild}
                     busyLabel={buildPressed ? "founding the world…" : sizingBuild ? "sizing the build…" : "shaping the draft…"}
                     onAttach={() => genesisAttachFiles(genesisId)}
                     onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
