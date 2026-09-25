@@ -241,6 +241,7 @@ operation creates, replaces, appends, moves or removes.
 | `packages/adapter-opencode` | The writing harness |
 | `packages/adapter-claude` | The bring-your-own harness, over the Claude Agent SDK |
 | `packages/adapter-codex` | The Codex writing harness |
+| `packages/confined-tools` | File and world-query tools confined to a session's folder, shared by harnesses that run tools themselves |
 | `packages/providers` | Provider clients and the model manifest |
 | `packages/voice` | The Voxa sidecar client |
 | `apps/desktop` | The Electron shell that embeds the Studio host and supplies native integrations |
