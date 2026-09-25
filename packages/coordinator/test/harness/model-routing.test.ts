@@ -703,6 +703,84 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     } finally { await test.close(); }
   });
 
+  it("checks a returned harness's first catalogue against the rows it was handed before opening local routing", async () => {
+    const adapter = new CaptureAdapter();
+    const supervisor = Object.assign(new EventEmitter(), {
+      id: "harness", status: "stopped", start: async () => {}, stop: async () => {}, restart: async () => {},
+    }) as unknown as ChildSupervisor;
+    const test = await fixture({ adapter, supervisor, localModels: PULLED });
+    try {
+      supervisor.emit("status", { id: "harness", status: "healthy" });
+      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the first lifecycle carried the rows", 12_000);
+      // The child restarts, and the replacement's first answer is its cloud-only start-up catalogue.
+      adapter.list = async () => CLOUD_ONLY;
+      supervisor.emit("status", { id: "harness", status: "unhealthy", reason: "the child exited" });
+      supervisor.emit("status", { id: "harness", status: "healthy" });
+      await until(() => adapter.initCalls === 2, "the returning harness initialised");
+      const before = test.adapter.sessions.length;
+      await test.chat();
+      assert.equal(test.adapter.sessions.length, before, "not run unmodelled on the returned harness's cloud-only read");
+      assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /not available to the harness yet/);
+      adapter.list = async () => MODELS;
+      await test.probeLocalRuntimes();
+      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the returned harness lists the rows");
+    } finally { await test.close(); }
+  });
+
+  it("does not count a connection the harness says needs signing in again", async () => {
+    const test = await fixture();
+    try {
+      (test.coordinator as unknown as { emit(event: DomainEvent): void }).emit({
+        at: new Date().toISOString(), type: "vendor-auth.status",
+        auth: VendorAuthStatusSchema.parse({ available: true, vendors: [
+          { id: "openai", name: "OpenAI", methods: [], connections: [{ kind: "stored", id: "c1", label: "OpenAI account" }], needsSignIn: true },
+        ] }),
+      });
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL, "a connection that failed its last turn is not a credential");
+    } finally { await test.close(); }
+  });
+
+  it("reads a stated fault on a surface that was read as read, not as unread", async () => {
+    const adapter = new CaptureAdapter();
+    adapter.capabilities = () => new Set(["models", "events", "auth"] as const) as unknown as ReturnType<CaptureAdapter["capabilities"]>;
+    Object.assign(adapter, { listIntegrations: async () => [
+      { id: "openai", name: "OpenAI", methods: [], connections: [{ kind: "stored", id: "c1", label: "OpenAI account" }], needsSignIn: false },
+    ] });
+    const test = await fixture({ adapter });
+    try {
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, undefined, "read once: the connected account decides");
+      // A removal that failed after that read: the surface states the fault, rows intact.
+      (test.coordinator as unknown as { emit(event: DomainEvent): void }).emit({
+        at: new Date().toISOString(), type: "vendor-auth.status",
+        auth: VendorAuthStatusSchema.parse({ available: true, reason: "the connection could not be removed", vendors: [
+          { id: "openai", name: "OpenAI", methods: [], connections: [{ kind: "stored", id: "c1", label: "OpenAI account" }], needsSignIn: false },
+        ] }),
+      });
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, undefined, "still a credential: the read behind the rows succeeded");
+    } finally { await test.close(); }
+  });
+
+  it("ends a chat with a chosen model at its Stop while the catalogue it is verified against is still being read", async () => {
+    const adapter = new CaptureAdapter();
+    let release: () => void = () => {};
+    const test = await fixture({ adapter });
+    try {
+      await test.send({ kind: "world-chat-create", worldId: WORLD_ID, requestId: randomUUID(), title: "Stopped while verifying",
+        entryContext: { kind: "production", productionId: "saltlight" } });
+      const conversationId = test.coordinator.getState().worldChat!.conversationId;
+      adapter.list = () => new Promise((resolve) => { release = () => resolve(MODELS); });
+      test.staleCatalogue();
+      const pending = test.send({ kind: "world-chat-send", worldId: WORLD_ID, requestId: randomUUID(), conversationId,
+        text: "Explain the current production.", attachmentIds: [], modelId: CHAT });
+      await until(() => test.coordinator.getState().worldChat?.runStatus !== null, "the turn admitted and verifying its model");
+      await test.send({ kind: "world-chat-cancel", worldId: WORLD_ID, conversationId });
+      await until(() => test.coordinator.getState().worldChat?.runStatus === null, "the turn ended at the Stop", 2_000);
+      release();
+      await pending;
+      assert.equal(test.adapter.sessions.filter((session) => session.agent === "world-builder").length, 0, "no session was built for a stopped turn");
+    } finally { release(); await test.close(); }
+  });
+
   it("skips a local model the runtime says cannot call tools", async () => {
     const adapter = new CaptureAdapter();
     adapter.list = async () => [{ provider: "ollama", id: "chatty:7b", tools: false }, ...MODELS];

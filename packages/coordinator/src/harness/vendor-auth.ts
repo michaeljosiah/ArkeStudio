@@ -73,6 +73,17 @@ export class VendorAuthService {
   private carryDetail: string | null = null;
   private refreshing: Promise<void> | null = null;
   private stopped = false;
+  /**
+   * Whether the last read of the harness's integration catalog succeeded (issue 1247). Kept
+   * apart from `reason`, which other operations also state faults through: a removal that
+   * failed after a successful read is a stated fault on a surface that was read.
+   */
+  private lastReadOk = false;
+
+  /** Whether the connections on display come from a read that succeeded. */
+  get readOk(): boolean {
+    return this.lastReadOk;
+  }
 
   constructor(private readonly opts: VendorAuthServiceOptions) {}
 
@@ -135,11 +146,13 @@ export class VendorAuthService {
       this.available = true;
       this.reason = null;
       this.vendors = this.surfaceOf(listed);
+      this.lastReadOk = true;
       this.updateCarry();
     } catch (err) {
       // The capability exists but the call failed: the surface stays, the fault is stated.
       this.available = true;
       this.reason = messageOf(err);
+      this.lastReadOk = false;
     }
     this.publish();
   }

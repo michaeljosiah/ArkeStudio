@@ -1045,6 +1045,8 @@ export class Coordinator {
   private localRuntimeProbeInFlight = false;
   /** The local models last handed to the harness, so an unchanged poll rewrites nothing (issue 1247). Null: never published. */
   private publishedLocalHarnessModels: string | null = null;
+  /** The rows behind that fingerprint, for checking a later catalogue read against them. */
+  private publishedLocalHarnessRows: readonly import("@arke-studio/contracts").LocalHarnessModel[] = [];
   /** Whether any cloud language-model key is stored, read with the harness environment (issue 1247). */
   private cloudLlmKeyStored = false;
   /**
@@ -2209,10 +2211,18 @@ export class Coordinator {
     });
   }
 
-  private async validateLanguageModel(modelId: string, needsImages = false): Promise<LanguageModelSelection> {
+  private async validateLanguageModel(modelId: string, needsImages = false, signal?: AbortSignal): Promise<LanguageModelSelection> {
+    // The catalogue read may be discovery still under way; a request stopped meanwhile is
+    // answered with its stop, not held to the read's own bound.
+    const stopped = signal === undefined ? null : new Promise<never>((_, reject) => {
+      if (signal.aborted) reject(signal.reason);
+      else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
     try {
-      return selectHarnessModel(modelId, await this.modelCatalog.get(), this.readModel.getState().app, needsImages);
-    } catch {
+      const models = stopped === null ? await this.modelCatalog.get() : await Promise.race([this.modelCatalog.get(), stopped]);
+      return selectHarnessModel(modelId, models, this.readModel.getState().app, needsImages);
+    } catch (error) {
+      if (signal?.aborted) return { modelId, reason: describeCoordinatorError(error) };
       return { modelId, reason: "The running harness's models could not be verified. Retry models in Settings → Harness → Advanced or the production's Develop conversation." };
     }
   }
@@ -2233,7 +2243,7 @@ export class Coordinator {
       ?.getBundle()
       .productions.find((candidate) => candidate.meta.id === productionId);
     const modelId = requestedId ?? this.agentOverrides?.[agent]?.model ?? production?.meta.models?.llm;
-    if (modelId !== undefined) return this.validateLanguageModel(modelId, agent === "stage-designer");
+    if (modelId !== undefined) return this.validateLanguageModel(modelId, agent === "stage-designer", signal);
     // Nothing chosen: the local default, where there is one (issue 1247). Stage needs a model
     // that reads images, and refuses before its session is built when none is chosen — so it
     // is decided here, where the refusal is, rather than left to the session builder.
@@ -2241,7 +2251,7 @@ export class Coordinator {
       try { await this.localDefaultGate(signal); } catch (error) { return { reason: describeCoordinatorError(error) }; }
     }
     const local = this.localHarnessDefault(agent === "stage-designer");
-    if (local !== undefined) return this.validateLanguageModel(local, agent === "stage-designer");
+    if (local !== undefined) return this.validateLanguageModel(local, agent === "stage-designer", signal);
     const refusal = this.keylessSessionRefusal(agent === "stage-designer");
     return refusal === null ? {} : { reason: refusal };
   }
@@ -4106,6 +4116,7 @@ export class Coordinator {
       return;
     }
     this.publishedLocalHarnessModels = fingerprint;
+    this.publishedLocalHarnessRows = models;
     // Shutdown may have started during the write; nothing is scheduled past it.
     if (this.stopping) { this.settleCatalogue(); return; }
     const timer = setTimeout(() => {
@@ -4178,7 +4189,15 @@ export class Coordinator {
     const returning = !this.catalogueGateOpen || !this.vendorAuthGateOpen;
     if (!this.catalogueGateOpen) this.armCatalogueGate();
     if (!this.vendorAuthGateOpen) this.armVendorAuthGate();
-    this.warmModelCatalog(!this.localModelsPublishable() || (returning && this.publishedLocalHarnessModels !== null));
+    const recovering = returning && this.publishedLocalHarnessModels !== null;
+    // The returned harness's catalogue is checked against the rows it was handed like any
+    // post-publication read: its first answer may still be the old one, and what the previous
+    // lifecycle had confirmed says nothing about this one. Until it carries them, the probe
+    // keeps asking, and a keyless session is refused rather than run on a cloud-only read.
+    if (recovering) this.localRuntimeListed = false;
+    this.warmModelCatalog(!this.localModelsPublishable() || recovering, recovering
+      ? () => { this.localRuntimeListed = this.catalogueCarries(this.publishedLocalHarnessRows); }
+      : undefined);
     const settleVendorAuth = this.settleVendorAuth;
     void this.refreshVendorAuthTracked({ patient: true }).finally(() => settleVendorAuth());
   }
@@ -4283,9 +4302,11 @@ export class Coordinator {
     // the harness sees it, and the store is read at the command — the published row outlives a
     // cleared key by the length of the relaunch, and a session in that gap must not count it.
     // Rows kept after a faulted read are last time's, not a credential: the unread refusal
-    // below decides then, not the rows.
+    // below decides then, not the rows. Nor is a connection the harness has said needs signing
+    // in again (R-13): a session on it fails the same way the last one did.
     return this.cloudLlmKeyStored ||
-      (!this.vendorAuthUnread() && this.readModel.getState().app.vendorAuth.vendors.some((vendor) => vendor.connections.some((connection) => connection.kind === "stored")));
+      (!this.vendorAuthUnread() && this.readModel.getState().app.vendorAuth.vendors.some((vendor) =>
+        !vendor.needsSignIn && vendor.connections.some((connection) => connection.kind === "stored")));
   }
 
   /**
@@ -4301,8 +4322,10 @@ export class Coordinator {
    * its last read faulted, so the connections on display are last time's, or nobody's.
    */
   private vendorAuthUnread(): boolean {
-    const auth = this.readModel.getState().app.vendorAuth;
-    return auth.available && auth.reason !== null;
+    // The read's own outcome, not the surface's stated reason: a removal that failed after a
+    // successful read states a fault on a surface that was read. Both halves from the service,
+    // so the answer is one lifecycle's, not a published row's against another's read.
+    return this.vendorAuth.current().available && !this.vendorAuth.readOk;
   }
 
   private keylessSessionRefusal(needsImages = false): string | null {
