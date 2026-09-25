@@ -407,15 +407,20 @@ export async function productionCreatedBy(worldDir: string, requestId: string): 
 // ---------------------------------------------------------------------------
 
 /**
- * The accepted overview's contribution to a drafting instruction, or "" when none exists. One
- * helper so scene drafting and chapter drafting steer from the same accepted facts — the UI
- * says the overview steers drafting, and this is where that claim is made true.
+ * The accepted overview's contribution to a drafting instruction, or "" when none exists. Scene
+ * drafting steers from it; a chapter's draft reads the same accepted facts whole through
+ * get_story (chapter-brief.ts). The UI says the overview steers drafting, and this is where that
+ * claim is made true.
  */
 export function overviewSteer(story: StoryOverview | null | undefined, style?: ProseStyle | null): string {
   const lines = story
     ? [
         ...(story.logline !== undefined ? [`- logline: ${story.logline}`] : []),
         ...(story.spine !== undefined ? [`- spine: ${story.spine}`] : []),
+        // The Overview shows these two beside the logline, and a chapter's draft reads them in
+        // get_story; a scene drafted from this line alone was missing what the story builds to.
+        ...(story.question !== undefined ? [`- dramatic question: ${story.question}`] : []),
+        ...(story.ending !== undefined ? [`- ending: ${story.ending}`] : []),
         ...(story.acts ?? []).map(
           (act, i) => `- act ${i + 1} · ${act.title}${act.summary !== undefined ? `: ${act.summary}` : ""}`,
         ),
