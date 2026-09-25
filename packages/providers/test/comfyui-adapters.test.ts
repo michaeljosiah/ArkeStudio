@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AdapterReleaseSchema } from "@arke-studio/contracts";
 import { HEARMEMAN_ADAPTERS } from "../src/comfyui/hearmeman.generated.js";
-import { recipeWithAdapters } from "../src/comfyui/adapters.js";
+import { recipeWithAdapters, adapterValidationCandidate } from "../src/comfyui/adapters.js";
+import { ComfyUiClient } from "../src/clients/comfyui.js";
 import { comfyUiRecipeById, comfyUiRecipeIdentity } from "../src/comfyui/recipes.js";
 
 test("pinned inventory accounts for all 14 artifacts without claiming GPU verification", () => {
@@ -37,4 +38,22 @@ test("selection changes only the declared model slot, freezes exact provenance a
   assert.throws(() => recipeWithAdapters(base, [{ ...selection[0], strength: 1.5 }], [release]), /strength/);
   assert.throws(() => recipeWithAdapters(base, selection), /validation/);
   assert.throws(() => recipeWithAdapters(base, [{ ...selection[0], sha256: "f".repeat(64) }], [release]), /changed/);
+});
+
+test("the maintainer candidate does not grant production verification or bypass the host guard", async () => {
+  const base = comfyUiRecipeById("comfyui-h3-video")!;
+  const release = HEARMEMAN_ADAPTERS[0]!;
+  const selections = [{ releaseId: release.id, sha256: release.source.sha256, strength: 1 }];
+  const before = structuredClone(release);
+  const candidate = adapterValidationCandidate(base, selections);
+  assert.deepEqual(release, before);
+  assert.deepEqual(candidate.adapters, selections);
+  assert.throws(() => recipeWithAdapters(base, selections), /validation/);
+  const client = new ComfyUiClient(async () => { throw new Error("Must refuse before HTTP"); }, () => "http://127.0.0.1:8188",
+    async () => ({ ok: true }), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+    adapterValidationCandidate);
+  try {
+    await assert.rejects(client.submit("", { model: base.id, capability: "video", recipe: comfyUiRecipeIdentity(candidate),
+      params: { adapters: selections } }), /authorization is unavailable/);
+  } finally { client.dispose(); }
 });

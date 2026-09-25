@@ -94,3 +94,39 @@ Promotion needs exact artifact/base/recipe/node/engine versions, a neutral input
 decoded output, observed RAM/VRAM, strength bounds, reference transport where applicable, and
 cancellation evidence for each pairing. Keep untested/incompatible pairings visible with a
 reason. Windows packaged startup and Linux CI are separate from source-level unit tests.
+
+### Maintainer GPU checks
+
+The following commands keep evidence and outputs outside git. The intake's optional `--download`
+fetches only the pinned 14 artifacts into its report directory and verifies their sizes/hashes.
+Without that flag it reads bounded tensor headers only; header inspection does not verify full
+artifact bytes. Supply the actual engine and shared models directories for the machine.
+
+```powershell
+node --import tsx packages/providers/scripts/inspect-h3-adapters.ts D:/AI/ComfyUI/models .dev/h3-adapter-validation/headers --download
+C:/path/to/ComfyUI/venv/Scripts/python.exe packages/providers/scripts/probe-h3-adapter-loader.py C:/path/to/ComfyUI .dev/h3-adapter-validation/headers
+node --import tsx packages/providers/scripts/smoke-h3-adapters.ts C:/path/to/ComfyUI D:/AI/ComfyUI/models .dev/h3-adapter-validation/headers .dev/h3-adapter-validation/fl2va comfyui-h3-video 0
+```
+
+The loader probe checks all keys against both base headers and runs each distinct patch shape
+on CUDA. It reports direct weight patching separately from the optional bypass implementation;
+a bypass failure is not proof that the shipped weight-patching path fails. Neither proves a full
+generation works. The smoke takes an adapter's zero-based inventory index, or `all`, and a shipped
+recipe ID. It requires an idle engine at localhost:8188 and preserves its base resource guards.
+Each job has a 45-minute deadline and cancellation targets only that job. Reference-video uses a
+synthetic colour reference; all prompts describe geometric objects. Inspect extracted frames and
+audio before treating a generated report as success. Memory minima are sampled, not instrumented
+instantaneous peaks, and a strength-one smoke establishes no broader usable strength range.
+
+The smoke uses the real provider client with an explicitly injected maintainer candidate builder.
+Production hosts retain `recipeWithAdapters`, which refuses unverified pairings. The candidate
+builder shares the same catalogue-bound graph construction; the smoke's host guard verifies its
+exact release/hash choice. It never edits the shipped catalogue, content acknowledgement or
+compliance journal. Candidate execution therefore creates evidence without first fabricating a
+verified catalogue record or a compliance-agent verdict.
+
+Pinned base hashes are cached in the smoke's report directory against file identity, size and
+mtime for repeated tests; remove `verified-files.json` to force rehashing. The smoke places a
+verified test file under the engine's `models/loras/arke` (hard link where possible, exclusive copy
+across volumes) and records whether it created it. Existing files are never overwritten. These
+test files are not app-owned setup downloads and are retained for inspection/repeat runs.

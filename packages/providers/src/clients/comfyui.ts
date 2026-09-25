@@ -277,6 +277,8 @@ export class ComfyUiClient implements ProviderClient {
     private readonly allBaseUrls?: () => readonly string[],
     private readonly isEndpointGone?: (url: string) => boolean,
     private readonly adapterGuard?: (recipeId: string, selections: unknown) => Promise<void>,
+    /** Trusted maintainer harness injection; production composition keeps the verified-only default. */
+    private readonly composeAdapterRecipe: typeof recipeWithAdapters = recipeWithAdapters,
   ) {}
 
   /** Latest step count per prompt, fed by the engine's socket and read by `poll`. */
@@ -764,7 +766,7 @@ export class ComfyUiClient implements ProviderClient {
     if (this.disposed) throw new Error("comfyui: the provider client is disposed");
     const baseRecipe = comfyUiRecipeById(request.model);
     if (!baseRecipe) throw new Error(`comfyui: "${request.model}" is not a shipped recipe`);
-    const recipe = recipeWithAdapters(baseRecipe, request.params.adapters);
+    const recipe = this.composeAdapterRecipe(baseRecipe, request.params.adapters);
     if (recipe !== baseRecipe) {
       if (!this.adapterGuard) throw new ProviderRequestRejectedError("Adapter authorization is unavailable in this host.");
       await this.adapterGuard(recipe.id, request.params.adapters);
