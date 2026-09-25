@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AdapterReleaseSchema } from "@arke-studio/contracts";
 import { HEARMEMAN_ADAPTERS } from "../src/comfyui/hearmeman.generated.js";
+import { H3_ADAPTER_BUNDLES } from "../src/comfyui/adapter-bundles.js";
 import { recipeWithAdapters, adapterValidationCandidate } from "../src/comfyui/adapters.js";
 import { ComfyUiClient } from "../src/clients/comfyui.js";
 import { comfyUiRecipeById, comfyUiRecipeIdentity } from "../src/comfyui/recipes.js";
@@ -15,6 +16,55 @@ test("pinned inventory accounts for all 14 artifacts without claiming GPU verifi
     assert.ok(row.compatibility.every(pair => pair.state !== "verified"));
     for (const id of row.supersedes) assert.ok(HEARMEMAN_ADAPTERS.some(prior => prior.id === id && prior.adapterId === row.adapterId));
   }
+});
+
+test("the experimental bundle chains all fourteen pinned adapters and freezes every dependency", () => {
+  const base = comfyUiRecipeById("comfyui-h3-video")!, before = structuredClone(base);
+  const bundle = H3_ADAPTER_BUNDLES[0]!, selected = bundle.selections;
+  assert.equal(selected.length, 14);
+  assert.deepEqual(selected.map(row => row.releaseId), HEARMEMAN_ADAPTERS.map(row => row.id));
+  const composed = recipeWithAdapters(base, selected);
+  assert.deepEqual(base, before);
+  selected.forEach((row, i) => {
+    const node = composed.graph[`arke_adapter_${i}`]!;
+    assert.equal(node.inputs.strength_model, 1);
+    assert.equal(node.inputs.lora_name, `arke/${row.sha256}.safetensors`);
+    assert.deepEqual(node.inputs.model, i ? [`arke_adapter_${i - 1}`, 0] : base.graph["3"]!.inputs.model);
+    assert.ok(composed.requires.checkpoints.some(file => file.sha256 === row.sha256));
+  });
+  assert.deepEqual(composed.graph["3"]!.inputs.model, ["arke_adapter_13", 0]);
+  assert.deepEqual(comfyUiRecipeIdentity(composed).adapters, selected);
+  assert.deepEqual(composed.hardware, base.hardware);
+  assert.equal(bundle.status, "experimental");
+  assert.throws(() => recipeWithAdapters(base, selected.slice(1)), /bundle/);
+  assert.throws(() => recipeWithAdapters(base, [...selected].reverse()), /bundle/);
+  assert.throws(() => recipeWithAdapters(comfyUiRecipeById("comfyui-h3-video-768")!, selected), /validation/);
+  const altered = structuredClone(HEARMEMAN_ADAPTERS);
+  altered[13]!.compatibility[0]!.state = "unverified";
+  altered[13]!.compatibility[0]!.reason = "Fixture validation pending";
+  assert.throws(() => recipeWithAdapters(base, selected, altered), /validation pending/);
+});
+
+test("bundle submission resolves every engine filename and retains all frozen choices", async () => {
+  const base = comfyUiRecipeById("comfyui-h3-video")!, selected = H3_ADAPTER_BUNDLES[0]!.selections;
+  const composed = recipeWithAdapters(base, selected), identity = comfyUiRecipeIdentity(composed);
+  let submitted: Record<string, { inputs: Record<string, unknown> }> | undefined, guarded = 0;
+  const names = selected.map((row, i) => `arke${i % 2 ? "\\" : "/"}${row.sha256}.safetensors`);
+  const client = new ComfyUiClient(async (url, init) => {
+    if (url.endsWith("/system_stats")) return Response.json({ system: { comfyui_version: "0.33.1" } });
+    if (url.endsWith("/object_info/LoraLoaderModelOnly")) return Response.json({ LoraLoaderModelOnly: { input: { required: { lora_name: [names] } } } });
+    if (url.endsWith("/prompt")) { submitted = JSON.parse(String(init?.body)).prompt; return Response.json({ prompt_id: "fixture-bundle" }); }
+    throw new Error(`Unexpected request: ${url}`);
+  }, () => "http://127.0.0.1:8188", async () => ({ ok: true }), undefined, undefined, undefined, undefined,
+  undefined, undefined, undefined, undefined, async () => { guarded++; });
+  try {
+    await client.submit("", { model: base.id, capability: "video", recipe: identity,
+      params: { prompt: "A red cube moves.", seed: 1, durationSec: 5, aspect: "16:9", adapters: selected } });
+    assert.ok(guarded > 0);
+    names.forEach((name, i) => assert.equal(submitted![`arke_adapter_${i}`]!.inputs.lora_name, name));
+    assert.deepEqual(identity.adapters, selected);
+    assert.deepEqual(submitted!["3"]!.inputs.model, ["arke_adapter_13", 0]);
+  } finally { client.dispose(); }
 });
 
 test("selection changes only the declared model slot, freezes exact provenance and raises measured floors", () => {

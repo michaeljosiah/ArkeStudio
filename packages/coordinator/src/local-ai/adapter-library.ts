@@ -5,8 +5,8 @@ import { dirname, join, relative, resolve, isAbsolute } from "node:path";
 import { z } from "zod";
 import {
   ADULT_CONTENT_OFF, AdultAcknowledgementSchema, AdultContentSchema, AdapterDecisionSchema,
-  AdapterSelectionsSchema, adapterCompatibilityProblem, adapterPolicyProblem,
-  type AdapterAction, type AdapterDecision, type AdapterLibraryState, type AdapterRelease,
+  AdapterSelectionsSchema, adapterCombinationProblem, adapterCompatibilityProblem, adapterPolicyProblem,
+  type AdapterAction, type AdapterBundle, type AdapterDecision, type AdapterLibraryState, type AdapterRelease,
 } from "@arke-studio/contracts";
 import { appendFlushed } from "../flushed-append.js";
 import { serializeFileMutation } from "../world/atomic.js";
@@ -34,6 +34,7 @@ async function assessWithSignal(client: AdapterComplianceClient, releases: reado
 export interface AdapterLibraryOptions {
   appRoot: string;
   releases: readonly AdapterRelease[];
+  bundles?: readonly AdapterBundle[];
   modelsDir(): string | null;
   local(): boolean;
   scanner?: AdapterComplianceClient;
@@ -117,7 +118,8 @@ export class AdapterLibrary {
         release, decision: state.decisions[release.source.sha256] ?? null, removed: state.removed.includes(release.source.sha256),
         installed: await this.present(release), owned: await this.owns(release, state), reason: this.policy(release, state),
       })));
-      return { revision: state.revision, adultContent: state.adultContent, scannerAvailable: !!this.opts.scanner, entries, error: this.error };
+      const bundles = state.adultContent.enabled ? structuredClone([...(this.opts.bundles ?? [])]) : [];
+      return { revision: state.revision, adultContent: state.adultContent, scannerAvailable: !!this.opts.scanner, entries, bundles, error: this.error };
     } catch {
       return { revision: 0, adultContent: { ...ADULT_CONTENT_OFF }, scannerAvailable: !!this.opts.scanner, entries: [], error: "Adapter history could not be read. Access is disabled until it is repaired." };
     }
@@ -251,7 +253,8 @@ export class AdapterLibrary {
     const selected = AdapterSelectionsSchema.parse(selections);
     if (!selected.length) return;
     if (!this.opts.local()) throw new Error("Adapters require a local ComfyUI engine.");
-    if (selected.length > 1) throw new Error("Adapter combinations have not completed validation.");
+    const combinationProblem = adapterCombinationProblem(selected, model, this.opts.bundles ?? []);
+    if (combinationProblem) throw new Error(combinationProblem);
     const state = await this.read();
     for (const row of selected) {
       const release = this.release(row.releaseId);

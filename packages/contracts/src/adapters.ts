@@ -6,10 +6,26 @@ const Id = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,127}$/);
 export const AdapterSelectionSchema = z.object({
   releaseId: Id, sha256: Digest, strength: z.number().finite().min(0).max(2),
 }).strict();
-export const AdapterSelectionsSchema = z.array(AdapterSelectionSchema).max(4).superRefine((rows, ctx) => {
+export const AdapterSelectionsSchema = z.array(AdapterSelectionSchema).max(14).superRefine((rows, ctx) => {
   if (new Set(rows.map(row => row.sha256)).size !== rows.length) ctx.addIssue({ code: "custom", message: "An adapter can be selected only once." });
 });
 export type AdapterSelection = z.infer<typeof AdapterSelectionSchema>;
+
+/** A trusted catalogue preset expands to frozen, ordered choices; it grants no member permission. */
+export const AdapterBundleSchema = z.object({
+  id: Id, displayName: z.string().min(1), recipeId: Id, status: z.literal("experimental"),
+  description: z.string().min(1), selections: AdapterSelectionsSchema.refine(rows => rows.length > 1),
+}).strict();
+export type AdapterBundle = z.infer<typeof AdapterBundleSchema>;
+
+export function matchingAdapterBundle(selected: readonly AdapterSelection[], recipeId: string, bundles: readonly AdapterBundle[]): AdapterBundle | undefined {
+  return bundles.find(bundle => bundle.recipeId === recipeId && bundle.selections.length === selected.length &&
+    bundle.selections.every((row, index) => row.releaseId === selected[index]?.releaseId && row.sha256 === selected[index]?.sha256 && row.strength === selected[index]?.strength));
+}
+
+export function adapterCombinationProblem(selected: readonly AdapterSelection[], recipeId: string, bundles: readonly AdapterBundle[]): string | null {
+  return selected.length <= 1 || matchingAdapterBundle(selected, recipeId, bundles) ? null : "Only a catalogue-declared experimental bundle can combine adapters.";
+}
 
 /** The current adapter catalogue is adult-classified; persisted choices retain that label even after removal. */
 export function hasAdultAdapter(params: unknown): boolean {
@@ -60,7 +76,7 @@ export const AdapterLibraryStateSchema = z.object({
   revision: z.number().int().nonnegative(), adultContent: AdultContentSchema, scannerAvailable: z.boolean(),
   entries: z.array(z.object({ release: AdapterReleaseSchema, decision: AdapterDecisionSchema.nullable(),
     removed: z.boolean(), installed: z.boolean(), owned: z.boolean(), reason: z.string().nullable(),
-  }).strict()), error: z.string().nullable(),
+  }).strict()), bundles: z.array(AdapterBundleSchema).optional(), error: z.string().nullable(),
 }).strict();
 export type AdapterLibraryState = z.infer<typeof AdapterLibraryStateSchema>;
 
