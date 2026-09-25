@@ -525,6 +525,41 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     await pending;
   });
 
+  it("asks for the catalogue again when the read after a publication failed, on the probe's cadence", async () => {
+    const test = await fixture({ localModels: [{ id: "gemma4:12b", tools: true, vision: false }] });
+    try {
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL);
+      test.adapter.list = async () => { throw new Error("discovery is down"); };
+      await test.send({ kind: "list-harness-models" });
+      await until(() => test.coordinator.getState().app.harnessModelStatus.status === "error", "the failed read");
+      const before = test.adapter.sessions.length;
+      await test.chat();
+      assert.equal(test.adapter.sessions.length, before, "refused while the catalogue is unread: no session was built");
+      test.adapter.list = async () => MODELS;
+      // The listing is unchanged, so nothing is published; the failed read is what is retried.
+      await test.probeLocalRuntimes();
+      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the catalogue reads again");
+    } finally { await test.close(); }
+  });
+
+  it("refuses while the harness's sign-in state could not be read, rather than pinning a connected account local", async () => {
+    const adapter = new CaptureAdapter();
+    adapter.capabilities = () => new Set(["models", "events", "auth"] as const) as unknown as ReturnType<CaptureAdapter["capabilities"]>;
+    let signInReadable = false;
+    Object.assign(adapter, { listIntegrations: async () => {
+      if (!signInReadable) throw new Error("the auth catalog is not answering");
+      return [];
+    } });
+    const test = await fixture({ adapter });
+    try {
+      assert.equal(await test.chat(), undefined, "unread is not absent");
+      assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /sign-in state could not be read/);
+      signInReadable = true;
+      await test.probeLocalRuntimes();
+      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the sign-in state has been read");
+    } finally { await test.close(); }
+  });
+
   it("chooses nothing when the catalogue lists nothing local", async () => {
     const adapter = new CaptureAdapter();
     adapter.list = async () => CLOUD_ONLY;

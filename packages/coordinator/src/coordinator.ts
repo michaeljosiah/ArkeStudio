@@ -4020,6 +4020,9 @@ export class Coordinator {
         ...local.map((id) => this.providerService.validate(id).catch(() => {})),
         this.refreshLocalResidency(),
         this.publishLocalHarnessModels(),
+        // A sign-in surface whose last read faulted is asked again here (issue 1247): a keyless
+        // session is refused while it is unread, and nothing else would read it again.
+        this.vendorAuthUnread() ? this.vendorAuth.refresh().catch(() => {}) : Promise.resolve(),
       ]);
     } finally {
       this.localRuntimeProbeInFlight = false;
@@ -4073,8 +4076,12 @@ export class Coordinator {
     const fingerprint = JSON.stringify(models);
     if (this.stopping) return;
     if (fingerprint === this.publishedLocalHarnessModels) {
-      // The catalogue already carries this listing, or the fetch that will is scheduled.
-      this.localRuntimeListed = listed;
+      // The catalogue already carries this listing, or the fetch that will is scheduled — unless
+      // that fetch failed, in which case nothing else asks again, and a keyless session would
+      // stay refused past the harness's recovery. Asked again on this cadence until it reads.
+      if (this.catalogueReadOk) { this.localRuntimeListed = listed; return; }
+      this.modelCatalog.invalidate();
+      this.warmModelCatalog(false, () => { this.localRuntimeListed = listed; });
       return;
     }
     // Pending until the catalogue carries the new rows: a session decided in between would read
@@ -4170,7 +4177,9 @@ export class Coordinator {
       return this.agentOverrides ? { agents: this.agentOverrides } : {};
     }
     const agents: Record<string, { model?: string; brief?: string }> = { ...this.agentOverrides };
-    for (const member of ROSTER) {
+    // The roster as it will run: a host's, when it supplies one, since its agents are the ones
+    // a session can actually be built for.
+    for (const member of this.opts.authoring?.roster ?? ROSTER) {
       const override = agents[member.name];
       if (override?.model !== undefined) continue;
       // Stage reads images; it takes the first local model that can, or none, the same
@@ -4219,8 +4228,22 @@ export class Coordinator {
    * a local model possibly sitting right there. Ollama not answering is the same silence one
    * step earlier: the rows it would have brought are not in the catalogue to read.
    */
+  /**
+   * Whether the harness's sign-in state could not be read (issue 1247): the surface exists but
+   * its last read faulted, so the connections on display are last time's, or nobody's.
+   */
+  private vendorAuthUnread(): boolean {
+    const auth = this.readModel.getState().app.vendorAuth;
+    return auth.available && auth.reason !== null;
+  }
+
   private keylessSessionRefusal(needsImages = false): string | null {
     if (this.cloudCredentialAvailable()) return null;
+    // Unread is not absent: a connected account pinned local by a faulted read would be the
+    // wrong lane chosen quietly, and this is retried on the runtime probe's cadence.
+    if (this.vendorAuthUnread()) {
+      return "The harness's sign-in state could not be read, and no cloud key is stored, so which model would write is unknown. Retry under Settings → Harness, or add a key.";
+    }
     // A harness with no catalogue to read is not a failed read: nothing local could be listed
     // by it, and a session on it runs exactly as it did before there was a local default.
     const adapter = this.opts.adapter;
@@ -4247,6 +4270,7 @@ export class Coordinator {
     // are not chosen from, and the refusal above says why.
     if (!this.catalogueReadOk) return undefined;
     if (this.localModelsPublishable() && !this.localRuntimeListed) return undefined;
+    if (this.vendorAuthUnread()) return undefined;
     // Every roster agent works through tools — reads, edits, world queries — so a model the
     // runtime says cannot call them would take the session and fail its first turn. Explicit
     // choices are still admitted: unknown is offered, and a stated refusal is one the person
