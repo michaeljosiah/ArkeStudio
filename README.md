@@ -240,6 +240,7 @@ operation creates, replaces, appends, moves or removes.
 | `packages/client` | The React desktop and browser frontend |
 | `packages/adapter-opencode` | The writing harness |
 | `packages/adapter-claude` | The bring-your-own harness, over the Claude Agent SDK |
+| `packages/adapter-arke` | Arke's own local writing harness: an agent loop against Ollama on this machine, running the shared confined tools itself |
 | `packages/adapter-codex` | The Codex writing harness |
 | `packages/confined-tools` | File and world-query tools confined to a session's folder, shared by harnesses that run tools themselves |
 | `packages/providers` | Provider clients and the model manifest |
