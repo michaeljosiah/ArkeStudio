@@ -12714,7 +12714,17 @@ export class Coordinator {
           const previous = this.stagedRecordings.get(msg.requestId);
           if (previous !== undefined) await discardRecording(previous.staged);
           this.stagedRecordings.set(msg.requestId, { worldId: msg.worldId, staged: recording });
-          staged({ file: recording.file, source: recording.source, qc: recording.qc, words: recording.words });
+          const report = recording.qc.status === "complete" ? recording.qc.report : null;
+          staged({
+            file: recording.file,
+            durationSec: recording.source.durationSec,
+            sampleRateHz: recording.source.sampleRateHz,
+            channels: recording.source.channels,
+            ...(report !== null ? { rmsDbfs: report.measurements.rmsDbfs, samplePeakDbfs: report.measurements.samplePeakDbfs, noiseFloor: report.checks.noiseFloor.outcome } : {}),
+            ...(recording.words.status === "compared"
+              ? { words: recording.words.result === "exact" ? ("match" as const) : ("differ" as const), differences: recording.words.differences.length }
+              : { words: "unchecked" as const }),
+          });
         } catch (err) {
           staged({ refused: err instanceof RecordedTakeRefusal ? err.message : describeCoordinatorError(err) });
         } finally {

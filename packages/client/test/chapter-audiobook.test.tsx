@@ -530,15 +530,16 @@ describe("the Audiobook view (turn 146)", () => {
     assert.ok(asked, "the press asks the coordinator to choose and check a file");
     assert.equal(asked.block, "p0.0");
     const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", block: "p0.0", requestId: asked.requestId };
-    const audio = `sha256:${"c".repeat(64)}`;
     await act(async () =>
       __applyEventForTest({
         at: AT,
         type: "audiobook.take-staged",
         ...ids,
         file: "07-011-1.wav",
-        source: { container: "wav", codec: "pcm_s16le", sampleFormat: "s16", sampleRateHz: 48_000, channels: 2, bitDepth: 16, durationSec: 3.8, sizeBytes: 1000 },
-        words: { status: "unavailable", audioHash: audio, targetTextHash: audio, reason: "stt-not-configured" },
+        durationSec: 3.8,
+        sampleRateHz: 48_000,
+        channels: 2,
+        words: "unchecked",
       }),
     );
     const dialog = dom.document.querySelector('[data-testid="recorded-take-dialog"]') as HTMLElement | null;

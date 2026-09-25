@@ -1173,23 +1173,22 @@ export function RecordedTakeDialog({ staged, row, onCancel, onReplace, onKeep }:
   const [performer, setPerformer] = useState("");
   const [basis, setBasis] = useState<"self" | "authorized" | "licensed" | null>(null);
   const tone = row.speakerKey === null ? "narrator" : row.colour === null ? "none" : String(row.colour);
-  const report = staged.qc?.status === "complete" ? staged.qc.report : null;
-  const check = (name: keyof NonNullable<typeof report>["checks"]) => report?.checks[name].outcome ?? "unavailable";
+  const checks = staged.checks;
   // Level against Retail's figures (R-23, R-35): the foundation measures RMS and peak on every file.
-  const level = report === null ? null : retailLevel(report.measurements);
-  const words = staged.words;
+  const level = checks === undefined ? null : retailLevel(checks);
+  const noise = checks?.noiseFloor ?? "unavailable";
   const rows: { key: string; label: string; value: string; outcome: string }[] = [
     {
       key: "words",
       label: "Words",
-      value: words === undefined || words.status === "unavailable" ? "unchecked" : words.result === "exact" ? "match" : `${words.differences.length} differ`,
-      outcome: words === undefined || words.status === "unavailable" ? "unavailable" : words.result === "exact" ? "pass" : "warning",
+      value: checks === undefined || checks.words === "unchecked" ? "unchecked" : checks.words === "match" ? "match" : `${checks.differences} differ`,
+      outcome: checks === undefined || checks.words === "unchecked" ? "unavailable" : checks.words === "match" ? "pass" : "warning",
     },
-    { key: "loudness", label: "Loudness", value: db(report?.measurements.rmsDbfs, "dBFS"), outcome: level?.loudness ?? "unavailable" },
-    { key: "peak", label: "Peak", value: db(report?.measurements.samplePeakDbfs, "dBFS"), outcome: level?.peak ?? "unavailable" },
-    { key: "noise", label: "Noise floor", value: check("noiseFloor") === "unavailable" ? "—" : check("noiseFloor"), outcome: check("noiseFloor") },
+    { key: "loudness", label: "Loudness", value: db(checks?.rmsDbfs, "dBFS"), outcome: level?.loudness ?? "unavailable" },
+    { key: "peak", label: "Peak", value: db(checks?.samplePeakDbfs, "dBFS"), outcome: level?.peak ?? "unavailable" },
+    { key: "noise", label: "Noise floor", value: noise === "unavailable" ? "—" : noise, outcome: noise },
   ];
-  const source = staged.source;
+  const source = checks;
   const technical = source === undefined ? "" : [
     source.durationSec !== null ? `${source.durationSec.toFixed(1)} s` : null,
     source.sampleRateHz !== null ? `${Math.round(source.sampleRateHz / 100) / 10} kHz` : null,

@@ -8,7 +8,6 @@ import { PerformanceRecordSchema } from "./performance.js";
 import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
 import { AudiobookDirectionInputSchema, AudiobookDoorSchema, AudiobookPriceLineSchema, ChapterAudiobookSchema } from "./audiobook.js";
-import { AudioQcAnalysisSchema, AudioTechnicalSchema, AudioTranscriptComparisonSchema } from "./audio.js";
 import { z } from "zod";
 import { ModelResidencySchema } from "./local-ai.js";
 import { WorldImageReferenceSchema } from "./world-image-references.js";
@@ -1132,13 +1131,22 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       chapterId: SlugSchema,
       block: z.string().min(1),
       requestId: UlidSchema,
-      /** The file's own name and what it is, as brought in. */
+      /**
+       * The file's own name and what it is, as brought in, and the checks on the prepared file
+       * as the dialog shows them (SPEC-047 R-35) — figures and outcomes, never a refusal unless a
+       * check is a hard incompatibility. Deliberately flat: the foundation's own report and
+       * comparison schemas make the event union too large for the engine's declaration build.
+       */
       file: z.string().min(1).optional(),
-      source: AudioTechnicalSchema.optional(),
-      /** The foundation's checks on the prepared file (SPEC-047 R-35): data, never a refusal unless a check is a hard incompatibility. */
-      qc: AudioQcAnalysisSchema.optional(),
-      /** The words heard against the block's words, or why they could not be checked. */
-      words: AudioTranscriptComparisonSchema.optional(),
+      durationSec: z.number().min(0).nullable().optional(),
+      sampleRateHz: z.number().int().positive().nullable().optional(),
+      channels: z.number().int().positive().nullable().optional(),
+      rmsDbfs: z.number().nullable().optional(),
+      samplePeakDbfs: z.number().nullable().optional(),
+      noiseFloor: z.enum(["pass", "informational", "warning", "hard-incompatibility", "unavailable", "not-applicable"]).optional(),
+      /** The words heard against the block's: `match`, `differ` with how many, or `unchecked`. */
+      words: z.enum(["match", "differ", "unchecked"]).optional(),
+      differences: z.number().int().min(0).optional(),
       /** Why the file cannot be a take, in one clause. */
       refused: z.string().min(1).optional(),
     })

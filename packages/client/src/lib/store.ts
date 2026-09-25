@@ -129,9 +129,17 @@ export interface StagedTake {
   block: string;
   state: "choosing" | "staged" | "keeping" | "refused";
   file?: string;
-  source?: import("@arke-studio/contracts").AudioTechnical;
-  qc?: import("@arke-studio/contracts").AudioQcAnalysis;
-  words?: import("@arke-studio/contracts").AudioTranscriptComparison;
+  /** What the checks said, as the dialog shows them (SPEC-047 R-35). */
+  checks?: {
+    durationSec: number | null;
+    sampleRateHz: number | null;
+    channels: number | null;
+    rmsDbfs: number | null;
+    samplePeakDbfs: number | null;
+    noiseFloor: string;
+    words: "match" | "differ" | "unchecked";
+    differences: number;
+  };
   refused?: string;
 }
 
@@ -1758,9 +1766,16 @@ function handleFrame(json: string): void {
                   ...held,
                   state: "staged",
                   ...(event.file !== undefined ? { file: event.file } : {}),
-                  ...(event.source !== undefined ? { source: event.source } : {}),
-                  ...(event.qc !== undefined ? { qc: event.qc } : {}),
-                  ...(event.words !== undefined ? { words: event.words } : {}),
+                  checks: {
+                    durationSec: event.durationSec ?? null,
+                    sampleRateHz: event.sampleRateHz ?? null,
+                    channels: event.channels ?? null,
+                    rmsDbfs: event.rmsDbfs ?? null,
+                    samplePeakDbfs: event.samplePeakDbfs ?? null,
+                    noiseFloor: event.noiseFloor ?? "unavailable",
+                    words: event.words ?? "unchecked",
+                    differences: event.differences ?? 0,
+                  },
                 },
         };
       }
