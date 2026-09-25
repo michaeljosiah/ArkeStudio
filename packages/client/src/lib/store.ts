@@ -160,6 +160,7 @@ interface StoreState {
       turns: Array<{ id?: string; role: "user" | "gate"; text: string; at: string }>;
       conversationId?: string;
       worldId?: string;
+      review?: import("@arke-studio/contracts").GenesisContentReview;
       /** The plan so far, folded from the sandbox directory (SPEC-031 R-2). */
       blueprint: import("@arke-studio/contracts").GenesisBlueprint | null;
       status: "running" | "completed" | "cancelled" | "timeout" | "budget-exceeded" | "failed" | null;
@@ -1498,6 +1499,8 @@ function handleFrame(json: string): void {
       };
     } else if (event.type === "setup.status") {
       setupStatus = event.setup;
+    } else if (event.type === "genesis.review") {
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], review: event.review } };
     } else if (event.type === "genesis.discarded") {
       genesis = { ...genesis };
       delete genesis[event.genesisId];
@@ -2685,6 +2688,10 @@ export function genesisChat(genesisId: string, text: string): void {
 
 export function listGenesisDrafts(): void { send({ kind: "genesis-list" }); }
 export function loadGenesisDraft(genesisId: string): void { send({ kind: "genesis-load", genesisId }); }
+export function reviewGenesisDraft(genesisId: string): void { send({ kind: "genesis-review", genesisId }); }
+export function decideGenesisDraft(genesisId: string, choices: Array<{ key: string; digest: string }>, decision: "approve" | "reject"): void {
+  send({ kind: "genesis-decide", genesisId, choices, decision, requestId: ulid() });
+}
 
 export function genesisDiscard(genesisId: string): void {
   send({ kind: "genesis-discard", genesisId });

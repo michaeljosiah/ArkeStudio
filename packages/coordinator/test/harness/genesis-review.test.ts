@@ -1,0 +1,68 @@
+import assert from "node:assert/strict";
+import { it } from "node:test";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { ulid } from "@arke-studio/contracts";
+import { tempDir } from "../tmp.js";
+import { FsWorldProvider } from "../../src/world/provider.js";
+import { approvedBlueprintForFounding, decideGenesisContent, reviewGenesisContent } from "../../src/harness/genesis-review.js";
+import { genesisConversation } from "../../src/harness/genesis-conversation.js";
+
+async function draft() {
+  const provider = new FsWorldProvider(await tempDir("genesis-review-"));
+  const dir = await provider.genesisDir("gen-review");
+  await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Harbour", bible: "The gates never open." }));
+  await mkdir(join(dir, "draft", "characters"), { recursive: true });
+  const path = join(dir, "draft", "characters", "maren.json");
+  await writeFile(path, JSON.stringify({ name: "Maren", sheet: { sections: { Essence: "She keeps the gate.", Appearance: "A red coat." } } }));
+  return { dir, path };
+}
+
+it("founding refuses unapproved content and keeps the exact approved version after a rejected edit", async () => {
+  const { dir, path } = await draft();
+  await assert.rejects(approvedBlueprintForFounding(dir), /Approve the world identity/);
+  const review = await reviewGenesisContent(dir);
+  await decideGenesisContent(dir, review.cards, "approve", ulid());
+  await writeFile(path, JSON.stringify({ name: "Maren", sheet: { sections: { Essence: "She opens the gate.", Appearance: "A blue coat." } } }));
+  const changed = await reviewGenesisContent(dir);
+  const card = changed.cards.find(card => card.key === "character:maren")!;
+  assert.equal(card.status, "pending");
+  assert.ok(card.previous);
+  await decideGenesisContent(dir, [card], "reject", ulid());
+  const selected = await approvedBlueprintForFounding(dir);
+  assert.equal(selected.characters[0]?.sheet?.sections["Essence"], "She keeps the gate.");
+  assert.equal(selected.characters[0]?.sheet?.sections["Appearance"], "A red coat.");
+});
+
+it("a stale batch rejects every choice before writing a decision", async () => {
+  const { dir, path } = await draft();
+  const old = await reviewGenesisContent(dir);
+  await writeFile(path, JSON.stringify({ name: "A different Maren" }));
+  await assert.rejects(decideGenesisContent(dir, old.cards, "approve", ulid()), /content changed/);
+  const { events } = await (await genesisConversation(dir)).read();
+  assert.equal(events.filter(event => event.event.type === "founding.decision").length, 0);
+});
+
+it("replayed approval is idempotent and a removal needs its own decision", async () => {
+  const { dir, path } = await draft();
+  const initial = await reviewGenesisContent(dir);
+  const requestId = ulid();
+  await decideGenesisContent(dir, initial.cards, "approve", requestId);
+  await decideGenesisContent(dir, initial.cards, "approve", requestId);
+  assert.equal((await (await genesisConversation(dir)).read()).events.filter(event => event.event.type === "founding.decision").length, initial.cards.length);
+  await writeFile(path, JSON.stringify({ name: "Maren", withdrawn: true }));
+  const removal = (await reviewGenesisContent(dir)).cards.find(card => card.key === "character:maren")!;
+  assert.equal(removal.content.kind, "remove");
+  assert.equal((await approvedBlueprintForFounding(dir)).characters.length, 1);
+  await decideGenesisContent(dir, [removal], "approve", ulid());
+  assert.equal((await approvedBlueprintForFounding(dir)).characters.length, 0);
+});
+
+it("unapproved relationship targets block founding while open questions remain open", async () => {
+  const { dir, path } = await draft();
+  await writeFile(path, JSON.stringify({ name: "Maren", sheet: { sections: { Essence: "Keeper", Appearance: "Red coat" }, links: ["location:vigil"] } }));
+  await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Harbour", canon: [{ slug: "gate", type: "thread", title: "Who built it?", statement: "Who built the gate?" }] }));
+  await decideGenesisContent(dir, (await reviewGenesisContent(dir)).cards, "approve", ulid());
+  await assert.rejects(approvedBlueprintForFounding(dir), /relationship/);
+  assert.equal((await reviewGenesisContent(dir)).selected.canon?.[0]?.type, "thread");
+});

@@ -10,6 +10,7 @@ import { GENESIS_ATTACHMENTS_DIR, sandboxAttachments } from "../artifacts/genesi
 import { blueprintSaysSomething, foldBlueprint, sameBlueprint } from "./blueprint.js";
 import { sessionTokenBudget } from "./token-budget.js";
 import { foundingMessages, recordFoundingBlueprint, recordFoundingMessage } from "./genesis-conversation.js";
+import { reviewGenesisContent } from "./genesis-review.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { THINKING_LABEL, WRITING_LABEL, workingLabel } from "../world-chat/project.js";
 
@@ -116,6 +117,20 @@ name inside it can change freely. A character file:
  "description": "a short paragraph of who they are in this story",
  "brief": {"apparentAge": "...", "build": "...", "colouring": "...", "hair": "...",
   "wardrobe": "...", "bearing": "...", "defaultExpression": "..."}}
+
+Each entity may also hold "sheet": {"sections": {...}, "links": ["location:the-vigil"]}.
+These are the full sheet words the author reviews and approves in chat, then saves unchanged.
+Use only these headings: character — Essence, Appearance, Relationships, Voice · written;
+location — Look, Sound, Customs; faction — Essence, Wants, Fears. Keep unknown details explicit.
+Optional sheet fields are role and billing for characters, region for locations.
+Relationship links use the other entity's kind and stable filename slug, not its display name.
+
+For world facts, draft.json may hold "canon": [{"slug":"closed-gates","type":"rule",
+"title":"The gates stay closed","statement":"The harbour gates never open after dusk."}].
+Supported types are rule, lore, location, faction, timeline, tone and thread. A thread is an
+open question; other types propose settled facts. Nothing becomes accepted until the author
+approves its content card. Do not write approval records. ./approved-content.json is an
+application-supplied snapshot of the author's choices, not an editable source of decisions.
 
 When the author says a character is unseen, never shown, or must never be pictured, set
 "neverDepicted": true on that character's file. This is a rule, not an appearance description:
@@ -251,6 +266,8 @@ export class GenesisService {
       const blueprintBefore = await foldBlueprint(dir);
 
       const history = firstTurn ? await foundingMessages(dir) : [];
+      const reviewed = await reviewGenesisContent(dir);
+      await atomicWriteFile(join(dir, "approved-content.json"), JSON.stringify(reviewed.selected, null, 2) + "\n");
       let restoredHistory = "";
       if (history.length) {
         const transcript = history.map(message => `${message.role}: ${message.text}`).join("\n\n");

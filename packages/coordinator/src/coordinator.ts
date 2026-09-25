@@ -457,6 +457,7 @@ import {
 } from "./harness/authoring.js";
 import { GenesisService } from "./harness/genesis.js";
 import { carryGenesisConversation, genesisControlDir, loadGenesisConversation, reserveGenesisWorld } from "./harness/genesis-conversation.js";
+import { approvedBlueprintForFounding, decideGenesisContent, reviewGenesisContent } from "./harness/genesis-review.js";
 import { FoundingBuildService } from "./world/founding-build.js";
 import { isAuthShapedFailure, VendorAuthService } from "./harness/vendor-auth.js";
 import { NoArkeCloud, type AccountService } from "./account.js";
@@ -1107,6 +1108,7 @@ export class Coordinator {
    * conversations — one of them left empty — while the first is still being made, or after.
    */
   private readonly worldChatCreates = new Map<string, Promise<{ id: ConversationId } | null>>();
+  private readonly genesisDeciding = new Set<string>();
   /** Accept and Discard are one decision per take, even when their messages overlap. */
   private readonly benchTakeActions = new Map<string, Promise<void>>();
   /** Reservations read and advance one session take counter. */
@@ -2951,6 +2953,7 @@ export class Coordinator {
               this.credentials ? this.credentials.get(provider as ProviderId) : null,
             harnessReady: () => this.opts.adapter?.readiness().ready === true && this.authoring !== null,
             genesisDir: (genesisId) => this.opts.provider.genesisDir!(genesisId),
+            reviewedBlueprint: async (genesisId) => approvedBlueprintForFounding(await this.opts.provider.genesisDir!(genesisId)),
             discardGenesis: async (genesisId) => this.opts.provider.discardGenesis?.(genesisId),
             releaseGenesis: (genesisId) => this.genesis?.release(genesisId),
             createWorld: async (input) => {
@@ -7068,6 +7071,23 @@ export class Coordinator {
         }
         return;
       }
+      case "genesis-review":
+      case "genesis-decide": {
+        if (!this.opts.provider.genesisDir) return;
+        if (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) return;
+        this.genesisDeciding.add(msg.genesisId);
+        try {
+          const dir = await this.opts.provider.genesisDir(msg.genesisId);
+          if ((await loadGenesisConversation(dir, msg.genesisId)).worldId) return;
+          const review = msg.kind === "genesis-decide"
+            ? await decideGenesisContent(dir, msg.choices, msg.decision, msg.requestId)
+            : await reviewGenesisContent(dir);
+          this.emit({ type: "genesis.review", at: new Date().toISOString(), genesisId: msg.genesisId, review });
+        } catch (err) {
+          this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: msg.genesisId, status: "failed", detail: describeCoordinatorError(err) });
+        } finally { this.genesisDeciding.delete(msg.genesisId); }
+        return;
+      }
       case "genesis-list":
       case "genesis-load": {
         if (!this.opts.provider.genesisDir) return;
@@ -7099,10 +7119,11 @@ export class Coordinator {
           return;
         }
         try {
-          if (this.foundingBuild?.isBeginning(msg.genesisId)) { failed("The world is beginning. Wait for it to finish."); return; }
+          if (this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) { failed("A decision is being saved. Try again shortly."); return; }
           const dir = await this.opts.provider.genesisDir(msg.genesisId);
           const draft = await loadGenesisConversation(dir, msg.genesisId, this.genesis.isRunning(msg.genesisId));
           if (draft.worldId) { failed("This world has begun. Continue in its world conversation."); return; }
+          if (this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) { failed("A decision is being saved. Try again shortly."); return; }
           this.emit(draft);
           // Fire and watch: turns, the draft and the final status arrive as events.
           this.trackBackground(this.genesis.run(dir, msg.genesisId, msg.text).catch(err => failed(describeCoordinatorError(err))));
@@ -7145,7 +7166,7 @@ export class Coordinator {
         return;
       }
       case "genesis-discard": {
-        if (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId)) return;
+        if (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) return;
         if (this.opts.provider.genesisDir) {
           const draft = await loadGenesisConversation(await this.opts.provider.genesisDir(msg.genesisId), msg.genesisId);
           if (draft.worldId) return;
@@ -7166,7 +7187,7 @@ export class Coordinator {
         // Anything still being carried into the new world finishes first — otherwise Begin
         // races the sweep and the files handed over are the ones that vanish.
         await this.carrying.get(msg.genesisId)?.catch(() => {});
-        await this.opts.provider.discardGenesis?.(msg.genesisId)?.catch(() => {});
+        await this.opts.provider.discardGenesis?.(msg.genesisId);
         this.emit({ type: "genesis.discarded", at: new Date().toISOString(), genesisId: msg.genesisId });
         return;
       }
@@ -7244,7 +7265,7 @@ export class Coordinator {
       case "begin-founding-build": {
         if (!this.foundingBuild) return;
         try {
-          if (this.genesis?.isRunning(msg.genesisId)) throw new Error("Wait for the current reply before beginning the world.");
+          if (this.genesis?.isRunning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) throw new Error("Wait for the current reply or decision before beginning the world.");
           await this.foundingBuild.begin(msg.genesisId, msg.requestId, msg.look, msg.models);
         } catch (err) {
           this.emit({

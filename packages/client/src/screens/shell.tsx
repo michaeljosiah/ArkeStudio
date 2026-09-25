@@ -6,6 +6,7 @@ import { EditorDialog } from "../components/editor-dialog.js";
 import { settingsReturnPath } from "../lib/settings-return.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import { renderInlineMarkdown } from "../components/inline-markdown.js";
+import { GenesisContentCards } from "../components/genesis-review.js";
 import { Archive, ChartLine, ChevronDown, ChevronRight, Pencil, Plus, RotateCcw, Sparkle, X } from "../components/icons.js";
 import { AgentsPanel } from "./agents.js";
 import {
@@ -48,6 +49,8 @@ import {
   genesisChat,
   listGenesisDrafts,
   loadGenesisDraft,
+  reviewGenesisDraft,
+  decideGenesisDraft,
   genesisDiscard,
   stopFoundingBuild,
   hostCanAttach,
@@ -789,6 +792,9 @@ function NewWorldDraft() {
   const turns = g?.turns ?? [];
   const chatRunning = g?.status === "running";
   const blueprint = g?.blueprint ?? null;
+  useEffect(() => {
+    if (connection === "open" && blueprint && !chatRunning && !g?.worldId) reviewGenesisDraft(genesisId);
+  }, [connection, blueprint, chatRunning, g?.worldId, genesisId]);
 
   // With a healthy harness, talking is the front door (prototype 12a) — unless the author
   // already picked the form themselves.
@@ -1184,6 +1190,9 @@ function NewWorldDraft() {
                     {turn.role === "user" ? turn.text : renderInlineMarkdown(turn.text)}
                   </div>
                 ))}
+                {g?.review && <GenesisContentCards review={g.review} busy={chatRunning || buildPressed || myBuild?.status === "running"}
+                  onDecide={(cards, decision) => decideGenesisDraft(genesisId, cards.map(card => ({ key: card.key, digest: card.digest })), decision)}
+                  onRevise={title => setMessage(`Please revise ${title}: `)} />}
                 {/* The look, previewable while the conversation is still a conversation (SPEC-031
                     §1.10): the agent proposed the words; the press and the spend are the author's.
                     Asked in the thread, not in the rail beside it — spend is decided where every

@@ -45,6 +45,7 @@ export const BuildItemKindSchema = z.enum([
   "author-sheet",
   /** One canon thread opened. */
   "thread",
+  "canon",
   /** One main photo, generated at count 1, landing as the identity anchor (R-21, R-26). */
   "main-photo",
   /** One establishing view per location, landing as the location's anchor (R-28). */
@@ -265,6 +266,7 @@ export function buildWorkingLine(item: Pick<BuildItem, "kind" | "name">): string
     world: "world files",
     "author-sheet": "sheet",
     thread: "thread",
+    canon: "canon",
     "main-photo": "main photo",
     "establishing-view": "establishing view",
     "sheet-image": "character sheet",
@@ -519,6 +521,11 @@ export function compileBuildItems(
       authorized: true,
     });
   });
+
+  for (const entry of blueprint.canon ?? []) {
+    items.push({ key: `canon:${entry.slug}`, kind: "canon", stage: 1, subject: entry.slug,
+      name: entry.title, estimatedMicroUsd: 0, authorized: true });
+  }
 
   for (const character of blueprint.characters) {
     items.push({

@@ -13,6 +13,8 @@ import {
   keyArtBriefSettled,
   locationBriefProse,
   newId,
+  genesisSheetIds,
+  sheetDir,
   ulid,
   type AppSettings,
   type BuildItem,
@@ -39,9 +41,9 @@ import { atomicWriteFile } from "./atomic.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { foldBlueprint } from "../harness/blueprint.js";
 import { carryGenesisConversation, genesisControlDir, reserveGenesisWorld } from "../harness/genesis-conversation.js";
-import { openThread } from "../canon/authoring.js";
+import { openThread, stageCanonEntry } from "../canon/authoring.js";
 import { MarkdownFile, sha256 } from "./text-files.js";
-import { createSheetFromSentence } from "../sheets/authoring.js";
+import { buildSheetContent, createSheetFromSentence } from "../sheets/authoring.js";
 import {
   characterSheetRequest,
   imageModelFor,
@@ -82,6 +84,7 @@ export interface FoundingBuildPorts {
   credentialFor(provider: string): Promise<string | null>;
   harnessReady(): boolean;
   genesisDir(genesisId: string): Promise<string>;
+  reviewedBlueprint?(genesisId: string): Promise<GenesisBlueprint>;
   discardGenesis(genesisId: string): Promise<void>;
   releaseGenesis(genesisId: string): void;
   createWorld(input: {
@@ -305,9 +308,9 @@ export class FoundingBuildService {
       });
     let blueprint: GenesisBlueprint;
     try {
-      blueprint = await foldBlueprint(await this.ports.genesisDir(genesisId));
-    } catch {
-      refuse("the conversation's plan could not be read");
+      blueprint = this.ports.reviewedBlueprint ? await this.ports.reviewedBlueprint(genesisId) : await foldBlueprint(await this.ports.genesisDir(genesisId));
+    } catch (err) {
+      refuse(describeCoordinatorError(err));
       return;
     }
     if (blueprint.name === undefined) {
@@ -318,7 +321,7 @@ export class FoundingBuildService {
     for (const character of blueprint.characters) {
       if (character.neverDepicted === true) notes.push(`${character.name} — never depicted`);
     }
-    if (!this.ports.harnessReady()) {
+    if (!blueprint.reviewed && !this.ports.harnessReady()) {
       notes.push("OpenCode is not running — sheets will hold their one-line summaries until authored later.");
     }
     const masterLook = await this.masterLookNote(genesisId, effectiveLook(blueprint, look));
@@ -402,7 +405,7 @@ export class FoundingBuildService {
       }
     }
 
-    const folded = await foldBlueprint(sandbox);
+    const folded = this.ports.reviewedBlueprint ? await this.ports.reviewedBlueprint(genesisId) : await foldBlueprint(sandbox);
     const founded = effectiveLook(folded, look);
     const blueprint: GenesisBlueprint = {
       ...folded,
@@ -571,7 +574,7 @@ export class FoundingBuildService {
         }
         continue;
       }
-      if (item.kind === "world" || item.kind === "author-sheet" || item.kind === "thread" || item.kind === "finalize") {
+      if (item.kind === "world" || item.kind === "author-sheet" || item.kind === "thread" || item.kind === "canon" || item.kind === "finalize") {
         // Local work re-runs idempotently through the driver; an intent alone is enough.
         continue;
       }
@@ -843,6 +846,9 @@ export class FoundingBuildService {
         case "thread":
           await this.runThread(active, item, store, gate);
           break;
+        case "canon":
+          await this.runCanon(active, item, store, gate);
+          break;
         case "finalize":
           await this.runFinalize(active);
           break;
@@ -984,6 +990,29 @@ export class FoundingBuildService {
           ? blueprint.locations.find((candidate) => candidate.slug === item.subject)
           : blueprint.factions.find((candidate) => candidate.slug === item.subject);
     if (!entity || item.sheetType === undefined) throw new Error("the blueprint no longer holds this entity");
+    if (blueprint.reviewed) {
+      if (!entity.sheet) throw new Error("The reviewed sheet has no approved content.");
+      const ids = genesisSheetIds(blueprint);
+      const id = ids.get(`${item.sheetType}:${entity.slug}`)!;
+      if (store.getBundle().sheets.some(sheet => sheet.id === id)) return;
+      const links = (entity.sheet.links ?? []).map(key => {
+        const target = ids.get(key);
+        if (!target) throw new Error("An approved relationship has no approved target.");
+        return target;
+      });
+      const { sections, role, billing, region } = entity.sheet;
+      const content = buildSheetContent({ id, type: item.sheetType, name: entity.name, status: "sketch",
+        sections, links, date: store.now().slice(0, 10),
+        extra: { ...(role ? { role } : {}), ...(billing ? { billing } : {}), ...(region ? { region } : {}),
+          ...("neverDepicted" in entity && entity.neverDepicted ? { neverDepicted: true } : {}) },
+      });
+      const proposal = await gate.stage({ kind: "new-sheet", summary: `Approved founding sheet: ${entity.name}`, source: "chat:studio",
+        targets: [{ path: `${sheetDir(item.sheetType)}/${id}.md`, content }] });
+      const outcome = await acceptDecided(gate, proposal.id);
+      if (outcome.status !== "accepted") throw new Error(`The approved sheet could not be saved (${outcome.status}).`);
+      await this.ports.refreshWorldSnapshot(active.record.worldId);
+      return;
+    }
     // Idempotent across recovery: a sheet that already exists under this name landed (R-34).
     const bundle = store.getBundle();
     if (bundle.sheets.some((sheet) => sheet.type === item.sheetType && sheet.name === entity.name)) {
@@ -1071,6 +1100,25 @@ export class FoundingBuildService {
     // Idempotent across recovery: an open canon entry with this title landed already.
     if (store.getBundle().canon.some((entry) => entry.title === title)) return;
     await openThread(store, gate, { title, question, candidates: [] });
+  }
+
+  private async runCanon(active: ActiveBuild, item: BuildItem, store: WorldStore, gate: ProposalManager): Promise<void> {
+    const entry = active.record.blueprint.canon?.find(candidate => candidate.slug === item.subject);
+    if (!entry) throw new Error("The approved canon entry is missing.");
+    const receiptPath = join(store.dir, BUILD_DIR, `canon-${entry.slug}.json`);
+    let receipt = await readFile(toExtendedLength(receiptPath), "utf8")
+      .then(raw => JSON.parse(raw) as { proposalId: string; entryId: string })
+      .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return null; throw err; });
+    if (receipt && store.getBundle().canon.some(candidate => candidate.id === receipt!.entryId)) return;
+    if (!receipt) {
+      const proposal = await stageCanonEntry(store, gate, { entryType: entry.type, title: entry.title,
+        statement: entry.statement, status: entry.type === "thread" ? "open" : "settled" });
+      receipt = { proposalId: proposal.id, entryId: proposal.reservedCanonIds[0]! };
+      await atomicWriteFile(receiptPath, JSON.stringify(receipt) + "\n");
+    }
+    const outcome = await acceptDecided(gate, receipt.proposalId);
+    if (outcome.status !== "accepted") throw new Error(`The approved canon entry could not be saved (${outcome.status}).`);
+    await this.ports.refreshWorldSnapshot(active.record.worldId);
   }
 
   private async runFinalize(active: ActiveBuild): Promise<void> {
@@ -1227,7 +1275,8 @@ export class FoundingBuildService {
         type === "character"
           ? blueprint.characters.find((c) => c.slug === slug)?.name
           : blueprint.locations.find((l) => l.slug === slug)?.name;
-      const sheet = bundle.sheets.find((candidate) => candidate.type === type && candidate.name === name);
+      const approvedId = blueprint.reviewed ? genesisSheetIds(blueprint).get(`${type}:${slug}`) : undefined;
+      const sheet = bundle.sheets.find((candidate) => approvedId ? candidate.id === approvedId : candidate.type === type && candidate.name === name);
       if (!sheet) throw new Error(`the ${type} sheet for ${name ?? slug} is not in the world`);
       return sheet;
     };
@@ -1411,7 +1460,8 @@ export class FoundingBuildService {
         type === "character"
           ? blueprint.characters.find((c) => c.slug === item.subject)?.name
           : blueprint.locations.find((l) => l.slug === item.subject)?.name;
-      const sheet = bundle.sheets.find((candidate) => candidate.type === type && candidate.name === name);
+      const approvedId = blueprint.reviewed ? genesisSheetIds(blueprint).get(`${type}:${item.subject}`) : undefined;
+      const sheet = bundle.sheets.find((candidate) => approvedId ? candidate.id === approvedId : candidate.type === type && candidate.name === name);
       if (!sheet) throw new Error(`the ${type} sheet is not in the world`);
       return sheet;
     };
