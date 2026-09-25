@@ -549,6 +549,63 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     } finally { await test.close(); }
   });
 
+  it("settles a re-opened gate only from the returning harness's own read, not a read the failure outlived", async () => {
+    const adapter = new CaptureAdapter();
+    adapter.capabilities = () => new Set(["models", "events", "auth"] as const) as unknown as ReturnType<CaptureAdapter["capabilities"]>;
+    const releases: Array<() => void> = [];
+    // Each lifecycle's read answers non-empty, or the patient seed would ask again and take the
+    // other lifecycle's answer; the first finds no connection, the second finds one.
+    const reads: Array<Array<{ id: string; name: string; methods: never[]; connections: Array<{ kind: "stored"; id: string; label: string }>; needsSignIn: boolean }>> = [
+      [{ id: "openai", name: "OpenAI", methods: [], connections: [], needsSignIn: false }],
+      [{ id: "openai", name: "OpenAI", methods: [], connections: [{ kind: "stored", id: "c1", label: "OpenAI account" }], needsSignIn: false }],
+    ];
+    Object.assign(adapter, { listIntegrations: async () => {
+      const answer = reads.shift() ?? [];
+      await new Promise<void>((resolve) => releases.push(resolve));
+      return answer;
+    } });
+    const supervisor = Object.assign(new EventEmitter(), {
+      id: "harness", status: "stopped", start: async () => {}, stop: async () => {}, restart: async () => {},
+    }) as unknown as ChildSupervisor;
+    const test = await fixture({ adapter, supervisor });
+    try {
+      supervisor.emit("status", { id: "harness", status: "healthy" });
+      await until(() => releases.length === 1, "the first lifecycle's sign-in read is out");
+      supervisor.emit("status", { id: "harness", status: "failed", reason: "the child exited" });
+      supervisor.emit("status", { id: "harness", status: "healthy" });
+      await until(() => adapter.initCalls === 2, "the returning harness initialised");
+      let decided = false;
+      const pending = test.chat().finally(() => { decided = true; });
+      releases[0]!();
+      await until(() => releases.length === 2, "the returning lifecycle's own read is out");
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      assert.equal(decided, false, "the first lifecycle's read settling must not open the returning one's gate");
+      releases[1]!();
+      const session = await pending;
+      assert.equal(session?.config.agents?.["world-builder"]?.model, undefined, "decided on the returning harness's read, which found a connected account");
+    } finally { await test.close(); }
+  });
+
+  it("ends a keyless chat at its Stop while its configuration is still waiting on discovery", async () => {
+    const adapter = new CaptureAdapter();
+    adapter.list = async () => CLOUD_ONLY;
+    const test = await fixture({ adapter, localModels: [{ id: "gemma4:12b", tools: true, vision: false }] });
+    try {
+      await test.send({ kind: "world-chat-create", worldId: WORLD_ID, requestId: randomUUID(), title: "Stopped early",
+        entryContext: { kind: "production", productionId: "saltlight" } });
+      const conversationId = test.coordinator.getState().worldChat!.conversationId;
+      const pending = test.send({ kind: "world-chat-send", worldId: WORLD_ID, requestId: randomUUID(), conversationId,
+        text: "Explain the current production.", attachmentIds: [] });
+      await until(() => test.coordinator.getState().worldChat?.runStatus !== null, "the turn admitted and waiting on discovery");
+      await test.send({ kind: "world-chat-cancel", worldId: WORLD_ID, conversationId });
+      // Well inside the reload delay the configuration is waiting on: the Stop ended the wait.
+      // (The send itself also awaits the conversation's naming pass, which is not the turn.)
+      await until(() => test.coordinator.getState().worldChat?.runStatus === null, "the turn ended at the Stop", 2_000);
+      await pending;
+      assert.equal(test.adapter.sessions.filter((session) => session.agent === "world-builder").length, 0, "no session was built for a stopped turn");
+    } finally { await test.close(); }
+  });
+
   it("skips a local model the runtime says cannot call tools", async () => {
     const adapter = new CaptureAdapter();
     adapter.list = async () => [{ provider: "ollama", id: "chatty:7b", tools: false }, ...MODELS];

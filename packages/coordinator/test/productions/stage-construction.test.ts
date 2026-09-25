@@ -287,6 +287,20 @@ it("a build stopped while its configuration is still being decided creates no se
     });
     assert.match(second?.detail ?? "", /stopped/);
     assert.equal(created, 0, "a run that adopts a stopped claim creates nothing");
+    // A Stop while the session itself is being opened ends the opening, not the turn after it.
+    const opening: HarnessAdapter = {
+      ...adapter,
+      createSession: (input) => new Promise((_, reject) => input.signal?.addEventListener("abort", () => reject(input.signal!.reason), { once: true })),
+    };
+    let third: Extract<DomainEvent, { type: "stage.construction" }> | undefined;
+    const third_run = constructor.run(store, { ...request, requestId: randomUUID() }, {
+      adapter: opening, sessionInput: (input) => input, model: "test/vision", scratchRoot: join(dir, ".scratch"), current: () => true,
+      emit: (event) => { if (event.status === "failed" || event.status === "ready") third = event; },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    constructor.cancel();
+    await third_run;
+    assert.match(third?.detail ?? "", /stopped/, "the stop reached the session being opened");
   } finally {
     await store.close();
   }

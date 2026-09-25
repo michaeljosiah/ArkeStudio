@@ -4122,12 +4122,15 @@ export class Coordinator {
    * waiting on it is refused with that reason rather than built on silence.
    */
   private warmModelCatalog(settles: boolean, then?: () => void): void {
+    // The gate as it is now: a harness that fails and returns while this fetch is out re-arms
+    // the gate, and this fetch's answer belongs to the lifecycle that asked, not the new one.
+    const settle = this.settleCatalogue;
     const work = this.modelCatalog.get(true).catch(() => {});
     this.backgroundWork.add(work);
     void work.finally(() => {
       this.backgroundWork.delete(work);
       then?.();
-      if (settles) this.settleCatalogue();
+      if (settles) settle();
     });
   }
 
@@ -4147,7 +4150,8 @@ export class Coordinator {
     if (!this.catalogueGateOpen) this.armCatalogueGate();
     if (!this.vendorAuthGateOpen) this.armVendorAuthGate();
     this.warmModelCatalog(!this.localModelsPublishable() || (returning && this.publishedLocalHarnessModels !== null));
-    void this.refreshVendorAuthTracked({ patient: true }).finally(() => this.settleVendorAuth());
+    const settleVendorAuth = this.settleVendorAuth;
+    void this.refreshVendorAuthTracked({ patient: true }).finally(() => settleVendorAuth());
   }
 
   /** A sign-in read stop() waits out, rather than one that publishes into a closed coordinator. */
@@ -17073,7 +17077,7 @@ export class Coordinator {
         const settings = this.appSettings ? await this.appSettings.load().catch(() => null) : null;
         return settings?.research.web === true;
       },
-      resolveLanguageModel: (input) => this.languageModelFor(input.entryContext, input.modelId),
+      resolveLanguageModel: (input) => this.languageModelFor(input.entryContext, input.modelId, "world-builder", input.signal),
       onTurnFailed: ({ conversationId, runId, cause }) => {
         void this.appLog?.append({ level: "warn", event: "world-chat.turn-failed", conversationId, runId, cause });
         if (isAuthShapedFailure(cause)) void this.vendorAuth.noteAuthFailure().catch(() => {});

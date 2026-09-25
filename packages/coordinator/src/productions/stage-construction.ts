@@ -205,7 +205,7 @@ export class StageConstructor {
       const session = await createPreparedSession(deps.adapter, dir, configured, {
         purpose: "art-prompt",
         agent: "stage-designer",
-      });
+      }, undefined, abort.signal);
       sessionId = session.sessionId;
       const turn = async (
         prompt: string,

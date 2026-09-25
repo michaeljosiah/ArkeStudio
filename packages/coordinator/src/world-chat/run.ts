@@ -82,11 +82,13 @@ export interface RunDeps {
     attachmentIds: readonly ChatAttachmentId[];
   }) => Promise<{ cwd: string; leaseToken: string }>;
   /** Atomically configure and create the harness session after preparation succeeds. */
-  createSession?: (input: { cwd: string; runId: RunId; model?: string }) => Promise<{ sessionId: string }>;
+  createSession?: (input: { cwd: string; runId: RunId; model?: string; signal?: AbortSignal }) => Promise<{ sessionId: string }>;
   /** Resolve an explicit or production language choice without ever substituting another model. */
   resolveLanguageModel?: (input: {
     entryContext: WorldChatContext | undefined;
     modelId?: string;
+    /** The run's own Stop: the decision may wait on model discovery (issue 1247). */
+    signal?: AbortSignal;
   }) => Promise<{ modelId?: string; sessionModel?: string; inputTokenLimit?: number; reason?: string }>;
   /** Release the lease and clean the scratch, whatever the outcome. */
   release: (input: { conversationId: ConversationId; runId: RunId }) => Promise<void>;
@@ -485,6 +487,7 @@ export class WorldChatRunner {
       ? await this.deps.resolveLanguageModel({
           entryContext: view.entryContext,
           ...(modelId !== undefined ? { modelId } : {}),
+          signal: controller.signal,
         })
       : modelId !== undefined ? { modelId } : {};
     // On a retry the words being asked again are already in the log under their original id, and
@@ -631,13 +634,23 @@ export class WorldChatRunner {
         await this.finish(store, run, controller.signal.reason === "world-closed" ? "interrupted" : "cancelled", "cancelled before the studio was asked");
         return { status: "cancelled" };
       }
-      const session = this.deps.createSession
-        ? await this.deps.createSession({
-            cwd,
-            runId,
-            ...(modelChoice.sessionModel !== undefined ? { model: modelChoice.sessionModel } : {}),
-          })
-        : await adapter.createSession({ purpose: "world-chat", cwd, agent: "world-builder" });
+      // The run's signal travels into creation (issue 1247): its configuration may wait on
+      // model discovery, and a Stop during that wait must end the creation, not the turn after.
+      let session: { sessionId: string };
+      try {
+        session = this.deps.createSession
+          ? await this.deps.createSession({
+              cwd,
+              runId,
+              ...(modelChoice.sessionModel !== undefined ? { model: modelChoice.sessionModel } : {}),
+              signal: controller.signal,
+            })
+          : await adapter.createSession({ purpose: "world-chat", cwd, agent: "world-builder", signal: controller.signal });
+      } catch (error) {
+        if (!controller.signal.aborted) throw error;
+        await this.finish(store, run, controller.signal.reason === "world-closed" ? "interrupted" : "cancelled", "cancelled before the studio was asked");
+        return { status: "cancelled" };
+      }
       const timeoutMs = this.deps.timeoutMs ?? DEFAULT_TURN_TIMEOUT_MS;
 
       const progress = this.deps.onProgress
