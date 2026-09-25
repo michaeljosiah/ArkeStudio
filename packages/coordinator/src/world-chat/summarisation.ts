@@ -4,7 +4,6 @@ import { z } from "zod";
 import {
   newId,
   type HarnessAdapter,
-  type SessionConfigInput,
   type WorldChatMessage,
 } from "@arke-studio/contracts";
 import { extractJson } from "../canon/ask.js";
@@ -112,9 +111,10 @@ export function makeConversationSummariser(
     try {
       // Configured and created inside the cleanup boundary: the configuration may be refused
       // (issue 1247), and a refused summary that left its directory behind would leave another
-      // on every retry, since no checkpoint is written for it.
-      const sessionConfig: SessionConfigInput = await sessionInput({ agent: "conversation-summarizer" });
-      const session = await createPreparedSession(adapter, scratch, sessionConfig, {
+      // on every retry, since no checkpoint is written for it. Handed over still pending, so
+      // the creation timeout bounds the wait on discovery too — a flight stuck ahead of that
+      // timer would hold every later summary behind it.
+      const session = await createPreparedSession(adapter, scratch, sessionInput({ agent: "conversation-summarizer" }), {
         purpose: "world-chat",
         agent: "conversation-summarizer",
       });

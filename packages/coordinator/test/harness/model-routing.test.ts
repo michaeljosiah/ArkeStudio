@@ -638,6 +638,22 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     } finally { await test.close(); }
   });
 
+  it("treats a catalogue row that still states the old capabilities as not yet carrying a re-pulled model", async () => {
+    // Same id, re-pulled without tool calling: the row that beat the reload still says tools.
+    const adapter = new CaptureAdapter();
+    const stated = (tools: boolean) => [...CLOUD_ONLY, { ...MODELS.find((model) => model.id === "gemma4:12b")!, tools }];
+    adapter.list = async () => stated(true);
+    const test = await fixture({ adapter, localModels: [{ id: "gemma4:12b", tools: false, vision: false }] });
+    try {
+      assert.equal(await test.chat(), undefined, "a row stating what was not written is not carried");
+      assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /not available to the harness yet/);
+      adapter.list = async () => stated(false);
+      await test.probeLocalRuntimes();
+      // Carried now — and passed over, since it cannot call tools: refused for that reason instead.
+      await untilAsync(async () => { await test.chat(); return /None of the local models/.test(test.coordinator.getState().worldChat?.lastFailure?.detail ?? ""); }, "the row read back as written, then judged on it");
+    } finally { await test.close(); }
+  });
+
   it("skips a local model the runtime says cannot call tools", async () => {
     const adapter = new CaptureAdapter();
     adapter.list = async () => [{ provider: "ollama", id: "chatty:7b", tools: false }, ...MODELS];

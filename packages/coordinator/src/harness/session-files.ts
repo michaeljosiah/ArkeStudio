@@ -88,6 +88,9 @@ export async function createPreparedSession(
     try {
       const preparationId = await writeSessionFiles(adapter, dir, input, abort.signal);
       try {
+        // A stop that landed while the files were written creates nothing: not every adapter
+        // refuses an already-fired signal, and a session opened for a stopped run is an orphan.
+        abort.signal.throwIfAborted();
         return await adapter.createSession({ ...session, cwd: dir, preparationId, signal: abort.signal });
       } finally {
         adapter.abandonSessionPreparation?.(preparationId);

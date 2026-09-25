@@ -4144,9 +4144,19 @@ export class Coordinator {
    * that was pulled, and a default chosen from it would name a model that is not there.
    */
   private catalogueCarries(published: readonly import("@arke-studio/contracts").LocalHarnessModel[]): boolean {
-    const listed = new Set(this.readModel.getState().app.harnessModels.filter((model) => model.provider === "ollama").map((model) => model.id));
-    const handed = new Set(published.map((model) => model.id));
-    return listed.size === handed.size && [...handed].every((id) => listed.has(id));
+    const rows = new Map(this.readModel.getState().app.harnessModels.filter((model) => model.provider === "ollama").map((model) => [model.id, model]));
+    if (rows.size !== published.length) return false;
+    return published.every((model) => {
+      const row = rows.get(model.id);
+      if (!row) return false;
+      // A re-pulled tag keeps its id and may change what it can do; the row must say what
+      // was written, where it says anything. Tools and images are written as stated and
+      // read back as stated; the context length is not compared, because the harness
+      // derives its own input limit from it rather than echoing it.
+      if (row.tools !== undefined && row.tools !== model.tools) return false;
+      if (row.inputModalities !== undefined && row.inputModalities.includes("image") !== model.vision) return false;
+      return true;
+    });
   }
 
   /** Whether a local-model publication will happen at all: both the writer and the runtime client are wired. */
