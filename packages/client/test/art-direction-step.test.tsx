@@ -185,7 +185,7 @@ async function mountGenesis(blueprint: GenesisBlueprint, plan?: BuildReview): Pr
   try {
     await act(async () => {
       root.render(
-        <MemoryRouter>
+        <MemoryRouter initialEntries={[`/new?draft=${GENESIS_ID}`]}>
           <NewWorldScreen />
         </MemoryRouter>,
       );
