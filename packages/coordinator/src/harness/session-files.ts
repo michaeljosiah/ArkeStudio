@@ -40,8 +40,9 @@ async function serialized<T>(dir: string, work: () => Promise<T>): Promise<T> {
 export async function writeSessionFiles(
   adapter: Pick<HarnessAdapter, "sessionFiles" | "prepareSession" | "abandonSessionPreparation">,
   dir: string,
-  input: SessionConfigInput = {},
+  pending: SessionConfigInput | Promise<SessionConfigInput> = {},
 ): Promise<string> {
+  const input = await pending;
   const preparationId = randomUUID();
   const prepared = { ...input, preparationId, skillBodies: await loadSkillBodies(input) };
   // Both seams, always. A harness takes its settings as files or as call options, and a
@@ -62,7 +63,7 @@ export async function writeSessionFiles(
 export async function createPreparedSession(
   adapter: HarnessAdapter,
   dir: string,
-  input: SessionConfigInput,
+  input: SessionConfigInput | Promise<SessionConfigInput>,
   session: CreateSessionInput,
   timeoutMs = 30_000,
 ): Promise<SessionRef> {
@@ -88,5 +89,10 @@ export async function createPreparedSession(
  * Read at call time rather than captured, so changing a model or a brief in Settings applies to
  * the next session rather than the next run — the property the old `buildConfig` wrapper had and
  * the reason this is a function rather than a value.
+ *
+ * May answer later rather than now (issue 1247): the local default it fills in is read from the
+ * harness catalogue, and a session that opens before the catalogue's first fetch has to wait for
+ * it — the alternative was that first session quietly running on the cloud default. The writers
+ * above take the promise, so a caller that only hands the input on has nothing to await.
  */
-export type SessionInput = (input: SessionConfigInput) => SessionConfigInput;
+export type SessionInput = (input: SessionConfigInput) => SessionConfigInput | Promise<SessionConfigInput>;

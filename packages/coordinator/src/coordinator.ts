@@ -1047,6 +1047,12 @@ export class Coordinator {
   private publishedLocalHarnessModels: string | null = null;
   /** Whether any cloud language-model key is stored, read with the harness environment (issue 1247). */
   private cloudLlmKeyStored = false;
+  /**
+   * Resolves once the harness catalogue has been fetched for the first time, or once it is
+   * known it will not be (issue 1247). What a keyless session waits on before it is built.
+   */
+  private readonly catalogueSettled: Promise<void>;
+  private settleCatalogue: () => void = () => {};
   private comfyUiSetupWork: Promise<void> = Promise.resolve();
   private comfyUiLifecycleWork: Promise<void> = Promise.resolve();
   /** actionClass per pending permission id, for remember-on-always (R-16). */
@@ -2205,8 +2211,13 @@ export class Coordinator {
       ?.getBundle()
       .productions.find((candidate) => candidate.meta.id === productionId);
     const modelId = requestedId ?? this.agentOverrides?.[agent]?.model ?? production?.meta.models?.llm;
-    if (modelId === undefined) return {};
-    return this.validateLanguageModel(modelId, agent === "stage-designer");
+    if (modelId !== undefined) return this.validateLanguageModel(modelId, agent === "stage-designer");
+    // Nothing chosen: the local default, where there is one (issue 1247). Stage needs a model
+    // that reads images, and refuses before its session is built when none is chosen — so it
+    // is decided here, where the refusal is, rather than left to the session builder.
+    if (!this.cloudLlmKeyStored) await this.catalogueSettled;
+    const local = this.localHarnessDefault(agent === "stage-designer");
+    return local === undefined ? {} : this.validateLanguageModel(local, agent === "stage-designer");
   }
   /** Per-agent model and brief overrides, as last read from settings. */
   private agentOverrides: Record<string, { model?: string; brief?: string }> | undefined;
@@ -2330,6 +2341,10 @@ export class Coordinator {
   private readonly localGpu: LocalGpu;
 
   constructor(private readonly opts: CoordinatorOptions) {
+    this.catalogueSettled = new Promise<void>((resolve) => { this.settleCatalogue = resolve; });
+    // No harness, no catalogue: nothing to wait for. A harness that never comes up settles this
+    // from its failure path below, and a session on it fails at creation either way.
+    if (!opts.adapter) this.settleCatalogue();
     this.localGpu = new LocalGpu(async (engine, signal) => {
       if (engine === "ComfyUI" && opts.comfyui?.service.engineIdentity()?.locality !== "local") return;
       await opts.dispatchClients?.[engine === "Ollama" ? "ollama" : "comfyui"]?.unload?.(signal);
@@ -2832,9 +2847,9 @@ export class Coordinator {
     // Every session config goes through here, so a per-agent override reaches genesis,
     // authoring, extraction and ask alike — or none of them. Read at build time rather than
     // captured, so changing a model in Settings applies to the next session, not the next run.
-    this.sessionInput = (input) => ({
+    this.sessionInput = async (input) => ({
       ...input,
-      ...(this.sessionAgents()),
+      ...(await this.sessionAgents()),
       ...(this.skillFamily !== undefined ? { skillFamily: this.skillFamily } : {}),
       // The model too, or a narrowed skill is recorded and never actually injected.
       ...(this.skillModelId !== undefined ? { skillModelId: this.skillModelId } : {}),
@@ -3271,7 +3286,7 @@ export class Coordinator {
             // Fetched now rather than on first use: the local default below reads the
             // catalogue synchronously when a session is built, and a session that opens
             // before anyone has looked at a picker would otherwise see an empty one.
-            if (readiness.ready) this.warmModelCatalog();
+            if (readiness.ready) this.warmModelCatalog(); else this.settleCatalogue();
             this.emit({
               at: new Date().toISOString(),
               type: "health.changed",
@@ -3286,6 +3301,7 @@ export class Coordinator {
             if (readiness.ready) void this.vendorAuth.refresh({ patient: true }).catch(() => {});
           })
           .catch((err: unknown) => {
+            this.settleCatalogue();
             this.emit({
               at: new Date().toISOString(),
               type: "health.changed",
@@ -3488,9 +3504,10 @@ export class Coordinator {
           status: ready.ready ? "healthy" : "unavailable", ...(ready.reason ? { reason: ready.reason } : {}) });
         // Warmed whether or not a picker has asked yet: the local default reads it at session
         // build time (issue 1247), and the first session of a run must see what is installed.
-        if (ready.ready) this.warmModelCatalog();
+        if (ready.ready) this.warmModelCatalog(); else this.settleCatalogue();
         if (ready.ready) void this.vendorAuth.refresh({ patient: true }).catch(() => {});
       }).catch((error: unknown) => {
+        this.settleCatalogue();
         if (this.stopping) return;
         this.emit({ at: this.nowIso(), type: "health.changed", component: "harness", status: "unavailable",
           reason: `Harness startup failed: ${describeCoordinatorError(error)}` });
@@ -4027,7 +4044,12 @@ export class Coordinator {
   private warmModelCatalog(): void {
     const work = this.modelCatalog.get(true).catch(() => {});
     this.backgroundWork.add(work);
-    void work.finally(() => this.backgroundWork.delete(work));
+    void work.finally(() => {
+      this.backgroundWork.delete(work);
+      // Settled on failure too: a catalogue that cannot be read is an answer, and a session
+      // waiting on it must go on to fail at creation with the harness's own reason.
+      this.settleCatalogue();
+    });
   }
 
   /**
@@ -4036,13 +4058,21 @@ export class Coordinator {
    * dispatch choice and beneath every override — the same order the config writer keeps —
    * rather than replacing any of them.
    */
-  private sessionAgents(): { agents?: Record<string, { model?: string; brief?: string }> } {
+  private async sessionAgents(): Promise<{ agents?: Record<string, { model?: string; brief?: string }> }> {
+    // A keyless session waits for the catalogue's first fetch rather than reading it empty:
+    // measured or not, an empty read here meant the first session of a run going to the cloud
+    // default — the one outcome this default exists to prevent.
+    if (!this.cloudLlmKeyStored) await this.catalogueSettled;
     const local = this.localHarnessDefault();
     if (local === undefined) return this.agentOverrides ? { agents: this.agentOverrides } : {};
     const agents: Record<string, { model?: string; brief?: string }> = { ...this.agentOverrides };
     for (const member of ROSTER) {
       const override = agents[member.name];
-      if (override?.model === undefined) agents[member.name] = { ...override, model: local };
+      if (override?.model !== undefined) continue;
+      // Stage reads images; it takes the first local model that can, or none, the same
+      // admission its own override would be held to.
+      const model = member.name === "stage-designer" ? this.localHarnessDefault(true) : local;
+      if (model !== undefined) agents[member.name] = { ...override, model };
     }
     return { agents };
   }
@@ -4064,11 +4094,18 @@ export class Coordinator {
    * inside the session builder; the catalogue is warmed when the harness comes up and after
    * every local-model publication for exactly that reason.
    */
-  private localHarnessDefault(): string | undefined {
+  private localHarnessDefault(needsImages = false): string | undefined {
     if (this.cloudLlmKeyStored) return undefined;
     const app = this.readModel.getState().app;
-    return app.harnessModels.filter((model) => model.provider === "ollama").map(harnessModelReference)
-      .find((reference) => selectHarnessModel(reference, app.harnessModels, app).reason === undefined);
+    const local = app.harnessModels.filter((model) => model.provider === "ollama");
+    // Admission lets an unstated modality through — unknown is offered, not withheld — but a
+    // default is a choice nobody is looking at, so for Stage a model that says it reads images
+    // comes before one that merely does not say it cannot.
+    const ordered = needsImages
+      ? [...local.filter((model) => model.inputModalities?.includes("image")), ...local.filter((model) => !model.inputModalities?.includes("image"))]
+      : local;
+    return ordered.map(harnessModelReference)
+      .find((reference) => selectHarnessModel(reference, app.harnessModels, app, needsImages).reason === undefined);
   }
 
   /**

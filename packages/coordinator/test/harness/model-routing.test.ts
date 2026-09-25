@@ -22,7 +22,11 @@ const MODELS: ModelInfo[] = [
   { provider: "custom-provider", id: "region/model:fast", displayName: "Custom model" },
   { provider: "ollama", id: "gemma4:12b", displayName: "Gemma 4 12B", inputTokenLimit: 131_072 },
   { provider: "ollama", id: "gemma4:e2b-it-qat", displayName: "Gemma 4 E2B" },
+  { provider: "ollama", id: "qwen3-vl:8b", displayName: "Qwen3 VL", inputModalities: ["text", "image"] },
 ];
+const LOCAL_VISION = "ollama/qwen3-vl:8b";
+/** The catalogue with nothing local in it: what a machine without Ollama sees. */
+const CLOUD_ONLY = MODELS.filter((model) => model.provider !== "ollama");
 const LOCAL = "ollama/gemma4:12b";
 const LOCAL_SMALL = "ollama/gemma4:e2b-it-qat";
 
@@ -211,7 +215,10 @@ describe("coordinator harness/model routing (#1122)", () => {
   });
 
   it("captures turn, agent, production, and default precedence in real chat session preparation", async () => {
-    const test = await fixture({ production: TEXT, agents: { "world-builder": { model: CHAT, brief: "Chat brief." } } });
+    // Cloud only, so "nothing chosen" ends at the harness default rather than a local model.
+    const adapter = new CaptureAdapter();
+    adapter.list = async () => CLOUD_ONLY;
+    const test = await fixture({ adapter, production: TEXT, agents: { "world-builder": { model: CHAT, brief: "Chat brief." } } });
     try {
       assert.equal((await test.chat())?.config.model, CHAT);
       assert.equal((await test.chat(CUSTOM))?.config.model, CUSTOM);
@@ -353,9 +360,22 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     } finally { await test.close(); }
   });
 
+  it("gives Stage the first local model that reads images, and chat the first that reads text", async () => {
+    const test = await fixture();
+    try {
+      await test.stage();
+      const stage = test.adapter.sessions.find(session => session.agent === "stage-designer");
+      assert.ok(stage, "Stage passed model admission on the local default rather than refusing");
+      assert.equal(stage.config.model, LOCAL_VISION);
+      assert.equal(stage.config.agents?.["stage-designer"]?.model, LOCAL_VISION);
+      assert.equal(stage.config.agents?.["world-builder"]?.model, LOCAL, "text agents keep the first text-capable row");
+      assert.equal((await test.chat())?.config.model, LOCAL, "chat with nothing chosen is decided the same way");
+    } finally { await test.close(); }
+  });
+
   it("chooses nothing when the catalogue lists nothing local", async () => {
     const adapter = new CaptureAdapter();
-    adapter.list = async () => MODELS.filter((model) => model.provider !== "ollama");
+    adapter.list = async () => CLOUD_ONLY;
     const test = await fixture({ adapter });
     try {
       assert.deepEqual((await test.chat())?.config.agents ?? {}, {}, "no agent is given a model it did not ask for");

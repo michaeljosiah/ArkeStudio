@@ -175,7 +175,7 @@ export class StageConstructor {
         await writeFile(join(dir, name), reference.data);
         sourceImages.push({ name, source: path });
       }
-      const configured = deps.sessionInput({ model: deps.model, researchWeb: false });
+      const configured = await deps.sessionInput({ model: deps.model, researchWeb: false });
       configured.agents = {
         ...configured.agents,
         "stage-designer": { ...configured.agents?.["stage-designer"], model: deps.model },
