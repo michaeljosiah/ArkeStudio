@@ -4410,7 +4410,7 @@ export function rejectTake(
 export function exportCut(
   worldId: string,
   productionId: string,
-  preset: "review-cut" | "master" | "social-excerpt",
+  preset: import("@arke-studio/contracts").ExportPreset,
   timelineRevision: number | null,
   episodeId?: string,
   subtitles?: { trackId: `tr_${string}`; mode: "none" | "burn-in" | "sidecar" | "burn-in+sidecar"; sidecar?: "srt" | "vtt" },

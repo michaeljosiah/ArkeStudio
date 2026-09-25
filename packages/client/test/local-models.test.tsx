@@ -183,6 +183,18 @@ const renderPane = (state: ClientState, engine: EngineId): string =>
 /** SSR splits a text node at every interpolation, so a rendered string is checked without them. */
 const plain = (html: string): string => html.replace(/<!-- -->/g, "").replace(/<[^>]+>/g, " ");
 
+it("shows persistent model requirements before Install without opening details", () => {
+  const state = stateWith({});
+  const component = state.app.setup!.components.find(item => item.id === "ollama-gemma4-12b")!;
+  component.caveat = "Community Uncensored variant · Requires Ollama 0.34.3 or newer · Installation and inference not verified by Arke";
+  component.detail = undefined;
+  const text = plain(renderEngine(state, "ollama"));
+  assert.match(text, /Install/);
+  assert.match(text, /Community Uncensored variant/);
+  assert.match(text, /Requires Ollama 0.34.3 or newer/);
+  assert.match(text, /Installation and inference not verified by Arke/);
+});
+
 it("shows processor residency as a warning while the local model remains installed", () => {
   const state = stateWith({ residency: [{ provider: "ollama", model: GEMMA.id, state: "cpu", vramBytes: 0 }] });
   state.app.setup!.components.find((item) => item.id === "ollama-gemma4-12b")!.state = "ready";

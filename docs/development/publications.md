@@ -128,6 +128,11 @@ timelines, unavailable tracks and interactive routing are refused. Intentional b
 remain valid, including a plan with no source media. Legacy song-clock delivery requires a saved
 timeline, as the shared planner does; legacy captions also require a saved timeline.
 
+The export sheet defaults 9:16 productions to `vertical-master` (1080×1920, CRF 18),
+and keeps an explicitly chosen preset for that production. Other productions retain the
+review default. Every preset uses the production frame rate (SPEC-038 R-32). The expanded
+Publish section states dimensions, frame rate and quality before submission (issue #1252).
+
 The host supplies its existing encoder and media probe, the encoder build identity and an existing
 scratch root. Capture accepts a trusted preparation callback so discovery and copying share one
 world gate. The compiler scans fresh state, preserves the existing placed-performance byte check,
@@ -215,6 +220,9 @@ The in-process queue also avoids redundant compilation for ordinary concurrent c
 
 A prepared directory is renamed inside its selected attempt; the ZIP is installed with a
 no-replace hard link. Existing targets are verified, never treated as permission to overwrite.
+After target verification, the ZIP's `staged.zip` alias is removed, including on recovery.
+Concurrent link changes can change inode timestamps; bounded retries repeat the complete
+checked read without weakening identity or digest checks.
 Completion is recorded only after the promoted output is verified against the prepared receipt.
 If a process stops before or after promotion, retry reconciles the recorded attempt and destination.
 A missing completion record never means that no output exists. A damaged, missing or conflicting

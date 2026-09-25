@@ -430,6 +430,7 @@ export function LocalModelRow({
           <span>{entry.reason}</span>
         </div>
       )}
+      {entry.component?.caveat && <div className="fy-set__why"><span>{entry.component.caveat}</span></div>}
       {entry.ineligible && (
         <div className="fy-set__why">
           <span className="fy-set__dot fy-set__dot--warn" />

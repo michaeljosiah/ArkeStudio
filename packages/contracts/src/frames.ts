@@ -7,7 +7,7 @@ import { StageInspectionFrameSchema } from "./stage-construction.js";
 import { DialogueFailureTagSchema } from "./take-feedback.js";
 import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
 import { MasterAudioBindingSchema, MasterAudioRequestSchema, PerformanceAudioRequestSchema } from "./audio-reference.js";
-import { DialogueTimingIntentSchema } from "./cut.js";
+import { DialogueTimingIntentSchema, ExportPresetSchema } from "./cut.js";
 import { AudioAttestationSchema, AudioRangeSchema, FullSha256Schema } from "./audio.js";
 import { RehearsalIdSchema } from "./rehearsal.js";
 import { PerformanceReferenceRoleSchema } from "./performance-bible.js";
@@ -2753,7 +2753,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       episodeId: z.string().optional(),
       /** The saved timeline revision shown when this export was requested; null means legacy derivation. */
       timelineRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable(),
-      preset: z.enum(["review-cut", "master", "social-excerpt"]),
+      preset: ExportPresetSchema,
       /** Which subtitle track to deliver and how (SPEC-038 R-27); absent delivers none. */
       subtitles: z
         .object({

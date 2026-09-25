@@ -13,13 +13,17 @@ The manifest includes Llama 3.1 8B and Llama 3.3 70B. Their Ollama names are `ll
 and `llama3.3:70b`. Users can bring installed models to OpenCode independently of this static
 manifest. The shared GPU coordinator serializes local harness inference with other GPU jobs.
 
-## Gemma 4 12B Balanced
+## Gemma 4 12B Uncensored Balanced
 
 The optional setup entry `ollama-gemma4-12b-balanced` provides the manifest model
 `gemma4-12b-balanced` (SPEC-008 R-9, R-13; SPEC-033 R-39). It uses the community
 [HauhauCS Balanced model](https://huggingface.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced)
 with Q4_K_M weights. Select it explicitly in Settings; it is not in the automatic
 recommendation order and does not replace standard Gemma 4 12B.
+Settings names the Uncensored variant and displays its requirements before installation
+(issue #1252). Installation and inference remain unverified by Arke; the persistent
+catalogue caveat states that limitation and the mutable upstream weights independently
+of download progress.
 
 ```powershell
 ollama pull hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M

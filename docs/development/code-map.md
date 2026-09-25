@@ -181,6 +181,11 @@ extraction. Contracts `render-plan.ts` keeps video sound by default, resolves fi
 their measured parent media, and carries scoped missing-measurement notices into the export sheet
 (issue #908). Regressions live in contracts `test/render-plan.test.ts` and client `test/exports.test.tsx`.
 
+Contracts `cut.ts` owns export presets and aspect-based `defaultExportPreset`; client
+`editor-export.tsx` retains explicit choices per production, while `publication-export.tsx`
+shows the delivered dimensions and production clock (issue #1252). Coverage includes client
+`test/publications.test.tsx` and coordinator `test/publications/video.test.ts` with real media tools.
+
 Inspect `TimelineCommandRefused` and existing migration/history handling when changing edits. A client drag preview is not a successful persisted edit. Start with coordinator `test/productions/timeline.test.ts`, `timeline-migration.test.ts` and client `test/timeline-editing-guards.test.tsx`, `plan-playback.test.ts`.
 
 Render planning, migration and inspector validation receive the whole world's artifact catalog. Contracts `artifact-access.ts` (`resolveProductionArtifact`) distinguishes missing media from another production's scoped material; the same decision guards timeline/Library placement, editor-request preparation and legacy writes. Render planning's `legacyArtifactScopeRefusal` checks unmigrated audio and song masters before preview or export; `legacyCutArtifactReferences` normalizes both legacy audio encodings for the planner and bulk-save validation. New picker offers remain scoped to the current production, while existing unavailable Library memberships stay visible for removal (SPEC-020 R-13).

@@ -87,20 +87,23 @@ export class PublicationHost implements PublicationBridge {
     return { operationId: intent.operationId, worldId: intent.worldId, productionId: intent.request.productionId,
       title: intent.request.title, status: "interrupted", phase: "Check saved output or retry" };
   }
-  private reply<T>(work: () => Promise<T>): Promise<PublicationReply<T>> {
+  private reply<T>(work: () => Promise<T>, opening = false): Promise<PublicationReply<T>> {
     const promise = (async (): Promise<PublicationReply<T>> => {
       try { this.controller.signal.throwIfAborted(); return { ok: true, value: await work() }; }
-      catch (error) { return { ok: false, reason: this.reason(error), ...(error instanceof Error && error.name === "AbortError" ? { cancelled: true } : {}) }; }
+      catch (error) { return { ok: false, reason: this.reason(error, opening), ...(error instanceof Error && error.name === "AbortError" ? { cancelled: true } : {}) }; }
     })();
     this.pending.add(promise);
     void promise.finally(() => this.pending.delete(promise));
     return promise;
   }
-  private reason(error: unknown): string {
+  private reason(error: unknown, opening = false): string {
     if (error instanceof EncoderChanged) return "The media encoder changed since this job was saved. Create a new edition from the source production.";
     if (error instanceof CompilerChanged) return "The publication compiler changed since this job was saved. Create a new edition from the source production.";
     // Domain wrappers can contain nested filesystem errors too. Only fixed copy crosses IPC.
-    if (error instanceof PublicationFileError) return `${error.code}: ${REFUSALS[error.code]}`;
+    if (error instanceof PublicationFileError) {
+      if (opening && error.code === "source-changed") return "This edition appears damaged or altered. A file no longer matches the edition's recorded contents. Try opening a fresh copy.";
+      return REFUSALS[error.code];
+    }
     if (error instanceof Error && error.name === "AbortError") return "Publication cancelled.";
     return "The publication could not be processed. Check the package, media tools and available disk space, then retry.";
   }
@@ -230,7 +233,7 @@ export class PublicationHost implements PublicationBridge {
           return { sessionId, manifest: pinned.manifest, manifestSha256: pinned.manifestSha256, mediaType: pinned.mediaType, assets } satisfies PublicationPlayback;
         } catch (error) { await pinned.dispose(); throw error; }
       } finally { this.opening = false; }
-    });
+    }, true);
   }
   close(sessionId: string): Promise<void> {
     const pinned = this.players.get(sessionId); this.players.delete(sessionId);

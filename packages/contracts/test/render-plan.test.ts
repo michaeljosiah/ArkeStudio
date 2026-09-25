@@ -6,6 +6,7 @@ import {
   buildExportPlan,
   buildFfmpegArgs,
   buildRenderPlan,
+  defaultExportPreset,
   deriveCut,
   exportAudioClips,
   exportOverlays,
@@ -37,6 +38,21 @@ const PLATE = "ar_01J8G0000000000000000000A1";
 const INSERT = "ar_01J8G0000000000000000000A2";
 const BELLS = "ar_01J8G0000000000000000000A3";
 const NOTES = "ar_01J8G0000000000000000000A4";
+
+it("defaults portrait exports to master quality and keeps the production clock", () => {
+  const value = production();
+  value.meta.aspect = "9:16";
+  const preset = defaultExportPreset(value.meta);
+  assert.equal(preset, "vertical-master");
+  assert.equal(defaultExportPreset({}), "review-cut");
+  assert.equal(defaultExportPreset({ aspect: "16:9" }), "review-cut");
+  const result = buildRenderPlan({ production: value, artifacts, timeline: { status: "absent" }, scope: { kind: "production" }, preset });
+  assert.ok(result.ok);
+  assert.equal(result.plan.frameRate, 25);
+  const args = buildFfmpegArgs(result.plan, "/world", "/film.mp4", "/font.ttf");
+  assert.match(args.join(" "), /1080[:x]1920/);
+  assert.equal(args[args.indexOf("-crf") + 1], "18");
+});
 
 const artifacts: RenderArtifact[] = [
   { id: PLATE, file: "plate.png", kind: "image" },

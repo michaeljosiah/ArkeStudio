@@ -55,10 +55,28 @@ async function realDirectory(path: string): Promise<string> {
 
 async function record<T>(root: string, name: string, schema: z.ZodType<T>): Promise<T | undefined> {
   if (!await exists(join(root, name))) return undefined;
-  const chunks: Buffer[] = [];
-  await readPublicationFile(root, name, 16 * 1024, undefined, undefined, chunks).catch(recoveryFailure);
+  const chunks = await stableRead(async () => {
+    const chunks: Buffer[] = [];
+    await readPublicationFile(root, name, 16 * 1024, undefined, undefined, chunks);
+    return chunks;
+  }).catch(recoveryFailure);
   try { return schema.parse(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)))); }
   catch { throw new PublicationFileError("incomplete-publication", "Publication recovery record is invalid; existing output has been preserved."); }
+}
+
+/**
+ * Installing/removing a hard-link alias changes ctime on the shared inode. A concurrent
+ * publisher may observe that while reading a receipt or ZIP. Repeat the whole checked read,
+ * never relax identity/hash checks: persistent damage must still refuse without rebuilding.
+ * Each immutable file has at most two alias transitions (install and staging cleanup).
+ */
+async function stableRead<T>(read: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try { return await read(); }
+    catch (error) {
+      if (attempt >= 2 || !(error instanceof PublicationFileError) || error.code !== "source-changed") throw error;
+    }
+  }
 }
 
 function recoveryFailure(error: unknown): never {
@@ -156,24 +174,26 @@ export async function publishPublication(
     const destination = join(attemptRoot, target);
     const verify = async (name: string): Promise<VerifiedPublicationDirectory> => {
       try {
-        let verified: VerifiedPublicationDirectory;
-        if (chosen.archive) {
-          const measured = await readPublicationFile(attemptRoot, name, publicationArchiveByteLimit(options.limits), options.signal);
-          requirePublicationDigest(measured, chosen.archive);
-          const extracted = await extractPublicationZip(join(attemptRoot, name), attemptRoot, options);
-          try { verified = extracted; }
-          finally { await extracted.dispose(); }
-          await measured.assertUnchanged();
-        } else verified = await verifyPublicationDirectory(join(attemptRoot, name), options);
-        if (verified.manifestSha256 !== chosen.manifestSha256 || verified.manifest.id !== operation.publicationId || verified.byteLength !== chosen.byteLength) {
-          throw new PublicationFileError("incomplete-publication", "Publication output differs from its prepared receipt; it has been preserved.");
-        }
-        return verified;
+        return await stableRead(async () => {
+          let verified: VerifiedPublicationDirectory;
+          if (chosen.archive) {
+            const measured = await readPublicationFile(attemptRoot, name, publicationArchiveByteLimit(options.limits), options.signal);
+            requirePublicationDigest(measured, chosen.archive);
+            const extracted = await extractPublicationZip(join(attemptRoot, name), attemptRoot, options);
+            try { verified = extracted; }
+            finally { await extracted.dispose(); }
+            await measured.assertUnchanged();
+          } else verified = await verifyPublicationDirectory(join(attemptRoot, name), options);
+          if (verified.manifestSha256 !== chosen.manifestSha256 || verified.manifest.id !== operation.publicationId || verified.byteLength !== chosen.byteLength) {
+            throw new PublicationFileError("incomplete-publication", "Publication output differs from its prepared receipt; it has been preserved.");
+          }
+          return verified;
+        });
       } catch (error) { options.signal?.throwIfAborted(); return recoveryFailure(error); }
     };
     options.signal?.throwIfAborted();
     if (!await exists(destination)) {
-      if (completed || !await exists(join(attemptRoot, staged))) throw new PublicationFileError("incomplete-publication", "Prepared publication output is missing; it cannot be rebuilt under the same operation.");
+      if ((completed || !await exists(join(attemptRoot, staged))) && !await exists(destination)) throw new PublicationFileError("incomplete-publication", "Prepared publication output is missing; it cannot be rebuilt under the same operation.");
       try { await verify(staged); }
       catch (error) {
         // A concurrent reconciler can rename the selected tree during this validation. Its
@@ -194,6 +214,9 @@ export async function publishPublication(
     }
     const verified = await verify(target);
     options.signal?.throwIfAborted();
+    // Keep staging through target verification. A crash before cleanup is reconciled by the
+    // same path on retry; a crash afterwards uses the installed, receipt-checked destination.
+    if (operation.format === "zip") await withTransientRetry(() => rm(toExtendedLength(join(attemptRoot, staged)), { force: true }));
     await installRecord(operationRoot, "complete.json", chosen);
     const completion = await record(operationRoot, "complete.json", Prepared);
     if (JSON.stringify(completion) !== JSON.stringify(chosen)) throw new PublicationFileError("incomplete-publication", "Publication completion receipt conflicts with this output.");
