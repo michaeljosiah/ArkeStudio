@@ -44,8 +44,13 @@ export class StageConstructor {
   } | null = null;
   /** Requests claimed before their run: the model decision ahead of it may wait on discovery (issue 1247). */
   private readonly pending = new Map<string, { request: Request; abort: AbortController }>();
-  /** Claim a request so a Stop can reach it before `run` does; `run` adopts the claim, `abandon` drops it. */
+  /**
+   * Claim a request so a Stop can reach it before `run` does; `run` adopts the claim, `abandon`
+   * drops it. One at a time, as `run` is: two claims waiting on discovery would become one run
+   * and one failure, with the screen following the newer, failed one.
+   */
   begin(request: Request): AbortSignal {
+    if (this.active || this.pending.size > 0) throw new Error("Another Stage construction is running. Stop it first.");
     const abort = new AbortController();
     this.pending.set(request.requestId, { request, abort });
     return abort.signal;

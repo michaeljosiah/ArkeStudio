@@ -4138,10 +4138,15 @@ export class Coordinator {
     });
   }
 
-  /** Whether every local model handed to the harness is now a row in its catalogue (issue 1247). */
+  /**
+   * Whether the local rows in the harness catalogue are exactly the models handed to it (issue
+   * 1247). Exactly: a row for a model that was deleted is as stale as a missing row for one
+   * that was pulled, and a default chosen from it would name a model that is not there.
+   */
   private catalogueCarries(published: readonly import("@arke-studio/contracts").LocalHarnessModel[]): boolean {
     const listed = new Set(this.readModel.getState().app.harnessModels.filter((model) => model.provider === "ollama").map((model) => model.id));
-    return published.every((model) => listed.has(model.id));
+    const handed = new Set(published.map((model) => model.id));
+    return listed.size === handed.size && [...handed].every((id) => listed.has(id));
   }
 
   /** Whether a local-model publication will happen at all: both the writer and the runtime client are wired. */
@@ -9691,7 +9696,8 @@ export class Coordinator {
         if (!adapter?.readiness().ready) { fail("The harness is unavailable. Check the running engine in Settings."); return; }
         // Claimed before the model decision, which may wait on discovery: a Stop in that wait
         // has to find the request, or the build starts after it.
-        const claimed = this.stageConstructor.begin(msg);
+        let claimed: AbortSignal;
+        try { claimed = this.stageConstructor.begin(msg); } catch (error) { fail(describeCoordinatorError(error)); return; }
         const selected = await this.languageModelFor({ kind: "production", productionId: msg.productionId }, undefined, "stage-designer", claimed);
         const configured = selected.sessionModel;
         if (selected.reason || !configured) {

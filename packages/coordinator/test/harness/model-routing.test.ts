@@ -33,6 +33,8 @@ const LOCAL_VISION = "ollama/qwen3-vl:8b";
 const CLOUD_ONLY = MODELS.filter((model) => model.provider !== "ollama");
 const LOCAL = "ollama/gemma4:12b";
 const LOCAL_SMALL = "ollama/gemma4:e2b-it-qat";
+/** What Ollama has pulled when the catalogue is MODELS: the harness lists exactly what it was handed (issue 1247). */
+const PULLED = MODELS.filter((model) => model.provider === "ollama").map((model) => ({ id: model.id, tools: true, vision: model.inputModalities?.includes("image") ?? false }));
 
 /** A reversible fake cipher that is very visibly not the plaintext. */
 const fakeCipher: Cipher = {
@@ -384,7 +386,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     // local rows appear on the next fetch — as the profile write does for the real harness.
     const adapter = new CaptureAdapter();
     adapter.list = async () => CLOUD_ONLY;
-    const test = await fixture({ adapter, localModels: [{ id: "gemma4:12b", tools: true, vision: false }], onPublish: () => { adapter.list = async () => MODELS; } });
+    const test = await fixture({ adapter, localModels: PULLED, onPublish: () => { adapter.list = async () => MODELS; } });
     try {
       assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL, "the first session saw the rows the publication brought");
     } finally { await test.close(); }
@@ -486,7 +488,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     let answering = false;
     const test = await fixture({ adapter, listLocalModels: async () => {
       if (!answering) throw new Error("ECONNREFUSED 127.0.0.1:11434");
-      return [{ id: "gemma4:12b", tools: true, vision: false }];
+      return PULLED;
     }, onPublish: () => { if (answering) adapter.list = async () => MODELS; } });
     try {
       assert.equal(await test.chat(), undefined, "no session is built while the runtime has not answered");
@@ -611,7 +613,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     // before it has is a successful read of the old rows, and must not count as carried.
     const adapter = new CaptureAdapter();
     adapter.list = async () => CLOUD_ONLY;
-    const test = await fixture({ adapter, localModels: [{ id: "gemma4:12b", tools: true, vision: false }] });
+    const test = await fixture({ adapter, localModels: PULLED });
     try {
       assert.equal(await test.chat(), undefined, "the read that beat the reload does not open local routing");
       assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /not available to the harness yet/);
@@ -619,6 +621,20 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       // The listing is unchanged, so nothing is published; the catalogue is asked again.
       await test.probeLocalRuntimes();
       await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the catalogue lists the published rows");
+    } finally { await test.close(); }
+  });
+
+  it("treats a catalogue still listing a deleted model as not yet carrying the listing", async () => {
+    // The harness lists three local rows; Ollama now holds one. A read that beat the reload is
+    // a successful read of the old rows, and a default from it could name a model that is gone.
+    const adapter = new CaptureAdapter();
+    const test = await fixture({ adapter, localModels: [PULLED[0]!] });
+    try {
+      assert.equal(await test.chat(), undefined, "extra rows are as stale as missing ones");
+      assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /not available to the harness yet/);
+      adapter.list = async () => [...CLOUD_ONLY, MODELS.find((model) => model.id === "gemma4:12b")!];
+      await test.probeLocalRuntimes();
+      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the catalogue lists exactly what was handed");
     } finally { await test.close(); }
   });
 
@@ -643,7 +659,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
   });
 
   it("asks for the catalogue again when the read after a publication failed, on the probe's cadence", async () => {
-    const test = await fixture({ localModels: [{ id: "gemma4:12b", tools: true, vision: false }] });
+    const test = await fixture({ localModels: PULLED });
     try {
       assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL);
       test.adapter.list = async () => { throw new Error("discovery is down"); };

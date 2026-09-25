@@ -278,6 +278,7 @@ it("a build stopped while its configuration is still being decided creates no se
     const request = { kind: "stage-construct" as const, worldId: store.worldId, productionId: "saltlight", sceneId: scene.id, shotId: shot.id,
       baseVersion: scene.version, requestId: randomUUID(), instruction: "", preserve: "none" as const };
     const claimed = constructor.begin(request);
+    assert.throws(() => constructor.begin({ ...request, requestId: randomUUID() }), /Another Stage construction is running/, "one claim at a time, as one run at a time");
     constructor.cancel(store.worldId, request.requestId);
     assert.ok(claimed.aborted, "the claim carried the stop");
     let second: Extract<DomainEvent, { type: "stage.construction" }> | undefined;
