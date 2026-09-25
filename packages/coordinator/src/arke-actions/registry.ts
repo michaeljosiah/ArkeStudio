@@ -484,6 +484,11 @@ const CLIENT_COMMAND_METADATA = {
   // Direction beside the prose (SPEC-047 R-6..R-10): a block's plan set by hand and a card
   // accepted whole are commands on the record; directing a chapter is the cast's derivation
   // turned on performance — a model run over the prose that writes nothing.
+  // A take a person recorded (turn 155c): chosen on this machine, prepared and checked here, and
+  // kept under the rights given once; nothing leaves the machine.
+  "stage-audiobook-take": action("production", "command", "voice", "host-file-access", ["chapters"]),
+  "keep-audiobook-take": action("production", "command", "voice", "privacy-sensitive", ["chapters"]),
+  "discard-audiobook-take": action("production", "command", "voice", "host-file-access", []),
   "set-audiobook-block": action("production", "command", "voice", "external-network-action", ["chapters"]),
   "direct-chapter": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),
   "discard-direction": action("production", "command", "extraction", "external-network-action", ["chapters"]),

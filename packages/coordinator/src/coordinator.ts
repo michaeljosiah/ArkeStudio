@@ -271,6 +271,7 @@ import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachm
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { deriveContinuity, makeAdapterContinuityDeriver, type ContinuityDeriver } from "./productions/continuity.js";
 import { castLines, makeAdapterVoicesDeriver, readVoices, setVoicePin, VoicePinRefusal, type VoicesDeriver } from "./productions/voices.js";
+import { discardRecording, keepRecording, RECORDED_TAKE_EXTENSIONS, RecordedTakeRefusal, stageRecording, type StagedRecording } from "./productions/audiobook-recorded.js";
 import { acceptDirections, directChapter, directableBlocks, makeAdapterDirectionDeriver, type DirectionDeriver } from "./productions/audiobook-direction.js";
 import { audiobookDoor, conformDirections, runAudiobookBook } from "./productions/audiobook-book.js";
 import { checkDirection, directionPlan, writeAudiobookBook, writeBlockDirection } from "./productions/audiobook.js";
@@ -1121,6 +1122,8 @@ export class Coordinator {
   private readonly derivingContinuity = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
   /** Chapters whose lines are being cast right now, keyed the same way (turn 130). */
   private readonly castingVoices = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
+  /** Recordings staged for a block and not yet kept or let go (turn 155c), by the window's request id. */
+  private readonly stagedRecordings = new Map<string, { worldId: string; staged: StagedRecording }>();
   /** `Direct this chapter` runs (turn 146), keyed like the cast's: one per chapter, ended with the world. */
   private readonly directingChapters = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
   /**
@@ -12669,6 +12672,85 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         const chapter = store?.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
         this.readingAudiobooks.get(`${msg.worldId}/${msg.productionId}/${chapter?.file ?? msg.chapterFile}`)?.control.abort();
+        return;
+      }
+      case "stage-audiobook-take": {
+        // A take a person recorded (design turn 155c, SPEC-047 R-34, R-35): the host's picker
+        // chooses the file, the foundation prepares and checks it on this machine, and the window
+        // is answered with the checks as data — or the one clause that says why it cannot be a take.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, block: msg.block, requestId: msg.requestId };
+        const staged = (extra: Omit<Extract<DomainEvent, { type: "audiobook.take-staged" }>, "at" | "type" | keyof typeof ids>) =>
+          this.emit({ at: new Date().toISOString(), type: "audiobook.take-staged", ...ids, ...extra });
+        if (!this.opts.audioMediaTools) {
+          staged({ refused: "audio preparation is not available here" });
+          return;
+        }
+        if (!this.opts.pickFiles) {
+          staged({ refused: "choosing a file needs the desktop app" });
+          return;
+        }
+        const control = new AbortController();
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        try {
+          const [chosen] = await this.opts.pickFiles({ accept: [...RECORDED_TAKE_EXTENSIONS] });
+          if (chosen === undefined) return;
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService);
+          const voice = this.voiceService;
+          const recording = await stageRecording(
+            store,
+            {
+              tools: this.opts.audioMediaTools,
+              transcribe: voice === null ? null : (bytes, contentType) => voice.transcribe(bytes, contentType),
+              narrator,
+              signal: control.signal,
+            },
+            { productionId: msg.productionId, chapterId: chapter.id, block: msg.block, sourcePath: chosen },
+          );
+          const previous = this.stagedRecordings.get(msg.requestId);
+          if (previous !== undefined) await discardRecording(previous.staged);
+          this.stagedRecordings.set(msg.requestId, { worldId: msg.worldId, staged: recording });
+          staged({ file: recording.file, source: recording.source, qc: recording.qc, words: recording.words });
+        } catch (err) {
+          staged({ refused: err instanceof RecordedTakeRefusal ? err.message : describeCoordinatorError(err) });
+        } finally {
+          store.closingSignal.removeEventListener("abort", onClose);
+        }
+        return;
+      }
+      case "keep-audiobook-take": {
+        // Kept under the rights given once (SPEC-047 R-36) and answered as the block's record is.
+        const store = this.opts.provider.openStore?.();
+        const held = this.stagedRecordings.get(msg.requestId);
+        if (!store || store.worldId !== msg.worldId || held === undefined || held.worldId !== msg.worldId) return;
+        const ids = { worldId: msg.worldId, productionId: held.staged.productionId, chapterId: held.staged.chapterId, requestId: msg.requestId };
+        try {
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService);
+          const record = await keepRecording(store, held.staged, {
+            basis: msg.basis,
+            ...(msg.performer !== undefined ? { performer: msg.performer } : {}),
+            narrator,
+            ackId: `ack_${ulid()}`,
+            now: () => store.now(),
+            ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
+          });
+          this.stagedRecordings.delete(msg.requestId);
+          this.refreshIfStillOpen(store);
+          this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, record });
+        } catch (err) {
+          this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, refused: err instanceof RecordedTakeRefusal ? err.message : describeCoordinatorError(err) });
+        }
+        return;
+      }
+      case "discard-audiobook-take": {
+        const held = this.stagedRecordings.get(msg.requestId);
+        if (held === undefined || held.worldId !== msg.worldId) return;
+        this.stagedRecordings.delete(msg.requestId);
+        await discardRecording(held.staged);
         return;
       }
       case "set-audiobook-block": {

@@ -2999,6 +2999,32 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * else. The coordinator supplies every hash from the block's words and refuses a control the
    * block's reader declares unsupported, so nothing reaches a run that could only flag it.
    */
+  /**
+   * A take a person recorded (design turn 155c, SPEC-047 R-34..R-36): the host's picker chooses
+   * the file, the coordinator prepares and checks it and answers `audiobook.take-staged` under
+   * the window's `requestId`; `keep` files it as the block's take under the rights given once,
+   * answered as `audiobook.record` with the same id; `discard` lets the staged copy go.
+   */
+  z
+    .object({
+      kind: z.literal("stage-audiobook-take"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      block: z.string().min(1),
+      requestId: UlidSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("keep-audiobook-take"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
+      basis: z.enum(["self", "authorized", "licensed"]),
+      performer: z.string().trim().min(1).max(80).optional(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("discard-audiobook-take"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
   z
     .object({
       kind: z.literal("set-audiobook-block"),

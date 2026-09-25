@@ -8,6 +8,7 @@ import { PerformanceRecordSchema } from "./performance.js";
 import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
 import { AudiobookDirectionInputSchema, AudiobookDoorSchema, AudiobookPriceLineSchema, ChapterAudiobookSchema } from "./audiobook.js";
+import { AudioQcAnalysisSchema, AudioTechnicalSchema, AudioTranscriptComparisonSchema } from "./audio.js";
 import { z } from "zod";
 import { ModelResidencySchema } from "./local-ai.js";
 import { WorldImageReferenceSchema } from "./world-image-references.js";
@@ -1122,6 +1123,26 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
    * a chapter's directions accepted. The window that asked, and every other, takes the record
    * as a run's finished one — the newer wins — or hears why nothing was written.
    */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.take-staged"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      block: z.string().min(1),
+      requestId: UlidSchema,
+      /** The file's own name and what it is, as brought in. */
+      file: z.string().min(1).optional(),
+      source: AudioTechnicalSchema.optional(),
+      /** The foundation's checks on the prepared file (SPEC-047 R-35): data, never a refusal unless a check is a hard incompatibility. */
+      qc: AudioQcAnalysisSchema.optional(),
+      /** The words heard against the block's words, or why they could not be checked. */
+      words: AudioTranscriptComparisonSchema.optional(),
+      /** Why the file cannot be a take, in one clause. */
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
   z
     .object({
       ...base,

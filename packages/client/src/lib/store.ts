@@ -122,6 +122,19 @@ export interface CanonRefsState {
   ripples: Array<{ kind: string; summary: string; targets: string[] }>;
 }
 
+/** A recording on its way to being a block's take (design turn 155c): what the checks said, and where it stands. */
+export interface StagedTake {
+  worldId: string;
+  productionId: string;
+  block: string;
+  state: "choosing" | "staged" | "keeping" | "refused";
+  file?: string;
+  source?: import("@arke-studio/contracts").AudioTechnical;
+  qc?: import("@arke-studio/contracts").AudioQcAnalysis;
+  words?: import("@arke-studio/contracts").AudioTranscriptComparison;
+  refused?: string;
+}
+
 interface StoreState {
   connection: ConnectionStatus;
   state: ClientState | null;
@@ -288,6 +301,11 @@ interface StoreState {
     }
   >;
   audiobookRecords: Record<string, { record?: import("@arke-studio/contracts").ChapterAudiobook; refused?: string; seq: number }>;
+  /**
+   * Recordings on their way to being a block's take (design turn 155c), by the window's request
+   * id: the host's picker open, the checks back, the keep on its way, or refused in one clause.
+   */
+  stagedTakes: Record<string, StagedTake>;
   /**
    * The door (turn 146, SPEC-047 R-29), by production: what every chapter stands at, who
    * reads, and the price of a press, as the coordinator last answered; and `Read the book`,
@@ -473,6 +491,7 @@ let current: StoreState = {
   audiobook: {},
   direction: {},
   audiobookRecords: {},
+  stagedTakes: {},
   audiobookDoor: {},
   audiobookBook: {},
   audiobookNotes: {},
@@ -1286,6 +1305,7 @@ function handleFrame(json: string): void {
       // derivation still going is dropped, since the replay restores it when it is.
       direction: changedWorld ? {} : Object.fromEntries(Object.entries(current.direction).filter(([, held]) => held.state !== "directing")),
       audiobookRecords: changedWorld ? {} : current.audiobookRecords,
+      stagedTakes: changedWorld ? {} : current.stagedTakes,
       audiobookDoor: changedWorld ? {} : current.audiobookDoor,
       audiobookBook: changedWorld || rejoined ? {} : current.audiobookBook,
       audiobookNotes: changedWorld ? {} : current.audiobookNotes,
@@ -1317,6 +1337,7 @@ function handleFrame(json: string): void {
     let audiobook = current.audiobook;
     let direction = current.direction;
     let audiobookRecords = current.audiobookRecords;
+    let stagedTakes = current.stagedTakes;
     let audiobookDoor = current.audiobookDoor;
     let audiobookBook = current.audiobookBook;
     let audiobookNotes = current.audiobookNotes;
@@ -1725,7 +1746,30 @@ function handleFrame(json: string): void {
           ...(event.reason !== undefined ? { reason: event.reason } : {}),
         },
       };
+    } else if (event.type === "audiobook.take-staged") {
+      const held = stagedTakes[event.requestId];
+      if (held !== undefined) {
+        stagedTakes = {
+          ...stagedTakes,
+          [event.requestId]:
+            event.refused !== undefined
+              ? { ...held, state: "refused", refused: event.refused }
+              : {
+                  ...held,
+                  state: "staged",
+                  ...(event.file !== undefined ? { file: event.file } : {}),
+                  ...(event.source !== undefined ? { source: event.source } : {}),
+                  ...(event.qc !== undefined ? { qc: event.qc } : {}),
+                  ...(event.words !== undefined ? { words: event.words } : {}),
+                },
+        };
+      }
     } else if (event.type === "audiobook.record") {
+      // A recording kept, or refused at the keep (turn 155c): its own answer, by its request id.
+      if (event.requestId !== undefined && stagedTakes[event.requestId] !== undefined) {
+        const { [event.requestId]: kept, ...rest } = stagedTakes;
+        stagedTakes = event.record !== undefined ? rest : { ...rest, [event.requestId]: { ...kept!, state: "staged", refused: event.refused ?? "refused" } };
+      }
       // A write outside a run (turn 146): the record, or why nothing was written. A card being
       // accepted takes the answer as its own — accepted, or refused and held for another try.
       const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
@@ -2114,6 +2158,7 @@ function handleFrame(json: string): void {
       audiobook,
       direction,
       audiobookRecords,
+      stagedTakes,
       audiobookDoor,
       audiobookBook,
       audiobookNotes,
@@ -4601,6 +4646,36 @@ export function readAudiobookBlocks(
   });
 }
 
+/** A recording chosen for a block (turn 155c, SPEC-047 R-35): the host's picker opens, and the checks come back under the returned id. */
+export function stageAudiobookTake(worldId: string, productionId: string, chapterFile: string, block: string): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "stage-audiobook-take", worldId, productionId, chapterFile, block, requestId })) return null;
+  emitChange({ ...current, stagedTakes: { ...current.stagedTakes, [requestId]: { worldId, productionId, block, state: "choosing" } } });
+  return requestId;
+}
+
+/** Keep the staged recording as the block's take, under the rights given (R-36). */
+export function keepAudiobookTake(worldId: string, requestId: string, basis: "self" | "authorized" | "licensed", performer?: string): boolean {
+  const held = current.stagedTakes[requestId];
+  if (held === undefined) return false;
+  const trimmed = performer?.trim();
+  if (!send({ kind: "keep-audiobook-take", worldId, requestId, basis, ...(trimmed ? { performer: trimmed } : {}) })) return false;
+  const { refused: _refused, ...rest } = held;
+  emitChange({ ...current, stagedTakes: { ...current.stagedTakes, [requestId]: { ...rest, state: "keeping" } } });
+  return true;
+}
+
+/** Let the staged recording go: its copies are deleted on the machine that made them. */
+export function discardAudiobookTake(worldId: string, requestId: string): void {
+  const { [requestId]: _gone, ...rest } = current.stagedTakes;
+  emitChange({ ...current, stagedTakes: rest });
+  send({ kind: "discard-audiobook-take", worldId, requestId });
+}
+
+export function useStagedTakes(): StoreState["stagedTakes"] {
+  return useStore().stagedTakes;
+}
+
 /** One block's direction, set or cleared (SPEC-047 R-6): the coordinator answers with the record, or why not. */
 export function setAudiobookBlock(worldId: string, productionId: string, chapterFile: string, block: string, direction: import("@arke-studio/contracts").AudiobookDirectionInput | null): boolean {
   return send({ kind: "set-audiobook-block", worldId, productionId, chapterFile, block, direction });
@@ -4935,6 +5010,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     audiobook: {},
     direction: {},
     audiobookRecords: {},
+    stagedTakes: {},
     audiobookDoor: {},
     audiobookBook: {},
     audiobookNotes: {},

@@ -1649,6 +1649,7 @@ export function ChapterWorkspace({
                 />
                 </>
               )}
+              {audiobook.uploadDialog}
               <div className="fy-ab__foot" data-testid="audiobook-foot">
                 <span>{`Saved · v${record?.version ?? chapter.version} · ${words.toLocaleString()} words`}</span>
                 <span className="fy-ab__foot-push" />
@@ -1856,6 +1857,7 @@ export function ChapterWorkspace({
                 onSetDirection={audiobook.setDirection}
                 onMakeAgain={audiobook.makeAgain}
                 refused={audiobook.lastRecord?.refused ?? null}
+                onUpload={audiobook.uploadTake}
                 blockHost={(key) => audiobookColumn.current?.querySelector<HTMLElement>(`[data-block="${key}"] .fy-ab__text`) ?? null}
               />
             )}
