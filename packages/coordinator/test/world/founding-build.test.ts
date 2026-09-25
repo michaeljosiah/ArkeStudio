@@ -24,6 +24,7 @@ import { FoundingBuildService, type FoundingBuildPorts } from "../../src/world/f
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { readKit } from "../../src/references/kit.js";
 import { assembleKeyArt, readKeyArtBrief } from "../../src/references/key-art-references.js";
+import { approvedBlueprintForFounding, decideGenesisContent, reviewGenesisContent } from "../../src/harness/genesis-review.js";
 
 /**
  * The founding build, end to end against a real world on disk (SPEC-031 §4). The queue is
@@ -265,6 +266,51 @@ function lastPlan(h: Harness): BuildReview {
 const BUILD_MS = 45_000;
 
 describe("the founding build (SPEC-031)", () => {
+  it("saves approved sheets, relationships and canon verbatim without reauthoring", async (t) => {
+    let h!: Harness;
+    h = await makeHarness(t, {
+      manifest: null,
+      harnessReady: () => true,
+      authorSheet: async () => { throw new Error("Approved content must not be reauthored"); },
+      reviewedBlueprint: async id => approvedBlueprintForFounding(await h.provider.genesisDir(id)),
+    });
+    const workspace = await h.provider.genesisDir("gen-reviewed");
+    await mkdir(join(workspace, "draft", "characters"), { recursive: true });
+    await mkdir(join(workspace, "draft", "locations"), { recursive: true });
+    await writeFile(join(workspace, "draft.json"), JSON.stringify({ name: "Harbour", bible: "The gate stays closed.",
+      canon: [
+        { slug: "gate-rule", type: "rule", title: "The gate", statement: "Nobody opens the gate." },
+        { slug: "gate-maker", type: "thread", title: "Who made it?", statement: "Who made the gate?" },
+      ],
+    }));
+    await writeFile(join(workspace, "draft", "characters", "maren.json"), JSON.stringify({
+      name: "Maren", sheet: { sections: { Essence: "She guards the gate.", Appearance: "A red coat." }, links: ["location:vigil"] },
+    }));
+    await writeFile(join(workspace, "draft", "locations", "vigil.json"), JSON.stringify({
+      name: "The Vigil", sheet: { sections: { Look: "A silent lighthouse." }, links: ["character:maren"] },
+    }));
+    const review = await reviewGenesisContent(workspace);
+    await decideGenesisContent(workspace, review.cards, "approve", ulid());
+    await h.service.begin("gen-reviewed", ulid());
+    await until(() => h.lastState()?.status === "completed", "the reviewed founding build", BUILD_MS);
+    assert.ok(h.lastState()?.items.filter(item => item.authorized).every(item => item.state === "landed"), JSON.stringify(h.lastState()?.items));
+    const bundle = h.provider.openStore()!.getBundle();
+    const maren = bundle.sheets.find(sheet => sheet.name === "Maren")!;
+    const vigil = bundle.sheets.find(sheet => sheet.name === "The Vigil")!;
+    assert.ok(maren && vigil);
+    assert.deepEqual(maren.links, [vigil.id]);
+    assert.deepEqual(vigil.links, [maren.id]);
+    assert.equal(maren.sections.find(section => section.heading === "Essence")?.body, "She guards the gate.");
+    assert.equal(bundle.canon.find(entry => entry.title === "The gate")?.body, "Nobody opens the gate.");
+    assert.equal(bundle.canon.find(entry => entry.title === "Who made it?")?.status, "open");
+    assert.equal(bundle.proposals.length, 0);
+    const id = h.worldId();
+    await h.service.begin("gen-reviewed", ulid());
+    assert.equal(h.worldId(), id);
+    assert.equal((await h.provider.listWorlds()).length, 1);
+    assert.equal(h.provider.openStore()!.getBundle().canon.length, 2);
+  });
+
   it("one press makes the whole world: files, sheets, anchors, key art — nothing left to decide", async (t) => {
     const h = await makeHarness(t);
     await makeSandbox(h.root, "gen-full");

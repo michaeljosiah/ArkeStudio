@@ -831,7 +831,7 @@ function NewWorldDraft() {
   const railFactions = (blueprint?.factions ?? []).map((f) => ({ name: f.name, sentence: oneLine(f) }));
   const coverage = blueprint ? blueprintCoverage(blueprint) : null;
   // A conversation that settled a name builds; anything less creates and seeds the old way.
-  const buildMode = blueprint?.name !== undefined;
+  const buildMode = blueprint?.name !== undefined || turns.length > 0;
   const buildPlans = useBuildPlans();
   const reviewPlan = planRequestId === null ? undefined : buildPlans[genesisId]?.[planRequestId];
   const buildResponse = buildRequestId === null ? undefined : buildPlans[genesisId]?.[buildRequestId];
@@ -943,12 +943,12 @@ function NewWorldDraft() {
       provider?.validation ?? "",
     ].join("|");
   })();
-  const plannedAgainst = useRef<{ blueprint: typeof blueprint; preview: string | null; route: string } | null>(null);
+  const plannedAgainst = useRef<{ blueprint: typeof blueprint; review: (typeof drafts)[string]["review"]; preview: string | null; route: string } | null>(null);
   useEffect(() => {
     if (!buildCardOpen || buildPressed) return;
     const preview = previewJob?.status ?? null;
     const last = plannedAgainst.current;
-    if (last !== null && last.blueprint === blueprint && last.preview === preview && last.route === imageRoute) return;
+    if (last !== null && last.blueprint === blueprint && last.review === g?.review && last.preview === preview && last.route === imageRoute) return;
     let lookText = lookForBuild;
     if (lookSource === "conversation" && look.trim() === conversationLookRef.current) {
       lookText = blueprint?.look?.trim() ?? "";
@@ -956,19 +956,19 @@ function NewWorldDraft() {
       setLook(lookText);
       setLookForBuild(lookText);
     }
-    plannedAgainst.current = { blueprint, preview, route: imageRoute };
+    plannedAgainst.current = { blueprint, review: g?.review, preview, route: imageRoute };
     const requestId = ulid();
     setPlanRequestId(requestId);
     setPlanStartedAt(new Date().toISOString());
     // A refusal answered the blueprint that moved; the fresh plan is the review it asked for.
     setBuildRequestId(null);
     planFoundingBuild(genesisId, requestId, lookText, models);
-  }, [buildCardOpen, buildPressed, previewJob?.status, blueprint, lookForBuild, look, lookSource, genesisId, models, imageRoute]);
+  }, [buildCardOpen, buildPressed, previewJob?.status, blueprint, g?.review, lookForBuild, look, lookSource, genesisId, models, imageRoute]);
 
   const openBuildCard = (lookText: string) => {
     setLookForBuild(lookText);
     setBuildRequestId(null);
-    plannedAgainst.current = { blueprint, preview: previewJob?.status ?? null, route: imageRoute };
+    plannedAgainst.current = { blueprint, review: g?.review, preview: previewJob?.status ?? null, route: imageRoute };
     const requestId = ulid();
     setPlanRequestId(requestId);
     setPlanStartedAt(new Date().toISOString());

@@ -29,6 +29,19 @@ export const GenesisContentReviewSchema = z.object({
 }).strict();
 export type GenesisContentReview = z.infer<typeof GenesisContentReviewSchema>;
 
+export function genesisContentChanges(previous: GenesisContent, next: GenesisContent): Array<{ field: string; before: string; after: string }> {
+  const flatten = (value: unknown, prefix = ""): Record<string, string> => {
+    if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+      return Object.fromEntries(Object.entries(value).flatMap(([key, child]) => Object.entries(flatten(child, prefix ? `${prefix} · ${key}` : key))));
+    }
+    return { [prefix]: Array.isArray(value) ? value.join(", ") : String(value ?? "") };
+  };
+  const before = flatten(previous.value), after = flatten(next.value);
+  return [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .filter(field => before[field] !== after[field])
+    .map(field => ({ field, before: before[field] ?? "", after: after[field] ?? "" }));
+}
+
 /** Canonical sheet text is what the preview and the founding writer both consume. */
 export function completeGenesisSheet<T extends { name: string; line?: string; description?: string; sheet?: z.infer<typeof import("./genesis.js").GenesisSheetContentSchema> }>(kind: "character" | "location" | "faction", entity: T) {
   const shape = SHEET_SHAPES[kind];

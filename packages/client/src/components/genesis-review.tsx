@@ -1,4 +1,4 @@
-import type { GenesisContent, GenesisContentReview, GenesisReviewCard } from "@arke-studio/contracts";
+import { genesisContentChanges, type GenesisContent, type GenesisContentReview, type GenesisReviewCard } from "@arke-studio/contracts";
 import { renderInlineMarkdown } from "./inline-markdown.js";
 import { Button, Callout } from "./ui.js";
 
@@ -35,10 +35,17 @@ export function GenesisContentCards({ review, busy, onDecide, onRevise }: {
   return <section aria-label="Review world content" style={{ display: "grid", gap: 14 }}>
     <h2>Review world content</h2>
     <p>Founding saves approved content. Changed or rejected proposals do not replace an earlier approved version.</p>
+    <p>{review.selected.characters.length} characters, {review.selected.locations.length} locations, {review.selected.factions.length} factions and {review.selected.canon?.length ?? 0} canon entries approved.
+      {pending.length > 0 && ` ${pending.length} proposals still await a decision.`}</p>
     {review.problems.length > 0 && <Callout title="Before founding">{review.problems.map(problem => <p key={problem}>{problem}</p>)}</Callout>}
     {review.cards.map(card => <article className="fy-actioncard" key={card.key} aria-label={card.title} data-status={card.status}>
       <div className="fy-actioncard__head"><h3>{card.title}</h3><span>{card.status}</span></div>
       <Content content={card.content} review={review} />
+      {card.previous && card.status !== "approved" && <section aria-label="Changes since approval">
+        {genesisContentChanges(card.previous, card.content).map(change => <div key={change.field}>
+          <h4>{change.field}</h4><p><del>{change.before || "(empty)"}</del></p><p><ins>{change.after || "(removed)"}</ins></p>
+        </div>)}
+      </section>}
       {card.previous && card.status !== "approved" && <details><summary>Previously approved content</summary><Content content={card.previous} review={review} /></details>}
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
         {card.status !== "approved" && <Button disabled={busy} onClick={() => onDecide([card], "approve")}>Approve this version</Button>}

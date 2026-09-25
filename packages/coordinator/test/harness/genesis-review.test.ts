@@ -66,3 +66,20 @@ it("unapproved relationship targets block founding while open questions remain o
   await assert.rejects(approvedBlueprintForFounding(dir), /relationship/);
   assert.equal((await reviewGenesisContent(dir)).selected.canon?.[0]?.type, "thread");
 });
+
+it("renaming an entity keeps its stable identity and relationship targets", async () => {
+  const { dir, path } = await draft();
+  await mkdir(join(dir, "draft", "locations"), { recursive: true });
+  await writeFile(join(dir, "draft", "locations", "vigil.json"), JSON.stringify({
+    name: "The Vigil", sheet: { sections: { Look: "A lighthouse" }, links: ["character:maren"] },
+  }));
+  await decideGenesisContent(dir, (await reviewGenesisContent(dir)).cards, "approve", ulid());
+  await writeFile(path, JSON.stringify({ name: "Maren Kest", sheet: { sections: { Essence: "The keeper", Appearance: "Red coat" } } }));
+  const renamed = (await reviewGenesisContent(dir)).cards.find(card => card.key === "character:maren")!;
+  assert.equal(renamed.status, "pending");
+  await decideGenesisContent(dir, [renamed], "approve", ulid());
+  const selected = await approvedBlueprintForFounding(dir);
+  assert.equal(selected.characters[0]?.slug, "maren");
+  assert.equal(selected.characters[0]?.name, "Maren Kest");
+  assert.deepEqual(selected.locations[0]?.sheet?.links, ["character:maren"]);
+});

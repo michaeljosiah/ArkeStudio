@@ -34,3 +34,19 @@ Relevant checks:
 
 This documents the implemented continuity foundation. Content, media, import and voice approvals
 are tracked separately in #1267 and #1269–#1273.
+# Reviewing founding content
+
+Issue #1269 adds versioned content decisions to the founding conversation. The agent proposes
+full sheet sections, relationship targets and canon entries in the draft. The coordinator
+normalizes the displayed sheet shape and hashes each proposal. Approve and reject commands
+must name that exact hash; a stale batch writes no decisions.
+
+Decisions live in the private conversation journal outside the harness workspace. Rejected
+edits preserve the previous approved version. Entity filenames identify relationships across
+display-name changes. Begin materializes the approved blueprint through the ordinary proposal
+gate without asking a harness to expand the content again. Canon threads remain open.
+
+The inline review shows current proposals, changes since approval and the approved counts.
+Unapproved proposals are carried into the continuing conversation as explicitly unestablished
+content; subsequent edits use the normal world-chat approval workflow. The founding plan calls
+out partial approval. Image selection and generation are tracked separately in #1267.

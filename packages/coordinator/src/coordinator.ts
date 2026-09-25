@@ -2954,6 +2954,16 @@ export class Coordinator {
             harnessReady: () => this.opts.adapter?.readiness().ready === true && this.authoring !== null,
             genesisDir: (genesisId) => this.opts.provider.genesisDir!(genesisId),
             reviewedBlueprint: async (genesisId) => approvedBlueprintForFounding(await this.opts.provider.genesisDir!(genesisId)),
+            reviewNotes: async (genesisId) => {
+              const review = await reviewGenesisContent(await this.opts.provider.genesisDir!(genesisId));
+              const pending = review.cards.filter(card => card.status === "pending");
+              const rejected = review.cards.filter(card => card.status === "rejected");
+              return [
+                ...(pending.length ? [`${pending.length} proposals are still unapproved: ${pending.map(card => card.title).join(", ")}. Only previously approved versions will be saved.`] : []),
+                ...(rejected.length ? [`${rejected.length} rejected proposals will not replace any previously approved content.`] : []),
+                ...((review.selected.canon ?? []).some(entry => entry.type === "thread") ? ["Approved open questions remain open in canon."] : []),
+              ];
+            },
             discardGenesis: async (genesisId) => this.opts.provider.discardGenesis?.(genesisId),
             releaseGenesis: (genesisId) => this.genesis?.release(genesisId),
             createWorld: async (input) => {
@@ -5682,6 +5692,11 @@ export class Coordinator {
         if (!create) return;
         try {
           const sandbox = msg.genesisId ? await this.opts.provider.genesisDir?.(msg.genesisId) : undefined;
+          if (sandbox && (await foundingMessages(sandbox)).length) {
+            this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: msg.genesisId!, status: "failed",
+              detail: "Review the proposed content and use Begin in the conversation to save the approved world." });
+            return;
+          }
           if (msg.genesisId && (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId))) return;
           const creationId = sandbox ? await reserveGenesisWorld(sandbox) : undefined;
           const { worldId } = await create({

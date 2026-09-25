@@ -40,7 +40,8 @@ import type { WorldStore } from "./store.js";
 import { atomicWriteFile } from "./atomic.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { foldBlueprint } from "../harness/blueprint.js";
-import { carryGenesisConversation, genesisControlDir, reserveGenesisWorld } from "../harness/genesis-conversation.js";
+import { carryGenesisConversation, genesisConversation, genesisControlDir, reserveGenesisWorld } from "../harness/genesis-conversation.js";
+import { reviewGenesisContent } from "../harness/genesis-review.js";
 import { openThread, stageCanonEntry } from "../canon/authoring.js";
 import { MarkdownFile, sha256 } from "./text-files.js";
 import { buildSheetContent, createSheetFromSentence } from "../sheets/authoring.js";
@@ -85,6 +86,7 @@ export interface FoundingBuildPorts {
   harnessReady(): boolean;
   genesisDir(genesisId: string): Promise<string>;
   reviewedBlueprint?(genesisId: string): Promise<GenesisBlueprint>;
+  reviewNotes?(genesisId: string): Promise<string[]>;
   discardGenesis(genesisId: string): Promise<void>;
   releaseGenesis(genesisId: string): void;
   createWorld(input: {
@@ -318,6 +320,7 @@ export class FoundingBuildService {
       return;
     }
     const { route, notes } = await this.resolveImageRoute(models);
+    if (this.ports.reviewNotes) notes.push(...await this.ports.reviewNotes(genesisId));
     for (const character of blueprint.characters) {
       if (character.neverDepicted === true) notes.push(`${character.name} — never depicted`);
     }
@@ -456,6 +459,23 @@ export class FoundingBuildService {
     if (!store || store.worldId !== worldId) throw new Error("the new world did not open");
 
     await store.ensureSchemaVersion(2, "world-chat");
+    if (blueprint.reviewed) {
+      const review = await reviewGenesisContent(sandbox);
+      const remaining = review.cards.filter(card => card.status !== "approved");
+      if (remaining.length) {
+        const describe = (value: unknown): string => {
+          if (Array.isArray(value)) return value.map(describe).join("\n");
+          if (value && typeof value === "object") return Object.entries(value).map(([key, child]) => `${key}: ${describe(child)}`).join("\n");
+          return String(value ?? "");
+        };
+        const text = "Proposals carried forward from founding. These versions are not established world content. Previously approved versions, where present, remain in force. You can discuss and revise these proposals here; further changes still need approval.\n\n" +
+          remaining.map(card => `### ${card.title} — ${card.status}\n${describe(card.content.value)}`).join("\n\n");
+        const log = await genesisConversation(sandbox);
+        const at = this.ports.nowIso();
+        await log.append({ type: "founding.message", message: { id: newId("msg"), turnId: newId("turn"), role: "studio", text, attachmentIds: [], createdAt: at } },
+          { at, requestId: "founding-unapproved-proposals" });
+      }
+    }
     await carryGenesisConversation(sandbox, store.dir);
 
     const record: FoundingBuildRecord = FoundingBuildRecordSchema.parse({

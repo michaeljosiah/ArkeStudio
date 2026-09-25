@@ -33,6 +33,9 @@ export async function reviewGenesisContent(dir: string): Promise<GenesisContentR
   const ids = new Set([...approved.characters.map(c => `character:${c.slug}`), ...approved.locations.map(c => `location:${c.slug}`), ...approved.factions.map(c => `faction:${c.slug}`)]);
   for (const [kind, entities] of [["character", approved.characters], ["location", approved.locations], ["faction", approved.factions]] as const) {
     for (const entity of entities) {
+      for (const field of ["role", "billing", "region"] as const) {
+        if (entity.sheet?.[field] && !SHEET_SHAPES[kind].extraFields.includes(field)) problems.push(`${entity.name}: ${field} is not a field on a ${kind} sheet.`);
+      }
       for (const heading of Object.keys(entity.sheet?.sections ?? {})) {
         if (!SHEET_SHAPES[kind].sections.some(section => section.heading === heading)) problems.push(`${entity.name}: unsupported section "${heading}".`);
       }
