@@ -348,6 +348,8 @@ for (const preset of ["review-cut", "vertical-master"] as const) it(`encodes and
   const productionPath = join(f.world, "productions/saltlight/production.json");
   const production = JSON.parse(await readFile(productionPath, "utf8"));
   await f.store.ownedWrite(() => writeFile(productionPath, JSON.stringify({ ...production, aspect: vertical ? "9:16" : "16:9", frameRate })));
+  f.timeline.frameRate = frameRate;
+  await f.store.ownedWrite(() => writeFile(f.timelinePath, JSON.stringify(f.timeline)));
   const ffmpeg = process.env.ARKE_TEST_FFMPEG!, ffprobe = process.env.ARKE_TEST_FFPROBE!;
   const metadata = join(f.scratch, "source-metadata.txt");
   await writeFile(metadata, ";FFMETADATA1\ntitle=Private camera title\ncomment=Private shooting notes\nlocation=+51.5000-000.1200/\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=4000\ntitle=Raw source chapter\n");
