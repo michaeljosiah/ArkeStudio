@@ -55,6 +55,14 @@ const DEFAULT_CONTEXT = 8_192;
 const CONTEXT_CEILING = 32_768;
 const DEFAULT_STEPS = 24;
 const CATALOGUE_DEADLINE_MS = 15_000;
+/**
+ * The smallest context a model must state to be offered at all (256k). A product decision
+ * (issue 1247): the roster's prompts, world context and long sessions are written for long
+ * windows, and a model trained on less degrades well before its window fills. How much of that
+ * window a session asks for is separate — `maxContextTokens`, set from what the GPU can hold.
+ * A model whose details could not be read states nothing, so it is not offered either.
+ */
+export const MIN_MODEL_CONTEXT = 262_144;
 const PROVIDER = "ollama";
 /**
  * Roles that answer with one JSON document and never touch a file. The coordinator lets them run
@@ -175,11 +183,10 @@ export class ArkeAdapter implements HarnessAdapter {
    * the default, because every roster agent but two works through them and a default nobody
    * chose should be one that can do the work.
    */
-  private async catalog(signal: AbortSignal): Promise<{ models: ModelInfo[]; pulled: PulledModel[] }> {
-    const pulled = await listPulled(this.fetchImpl, this.baseUrl, signal, this.opts.catalogueDeadlineMs ?? CATALOGUE_DEADLINE_MS);
-    // Only a model seen to call tools: one whose details could not be read might be an
-    // embedding model, and a default nobody chose must be one that can do the work.
-    const fallback = pulled.find((model) => model.tools && !model.assumed)?.id;
+  private async catalog(signal: AbortSignal): Promise<{ models: ModelInfo[]; pulled: PulledModel[]; all: PulledModel[] }> {
+    const all = await listPulled(this.fetchImpl, this.baseUrl, signal, this.opts.catalogueDeadlineMs ?? CATALOGUE_DEADLINE_MS);
+    const pulled = all.filter(supported);
+    const fallback = pulled.find((model) => model.tools)?.id;
     const models = pulled.map((model): ModelInfo => ({
       id: model.id, provider: PROVIDER, displayName: model.id,
       inputModalities: model.vision ? ["text", "image"] : ["text"],
@@ -187,12 +194,11 @@ export class ArkeAdapter implements HarnessAdapter {
       // context from this before a session exists, and a prompt sized to 131,072 tokens sent
       // into a 32,768 window loses its beginning without an error.
       inputTokenLimit: this.contextFor(model.contextLength),
-      // Stated when it was seen. A model whose details could not be read says nothing, which the
-      // contract reads as unknown; claiming tools for it would be a guess presented as a fact.
-      ...(model.assumed ? {} : { tools: model.tools }),
+      // Always seen, never assumed: a model whose details could not be read is not offered.
+      tools: model.tools,
       ...(model.id === fallback ? { isDefault: true } : {}),
     }));
-    return { models, pulled };
+    return { models, pulled, all };
   }
 
   /** The context window asked of Ollama: the model's own, held to the ceiling. */
@@ -217,16 +223,21 @@ export class ArkeAdapter implements HarnessAdapter {
     const root = await resolveRoot(input.cwd);
     const override = prepared.agents?.[member.name];
     const requested = prepared.model ?? override?.model;
-    const { models, pulled } = await this.catalog(input.signal ?? new AbortController().signal);
+    const { models, pulled, all } = await this.catalog(input.signal ?? new AbortController().signal);
     input.signal?.throwIfAborted();
     const promptOnly = PROMPT_ONLY_AGENTS.has(member.name);
-    // A role that sends no tools needs no model that calls them: any model seen to complete text
-    // will do when none that calls tools is pulled. Unread models are still never chosen.
-    const answering = (model: ModelInfo) => pulled.some((row) => row.id === model.id && !row.assumed);
+    // A role that sends no tools needs no model that calls them: any offered model will do when
+    // none that calls tools is pulled. Unread models are never offered, so never chosen.
     const selected = requested !== undefined ? findHarnessModel(requested, models)
-      : models.find((model) => model.isDefault) ?? (promptOnly ? models.find(answering) : undefined);
-    if (requested !== undefined && !selected) throw new Error("The selected model is not pulled in Ollama. Refresh the model list and choose an available model.");
-    if (!selected) throw new Error(promptOnly ? "Ollama has no model that can answer. Pull one, or choose a model." : "Ollama has no model that calls tools. Pull one, or choose a model before starting this agent.");
+      : models.find((model) => model.isDefault) ?? (promptOnly ? models[0] : undefined);
+    if (requested !== undefined && !selected) {
+      // Pulled but not offered says something different from not pulled: the person can act on it.
+      const present = all.some((row) => findHarnessModel(requested, [{ id: row.id, provider: PROVIDER, displayName: row.id }]));
+      throw new Error(present
+        ? "This model's context window is under 256k tokens. Arke's local harness needs 256k or more."
+        : "The selected model is not pulled in Ollama. Refresh the model list and choose an available model.");
+    }
+    if (!selected) throw new Error(promptOnly ? "Ollama has no model with a 256k context window. Pull one, or choose a model." : "Ollama has no model with a 256k context window that calls tools. Pull one, or choose a model before starting this agent.");
     const missingInput = harnessModelMissingInput(selected, member.name === "stage-designer");
     if (missingInput === "text") throw new Error("This model cannot accept the text instructions required by Arke.");
     if (missingInput === "image") throw new Error("This model cannot inspect Stage images.");
@@ -463,4 +474,8 @@ export class ArkeAdapter implements HarnessAdapter {
     this.ready = { ready: false, reason: "The Arke harness is disposed." };
     this.revision++;
   }
+}
+
+function supported(model: PulledModel): boolean {
+  return !model.assumed && (model.contextLength ?? 0) >= MIN_MODEL_CONTEXT;
 }

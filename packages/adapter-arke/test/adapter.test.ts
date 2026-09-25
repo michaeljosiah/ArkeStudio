@@ -8,7 +8,7 @@ import { TRIMMED_TOOL_RESULT } from "../src/context.js";
 import { ArkeAdapter, loopbackBaseUrl } from "../src/index.js";
 import { callTool, FakeOllama, reply, say } from "./fake-ollama.js";
 
-async function fixture(t: test.TestContext, options: { maxStepsPerTurn?: number; catalogueDeadlineMs?: number } = {}) {
+async function fixture(t: test.TestContext, options: { maxStepsPerTurn?: number; catalogueDeadlineMs?: number; maxContextTokens?: number } = {}) {
   const ollama = new FakeOllama(); await ollama.start();
   const base = await mkdtemp(join(tmpdir(), "arke-harness-")); const root = join(base, "proposal");
   await mkdir(root); await writeFile(join(base, "secret.txt"), "SECRET_MUST_NOT_LEAK");
@@ -34,15 +34,16 @@ test("lists pulled models in the contract's terms, and names a tool-calling one 
   const f = await fixture(t);
   f.ollama.models = [
     { name: "nomic-embed-text", capabilities: ["embedding"] },
-    { name: "chatty:7b", capabilities: ["completion"], context: 8192 },
-    { name: "qwen3-vl:8b", capabilities: ["completion", "tools", "vision"], context: 65536 },
+    { name: "short:8b", capabilities: ["completion", "tools"], context: 131072 },
+    { name: "chatty:7b", capabilities: ["completion"], context: 262144 },
+    { name: "qwen3-vl:8b", capabilities: ["completion", "tools", "vision"], context: 1048576 },
   ];
   await f.adapter.init();
   assert.equal(f.adapter.readiness().ready, true);
   assert.deepEqual(await f.adapter.listModels(), [
-    { id: "chatty:7b", provider: "ollama", displayName: "chatty:7b", inputModalities: ["text"], inputTokenLimit: 8192, tools: false },
+    { id: "chatty:7b", provider: "ollama", displayName: "chatty:7b", inputModalities: ["text"], inputTokenLimit: 32768, tools: false },
     { id: "qwen3-vl:8b", provider: "ollama", displayName: "qwen3-vl:8b", inputModalities: ["text", "image"], inputTokenLimit: 32768, tools: true, isDefault: true },
-  ], "the limit is the window a session will get, and a model that cannot call tools says so");
+  ], "only models stating 256k or more; the limit is the window a session will get; a model that cannot call tools says so");
 });
 
 test("a turn streams, completes, and ends with a stated reason; every event parses", async (t) => {
@@ -139,17 +140,21 @@ test("a refused request is a session error with Ollama's reason, and a stream th
   await assert.rejects(f.adapter.sendMessage({ sessionId: id, parts: [{ type: "text", text: "again" }] }), /before it finished/);
 });
 
-test("the chosen model is the one asked for, and a model that is not pulled is refused before any session exists", async (t) => {
+test("the chosen model is the one asked for; one not pulled, or under 256k, is refused before any session exists", async (t) => {
   const f = await fixture(t);
-  f.ollama.models.push({ name: "qwen3:8b", capabilities: ["completion", "tools"], context: 4096 });
+  f.ollama.models.push({ name: "qwen3:8b", capabilities: ["completion", "tools"], context: 262144 }, { name: "short:8b", capabilities: ["completion", "tools"], context: 131072 });
   const id = await f.session("canon-qa", { model: "ollama/qwen3:8b" });
   f.ollama.script.push(reply("ok"));
   await f.adapter.sendMessage({ sessionId: id, parts: [{ type: "text", text: "hi" }] });
   assert.equal(f.ollama.chats[0]!.model, "qwen3:8b");
-  assert.deepEqual(f.ollama.chats[0]!.options, { num_ctx: 4096 }, "never more context than the model states");
+  assert.deepEqual(f.ollama.chats[0]!.options, { num_ctx: 32768 });
   await assert.rejects(f.session("world-builder", { model: "ollama/absent:1b" }), /not pulled/);
-  await assert.rejects(f.session("world-builder", { model: "ollama/qwen3:8b" }), /too small for this role's instructions/,
-    "a window that cannot hold the role's prompt is refused before a session exists, not truncated on every turn");
+  await assert.rejects(f.session("canon-qa", { model: "ollama/short:8b" }), /under 256k tokens/, "pulled, but not offered, and told why");
+});
+
+test("a window that cannot hold the role's prompt is refused before a session exists, not truncated on every turn", async (t) => {
+  const f = await fixture(t, { maxContextTokens: 8192 });
+  await assert.rejects(f.session("world-builder"), /too small for this role's instructions/);
 });
 
 test("Ollama is reached on this machine only, unless a remote host is an explicit setting", () => {
@@ -242,28 +247,27 @@ test("Ollama dropping the connection mid-reply is the runtime lost, not a turn g
   assert.ok(f.adapter.lifecycleRevision() > revision);
 });
 
-test("one model whose inspection stalls is listed with assumed capabilities; the others are read", async (t) => {
+test("a model whose inspection stalls is not offered, since its window cannot be confirmed; the others are read", async (t) => {
   const f = await fixture(t);
   f.ollama.models = [
     { name: "stuck:1b", stall: true },
-    { name: "gemma4:12b", capabilities: ["completion", "tools", "vision"], context: 8192 },
+    { name: "gemma4:12b", capabilities: ["completion", "tools", "vision"], context: 262144 },
   ];
   await f.adapter.init();
   assert.deepEqual(await f.adapter.listModels(), [
-    { id: "stuck:1b", provider: "ollama", displayName: "stuck:1b", inputModalities: ["text"], inputTokenLimit: 8192 },
-    { id: "gemma4:12b", provider: "ollama", displayName: "gemma4:12b", inputModalities: ["text", "image"], inputTokenLimit: 8192, tools: true, isDefault: true },
-  ], "an unread model claims no tools and is never the default");
+    { id: "gemma4:12b", provider: "ollama", displayName: "gemma4:12b", inputModalities: ["text", "image"], inputTokenLimit: 32768, tools: true, isDefault: true },
+  ]);
 });
 
 test("the catalogue's own deadline lists what it has not read as unknown instead of failing", async (t) => {
   const f = await fixture(t, { catalogueDeadlineMs: 300 });
   f.ollama.models = [
     ...Array.from({ length: 9 }, (_, i) => ({ name: `stuck-${i}:1b`, stall: true })),
-    { name: "gemma4:12b", capabilities: ["completion", "tools"], context: 8192 },
+    { name: "gemma4:12b", capabilities: ["completion", "tools"], context: 262144 },
   ];
-  const models = await f.adapter.listModels();
-  assert.equal(models.length, 10);
-  assert.ok(models.every((model) => model.tools === undefined && !model.isDefault), "nothing unread is claimed or chosen");
+  const started = Date.now();
+  assert.deepEqual(await f.adapter.listModels(), [], "nothing unread is offered, and the listing still answers");
+  assert.ok(Date.now() - started < 2_000, "at the catalogue's own deadline, not after every stalled inspection");
 });
 
 test("a research preparation is not granted web tools this harness cannot provide", async (t) => {
@@ -304,8 +308,7 @@ test("file tools are described compactly, keeping the rule a model must know", a
 });
 
 test("a long session is trimmed to its window: old tool results first, the instructions never", async (t) => {
-  const f = await fixture(t);
-  f.ollama.models = [{ name: "small:4b", capabilities: ["completion", "tools"], context: 8192 }];
+  const f = await fixture(t, { maxContextTokens: 8192 });
   await writeFile(join(f.root, "long.md"), "L".repeat(12_000));
   const id = await f.session("sheet-editor");
   f.ollama.script.push(callTool("read", { path: "long.md" }), reply("Read it."), reply("Noted."));
@@ -320,8 +323,7 @@ test("a long session is trimmed to its window: old tool results first, the instr
 });
 
 test("a message that cannot fit the window ends the turn with that reason, and nothing is sent", async (t) => {
-  const f = await fixture(t);
-  f.ollama.models = [{ name: "small:4b", capabilities: ["completion", "tools"], context: 8192 }];
+  const f = await fixture(t, { maxContextTokens: 8192 });
   const id = await f.session("sheet-editor");
   await assert.rejects(f.adapter.sendMessage({ sessionId: id, ...text("Q".repeat(30_000)) }), /do not fit the model's context window/);
   assert.equal(f.ollama.chats.length, 0);
@@ -381,17 +383,17 @@ test("releasing residency unloads what was loaded, except a model a turn is usin
 
 test("a prompt-only role falls back to a model seen to answer when none calls tools", async (t) => {
   const f = await fixture(t);
-  f.ollama.models = [{ name: "chatty:7b", capabilities: ["completion"], context: 8192 }];
+  f.ollama.models = [{ name: "chatty:7b", capabilities: ["completion"], context: 262144 }];
   const id = await f.session("conversation-namer");
   f.ollama.script.push(reply('{"title":"Saltlight"}'));
   await f.adapter.sendMessage({ sessionId: id, ...text("Name it.") });
   assert.equal(f.ollama.chats[0]!.model, "chatty:7b");
-  await assert.rejects(f.session("sheet-editor"), /no model that calls tools/);
+  await assert.rejects(f.session("sheet-editor"), /no model with a 256k context window that calls tools/);
 });
 
 test("a session still being created when the adapter is disposed is never published", async (t) => {
   const f = await fixture(t, { catalogueDeadlineMs: 200 });
-  f.ollama.models = [{ name: "stuck:1b", stall: true }, { name: "gemma4:12b", capabilities: ["completion", "tools"], context: 8192 }];
+  f.ollama.models = [{ name: "stuck:1b", stall: true }, { name: "gemma4:12b", capabilities: ["completion", "tools"], context: 262144 }];
   const creating = f.session("canon-qa");
   await new Promise((resolve) => setTimeout(resolve, 20));
   await f.adapter.dispose();

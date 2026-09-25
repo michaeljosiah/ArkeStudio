@@ -19,7 +19,7 @@ export class FakeOllama {
   /** `/api/generate` bodies: the only use here is an unload. */
   readonly generates: Array<Record<string, unknown>> = [];
   readonly script: ChatScript[] = [];
-  models: FakeModel[] = [{ name: "gemma4:12b", capabilities: ["completion", "tools"], context: 131072 }];
+  models: FakeModel[] = [{ name: "gemma4:12b", capabilities: ["completion", "tools"], context: 262144 }];
   aborted = 0;
   private server: Server | null = null;
   url = "";
