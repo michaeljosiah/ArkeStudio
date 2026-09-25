@@ -13,10 +13,15 @@ function Content({ content, review }: { content: GenesisContent; review: Genesis
     {Object.entries(content.value).filter(([key]) => key !== "keyArt").map(([key, value]) =>
       <section key={key}><h4>{key === "bible" ? "World bible" : key[0]!.toUpperCase() + key.slice(1)}</h4>
         <div style={{ whiteSpace: "pre-wrap" }}>{renderInlineMarkdown(String(value))}</div></section>)}
-    {content.value.keyArt && <p>Key art: {content.value.keyArt.prompt ?? content.value.keyArt.subject}</p>}
+    {content.value.keyArt && <section><h4>Key art</h4>{Object.entries(content.value.keyArt).map(([field, value]) =>
+      <p key={field}>{field}: {Array.isArray(value) ? value.join(", ") : String(value)}</p>)}</section>}
   </>;
   const entity = content.value;
   return <>
+    {entity.line && <p>{entity.line}</p>}
+    {entity.description && <p style={{ whiteSpace: "pre-wrap" }}>{entity.description}</p>}
+    {"brief" in entity && entity.brief && <section><h4>Image brief</h4>{Object.entries(entity.brief).map(([field, value]) =>
+      <p key={field}>{field}: {String(value)}</p>)}</section>}
     {("neverDepicted" in entity && entity.neverDepicted) && <p>Never depicted</p>}
     {(["role", "billing", "region"] as const).map(field => entity.sheet?.[field] ?
       <p key={field}>{field}: {entity.sheet[field]}</p> : null)}

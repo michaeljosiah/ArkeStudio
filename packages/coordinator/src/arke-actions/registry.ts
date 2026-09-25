@@ -249,6 +249,7 @@ const CLIENT_COMMAND_METADATA = {
   "genesis-list": globalOnly("Founding drafts are app-scoped."),
   "genesis-load": globalOnly("Founding drafts are app-scoped."),
   "genesis-review": globalOnly("Founding content review is pre-world."),
+  "genesis-propose-world": globalOnly("Form values become reviewable founding proposals."),
   "genesis-decide": globalOnly("Founding content decisions belong to the author."),
   "genesis-discard": globalOnly("Genesis sandbox lifecycle is outside an open world."),
   "plan-founding-build": globalOnly("Founding plans create a world and are outside an open-world scope."),

@@ -175,6 +175,7 @@ export function blueprintSaysSomething(blueprint: GenesisBlueprint): boolean {
     blueprint.look !== undefined ||
     blueprint.bible !== undefined ||
     blueprint.keyArt !== undefined ||
+    (blueprint.canon?.length ?? 0) > 0 ||
     blueprint.threads.length > 0 ||
     blueprint.characters.length > 0 ||
     blueprint.locations.length > 0 ||

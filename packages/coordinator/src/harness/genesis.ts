@@ -1,5 +1,6 @@
 import { createPreparedSession, type SessionInput } from "./session-files.js";
 import { basename, join } from "node:path";
+import { readFile } from "node:fs/promises";
 import {
   GenesisDraftSchema,
   type DomainEvent,
@@ -67,11 +68,12 @@ plus one-line entries for any cast or places you have not yet written files for:
  "characters": [{"name": "...", "line": "one line on who they are"}],
  "locations": [{"name": "...", "line": "one line on the place"}],
  "threads": ["an open question worth pulling later"],
+ "canon": [{"slug":"stable-fact-name","type":"rule","title":"A proposed fact","statement":"The exact proposed fact."}],
  "bible": "a few paragraphs of prose: the through-line, the shape, what it is about",
  "keyArt": {"prompt": "one complete prompt for an image model", "subject": "what the world's one image holds", "moment": "the moment it catches",
   "stakes": "what is at stake in it", "characters": ["names in frame"], "location": "the place in frame"}}
 
-Omit anything not settled. If nothing has been settled yet, return {}.`;
+Preserve existing canon and entity identities. Omit anything not discussed. If nothing has been discussed yet, return {}.`;
 
 /** Repeated on author turns so a hidden JSON recovery turn cannot set the conversation's register. */
 const CONVERSATION = `You are shaping a brand-new story world with its author. Think with them about the
@@ -420,7 +422,10 @@ export class GenesisService {
           break;
         } else if (event.type === "session.error" || event.type === "session.ended") break;
       }
-      const draft = parseDraftFrom(reply);
+      const existing = await readFile(join(dir, "draft.json"), "utf8").then(raw => JSON.parse(raw) as Record<string, unknown>)
+        .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT" || err instanceof SyntaxError) return {}; throw err; });
+      // Recovery restores missing output; omission is not a request to erase proposals.
+      const draft = parseDraftFrom(reply, existing);
       if (draft === null) return null;
       await atomicWriteFile(join(dir, "draft.json"), JSON.stringify(draft, null, 2) + "\n");
       return draft;
@@ -442,6 +447,7 @@ function saysSomething(draft: GenesisDraft): boolean {
     draft.genre !== undefined ||
     draft.look !== undefined ||
     draft.keyArt !== undefined ||
+    (draft.canon?.length ?? 0) > 0 ||
     draft.characters.length > 0 ||
     draft.locations.length > 0 ||
     draft.threads.length > 0 ||
@@ -456,16 +462,16 @@ function saysSomething(draft: GenesisDraft): boolean {
  * Pull the draft out of a reply. Models fence JSON, prefix it with a sentence, or answer with
  * it bare; all three are the same answer. The outermost braces win, and the schema decides.
  */
-export function parseDraftFrom(reply: string): GenesisDraft | null {
+export function parseDraftFrom(reply: string, previous: Record<string, unknown> = {}): GenesisDraft | null {
   const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(reply);
   const candidates = [fenced?.[1], reply.slice(reply.indexOf("{"), reply.lastIndexOf("}") + 1), reply];
   for (const candidate of candidates) {
     if (candidate === undefined || candidate.trim() === "") continue;
     try {
-      const parsed = GenesisDraftSchema.safeParse(JSON.parse(candidate));
+      const parsed = GenesisDraftSchema.safeParse({ ...previous, ...JSON.parse(candidate) });
       // `{}` parses cleanly — the schema fills the lists — but says nothing. A draft that
       // settles nothing must not overwrite one that settled something.
-      if (parsed.success && saysSomething(parsed.data)) return parsed.data;
+      if (parsed.success && (saysSomething(parsed.data) || Object.keys(previous).length > 0)) return parsed.data;
     } catch {
       /* try the next shape */
     }

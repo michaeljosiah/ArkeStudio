@@ -247,6 +247,24 @@ async function answerPlan(mounted: MountedGenesis): Promise<void> {
 }
 
 describe("the chat-to-build handoff (issue 666)", () => {
+  it("lets the form name an unnamed conversation and returns those values to chat for review", async () => {
+    const draft = genesisBlueprint("Ink on paper.");
+    delete draft.name;
+    const mounted = await mountGenesis(draft);
+    try {
+      await act(async () => button(mounted.container, "Form").click());
+      const name = mounted.container.querySelector<HTMLInputElement>('input[aria-label="What this world is called"]')!;
+      const props = (name as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[Object.keys(name).find(key => key.startsWith("__reactProps$"))!]!;
+      await act(async () => props.onChange({ target: { value: "Harbour" } }));
+      await act(async () => button(mounted.container, "Begin in this world").click());
+      const proposed = mounted.messages.findLast(message => message.kind === "genesis-propose-world");
+      assert.ok(proposed?.kind === "genesis-propose-world");
+      assert.equal(proposed.draft.name, "Harbour");
+      assert.ok(!mounted.messages.some(message => message.kind === "create-world"));
+      assert.ok(!mounted.container.textContent?.includes("Creating…"));
+    } finally { await unmountGenesis(mounted); }
+  });
+
   it("treats Begin as approval of the look already proposed in conversation", async () => {
     const mounted = await mountGenesis(genesisBlueprint("Ink-washed miniatures under cold harbor light."), BUILD_REVIEW);
     try {

@@ -2689,6 +2689,9 @@ export function genesisChat(genesisId: string, text: string): void {
 export function listGenesisDrafts(): void { send({ kind: "genesis-list" }); }
 export function loadGenesisDraft(genesisId: string): void { send({ kind: "genesis-load", genesisId }); }
 export function reviewGenesisDraft(genesisId: string): void { send({ kind: "genesis-review", genesisId }); }
+export function proposeGenesisWorld(genesisId: string, draft: import("@arke-studio/contracts").GenesisDraft): void {
+  send({ kind: "genesis-propose-world", genesisId, draft });
+}
 export function decideGenesisDraft(genesisId: string, choices: Array<{ key: string; digest: string }>, decision: "approve" | "reject"): void {
   send({ kind: "genesis-decide", genesisId, choices, decision, requestId: ulid() });
 }

@@ -134,7 +134,7 @@ export function keyArtBriefProse(brief: GenesisKeyArtBrief): string {
  */
 export const GenesisDraftSchema = z
   .object({
-    canon: z.array(GenesisCanonSchema).max(100).optional(),
+    canon: z.array(GenesisCanonSchema).max(100).refine(entries => new Set(entries.map(entry => entry.slug)).size === entries.length, "Canon entries need unique slugs.").optional(),
     name: z.string().min(1).max(120).optional(),
     logline: z.string().min(1).max(500).optional(),
     tone: z.string().min(1).max(120).optional(),

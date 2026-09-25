@@ -7086,6 +7086,25 @@ export class Coordinator {
         }
         return;
       }
+      case "genesis-propose-world": {
+        if (!this.opts.provider.genesisDir || this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) return;
+        this.genesisDeciding.add(msg.genesisId);
+        try {
+          const dir = await this.opts.provider.genesisDir(msg.genesisId);
+          if ((await loadGenesisConversation(dir, msg.genesisId)).worldId) throw new Error("This world has already begun.");
+          const previous = await readFile(join(dir, "draft.json"), "utf8").then(raw => JSON.parse(raw) as Record<string, unknown>)
+            .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return {}; throw err; });
+          const combine = (old: unknown, added: Array<{ name: string; line: string }>) =>
+            [...new Map([...(Array.isArray(old) ? old as Array<{ name: string; line: string }> : []), ...added].map(entity => [entity.name, entity])).values()];
+          await atomicWriteFile(join(dir, "draft.json"), JSON.stringify({ ...previous, ...msg.draft,
+            characters: combine(previous["characters"], msg.draft.characters), locations: combine(previous["locations"], msg.draft.locations),
+          }, null, 2) + "\n");
+          this.emit(await loadGenesisConversation(dir, msg.genesisId));
+        } catch (err) {
+          this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: msg.genesisId, status: "failed", detail: describeCoordinatorError(err) });
+        } finally { this.genesisDeciding.delete(msg.genesisId); }
+        return;
+      }
       case "genesis-review":
       case "genesis-decide": {
         if (!this.opts.provider.genesisDir) return;
