@@ -172,9 +172,10 @@ export interface AssembleHarnessOptions {
   codex?: CodexDiscoveryOptions & { enabled?: boolean };
   /**
    * Arke's own local harness (issue 1247). No discovery and no process: it is part of the app
-   * and talks to Ollama on this machine. `maxContextTokens` is the window a session asks for.
+   * and talks to Ollama on this machine. `maxContextTokens` is the window a session asks for;
+   * `baseUrl` moves it to another loopback port (the adapter refuses anything else).
    */
-  arke?: { enabled?: boolean; maxContextTokens?: number };
+  arke?: { enabled?: boolean; maxContextTokens?: number; baseUrl?: string };
   /** The adapter's trace sink — logs/harness.jsonl at the host's root. */
   onTrace?: (line: Record<string, unknown>) => void;
 }
@@ -215,6 +216,7 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
     // says itself, through readiness, whether it is answering. Only a loopback address is ever
     // used here — a remote runtime would be an explicit setting, and there is none yet.
     const adapter = new ArkeAdapter({
+      ...(opts.arke?.baseUrl !== undefined ? { baseUrl: opts.arke.baseUrl } : {}),
       ...(opts.arke?.maxContextTokens !== undefined ? { maxContextTokens: opts.arke.maxContextTokens } : {}),
       ...(opts.onTrace ? { onTrace: opts.onTrace } : {}),
     });

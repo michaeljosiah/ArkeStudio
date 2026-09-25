@@ -34,6 +34,7 @@ export class FakeOllama {
       let body = "";
       req.on("data", (chunk) => { body += chunk; });
       req.on("end", () => {
+        if (req.url === "/api/ps") { res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ models: [] })); return; }
         if (req.url === "/api/tags") { res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ models: this.models.map((m) => ({ name: m.name })) })); return; }
         if (req.url === "/api/show") {
           const { model } = JSON.parse(body) as { model: string };
