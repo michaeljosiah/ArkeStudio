@@ -116,9 +116,12 @@ node --import tsx packages/providers/scripts/smoke-h3-adapters.ts C:/path/to/Com
 The loader probe checks all keys against both base headers and runs each distinct patch shape
 on CUDA. It reports direct weight patching separately from the optional bypass implementation;
 a bypass failure is not proof that the shipped weight-patching path fails. Neither proves a full
-generation works. The smoke takes an adapter's zero-based inventory index, or `all`, and a shipped
+generation works. The smoke takes comma-separated zero-based inventory indices, or `all`, and a shipped
 recipe ID. It requires an idle engine at localhost:8188 and preserves its base resource guards.
-Each job has a 45-minute deadline and cancellation targets only that job. Reference-video uses a
+Each job has a 90-minute deadline and cancellation targets only that job. HTTP calls have a
+30-second limit; interrupted polling reconciles the same prompt until the job deadline. Progress
+reports are replaced atomically throughout the run, and an explicit rerun archives the prior
+report. Reference-video uses a
 synthetic colour reference; all prompts describe geometric objects. Inspect extracted frames and
 audio before treating a generated report as success. Memory minima are sampled, not instrumented
 instantaneous peaks, and a strength-one smoke establishes no broader usable strength range.
