@@ -227,3 +227,27 @@ test("events emitted before the first pull still reach a subscriber", async (t) 
   for await (const event of stream) { seen.push(event.type); if (event.type === "session.ended") break; }
   assert.deepEqual(seen, ["message.delta", "message.delta", "message.completed", "session.ended"]);
 });
+
+test("Ollama dropping the connection mid-reply is the runtime lost, not a turn gone wrong", async (t) => {
+  const f = await fixture(t);
+  await f.adapter.init();
+  const id = await f.session("world-builder");
+  const revision = f.adapter.lifecycleRevision();
+  f.ollama.script.push({ drop: true, chunks: [{ message: { role: "assistant", content: "Once" }, done: false }] });
+  await assert.rejects(f.adapter.sendMessage({ sessionId: id, parts: [{ type: "text", text: "hi" }] }), /stopped answering/);
+  assert.equal(f.adapter.readiness().ready, false);
+  assert.ok(f.adapter.lifecycleRevision() > revision);
+});
+
+test("one model whose inspection stalls is listed with assumed capabilities; the others are read", async (t) => {
+  const f = await fixture(t);
+  f.ollama.models = [
+    { name: "stuck:1b", stall: true },
+    { name: "gemma4:12b", capabilities: ["completion", "tools", "vision"], context: 8192 },
+  ];
+  await f.adapter.init();
+  assert.deepEqual(await f.adapter.listModels(), [
+    { id: "stuck:1b", provider: "ollama", displayName: "stuck:1b", inputModalities: ["text"], inputTokenLimit: 8192, tools: true, isDefault: true },
+    { id: "gemma4:12b", provider: "ollama", displayName: "gemma4:12b", inputModalities: ["text", "image"], inputTokenLimit: 8192, tools: true },
+  ]);
+});

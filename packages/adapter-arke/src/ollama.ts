@@ -120,10 +120,17 @@ export async function streamChat(
       if (typeof chunk.done_reason === "string") result.doneReason = chunk.done_reason;
     }
   };
-  for await (const bytes of response.body as unknown as AsyncIterable<Uint8Array>) {
-    pending += decoder.decode(bytes, { stream: true });
-    let newline: number;
-    while ((newline = pending.indexOf("\n")) >= 0) { take(pending.slice(0, newline)); pending = pending.slice(newline + 1); }
+  try {
+    for await (const bytes of response.body as unknown as AsyncIterable<Uint8Array>) {
+      pending += decoder.decode(bytes, { stream: true });
+      let newline: number;
+      while ((newline = pending.indexOf("\n")) >= 0) { take(pending.slice(0, newline)); pending = pending.slice(newline + 1); }
+    }
+  } catch (error) {
+    // Ollama exiting mid-generation surfaces here, after the headers, as a transport error
+    // ("terminated"): the same loss as a refused connection, so it is reported the same way.
+    if (signal.aborted || error instanceof OllamaChatError) throw error;
+    throw new OllamaUnreachableError("Ollama stopped answering during the reply.", { cause: error });
   }
   take(pending + decoder.decode());
   if (!done) throw new OllamaChatError("Ollama ended the reply before it finished.");
@@ -149,32 +156,51 @@ export interface PulledModel { id: string; contextLength?: number; tools: boolea
  * be read is listed with tools assumed and no image input claimed.
  */
 export async function listPulled(fetchImpl: typeof fetch, baseUrl: string, signal: AbortSignal): Promise<PulledModel[]> {
+  const listed = await listTags(fetchImpl, baseUrl, signal);
+  const ids = listed.flatMap((raw) => { const id = object(raw).name; return typeof id === "string" && id ? [id] : []; });
+  const rows: Array<PulledModel | null> = new Array(ids.length).fill(null);
+  // A few at a time, each with its own deadline: one model whose inspection stalls is listed with
+  // assumed capabilities rather than taking the whole catalogue down with it. Only the caller's
+  // own cancellation ends the pass.
+  let next = 0;
+  const worker = async () => {
+    for (let at = next++; at < ids.length; at = next++) rows[at] = await inspect(fetchImpl, baseUrl, ids[at]!, signal);
+  };
+  await Promise.all(Array.from({ length: Math.min(INSPECTION_CONCURRENCY, ids.length) }, worker));
+  return rows.filter((row): row is PulledModel => row !== null);
+}
+
+/** Whether Ollama answers at all: the model list, without inspecting each model. */
+export async function listTags(fetchImpl: typeof fetch, baseUrl: string, signal: AbortSignal): Promise<unknown[]> {
   const tags = await fetchImpl(`${baseUrl}/api/tags`, { redirect: "error", signal });
   if (!tags.ok) throw new Error(`Ollama could not list its models (HTTP ${tags.status}).`);
   const listed = object(await tags.json()).models;
   if (!Array.isArray(listed)) throw new Error("Ollama did not return a model list.");
-  const models: PulledModel[] = [];
-  for (const raw of listed) {
-    const id = object(raw).name;
-    if (typeof id !== "string" || !id) continue;
-    let details: JsonObject = {};
-    try {
-      const shown = await fetchImpl(`${baseUrl}/api/show`, {
-        method: "POST", redirect: "error", signal, headers: { "content-type": "application/json" }, body: JSON.stringify({ model: id }),
-      });
-      if (shown.ok) details = object(await shown.json());
-    } catch (error) { if (signal.aborted) throw error; }
-    const capabilities = Array.isArray(details.capabilities) ? details.capabilities.filter((value): value is string => typeof value === "string") : null;
-    if (capabilities && !capabilities.includes("completion")) continue;
-    const info = object(details.model_info);
-    const architecture = typeof info["general.architecture"] === "string" ? info["general.architecture"] : null;
-    const context = architecture !== null ? info[`${architecture}.context_length`] : undefined;
-    models.push({
-      id,
-      ...(typeof context === "number" && Number.isSafeInteger(context) && context > 0 ? { contextLength: context } : {}),
-      tools: capabilities ? capabilities.includes("tools") : true,
-      vision: capabilities ? capabilities.includes("vision") : false,
+  return listed;
+}
+
+const INSPECTION_CONCURRENCY = 4;
+const INSPECTION_TIMEOUT_MS = 5_000;
+
+async function inspect(fetchImpl: typeof fetch, baseUrl: string, id: string, signal: AbortSignal): Promise<PulledModel | null> {
+  signal.throwIfAborted();
+  let details: JsonObject = {};
+  try {
+    const shown = await fetchImpl(`${baseUrl}/api/show`, {
+      method: "POST", redirect: "error", signal: AbortSignal.any([signal, AbortSignal.timeout(INSPECTION_TIMEOUT_MS)]),
+      headers: { "content-type": "application/json" }, body: JSON.stringify({ model: id }),
     });
-  }
-  return models;
+    if (shown.ok) details = object(await shown.json());
+  } catch (error) { if (signal.aborted) throw error; }
+  const capabilities = Array.isArray(details.capabilities) ? details.capabilities.filter((value): value is string => typeof value === "string") : null;
+  if (capabilities && !capabilities.includes("completion")) return null;
+  const info = object(details.model_info);
+  const architecture = typeof info["general.architecture"] === "string" ? info["general.architecture"] : null;
+  const context = architecture !== null ? info[`${architecture}.context_length`] : undefined;
+  return {
+    id,
+    ...(typeof context === "number" && Number.isSafeInteger(context) && context > 0 ? { contextLength: context } : {}),
+    tools: capabilities ? capabilities.includes("tools") : true,
+    vision: capabilities ? capabilities.includes("vision") : false,
+  };
 }

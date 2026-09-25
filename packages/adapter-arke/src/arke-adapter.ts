@@ -9,7 +9,7 @@ import {
   type ToolResult, type ToolSession,
 } from "@arke-studio/confined-tools";
 import {
-  listPulled, loopbackBaseUrl, OLLAMA_DEFAULT_URL, OllamaUnreachableError, streamChat,
+  listPulled, listTags, loopbackBaseUrl, OLLAMA_DEFAULT_URL, OllamaUnreachableError, streamChat,
   type ChatMessage, type ChatTool, type PulledModel,
 } from "./ollama.js";
 
@@ -121,7 +121,9 @@ export class ArkeAdapter implements HarnessAdapter {
   async init(): Promise<void> {
     if (this.disposed) throw new Error("The Arke harness is disposed.");
     try {
-      await listPulled(this.fetchImpl, this.baseUrl, AbortSignal.timeout(8_000));
+      // Reachability only: inspecting every pulled model is the catalogue's work, and one slow
+      // inspection must not read as Ollama being down.
+      await listTags(this.fetchImpl, this.baseUrl, AbortSignal.timeout(8_000));
       if (!this.ready.ready) this.revision++;
       this.ready = { ready: true };
     } catch {

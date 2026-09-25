@@ -5,9 +5,10 @@ import type { AddressInfo } from "node:net";
 export type ChatScript =
   | { chunks: Record<string, unknown>[] }
   | { status: number; error: string }
-  | { hang: true; chunks?: Record<string, unknown>[] };
+  | { hang: true; chunks?: Record<string, unknown>[] }
+  | { drop: true; chunks: Record<string, unknown>[] };
 
-export interface FakeModel { name: string; capabilities?: string[]; context?: number }
+export interface FakeModel { name: string; capabilities?: string[]; context?: number; stall?: boolean }
 
 /**
  * A scripted Ollama: `/api/tags` and `/api/show` from a model list, and `/api/chat` answering
@@ -30,6 +31,7 @@ export class FakeOllama {
         if (req.url === "/api/show") {
           const { model } = JSON.parse(body) as { model: string };
           const found = this.models.find((m) => m.name === model);
+          if (found?.stall) return;
           if (!found) { res.writeHead(404).end(JSON.stringify({ error: "model not found" })); return; }
           res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({
             capabilities: found.capabilities, model_info: { "general.architecture": "gemma4", ...(found.context ? { "gemma4.context_length": found.context } : {}) },
@@ -42,6 +44,7 @@ export class FakeOllama {
           if ("status" in next) { res.writeHead(next.status, { "content-type": "application/json" }).end(JSON.stringify({ error: next.error })); return; }
           res.writeHead(200, { "content-type": "application/x-ndjson" });
           for (const chunk of next.chunks ?? []) res.write(JSON.stringify(chunk) + "\n");
+          if ("drop" in next) { setTimeout(() => res.socket?.destroy(), 20); return; }
           if ("hang" in next) { req.on("close", () => { this.aborted++; }); res.on("close", () => { this.aborted++; }); return; }
           res.end();
           return;
