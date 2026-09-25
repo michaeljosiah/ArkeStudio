@@ -8,6 +8,7 @@ import {
   audiobookCounts,
   audiobookDirectionFor,
   audiobookHeading,
+  audiobookRecordingKey,
   audiobookSpeakerColours,
   audiobookSpeakerKey,
   retailLevel,
@@ -79,6 +80,8 @@ export interface ChapterAudiobookInput {
   /** The takes the record names that the coordinator found gone from the shelf when the chapter was opened. */
   missing?: readonly string[];
   reading: AudiobookReading;
+  /** The book's recorded speakers (SPEC-047 R-37), by `audiobookRecordingKey`. */
+  recorded?: readonly string[];
   connection: string;
   locked: boolean;
   /**
@@ -115,6 +118,8 @@ export interface BlockRow {
   colour: number | null;
   /** The kept take was recorded by a person (SPEC-047 R-34), not made by a voice. */
   recorded: boolean;
+  /** The block's speaker is recorded by a person (R-37): made only by a recording. */
+  byPerson: boolean;
 }
 
 /** The filter over the blocks (R-33): everyone, the narrator, or one speaker by key. */
@@ -127,7 +132,7 @@ export function inAudiobookFilter(row: Pick<BlockRow, "speakerKey">, filter: Aud
   return row.speakerKey === filter.speaker;
 }
 
-const STATE_LABEL: Record<AudiobookBlockState, string> = { "not made": "not made", made: "made", stale: "stale", flagged: "flagged" };
+const STATE_LABEL: Record<AudiobookBlockState, string> = { "not made": "not made", made: "made", stale: "stale", flagged: "flagged", awaiting: "awaiting recording" };
 
 function readerOf(voice: { provider: string; model?: string; voiceId: string; label?: string }, clonedVoices: readonly ClonedVoice[] | undefined): AudiobookReader | null {
   const model = voice.model ?? legacyVoiceModel(voice.provider, voice.voiceId, clonedVoices ?? []);
@@ -138,6 +143,8 @@ function readerOf(voice: { provider: string; model?: string; voiceId: string; la
 /** The blocks, their states and the counts, from the one rule both ends use. */
 export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const { worldId, prodId, chapter, body, cast, record, missing, reading, connection, locked } = input;
+  const recordedList = input.recorded;
+  const recordedKeys = useMemo(() => new Set(recordedList ?? []), [recordedList]);
   const { state } = useStore();
   const world = state?.world ?? null;
   const catalogue = useStore().voiceCatalogue;
@@ -210,9 +217,10 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       const speakerKey = audiobookSpeakerKey(block);
       const colour = block.sheet === undefined ? null : (colours.get(block.sheet) ?? null);
       const recorded = take?.source === "recorded";
-      return { block, state: audiobookBlockState(block, recordOrNull, assigned, hasArtifact), mark, markWarn, assigned, speaker, ...(language !== undefined ? { language } : {}), artifact, speakerKey, colour, recorded };
+      const byPerson = recordedKeys.has(audiobookRecordingKey(block));
+      return { block, state: audiobookBlockState(block, recordOrNull, assigned, hasArtifact, byPerson), mark, markWarn, assigned, speaker, ...(language !== undefined ? { language } : {}), artifact, speakerKey, colour, recorded, byPerson };
     });
-  }, [derived.blocks, narrator, reading, world, recordOrNull, hasArtifact, catalogue, modelOf, colours]);
+  }, [derived.blocks, narrator, reading, world, recordOrNull, hasArtifact, catalogue, modelOf, colours, recordedKeys]);
   // The filter is the page's (R-33): not kept, and gone with the chapter.
   const [filter, setFilter] = useState<AudiobookFilter>(null);
   useEffect(() => setFilter(null), [chapter.id]);
@@ -237,8 +245,15 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     if (connection === "open") requestVoiceCatalogue(worldId);
   }, [connection, worldId]);
   const counts = useMemo(
-    () => audiobookCounts(derived.blocks, recordOrNull, (block) => rows.find((row) => row.block.key === block.key)?.assigned ?? narrator, hasArtifact),
-    [derived.blocks, recordOrNull, rows, narrator, hasArtifact],
+    () =>
+      audiobookCounts(
+        derived.blocks,
+        recordOrNull,
+        (block) => rows.find((row) => row.block.key === block.key)?.assigned ?? narrator,
+        hasArtifact,
+        (block) => recordedKeys.has(audiobookRecordingKey(block)),
+      ),
+    [derived.blocks, recordOrNull, rows, narrator, hasArtifact, recordedKeys],
   );
   // What a press would spend, before the run asks: the cloud blocks not made, by the character
   // as the row bills it (SPEC-046 R-8) — bytes or doubled CJK for the readers that count so.
@@ -246,7 +261,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const estimate = useMemo(
     () =>
       rows.reduce((sum, row) => {
-        if (row.state === "made" || row.speaker.provider === "kokoro") return sum;
+        if (row.state === "made" || row.state === "awaiting" || row.speaker.provider === "kokoro") return sum;
         const model = modelOf(row.speaker);
         return model === null ? sum : sum + estimateMicroUsd(model, { characters: billableCharacters(model, row.block.text) });
       }, 0),
@@ -712,7 +727,12 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelect, onPlayOne,
                   <Pin size={11} />
                 </span>
               )}
-              {row.artifact !== null &&
+              {row.state === "awaiting" && (
+                <span className="fy-ab__source" title="awaiting recording" aria-label="awaiting recording">
+                  <Mic size={11} />
+                </span>
+              )}
+              {row.artifact !== null && row.state !== "awaiting" &&
                 (row.recorded ? (
                   <span className="fy-ab__source fy-ab__source--recorded" title="recorded" aria-label="recorded">
                     <Mic size={11} />
@@ -828,7 +848,7 @@ function reportLine(plan: CadencePlan, controls: ReturnType<typeof mapCadence>["
 }
 
 /** The side in the Audiobook view: the block pressed, its direction, then its takes. */
-export function AudiobookSide({ rows, selected, record, artifacts, slug, productionId, chapterId, chapterTitle, modelOf, onSetDirection, onMakeAgain, onUpload, refused, blockHost }: {
+export function AudiobookSide({ rows, selected, record, artifacts, slug, productionId, chapterId, chapterTitle, modelOf, onSetDirection, onMakeAgain, onUpload, onRecorded, refused, blockHost }: {
   rows: BlockRow[];
   selected: string | null;
   record: ChapterAudiobook | null;
@@ -842,6 +862,8 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
   onMakeAgain: (key: string) => void;
   /** A recording for the block, from the host's picker (SPEC-047 R-35). */
   onUpload?: (key: string) => void;
+  /** The block's speaker recorded by a person, or given back to their voice (R-37). */
+  onRecorded?: (speaker: string, recorded: boolean) => void;
   /** The last write's refusal (R-9), said on the panel until the next write answers. */
   refused: string | null;
   /** The element the block's words are shown in, for a cue placed at the selection. */
@@ -1102,6 +1124,12 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
             </Button>
           )}
         </div>
+        {onRecorded !== undefined && (
+          <label className="fy-ab__recorded" data-testid="audiobook-recorded">
+            <input type="checkbox" checked={row.byPerson} onChange={() => onRecorded(audiobookRecordingKey(row.block), !row.byPerson)} />
+            <span>{row.speakerKey === null ? "Narrator" : row.mark} · recorded by a person</span>
+          </label>
+        )}
       </section>
     </>
   );

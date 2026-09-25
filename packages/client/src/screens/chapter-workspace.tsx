@@ -57,6 +57,7 @@ import {
   stopContinuity,
   useDeriving,
   castVoices,
+  setAudiobookRecorded,
   setVoicePin,
   requestVoiceCatalogue,
   stopVoices,
@@ -1100,6 +1101,7 @@ export function ChapterWorkspace({
     record: audiobookRecord.record,
     missing: audiobookRecord.missing,
     reading: production.audiobook?.reading ?? "narrator",
+    ...(production.audiobook?.recorded !== undefined ? { recorded: production.audiobook.recorded } : {}),
     connection,
     locked: locked || record === null,
     // The press waits out the autosave (turn 126's fourth rule, codex on PR 1180): a read of
@@ -1662,6 +1664,7 @@ export function ChapterWorkspace({
                     ...(audiobook.counts.stale > 0 ? [`${audiobook.counts.stale} stale`] : []),
                     ...(audiobook.counts.flagged > 0 ? [`${audiobook.counts.flagged} flagged`] : []),
                     ...(audiobook.counts.notMade > 0 ? [`${audiobook.counts.notMade} not made`] : []),
+                    ...(audiobook.counts.awaiting > 0 ? [`${audiobook.counts.awaiting} awaiting recording`] : []),
                   ].join(" · ")}
                 </span>
               </div>
@@ -1858,6 +1861,7 @@ export function ChapterWorkspace({
                 onMakeAgain={audiobook.makeAgain}
                 refused={audiobook.lastRecord?.refused ?? null}
                 onUpload={audiobook.uploadTake}
+                onRecorded={(speaker, on) => setAudiobookRecorded(worldId, prodId, speaker, on)}
                 blockHost={(key) => audiobookColumn.current?.querySelector<HTMLElement>(`[data-block="${key}"] .fy-ab__text`) ?? null}
               />
             )}

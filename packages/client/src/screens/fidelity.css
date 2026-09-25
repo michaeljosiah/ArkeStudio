@@ -6792,6 +6792,7 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ab__menu-tick { flex: none; width: 14px; color: var(--foreground); }
 .fy-ab__menu-sep { height: 1px; margin: 5px -6px; background: var(--border); }
 .fy-ab__source--recorded { color: var(--foreground); }
+.fy-ab__recorded { display: flex; align-items: center; gap: 7px; margin-top: 10px; font: 400 12px/1.4 var(--font-sans); color: var(--muted-foreground); cursor: pointer; }
 /* Upload a take (design turn 155c, SPEC-047 R-35): 540 wide; the checks are data, a warning never refuses. */
 .fy-rectake { display: flex; flex-direction: column; gap: 14px; }
 .fy-rectake__quote { padding: 10px 12px; border-radius: 8px; box-shadow: inset 2px 0 0 var(--fy-voice); background: color-mix(in srgb, var(--fy-voice) 7%, transparent); font: 400 15px/1.6 var(--font-sans); }

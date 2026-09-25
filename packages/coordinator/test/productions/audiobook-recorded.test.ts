@@ -6,7 +6,7 @@ import { audiobookBlockState, type AudioQcAnalysis, type AudiobookReader } from 
 import { hashAudioFile, type AudioMediaTools } from "../../src/audio/media-tools.js";
 import { readAudioRights } from "../../src/audio/rights.js";
 import { keepRecording, RecordedTakeRefusal, stageRecording } from "../../src/productions/audiobook-recorded.js";
-import { planAudiobook, readAudiobook } from "../../src/productions/audiobook.js";
+import { planAudiobook, readAudiobook, readAudiobookBook, writeAudiobookBook } from "../../src/productions/audiobook.js";
 import { openChapter, saveChapter } from "../../src/productions/ops.js";
 import { RECORDED_TAKE_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -102,5 +102,29 @@ describe("a take a person recorded (SPEC-047 R-34..R-36)", () => {
     await saveChapter(store, PRODUCTION, "01-neap", live.body.replace(block.text.slice(0, 20), "Entirely other words"), { baseHash: live.hash });
     await assert.rejects(keepRecording(store, staged, { basis: "self", narrator: NARRATOR, ackId: "ack_late", now: NOW }), /words changed/);
     assert.deepEqual(await readAudioRights(store), [], "nothing acknowledged for a take not kept");
+  });
+});
+
+describe("a speaker a person records (SPEC-047 R-37, R-38)", () => {
+  it("the narrator recorded: every narration block waits on a recording, and a current recording makes it", async () => {
+    const { store } = await open();
+    await writeAudiobookBook(store, PRODUCTION, { schemaVersion: 1, reading: "narrator", recorded: ["narrator"] });
+    const plan = await planAudiobook(store, PRODUCTION, "neap", { narrator: NARRATOR });
+    assert.ok(plan.blocks.length > 1);
+    assert.ok(plan.blocks.every((planned) => planned.state === "awaiting" && planned.recorded === true), "the title and narration wait on the narrator's recording");
+
+    const block = plan.blocks.find((planned) => planned.block.key !== "title")!.block;
+    const deps = { tools: fakeTools(), transcribe: null, narrator: NARRATOR, signal: new AbortController().signal };
+    const staged = await stageRecording(store, deps, { productionId: PRODUCTION, chapterId: "neap", block: block.key, sourcePath: await recording() });
+    await keepRecording(store, staged, { basis: "self", narrator: NARRATOR, ackId: "ack_narrator", now: NOW });
+    const after = await planAudiobook(store, PRODUCTION, "neap", { narrator: NARRATOR });
+    assert.equal(after.blocks.find((planned) => planned.block.key === block.key)!.state, "made");
+    assert.equal(after.blocks.filter((planned) => planned.state === "awaiting").length, plan.blocks.length - 1);
+  });
+
+  it("the book record keeps its reading and its recorded speakers apart: neither write drops the other", async () => {
+    const { store } = await open();
+    await writeAudiobookBook(store, PRODUCTION, { schemaVersion: 1, reading: "cast", recorded: ["odile-sarn"] });
+    assert.deepEqual(await readAudiobookBook(store, PRODUCTION), { schemaVersion: 1, reading: "cast", recorded: ["odile-sarn"] });
   });
 });

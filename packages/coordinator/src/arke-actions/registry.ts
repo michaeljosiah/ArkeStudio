@@ -486,6 +486,7 @@ const CLIENT_COMMAND_METADATA = {
   // turned on performance — a model run over the prose that writes nothing.
   // A take a person recorded (turn 155c): chosen on this machine, prepared and checked here, and
   // kept under the rights given once; nothing leaves the machine.
+  "set-audiobook-recorded": action("production", "command", "voice", "authored-change", ["chapters"]),
   "stage-audiobook-take": action("production", "command", "voice", "host-file-access", ["chapters"]),
   "keep-audiobook-take": action("production", "command", "voice", "privacy-sensitive", ["chapters"]),
   "discard-audiobook-take": action("production", "command", "voice", "host-file-access", []),

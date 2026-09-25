@@ -4624,6 +4624,11 @@ export function setAudiobookReading(worldId: string, productionId: string, readi
   return send({ kind: "set-audiobook-reading", worldId, productionId, reading });
 }
 
+/** A speaker recorded by a person, or given back to their voice (SPEC-047 R-37): `narrator`, a sheet id, or a name. */
+export function setAudiobookRecorded(worldId: string, productionId: string, speaker: string, recorded: boolean): boolean {
+  return send({ kind: "set-audiobook-recorded", worldId, productionId, speaker, recorded });
+}
+
 /**
  * A price declined, or an upload consent declined: the run is over on the coordinator's side
  * either way — it returned without a finished event when it asked — so only this window's word

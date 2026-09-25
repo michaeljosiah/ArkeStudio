@@ -274,7 +274,7 @@ import { castLines, makeAdapterVoicesDeriver, readVoices, setVoicePin, VoicePinR
 import { discardRecording, keepRecording, RECORDED_TAKE_EXTENSIONS, RecordedTakeRefusal, stageRecording, type StagedRecording } from "./productions/audiobook-recorded.js";
 import { acceptDirections, directChapter, directableBlocks, makeAdapterDirectionDeriver, type DirectionDeriver } from "./productions/audiobook-direction.js";
 import { audiobookDoor, conformDirections, runAudiobookBook } from "./productions/audiobook-book.js";
-import { checkDirection, directionPlan, writeAudiobookBook, writeBlockDirection } from "./productions/audiobook.js";
+import { checkDirection, directionPlan, readAudiobookBook, writeAudiobookBook, writeBlockDirection } from "./productions/audiobook.js";
 import { runAudiobookChapter } from "./productions/audiobook-run.js";
 import { exportManuscript, importManuscript, readManuscript } from "./productions/manuscript.js";
 import { manuscriptChapters, productionShape, type StructuredDocument } from "@arke-studio/contracts";
@@ -369,7 +369,7 @@ import { deleteVoice } from "./voice/library.js";
 import { atomicWriteFile, serializeFileMutation } from "./world/atomic.js";
 import { restoreBible, saveBible } from "./world/bible.js";
 import { changesForEntity } from "./world/change-writer.js";
-import { classify, CommitPlanError, MEDIA_HAS_VIDEO_SCHEMA_VERSION } from "./world/commit.js";
+import { classify, CommitPlanError, MEDIA_HAS_VIDEO_SCHEMA_VERSION, RECORDED_TAKE_SCHEMA_VERSION } from "./world/commit.js";
 import { describeCoordinatorError } from "./errors/user-message.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
 import { WorldOpenError, scanWorld } from "./world/scan.js";
@@ -12912,7 +12912,10 @@ export class Coordinator {
           return;
         }
         try {
-          await writeAudiobookBook(store, msg.productionId, { schemaVersion: 1, reading: msg.reading });
+          // Only the reading moves: the speakers a person records stay as they were (R-37).
+          const held = await readAudiobookBook(store, msg.productionId);
+          const recorded = held === null || held === "unreadable" ? undefined : held.recorded;
+          await writeAudiobookBook(store, msg.productionId, { schemaVersion: 1, reading: msg.reading, ...(recorded !== undefined ? { recorded } : {}) });
           // The reading switched moves blocks between the narrator and the cast's voices (R-13):
           // every standing direction is re-checked against its new reader's row, the controls
           // that row cannot carry dropped and counted, so a direction accepted for one voice is
@@ -12921,6 +12924,34 @@ export class Coordinator {
           this.refreshIfStillOpen(store);
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.reading-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+      case "set-audiobook-recorded": {
+        // A speaker a person records (design turn 155, SPEC-047 R-37): the book's choice, kept
+        // beside the reading. Refused while the book or a chapter of it is being read, as the
+        // reading is — a run half way through would make the lines it now should wait on.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
+        const reading = this.readingBooks.has(`${msg.worldId}/${msg.productionId}`) || [...this.readingAudiobooks.values()].some((run) => run.worldId === msg.worldId && run.productionId === msg.productionId);
+        if (reading) {
+          void this.appLog?.append({ kind: "audiobook.recorded-refused", production: msg.productionId, message: "the book is being read" });
+          return;
+        }
+        try {
+          const held = await readAudiobookBook(store, msg.productionId);
+          const base = held === null || held === "unreadable" ? { schemaVersion: 1 as const, reading: "narrator" as const, recorded: [] as string[] } : held;
+          const list = new Set(base.recorded ?? []);
+          if (msg.recorded) list.add(msg.speaker);
+          else list.delete(msg.speaker);
+          const next = { schemaVersion: 1 as const, reading: base.reading, ...(list.size > 0 ? { recorded: [...list] } : {}) };
+          // A book record with speakers recorded is read strictly by the builds before it.
+          if (next.recorded !== undefined) await store.ensureSchemaVersion(RECORDED_TAKE_SCHEMA_VERSION, "recorded-speakers");
+          await writeAudiobookBook(store, msg.productionId, next);
+          this.refreshIfStillOpen(store);
+        } catch (err) {
+          void this.appLog?.append({ kind: "audiobook.recorded-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
         }
         return;
       }
