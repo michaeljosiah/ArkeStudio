@@ -1225,31 +1225,31 @@ export function RecordedTakeDialog({ staged, row, onCancel, onReplace, onKeep }:
   const refused = staged.state === "refused" ? staged.refused : undefined;
   return (
     <EditorDialog open title="Upload a take" subtitle={`${row.mark} · ${row.block.key}`} onClose={onCancel} width={540}>
-      <div className="fy-rt" data-testid="recorded-take-dialog">
-        <div className={`fy-rt__quote fy-voice--${tone}`}>{row.block.text}</div>
+      <div className="fy-rectake" data-testid="recorded-take-dialog">
+        <div className={`fy-rectake__quote fy-voice--${tone}`}>{row.block.text}</div>
         {refused !== undefined ? (
-          <p className="fy-rt__refused">{refused}</p>
+          <p className="fy-rectake__refused">{refused}</p>
         ) : (
           <>
-            <div className="fy-rt__file">
-              <span className="fy-rt__name">{staged.file ?? ""}</span>
-              <span className="fy-mono fy-rt__tech">{technical}</span>
+            <div className="fy-rectake__file">
+              <span className="fy-rectake__name">{staged.file ?? ""}</span>
+              <span className="fy-mono fy-rectake__tech">{technical}</span>
               <Button variant="ghost" onClick={onReplace}>Replace</Button>
             </div>
-            <div className="fy-rt__checks" data-testid="recorded-take-checks">
+            <div className="fy-rectake__checks" data-testid="recorded-take-checks">
               {rows.map((item) => (
-                <div key={item.key} className={`fy-rt__check fy-rt__check--${item.outcome}`}>
-                  <span className="fy-rt__check-label">{item.label}</span>
-                  <span className="fy-mono fy-rt__check-value">{item.value}</span>
+                <div key={item.key} className={`fy-rectake__check fy-rectake__check--${item.outcome}`}>
+                  <span className="fy-rectake__check-label">{item.label}</span>
+                  <span className="fy-mono fy-rectake__check-value">{item.value}</span>
                 </div>
               ))}
             </div>
-            <div className="fy-rt__who">
-              <label className="fy-rt__field">
+            <div className="fy-rectake__who">
+              <label className="fy-rectake__field">
                 <span>Performer</span>
-                <input className="fy-rt__input" value={performer} maxLength={80} onChange={(event) => setPerformer(event.target.value)} />
+                <input className="fy-rectake__input" value={performer} maxLength={80} onChange={(event) => setPerformer(event.target.value)} />
               </label>
-              <div className="fy-rt__field">
+              <div className="fy-rectake__field">
                 <span>Rights</span>
                 <span className="fy-seg" role="group" aria-label="Rights">
                   {([["self", "My voice"], ["authorized", "Authorized"], ["licensed", "Licensed"]] as const).map(([value, label]) => (
@@ -1260,12 +1260,12 @@ export function RecordedTakeDialog({ staged, row, onCancel, onReplace, onKeep }:
                 </span>
               </div>
             </div>
-            {staged.refused !== undefined && <p className="fy-rt__refused">{staged.refused}</p>}
+            {staged.refused !== undefined && <p className="fy-rectake__refused">{staged.refused}</p>}
           </>
         )}
-        <div className="fy-rt__foot">
-          <span className="fy-mono fy-rt__tech">{refused === undefined ? "wav · mono" : ""}</span>
-          <span className="fy-rt__push" />
+        <div className="fy-rectake__foot">
+          <span className="fy-mono fy-rectake__tech">{refused === undefined ? "wav · mono" : ""}</span>
+          <span className="fy-rectake__push" />
           <Button variant="ghost" onClick={onCancel}>Cancel</Button>
           {refused !== undefined ? (
             <Button variant="primary" onClick={onReplace}>Choose another</Button>
