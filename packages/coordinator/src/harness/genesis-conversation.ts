@@ -1,6 +1,7 @@
 import { basename, dirname, join } from "node:path";
 import { readFile, stat } from "node:fs/promises";
-import { newId, ulid, UlidSchema, type DomainEvent, type GenesisBlueprint, type WorldChatMessage } from "@arke-studio/contracts";
+import { CapabilitySchema, GenesisBlueprintSchema, newId, ulid, UlidSchema, type DomainEvent, type GenesisBlueprint, type WorldChatMessage } from "@arke-studio/contracts";
+import { z } from "zod";
 import { WorldChatStore, conversationDir } from "../world-chat/store.js";
 import { foldBlueprint } from "./blueprint.js";
 import { sandboxAttachments } from "../artifacts/genesis-attachments.js";
@@ -11,6 +12,13 @@ import { atomicWriteFile, serializeFileMutation } from "../world/atomic.js";
 export function genesisControlDir(workspace: string): string {
   if (basename(workspace) !== "workspace") throw new Error("A founding workspace must have its own control directory.");
   return dirname(workspace);
+}
+
+const FrozenFoundingSchema = z.object({ blueprint: GenesisBlueprintSchema, models: z.record(CapabilitySchema, z.string()).optional() }).strict();
+export async function frozenFoundingInput(dir: string) {
+  return readFile(join(genesisControlDir(dir), "founding-input.json"), "utf8")
+    .then(raw => FrozenFoundingSchema.parse(JSON.parse(raw)))
+    .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return null; throw err; });
 }
 
 export function reserveGenesisWorld(dir: string): Promise<string> {
@@ -79,13 +87,25 @@ export async function loadGenesisConversation(dir: string, genesisId: string, ru
   const current = await foldBlueprint(dir);
   const { events } = await log.read();
   const latest = events.findLast(envelope => envelope.event.type === "founding.blueprint")?.event;
-  const blueprint = current.dropped.length && latest?.type === "founding.blueprint"
-    ? { ...latest.blueprint, dropped: current.dropped } : current;
+  const frozen = await frozenFoundingInput(dir);
+  let blueprint = current;
+  if (latest?.type === "founding.blueprint") {
+    if (current.dropped.includes("draft.json")) {
+      blueprint = { ...latest.blueprint, characters: current.characters, locations: current.locations, factions: current.factions, dropped: current.dropped };
+    }
+    for (const kind of ["characters", "locations", "factions"] as const) {
+      const missing = latest.blueprint[kind].filter(entity => current.dropped.includes(`draft/${kind}/${entity.slug}.json`) || current.dropped.includes(`draft/${kind}`));
+      blueprint = { ...blueprint, [kind]: [...blueprint[kind].filter(entity => !missing.some(old => old.slug === entity.slug)), ...missing] };
+    }
+  }
+  if (frozen) blueprint = frozen.blueprint;
   const begun = await readFile(join(genesisControlDir(dir), "begun.json"), "utf8").then(raw => {
-    const value = JSON.parse(raw) as { worldId?: unknown };
+    const value = JSON.parse(raw) as { worldId?: unknown; form?: unknown };
     if (typeof value.worldId !== "string" || !/^[0-9A-HJKMNP-TV-Z]{26}$/.test(value.worldId)) throw new Error("The founding handoff needs repair.");
-    return { worldId: value.worldId };
+    return { worldId: value.worldId, form: value.form === true };
   }).catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return null; throw err; });
+  const complete = begun?.form ? await stat(join(genesisControlDir(dir), "completed.json")).then(() => true)
+    .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return false; throw err; }) : false;
   return {
     type: "genesis.loaded", at: new Date().toISOString(), genesisId, conversationId: meta.id,
     turns: messages.map(m => ({ id: m.id, role: m.role === "user" ? "user" : "gate", text: m.text, at: m.createdAt })),
@@ -94,6 +114,8 @@ export async function loadGenesisConversation(dir: string, genesisId: string, ru
     status: running ? "running" : messages.at(-1)?.role === "user" ? "failed" : "completed",
     ...(!running && messages.at(-1)?.role === "user" ? { detail: "The previous reply did not finish. Your message and draft are saved; continue when ready." } : {}),
     ...(begun ? { worldId: begun.worldId } : {}),
+    ...(frozen ? { founding: true } : {}),
+    ...(begun?.form ? { formHandoff: complete ? "completed" as const : "pending" as const } : {}),
   };
 }
 

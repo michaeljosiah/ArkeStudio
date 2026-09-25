@@ -2,6 +2,7 @@ import { copyFile, mkdir, open, readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   ART_DIRECTION_PATH,
+  FOUNDING_CONVERSATION_SCHEMA_VERSION,
   BuildJournalEntrySchema,
   BuildReviewSchema,
   buildItemDispatches,
@@ -38,7 +39,7 @@ import type { WorldStore } from "./store.js";
 import { atomicWriteFile } from "./atomic.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { foldBlueprint } from "../harness/blueprint.js";
-import { carryGenesisConversation, genesisControlDir, reserveGenesisWorld } from "../harness/genesis-conversation.js";
+import { carryGenesisConversation, frozenFoundingInput, genesisControlDir, reserveGenesisWorld } from "../harness/genesis-conversation.js";
 import { openThread } from "../canon/authoring.js";
 import { MarkdownFile, sha256 } from "./text-files.js";
 import { createSheetFromSentence } from "../sheets/authoring.js";
@@ -305,7 +306,10 @@ export class FoundingBuildService {
       });
     let blueprint: GenesisBlueprint;
     try {
-      blueprint = await foldBlueprint(await this.ports.genesisDir(genesisId));
+      const sandbox = await this.ports.genesisDir(genesisId);
+      const frozen = await frozenFoundingInput(sandbox);
+      blueprint = frozen?.blueprint ?? await foldBlueprint(sandbox);
+      if (frozen) { models = frozen.models; look = frozen.blueprint.look; }
     } catch {
       refuse("the conversation's plan could not be read");
       return;
@@ -314,6 +318,7 @@ export class FoundingBuildService {
       refuse("the world has no name yet — settle one in the conversation first");
       return;
     }
+    if (blueprint.dropped.length) { refuse("Repair the unreadable draft files before beginning."); return; }
     const { route, notes } = await this.resolveImageRoute(models);
     for (const character of blueprint.characters) {
       if (character.neverDepicted === true) notes.push(`${character.name} — never depicted`);
@@ -402,8 +407,11 @@ export class FoundingBuildService {
       }
     }
 
-    const folded = await foldBlueprint(sandbox);
-    const founded = effectiveLook(folded, look);
+    const frozen = await frozenFoundingInput(sandbox);
+    const folded = frozen?.blueprint ?? await foldBlueprint(sandbox);
+    if (folded.dropped.length) throw new Error("Repair the unreadable draft files before beginning.");
+    if (frozen) models = frozen.models;
+    const founded = frozen ? folded.look : effectiveLook(folded, look);
     const blueprint: GenesisBlueprint = {
       ...folded,
       ...(founded !== undefined ? { look: founded } : {}),
@@ -426,6 +434,7 @@ export class FoundingBuildService {
       route === null ? null : { model: route.model, referenceImages: route.referenceImages },
     );
     const capMicroUsd = items.filter((item) => item.authorized).reduce((sum, item) => sum + item.estimatedMicroUsd, 0);
+    if (!frozen) await atomicWriteFile(join(genesisControlDir(sandbox), "founding-input.json"), JSON.stringify({ blueprint, ...(models ? { models } : {}) }) + "\n");
 
     // Wave 0 is the world itself: world.json, art direction v1 from the look the conversation
     // proposed, and the bible it wrote (R-18). The marker is written the moment the world's
@@ -452,7 +461,7 @@ export class FoundingBuildService {
     const store = this.ports.openStore();
     if (!store || store.worldId !== worldId) throw new Error("the new world did not open");
 
-    await store.ensureSchemaVersion(2, "world-chat");
+    await store.ensureSchemaVersion(FOUNDING_CONVERSATION_SCHEMA_VERSION, "founding-chat");
     await carryGenesisConversation(sandbox, store.dir);
 
     const record: FoundingBuildRecord = FoundingBuildRecordSchema.parse({

@@ -17,6 +17,14 @@ that world outside the library and publishes it with a directory rename. Retryin
 identity returns the published world. Conversation handoff appends each source event with its
 original event identity as an idempotency key; an interrupted prefix can be replayed safely.
 
+Begin freezes its blueprint and model choices before publishing the reserved world. Recovery
+uses that input even if draft files subsequently change. Unreadable drafts block Begin; draft
+recovery restores only the damaged records so valid edits remain visible. Form handoffs also
+retain a pending marker until attachments and conversation history have finished copying.
+
+Worlds containing founding conversation events require schema version 28. Older readers must
+refuse the world rather than misread its strict conversation journal.
+
 The founding marker and sandbox remain after completion so a repeated Begin joins its original
 world and draft URLs can resolve the ongoing conversation. They are not abandoned drafts.
 Explicit abandonment only removes an unfounded, idle sandbox. Completed-sandbox garbage

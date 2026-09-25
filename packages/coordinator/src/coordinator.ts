@@ -457,6 +457,7 @@ import {
 } from "./harness/authoring.js";
 import { GenesisService } from "./harness/genesis.js";
 import { carryGenesisConversation, foundingMessages, genesisControlDir, loadGenesisConversation, reserveGenesisWorld } from "./harness/genesis-conversation.js";
+import { FOUNDING_CONVERSATION_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { FoundingBuildService } from "./world/founding-build.js";
 import { isAuthShapedFailure, VendorAuthService } from "./harness/vendor-auth.js";
 import { NoArkeCloud, type AccountService } from "./account.js";
@@ -5691,7 +5692,7 @@ export class Coordinator {
             ...(msg.bible !== undefined ? { bible: msg.bible } : {}),
             ...(msg.models !== undefined ? { models: msg.models } : {}),
           });
-          if (sandbox) await atomicWriteFile(join(genesisControlDir(sandbox), "begun.json"), JSON.stringify({ worldId }) + "\n");
+          if (sandbox) await atomicWriteFile(join(genesisControlDir(sandbox), "begun.json"), JSON.stringify({ worldId, form: true }) + "\n");
           this.readModel.setWorlds(await this.opts.provider.listWorlds());
           await this.openWorld(worldId);
           // After the world is open, so filing has a store to commit into. Whatever was handed
@@ -5704,8 +5705,11 @@ export class Coordinator {
               await this.carryGenesisAttachments(genesisId, worldId);
               const store = this.opts.provider.openStore?.();
               if (sandbox && store?.worldId === worldId && (await foundingMessages(sandbox)).length) {
-                await store.ensureSchemaVersion(2, "world-chat");
+                await store.ensureSchemaVersion(FOUNDING_CONVERSATION_SCHEMA_VERSION, "founding-chat");
                 await carryGenesisConversation(sandbox, store.dir);
+              }
+              if (sandbox) {
+                await atomicWriteFile(join(genesisControlDir(sandbox), "completed.json"), JSON.stringify({ worldId, form: true }) + "\n");
                 this.emit(await loadGenesisConversation(sandbox, genesisId));
               }
             })();
@@ -7080,8 +7084,24 @@ export class Coordinator {
                 .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return null; throw err; });
               if (completed !== null) continue;
             }
-            const loaded = await loadGenesisConversation(dir, id);
+            let loaded = await loadGenesisConversation(dir, id);
             if (msg.kind === "genesis-load" && loaded.worldId) await this.openWorld(loaded.worldId);
+            if (msg.kind === "genesis-load" && loaded.worldId && loaded.formHandoff === "pending") {
+              const worldId = loaded.worldId;
+              const carry = (async () => {
+                await this.carryGenesisAttachments(id, worldId);
+                const store = this.opts.provider.openStore?.();
+                if (!store || store.worldId !== worldId) throw new Error("The founding world did not open.");
+                if (loaded.turns.length) {
+                  await store.ensureSchemaVersion(FOUNDING_CONVERSATION_SCHEMA_VERSION, "founding-chat");
+                  await carryGenesisConversation(dir, store.dir);
+                }
+                await atomicWriteFile(join(genesisControlDir(dir), "completed.json"), JSON.stringify({ worldId, form: true }) + "\n");
+              })();
+              this.carrying.set(id, carry);
+              await carry.finally(() => this.carrying.delete(id));
+              loaded = await loadGenesisConversation(dir, id);
+            }
             if (this.genesis?.isRunning(id)) { loaded.status = "running"; delete loaded.detail; }
             this.emit(loaded);
           } catch (err) {
@@ -7108,6 +7128,7 @@ export class Coordinator {
           const dir = await this.opts.provider.genesisDir(msg.genesisId);
           const draft = await loadGenesisConversation(dir, msg.genesisId, this.genesis.isRunning(msg.genesisId));
           if (draft.worldId) { failed("This world has begun. Continue in its world conversation."); return; }
+          if (draft.founding) { failed("World creation has started. Press Begin again to recover it."); return; }
           this.emit(draft);
           // Fire and watch: turns, the draft and the final status arrive as events.
           this.trackBackground(this.genesis.run(dir, msg.genesisId, msg.text).catch(err => failed(describeCoordinatorError(err))));
@@ -7153,7 +7174,7 @@ export class Coordinator {
         if (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId)) return;
         if (this.opts.provider.genesisDir) {
           const draft = await loadGenesisConversation(await this.opts.provider.genesisDir(msg.genesisId), msg.genesisId);
-          if (draft.worldId) return;
+          if (draft.worldId || draft.founding) return;
         }
         this.genesis?.release(msg.genesisId);
         // A conversation-scoped job still in flight is cancelled with its conversation

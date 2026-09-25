@@ -160,6 +160,8 @@ interface StoreState {
       turns: Array<{ id?: string; role: "user" | "gate"; text: string; at: string }>;
       conversationId?: string;
       worldId?: string;
+      founding?: boolean;
+      formHandoff?: "pending" | "completed";
       /** The plan so far, folded from the sandbox directory (SPEC-031 R-2). */
       blueprint: import("@arke-studio/contracts").GenesisBlueprint | null;
       status: "running" | "completed" | "cancelled" | "timeout" | "budget-exceeded" | "failed" | null;
@@ -1510,6 +1512,8 @@ function handleFrame(json: string): void {
         ...emptyGenesis(), ...genesis[event.genesisId],
         turns: [...messages.values()].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)), blueprint: event.blueprint,
         attachments: event.attachments, status: event.status, conversationId: event.conversationId,
+        founding: event.founding,
+        formHandoff: event.formHandoff,
         ...(event.detail ? { detail: event.detail } : {}),
         ...(event.worldId ? { worldId: event.worldId } : {}),
       } };
