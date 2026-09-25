@@ -411,6 +411,7 @@ describe("live harness model controls (#1123, #1124)", () => {
   it("shows the local harness as built in: named Local, running, with no executable to choose (issue 1247)", async () => {
     const state = modelState();
     state.app.harnessInfo = { generation: "arke", source: "bundled", version: null, beta: false };
+    state.app.research = { ...state.app.research, web: true };
     state.app.harness = {
       engine: "arke", claudePath: null, codexPath: null, launchOverride: null,
       harnesses: [OPENCODE_AVAILABILITY, arkeAvailability(null)],
@@ -420,6 +421,8 @@ describe("live harness model controls (#1123, #1124)", () => {
     assert.match(tabs.find((tab) => tab.textContent!.includes("Local"))!.textContent!, /running now/);
     assert.match(container.textContent!, /Ships with Arke Studio/);
     assert.doesNotMatch(container.textContent!, /Choose…/, "nothing to locate: the harness is part of the app");
+    assert.doesNotMatch(container.textContent!, /Searches, reads, and cites pages/, "Local has no web tools, so the switch does not promise them");
+    assert.match(container.textContent!, /On, but Local stays offline/);
     await press("Advanced · which model runs each writing agent");
     assert.match(container.textContent!, /models from Local/);
   });
@@ -434,6 +437,9 @@ describe("live harness model controls (#1123, #1124)", () => {
     await mount(state, <SettingsHarnessScreen />, "/settings/harness?harness=arke");
     assert.match(container.textContent!, /No pulled model has a 256k context window/);
     assert.match(container.textContent!, /unavailable for now/);
+    const tab = [...container.querySelectorAll('[role="tab"]')].find((item) => item.textContent!.includes("Local"))!;
+    assert.match(tab.textContent!, /unavailable/);
+    assert.doesNotMatch(container.textContent!, /not here/, "it ships with the app; what is missing is Ollama or a model");
     const use = [...container.querySelectorAll("button")].find((button) => button.textContent === "Use this")!;
     assert.equal(use.disabled, true);
   });

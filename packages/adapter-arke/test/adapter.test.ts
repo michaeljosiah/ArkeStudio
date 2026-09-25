@@ -509,3 +509,49 @@ test("reaching Ollama is not enough to be ready: it must hold a model this harne
   await f.adapter.init();
   assert.equal(f.adapter.readiness().ready, true);
 });
+
+test("startup and recovery share one check, and a check in flight never outlives dispose", async (t) => {
+  const ollama = new FakeOllama(); await ollama.start();
+  let tags = 0;
+  let stall = false;
+  const adapter = new ArkeAdapter({
+    baseUrl: ollama.url, reprobeMs: 0,
+    fetch: (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      if (String(input).endsWith("/api/show")) tags++;
+      if (String(input).endsWith("/api/tags")) {
+        if (stall) return new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true }));
+      }
+      return fetch(input, init);
+    }) as typeof fetch,
+  });
+  t.after(async () => { await ollama.stop(); });
+  await Promise.all([adapter.init(), adapter.init(), adapter.init()]);
+  assert.equal(tags, 1, "three callers, one check: the one pulled model inspected once");
+  assert.equal(adapter.readiness().ready, true);
+
+  const idle = new ArkeAdapter({ baseUrl: ollama.url, reprobeMs: 0, fetch: (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    if (String(input).endsWith("/api/tags") && stall) return new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true }));
+    return fetch(input, init);
+  }) as typeof fetch });
+  stall = true;
+  const probing = idle.init().catch(() => {});
+  const started = Date.now();
+  await idle.dispose();
+  await probing;
+  assert.ok(Date.now() - started < 1_000, "dispose stopped the check rather than waiting out its deadline");
+  assert.equal(idle.readiness().ready, false, "and nothing it found afterwards could mark a disposed adapter ready");
+  await adapter.dispose();
+});
+
+test("removing the last usable model while running is seen at the next catalogue read", async (t) => {
+  const f = await fixture(t);
+  await f.adapter.init();
+  assert.equal(f.adapter.readiness().ready, true);
+  const revision = f.adapter.lifecycleRevision();
+  f.ollama.models = [{ name: "short:8b", capabilities: ["completion", "tools"], context: 131072 }];
+  assert.deepEqual(await f.adapter.listModels(), []);
+  const readiness = f.adapter.readiness();
+  assert.equal(readiness.ready, false, "no longer reported healthy");
+  assert.match(readiness.reason ?? "", /256k/);
+  assert.ok(f.adapter.lifecycleRevision() > revision);
+});

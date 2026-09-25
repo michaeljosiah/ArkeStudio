@@ -381,6 +381,18 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     } finally { await test.close(); }
   });
 
+  it("keeps the validated local default on Arke's own lane even when a cloud key is stored (issue 1247)", async () => {
+    // The local harness cannot spend a cloud key, so a stored one must not hand the choice back
+    // to the adapter: it would pick for itself, past the disabled-model and Stage image checks.
+    const adapter = new CaptureAdapter();
+    Object.defineProperty(adapter, "id", { value: "arke" });
+    const test = await fixture({ adapter, cipher: fakeCipher });
+    try {
+      await test.send({ kind: "set-credential", provider: "anthropic", key: "sk-ant-test-key" });
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL, "the application's local default, key or no key");
+    } finally { await test.close(); }
+  });
+
   it("waits for the first local-model publication and its reload before deciding, on a fresh start", async () => {
     // Before publication the harness lists only cloud rows; the publication is what makes the
     // local rows appear on the next fetch — as the profile write does for the real harness.

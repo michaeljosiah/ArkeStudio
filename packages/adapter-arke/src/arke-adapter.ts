@@ -59,6 +59,7 @@ const DEFAULT_STEPS = 24;
 const CATALOGUE_DEADLINE_MS = 15_000;
 const DISPOSE_RELEASE_MS = 2_000;
 const REPROBE_MS = 5_000;
+const NO_USABLE_MODEL = "No pulled model has a 256k context window and calls tools. Pull one, such as Gemma 4 12B.";
 /**
  * Only models stating a 256k context are offered, the same rule as the OpenCode lane
  * (`meetsLocalModelMinimum` in contracts). How much of that window a session asks for is
@@ -143,6 +144,8 @@ export class ArkeAdapter implements HarnessAdapter {
    */
   private releasing: Promise<void> = Promise.resolve();
   private probing: Promise<void> | null = null;
+  /** Aborted by dispose, so a check in flight stops rather than outliving the adapter. */
+  private readonly lifetime = new AbortController();
   private lastProbe = 0;
 
   constructor(private readonly opts: ArkeAdapterOptions = {}) {
@@ -159,8 +162,7 @@ export class ArkeAdapter implements HarnessAdapter {
    */
   readiness(): Readiness {
     if (!this.ready.ready && !this.disposed && this.probing === null && Date.now() - this.lastProbe >= (this.opts.reprobeMs ?? REPROBE_MS)) {
-      this.lastProbe = Date.now();
-      this.probing = this.init().catch(() => {}).finally(() => { this.probing = null; });
+      void this.init().catch(() => {});
     }
     return this.ready;
   }
@@ -191,20 +193,31 @@ export class ArkeAdapter implements HarnessAdapter {
    */
   async init(): Promise<void> {
     if (this.disposed) throw new Error("The Arke harness is disposed.");
+    // One check at a time, whoever asks: startup and recovery share it, so an older answer can
+    // never land after a newer one.
+    this.probing ??= this.probe().finally(() => { this.probing = null; });
+    return this.probing;
+  }
+
+  private async probe(): Promise<void> {
     this.lastProbe = Date.now();
-    const unready = (reason: string): never => { this.markUnready(reason); throw new Error(reason); };
+    const signal = this.lifetime.signal;
+    const unready = (reason: string): never => {
+      if (!this.disposed) this.markUnready(reason);
+      throw new Error(reason);
+    };
     let models: ModelInfo[];
     try {
       // Reachability first, on its own deadline: a slow model inspection must not read as
       // Ollama being down. The catalogue then has its own deadline for the inspections.
-      await listTags(this.fetchImpl, this.baseUrl, AbortSignal.timeout(8_000));
-      ({ models } = await this.catalog(new AbortController().signal));
+      await listTags(this.fetchImpl, this.baseUrl, AbortSignal.any([signal, AbortSignal.timeout(8_000)]));
+      ({ models } = await this.catalog(signal));
     } catch {
       return unready("Ollama is not answering on this machine.");
     }
-    if (!models.some((model) => model.isDefault)) {
-      return unready("No pulled model has a 256k context window and calls tools. Pull one, such as Gemma 4 12B.");
-    }
+    // A check that finishes after disposal says nothing about an adapter that no longer exists.
+    if (this.disposed) throw new Error("The Arke harness is disposed.");
+    if (!models.some((model) => model.isDefault)) return unready(NO_USABLE_MODEL);
     if (!this.ready.ready) this.revision++;
     this.ready = { ready: true };
   }
@@ -223,6 +236,10 @@ export class ArkeAdapter implements HarnessAdapter {
     const pulled = all.filter(supported);
     // Only a model seen to call tools: a default nobody chose must be one that can do the work.
     const fallback = pulled.find((model) => model.tools === true)?.id;
+    // Every read of the catalogue is also a check of readiness: the last usable model can be
+    // removed while the app runs, and a harness that cannot start a writing session must not go
+    // on reporting itself healthy. The recovery probe restores it when one is pulled again.
+    if (fallback === undefined && this.ready.ready) this.markUnready(NO_USABLE_MODEL);
     const models = pulled.map((model): ModelInfo => ({
       id: model.id, provider: PROVIDER, displayName: model.id,
       inputModalities: model.vision ? ["text", "image"] : ["text"],
@@ -519,6 +536,8 @@ export class ArkeAdapter implements HarnessAdapter {
 
   async dispose(): Promise<void> {
     this.disposed = true;
+    this.lifetime.abort();
+    await this.probing?.catch(() => {});
     this.preparations.clear();
     const running = [...this.sessions.values()].flatMap((session) => session.turn ? [session.turn] : []);
     for (const turn of running) turn.abort.abort();

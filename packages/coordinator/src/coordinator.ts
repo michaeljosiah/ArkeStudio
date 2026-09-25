@@ -4342,6 +4342,11 @@ export class Coordinator {
    * the credential store and so is read from the published sign-in state.
    */
   private cloudCredentialAvailable(): boolean {
+    // Arke's local harness cannot spend a cloud key, so for it none is ever available: every
+    // session without an explicit model gets the application-validated local default — disabled
+    // models, hardware eligibility and Stage's image input all checked — rather than whatever
+    // model the adapter would pick for itself (issue 1247).
+    if (this.opts.adapter?.id === "arke") return false;
     // Only the connections the harness keeps itself. An `env` connection is Studio's own key as
     // the harness sees it, and the store is read at the command — the published row outlives a
     // cleared key by the length of the relaunch, and a session in that gap must not count it.
