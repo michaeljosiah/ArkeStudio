@@ -447,6 +447,15 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       (test.coordinator as unknown as { emit(event: DomainEvent): void }).emit({
         at: new Date().toISOString(), type: "vendor-auth.status",
         auth: VendorAuthStatusSchema.parse({ available: true, vendors: [
+          { id: "anthropic", name: "Anthropic", methods: [], connections: [{ kind: "env", name: "ANTHROPIC_API_KEY" }] },
+        ] }),
+      });
+      // An env connection is Studio's own key as the harness saw it at spawn; the store, read at
+      // the command, is the authority on whether that key still exists.
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL, "a published env connection is not a second credential");
+      (test.coordinator as unknown as { emit(event: DomainEvent): void }).emit({
+        at: new Date().toISOString(), type: "vendor-auth.status",
+        auth: VendorAuthStatusSchema.parse({ available: true, vendors: [
           { id: "openai", name: "OpenAI", methods: [], connections: [{ kind: "stored", id: "c1", label: "OpenAI account" }] },
         ] }),
       });
@@ -476,10 +485,23 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     }, onPublish: () => { if (answering) adapter.list = async () => MODELS; } });
     try {
       assert.equal(await test.chat(), undefined, "no session is built while the runtime has not answered");
-      assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /Ollama is not answering/);
+      assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /not available to the harness yet/);
       answering = true;
       await test.probeLocalRuntimes();
+      // Listed, published, and not yet in the catalogue: still not decided on the old catalogue.
+      assert.equal(await test.chat(), undefined, "the reload window after a changed listing is refused, not run unmodelled");
       await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the runtime has listed", 10_000);
+    } finally { await test.close(); }
+  });
+
+  it("refuses rather than going unmodelled when every local model is passed over", async () => {
+    const adapter = new CaptureAdapter();
+    adapter.list = async () => [{ provider: "ollama", id: "chatty:7b", tools: false }, ...CLOUD_ONLY];
+    const test = await fixture({ adapter });
+    try {
+      assert.equal(await test.chat(), undefined, "a local runtime with only tool-less models is not nothing local");
+      assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /None of the local models/);
+      assert.equal((await test.chat("ollama/chatty:7b"))?.config.model, "ollama/chatty:7b", "chosen on purpose, it is still admitted");
     } finally { await test.close(); }
   });
 

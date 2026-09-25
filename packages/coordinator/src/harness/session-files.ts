@@ -75,10 +75,16 @@ export async function createPreparedSession(
   input: SessionConfigInput | Promise<SessionConfigInput>,
   session: CreateSessionInput,
   timeoutMs = 30_000,
+  signal?: AbortSignal,
 ): Promise<SessionRef> {
   return serialized(dir, async () => {
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(new Error("session creation timed out")), timeoutMs);
+    // The caller's stop, combined with the bound: a run stopped while its configuration waits
+    // on discovery (issue 1247) must not find a session created for it once discovery settles.
+    const stop = () => abort.abort(signal!.reason);
+    if (signal?.aborted) stop();
+    else signal?.addEventListener("abort", stop, { once: true });
     try {
       const preparationId = await writeSessionFiles(adapter, dir, input, abort.signal);
       try {
@@ -87,10 +93,12 @@ export async function createPreparedSession(
         adapter.abandonSessionPreparation?.(preparationId);
       }
     } catch (error) {
+      if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new Error("session creation stopped", { cause: error });
       if (abort.signal.aborted) throw new Error("session creation timed out", { cause: error });
       throw error;
     } finally {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", stop);
     }
   });
 }

@@ -273,6 +273,20 @@ it("a build stopped while its configuration is still being decided creates no se
     decide({ model: "test/vision" });
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(created, 0, "discovery settling after the stop must not create a session for it");
+    // A Stop that arrives before the run, while the model decision upstream is still waiting,
+    // has to find the request: the claim is what it finds, and the run adopts it.
+    const request = { kind: "stage-construct" as const, worldId: store.worldId, productionId: "saltlight", sceneId: scene.id, shotId: shot.id,
+      baseVersion: scene.version, requestId: randomUUID(), instruction: "", preserve: "none" as const };
+    const claimed = constructor.begin(request);
+    constructor.cancel(store.worldId, request.requestId);
+    assert.ok(claimed.aborted, "the claim carried the stop");
+    let second: Extract<DomainEvent, { type: "stage.construction" }> | undefined;
+    await constructor.run(store, request, {
+      adapter, sessionInput: (input) => input, model: "test/vision", scratchRoot: join(dir, ".scratch"), current: () => true,
+      emit: (event) => { if (event.status === "failed" || event.status === "ready") second = event; },
+    });
+    assert.match(second?.detail ?? "", /stopped/);
+    assert.equal(created, 0, "a run that adopts a stopped claim creates nothing");
   } finally {
     await store.close();
   }

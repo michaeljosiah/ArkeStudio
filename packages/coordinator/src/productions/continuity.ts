@@ -103,11 +103,16 @@ export function makeAdapterJsonDeriver<T>(
     if (signal?.aborted) throw stopped();
     const sandbox = join(scratchRoot, `${name}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`);
     await mkdir(toExtendedLength(sandbox), { recursive: true });
-    const session = await createPreparedSession(adapter, sandbox, sessionInput({}), {
-      purpose: "extraction",
-      agent: "canon-author",
-    });
-    if (signal?.aborted) throw stopped();
+    let session: Awaited<ReturnType<typeof createPreparedSession>>;
+    try {
+      session = await createPreparedSession(adapter, sandbox, sessionInput({}), {
+        purpose: "extraction",
+        agent: "canon-author",
+      }, undefined, signal);
+    } catch (error) {
+      if (signal?.aborted) throw stopped();
+      throw error;
+    }
 
     const turn = async (prompt: string): Promise<string> => {
       if (signal?.aborted) throw stopped();

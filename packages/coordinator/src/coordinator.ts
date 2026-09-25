@@ -1060,9 +1060,11 @@ export class Coordinator {
    */
   private catalogueReadOk = false;
   /**
-   * Whether Ollama answered the last listing (issue 1247). A runtime that has not started
-   * answering yet and one with nothing pulled both publish no rows; only the second is a
-   * machine with no local model, and a keyless session is not decided on the first.
+   * Whether what Ollama last listed is what the harness catalogue now carries (issue 1247). A
+   * runtime that has not started answering yet and one with nothing pulled both publish no
+   * rows; only the second is a machine with no local model, and a keyless session is not
+   * decided on the first. False again from a changed listing until the fetch that follows its
+   * publication: in between, the catalogue on display describes the old rows.
    */
   private localRuntimeListed = false;
   /** Resolves once the harness's sign-in state has been read for the first time, or once it is known it will not be. */
@@ -2218,6 +2220,7 @@ export class Coordinator {
     context: WorldChatContext | undefined,
     requestedId?: string,
     agent = "world-builder",
+    signal?: AbortSignal,
   ): Promise<LanguageModelSelection> {
     const productionId = context && "productionId" in context ? context.productionId : undefined;
     if (requestedId !== undefined && productionId === undefined && context?.kind !== "production-setup") {
@@ -2232,10 +2235,12 @@ export class Coordinator {
     // Nothing chosen: the local default, where there is one (issue 1247). Stage needs a model
     // that reads images, and refuses before its session is built when none is chosen — so it
     // is decided here, where the refusal is, rather than left to the session builder.
-    if (!this.cloudCredentialAvailable()) await this.localDefaultGate();
+    if (!this.cloudCredentialAvailable()) {
+      try { await this.localDefaultGate(signal); } catch (error) { return { reason: describeCoordinatorError(error) }; }
+    }
     const local = this.localHarnessDefault(agent === "stage-designer");
     if (local !== undefined) return this.validateLanguageModel(local, agent === "stage-designer");
-    const refusal = this.keylessSessionRefusal();
+    const refusal = this.keylessSessionRefusal(agent === "stage-designer");
     return refusal === null ? {} : { reason: refusal };
   }
   /** Per-agent model and brief overrides, as last read from settings. */
@@ -2869,7 +2874,7 @@ export class Coordinator {
     // captured, so changing a model in Settings applies to the next session, not the next run.
     this.sessionInput = async (input) => ({
       ...input,
-      ...(await this.sessionAgents()),
+      ...(await this.sessionAgents(input.model !== undefined)),
       ...(this.skillFamily !== undefined ? { skillFamily: this.skillFamily } : {}),
       // The model too, or a narrowed skill is recorded and never actually injected.
       ...(this.skillModelId !== undefined ? { skillModelId: this.skillModelId } : {}),
@@ -4059,14 +4064,22 @@ export class Coordinator {
     // Not answering is published as nothing pulled — a stale row validates in the picker and
     // fails on the turn — but remembered apart from it, for the keyless decision below.
     let models: readonly import("@arke-studio/contracts").LocalHarnessModel[] = [];
+    let listed = true;
     try {
       models = await list();
-      this.localRuntimeListed = true;
     } catch {
-      this.localRuntimeListed = false;
+      listed = false;
     }
     const fingerprint = JSON.stringify(models);
-    if (this.stopping || fingerprint === this.publishedLocalHarnessModels) return;
+    if (this.stopping) return;
+    if (fingerprint === this.publishedLocalHarnessModels) {
+      // The catalogue already carries this listing, or the fetch that will is scheduled.
+      this.localRuntimeListed = listed;
+      return;
+    }
+    // Pending until the catalogue carries the new rows: a session decided in between would read
+    // the old catalogue as the answer, and go unmodelled to the cloud default on it.
+    this.localRuntimeListed = false;
     try {
       await publish(models);
     } catch (error) {
@@ -4084,7 +4097,7 @@ export class Coordinator {
       if (this.stopping) { this.settleCatalogue(); return; }
       this.modelCatalog.invalidate();
       // The fetch a keyless session waits on: the first one that can carry the local rows.
-      this.warmModelCatalog(true);
+      this.warmModelCatalog(true, () => { this.localRuntimeListed = listed; });
     }, 5_000);
     timer.unref?.();
     this.lifecycleTimers.add(timer);
@@ -4098,11 +4111,12 @@ export class Coordinator {
    * Settled on failure too: a catalogue that cannot be read is an answer, and a session
    * waiting on it is refused with that reason rather than built on silence.
    */
-  private warmModelCatalog(settles: boolean): void {
+  private warmModelCatalog(settles: boolean, then?: () => void): void {
     const work = this.modelCatalog.get(true).catch(() => {});
     this.backgroundWork.add(work);
     void work.finally(() => {
       this.backgroundWork.delete(work);
+      then?.();
       if (settles) this.settleCatalogue();
     });
   }
@@ -4125,8 +4139,14 @@ export class Coordinator {
   }
 
   /** What a keyless session waits on before it is built: the catalogue after the local rows, and the sign-in state. */
-  private localDefaultGate(): Promise<void> {
-    return Promise.all([this.catalogueSettled, this.vendorAuthSettled]).then(() => undefined);
+  private localDefaultGate(signal?: AbortSignal): Promise<void> {
+    const settled = Promise.all([this.catalogueSettled, this.vendorAuthSettled]).then(() => undefined);
+    if (!signal) return settled;
+    // A request stopped while waiting is not built when discovery settles.
+    return Promise.race([settled, new Promise<never>((_, reject) => {
+      if (signal.aborted) reject(signal.reason);
+      else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    })]);
   }
 
   /**
@@ -4135,7 +4155,7 @@ export class Coordinator {
    * dispatch choice and beneath every override — the same order the config writer keeps —
    * rather than replacing any of them.
    */
-  private async sessionAgents(): Promise<{ agents?: Record<string, { model?: string; brief?: string }> }> {
+  private async sessionAgents(chosen = false): Promise<{ agents?: Record<string, { model?: string; brief?: string }> }> {
     // A keyless session waits for the catalogue's first fetch rather than reading it empty:
     // measured or not, an empty read here meant the first session of a run going to the cloud
     // default — the one outcome this default exists to prevent.
@@ -4143,7 +4163,9 @@ export class Coordinator {
     if (this.stopping) throw new Error("Arke Studio is shutting down.");
     const local = this.localHarnessDefault();
     if (local === undefined) {
-      const refusal = this.keylessSessionRefusal();
+      // A session whose model was chosen — by the dispatch, validated before this — runs on
+      // that model; the refusal is for a session that would otherwise run on nothing chosen.
+      const refusal = chosen ? null : this.keylessSessionRefusal();
       if (refusal !== null) throw new Error(refusal);
       return this.agentOverrides ? { agents: this.agentOverrides } : {};
     }
@@ -4182,8 +4204,11 @@ export class Coordinator {
    * the credential store and so is read from the published sign-in state.
    */
   private cloudCredentialAvailable(): boolean {
+    // Only the connections the harness keeps itself. An `env` connection is Studio's own key as
+    // the harness sees it, and the store is read at the command — the published row outlives a
+    // cleared key by the length of the relaunch, and a session in that gap must not count it.
     return this.cloudLlmKeyStored ||
-      this.readModel.getState().app.vendorAuth.vendors.some((vendor) => vendor.connections.length > 0);
+      this.readModel.getState().app.vendorAuth.vendors.some((vendor) => vendor.connections.some((connection) => connection.kind === "stored"));
   }
 
   /**
@@ -4194,7 +4219,7 @@ export class Coordinator {
    * a local model possibly sitting right there. Ollama not answering is the same silence one
    * step earlier: the rows it would have brought are not in the catalogue to read.
    */
-  private keylessSessionRefusal(): string | null {
+  private keylessSessionRefusal(needsImages = false): string | null {
     if (this.cloudCredentialAvailable()) return null;
     // A harness with no catalogue to read is not a failed read: nothing local could be listed
     // by it, and a session on it runs exactly as it did before there was a local default.
@@ -4204,7 +4229,13 @@ export class Coordinator {
       return "The harness's models could not be read, and no cloud key is stored, so which model would write is unknown. Retry models in Settings → Harness → Advanced, or add a key.";
     }
     if (this.localModelsPublishable() && !this.localRuntimeListed) {
-      return "Ollama is not answering, and no cloud key is stored, so nothing can write. Start Ollama and try again in a moment, or add a key.";
+      return "The local models are not available to the harness yet, and no cloud key is stored, so nothing can write. Check that Ollama is running and try again in a moment, or add a key.";
+    }
+    // Local rows the default passed over — switched off, or unable to call tools — are not
+    // nothing local: a session going unmodelled past them would run on the cloud default with
+    // a local runtime right there. Stage refuses on its own when no model reads images.
+    if (!needsImages && this.readModel.getState().app.harnessModels.some((model) => model.provider === "ollama")) {
+      return "None of the local models can write here: each is switched off or cannot call tools, and no cloud key is stored. Pull a model that calls tools, switch one on under AI models, or add a key.";
     }
     return null;
   }
@@ -9587,9 +9618,16 @@ export class Coordinator {
         }
         const adapter = this.opts.adapter;
         if (!adapter?.readiness().ready) { fail("The harness is unavailable. Check the running engine in Settings."); return; }
-        const selected = await this.languageModelFor({ kind: "production", productionId: msg.productionId }, undefined, "stage-designer");
+        // Claimed before the model decision, which may wait on discovery: a Stop in that wait
+        // has to find the request, or the build starts after it.
+        const claimed = this.stageConstructor.begin(msg);
+        const selected = await this.languageModelFor({ kind: "production", productionId: msg.productionId }, undefined, "stage-designer", claimed);
         const configured = selected.sessionModel;
-        if (selected.reason || !configured) { fail(selected.reason ?? "Choose Stage designer under Settings → Harness → Advanced, or a language model in this production's Develop conversation."); return; }
+        if (selected.reason || !configured) {
+          this.stageConstructor.abandon(msg.requestId);
+          fail(selected.reason ?? "Choose Stage designer under Settings → Harness → Advanced, or a language model in this production's Develop conversation.");
+          return;
+        }
         this.trackBackground(this.stageConstructor.run(store, msg, {
           adapter, sessionInput: this.sessionInput, model: configured,
           scratchRoot: this.opts.appRoot ? join(this.opts.appRoot, ".stage") : `${this.opts.changeLogPath}.stage`,

@@ -42,12 +42,24 @@ export class StageConstructor {
     round: number;
     receive?: (frames: StageInspectionFrame[]) => void;
   } | null = null;
+  /** Requests claimed before their run: the model decision ahead of it may wait on discovery (issue 1247). */
+  private readonly pending = new Map<string, { request: Request; abort: AbortController }>();
+  /** Claim a request so a Stop can reach it before `run` does; `run` adopts the claim, `abandon` drops it. */
+  begin(request: Request): AbortSignal {
+    const abort = new AbortController();
+    this.pending.set(request.requestId, { request, abort });
+    return abort.signal;
+  }
+  abandon(requestId: string) {
+    this.pending.delete(requestId);
+  }
   cancel(worldId?: string, requestId?: string) {
-    if (
-      this.active &&
-      (!worldId || this.active.request.worldId === worldId) &&
-      (!requestId || this.active.request.requestId === requestId)
-    )
+    const matches = (request: Request) =>
+      (!worldId || request.worldId === worldId) && (!requestId || request.requestId === requestId);
+    for (const claim of this.pending.values()) {
+      if (matches(claim.request)) claim.abort.abort(new Error("Stage construction stopped."));
+    }
+    if (this.active && matches(this.active.request))
       this.active.abort.abort(new Error("Stage construction stopped."));
   }
   inspect(worldId: string, requestId: string, round: number, frames: StageInspectionFrame[]) {
@@ -76,7 +88,9 @@ export class StageConstructor {
     },
   ): Promise<void> {
     if (this.active) throw new Error("Another Stage construction is running. Stop it first.");
-    const abort = new AbortController();
+    const claimed = this.pending.get(request.requestId);
+    this.pending.delete(request.requestId);
+    const abort = claimed?.abort ?? new AbortController();
     const active: NonNullable<StageConstructor["active"]> = { request, abort, round: 0 };
     this.active = active;
     const dir = join(deps.scratchRoot, `stage-${request.requestId}`);
