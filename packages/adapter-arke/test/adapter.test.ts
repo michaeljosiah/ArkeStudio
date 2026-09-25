@@ -4,8 +4,9 @@ import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HarnessEventSchema, type HarnessEvent } from "@arke-studio/contracts";
+import { TRIMMED_TOOL_RESULT } from "../src/context.js";
 import { ArkeAdapter, loopbackBaseUrl } from "../src/index.js";
-import { callTool, FakeOllama, reply } from "./fake-ollama.js";
+import { callTool, FakeOllama, reply, say } from "./fake-ollama.js";
 
 async function fixture(t: test.TestContext, options: { maxStepsPerTurn?: number; catalogueDeadlineMs?: number } = {}) {
   const ollama = new FakeOllama(); await ollama.start();
@@ -141,12 +142,14 @@ test("a refused request is a session error with Ollama's reason, and a stream th
 test("the chosen model is the one asked for, and a model that is not pulled is refused before any session exists", async (t) => {
   const f = await fixture(t);
   f.ollama.models.push({ name: "qwen3:8b", capabilities: ["completion", "tools"], context: 4096 });
-  const id = await f.session("world-builder", { model: "ollama/qwen3:8b" });
+  const id = await f.session("canon-qa", { model: "ollama/qwen3:8b" });
   f.ollama.script.push(reply("ok"));
   await f.adapter.sendMessage({ sessionId: id, parts: [{ type: "text", text: "hi" }] });
   assert.equal(f.ollama.chats[0]!.model, "qwen3:8b");
   assert.deepEqual(f.ollama.chats[0]!.options, { num_ctx: 4096 }, "never more context than the model states");
   await assert.rejects(f.session("world-builder", { model: "ollama/absent:1b" }), /not pulled/);
+  await assert.rejects(f.session("world-builder", { model: "ollama/qwen3:8b" }), /too small for this role's instructions/,
+    "a window that cannot hold the role's prompt is refused before a session exists, not truncated on every turn");
 });
 
 test("Ollama is reached on this machine only, unless a remote host is an explicit setting", () => {
@@ -273,4 +276,125 @@ test("a research preparation is not granted web tools this harness cannot provid
   const [asked, plain] = f.ollama.chats as Array<{ tools?: unknown; messages: Array<{ content: string }> }>;
   assert.deepEqual(asked!.tools, plain!.tools);
   assert.equal(asked!.messages[0]!.content, plain!.messages[0]!.content, "the prompt promises nothing the plain session lacks");
+});
+
+const text = (value: string) => ({ parts: [{ type: "text" as const, text: value }] });
+
+test("each request begins with the previous one's bytes, so Ollama's prompt cache stays warm", async (t) => {
+  const f = await fixture(t);
+  const id = await f.session("sheet-editor");
+  f.ollama.script.push(callTool("list", {}), reply("Nothing yet."), reply("Still nothing."));
+  await f.adapter.sendMessage({ sessionId: id, ...text("Look around.") });
+  await f.adapter.sendMessage({ sessionId: id, ...text("And now?") });
+  const sent = f.ollama.chats.map((chat) => JSON.stringify(chat.messages));
+  assert.equal(sent.length, 3);
+  for (let i = 1; i < sent.length; i++) assert.ok(sent[i]!.startsWith(sent[i - 1]!.slice(0, -1)), `request ${i} extends request ${i - 1}`);
+  const tools = new Set(f.ollama.chats.map((chat) => JSON.stringify(chat.tools)));
+  assert.equal(tools.size, 1, "the tool list is byte-identical on every call");
+});
+
+test("file tools are described compactly, keeping the rule a model must know", async (t) => {
+  const f = await fixture(t);
+  const id = await f.session("sheet-editor");
+  f.ollama.script.push(reply("ok"));
+  await f.adapter.sendMessage({ sessionId: id, ...text("hi") });
+  const tools = f.ollama.chats[0]!.tools as Array<{ function: { name: string; description: string } }>;
+  assert.ok(tools.every((tool) => tool.function.description.length <= 90), "short enough to be cheap on a cold turn");
+  assert.match(tools.find((tool) => tool.function.name === "write")!.function.description, /Only proposal files/);
+});
+
+test("a long session is trimmed to its window: old tool results first, the instructions never", async (t) => {
+  const f = await fixture(t);
+  f.ollama.models = [{ name: "small:4b", capabilities: ["completion", "tools"], context: 8192 }];
+  await writeFile(join(f.root, "long.md"), "L".repeat(12_000));
+  const id = await f.session("sheet-editor");
+  f.ollama.script.push(callTool("read", { path: "long.md" }), reply("Read it."), reply("Noted."));
+  await f.adapter.sendMessage({ sessionId: id, ...text("Read long.md.") });
+  await f.adapter.sendMessage({ sessionId: id, ...text("Q".repeat(3_000)) });
+  const last = f.ollama.chats.at(-1)!.messages as Array<{ role: string; content: string }>;
+  const first = f.ollama.chats[0]!.messages as Array<{ role: string; content: string }>;
+  assert.deepEqual(last[0], first[0], "the system prompt is untouched");
+  assert.ok(last.some((m) => m.content === TRIMMED_TOOL_RESULT));
+  assert.ok(!JSON.stringify(last).includes("L".repeat(100)), "the old file read is gone");
+  assert.equal(last.at(-1)!.content, "Q".repeat(3_000));
+});
+
+test("a message that cannot fit the window ends the turn with that reason, and nothing is sent", async (t) => {
+  const f = await fixture(t);
+  f.ollama.models = [{ name: "small:4b", capabilities: ["completion", "tools"], context: 8192 }];
+  const id = await f.session("sheet-editor");
+  await assert.rejects(f.adapter.sendMessage({ sessionId: id, ...text("Q".repeat(30_000)) }), /do not fit the model's context window/);
+  assert.equal(f.ollama.chats.length, 0);
+  const ending = await f.ended(id);
+  assert.equal(ending.type === "session.ended" && ending.reason, "budget-exceeded");
+});
+
+test("a tool call written as the reply is run as a call", async (t) => {
+  const f = await fixture(t);
+  const id = await f.session("sheet-editor");
+  f.ollama.script.push(say('{"name":"write","arguments":{"path":"town.md","content":"Saltlight"}}'), reply("Written."));
+  await f.adapter.sendMessage({ sessionId: id, ...text("Write it.") });
+  assert.equal(await readFile(join(f.root, "town.md"), "utf8"), "Saltlight");
+  assert.ok(f.events.some((e) => e.type === "tool.activity" && e.sessionId === id && e.tool === "arke.write"));
+  const history = f.ollama.chats[1]!.messages as Array<{ role: string; content: string; tool_calls?: unknown }>;
+  assert.deepEqual(history.at(-2), { role: "assistant", content: "", tool_calls: [{ function: { name: "write", arguments: { path: "town.md", content: "Saltlight" } } }] });
+  assert.equal((f.events.findLast((e) => e.type === "message.completed" && e.sessionId === id) as { text: string }).text, "Written.");
+});
+
+test("an unreadable call is sent back once with the reason; a second ends the turn, and nothing is written", async (t) => {
+  const f = await fixture(t);
+  const id = await f.session("sheet-editor");
+  f.ollama.script.push(say("<tool_call>{name: write, path: town.md}</tool_call>"), reply("Done in words instead."));
+  await f.adapter.sendMessage({ sessionId: id, ...text("Write it.") });
+  const asked = f.ollama.chats[1]!.messages as Array<{ role: string; content: string }>;
+  assert.match(asked.at(-1)!.content, /could not be read: the text inside <tool_call> is not valid JSON/);
+  f.ollama.script.push(say("<tool_call>{bad}</tool_call>"), say("<tool_call>{still bad}</tool_call>"));
+  await assert.rejects(f.adapter.sendMessage({ sessionId: id, ...text("Try again.") }), /could not be read/);
+  await assert.rejects(stat(join(f.root, "town.md")));
+});
+
+test("a structured reply is a reply, even to a role that has tools", async (t) => {
+  const f = await fixture(t);
+  const id = await f.session("world-builder");
+  f.ollama.script.push(say('{"reply":"Saltlight it is.","operations":[]}'));
+  await f.adapter.sendMessage({ sessionId: id, ...text("Name it.") });
+  assert.equal((f.events.findLast((e) => e.type === "message.completed" && e.sessionId === id) as { text: string }).text, '{"reply":"Saltlight it is.","operations":[]}');
+});
+
+test("releasing residency unloads what was loaded, except a model a turn is using", async (t) => {
+  const f = await fixture(t);
+  const id = await f.session("world-builder");
+  f.ollama.script.push(reply("ok"));
+  await f.adapter.sendMessage({ sessionId: id, ...text("hi") });
+  await f.adapter.releaseResidency();
+  assert.deepEqual(f.ollama.generates, [{ model: "gemma4:12b", keep_alive: 0 }]);
+  await f.adapter.releaseResidency();
+  assert.equal(f.ollama.generates.length, 1, "nothing loaded since, so nothing to release");
+  f.ollama.script.push(reply("again"), { hang: true, chunks: [{ message: { role: "assistant", content: "Once" }, done: false }] });
+  await f.adapter.sendMessage({ sessionId: id, ...text("again") });
+  const busy = f.adapter.sendMessage({ sessionId: id, ...text("long") }).catch(() => {});
+  while (f.ollama.chats.length < 3) await new Promise((resolve) => setTimeout(resolve, 5));
+  await f.adapter.releaseResidency();
+  assert.equal(f.ollama.generates.length, 1, "the model generating right now stays loaded");
+  await f.adapter.interrupt(id); await busy;
+});
+
+test("a prompt-only role falls back to a model seen to answer when none calls tools", async (t) => {
+  const f = await fixture(t);
+  f.ollama.models = [{ name: "chatty:7b", capabilities: ["completion"], context: 8192 }];
+  const id = await f.session("conversation-namer");
+  f.ollama.script.push(reply('{"title":"Saltlight"}'));
+  await f.adapter.sendMessage({ sessionId: id, ...text("Name it.") });
+  assert.equal(f.ollama.chats[0]!.model, "chatty:7b");
+  await assert.rejects(f.session("sheet-editor"), /no model that calls tools/);
+});
+
+test("a session still being created when the adapter is disposed is never published", async (t) => {
+  const f = await fixture(t, { catalogueDeadlineMs: 200 });
+  f.ollama.models = [{ name: "stuck:1b", stall: true }, { name: "gemma4:12b", capabilities: ["completion", "tools"], context: 8192 }];
+  const creating = f.session("canon-qa");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await f.adapter.dispose();
+  await assert.rejects(creating, /disposed/);
+  assert.ok(!f.events.some((e) => e.type === "session.created"));
 });

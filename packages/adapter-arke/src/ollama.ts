@@ -214,3 +214,17 @@ async function inspect(fetchImpl: typeof fetch, baseUrl: string, id: string, sig
     ...(capabilities ? {} : { assumed: true }),
   };
 }
+
+/**
+ * Asks Ollama to release a model's memory now rather than after its idle timeout. An empty
+ * generate request with `keep_alive: 0` is Ollama's documented way to unload; the model is simply
+ * loaded again by the next request that names it.
+ */
+export async function unloadModel(fetchImpl: typeof fetch, baseUrl: string, model: string, signal: AbortSignal): Promise<void> {
+  const response = await fetchImpl(`${baseUrl}/api/generate`, {
+    method: "POST", redirect: "error", signal,
+    headers: { "content-type": "application/json" }, body: JSON.stringify({ model, keep_alive: 0 }),
+  });
+  await response.body?.cancel();
+  if (!response.ok) throw new OllamaChatError(`Ollama could not unload ${model} (HTTP ${response.status}).`);
+}

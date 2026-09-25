@@ -16,6 +16,8 @@ export interface FakeModel { name: string; capabilities?: string[]; context?: nu
  */
 export class FakeOllama {
   readonly chats: Array<Record<string, unknown>> = [];
+  /** `/api/generate` bodies: the only use here is an unload. */
+  readonly generates: Array<Record<string, unknown>> = [];
   readonly script: ChatScript[] = [];
   models: FakeModel[] = [{ name: "gemma4:12b", capabilities: ["completion", "tools"], context: 131072 }];
   aborted = 0;
@@ -36,6 +38,11 @@ export class FakeOllama {
           res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({
             capabilities: found.capabilities, model_info: { "general.architecture": "gemma4", ...(found.context ? { "gemma4.context_length": found.context } : {}) },
           }));
+          return;
+        }
+        if (req.url === "/api/generate") {
+          this.generates.push(JSON.parse(body) as Record<string, unknown>);
+          res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ done: true, done_reason: "unload" }));
           return;
         }
         if (req.url === "/api/chat") {
@@ -77,5 +84,13 @@ export function callTool(name: string, args: Record<string, unknown>): ChatScrip
   return { chunks: [
     { message: { role: "assistant", content: "", tool_calls: [{ function: { name, arguments: args } }] }, done: false },
     { message: { role: "assistant", content: "" }, done: true, done_reason: "stop", prompt_eval_count: 50, eval_count: 5 },
+  ] };
+}
+
+/** A reply whose text is `content` exactly, in one piece. */
+export function say(content: string): ChatScript {
+  return { chunks: [
+    { message: { role: "assistant", content }, done: false },
+    { message: { role: "assistant", content: "" }, done: true, done_reason: "stop", prompt_eval_count: 20, eval_count: 5 },
   ] };
 }
