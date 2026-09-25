@@ -7,18 +7,31 @@ import {
   agentForPurpose, type ClientMessage, type CreateSessionInput, type DomainEvent,
   type HarnessAdapter, type ModelInfo, type SessionConfigInput,
 } from "@arke-studio/contracts";
+import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { Coordinator } from "../../src/coordinator.js";
+import type { Cipher } from "../../src/credentials/store.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { setProductionModel } from "../../src/productions/ops.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
-import { until } from "../wait.js";
+import { until, untilAsync } from "../wait.js";
 
 const MODELS: ModelInfo[] = [
   { provider: "anthropic", id: "sonnet", aliases: ["claude-sonnet-5"], displayName: "Sonnet", inputTokenLimit: 200_000 },
   { provider: "anthropic", id: "opus[1m]", displayName: "Opus", inputModalities: ["text", "image"] },
   { provider: "openai", id: "spark", displayName: "Spark", inputModalities: ["text"] },
   { provider: "custom-provider", id: "region/model:fast", displayName: "Custom model" },
+  { provider: "ollama", id: "gemma4:12b", displayName: "Gemma 4 12B", inputTokenLimit: 131_072 },
+  { provider: "ollama", id: "gemma4:e2b-it-qat", displayName: "Gemma 4 E2B" },
 ];
+const LOCAL = "ollama/gemma4:12b";
+const LOCAL_SMALL = "ollama/gemma4:e2b-it-qat";
+
+/** A reversible fake cipher that is very visibly not the plaintext. */
+const fakeCipher: Cipher = {
+  isAvailable: () => true,
+  encryptString: (plain) => Buffer.from(`enc:${Buffer.from(plain).toString("hex")}`),
+  decryptString: (buf) => Buffer.from(buf.toString().slice(4), "hex").toString(),
+};
 const CHAT = "anthropic/sonnet";
 const STAGE = "anthropic/opus[1m]";
 const TEXT = "openai/spark";
@@ -62,6 +75,10 @@ async function fixture(options: {
   adapter?: CaptureAdapter;
   agents?: Record<string, { model?: string; brief?: string }>;
   production?: string;
+  /** A cipher makes a credential store exist, so a cloud key can be stored (issue 1247). */
+  cipher?: Cipher;
+  /** The shipped manifest, with Ollama answering as a running local runtime so its rows pass the gate. */
+  manifest?: boolean;
 } = {}) {
   const { root, worldDir } = await makeTempRoot();
   if (options.agents) await writeFile(join(root, "settings.json"), JSON.stringify({ agents: options.agents }), "utf8");
@@ -73,12 +90,20 @@ async function fixture(options: {
   const coordinator = new Coordinator({
     provider, adapter, appRoot: root, appVersion: "test", authoring: { agentForPurpose },
     changeLogPath: join(root, "changes.jsonl"), observeEvent: event => events.push(event),
+    ...(options.cipher ? { cipher: options.cipher } : {}),
+    ...(options.manifest ? {
+      manifest: SHIPPED_MANIFEST,
+      validators: { ollama: { validateKey: async () => [{ capability: "llm" as const, available: true }] } },
+    } : {}),
   });
   await coordinator.start(0);
   const send = (message: ClientMessage) => (coordinator as unknown as {
     handleClientMessage(message: ClientMessage): Promise<void>;
   }).handleClientMessage(message);
   const close = async () => { await coordinator.stop(); await provider.close(); };
+  // The catalogue is fetched as soon as the harness is ready (issue 1247), so a test that wants
+  // the next validation to find discovery pending first makes what is cached stale.
+  const staleCatalogue = () => (coordinator as unknown as { modelCatalog: { invalidate(): void } }).modelCatalog.invalidate();
   const settings = async () => JSON.parse(await readFile(join(root, "settings.json"), "utf8")) as { agents?: Record<string, { model?: string; brief?: string }> };
   const chat = async (modelId?: string) => {
     await send({ kind: "world-chat-create", worldId: WORLD_ID, requestId: randomUUID(), title: "Model routing",
@@ -96,7 +121,7 @@ async function fixture(options: {
     await until(() => events.some(event => event.type === "stage.construction" && event.requestId === requestId && event.status === "failed"), "Stage's terminal test result");
     return events.findLast(event => event.type === "stage.construction" && event.requestId === requestId);
   };
-  return { root, worldDir, coordinator, adapter, provider, events, send, settings, chat, stage, close };
+  return { root, worldDir, coordinator, adapter, provider, events, send, settings, chat, stage, close, staleCatalogue };
 }
 
 describe("coordinator harness/model routing (#1122)", () => {
@@ -126,6 +151,7 @@ describe("coordinator harness/model routing (#1122)", () => {
     try {
       let resolve!: (models: ModelInfo[]) => void;
       test.adapter.list = () => new Promise(done => { resolve = done; });
+        test.staleCatalogue();
       const pending = test.send({ kind: "list-harness-models" });
       await until(() => test.coordinator.getState().app.harnessModelStatus.status === "loading", "catalog loading");
       resolve(MODELS);
@@ -152,6 +178,7 @@ describe("coordinator harness/model routing (#1122)", () => {
       assert.equal(test.coordinator.getState().app.harnessModelStatus.status, "ready");
       let resolve!: (models: ModelInfo[]) => void;
       test.adapter.list = () => new Promise(done => { resolve = done; });
+        test.staleCatalogue();
       test.adapter.revision++;
       await until(() => test.coordinator.getState().app.harnessModelStatus.status === "loading", "automatic replacement catalog discovery");
       assert.equal(test.coordinator.getState().app.health.harness.status, "healthy");
@@ -207,6 +234,7 @@ describe("coordinator harness/model routing (#1122)", () => {
       try {
         let resolve!: (models: ModelInfo[]) => void;
         test.adapter.list = () => new Promise(done => { resolve = done; });
+        test.staleCatalogue();
         const oldChoice = test.send({ kind: "set-agent-config", agent: "world-builder", model: oldModel, brief: "Old brief" });
         await until(() => test.coordinator.getState().app.harnessModelStatus.status === "loading", "delayed agent validation");
         const otherAgent = test.send({ kind: "set-agent-config", agent: "stage-designer", model: STAGE });
@@ -226,6 +254,7 @@ describe("coordinator harness/model routing (#1122)", () => {
     try {
       let resolve!: (models: ModelInfo[]) => void;
       test.adapter.list = () => new Promise(done => { resolve = done; });
+        test.staleCatalogue();
       const oldChoice = test.send({ kind: "set-agent-config", agent: "world-builder", model: CHAT, brief: "Keep this brief" });
       await until(() => test.coordinator.getState().app.harnessModelStatus.status === "loading", "delayed agent choice");
       const latestChoice = test.send({ kind: "set-agent-config", agent: "world-builder", model: CUSTOM });
@@ -244,6 +273,7 @@ describe("coordinator harness/model routing (#1122)", () => {
       try {
         let resolve!: (models: ModelInfo[]) => void;
         test.adapter.list = () => new Promise(done => { resolve = done; });
+        test.staleCatalogue();
         const oldChoice = test.send({ kind: "set-production-model", worldId: WORLD_ID, productionId: "saltlight", capability: "llm", modelId: CHAT });
         await until(() => test.coordinator.getState().app.harnessModelStatus.status === "loading", "delayed production validation");
         const latestChoice = test.send({ kind: "set-production-model", worldId: WORLD_ID, productionId: "saltlight", capability: "llm", modelId: latestModel });
@@ -282,6 +312,53 @@ describe("coordinator harness/model routing (#1122)", () => {
       assert.equal(test.adapter.sessions.length, 0);
       await test.send({ kind: "set-agent-config", agent: "stage-designer", model: TEXT });
       assert.ok(test.events.some(event => event.type === "command.failed" && /cannot read images/.test(event.reason)));
+    } finally { await test.close(); }
+  });
+});
+
+describe("the local default when nobody chose and nothing cloud is paid for (issue 1247)", () => {
+  it("fills every agent left without a model from the local runtime, beneath dispatch and overrides", async () => {
+    const test = await fixture({ agents: { "world-builder": { model: CHAT, brief: "Chat brief." } } });
+    try {
+      const session = await test.chat();
+      // Chat resolves the world-builder's own override into the dispatch choice, as before.
+      assert.equal(session?.config.model, CHAT);
+      assert.equal(session?.config.agents?.["world-builder"]?.model, CHAT, "a Settings override is the agent's own");
+      assert.equal(session?.config.agents?.["world-builder"]?.brief, "Chat brief.");
+      assert.equal(session?.config.agents?.["scene-writer"]?.model, LOCAL, "an agent with no override runs locally");
+      assert.equal((await test.chat(CUSTOM))?.config.model, CUSTOM, "a dispatch choice still wins");
+    } finally { await test.close(); }
+  });
+
+  it("takes the first local row the admission gate lets through, under the shipped manifest", async () => {
+    const test = await fixture({ manifest: true });
+    try {
+      // Under the shipped manifest a local row is gated on the runtime's own status, so the
+      // choice waits for Ollama to have answered the poll, as it would on a real machine.
+      await until(() => test.coordinator.getState().app.providers.some((p) => p.id === "ollama" && p.validation === "valid"), "Ollama answering");
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL);
+      await test.send({ kind: "set-model-enabled", modelId: "gemma4-12b", enabled: false });
+      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL_SMALL, "the next admissible local row once the first is switched off");
+    } finally { await test.close(); }
+  });
+
+  it("stands down the moment a cloud key is stored, and returns when it is cleared", async () => {
+    const test = await fixture({ cipher: fakeCipher });
+    try {
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL);
+      await test.send({ kind: "set-credential", provider: "anthropic", key: "sk-ant-test-key" });
+      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === undefined, "the harness default once a key exists");
+      await test.send({ kind: "clear-credential", provider: "anthropic" });
+      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "local again once the key is gone");
+    } finally { await test.close(); }
+  });
+
+  it("chooses nothing when the catalogue lists nothing local", async () => {
+    const adapter = new CaptureAdapter();
+    adapter.list = async () => MODELS.filter((model) => model.provider !== "ollama");
+    const test = await fixture({ adapter });
+    try {
+      assert.deepEqual((await test.chat())?.config.agents ?? {}, {}, "no agent is given a model it did not ask for");
     } finally { await test.close(); }
   });
 });

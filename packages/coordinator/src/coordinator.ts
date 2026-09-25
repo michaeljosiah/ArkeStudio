@@ -92,6 +92,8 @@ import {
   estimateMicroUsd,
   modelEligible,
   modelForCapability,
+  harnessModelReference,
+  ROSTER,
   gateLocalRuntimes,
   type EngineLocalities,
   PROVIDERS,
@@ -1043,6 +1045,8 @@ export class Coordinator {
   private localRuntimeProbeInFlight = false;
   /** The local models last handed to the harness, so an unchanged poll rewrites nothing (issue 1247). Null: never published. */
   private publishedLocalHarnessModels: string | null = null;
+  /** Whether any cloud language-model key is stored, read with the harness environment (issue 1247). */
+  private cloudLlmKeyStored = false;
   private comfyUiSetupWork: Promise<void> = Promise.resolve();
   private comfyUiLifecycleWork: Promise<void> = Promise.resolve();
   /** actionClass per pending permission id, for remember-on-always (R-16). */
@@ -2830,7 +2834,7 @@ export class Coordinator {
     // captured, so changing a model in Settings applies to the next session, not the next run.
     this.sessionInput = (input) => ({
       ...input,
-      ...(this.agentOverrides ? { agents: this.agentOverrides } : {}),
+      ...(this.sessionAgents()),
       ...(this.skillFamily !== undefined ? { skillFamily: this.skillFamily } : {}),
       // The model too, or a narrowed skill is recorded and never actually injected.
       ...(this.skillModelId !== undefined ? { skillModelId: this.skillModelId } : {}),
@@ -3225,15 +3229,18 @@ export class Coordinator {
    */
   private refreshHarnessEnv(): Promise<void> {
     const run = async (): Promise<void> => {
-      if (!this.opts.relaunchHarness || !this.credentials) return;
       const credentials: Record<string, string | undefined> = {};
       for (const provider of LLM_ENV_PROVIDERS) {
         try {
-          credentials[provider] = (await this.credentials.get(provider)) ?? undefined;
+          credentials[provider] = (await this.credentials?.get(provider)) ?? undefined;
         } catch {
           /* one unreadable key must not cost the other its delivery */
         }
       }
+      // Read here rather than where it is used, because this is the one place every key
+      // change already passes through; the session builder only asks the flag.
+      this.cloudLlmKeyStored = LLM_ENV_PROVIDERS.some((provider) => Boolean(credentials[provider]));
+      if (!this.opts.relaunchHarness || !this.credentials) return;
       try {
         await this.opts.relaunchHarness(credentials);
         this.modelCatalogValue?.invalidate();
@@ -3261,6 +3268,10 @@ export class Coordinator {
             if (this.stopping) return;
             this.modelCatalogValue?.invalidate();
             const readiness = adapter.readiness();
+            // Fetched now rather than on first use: the local default below reads the
+            // catalogue synchronously when a session is built, and a session that opens
+            // before anyone has looked at a picker would otherwise see an empty one.
+            if (readiness.ready) this.warmModelCatalog();
             this.emit({
               at: new Date().toISOString(),
               type: "health.changed",
@@ -3475,7 +3486,9 @@ export class Coordinator {
         this.modelCatalogValue?.invalidate();
         this.emit({ at: this.nowIso(), type: "health.changed", component: "harness",
           status: ready.ready ? "healthy" : "unavailable", ...(ready.reason ? { reason: ready.reason } : {}) });
-        if (ready.ready && this.modelCatalogValue) this.trackBackground(this.modelCatalogValue.get().catch(() => {}));
+        // Warmed whether or not a picker has asked yet: the local default reads it at session
+        // build time (issue 1247), and the first session of a run must see what is installed.
+        if (ready.ready) this.warmModelCatalog();
         if (ready.ready) void this.vendorAuth.refresh({ patient: true }).catch(() => {});
       }).catch((error: unknown) => {
         if (this.stopping) return;
@@ -4004,12 +4017,58 @@ export class Coordinator {
       this.lifecycleTimers.delete(timer);
       if (this.stopping) return;
       this.modelCatalog.invalidate();
-      const work = this.modelCatalog.get(true).catch(() => {});
-      this.backgroundWork.add(work);
-      void work.finally(() => this.backgroundWork.delete(work));
+      this.warmModelCatalog();
     }, 5_000);
     timer.unref?.();
     this.lifecycleTimers.add(timer);
+  }
+
+  /** Fetch and publish the harness catalogue now, tracked so stop() waits it out. */
+  private warmModelCatalog(): void {
+    const work = this.modelCatalog.get(true).catch(() => {});
+    this.backgroundWork.add(work);
+    void work.finally(() => this.backgroundWork.delete(work));
+  }
+
+  /**
+   * The per-agent settings a session is built with. A Settings override is the agent's own;
+   * the local default (above) fills only the agents left without one, so it sits beneath a
+   * dispatch choice and beneath every override — the same order the config writer keeps —
+   * rather than replacing any of them.
+   */
+  private sessionAgents(): { agents?: Record<string, { model?: string; brief?: string }> } {
+    const local = this.localHarnessDefault();
+    if (local === undefined) return this.agentOverrides ? { agents: this.agentOverrides } : {};
+    const agents: Record<string, { model?: string; brief?: string }> = { ...this.agentOverrides };
+    for (const member of ROSTER) {
+      const override = agents[member.name];
+      if (override?.model === undefined) agents[member.name] = { ...override, model: local };
+    }
+    return { agents };
+  }
+
+  /**
+   * The model a session runs on when nobody chose one and there is no cloud key to run on
+   * (issue 1247): the local runtime's, so the first session on a fresh install writes rather
+   * than fails on a cloud model nothing can pay for.
+   *
+   * Undefined whenever a cloud key is stored — the harness's own default stands then, as it
+   * always has — and whenever the catalogue lists nothing local. Of what it lists, the first
+   * local row that passes the same admission check an explicit choice would: Ollama lists the
+   * model pulled or used most recently first, and a model the hardware gate refuses is never
+   * chosen quietly. There is no routed text default to prefer — `routing.llm` is retired on
+   * load (see app-settings) — so the person's way to choose is the agent override in Settings,
+   * which sits above this.
+   *
+   * Read synchronously from the published catalogue rather than fetched, because this runs
+   * inside the session builder; the catalogue is warmed when the harness comes up and after
+   * every local-model publication for exactly that reason.
+   */
+  private localHarnessDefault(): string | undefined {
+    if (this.cloudLlmKeyStored) return undefined;
+    const app = this.readModel.getState().app;
+    return app.harnessModels.filter((model) => model.provider === "ollama").map(harnessModelReference)
+      .find((reference) => selectHarnessModel(reference, app.harnessModels, app).reason === undefined);
   }
 
   /**
