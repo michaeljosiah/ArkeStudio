@@ -264,6 +264,9 @@ Respond with ONLY a JSON object: {"summary": "..."}
     name: "canon-qa",
     description: "Answer questions from retrieved canon",
     needsProposal: false,
+    // It answers from what the arke-world tools return and writes nothing. Without this it was
+    // handed the authoring tools simply for having no proposal directory, under every harness.
+    readOnly: true,
     brief: `You answer questions about a fictional world using ONLY what the arke-world tools return.
 Call search_canon with the question's key terms, then get_entry for anything promising.
 Answer from retrieved statements alone and quote the exact span that supports each claim.
