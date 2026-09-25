@@ -310,10 +310,11 @@ async function runConversation(lane, model, run) {
       try {
         await adapter.sendMessage({ sessionId, correlationId: randomUUID(), parts: [{ type: "text", text: PROMPTS[(turn - 1) % PROMPTS.length] }] });
       } catch (caught) { error = String(caught?.message ?? caught); }
-      // Events can trail the send's own settling by a moment.
+      // Timed at the send's own settling. The pause after it only lets a trailing failure event
+      // arrive, and is no part of the turn.
+      const ended = performance.now();
       await new Promise((resolve) => setTimeout(resolve, 50));
       error ??= failure;
-      const ended = performance.now();
       // First output of the turn, as seen at Ollama: the same ruler for both lanes, and no
       // reliance on how each adapter labels its events.
       const firsts = calls
