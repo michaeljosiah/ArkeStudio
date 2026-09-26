@@ -17,6 +17,7 @@ import {
   DEFAULT_NARRATOR,
   audiobookSpeakerColours,
   pinTarget,
+  performanceNote,
   pinnedLines,
   legacyVoiceModel,
   voicedBlocks,
@@ -40,7 +41,8 @@ import { continuityStamp } from "../lib/continuity.js";
 import { passageAction, passageActions, type PassageAction } from "../lib/passage-actions.js";
 import { useProduction } from "../lib/selectors.js";
 import { EditableText, SceneTitle } from "./storyboard.js";
-import { AudiobookBlocks, AudiobookFilterRow, AudiobookSide, DirectionCard, SpeakerLinesDialog, useChapterAudiobook, type AudiobookIntent, type BlockRow, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
+import { AudiobookBlocks, AudiobookFilterRow, AudiobookSide, DirectionCard, PerformedSpeaker, SpeakerLinesDialog, useChapterAudiobook, type AudiobookIntent, type BlockRow, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
+import { NarratorDialog } from "./audiobook-narrator.js";
 import { playClip } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
 import {
@@ -1107,6 +1109,8 @@ export function ChapterWorkspace({
     missing: audiobookRecord.missing,
     reading: production.audiobook?.reading ?? "narrator",
     ...(production.audiobook?.recorded !== undefined ? { recorded: production.audiobook.recorded } : {}),
+    ...(production.audiobook?.notes !== undefined ? { notes: production.audiobook.notes } : {}),
+    ...(production.audiobook?.narrator !== undefined ? { bookNarrator: production.audiobook.narrator } : {}),
     connection,
     locked: locked || record === null,
     // The press waits out the autosave (turn 126's fourth rule, codex on PR 1180): a read of
@@ -1142,6 +1146,10 @@ export function ChapterWorkspace({
   };
   // A recorded speaker's lines out and back (turn 155d), opened from the block's Takes panel.
   const [linesFor, setLinesFor] = useState<{ speaker: string; label: string } | null>(null);
+  // One narrator performs the cast (turn 155g): the speaker whose note row is focused, and the
+  // book's narrator dialog, opened from the Narration row (R-46).
+  const [performer, setPerformer] = useState<string | null>(null);
+  const [narratorOpen, setNarratorOpen] = useState(false);
   const audiobookColumn = useRef<HTMLDivElement | null>(null);
   audiobookResume.current = audiobook.resume;
   const directionStands = audiobook.directedBlocks > 0;
@@ -1646,6 +1654,10 @@ export function ChapterWorkspace({
                 <AudiobookBlocks
                   {...(pinChoices !== null ? { choices: pinChoices, onPin: pinBlock } : {})}
                   filter={audiobook.filter}
+                  marker={audiobook.marker}
+                  onMarker={audiobook.setMarker}
+                  modelOf={audiobook.modelOf}
+                  onDirect={audiobook.setDirection}
                   rows={audiobook.rows}
                   sounding={audiobook.sounding}
                   selected={audiobook.selected}
@@ -1878,6 +1890,7 @@ export function ChapterWorkspace({
                 chapterTitle={chapter.title}
                 modelOf={audiobook.modelOf}
                 onSetDirection={audiobook.setDirection}
+                onMarker={audiobook.setMarker}
                 onMakeAgain={audiobook.makeAgain}
                 refused={audiobook.lastRecord?.refused ?? null}
                 onUpload={audiobook.uploadTake}
@@ -2001,11 +2014,41 @@ export function ChapterWorkspace({
                   <li>
                     <div className="fy-ch__who-head">
                       <span className="fy-ch__who-name"><i className="fy-ab__speaker-dot fy-voice--narrator" aria-hidden="true" /><span>Narration</span></span>
-                      <span className="fy-ch__who-where fy-mono">{narratorName} · narrator</span>
+                      <button type="button" className="fy-ch__who-where fy-mono fy-ab__narrator-press" onClick={() => setNarratorOpen(true)} data-testid="voices-narrator">
+                        {audiobook.narrator.label ?? narratorName} · {production?.audiobook?.narrator !== undefined ? "this book" : "narrator"}
+                      </button>
                       <span className="fy-ch__who-count fy-mono">{narrationBlocks} blocks</span>
                     </div>
                   </li>
-                  {speakers.map((who) => {
+                  {production?.audiobook?.reading === "performed" &&
+                    speakers.map((who) => {
+                      const key = who.sheet ?? who.speaker;
+                      const sheet = who.sheet === undefined ? undefined : world.sheets.find((candidate) => candidate.id === who.sheet);
+                      const note = production.audiobook?.notes?.[key];
+                      const model = audiobook.modelOf(audiobook.narrator);
+                      const selectedRow = audiobook.rows.find((row) => row.block.key === audiobook.selected);
+                      const line = selectedRow !== undefined && selectedRow.speakerKey === key ? selectedRow : (audiobook.rows.find((row) => row.speakerKey === key) ?? null);
+                      return (
+                        <PerformedSpeaker
+                          key={key}
+                          worldId={worldId}
+                          productionId={prodId}
+                          chapterFile={chapter.file}
+                          speakerKey={key}
+                          name={sheet?.name ?? who.speaker}
+                          lines={who.lines}
+                          tone={who.sheet === undefined ? "none" : String(speakerColours.get(who.sheet) ?? "none")}
+                          {...(note !== undefined ? { note } : {})}
+                          noteHeld={model === null || performanceNote(note ?? "x", model).mode === "unsupported"}
+                          line={line}
+                          model={model}
+                          slug={worldSlug}
+                          focused={performer === key}
+                          onFocus={() => setPerformer(key)}
+                        />
+                      );
+                    })}
+                  {production?.audiobook?.reading !== "performed" && speakers.map((who) => {
                     const sheet = who.sheet === undefined ? undefined : world.sheets.find((candidate) => candidate.id === who.sheet);
                     const voice = sheet?.voice;
                     return (
@@ -2044,6 +2087,19 @@ export function ChapterWorkspace({
                     ...(voicesRecord.lost !== undefined ? [`${voicesRecord.lost} correction${voicesRecord.lost === 1 ? "" : "s"} lost`] : []),
                   ].join(" · ")}
                 </p>
+              )}
+              {narratorOpen && (
+                <NarratorDialog
+                  worldId={worldId}
+                  productionId={prodId}
+                  narratorLabel={audiobook.narrator.label ?? narratorName}
+                  {...(production?.audiobook?.narrator !== undefined ? { bookNarrator: production.audiobook.narrator } : {})}
+                  appLabel={narratorName}
+                  trial={{ chapterFile: chapter.file, block: audiobook.selected ?? "title" }}
+                  slug={worldSlug}
+                  data={`${chapter.title} · ${audiobook.rows.length} blocks`}
+                  onClose={() => setNarratorOpen(false)}
+                />
               )}
             </section>
 

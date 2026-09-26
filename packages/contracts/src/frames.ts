@@ -5,7 +5,7 @@ import { GenesisImageTargetSchema } from "./genesis-images.js";
 import { AccountPageSchema } from "./account.js";
 import { StageReferenceFrameSchema } from "./scene.js";
 import { isManuscriptLanguage } from "./manuscript.js";
-import { AudiobookDirectionInputSchema, AudiobookReadingSchema } from "./audiobook.js";
+import { AudiobookDirectionInputSchema, AudiobookReaderSchema, AudiobookReadingSchema } from "./audiobook.js";
 import { StageInspectionFrameSchema } from "./stage-construction.js";
 import { DialogueFailureTagSchema } from "./take-feedback.js";
 import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
@@ -15,7 +15,7 @@ import { AudioAttestationSchema, AudioRangeSchema, FullSha256Schema } from "./au
 import { RehearsalIdSchema } from "./rehearsal.js";
 import { PerformanceReferenceRoleSchema } from "./performance-bible.js";
 import { PerformanceDeliverySchema } from "./voice.js";
-import { CadencePlanSchema } from "./cadence.js";
+import { CADENCE_PHRASE_MAX, CadencePlanSchema } from "./cadence.js";
 import { PerformanceIdSchema } from "./performance.js";
 import { VoiceSampleSourceSchema } from "./voice-sample.js";
 import { z } from "zod";
@@ -3028,6 +3028,47 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    */
   z
     .object({ kind: z.literal("set-audiobook-recorded"), worldId: UlidSchema, productionId: SlugSchema, speaker: z.string().min(1).max(120), recorded: z.boolean() })
+    .strict(),
+  /**
+   * How the narrator plays a character under `performed` (design turn 155g, SPEC-047 R-44):
+   * a phrase of at most 60 characters on the book record, keyed by sheet id or a name no sheet
+   * carries; null takes it away. Changing it makes that speaker's lines stale (R-45).
+   */
+  z
+    .object({ kind: z.literal("set-audiobook-note"), worldId: UlidSchema, productionId: SlugSchema, speaker: z.string().min(1).max(120), note: z.string().min(1).max(CADENCE_PHRASE_MAX).nullable() })
+    .strict(),
+  /**
+   * The book's own narrator (design turn 155h, SPEC-047 R-46), or null for the app's. Written
+   * on the book record and nothing made; the takes a switch leaves current are the record's
+   * choice again without a call (R-48).
+   */
+  z
+    .object({ kind: z.literal("set-audiobook-narrator"), worldId: UlidSchema, productionId: SlugSchema, voice: AudiobookReaderSchema.nullable() })
+    .strict(),
+  /**
+   * What a narrator switch would do, before it is made (R-46): the blocks that go stale across
+   * the book, the direction the new reader cannot express, the price of reading the book
+   * again, and the takes kept. Answered by `audiobook.narrator-quote`; nothing written.
+   */
+  z
+    .object({ kind: z.literal("quote-audiobook-narrator"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, voice: AudiobookReaderSchema.nullable() })
+    .strict(),
+  /**
+   * A block heard as it would be read (R-45, R-46): its words with its direction and, under
+   * `performed`, its speaker's note, in the narrator's voice or the voice given — a preview,
+   * cached, never a take. The press on a priced button is the consent to a cloud reader's
+   * price. Answered by `audiobook.heard`.
+   */
+  z
+    .object({
+      kind: z.literal("hear-audiobook-line"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      chapterFile: z.string().min(1),
+      block: z.string().min(1),
+      voice: AudiobookReaderSchema.optional(),
+    })
     .strict(),
   /**
    * Direction beside the prose (SPEC-047 R-6..R-10): one block's plan set by hand, or cleared;

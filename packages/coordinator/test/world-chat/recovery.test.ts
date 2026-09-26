@@ -91,6 +91,20 @@ describe("startup recovery", () => {
     );
   });
 
+  it("leaves a run alone while this process has its turn in flight (2026-09-26)", async () => {
+    const { world, dir } = await worldWithInterruptedTurn();
+    const { events: before } = await new WorldChatStore(dir).read();
+
+    const live = await recoverConversations(world, NOW, { isLive: () => true });
+    assert.deepEqual(live.repaired, [], "a running run the runner is holding is a live turn, not a crash");
+    const { events: after } = await new WorldChatStore(dir).read();
+    assert.equal(after.length, before.length, "nothing is appended to a live turn's log");
+
+    // Once the turn is no longer anybody's, the same run is the crash it looks like.
+    const later = await recoverConversations(world, NOW, { isLive: () => false });
+    assert.equal(later.repaired.length, 1);
+  });
+
   it("leaves a conversation whose turn completed properly alone", async () => {
     const world = await tempDir("arke-recovery-");
     const id = newId("cv");
