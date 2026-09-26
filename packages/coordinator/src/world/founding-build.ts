@@ -2,7 +2,7 @@ import { copyFile, mkdir, open, readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   ART_DIRECTION_PATH,
-  FOUNDING_IMAGES_SCHEMA_VERSION,
+  FOUNDING_IMPORTS_SCHEMA_VERSION,
   BuildJournalEntrySchema,
   BuildReviewSchema,
   buildItemDispatches,
@@ -44,6 +44,7 @@ import { foldBlueprint } from "../harness/blueprint.js";
 import { carryGenesisConversation, genesisConversation, frozenFoundingInput, genesisControlDir, reserveGenesisWorld } from "../harness/genesis-conversation.js";
 import { reviewGenesisContent } from "../harness/genesis-review.js";
 import { carryGenesisImageArtifacts, installGenesisImage } from "../harness/genesis-image-carry.js";
+import { carryGenesisSources, carryGenesisCanonSources } from "../harness/genesis-imports.js";
 import { openThread, stageCanonEntry } from "../canon/authoring.js";
 import { MarkdownFile, sha256 } from "./text-files.js";
 import { buildSheetContent, createSheetFromSentence } from "../sheets/authoring.js";
@@ -468,7 +469,7 @@ export class FoundingBuildService {
     const store = this.ports.openStore();
     if (!store || store.worldId !== worldId) throw new Error("the new world did not open");
 
-    await store.ensureSchemaVersion(FOUNDING_IMAGES_SCHEMA_VERSION, "founding-content");
+    await store.ensureSchemaVersion(FOUNDING_IMPORTS_SCHEMA_VERSION, "founding-content");
     if (blueprint.reviewed) {
       const review = await reviewGenesisContent(sandbox);
       const remaining = review.cards.filter(card => card.status !== "approved");
@@ -928,6 +929,7 @@ export class FoundingBuildService {
     await this.ports.carryAttachments(active.record.genesisId, active.record.worldId);
     const imageStore = this.ports.openStore();
     if (imageStore?.worldId === active.record.worldId && active.record.blueprint.reviewed) {
+      await carryGenesisSources(await this.ports.genesisDir(active.record.genesisId), active.record.blueprint, imageStore);
       await carryGenesisImageArtifacts(await this.ports.genesisDir(active.record.genesisId), active.record.genesisId,
         active.record.blueprint, imageStore, jobId => this.ports.ledgerEntryFor(jobId));
     }
@@ -1151,7 +1153,10 @@ export class FoundingBuildService {
     let receipt = await readFile(toExtendedLength(receiptPath), "utf8")
       .then(raw => JSON.parse(raw) as { proposalId: string; entryId: string })
       .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return null; throw err; });
-    if (receipt && store.getBundle().canon.some(candidate => candidate.id === receipt!.entryId)) return;
+    if (receipt && store.getBundle().canon.some(candidate => candidate.id === receipt!.entryId)) {
+      await carryGenesisCanonSources(await this.ports.genesisDir(active.record.genesisId), entry.sources ?? [], receipt.entryId, store);
+      return;
+    }
     if (!receipt) {
       const proposal = await stageCanonEntry(store, gate, { entryType: entry.type, title: entry.title,
         statement: entry.statement, status: entry.type === "thread" ? "open" : "settled" });
@@ -1160,6 +1165,7 @@ export class FoundingBuildService {
     }
     const outcome = await acceptDecided(gate, receipt.proposalId);
     if (outcome.status !== "accepted") throw new Error(`The approved canon entry could not be saved (${outcome.status}).`);
+    await carryGenesisCanonSources(await this.ports.genesisDir(active.record.genesisId), entry.sources ?? [], receipt.entryId, store);
     await this.ports.refreshWorldSnapshot(active.record.worldId);
   }
 

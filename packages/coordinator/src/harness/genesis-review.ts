@@ -7,8 +7,10 @@ import { conversationActionDigest } from "../arke-actions/digest.js";
 import { serializeFileMutation } from "../world/atomic.js";
 import { foldBlueprint } from "./blueprint.js";
 import { genesisControlDir, genesisConversation } from "./genesis-conversation.js";
+import { recoverGenesisImports, validateGenesisSources } from "./genesis-imports.js";
 
 export async function reviewGenesisContent(dir: string): Promise<GenesisContentReview> {
+  await recoverGenesisImports(dir);
   const blueprint = await foldBlueprint(dir);
   const log = await genesisConversation(dir);
   const { events, problems: journalProblems } = await log.read();
@@ -30,6 +32,7 @@ export async function reviewGenesisContent(dir: string): Promise<GenesisContentR
     return { ...row, digest, ...(previous ? { previous } : {}), status: decision?.decision === "reject" ? "rejected" : isSelected || removed ? "approved" : "pending" };
   });
   const approved = approvedGenesisBlueprint(selected);
+  await validateGenesisSources(dir, approved);
   const problems = blueprint.dropped.map(file => `Cannot read ${file}; repair it before founding.`);
   const ids = new Set([...approved.characters.map(c => `character:${c.slug}`), ...approved.locations.map(c => `location:${c.slug}`), ...approved.factions.map(c => `faction:${c.slug}`)]);
   for (const [kind, entities] of [["character", approved.characters], ["location", approved.locations], ["faction", approved.factions]] as const) {
@@ -60,6 +63,7 @@ export async function decideGenesisContent(
       if (!card || card.digest !== choice.digest) throw new Error("The proposed content changed. Review the current version before deciding.");
       return card;
     });
+    await validateGenesisSources(dir, await foldBlueprint(dir));
     // Validate the complete batch before appending any decisions.
     for (const card of cards) {
       const record: GenesisDecision = { key: card.key, digest: card.digest, content: card.content, decision, at: new Date().toISOString() };

@@ -8,6 +8,8 @@ import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import { renderInlineMarkdown } from "../components/inline-markdown.js";
 import { GenesisContentCards } from "../components/genesis-review.js";
 import { GenesisImageCards } from "../components/genesis-images.js";
+import { GenesisImportCards } from "../components/genesis-imports.js";
+import { reviewGenesisImports, resolveGenesisImport } from "../lib/store.js";
 import { Archive, ChartLine, ChevronDown, ChevronRight, Pencil, Plus, RotateCcw, Sparkle, X } from "../components/icons.js";
 import { AgentsPanel } from "./agents.js";
 import {
@@ -801,6 +803,9 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
   const chatRunning = g?.status === "running";
   const blueprint = g?.blueprint ?? null;
   useEffect(() => {
+    if (connection === "open" && !chatRunning && !g?.worldId && !g?.founding) reviewGenesisImports(genesisId);
+  }, [connection, chatRunning, blueprint, g?.attachments, genesisId]);
+  useEffect(() => {
     if (connection === "open" && blueprint && !chatRunning && !g?.worldId) reviewGenesisDraft(genesisId);
   }, [connection, blueprint, chatRunning, g?.worldId, genesisId]);
 
@@ -1218,6 +1223,10 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                     {turn.role === "user" ? turn.text : renderInlineMarkdown(turn.text)}
                   </div>
                 ))}
+                {g?.imports && <GenesisImportCards imports={g.imports} busy={chatRunning || buildPressed || !!g.worldId || !!g.founding}
+                  onResolve={resolution => resolveGenesisImport(genesisId, resolution)}
+                  onRefresh={() => reviewGenesisImports(genesisId)}
+                  onExtract={name => setMessage(`Please extract reviewable worldbuilding proposals from attachments/${name}. Cite exact source quotes; keep interpretations and suggested relationships separate from the evidence.`)} />}
                 {g?.review && <GenesisContentCards review={g.review} busy={chatRunning || buildPressed || myBuild?.status === "running"}
                   onDecide={(cards, decision) => decideGenesisDraft(genesisId, cards.map(card => ({ key: card.key, digest: card.digest })), decision)}
                   onRevise={title => setMessage(`Please revise ${title}: `)} />}

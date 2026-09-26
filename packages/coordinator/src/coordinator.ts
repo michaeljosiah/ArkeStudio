@@ -459,6 +459,7 @@ import { GenesisService } from "./harness/genesis.js";
 import { carryGenesisConversation, foundingMessages, genesisControlDir, loadGenesisConversation, reserveGenesisWorld } from "./harness/genesis-conversation.js";
 import { approvedBlueprintForFounding, decideGenesisContent, reviewGenesisContent } from "./harness/genesis-review.js";
 import { decideGenesisImage, genesisImageRequest, reviewGenesisImages, reviewedGenesisImages } from "./harness/genesis-images.js";
+import { reviewGenesisImports, resolveGenesisImport, recoverGenesisImports } from "./harness/genesis-imports.js";
 import { FOUNDING_CONVERSATION_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { FoundingBuildService } from "./world/founding-build.js";
 import { isAuthShapedFailure, VendorAuthService } from "./harness/vendor-auth.js";
@@ -7133,6 +7134,29 @@ export class Coordinator {
         } finally { if (!reading) this.genesisDeciding.delete(msg.genesisId); }
         return;
       }
+      case "genesis-imports":
+      case "genesis-import-resolve": {
+        if (!this.opts.provider.genesisDir) return;
+        let held = false;
+        const reading = msg.kind === "genesis-imports";
+        try {
+          if (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || (!reading && this.genesisDeciding.has(msg.genesisId)))
+            throw new Error("Another draft operation is still running. Try again shortly.");
+          if (!reading) { this.genesisDeciding.add(msg.genesisId); held = true; }
+          const dir = await this.opts.provider.genesisDir(msg.genesisId);
+          const loaded = await loadGenesisConversation(dir, msg.genesisId);
+          if (loaded.worldId || loaded.founding) throw new Error("This world has begun. Continue imports in its world conversation.");
+          const imports = msg.kind === "genesis-import-resolve" ? await resolveGenesisImport(dir, msg.resolution) : await reviewGenesisImports(dir);
+          this.emit({ type: "genesis.imports", at: new Date().toISOString(), genesisId: msg.genesisId, imports });
+          if (msg.kind === "genesis-import-resolve") {
+            this.emit(await loadGenesisConversation(dir, msg.genesisId));
+            this.emit({ type: "genesis.review", at: new Date().toISOString(), genesisId: msg.genesisId, review: await reviewGenesisContent(dir) });
+          }
+        } catch (err) {
+          this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: msg.genesisId, status: "failed", detail: describeCoordinatorError(err) });
+        } finally { if (held) this.genesisDeciding.delete(msg.genesisId); }
+        return;
+      }
       case "genesis-propose-world": {
         if (!this.opts.provider.genesisDir || this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) return;
         this.genesisDeciding.add(msg.genesisId);
@@ -7229,6 +7253,7 @@ export class Coordinator {
           if (draft.worldId) { failed("This world has begun. Continue in its world conversation."); return; }
           if (this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) { failed("A decision is being saved. Try again shortly."); return; }
           if (draft.founding) { failed("World creation has started. Press Begin again to recover it."); return; }
+          await recoverGenesisImports(dir);
           this.emit(draft);
           // Fire and watch: turns, the draft and the final status arrive as events.
           this.trackBackground(this.genesis.run(dir, msg.genesisId, msg.text).catch(err => failed(describeCoordinatorError(err))));

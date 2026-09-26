@@ -31,6 +31,7 @@ const KINDS = [
 ] as const;
 
 interface FoldedEntity {
+  sources?: import("@arke-studio/contracts").GenesisSource[];
   sheet?: import("@arke-studio/contracts").BlueprintCharacter["sheet"];
   slug: string;
   name: string;
@@ -89,6 +90,7 @@ async function foldKind(
     }
     entities.push({
       slug,
+      ...(parsed.sources ? { sources: parsed.sources } : {}),
       name: parsed.name,
       ...(parsed.line !== undefined ? { line: parsed.line } : {}),
       ...(parsed.description !== undefined ? { description: parsed.description } : {}),

@@ -23,6 +23,7 @@ import { BuildReviewSchema, FoundingBuildStateSchema } from "./founding-build.js
 import { GenesisBlueprintSchema } from "./genesis.js";
 import { GenesisContentReviewSchema } from "./genesis-review.js";
 import { GenesisImagesSchema } from "./genesis-images.js";
+import { GenesisImportsSchema } from "./genesis-imports.js";
 import { FrameRunQuoteSchema, FrameRunStateSchema } from "./frame-run.js";
 import { HarnessStatusSchema } from "./harness.js";
 import {
@@ -1680,6 +1681,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("genesis.discarded"), genesisId: z.string().min(1) }).strict(),
   z.object({ ...base, type: z.literal("genesis.review"), genesisId: z.string().min(1), review: GenesisContentReviewSchema }).strict(),
   z.object({ ...base, type: z.literal("genesis.images"), genesisId: z.string().min(1), images: GenesisImagesSchema }).strict(),
+  z.object({ ...base, type: z.literal("genesis.imports"), genesisId: z.string().min(1), imports: GenesisImportsSchema }).strict(),
   z
     .object({
       ...base,

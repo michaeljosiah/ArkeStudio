@@ -250,6 +250,8 @@ const CLIENT_COMMAND_METADATA = {
   "genesis-load": globalOnly("Founding drafts are app-scoped."),
   "genesis-review": globalOnly("Founding content review is pre-world."),
   "genesis-images": globalOnly("Images belong to a pre-world conversation."),
+  "genesis-imports": globalOnly("Imports belong to a pre-world conversation."),
+  "genesis-import-resolve": globalOnly("Import review belongs to a pre-world conversation."),
   "genesis-image-generate": globalOnly("Generation belongs to a pre-world conversation."),
   "genesis-image-decide": globalOnly("Image decisions belong to a pre-world conversation."),
   "genesis-propose-world": globalOnly("Form values become reviewable founding proposals."),

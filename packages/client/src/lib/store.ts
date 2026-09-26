@@ -162,6 +162,7 @@ interface StoreState {
       worldId?: string;
       review?: import("@arke-studio/contracts").GenesisContentReview;
       images?: import("@arke-studio/contracts").GenesisImages;
+      imports?: import("@arke-studio/contracts").GenesisImports;
       founding?: boolean;
       formHandoff?: "pending" | "completed";
       /** The plan so far, folded from the sandbox directory (SPEC-031 R-2). */
@@ -1504,6 +1505,8 @@ function handleFrame(json: string): void {
       setupStatus = event.setup;
     } else if (event.type === "genesis.images") {
       genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], images: event.images } };
+    } else if (event.type === "genesis.imports") {
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], imports: event.imports } };
     } else if (event.type === "genesis.review") {
       genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], review: event.review } };
     } else if (event.type === "genesis.discarded") {
@@ -2698,6 +2701,10 @@ export function loadGenesisDraft(genesisId: string): void { send({ kind: "genesi
 export function reviewGenesisDraft(genesisId: string): void { send({ kind: "genesis-review", genesisId }); }
 export function reviewGenesisImages(genesisId: string, models?: Partial<Record<import("@arke-studio/contracts").Capability, string>>): void {
   send({ kind: "genesis-images", genesisId, ...(models ? { models } : {}) });
+}
+export function reviewGenesisImports(genesisId: string): void { send({ kind: "genesis-imports", genesisId }); }
+export function resolveGenesisImport(genesisId: string, resolution: import("@arke-studio/contracts").GenesisImportResolve): void {
+  send({ kind: "genesis-import-resolve", genesisId, resolution });
 }
 export function generateGenesisImage(genesisId: string, intentId: string, digest: string, models?: Partial<Record<import("@arke-studio/contracts").Capability, string>>): void {
   send({ kind: "genesis-image-generate", genesisId, intentId, digest, requestId: ulid(), ...(models ? { models } : {}) });

@@ -134,6 +134,17 @@ open question; other types propose settled facts. Nothing becomes accepted until
 approves its content card. Do not write approval records. ./approved-content.json is an
 application-supplied snapshot of the author's choices, not an editable source of decisions.
 
+For document imports, write one candidate per file at draft/imports/<stable-id>.json:
+{"source":"notes.md","kind":"character","name":"Maren","body":"Proposed interpretation",
+"section":"Essence","quote":"Exact source words","links":["location:the-vigil"]}.
+Supported kinds: character, location, faction, canon. Character sections: Essence, Appearance;
+location: Look, Sound; faction: Essence, Wants. Omit section for canon. Every candidate needs an
+exact quote from that uploaded source. Interpretations and suggested relationship links are
+proposals, not verified facts. Do not invent missing details or write extracted content directly
+into entity files. The author compares duplicates, edits, rejects, merges or retains candidates
+in chat, then separately approves the exact resulting content. Preserve sources metadata when
+later revising prepared content. Do not author or alter source evidence metadata.
+
 When the author asks for a character or location image, prepare a typed generation request in
 draft.json "images": [{"id":"maren-portrait","target":"character:maren","prompt":"Complete image
 prompt including the agreed look and visible subject","references":["uploaded-photo.png"]}].

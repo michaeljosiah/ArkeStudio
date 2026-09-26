@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { KeyArtIntentSchema } from "./art-direction.js";
 import { GenesisImageIntentSchema, GenesisImageSelectionSchema } from "./genesis-images.js";
+import { GenesisSourceSchema } from "./genesis-imports.js";
 export const FOUNDING_CONVERSATION_SCHEMA_VERSION = 28;
 
 export const GenesisSheetContentSchema = z.object({
@@ -14,6 +15,7 @@ export const GenesisSheetContentSchema = z.object({
 export const GenesisCanonSchema = z.object({
   slug: z.string().regex(/^[a-z0-9][a-z0-9-]*$/).max(120),
   type: z.enum(["rule", "lore", "location", "faction", "timeline", "tone", "thread"]),
+  sources: z.array(GenesisSourceSchema).max(100).optional(),
   title: z.string().min(1).max(200), statement: z.string().min(1).max(16000),
 }).strict();
 
@@ -184,7 +186,8 @@ export type GenesisDraft = z.infer<typeof GenesisDraftSchema>;
  * removed from the fold and never built.
  */
 const entityFileBase = {
-  sheet: GenesisSheetContentSchema.optional(),
+  sources: z.array(GenesisSourceSchema).max(100).optional(),
+    sheet: GenesisSheetContentSchema.optional(),
   name: z.string().min(1).max(120),
   line: z.string().min(1).max(300).optional(),
   description: z.string().min(1).max(4000).optional(),
@@ -211,6 +214,7 @@ export type GenesisFactionFile = z.infer<typeof GenesisFactionFileSchema>;
 /** A folded entity: the file's contents under the identity its filename carries. */
 export const BlueprintCharacterSchema = z
   .object({
+    sources: z.array(GenesisSourceSchema).max(100).optional(),
     sheet: GenesisSheetContentSchema.optional(),
     slug: z.string().min(1).max(120),
     name: z.string().min(1).max(120),
@@ -224,6 +228,7 @@ export type BlueprintCharacter = z.infer<typeof BlueprintCharacterSchema>;
 
 export const BlueprintLocationSchema = z
   .object({
+    sources: z.array(GenesisSourceSchema).max(100).optional(),
     sheet: GenesisSheetContentSchema.optional(),
     slug: z.string().min(1).max(120),
     name: z.string().min(1).max(120),
@@ -236,6 +241,7 @@ export type BlueprintLocation = z.infer<typeof BlueprintLocationSchema>;
 
 export const BlueprintFactionSchema = z
   .object({
+    sources: z.array(GenesisSourceSchema).max(100).optional(),
     sheet: GenesisSheetContentSchema.optional(),
     slug: z.string().min(1).max(120),
     name: z.string().min(1).max(120),
