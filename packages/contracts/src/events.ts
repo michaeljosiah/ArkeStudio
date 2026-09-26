@@ -1125,6 +1125,60 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...base,
+      type: z.literal("audiobook.script"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      /** World-relative, under `exports/`. */
+      output: z.string().min(1).optional(),
+      lines: z.number().int().min(0).optional(),
+      chapters: z.number().int().min(0).optional(),
+      /** Chapters whose cast is not current, so their lines could not be named. */
+      notCast: z.number().int().min(0).optional(),
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.lines-staged"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      /** A row a file (R-39): the line it matched and its checks, or the one clause it was refused in. */
+      rows: z
+        .array(
+          z
+            .object({
+              file: z.string().min(1),
+              id: z.string().min(1).optional(),
+              quote: z.string().optional(),
+              words: z.enum(["match", "differ", "unchecked"]).optional(),
+              differences: z.number().int().min(0).optional(),
+              rmsDbfs: z.number().nullable().optional(),
+              samplePeakDbfs: z.number().nullable().optional(),
+              refused: z.string().min(1).optional(),
+            })
+            .strict(),
+        )
+        .max(400),
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.lines-kept"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      kept: z.number().int().min(0),
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
       type: z.literal("audiobook.take-staged"),
       worldId: UlidSchema,
       productionId: SlugSchema,

@@ -40,7 +40,7 @@ import { continuityStamp } from "../lib/continuity.js";
 import { passageAction, passageActions, type PassageAction } from "../lib/passage-actions.js";
 import { useProduction } from "../lib/selectors.js";
 import { EditableText, SceneTitle } from "./storyboard.js";
-import { AudiobookBlocks, AudiobookFilterRow, AudiobookSide, DirectionCard, useChapterAudiobook, type AudiobookIntent, type BlockRow, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
+import { AudiobookBlocks, AudiobookFilterRow, AudiobookSide, DirectionCard, SpeakerLinesDialog, useChapterAudiobook, type AudiobookIntent, type BlockRow, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
 import { playClip } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
 import {
@@ -1135,6 +1135,8 @@ export function ChapterWorkspace({
     if (target === null) return;
     setVoicePin(worldId, prodId, chapter.file, { ...target, ...pick });
   };
+  // A recorded speaker's lines out and back (turn 155d), opened from the block's Takes panel.
+  const [linesFor, setLinesFor] = useState<{ speaker: string; label: string } | null>(null);
   const audiobookColumn = useRef<HTMLDivElement | null>(null);
   audiobookResume.current = audiobook.resume;
   const directionStands = audiobook.directedBlocks > 0;
@@ -1652,6 +1654,19 @@ export function ChapterWorkspace({
                 </>
               )}
               {audiobook.uploadDialog}
+              {linesFor !== null && (
+                <SpeakerLinesDialog
+                  worldId={worldId}
+                  productionId={prodId}
+                  speaker={linesFor.speaker}
+                  label={linesFor.label}
+                  tone={(() => {
+                    const row = audiobook.rows.find((candidate) => (candidate.speakerKey === null ? "narrator" : (candidate.block.sheet ?? candidate.block.speaker)) === linesFor.speaker);
+                    return row === undefined || row.speakerKey === null ? "narrator" : row.colour === null ? "none" : String(row.colour);
+                  })()}
+                  onClose={() => setLinesFor(null)}
+                />
+              )}
               <div className="fy-ab__foot" data-testid="audiobook-foot">
                 <span>{`Saved · v${record?.version ?? chapter.version} · ${words.toLocaleString()} words`}</span>
                 <span className="fy-ab__foot-push" />
@@ -1862,6 +1877,7 @@ export function ChapterWorkspace({
                 refused={audiobook.lastRecord?.refused ?? null}
                 onUpload={audiobook.uploadTake}
                 onRecorded={(speaker, on) => setAudiobookRecorded(worldId, prodId, speaker, on)}
+                onLines={(speaker, label) => setLinesFor({ speaker, label })}
                 blockHost={(key) => audiobookColumn.current?.querySelector<HTMLElement>(`[data-block="${key}"] .fy-ab__text`) ?? null}
               />
             )}
