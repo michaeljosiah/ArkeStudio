@@ -61,6 +61,22 @@ export class WorldChatRunnerCache<R extends CachedRunner> {
     return this.current.get(worldId)?.runner;
   }
 
+  /**
+   * Whether any runner of this world has a turn in flight on the conversation.
+   *
+   * Recovery asks this before closing a run the log shows as running: the log cannot tell a live
+   * turn from a crashed one, and these runners are the only record of which is which. Unlike
+   * `runnerFor` it retires nothing — a question asked from recovery must not change the answer
+   * the next command gets.
+   */
+  isRunning(worldId: string, conversationId: ConversationId): boolean {
+    if (this.current.get(worldId)?.runner.isRunning(conversationId)) return true;
+    for (const entry of this.retired) {
+      if (entry.worldId === worldId && entry.runner.isRunning(conversationId)) return true;
+    }
+    return false;
+  }
+
   /** Hold this runner as the one the open store's world uses from now on. */
   remember(worldId: string, store: object, runner: R): void {
     this.current.set(worldId, { runner, store });

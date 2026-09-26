@@ -3748,6 +3748,21 @@ export class Coordinator {
     }
   }
 
+  /**
+   * Wait out any world open in progress, recovery included, before starting a conversation turn.
+   *
+   * The provider installs the store part-way through an open, so a line sent the moment a window
+   * lands in a world finds a store and is taken — and then the same open's recovery, which reads
+   * every run marked running as one the last process died in, closes it as "the app closed
+   * mid-turn" while the person is watching it think (seen 2026-09-26: a line taken eight seconds
+   * before `world.opened`). Holding the turn until the open settles keeps recovery to runs this
+   * process never started. Opens are serialised on the tail, so this also covers one queued
+   * behind another.
+   */
+  private async worldOpensSettled(): Promise<void> {
+    await this.openWorldTail;
+  }
+
   private async openWorldOnce(worldId: string): Promise<void> {
     // Captured before the load, because recovery must not run on a world that was already open:
     // it closes any run still marked running, and on the open world that could be a live turn
@@ -3962,7 +3977,9 @@ export class Coordinator {
     try {
       // Setup transcripts share this recovery path. Repairing a torn tail or interrupted turn
       // writes private world data, so it needs the same ownership gate as a live setup turn.
-      const outcome = await store.ownedWrite(() => recoverConversations(store.dir, now));
+      const outcome = await store.ownedWrite(() => recoverConversations(store.dir, now, {
+        isLive: (conversationId) => this.worldChatRunners.isRunning(store.worldId, conversationId),
+      }));
       const gate = this.opts.provider.gate?.();
       const wrapUps = gate ? await recoverWrapUps(store, gate, now) : { repaired: [] };
       await this.durableExportReads(store.worldId);
@@ -5665,6 +5682,8 @@ export class Coordinator {
         return;
       }
       case "production-setup": {
+        // A setup turn is a World Chat run like any other, and recovery repairs setups too.
+        await this.worldOpensSettled();
         const store = this.opts.provider.openStore?.();
         try {
           if (!store || store.worldId !== msg.worldId) throw new Error("Open the world this production setup belongs to.");
@@ -6417,6 +6436,9 @@ export class Coordinator {
             admitted,
             ...(turnId !== undefined ? { turnId } : {}),
           });
+        // Before anything is remembered for the request: the open clears what the last world's
+        // session remembered, and a line held for the open belongs to the session it opens.
+        await this.worldOpensSettled();
         // The same request again is the same line (codex on PR 1232): still being taken, the
         // first's answer is this one's too; taken, it is answered as taken and not said twice.
         const seen = this.worldChatSends.get(msg.requestId);
@@ -6475,6 +6497,9 @@ export class Coordinator {
         // Taken is known for the world's session; anything else is not taken as far as this
         // coordinator knows — declined, never received, or sent to one that has since restarted.
         // Still being taken, the first send's own answer will come.
+        // Behind the same wait as the send, so a line still held for an open is found pending
+        // rather than answered as never taken — which a window would resend as a second turn.
+        await this.worldOpensSettled();
         const seen = this.worldChatSends.get(msg.requestId);
         if (seen === "pending") return;
         this.emit({
@@ -6488,6 +6513,7 @@ export class Coordinator {
         return;
       }
       case "world-chat-retry-turn": {
+        await this.worldOpensSettled();
         const store = this.opts.provider.openStore?.();
         if (!store) return;
         const started = await this.conversationAuthoring(store).retry(msg.conversationId, msg.turnId);
