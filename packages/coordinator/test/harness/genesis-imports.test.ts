@@ -145,3 +145,38 @@ it("retains long quoted evidence without overflowing the authored section", asyn
   assert.ok(entity.sheet!.sections["Essence"]!.length < 8000);
   assert.equal(entity.sources![0]!.quote, quote);
 });
+
+it("withdraws replaced proposals and does not restore superseded evidence", async () => {
+  const { dir } = await setup();
+  const path = join(dir, "draft", "imports", "maren.json");
+  const initial = (await reviewGenesisImports(dir)).cards[0]!;
+  await resolveGenesisImport(dir, { id: initial.id, digest: initial.digest, decision: "defer" });
+  const proposal = JSON.parse(await readFile(path, "utf8"));
+  await writeFile(path, JSON.stringify({ ...proposal, name: "Maren Kest" }));
+  const revised = (await reviewGenesisImports(dir)).cards;
+  assert.equal(revised.length, 1);
+  assert.notEqual(revised[0]!.id, initial.id);
+  await assert.rejects(resolveGenesisImport(dir, { id: initial.id, digest: initial.digest, decision: "prepare" }), /unavailable/);
+  await resolveGenesisImport(dir, { id: revised[0]!.id, digest: revised[0]!.digest, decision: "prepare" });
+  const entity = (await foldBlueprint(dir)).characters[0]!;
+  await writeFile(path, JSON.stringify({ ...proposal, name: "Maren Kest", quote: "The gate closes at dusk.", body: "Guards the evening gate." }));
+  const next = (await reviewGenesisImports(dir)).cards.find(card => card.status === "pending")!;
+  await resolveGenesisImport(dir, { id: next.id, digest: next.digest, decision: "prepare", mode: "replace", target: "character:" + entity.slug });
+  const content = (await reviewGenesisContent(dir)).cards.find(card => card.key === "character:" + entity.slug)!;
+  assert.ok(content.content.kind === "character");
+  assert.deepEqual(content.content.value.sources?.map(source => source.candidateId), [next.id]);
+});
+
+it("bounds duplicate excerpts in large import reviews", async () => {
+  const { dir } = await setup();
+  const path = join(dir, "draft", "imports", "maren.json");
+  const proposal = JSON.parse(await readFile(path, "utf8"));
+  const quotes = Array.from({ length: 12 }, (_, i) => `Maren guards gate ${i}.`);
+  await writeFile(join(dir, "attachments", "notes.md"), [proposal.quote, ...quotes].join("\n"));
+  for (let i = 0; i < 12; i++) {
+    await writeFile(join(dir, "draft", "imports", `copy-${i}.json`), JSON.stringify({ ...proposal, quote: quotes[i], body: "x".repeat(6000) }));
+  }
+  const review = await reviewGenesisImports(dir);
+  assert.equal(review.cards.length, 13);
+  assert.ok(review.cards.every(card => card.related.length <= 5 && card.related.every(other => other.text.length <= 601)));
+});
