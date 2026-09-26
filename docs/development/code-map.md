@@ -164,7 +164,8 @@ See [founding chat](founding-chat.md) for lifecycle and recovery checks.
 Contracts `genesis-voices.ts` defines voice intents and immutable audition candidates.
 Coordinator `harness/genesis-voices.ts` owns preview plans, private audio and decisions;
 `voice/service.ts` supplies the catalogue and serialized local synthesis. Cloud auditions
-use the existing queue and ledger. `world/founding-build.ts` installs approved voices through
+use the existing queue and ledger. `coordinator.ts` finalizes queued auditions into private
+candidates before their Activity rows become deletable. `world/founding-build.ts` installs approved voices through
 `sheets/authoring.ts`. Client `components/genesis-voices.tsx` renders audio and separate
 generation/assignment controls. Checks: coordinator `test/harness/genesis-voices.test.ts`,
 `test/world/founding-build.test.ts`; client `test/genesis-voices.test.tsx`.
@@ -177,7 +178,9 @@ Contracts `genesis-images.ts` defines intents, candidates, selections and review
 `harness/genesis-images.ts`, which freezes media and persists exact-hash decisions outside
 the harness workspace. `harness/genesis-image-carry.ts` files artifacts and installs approved
 main photos and location views through reference services. `world/founding-build.ts` replaces
-the corresponding paid work with the selected image.
+the corresponding paid work with the selected image. Queue finalization in `coordinator.ts`
+preserves generated candidates before Activity allows deletion; retrying this local filing
+never contacts the provider again.
 
 Client `components/genesis-images.tsx`, `screens/shell.tsx` and `lib/store.ts` render generation
 authorization separately from actual-image approval. Tests: coordinator

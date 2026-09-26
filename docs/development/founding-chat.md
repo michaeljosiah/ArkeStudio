@@ -57,6 +57,9 @@ workspace. Begin files them in Artifacts, then installs approved selections thro
 main-photo and establishing-view services. Existing selections cost nothing to reuse and replace
 the corresponding generation in the build plan. Alternatives remain artifacts. Generated
 artifacts retain their producing job, provider, model, parameters, cost and entity links.
+Queue finalization preserves generated images and voice auditions even when the chat is closed.
+Activity cannot delete a generated image job until its candidate has been saved; failed filing
+can be retried without generating or paying again.
 
 Founding image decisions and generated-image provenance require schema version 37. Artifact
 writes that introduce location reference provenance raise this boundary atomically as well.
