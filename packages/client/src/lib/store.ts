@@ -168,6 +168,7 @@ interface StoreState {
       readiness?: import("@arke-studio/contracts").GenesisReadiness;
       readinessPending?: boolean;
       imports?: import("@arke-studio/contracts").GenesisImports;
+      imageError?: string;
       founding?: boolean;
       frozenModels?: ModelChoices;
       frozenGenerateImages?: boolean;
@@ -1510,8 +1511,10 @@ function handleFrame(json: string): void {
       };
     } else if (event.type === "setup.status") {
       setupStatus = event.setup;
+    } else if (event.type === "genesis.image-error") {
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], imageError: event.detail } };
     } else if (event.type === "genesis.images") {
-      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], images: event.images, readiness: undefined } };
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], images: event.images, imageError: undefined, readiness: undefined } };
     } else if (event.type === "genesis.voices") {
       genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], voices: event.voices, readiness: undefined } };
     } else if (event.type === "genesis.readiness") {

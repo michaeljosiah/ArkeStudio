@@ -1267,6 +1267,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                   onGenerate={(intentId, digest) => generateGenesisVoice(genesisId, intentId, digest)}
                   onDecide={(target, decision, candidate) => decideGenesisVoice(genesisId, target, decision, candidate)}
                   onRevise={setMessage} onRefresh={() => reviewGenesisVoices(genesisId)} onCancel={cancelJob} />}
+                {g?.imageError && <Callout title="Image request needs attention">{g.imageError}</Callout>}
                 {g?.images && blueprint && <GenesisImageCards genesisId={genesisId} blueprint={blueprint} images={g.images} jobs={imageJobs}
                   busy={chatRunning || buildPressed || !!g.founding || myBuild?.status === "running" || !!g.worldId}
                   onGenerate={(intentId, digest) => generateGenesisImage(genesisId, intentId, digest, models)}

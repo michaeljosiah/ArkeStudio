@@ -1095,6 +1095,7 @@ export const WorldChatStoredEventSchema = valueSchema(z.discriminatedUnion("type
     candidate: GenesisVoiceCandidateSchema.optional(), decision: z.enum(["approve", "reject", "unassign"]) }).strict(),
   z.object({ type: z.literal("founding.image-decision"), target: GenesisImageTargetSchema,
     candidate: GenesisImageCandidateSchema.optional(), decision: z.enum(["approve", "reject", "unassign"]) }).strict(),
+  z.object({ type: z.literal("founding.decisions"), decisions: z.array(GenesisDecisionSchema).min(1).max(500) }).strict(),
   z.object({ type: z.literal("production-setup.updated"), state: ProductionSetupStateSchema }).strict(),
   z
     .object({

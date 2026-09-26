@@ -139,6 +139,7 @@ export async function recordReferenceTake(store: WorldStore, job: Job, ledgerEnt
     provider: job.provider,
     model: job.model,
     provenance: {
+      ...(job.recipe ? { recipe: job.recipe, recipeVersion: job.recipe.version } : {}),
       canonRevision: frozen.canonRevision,
       ...(frozen.borrowedImages ? { borrowedImages: frozen.borrowedImages } : {}),
       sheets: { [sheetId]: sheetVersion },

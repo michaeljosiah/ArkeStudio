@@ -209,6 +209,7 @@ export function foldConversation(
       case "founding.message":
         addMessage(e.message, envelope.seq);
         break;
+      case "founding.decisions":
       case "founding.decision":
         // Audit decisions stay in the journal without evicting dialogue from its bounded view.
         break;

@@ -96,7 +96,7 @@ it("a stale batch rejects every choice before writing a decision", async () => {
   await writeFile(path, JSON.stringify({ name: "A different Maren" }));
   await assert.rejects(decideGenesisContent(dir, old.cards, "approve", ulid()), /content changed/);
   const { events } = await (await genesisConversation(dir)).read();
-  assert.equal(events.filter(event => event.event.type === "founding.decision").length, 0);
+  assert.equal(events.filter(event => (event.event.type === "founding.decision" || event.event.type === "founding.decisions")).length, 0);
 });
 
 it("replayed approval is idempotent and a removal needs its own decision", async () => {
@@ -105,7 +105,7 @@ it("replayed approval is idempotent and a removal needs its own decision", async
   const requestId = ulid();
   await decideGenesisContent(dir, initial.cards, "approve", requestId);
   await decideGenesisContent(dir, initial.cards, "approve", requestId);
-  assert.equal((await (await genesisConversation(dir)).read()).events.filter(event => event.event.type === "founding.decision").length, initial.cards.length);
+  assert.equal((await (await genesisConversation(dir)).read()).events.filter(event => (event.event.type === "founding.decision" || event.event.type === "founding.decisions")).length, 1);
   await writeFile(path, JSON.stringify({ name: "Maren", withdrawn: true }));
   const removal = (await reviewGenesisContent(dir)).cards.find(card => card.key === "character:maren")!;
   assert.equal(removal.content.kind, "remove");
@@ -146,4 +146,16 @@ it("recovers a torn decision tail on the first review without losing durable app
   await decideGenesisContent(dir, review.cards, "approve", ulid());
   await appendFile(join(genesisControlDir(dir), ".conversation", "events.jsonl"), '{"partial":');
   assert.ok((await reviewGenesisContent(dir)).cards.every(card => card.status === "approved"));
+});
+
+it("key art cannot retain a renamed approved location", async () => {
+  const { dir } = await draft();
+  await mkdir(join(dir, "draft", "locations"), { recursive: true });
+  const path = join(dir, "draft", "locations", "vigil.json");
+  await writeFile(path, JSON.stringify({ name: "The Vigil", line: "Lighthouse" }));
+  await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Harbour", keyArt: { location: "The Vigil" } }));
+  await decideGenesisContent(dir, (await reviewGenesisContent(dir)).cards, "approve", ulid());
+  await writeFile(path, JSON.stringify({ name: "The Light", line: "Lighthouse" }));
+  await decideGenesisContent(dir, (await reviewGenesisContent(dir)).cards.filter(card => card.key === "location:vigil"), "approve", ulid());
+  await assert.rejects(approvedBlueprintForFounding(dir), /Key art names The Vigil/);
 });
