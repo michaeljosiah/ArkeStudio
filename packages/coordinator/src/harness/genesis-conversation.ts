@@ -1,5 +1,5 @@
 import { basename, dirname, join } from "node:path";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, stat, rm } from "node:fs/promises";
 import { CapabilitySchema, GenesisBlueprintSchema, newId, ulid, UlidSchema, type DomainEvent, type GenesisBlueprint, type WorldChatMessage } from "@arke-studio/contracts";
 import { z } from "zod";
 import { WorldChatStore, conversationDir } from "../world-chat/store.js";
@@ -75,17 +75,18 @@ export async function recordFoundingMessage(dir: string, role: "user" | "studio"
   return message;
 }
 
-export async function recordFoundingBlueprint(dir: string, blueprint: GenesisBlueprint): Promise<void> {
+export async function recordFoundingBlueprint(dir: string, blueprint: GenesisBlueprint): Promise<number> {
   const log = await genesisConversation(dir);
-  await log.append({ type: "founding.blueprint", blueprint });
+  return (await log.append({ type: "founding.blueprint", blueprint })).envelope.seq;
 }
 
 export async function loadGenesisConversation(dir: string, genesisId: string, running = false): Promise<Extract<DomainEvent, { type: "genesis.loaded" }>> {
   const messages = await foundingMessages(dir);
   const log = await genesisConversation(dir);
   const meta = (await log.readMeta())!;
-  const current = await foldBlueprint(dir);
   const { events } = await log.read();
+  const revision = events.at(-1)?.seq ?? 0;
+  const current = await foldBlueprint(dir);
   const latest = events.findLast(envelope => envelope.event.type === "founding.blueprint")?.event;
   const frozen = await frozenFoundingInput(dir);
   let blueprint = current;
@@ -107,7 +108,7 @@ export async function loadGenesisConversation(dir: string, genesisId: string, ru
   const complete = begun?.form ? await stat(join(genesisControlDir(dir), "completed.json")).then(() => true)
     .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return false; throw err; }) : false;
   return {
-    type: "genesis.loaded", at: new Date().toISOString(), genesisId, conversationId: meta.id,
+    type: "genesis.loaded", at: new Date().toISOString(), genesisId, conversationId: meta.id, revision,
     turns: messages.map(m => ({ id: m.id, role: m.role === "user" ? "user" : "gate", text: m.text, at: m.createdAt })),
     blueprint,
     attachments: (await sandboxAttachments(dir)).map(path => ({ name: basename(path), kind: kindForFile(path) })),
@@ -126,6 +127,13 @@ export async function carryGenesisConversation(dir: string, worldDir: string): P
   const { events, problems } = await source.read();
   if (problems.length) throw new Error("The founding conversation needs repair before handoff.");
   const target = new WorldChatStore(conversationDir(worldDir, meta.id));
+  const pointer = join(worldDir, "build", "conversation.json");
+  const incomplete = join(target.dir, ".founding-incomplete");
+  const completed = await readFile(pointer, "utf8").then(raw => JSON.parse(raw).conversationId === meta.id)
+    .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return false; throw err; });
+  if (completed) { await rm(incomplete, { force: true }); return; }
+  // A prefix is private until its final flushed event and handoff receipt exist.
+  await atomicWriteFile(incomplete, "Founding conversation transfer in progress.\n");
   await target.create(meta.id, meta.createdAt);
   for (const envelope of events) {
     if (envelope.event.type !== "founding.message" && envelope.event.type !== "founding.blueprint" && envelope.event.type !== "founding.decision" && envelope.event.type !== "conversation.created") {
@@ -134,5 +142,6 @@ export async function carryGenesisConversation(dir: string, worldDir: string): P
     await target.append(envelope.event, { at: envelope.at, requestId: `founding:${envelope.eventId}` });
   }
   // The pointer is written only after every append was flushed. Recovery can safely replay.
-  await atomicWriteFile(join(worldDir, "build", "conversation.json"), JSON.stringify({ conversationId: meta.id }) + "\n");
+  await atomicWriteFile(pointer, JSON.stringify({ conversationId: meta.id }) + "\n");
+  await rm(incomplete, { force: true });
 }
