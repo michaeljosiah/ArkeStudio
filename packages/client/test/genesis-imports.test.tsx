@@ -3,7 +3,7 @@ import { it } from "node:test";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { GenesisImportsSchema, type GenesisImportResolve } from "@arke-studio/contracts";
+import { GenesisBlueprintSchema, GenesisImportsSchema, type GenesisImportResolve } from "@arke-studio/contracts";
 import { GenesisImportCards } from "../src/components/genesis-imports.js";
 
 it("shows exact source evidence separately from interpretation and sends the reviewed merge revision", async () => {
@@ -32,5 +32,23 @@ it("shows exact source evidence separately from interpretation and sends the rev
     assert.equal(decisions.at(-1)?.decision, "defer");
     await act(async () => button("Extract proposals in chat").click());
     assert.deepEqual(extracted, ["notes.md"]);
+    const change = async (selector: string, value: string) => {
+      const input = container.querySelector(selector)!;
+      const props = (input as unknown as Record<string, { onChange(event: { target: { value: string } }): void }>)[Object.keys(input).find(key => key.startsWith("__reactProps$"))!]!;
+      await act(async () => props.onChange({ target: { value } }));
+    };
+    const blueprint = GenesisBlueprintSchema.parse({ characters: [{ slug: "rue", name: "Rue", line: "Captain" }], locations: [], factions: [], threads: [], dropped: [] });
+    await change('[aria-label="Imported name"]', "Rue");
+    await change('[aria-label="Imported interpretation"]', "My edited interpretation");
+    const refreshed = { ...imports, cards: imports.cards.map(card => ({ ...card, digest: "new-digest", proposal: { ...card.proposal, name: "Updated source name", body: "Updated extraction" } })) };
+    await act(async () => root.render(<GenesisImportCards imports={refreshed} blueprint={blueprint} busy={false}
+      onResolve={decision => decisions.push(decision)} onExtract={() => {}} onRefresh={() => {}} />));
+    assert.equal((container.querySelector('[aria-label="Imported name"]') as HTMLInputElement).value, "Rue");
+    assert.equal((container.querySelector('[aria-label="Imported interpretation"]') as HTMLTextAreaElement).value, "My edited interpretation");
+    await change('[aria-label="Import resolution"]', "append");
+    await act(async () => button("Prepare for approval").click());
+    assert.equal(decisions.at(-1)?.target, "character:rue");
+    assert.equal(decisions.at(-1)?.digest, "new-digest");
+    assert.equal(decisions.at(-1)?.body, "My edited interpretation");
   } finally { await act(async () => root.unmount()); container.remove(); }
 });

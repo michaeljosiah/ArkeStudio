@@ -431,6 +431,8 @@ describe("the founding build (SPEC-031)", () => {
     }));
     const review = await reviewGenesisContent(workspace);
     await decideGenesisContent(workspace, review.cards, "approve", ulid());
+    const unapproved = "A different gate. ".repeat(300);
+    await writeFile(join(workspace, "draft", "characters", "maren.json"), JSON.stringify({ name: "Maren", sheet: { sections: { Essence: unapproved, Appearance: "Blue coat" } } }));
     await h.service.plan("gen-reviewed", ulid());
     const planned = h.events.findLast(event => event.type === "build.plan");
     assert.ok(planned?.type === "build.plan" && planned.plan);
@@ -449,6 +451,10 @@ describe("the founding build (SPEC-031)", () => {
     assert.equal(bundle.canon.find(entry => entry.title === "The gate")?.body, "Nobody opens the gate.");
     assert.equal(bundle.canon.find(entry => entry.title === "Who made it?")?.status, "open");
     assert.equal(bundle.proposals.length, 0);
+    const carried = bundle.artifacts.find(artifact => artifact.kind === "document");
+    assert.ok(carried);
+    assert.match(await readFile(join(h.provider.openStore()!.dir, "artifacts", carried.file), "utf8"), /not established world content/);
+    assert.ok((await readFile(join(h.provider.openStore()!.dir, "artifacts", carried.file), "utf8")).includes(unapproved.trim()));
     const id = h.worldId();
     await h.service.begin("gen-reviewed", ulid());
     assert.equal(h.worldId(), id);
