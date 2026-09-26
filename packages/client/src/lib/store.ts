@@ -201,6 +201,7 @@ interface StoreState {
       images?: import("@arke-studio/contracts").GenesisImages;
       imports?: import("@arke-studio/contracts").GenesisImports;
       imageError?: string;
+      importError?: string;
       founding?: boolean;
       frozenModels?: ModelChoices;
       formHandoff?: "pending" | "completed";
@@ -1561,8 +1562,10 @@ function handleFrame(json: string): void {
       genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], imageError: event.detail } };
     } else if (event.type === "genesis.images") {
       genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], images: event.images, imageError: undefined } };
+    } else if (event.type === "genesis.import-error") {
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], importError: event.detail } };
     } else if (event.type === "genesis.imports") {
-      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], imports: event.imports } };
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], imports: event.imports, importError: undefined } };
     } else if (event.type === "genesis.review") {
       if (genesis[event.genesisId]?.reviewRequestId === event.requestId) {
         genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], review: event.review } };

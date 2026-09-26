@@ -1233,6 +1233,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                     {turn.role === "user" ? turn.text : renderInlineMarkdown(turn.text)}
                   </div>
                 ))}
+                {g?.importError && <Callout title="Import review needs attention">{g.importError}</Callout>}
                 {g?.imports && <GenesisImportCards imports={g.imports} blueprint={blueprint} busy={chatRunning || buildPressed || !!g.worldId || !!g.founding}
                   onResolve={resolution => resolveGenesisImport(genesisId, resolution)}
                   onRefresh={() => reviewGenesisImports(genesisId)}

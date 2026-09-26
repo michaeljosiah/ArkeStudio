@@ -3,7 +3,7 @@ import { lstat, readdir, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { z } from "zod";
 import {
-  GenesisImportProposalSchema, GenesisImportsSchema, GenesisSourceSchema, GenesisBlueprintSchema,
+  GenesisImportProposalSchema, GenesisImportsSchema, GenesisSourceSchema, GenesisBlueprintSchema, GenesisDraftSchema,
   completeGenesisSheet, genesisContentRows, genesisSheetIds,
   type GenesisBlueprint, type GenesisImportCard, type GenesisImportResolve, type GenesisSource,
 } from "@arke-studio/contracts";
@@ -17,12 +17,14 @@ import { foldBlueprint } from "./blueprint.js";
 import { genesisControlDir } from "./genesis-conversation.js";
 import { sandboxAttachments } from "../artifacts/genesis-attachments.js";
 
+const normalizedName = (name: string) => name.trim().toLocaleLowerCase();
+const excerpt = (text: string) => text.length > 600 ? text.slice(0, 600) + "…" : text;
 const hash = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
 const pathFor = (dir: string) => join(genesisControlDir(dir), "imports.json");
 const ResolutionSchema = z.object({
   status: z.enum(["prepared", "rejected", "deferred"]), target: z.string().optional(),
   write: z.object({ file: z.string(), content: z.string() }).optional(), applied: z.boolean(),
-  restoreEvidence: z.boolean().optional(),
+  restoreEvidence: z.boolean().optional(), modified: z.boolean().optional(),
 }).strict();
 const StateSchema = z.object({
   cards: z.array(GenesisImportsSchema.shape.cards.element),
@@ -91,7 +93,9 @@ async function reviewUnlocked(dir: string, state: State) {
     try {
       const info = await lstat(join(folder, name));
       if (!info.isFile() || info.isSymbolicLink() || info.size > 64000) throw new Error("Invalid import proposal file.");
-      const proposal = GenesisImportProposalSchema.parse(JSON.parse(await readFile(join(folder, name), "utf8")));
+      const parsed = GenesisImportProposalSchema.parse(JSON.parse(await readFile(join(folder, name), "utf8")));
+      const proposal = { ...parsed, name: parsed.name.trim(), section: parsed.kind === "canon" ? undefined : parsed.section ?? (parsed.kind === "location" ? "Look" : "Essence") };
+      if (!proposal.name) throw new Error("The import needs a name.");
       const source = sources.get(proposal.source);
       if (!source) throw new Error(`${proposal.source} is unavailable or unsupported.`);
       const verified = verifyCandidates([proposal], source.text, []);
@@ -118,10 +122,10 @@ async function reviewUnlocked(dir: string, state: State) {
   state.cards = state.cards.filter(card => (proposed.has(card.id) && !conflicting.has(card.id)) || ["prepared", "rejected"].includes(state.resolutions[card.id]?.status ?? ""));
   const rows = genesisContentRows(await foldBlueprint(dir));
   for (const card of state.cards) {
-    card.matches = rows.filter(row => row.content.kind === card.proposal.kind && row.title.toLocaleLowerCase() === card.proposal.name.toLocaleLowerCase())
-      .map(row => ({ key: row.key, name: row.title, text: textOf(row) }));
+    card.matches = rows.filter(row => row.content.kind === card.proposal.kind && normalizedName(row.title) === normalizedName(card.proposal.name))
+      .slice(0, 20).map(row => ({ key: row.key, name: row.title, text: excerpt(textOf(row)) }));
     card.related = state.cards.filter(other => other.id !== card.id && other.proposal.kind === card.proposal.kind &&
-      other.proposal.name.toLocaleLowerCase() === card.proposal.name.toLocaleLowerCase() && state.resolutions[other.id]?.status !== "rejected")
+      normalizedName(other.proposal.name) === normalizedName(card.proposal.name) && state.resolutions[other.id]?.status !== "rejected")
       .slice(0, 5).map(other => ({ source: other.source.name, name: other.proposal.name, text: other.proposal.body.length > 600 ? other.proposal.body.slice(0, 600) + "…" : other.proposal.body }));
     card.digest = conversationActionDigest({ proposal: card.proposal, source: card.source, matches: card.matches, related: card.related });
     const resolved = state.resolutions[card.id];
@@ -147,11 +151,12 @@ export async function resolveGenesisImport(dir: string, input: GenesisImportReso
     } else {
       const draft = await foldBlueprint(dir);
       if (draft.dropped.length) throw new Error("Repair unreadable draft files before preparing an import.");
-      const proposal = card.proposal, name = input.name ?? proposal.name, body = input.body ?? proposal.body;
+      const proposal = card.proposal, name = (input.name ?? proposal.name).trim(), body = input.body ?? proposal.body;
+      if (!name) throw new Error("The import needs a name.");
       const rows = genesisContentRows(draft), kind = proposal.kind;
       const section = proposal.section ?? (kind === "location" ? "Look" : "Essence");
       const existing = input.target ? rows.find(row => row.key === input.target && row.content.kind === kind) : undefined;
-      const matches = rows.filter(row => row.content.kind === kind && row.title.toLocaleLowerCase() === name.toLocaleLowerCase());
+      const matches = rows.filter(row => row.content.kind === kind && normalizedName(row.title) === normalizedName(name));
       if (input.target && !existing) throw new Error("The selected merge target is unavailable.");
       if (matches.length && !input.mode) throw new Error("The edited name matches an existing record. Choose whether to merge or retain a distinct entity.");
       if (input.mode !== "distinct" && !existing && matches.length) throw new Error("Select the record to merge.");
@@ -178,17 +183,28 @@ export async function resolveGenesisImport(dir: string, input: GenesisImportReso
           statement: input.mode === "append" && old ? `${old.statement}\n\n${sourced}` : sourced,
           sources: [...(input.mode === "replace" ? [] : old?.sources ?? []), source] };
         const raw = JSON.parse(await readFile(join(dir, "draft.json"), "utf8").catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return "{}"; throw err; }));
-        file = "draft.json"; content = JSON.stringify({ ...raw, canon: [...(draft.canon ?? []).filter(entry => entry.slug !== slug), entry] }, null, 2) + "\n";
+        const persisted = { ...raw, canon: [...(draft.canon ?? []).filter(entry => entry.slug !== slug), entry] };
+        GenesisDraftSchema.parse(persisted);
+        file = "draft.json"; content = JSON.stringify(persisted, null, 2) + "\n";
         GenesisBlueprintSchema.parse({ ...draft, canon: [...(draft.canon ?? []).filter(entry => entry.slug !== slug), entry] });
       } else {
         const entities = kind === "character" ? draft.characters : kind === "location" ? draft.locations : draft.factions;
         const old = entities.find(entity => entity.slug === slug);
         const entity = completeGenesisSheet(kind, old ?? { name });
         const previous = entity.sheet.sections[section];
+        const links = (proposal.links ?? []).map(link => {
+          const candidates = state.cards.filter(other => other.id !== card.id && other.source.hash === card.source.hash &&
+            `${other.proposal.kind}:${slugify(other.proposal.name)}` === link);
+          if (!candidates.length) return link;
+          const targets = [...new Set(candidates.map(other => state.resolutions[other.id]?.status === "prepared" ? state.resolutions[other.id]?.target : undefined))];
+          if (targets.length === 1 && !targets[0] && !rows.some(row => row.key === link)) return link;
+          if (targets.length !== 1 || !targets[0]) throw new Error(`Prepare the imported relationship target ${link} before this record, or revise the proposed relationship.`);
+          return targets[0];
+        });
         const next = { ...entity, name, sources: [...(old?.sources ?? []).filter(source => !replacedSources.has(source.candidateId)), source],
           sheet: { ...entity.sheet, sections: { ...entity.sheet.sections,
             [section]: input.mode === "append" && previous && previous !== "—" ? `${previous}\n\n${sourced}` : sourced },
-            links: [...new Set([...(entity.sheet.links ?? []), ...(proposal.links ?? [])])] } };
+            links: [...new Set([...(entity.sheet.links ?? []), ...links])] } };
         file = `draft/${kind === "character" ? "characters" : kind === "location" ? "locations" : "factions"}/${slug}.json`;
         content = JSON.stringify(next, null, 2) + "\n";
         const key = kind === "character" ? "characters" : kind === "location" ? "locations" : "factions";
@@ -200,7 +216,7 @@ export async function resolveGenesisImport(dir: string, input: GenesisImportReso
           if (replacedSources.has(id)) resolution.restoreEvidence = false;
         }
       }
-      state.resolutions[card.id] = { status: "prepared", target: `${kind}:${slug}`, write: { file, content }, applied: false };
+      state.resolutions[card.id] = { status: "prepared", target: `${kind}:${slug}`, write: { file, content }, applied: false, modified: source.modified };
     }
     // Persist the exact intended draft write first. Recovery can finish a lost response safely.
     await save(dir, state); await recover(dir, state);
@@ -238,8 +254,9 @@ export async function restoreGenesisSources(dir: string, blueprint: GenesisBluep
       kind === "faction" ? result.factions.find(entity => entity.slug === slug) : result.canon?.find(entity => entity.slug === slug);
     if (!entity) continue;
     const name = "name" in entity ? entity.name : entity.title;
-    const text = "statement" in entity ? entity.statement : Object.values(entity.sheet?.sections ?? {}).join("\n");
-    const source = { ...card.source, modified: name !== card.source.originalName || !text.includes(card.source.originalBody) };
+    const section = card.proposal.section ?? (kind === "location" ? "Look" : "Essence");
+    const text = "statement" in entity ? entity.statement : entity.sheet?.sections[section] ?? "";
+    const source = { ...card.source, modified: resolution.modified === true || entity.sources?.some(old => old.candidateId === card.id && old.modified) === true || name !== card.source.originalName || !text.includes(card.source.originalBody) };
     entity.sources = [...(entity.sources ?? []).filter(old => old.candidateId !== card.id), source];
   }
   return result;

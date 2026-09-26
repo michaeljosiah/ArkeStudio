@@ -7199,7 +7199,7 @@ export class Coordinator {
             this.emit({ type: "genesis.review", at: new Date().toISOString(), genesisId: msg.genesisId, review: await reviewGenesisContent(dir) });
           }
         } catch (err) {
-          this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: msg.genesisId, status: "failed", detail: describeCoordinatorError(err) });
+          this.emit({ type: "genesis.import-error", at: new Date().toISOString(), genesisId: msg.genesisId, detail: describeCoordinatorError(err) });
         } finally { if (held) this.genesisDeciding.delete(msg.genesisId); }
         return;
       }
