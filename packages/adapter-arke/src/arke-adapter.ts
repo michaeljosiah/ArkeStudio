@@ -37,9 +37,9 @@ export interface ArkeAdapterOptions {
   /** Replaced in tests. */
   fetch?: typeof fetch;
   /**
-   * The context window asked for when a model does not state one, and the ceiling otherwise.
-   * The host sets it from what the GPU can hold: a window the card cannot fit is one Ollama
-   * splits onto the CPU, which is slower than a smaller window that fits.
+   * The context window, when the host fixes it: the ceiling for a model that states more, the
+   * window for one that states nothing. Unset, a session gets the model's own window, from 128k
+   * to 256k. A window the card cannot fit is one Ollama splits onto the CPU: slower, not broken.
    */
   maxContextTokens?: number;
   /** Model calls one turn may make before it is ended. Each tool round is one. */
@@ -70,16 +70,20 @@ export interface ArkeAdapterOptions {
   onTrace?: (line: Record<string, unknown>) => void;
 }
 
-const DEFAULT_CONTEXT = 8_192;
 /**
- * The window a session asks for, at most, unless the host says otherwise. 32k held a chapter
- * ask only once the prompt was measured properly (issue 1265), and left a long thread or a whole
- * chapter's context little room. Gemma 4 12B keeps the full context in 8 of its 48 layers, one
- * 512+512 KV head each: about 16 KB a token, so 128k is some 2 GB of cache where 32k was half a
- * gigabyte. On a 10 GB card that moves more of the model onto the CPU, which Ollama does by
- * itself rather than failing; a host that knows its card can still set `maxContextTokens`.
+ * The window a session asks for: the model's own, between these two. The lane admits only models
+ * stating 256k (`meetsLocalModelMinimum`), and a session now gets that window rather than a
+ * fraction of it (issue 1265 held every session to 32k).
+ *
+ * Measured on a 10 GB RTX 3080 with Gemma 4 12B (2026-09-26, f16 cache, flash attention): 128k
+ * put 30% of the model on the CPU and generated at 11.8 tokens a second, 256k put 44% there at
+ * 7.8, and both read a fact back from the middle of a 121,000-token prompt (141 s and 179 s).
+ * The model keeps the full context in 8 of its 48 layers, about 16 KB a token, so the window is
+ * cheap in memory and Ollama spills to the CPU rather than failing. The floor is the product's
+ * own minimum: a session never runs below 128k, however little a model says about itself.
  */
-const CONTEXT_CEILING = 131_072;
+const CONTEXT_FLOOR = 131_072;
+const CONTEXT_CEILING = 262_144;
 const DEFAULT_STEPS = 24;
 const CATALOGUE_DEADLINE_MS = 15_000;
 const DISPOSE_RELEASE_MS = 2_000;
@@ -297,8 +301,10 @@ export class ArkeAdapter implements HarnessAdapter {
 
   /** The context window asked of Ollama: the model's own, held to the ceiling. */
   private contextFor(stated: number | undefined): number {
-    const ceiling = this.opts.maxContextTokens ?? CONTEXT_CEILING;
-    return Math.min(stated ?? this.opts.maxContextTokens ?? DEFAULT_CONTEXT, ceiling);
+    // A host's explicit setting is taken as given — it knows its card, and tests exercise
+    // trimming in small windows. Otherwise the model's own window, held between floor and ceiling.
+    if (this.opts.maxContextTokens !== undefined) return Math.min(stated ?? this.opts.maxContextTokens, this.opts.maxContextTokens);
+    return Math.max(CONTEXT_FLOOR, Math.min(stated ?? CONTEXT_FLOOR, CONTEXT_CEILING));
   }
 
   knownInputTokenLimit(sessionId?: string): number | null {

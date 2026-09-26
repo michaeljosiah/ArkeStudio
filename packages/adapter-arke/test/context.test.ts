@@ -14,7 +14,8 @@ const exchange = (i: number, size: number): ChatMessage[] => [
 ];
 
 test("the budget leaves room for the reply", () => {
-  assert.equal(promptBudget(32_768), 28_672);
+  assert.equal(promptBudget(262_144), 258_048);
+  assert.equal(promptBudget(131_072), 126_976);
   assert.equal(promptBudget(4_096), 3_072);
 });
 

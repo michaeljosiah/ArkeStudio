@@ -92,7 +92,8 @@ export function budgetFor(inputTokenLimit: number | undefined, harnessReserve?: 
      * covers what the turn reads back while it runs.
      */
     const reserved = Math.max(reservedTokens(inputTokenLimit), harnessReserve + Math.round(inputTokenLimit * HARNESS_READ_SHARE));
-    return Math.floor(Math.max(0, inputTokenLimit - reserved) * HARNESS_CHARS_PER_TOKEN);
+    const spendable = Math.min(Math.max(0, inputTokenLimit - reserved), HARNESS_PROMPT_CAP_TOKENS);
+    return Math.floor(spendable * HARNESS_CHARS_PER_TOKEN);
   }
   const spendable = Math.max(0, inputTokenLimit - reservedTokens(inputTokenLimit));
   return Math.floor(spendable * CHARS_PER_TOKEN);
@@ -100,6 +101,14 @@ export function budgetFor(inputTokenLimit: number | undefined, harnessReserve?: 
 
 /** Room kept for tool reads beside a harness's stated reserve. */
 const HARNESS_READ_SHARE = 0.1;
+/**
+ * The most a turn's assembled context may take on a local harness, whatever its window. A 256k
+ * window is room for the turn to read and answer in, not an invitation to fill it: a 12B model
+ * reads a 121,000-token prompt in three minutes on a 10 GB card, and long-context studies find
+ * small models answer better from a short curated context than from a full one. A quarter of the
+ * largest window, so the bible, the summary and the recent turns fit and the rest is fetched.
+ */
+const HARNESS_PROMPT_CAP_TOKENS = 64_000;
 /**
  * The rate a local harness's own estimate charges this prompt's mix of prose, ids and JSON: it
  * errs high on purpose, so a message sized at the gentler rate above would not fit its check.

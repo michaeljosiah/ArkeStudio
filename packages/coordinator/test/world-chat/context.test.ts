@@ -213,13 +213,18 @@ describe("context assembly", () => {
    * every chapter ask was refused before the model saw it.
    */
   it("sizes to a harness's stated reserve, in the harness's own count, with room left for reads", () => {
-    const window = 32_768;
-    const reserve = 18_000;
+    const window = 131_072;
+    const reserve = 18_400;
     const budget = budgetFor(window, reserve);
-    assert.ok(budget < budgetFor(window), "a harness that states more than the default reserve gets less");
     assert.ok(budget / 3 + reserve + window * 0.1 <= window, `${budget} characters overflow the harness's own check`);
-    assert.ok(budget >= 25_000, `still room for a chapter brief (${budget})`);
+    assert.ok(budget >= 150_000, `a 128k window is actually used (${budget})`);
   });
+
+  it("caps a local harness's prompt at 64,000 tokens however large its window (issue 1289)", () => {
+    assert.equal(budgetFor(262_144, 18_400), 64_000 * 3, "a 256k window is room to read and answer in, not to fill");
+    assert.equal(budgetFor(262_144), Math.floor((262_144 - 39_322) * 3.5), "a hosted window is not capped");
+  });
+
 
   it("does not force the fallback onto a window that is simply small", () => {
     assert.ok(budgetFor(32_000) < FALLBACK_BUDGET_CHARS, "a small window gets a small budget");
