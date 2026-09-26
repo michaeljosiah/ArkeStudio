@@ -205,9 +205,18 @@ interface StoreState {
       worldId?: string;
       review?: import("@arke-studio/contracts").GenesisContentReview;
       reviewRequestId?: string;
+      images?: import("@arke-studio/contracts").GenesisImages;
+      voices?: import("@arke-studio/contracts").GenesisVoices;
+      readiness?: import("@arke-studio/contracts").GenesisReadiness;
+      readinessPending?: boolean;
+      imports?: import("@arke-studio/contracts").GenesisImports;
+      imageError?: string;
+      importError?: string;
       reviewPending?: boolean;
+      decisionPending?: "image" | "voice" | "import";
       founding?: boolean;
       frozenModels?: ModelChoices;
+      frozenGenerateImages?: boolean;
       formHandoff?: "pending" | "completed";
       /** The plan so far, folded from the sandbox directory (SPEC-031 R-2). */
       blueprint: import("@arke-studio/contracts").GenesisBlueprint | null;
@@ -1572,9 +1581,21 @@ function handleFrame(json: string): void {
       };
     } else if (event.type === "setup.status") {
       setupStatus = event.setup;
+    } else if (event.type === "genesis.image-error") {
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], imageError: event.detail, decisionPending: undefined } };
+    } else if (event.type === "genesis.images") {
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], images: event.images, imageError: undefined, readiness: undefined, decisionPending: genesis[event.genesisId]?.decisionPending === "image" ? undefined : genesis[event.genesisId]?.decisionPending } };
+    } else if (event.type === "genesis.voices") {
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], voices: event.voices, readiness: undefined, decisionPending: genesis[event.genesisId]?.decisionPending === "voice" ? undefined : genesis[event.genesisId]?.decisionPending } };
+    } else if (event.type === "genesis.readiness") {
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], readiness: event.review, readinessPending: false } };
+    } else if (event.type === "genesis.import-error") {
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], importError: event.detail, decisionPending: undefined } };
+    } else if (event.type === "genesis.imports") {
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], imports: event.imports, importError: undefined, readiness: undefined, decisionPending: genesis[event.genesisId]?.decisionPending === "import" ? undefined : genesis[event.genesisId]?.decisionPending } };
     } else if (event.type === "genesis.review") {
       if (genesis[event.genesisId]?.reviewRequestId === event.requestId) {
-        genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], review: event.review, reviewPending: false } };
+        genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], review: event.review, reviewPending: false, readiness: undefined } };
       }
     } else if (event.type === "genesis.discarded") {
       discardedGenesis.add(event.genesisId);
@@ -1590,10 +1611,11 @@ function handleFrame(json: string): void {
       genesis = { ...genesis, [event.genesisId]: {
         ...emptyGenesis(), ...genesis[event.genesisId],
         turns: [...messages.values()].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)), blueprint: event.blueprint,
-        revision: event.revision, attachments: event.attachments, status: event.status, conversationId: event.conversationId,
+        revision: event.revision, attachments: event.attachments, status: event.status, conversationId: event.conversationId, readiness: undefined, readinessPending: false,
         founding: event.founding,
         formHandoff: event.formHandoff,
         frozenModels: event.frozenModels,
+        frozenGenerateImages: event.frozenGenerateImages,
         review: undefined, reviewRequestId: ulid(), reviewPending: false,
         ...(event.detail ? { detail: event.detail } : {}),
         ...(event.worldId ? { worldId: event.worldId } : {}),
@@ -1610,7 +1632,7 @@ function handleFrame(json: string): void {
       };
     } else if (event.type === "genesis.blueprint") {
       const g = genesis[event.genesisId] ?? emptyGenesis();
-      genesis = { ...genesis, [event.genesisId]: { ...g, blueprint: event.blueprint, revision: event.revision, review: undefined, reviewRequestId: ulid() } };
+      genesis = { ...genesis, [event.genesisId]: { ...g, blueprint: event.blueprint, revision: event.revision, readiness: undefined, review: undefined, reviewRequestId: ulid() } };
     } else if (event.type === "world-image.plan") {
       keyArtPlans = {
         ...keyArtPlans,
@@ -1641,7 +1663,7 @@ function handleFrame(json: string): void {
         [event.genesisId]: {
           ...g,
           status: event.status,
-          ...(event.status === "failed" ? { reviewPending: false } : {}),
+          ...(event.status === "failed" ? { readinessPending: false, reviewPending: false, decisionPending: undefined } : {}),
           // The clock starts when the turn does; a settled turn takes its working line with it.
           runStartedAt: event.status === "running" ? event.at : g.runStartedAt,
           working: event.status === "running" ? g.working : null,
@@ -2330,7 +2352,7 @@ function handleFrame(json: string): void {
 
 function handleStatus(status: ConnectionStatus): void {
   if (status !== "open") pendingQueueRequests.clear();
-  emitChange({ ...current, connection: status });
+  emitChange({ ...current, connection: status, ...(status !== "open" ? { genesis: Object.fromEntries(Object.entries(current.genesis).map(([id, draft]) => [id, { ...draft, readinessPending: false, reviewPending: false, decisionPending: undefined }])) } : {}) });
   if (status === "open") {
     reconnectAttempts = 0;
     rejoining = true;
@@ -2863,13 +2885,57 @@ export function reviewGenesisDraft(genesisId: string): void {
   if (current.genesis[genesisId]?.founding || current.genesis[genesisId]?.worldId) return;
   send({ kind: "genesis-review", genesisId, requestId: genesisReviewRequest(genesisId) });
 }
+export function reviewGenesisImages(genesisId: string, models?: Partial<Record<import("@arke-studio/contracts").Capability, string>>): void {
+  send({ kind: "genesis-images", genesisId, ...(models ? { models } : {}) });
+}
+export function reviewGenesisVoices(genesisId: string): void { send({ kind: "genesis-voices", genesisId }); }
+function beginReadinessRequest(genesisId: string): boolean {
+  if (!bridge || current.connection !== "open" || (current.genesis[genesisId]?.decisionPending || current.genesis[genesisId]?.readinessPending || current.genesis[genesisId]?.reviewPending || current.genesis[genesisId]?.founding)) return false;
+  emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...emptyGenesis(), ...current.genesis[genesisId], readinessPending: true } } });
+  return true;
+}
+export function reviewGenesisReadiness(genesisId: string): void {
+  if (beginReadinessRequest(genesisId)) send({ kind: "genesis-readiness", genesisId });
+}
+export function leaveGenesisFinding(genesisId: string, findingId: string, digest: string): void {
+  if (!beginReadinessRequest(genesisId)) return;
+  send({ kind: "genesis-readiness-leave", genesisId, requestId: ulid(), findingId, digest });
+}
+function beginGenesisDecision(genesisId: string, kind: "image" | "voice" | "import"): boolean {
+  const draft = current.genesis[genesisId];
+  if (!bridge || current.connection !== "open" || draft?.decisionPending || draft?.readinessPending || draft?.reviewPending || draft?.founding || draft?.worldId) return false;
+  emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...emptyGenesis(), ...draft, decisionPending: kind, readiness: undefined } } });
+  return true;
+}
+export function generateGenesisVoice(genesisId: string, intentId: string, digest: string): void {
+  if (!beginGenesisDecision(genesisId, "voice")) return;
+  send({ kind: "genesis-voice-generate", genesisId, intentId, digest, requestId: ulid() });
+}
+export function decideGenesisVoice(genesisId: string, target: string, decision: "approve" | "reject" | "unassign", candidate?: import("@arke-studio/contracts").GenesisVoiceCandidate): void {
+  if (!beginGenesisDecision(genesisId, "voice")) return;
+  send({ kind: "genesis-voice-decide", genesisId, requestId: ulid(), target, decision,
+    ...(candidate ? { candidateId: candidate.id, hash: candidate.hash } : {}) });
+}
+export function reviewGenesisImports(genesisId: string): void { send({ kind: "genesis-imports", genesisId }); }
+export function resolveGenesisImport(genesisId: string, resolution: import("@arke-studio/contracts").GenesisImportResolve): void {
+  if (!beginGenesisDecision(genesisId, "import")) return;
+  send({ kind: "genesis-import-resolve", genesisId, resolution });
+}
+export function generateGenesisImage(genesisId: string, intentId: string, digest: string, models?: Partial<Record<import("@arke-studio/contracts").Capability, string>>): void {
+  if (!beginGenesisDecision(genesisId, "image")) return;
+  send({ kind: "genesis-image-generate", genesisId, intentId, digest, requestId: ulid(), ...(models ? { models } : {}) });
+}
+export function decideGenesisImage(genesisId: string, target: string, decision: "approve" | "reject" | "unassign", candidate?: import("@arke-studio/contracts").GenesisImageCandidate): void {
+  if (!beginGenesisDecision(genesisId, "image")) return;
+  send({ kind: "genesis-image-decide", genesisId, requestId: ulid(), target, decision, ...(candidate ? { candidateId: candidate.id, hash: candidate.hash } : {}) });
+}
 export function proposeGenesisWorld(genesisId: string, draft: import("@arke-studio/contracts").GenesisDraft): void {
   send({ kind: "genesis-propose-world", genesisId, draft });
 }
 export function decideGenesisDraft(genesisId: string, choices: Array<{ key: string; digest: string }>, decision: "approve" | "reject"): void {
   const draft = current.genesis[genesisId];
-  if (draft?.reviewPending || draft?.founding || draft?.worldId) return;
-  send({ kind: "genesis-decide", genesisId, choices, decision, requestId: genesisReviewRequest(genesisId) });
+  if (draft?.decisionPending || draft?.readinessPending || draft?.reviewPending || draft?.founding || draft?.worldId) return;
+  send({ kind: "genesis-decide", genesisId, choices: choices.slice(0, 300), decision, requestId: genesisReviewRequest(genesisId) });
 }
 
 export function genesisDiscard(genesisId: string): void {
@@ -2878,12 +2944,13 @@ export function genesisDiscard(genesisId: string): void {
 
 // ---- The founding build (SPEC-031) ----------------------------------------
 
-export function planFoundingBuild(genesisId: string, requestId: string, look?: string, models?: ModelChoices): void {
+export function planFoundingBuild(genesisId: string, requestId: string, look?: string, models?: ModelChoices, generateImages = true): void {
   // The same look the press will send: the review's master-look note is only true if it asks
   // the carry question against the words the world would actually be founded on (SPEC-031 R-54).
   // The same holds for the models: the review prices the build on the model the press will use.
   send({
     kind: "plan-founding-build",
+    generateImages,
     genesisId,
     requestId,
     ...(look !== undefined ? { look } : {}),
@@ -2891,9 +2958,11 @@ export function planFoundingBuild(genesisId: string, requestId: string, look?: s
   });
 }
 
-export function beginFoundingBuild(genesisId: string, requestId: string, look?: string, models?: ModelChoices): void {
+export function beginFoundingBuild(genesisId: string, requestId: string, look?: string, models?: ModelChoices, approvalDigest?: string, generateImages = true): void {
   send({
     kind: "begin-founding-build",
+    generateImages,
+    ...(approvalDigest ? { approvalDigest } : {}),
     genesisId,
     requestId,
     ...(look !== undefined ? { look } : {}),

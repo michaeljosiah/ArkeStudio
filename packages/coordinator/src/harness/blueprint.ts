@@ -31,6 +31,7 @@ const KINDS = [
 ] as const;
 
 interface FoldedEntity {
+  sources?: import("@arke-studio/contracts").GenesisSource[];
   sheet?: import("@arke-studio/contracts").BlueprintCharacter["sheet"];
   slug: string;
   name: string;
@@ -89,6 +90,7 @@ async function foldKind(
     }
     entities.push({
       slug,
+      ...(parsed.sources ? { sources: parsed.sources } : {}),
       name: parsed.name,
       ...(parsed.line !== undefined ? { line: parsed.line } : {}),
       ...(parsed.description !== undefined ? { description: parsed.description } : {}),
@@ -140,7 +142,10 @@ export async function foldBlueprint(dir: string): Promise<GenesisBlueprint> {
   };
 
   const folded = GenesisBlueprintSchema.safeParse({
+    ...(draft.props !== undefined ? { props: draft.props } : {}),
+    ...(draft.voices !== undefined ? { voices: draft.voices } : {}),
     ...(draft.canon !== undefined ? { canon: draft.canon } : {}),
+    ...(draft.images !== undefined ? { images: draft.images } : {}),
     ...(draft.name !== undefined ? { name: draft.name } : {}),
     ...(draft.logline !== undefined ? { logline: draft.logline } : {}),
     ...(draft.tone !== undefined ? { tone: draft.tone } : {}),
@@ -176,6 +181,9 @@ export function blueprintSaysSomething(blueprint: GenesisBlueprint): boolean {
     blueprint.bible !== undefined ||
     blueprint.keyArt !== undefined ||
     (blueprint.canon?.length ?? 0) > 0 ||
+    (blueprint.images?.length ?? 0) > 0 ||
+    (blueprint.props?.length ?? 0) > 0 ||
+    (blueprint.voices?.length ?? 0) > 0 ||
     blueprint.threads.length > 0 ||
     blueprint.characters.length > 0 ||
     blueprint.locations.length > 0 ||

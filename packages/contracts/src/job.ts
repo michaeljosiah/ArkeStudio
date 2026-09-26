@@ -73,6 +73,7 @@ export const REPLAYABLE_FINALIZATION_TARGETS: ReadonlySet<string> = new Set([
   "performance-conversion",
   "performance-generation",
   "table-read-cache",
+  "genesis-image",
   ...REFERENCE_FINALIZATION_TARGETS,
   "voice-line",
   "voice-preview",

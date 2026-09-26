@@ -213,6 +213,8 @@ export function foldConversation(
       case "founding.decision":
         // Audit decisions stay in the journal without evicting dialogue from its bounded view.
         break;
+      case "founding.image-decision":
+        break;
       case "production-setup.updated":
         productionSetup = e.state;
         break;

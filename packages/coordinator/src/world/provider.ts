@@ -1,5 +1,5 @@
 import { mkdir, readdir, readFile, rm, stat, realpath } from "node:fs/promises";
-import { basename, join, relative, isAbsolute, sep } from "node:path";
+import { basename, dirname, join, relative, isAbsolute, sep } from "node:path";
 import {
   BIBLE_PATH,
   DEFAULT_AUDIO_POLICY,
@@ -9,6 +9,7 @@ import {
   unattendedProposalsOf,
   worldSheets,
   worldImageReferences,
+  artifactReferenceFile,
   type WorldImageReference,
   type ArtDirectionRecord,
   type Capability,
@@ -763,9 +764,10 @@ export class FsWorldProvider implements WorldProvider {
     }
     const aliases = new Set<string>();
     for (const artifact of bundle.artifacts) {
-      if (artifact.generation?.source !== "character-reference") continue;
+      const sourceFile = artifactReferenceFile(artifact, bundle.referenceTakes);
+      if (!sourceFile) continue;
       const file = `artifacts/${artifact.file}`;
-      const source = available.get(artifact.generation.sourceFile), copy = available.get(file);
+      const source = available.get(sourceFile), copy = available.get(file);
       if (!source || !copy) continue;
       // A source path can be regenerated, removed or externally edited. Suppress its filed
       // copy only when both current files still match the artifact's recorded identity.
@@ -810,8 +812,13 @@ export class FsWorldProvider implements WorldProvider {
     const ext = portable.slice(portable.lastIndexOf(".")).toLowerCase();
     const contentType = FsWorldProvider.MEDIA_TYPES[ext];
     if (contentType === undefined) return null;
-    const abs = join(this.appRoot, ".genesis-v2", genesisId, "workspace", fromPortable(portable));
+    const workspace = join(this.appRoot, ".genesis-v2", genesisId, "workspace");
+    const privateMedia = /^media\/[a-f0-9]{64}\.(png|jpg|webp|wav|mp3|flac)$/.test(portable);
+    const root = privateMedia ? join(dirname(workspace), "media") : workspace;
+    const abs = privateMedia ? join(root, basename(portable)) : join(root, fromPortable(portable));
     try {
+      const rel = relative(await realpath(root), await realpath(abs));
+      if (rel.startsWith("..") || isAbsolute(rel)) return null;
       const info = await stat(toExtendedLength(abs));
       if (!info.isFile()) return null;
     } catch {

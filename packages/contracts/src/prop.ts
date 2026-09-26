@@ -52,6 +52,23 @@ export const PropSchema = z
   .strict();
 export type Prop = z.infer<typeof PropSchema>;
 
+export const CONVERSATIONAL_PROPS_SCHEMA_VERSION = 39;
+export const PropAuthoringChangeSchema = z.discriminatedUnion("operation", [
+  z.object({ operation: z.literal("create"), name: z.string().trim().min(1).max(80),
+    states: z.array(z.string().trim().min(1).max(80)).max(100).default([]) }).strict(),
+  z.object({ operation: z.literal("add-state"), propId: PropIdSchema, name: z.string().trim().min(1).max(80) }).strict(),
+  z.object({ operation: z.literal("rename"), propId: PropIdSchema, name: z.string().trim().min(1).max(80) }).strict(),
+  z.object({ operation: z.literal("rename-state"), propId: PropIdSchema, stateId: PropStateIdSchema, name: z.string().trim().min(1).max(80) }).strict(),
+]);
+export type PropAuthoringChange = z.infer<typeof PropAuthoringChangeSchema>;
+export const GenesisPropSchema = z.object({
+  slug: z.string().regex(/^[a-z0-9][a-z0-9-]*$/).max(120),
+  name: z.string().trim().min(1).max(80),
+  states: z.array(z.object({ slug: z.string().regex(/^[a-z0-9][a-z0-9-]*$/).max(120), name: z.string().trim().min(1).max(80) }).strict()).max(100)
+    .refine(states => new Set(states.map(state => state.slug)).size === states.length, "State identities must be unique."),
+}).strict();
+export type GenesisProp = z.infer<typeof GenesisPropSchema>;
+
 /**
  * What a take froze about one prop at dispatch — turn 105's five fields, explicit about absence
  * rather than silent: a shot that cited the prop with no state chosen dispatches `unresolved`

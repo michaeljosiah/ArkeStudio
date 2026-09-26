@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
   ART_DIRECTION_PATH,
+  FOUNDING_IMAGES_SCHEMA_VERSION,
   ArtDirectionRecordSchema,
   BIBLE_PATH,
   deriveArtDirectionDescription,
@@ -339,7 +340,8 @@ function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: strin
   for (const file of files) {
     if (!file.newContent || !file.path.endsWith(".json")) continue;
     try {
-      const record = JSON.parse(file.newContent) as { mediaInfo?: Record<string, unknown>; retiredAt?: unknown; generation?: { source?: unknown; directionHash?: unknown; remakeOf?: unknown; recording?: unknown } } | null;
+      const record = JSON.parse(file.newContent) as { mediaInfo?: Record<string, unknown>; retiredAt?: unknown; generation?: { source?: unknown; workflow?: unknown; directionHash?: unknown; remakeOf?: unknown; recording?: unknown } } | null;
+      if (file.path.startsWith("artifacts/") && (record?.generation?.source === "founding" || record?.generation?.workflow === "location-view-candidate")) boundary = Math.max(boundary, FOUNDING_IMAGES_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.retiredAt !== undefined) boundary = Math.max(boundary, ARTIFACT_RETIREMENT_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook") boundary = Math.max(boundary, AUDIOBOOK_TAKE_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook" && record.generation.directionHash !== undefined) boundary = Math.max(boundary, AUDIOBOOK_DIRECTION_SCHEMA_VERSION);
