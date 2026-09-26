@@ -56,17 +56,21 @@ npm run dev
 ```
 
 `VITE_ARKE_WS` is where the remote browser reaches the server; `ARKE_DEV_LOCAL_WS` is the
-loopback server it forwards to, whose handoff Vite reads; `ARKE_DEV_ORIGIN` is the address the
-browser opens. Vite checks the session through the proxy before printing a link, so a printed
-link has already worked along the path the browser will take. Open it on the other device. With
-`npm run dev:coordinator` instead of the server, set `ARKE_DEV_ORIGIN` in its terminal in place of
-`--origin`.
+loopback server it forwards to, whose handoff Vite reads; `ARKE_DEV_ORIGIN` is the `https:`
+address the browser opens. Vite checks the session through the server's proxy before printing a
+link. It does not check the page's own route, so if the link fails to load, check the 443 Serve
+mapping. Open the link on the other device. With `npm run dev:coordinator` instead of the
+server, set `ARKE_DEV_ORIGIN` in its terminal in place of `--origin`.
 
-A remote endpoint must be `wss:`, and Vite refuses to print a link otherwise: the capability
-never crosses a network unencrypted. Only the declared origin's host name is added to Vite's
-allowed hosts and only the declared server is added to the page's content policy. Every
-connection still needs the session capability. Browser media requests carry it as a query
-parameter, inside the TLS connection.
+Vite refuses to print a link unless the server is `wss:` and the page `https:`: neither the
+capability nor the page that holds it crosses a network unencrypted. Every server connection
+still needs the capability; media requests carry it as a query parameter, inside TLS.
+
+Vite itself asks nobody for a capability, so anyone on your tailnet can load its pages. In this
+mode it serves only the client and contracts packages and `node_modules`, not the rest of the
+checkout, and allows only the declared host name. If your tailnet has other people or shared
+devices, restrict ports 443 and 8443 on this machine to your own devices in the tailnet policy.
+Stop Serve (`tailscale serve reset`) when you are done.
 
 ## What works
 
