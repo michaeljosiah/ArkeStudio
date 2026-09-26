@@ -1,12 +1,15 @@
-import { mkdir, readdir, rm, stat, realpath } from "node:fs/promises";
-import { basename, join, relative, isAbsolute, sep } from "node:path";
+import { mkdir, readdir, readFile, rm, stat, realpath } from "node:fs/promises";
+import { basename, dirname, join, relative, isAbsolute, sep } from "node:path";
 import {
   BIBLE_PATH,
   DEFAULT_AUDIO_POLICY,
+  FoundingBuildRecordSchema,
+  UlidSchema,
   ulid,
   unattendedProposalsOf,
   worldSheets,
   worldImageReferences,
+  artifactReferenceFile,
   type WorldImageReference,
   type ArtDirectionRecord,
   type Capability,
@@ -18,7 +21,7 @@ import { WORLD_MODELS_SCHEMA_VERSION } from "./commit.js";
 import { AppIndex } from "../index-db/app-index.js";
 import type { DatabaseCtor } from "../index-db/sqlite.js";
 import type { WorldProvider } from "../world-provider.js";
-import { atomicWriteFile, renameWithRetry, type AtomicDeps } from "./atomic.js";
+import { atomicWriteFile, serializeFileMutation, renameWithRetry, type AtomicDeps } from "./atomic.js";
 import { initialBible } from "./bible.js";
 import { appendChanges } from "./change-writer.js";
 import { checkPathBudget, fromPortable, toExtendedLength, type PathBudget } from "./paths.js";
@@ -26,6 +29,7 @@ import { installSampleWorld } from "./sample-world.js";
 import { findKeyArt, hashMedia, readWorldMeta, scanWorld, WorldOpenError } from "./scan.js";
 import { uniqueSlug } from "./slug.js";
 import { WorldStore } from "./store.js";
+import { WorldChatStore } from "../world-chat/store.js";
 
 /**
  * The real filesystem WorldProvider (SPEC-002 T-14), replacing SPEC-001's mock. Owns the app
@@ -34,6 +38,8 @@ import { WorldStore } from "./store.js";
  */
 
 export interface CreateWorldInput {
+  /** Server-reserved identity for recoverable founding; never accepted from a client frame. */
+  creationId?: string;
   name: string;
   logline?: string;
   tone?: string;
@@ -289,12 +295,33 @@ export class FsWorldProvider implements WorldProvider {
 
   /** Create a world folder: slug, world.json, first change line (SPEC-002 §2.2). */
   async createWorld(input: CreateWorldInput): Promise<{ worldId: string; slug: string }> {
+    return serializeFileMutation(join(this.appRoot, ".world-creations", "writer"), () => this.createWorldWork(input));
+  }
+
+  private async createWorldWork(input: CreateWorldInput): Promise<{ worldId: string; slug: string }> {
     await this.ensureAppRoot();
+    if (input.creationId) {
+      if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(input.creationId)) throw new Error("invalid creation identity");
+      // Recovery must prove absence. An unreadable published world may hold the reserved
+      // identity; treating it as absent would publish a second copy with the same identity.
+      for (const entry of await readdir(toExtendedLength(this.worldsDir()), { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const existing = join(this.worldsDir(), entry.name);
+        const meta = await readWorldMeta(existing).catch(() => {
+          throw new Error(`Cannot recover founding while world "${entry.name}" is unreadable. Repair its world.json before retrying.`);
+        });
+        if (meta.worldId === input.creationId) return { worldId: input.creationId, slug: entry.name };
+      }
+    }
     const taken = await readdir(toExtendedLength(this.worldsDir())).catch(() => [] as string[]);
+    const worldId = input.creationId ?? ulid();
     const slug = uniqueSlug(input.name, "world", taken);
-    const worldId = ulid();
     const at = this.clock();
-    const dir = join(this.worldsDir(), slug);
+    const destination = join(this.worldsDir(), slug);
+    const dir = input.creationId ? join(this.appRoot, ".world-creations", worldId) : destination;
+    // A reserved but unpublished directory may contain an interrupted earlier input. Rebuild
+    // that private staging directory so omitted optional documents cannot survive a retry.
+    if (input.creationId) await rm(toExtendedLength(dir), { recursive: true, force: true });
     await mkdir(toExtendedLength(dir), { recursive: true });
     const meta = {
       worldId,
@@ -341,14 +368,20 @@ export class FsWorldProvider implements WorldProvider {
     if (input.bible) {
       await atomicWriteFile(join(dir, fromPortable(BIBLE_PATH)), initialBible(input.bible, at));
     }
-    await appendChanges(join(dir, "changes.jsonl"), [
+    const initialChanges = [
       { ts: at, entity: "world", created: true, source: "form", canonRevisionAfter: 0 },
       // The shape a commit would have written for the same file (`commit.ts:401`), so the
       // history screen reads a born bible and an edited one the same way.
       ...(input.bible
         ? [{ ts: at, entity: "bible", fromVersion: null, toVersion: 1, source: "genesis", canonRevisionAfter: 0 }]
         : []),
-    ]);
+    ];
+    if (input.creationId) {
+      await atomicWriteFile(join(dir, "changes.jsonl"), initialChanges.map(change => JSON.stringify(change)).join("\n") + "\n");
+      await renameWithRetry(dir, destination);
+    } else {
+      await appendChanges(join(dir, "changes.jsonl"), initialChanges);
+    }
     this.appIndex?.upsertWorld({
       worldId,
       slug,
@@ -656,14 +689,67 @@ export class FsWorldProvider implements WorldProvider {
   /** Genesis sandboxes live beside worlds, never inside one — world-less by construction. */
   async genesisDir(genesisId: string): Promise<string> {
     if (!/^[a-z0-9][a-z0-9-]{2,40}$/.test(genesisId)) throw new Error("invalid genesis id");
-    const dir = join(this.appRoot, ".genesis", genesisId);
-    await mkdir(toExtendedLength(dir), { recursive: true });
-    return dir;
+    const root = join(this.appRoot, ".genesis-v2", genesisId);
+    const legacy = join(this.appRoot, ".genesis", genesisId);
+    return serializeFileMutation(join(root, "layout"), async () => {
+      const dir = join(root, "workspace");
+      const currentMarker = await stat(toExtendedLength(join(root, "begun.json"))).catch((err: NodeJS.ErrnoException) => {
+        if (err.code === "ENOENT") return null; throw err;
+      });
+      if (!currentMarker) {
+        const legacyMarker = await readFile(toExtendedLength(join(legacy, "begun.json")), "utf8").catch((err: NodeJS.ErrnoException) => {
+          if (err.code === "ENOENT") return null; throw err;
+        });
+        if (legacyMarker !== null) {
+          // The old sandbox was writable by the harness. Only the world's durable
+          // authorization can turn its marker into an application-owned receipt.
+          try {
+            const marker = JSON.parse(legacyMarker) as { worldId?: unknown; requestId?: unknown };
+            const worldId = UlidSchema.parse(marker.worldId);
+            const worldDir = await this.findWorldDir(worldId);
+            const record = FoundingBuildRecordSchema.parse(JSON.parse(await readFile(toExtendedLength(join(worldDir, "build", "build.json")), "utf8")));
+            if (record.worldId !== worldId || record.genesisId !== genesisId ||
+              (marker.requestId !== undefined && marker.requestId !== record.requestId)) throw new Error("mismatched founding record");
+            await atomicWriteFile(join(root, "creation.json"), JSON.stringify({ worldId }) + "\n");
+            await atomicWriteFile(join(root, "begun.json"), JSON.stringify({ worldId, requestId: record.requestId }) + "\n");
+          } catch {
+            throw new Error("The legacy founding handoff needs repair. Open its existing world; this draft cannot begin another world.");
+          }
+        }
+      }
+      await mkdir(toExtendedLength(dir), { recursive: true });
+      // Old drafts had no control directory. Move only their known content; never promote
+      // agent-authored files into application receipts or approval records.
+      for (const name of ["draft.json", "draft", "attachments", "previews"]) {
+        const source = join(legacy, name);
+        const exists = await stat(toExtendedLength(source)).catch((err: NodeJS.ErrnoException) => {
+          if (err.code === "ENOENT") return null; throw err;
+        });
+        if (exists) {
+          const target = join(dir, name);
+          const occupied = await stat(toExtendedLength(target)).catch((err: NodeJS.ErrnoException) => {
+            if (err.code === "ENOENT") return null; throw err;
+          });
+          if (occupied) throw new Error("Both old and new founding draft files exist; neither was overwritten.");
+          await renameWithRetry(source, target);
+        }
+      }
+      return dir;
+    });
+  }
+
+  async listGenesisIds(): Promise<string[]> {
+    const entries = (await Promise.all([".genesis", ".genesis-v2"].map(folder =>
+      readdir(toExtendedLength(join(this.appRoot, folder)), { withFileTypes: true })
+        .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return []; throw err; })))).flat();
+    return [...new Set(entries.filter(entry => entry.isDirectory() && /^[a-z0-9][a-z0-9-]{2,40}$/.test(entry.name)).map(entry => entry.name))];
   }
 
   async discardGenesis(genesisId: string): Promise<void> {
     if (!/^[a-z0-9][a-z0-9-]{2,40}$/.test(genesisId)) return;
+    await WorldChatStore.discard(join(this.appRoot, ".genesis-v2", genesisId, ".conversation"));
     await rm(toExtendedLength(join(this.appRoot, ".genesis", genesisId)), { recursive: true, force: true });
+    await rm(toExtendedLength(join(this.appRoot, ".genesis-v2", genesisId)), { recursive: true, force: true });
   }
 
   async listReferenceImages(slug: string): Promise<WorldImageReference[]> {
@@ -678,9 +764,10 @@ export class FsWorldProvider implements WorldProvider {
     }
     const aliases = new Set<string>();
     for (const artifact of bundle.artifacts) {
-      if (artifact.generation?.source !== "character-reference") continue;
+      const sourceFile = artifactReferenceFile(artifact, bundle.referenceTakes);
+      if (!sourceFile) continue;
       const file = `artifacts/${artifact.file}`;
-      const source = available.get(artifact.generation.sourceFile), copy = available.get(file);
+      const source = available.get(sourceFile), copy = available.get(file);
       if (!source || !copy) continue;
       // A source path can be regenerated, removed or externally edited. Suppress its filed
       // copy only when both current files still match the artifact's recorded identity.
@@ -713,7 +800,7 @@ export class FsWorldProvider implements WorldProvider {
   /**
    * Read-only media from a genesis sandbox — the look preview, before any world exists
    * (SPEC-031 R-50). Same guarding as `serveMedia`, different root: sandboxes live under
-   * `.genesis/`, deliberately outside the worlds directory.
+   * `.genesis-v2/`, deliberately outside the worlds directory.
    *
    * Media only — a sandbox holds a look preview and nothing a text viewer would open, so the
    * artifact-shelf text types (issue 477) deliberately do not reach here.
@@ -725,8 +812,13 @@ export class FsWorldProvider implements WorldProvider {
     const ext = portable.slice(portable.lastIndexOf(".")).toLowerCase();
     const contentType = FsWorldProvider.MEDIA_TYPES[ext];
     if (contentType === undefined) return null;
-    const abs = join(this.appRoot, ".genesis", genesisId, fromPortable(portable));
+    const workspace = join(this.appRoot, ".genesis-v2", genesisId, "workspace");
+    const privateMedia = /^media\/[a-f0-9]{64}\.(png|jpg|webp|wav|mp3|flac)$/.test(portable);
+    const root = privateMedia ? join(dirname(workspace), "media") : workspace;
+    const abs = privateMedia ? join(root, basename(portable)) : join(root, fromPortable(portable));
     try {
+      const rel = relative(await realpath(root), await realpath(abs));
+      if (rel.startsWith("..") || isAbsolute(rel)) return null;
       const info = await stat(toExtendedLength(abs));
       if (!info.isFile()) return null;
     } catch {

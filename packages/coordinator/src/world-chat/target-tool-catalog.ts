@@ -47,7 +47,7 @@ export const TARGET_READ_TOOLS: readonly TargetReadToolDefinition[] = [
   tool("list_sheets", "Read complete character, location and faction sheets in stable id order.", {}),
   tool("get_bible", "Read the complete Bible in bounded text chunks.", {}),
   tool("get_art_direction", "Read the complete resolved art direction.", {}),
-  tool("list_references", "Read complete reference kits, tiles, looks and compilations.", {}),
+  tool("list_references", "Read complete reference kits, tiles, looks, compilations, props and named states.", {}),
   tool("list_artifacts", "Read complete artifact sidecars including extraction state and provenance.", {}),
   tool("list_voices", "Read cloned voices and every sheet voice assignment.", {}),
   tool("list_productions", "Read every production identity and metadata record.", {}),

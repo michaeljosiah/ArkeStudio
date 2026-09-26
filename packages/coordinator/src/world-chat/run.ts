@@ -192,7 +192,7 @@ export interface RunDeps {
     baseVersion: number | null;
   }) => Promise<void>;
   /** Build digest-bound intents before the assistant event is appended. This callback must be pure. */
-  prepareActions?: (turn: WorldChatActionTurn) => readonly PreparedWorldChatAction[];
+  prepareActions?: (turn: WorldChatActionTurn) => readonly PreparedWorldChatAction[] | Promise<readonly PreparedWorldChatAction[]>;
   /** Bind authority records only after the assistant event and all its intents are durable. */
   bindActions?: (actions: readonly PreparedWorldChatAction[]) => Promise<void>;
   /** Separate bounded model pass; its output is context only and failure leaves the prior summary. */
@@ -501,7 +501,12 @@ export class WorldChatRunner {
      * what has been said and understood, so it is what the model is given — bounded by §8.5, and
      * with retractions travelling as keys so a withdrawn idea is not put back in front of it.
      */
-    const { events } = await store.read();
+    let { events } = await store.read();
+    if (this.deps.summarise && !events.some(envelope => envelope.event.type === "summary.updated") &&
+      events.some(envelope => envelope.event.type === "founding.message")) {
+      await refreshConversationSummary(store, this.deps.summarise, controller.signal);
+      events = (await store.read()).events;
+    }
     const meta = await store.readMeta();
     const view = foldConversation(conversationId, meta?.createdAt ?? at, events).view;
     const modelChoice = this.deps.resolveLanguageModel
@@ -1099,7 +1104,7 @@ export class WorldChatRunner {
     const completedRun = runFrom(events, runId);
     let actions: readonly PreparedWorldChatAction[] = [];
     try {
-      actions = this.deps.prepareActions?.({
+      actions = await this.deps.prepareActions?.({
         conversationId,
         turnId: completedRun.turnId,
         entryContext: folded.entryContext,

@@ -1,4 +1,5 @@
-import { open, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { open, mkdir, readFile, rename, writeFile, rm, stat } from "node:fs/promises";
+import { atomicWriteFile } from "../world/atomic.js";
 import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import {
@@ -124,6 +125,15 @@ export interface ReadResult {
 }
 
 export class WorldChatStore {
+  /** Explicit deletion owns the journal queue and resets the shared tail for a future draft. */
+  static async discard(dir: string): Promise<void> {
+    const writer = writerFor(dir);
+    await writer.queue.enqueue(async () => {
+      await rm(toExtendedLength(dir), { recursive: true, force: true });
+      writer.tail = null;
+      writer.uncertain = false;
+    });
+  }
   /** Shared with every other store on this directory — see `writerFor`. */
   private readonly writer: Writer;
   /**
@@ -149,18 +159,21 @@ export class WorldChatStore {
   async create(id: ConversationId, createdAt: string): Promise<WorldChatConversationMeta> {
     const meta = WorldChatConversationMetaSchema.parse({ schemaVersion: 1, id, createdAt });
     await mkdir(toExtendedLength(this.dir), { recursive: true });
-    // wx: a second create must not silently rewrite the identity of an existing conversation.
-    await writeFile(toExtendedLength(this.metaPath), JSON.stringify(meta, null, 2), {
-      encoding: "utf8",
-      flag: "wx",
-    }).catch((err: NodeJS.ErrnoException) => {
-      if (err.code !== "EEXIST") throw err;
+    // All stores for this directory share the writer queue. Serialize the existence check
+    // and publish a flushed header atomically, so a crash cannot expose partial metadata.
+    let saved = meta;
+    await this.writer.queue.enqueue(async () => {
+      const existing = await readFile(toExtendedLength(this.metaPath), "utf8")
+        .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return null; throw err; });
+      if (existing !== null) { saved = WorldChatConversationMetaSchema.parse(JSON.parse(existing)); return; }
+      await atomicWriteFile(this.metaPath, JSON.stringify(meta, null, 2));
     });
-    return meta;
+    return saved;
   }
 
   async readMeta(): Promise<WorldChatConversationMeta | null> {
     try {
+      if (await stat(join(this.dir, ".founding-incomplete")).then(() => true).catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return false; throw err; })) return null;
       const raw = await readFile(toExtendedLength(this.metaPath), "utf8");
       const parsed = WorldChatConversationMetaSchema.safeParse(JSON.parse(raw));
       return parsed.success ? parsed.data : null;

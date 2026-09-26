@@ -78,6 +78,7 @@ async function setup(
   adapter: HarnessAdapter,
   options: {
     timeoutMs?: number;
+    summarise?: RunDeps["summarise"];
     entryContext?: import("@arke-studio/contracts").WorldChatContext;
     chapterBrief?: RunDeps["chapterBrief"];
     resolveLanguageModel?: RunDeps["resolveLanguageModel"];
@@ -98,6 +99,7 @@ async function setup(
   const released: RunId[] = [];
   const runner = new WorldChatRunner({
     adapter,
+    ...(options.summarise ? { summarise: options.summarise } : {}),
     ...(options.chapterBrief ? { chapterBrief: options.chapterBrief } : {}),
     ...(options.resolveLanguageModel ? { resolveLanguageModel: options.resolveLanguageModel } : {}),
     ...(options.createdModels
@@ -937,4 +939,48 @@ it("durably cancels a turn stopped while its chapter brief is being read", async
   assert.equal(finished.run.status, "cancelled");
   assert.equal(h.released.length, 1);
   assert.equal((await h.runner.send(h.store, h.conversationId, "Continue")).status, "completed");
+});
+
+it("summarizes founding history before it exceeds the recent prompt window", async () => {
+  const prompts: string[] = [];
+  const { runner, store, conversationId } = await setup(fakeAdapter(["not json", "not json"], { prompts }), {
+    summarise: async input => {
+      assert.equal(prompts.length, 0);
+      assert.equal(input.messages[0]?.text, "The first founding decision.");
+      return "The first founding decision must be remembered.";
+    },
+  });
+  for (let index = 0; index < 18; index++) await store.append({ type: "founding.message", message: {
+    id: newId("msg"), turnId: newId("turn"), role: index % 2 ? "studio" : "user",
+    text: index ? `Later founding message ${index}` : "The first founding decision.", attachmentIds: [], createdAt: AT,
+  } });
+  await runner.send(store, conversationId, "What did we decide first?");
+  assert.match(prompts[0]!, /The first founding decision must be remembered/);
+});
+
+it("stops founding-summary preflight without waiting for an unresponsive summariser", { timeout: 5000 }, async () => {
+  let started!: () => void;
+  let release!: (value: string) => void;
+  let signal: AbortSignal | undefined;
+  const starting = new Promise<void>(resolve => { started = resolve; });
+  const blocked = new Promise<string>(resolve => { release = resolve; });
+  const createdModels: Array<string | undefined> = [];
+  const h = await setup(fakeAdapter([]), {
+    createdModels,
+    summarise: async input => { signal = input.signal; started(); return blocked; },
+  });
+  for (let index = 0; index < 18; index++) await h.store.append({ type: "founding.message", message: {
+    id: newId("msg"), turnId: newId("turn"), role: index % 2 ? "studio" : "user",
+    text: `Founding message ${index}`, attachmentIds: [], createdAt: AT,
+  } });
+  const pending = h.runner.send(h.store, h.conversationId, "Continue");
+  try {
+    await starting;
+    assert.equal(h.runner.cancel(h.conversationId), true);
+    assert.equal((await pending).status, "cancelled");
+    assert.equal(signal?.aborted, true);
+    assert.equal(createdModels.length, 0);
+  } finally { release("A late summary."); }
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal((await h.store.read()).events.some(event => event.event.type === "summary.updated"), false);
 });

@@ -2743,3 +2743,45 @@ describe("multimedia preparation stays before the submission boundary", () => {
     h.queue.dispose();
   });
 });
+
+it("adopts a founding image receipt with its permanent media path across reload", async () => {
+  const h = await makeHarness({});
+  const id = "jb_01J8E0000000000000000000B1";
+  await writeFile(h.journalPath, JSON.stringify({ ...INPUT, id, idempotencyKey: "01J8E0000000000000000000B1", worldId: "gen-images",
+    status: "succeeded", providerJobId: null, attempt: 1, error: null, landedFiles: ["generated/private.png"],
+    createdAt: "2026-09-25T10:00:00.000Z", updatedAt: "2026-09-25T10:00:00.000Z" }) + "\n");
+  await h.queue.start();
+  try {
+    await h.queue.adoptWorld(id, WORLD, ["artifacts/founding-image.png"]);
+    assert.deepEqual(foldedJob(h, id)?.landedFiles, ["artifacts/founding-image.png"]);
+    h.queue.dispose();
+    const restored = h.revive();
+    try {
+      await restored.queue.start();
+      assert.equal(foldedJob(restored, id)?.worldId, WORLD);
+      assert.deepEqual(foldedJob(restored, id)?.landedFiles, ["artifacts/founding-image.png"]);
+    } finally { restored.queue.dispose(); }
+  } finally { h.queue.dispose(); }
+});
+
+it("finishes live founding image preservation before permitting history deletion", async () => {
+  const fake = new FakeProvider({});
+  fake.artifacts = [{ name: "portrait.png", contentType: "image/png", data: pngBytes() }];
+  let release!: () => void;
+  const waiting = new Promise<void>(resolve => { release = resolve; });
+  const h = await makeHarness({ fake }, { onTerminal: async job => {
+    if (job.status === "succeeded") await waiting;
+  } });
+  try {
+    await h.queue.start();
+    const job = await h.queue.enqueue({ ...INPUT, capability: "image", target: { kind: "genesis-image", id: "character:maren" },
+      landing: { dir: "generated", name: "portrait.png" } });
+    await until(() => foldedJob(h, job.id)?.finalization?.status === "pending", "pending founding finalization", FOLD_MS);
+    await h.queue.delete(job.id);
+    assert.ok(foldedJob(h, job.id));
+    release();
+    await until(() => foldedJob(h, job.id)?.finalization?.status === "complete", "completed founding finalization", FOLD_MS);
+    await h.queue.delete(job.id);
+    assert.equal(h.queue.listJobs().some(row => row.id === job.id), false);
+  } finally { release(); h.queue.dispose(); }
+});

@@ -1,4 +1,4 @@
-import { WorldChatProductionStageConstructActionSchema } from "@arke-studio/contracts";
+import { WorldChatProductionStageConstructActionSchema, WorldChatPropAuthoringActionSchema, WorldChatPropReferenceActionSchema } from "@arke-studio/contracts";
 import {
   ClientMessageSchema,
   BenchGenerationModelActionSchema,
@@ -246,6 +246,21 @@ const CLIENT_COMMAND_METADATA = {
   "setup-repair": globalOnly(GLOBAL_OPERATION),
   "setup-cancel": globalOnly(GLOBAL_OPERATION),
   "genesis-chat": globalOnly("Genesis is a pre-world conversation and cannot be targeted from an open world."),
+  "genesis-list": globalOnly("Founding drafts are app-scoped."),
+  "genesis-load": globalOnly("Founding drafts are app-scoped."),
+  "genesis-review": globalOnly("Founding content review is pre-world."),
+  "genesis-images": globalOnly("Images belong to a pre-world conversation."),
+  "genesis-voices": globalOnly("Voices belong to a pre-world conversation."),
+  "genesis-readiness": globalOnly("Readiness belongs to a pre-world conversation."),
+  "genesis-readiness-leave": globalOnly("Unresolved choices belong to a pre-world conversation."),
+  "genesis-voice-generate": globalOnly("Auditions belong to a pre-world conversation."),
+  "genesis-voice-decide": globalOnly("Voice decisions belong to a pre-world conversation."),
+  "genesis-imports": globalOnly("Imports belong to a pre-world conversation."),
+  "genesis-import-resolve": globalOnly("Import review belongs to a pre-world conversation."),
+  "genesis-image-generate": globalOnly("Generation belongs to a pre-world conversation."),
+  "genesis-image-decide": globalOnly("Image decisions belong to a pre-world conversation."),
+  "genesis-propose-world": globalOnly("Form values become reviewable founding proposals."),
+  "genesis-decide": globalOnly("Founding content decisions belong to the author."),
   "genesis-discard": globalOnly("Genesis sandbox lifecycle is outside an open world."),
   "plan-founding-build": globalOnly("Founding plans create a world and are outside an open-world scope."),
   "begin-founding-build": globalOnly("Founding creates a world and cannot be approved by Arke inside one."),
@@ -332,8 +347,8 @@ const CLIENT_COMMAND_METADATA = {
   "account-open": globalOnly(GLOBAL_OPERATION),
   "set-appearance-theme": globalOnly(GLOBAL_OPERATION),
   "set-narrator": globalOnly(GLOBAL_OPERATION),
-  "create-prop": humanOnly("Prop authoring has no registered Arke action adapter."),
-  "add-prop-state": humanOnly("Prop authoring has no registered Arke action adapter."),
+  "create-prop": action("world", "command", "reference-kit", "authored-change", ["references", "sheets"]),
+  "add-prop-state": action("world", "command", "reference-kit", "authored-change", ["references"]),
   "import-prop-state-candidate": humanOnly("Importing a prop image requires the person's host picker."),
   "accept-prop-state": humanOnly("Accepting a prop image is a human review decision."),
   "cancel-job": humanOnly("Cancelling a globally addressed job is a human recovery control until jobs have a world-confined action seam."),
@@ -770,6 +785,14 @@ const WORLD_CHAT_ACTION_REGISTRY = {
     kind: "world-chat-voice-assignment",
     schema: WorldChatVoiceAssignmentActionSchema,
     ...action("world", "setting", "voice", "authored-change", ["sheets", "voices"]),
+  },
+  "world-chat-prop-authoring": {
+    kind: "world-chat-prop-authoring", schema: WorldChatPropAuthoringActionSchema,
+    ...action("world", "command", "reference-kit", "authored-change", ["references", "sheets"]),
+  },
+  "world-chat-prop-reference": {
+    kind: "world-chat-prop-reference", schema: WorldChatPropReferenceActionSchema,
+    ...action("world", "take-review", "reference-kit", "authored-change", ["references", "artifacts"]),
   },
   "world-chat-voice-audition": {
     kind: "world-chat-voice-audition",

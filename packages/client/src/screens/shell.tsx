@@ -6,6 +6,15 @@ import { EditorDialog } from "../components/editor-dialog.js";
 import { settingsReturnPath } from "../lib/settings-return.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import { renderInlineMarkdown } from "../components/inline-markdown.js";
+import { GenesisContentCards } from "../components/genesis-review.js";
+import { GenesisImageCards } from "../components/genesis-images.js";
+import { GenesisVoiceCards } from "../components/genesis-voices.js";
+import { GenesisReadinessCard, FoundingProgressCard } from "../components/genesis-readiness.js";
+import { ApprovedGenesisContent } from "../components/genesis-review.js";
+import { reviewGenesisReadiness, leaveGenesisFinding } from "../lib/store.js";
+import { reviewGenesisVoices, generateGenesisVoice, decideGenesisVoice } from "../lib/store.js";
+import { GenesisImportCards } from "../components/genesis-imports.js";
+import { reviewGenesisImports, resolveGenesisImport } from "../lib/store.js";
 import { Archive, ChartLine, ChevronDown, ChevronRight, Pencil, Plus, RotateCcw, Sparkle, X } from "../components/icons.js";
 import { AgentsPanel } from "./agents.js";
 import {
@@ -46,6 +55,15 @@ import {
   createWorld,
   genesisAttachFiles,
   genesisChat,
+  listGenesisDrafts,
+  loadGenesisDraft,
+  reviewGenesisDraft,
+  decideGenesisDraft,
+  reviewGenesisImages,
+  generateGenesisImage,
+  decideGenesisImage,
+  cancelJob,
+  proposeGenesisWorld,
   genesisDiscard,
   hostCanAttach,
   chooseClaudeExecutable,
@@ -667,6 +685,8 @@ function BuildCard({
         [plan.counts.characters, plan.counts.characters === 1 ? "character" : "characters"],
         [plan.counts.locations, plan.counts.locations === 1 ? "place" : "places"],
         [plan.counts.factions, plan.counts.factions === 1 ? "faction" : "factions"],
+        [plan.counts.canon, plan.counts.canon === 1 ? "canon entry" : "canon entries"],
+        [plan.counts.props, plan.counts.props === 1 ? "prop" : "props"],
         [plan.counts.threads, plan.counts.threads === 1 ? "open thread" : "open threads"],
       ]
     : [];
@@ -690,6 +710,17 @@ function BuildCard({
         <p className="fy-actioncard__notice">{entry.reason ?? "the build could not be sized"}</p>
       ) : (
         <>
+          {plan.approvedContent && <ApprovedGenesisContent blueprint={plan.approvedContent} />}
+          {plan.approvedContent?.selectedImages?.map(selection => <details key={selection.target}>
+            <summary>Reuse {selection.candidate.label} for {selection.target}</summary>
+            <img className="fy-actioncard__media" src={genesisMediaUrl(plan.genesisId, selection.candidate.file)} alt={selection.candidate.label} />
+          </details>)}
+          {plan.approvedContent?.selectedVoices?.map(selection => <p key={selection.plan.intent.target}>
+            Assign {selection.plan.voice.label} ({selection.plan.voice.provider}) to {selection.plan.title}; no new audition.
+          </p>)}
+          {plan.work && <details><summary>Work and reused selections</summary>{plan.work.map(item => <p key={item.key}>
+            {item.name} · {item.kind.replaceAll("-", " ")} · {item.authorized ? formatMicroUsd(item.estimatedMicroUsd) : "not authorized"}
+          </p>)}</details>}
           <p className="fy-actioncard__consequence">
             {counts
               .filter(([count]) => count > 0)
@@ -728,8 +759,16 @@ function BuildCard({
 
 /** World genesis (prototype 12a): the whole window is the surface — form beside the world-so-far rail. */
 export function NewWorldScreen() {
+  const [params] = useSearchParams();
+  const freshId = useRef(`gen-${ulid().toLowerCase()}`);
+  const draftId = params.get("draft") ?? freshId.current;
+  return <NewWorldDraft key={draftId} draftId={draftId} />;
+}
+
+function NewWorldDraft({ draftId }: { draftId: string }) {
   const { state, connection } = useStore();
   const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
   const [name, setName] = useState("");
   const [logline, setLogline] = useState("");
   const [tone, setTone] = useState("");
@@ -748,6 +787,7 @@ export function NewWorldScreen() {
   // the thread and founded in one press there; a bare form still creates and seeds the old way.
   const [lookForBuild, setLookForBuild] = useState("");
   const [buildPressed, setBuildPressed] = useState(false);
+  const [generateImages, setGenerateImages] = useState(true);
   const [planRequestId, setPlanRequestId] = useState<string | null>(null);
   const [planStartedAt, setPlanStartedAt] = useState<string | null>(null);
   const buildCardRef = useRef<HTMLDivElement>(null);
@@ -765,20 +805,43 @@ export function NewWorldScreen() {
   const [models, setModels] = useState<ModelChoices | undefined>(undefined);
   const [genMode, setGenMode] = useState<"form" | "chat">("form");
   const modeTouchedRef = useRef(false);
-  const genesisIdRef = useRef(`gen-${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`);
+  const genesisIdRef = useRef(draftId);
   const genesisId = genesisIdRef.current;
   const [message, setMessage] = useState("");
   const harnessReady = state?.app.health.harness.status === "healthy";
-  const g = useGenesis()[genesisId];
+  const drafts = useGenesis();
+  const g = drafts[genesisId];
+  useEffect(() => { if (g?.status === "failed") setSubmittedName(null); }, [g?.status]);
+  useEffect(() => {
+    if (!g?.founding) return;
+    setModels(g.frozenModels);
+    setGenerateImages(g.frozenGenerateImages ?? true);
+    setLook(g.blueprint?.look ?? "");
+    setLookForBuild(g.blueprint?.look ?? "");
+    setGenMode("chat");
+  }, [g?.founding, g?.frozenModels, g?.frozenGenerateImages, g?.blueprint?.look]);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  useEffect(() => {
+    if (connection !== "open") return;
+    listGenesisDrafts();
+    if (params.has("draft")) loadGenesisDraft(genesisId);
+  }, [connection, genesisId]);
+  const canViewChat = harnessReady || Boolean(g?.blueprint || g?.turns.length);
   const turns = g?.turns ?? [];
   const chatRunning = g?.status === "running";
   const blueprint = g?.blueprint ?? null;
+  useEffect(() => {
+    if (g && connection === "open" && !chatRunning && !g.worldId && !g.founding) reviewGenesisImports(genesisId);
+  }, [connection, chatRunning, blueprint, g?.attachments, genesisId]);
+  useEffect(() => {
+    if (connection === "open" && blueprint && !chatRunning && !g?.worldId && !g?.founding) reviewGenesisDraft(genesisId);
+  }, [connection, blueprint, chatRunning, g?.worldId, g?.founding, genesisId]);
 
   // With a healthy harness, talking is the front door (prototype 12a) — unless the author
   // already picked the form themselves.
   useEffect(() => {
-    if (harnessReady && !modeTouchedRef.current) setGenMode("chat");
-  }, [harnessReady]);
+    if (canViewChat && !modeTouchedRef.current) setGenMode("chat");
+  }, [canViewChat]);
 
   const charSeed = parseSeed(firstCharacter);
   const locSeed = parseSeed(firstLocation);
@@ -839,8 +902,9 @@ export function NewWorldScreen() {
     return estimateImageMicroUsd(routed, { landscape: true });
   })();
   const sendGenesis = () => {
-    if (!harnessReady || chatRunning || message.trim().length === 0) return;
+    if (!harnessReady || chatRunning || myBuild?.status === "running" || g?.worldId || message.trim().length === 0) return;
     genesisChat(genesisId, message.trim());
+    if (!params.has("draft")) setParams({ draft: genesisId }, { replace: true });
     setMessage("");
   };
 
@@ -865,16 +929,22 @@ export function NewWorldScreen() {
       for (const t of (blueprint?.threads ?? []).slice(0, 4)) {
         openThread(worldId, t.length > 80 ? `${t.slice(0, 77)}…` : t, t, []);
       }
-      genesisDiscard(genesisId);
+      if (!turns.length) genesisDiscard(genesisId);
     }
-    navigate(`/w/${worldId}`, { replace: true });
+    if (!turns.length) navigate(`/w/${worldId}`, { replace: true });
   }, [submittedName, state?.world, navigate, railCharacters, railLocations, railFactions, blueprint, genesisId]);
 
   // The build begins server-side from one frame (SPEC-031 R-17); the screen's whole job is
   // to follow it to the building screen the moment the coordinator names the world.
   useEffect(() => {
-    if (buildPressed && myBuild) navigate(`/building/${myBuild.worldId}`, { replace: true });
-  }, [buildPressed, myBuild, navigate]);
+    const worldId = myBuild?.worldId ?? g?.worldId;
+    if (worldId && g?.formHandoff === "completed" && !turns.length) {
+      navigate(`/w/${worldId}`, { replace: true });
+    } else if (worldId && g?.conversationId && (myBuild?.status === "completed" || myBuild?.status === "stopped" || g?.formHandoff === "completed")) {
+      navigate(`/w/${worldId}/chat/${g.conversationId}`, { replace: true });
+    }
+    if (buildPressed && myBuild) setStep("draft");
+  }, [buildPressed, myBuild, g?.worldId, g?.conversationId, g?.formHandoff, turns.length, navigate]);
   // A begin the coordinator refused answers with a reasoned plan; the press un-arms so the
   // refusal can be read and the author can go back — never a button stuck on "Building…".
   useEffect(() => {
@@ -916,12 +986,22 @@ export function NewWorldScreen() {
       provider?.validation ?? "",
     ].join("|");
   })();
-  const plannedAgainst = useRef<{ blueprint: typeof blueprint; preview: string | null; route: string } | null>(null);
+  const imageJobs = (state?.app.jobs ?? []).filter(job => job.worldId === genesisId && job.target.kind === "genesis-image");
+  const imageJobsKey = imageJobs.map(job => `${job.id}:${job.status}`).join("|");
+  const voiceJobs = (state?.app.jobs ?? []).filter(job => job.worldId === genesisId && job.params["purpose"] === "genesis-voice");
+  const voiceJobsKey = voiceJobs.map(job => `${job.id}:${job.status}`).join("|");
+  useEffect(() => {
+    if (connection === "open" && blueprint && !chatRunning && !g?.worldId) reviewGenesisVoices(genesisId);
+  }, [connection, blueprint, chatRunning, g?.worldId, genesisId, voiceJobsKey]);
+  useEffect(() => {
+    if (connection === "open" && blueprint && !chatRunning && !g?.worldId) reviewGenesisImages(genesisId, models);
+  }, [connection, blueprint, chatRunning, g?.worldId, g?.attachments, genesisId, models, imageJobsKey, imageRoute]);
+  const plannedAgainst = useRef<{ blueprint: typeof blueprint; review: (typeof drafts)[string]["review"]; images: (typeof drafts)[string]["images"]; voices: (typeof drafts)[string]["voices"]; preview: string | null; route: string } | null>(null);
   useEffect(() => {
     if (!buildCardOpen || buildPressed) return;
     const preview = previewJob?.status ?? null;
     const last = plannedAgainst.current;
-    if (last !== null && last.blueprint === blueprint && last.preview === preview && last.route === imageRoute) return;
+    if (last !== null && last.blueprint === blueprint && last.review === g?.review && last.images === g?.images && last.voices === g?.voices && last.preview === preview && last.route === imageRoute) return;
     let lookText = lookForBuild;
     if (lookSource === "conversation" && look.trim() === conversationLookRef.current) {
       lookText = blueprint?.look?.trim() ?? "";
@@ -929,23 +1009,23 @@ export function NewWorldScreen() {
       setLook(lookText);
       setLookForBuild(lookText);
     }
-    plannedAgainst.current = { blueprint, preview, route: imageRoute };
+    plannedAgainst.current = { blueprint, review: g?.review, images: g?.images, voices: g?.voices, preview, route: imageRoute };
     const requestId = ulid();
     setPlanRequestId(requestId);
     setPlanStartedAt(new Date().toISOString());
     // A refusal answered the blueprint that moved; the fresh plan is the review it asked for.
     setBuildRequestId(null);
-    planFoundingBuild(genesisId, requestId, lookText, models);
-  }, [buildCardOpen, buildPressed, previewJob?.status, blueprint, lookForBuild, look, lookSource, genesisId, models, imageRoute]);
+    planFoundingBuild(genesisId, requestId, lookText, models, generateImages);
+  }, [buildCardOpen, buildPressed, previewJob?.status, blueprint, g?.review, g?.images, g?.voices, lookForBuild, look, lookSource, genesisId, models, imageRoute, generateImages]);
 
   const openBuildCard = (lookText: string) => {
     setLookForBuild(lookText);
     setBuildRequestId(null);
-    plannedAgainst.current = { blueprint, preview: previewJob?.status ?? null, route: imageRoute };
+    plannedAgainst.current = { blueprint, review: g?.review, images: g?.images, voices: g?.voices, preview: previewJob?.status ?? null, route: imageRoute };
     const requestId = ulid();
     setPlanRequestId(requestId);
     setPlanStartedAt(new Date().toISOString());
-    planFoundingBuild(genesisId, requestId, lookText, models);
+    planFoundingBuild(genesisId, requestId, lookText, models, generateImages);
     setStep("draft");
   };
 
@@ -965,11 +1045,24 @@ export function NewWorldScreen() {
     setStep("draft");
   };
 
-  const canCreate = connection === "open" && shownName.length > 0 && submittedName === null;
+  const canCreate = connection === "open" && shownName.length > 0 && submittedName === null && !chatRunning;
   const entries =
     1 + railCharacters.length + railLocations.length + railFactions.length + (blueprint?.threads.length ?? 0);
 
   const begin = (artDirection?: string) => {
+    if (turns.length || buildMode) {
+      proposeGenesisWorld(genesisId, {
+        name: shownName, ...(shownLogline ? { logline: shownLogline } : {}),
+        ...(shownTone ? { tone: shownTone } : {}), ...(shownGenre ? { genre: shownGenre } : {}),
+        ...(artDirection?.trim() ? { look: artDirection.trim() } : {}),
+        characters: charSeed ? [{ name: charSeed.name, line: charSeed.sentence }] : [],
+        locations: locSeed ? [{ name: locSeed.name, line: locSeed.sentence }] : [],
+        threads: blueprint?.threads ?? [],
+      });
+      setGenMode("chat");
+      setStep("draft");
+      return;
+    }
     setSubmittedName(shownName);
     createWorld({
       name: shownName,
@@ -1036,7 +1129,7 @@ export function NewWorldScreen() {
                 <span style={{ flex: 1 }} />
                 {/* Skippable, but not hidden: a world with no look is a real state, and it is
                     better said out loud than arrived at by closing a screen. */}
-                <Button variant="ghost" disabled={!canCreate} onClick={() => (buildMode ? openBuildCard("") : begin())}>
+                <Button variant="ghost" disabled={!canCreate} onClick={() => (buildMode && genMode !== "form" ? openBuildCard("") : begin())}>
                   Decide later
                 </Button>
               </div>
@@ -1078,7 +1171,7 @@ export function NewWorldScreen() {
                 <Button
                   variant="primary"
                   disabled={!canCreate || look.trim().length === 0}
-                  onClick={() => (buildMode ? openBuildCard(look.trim()) : begin(look))}
+                  onClick={() => (buildMode && genMode !== "form" ? openBuildCard(look.trim()) : begin(look))}
                 >
                   {submittedName ? "Creating…" : "Looks right"}
                 </Button>
@@ -1106,9 +1199,9 @@ export function NewWorldScreen() {
               <button
                 type="button"
                 className={cx("fy-seg__item", genMode === "chat" && "fy-seg__item--active")}
-                disabled={!harnessReady}
-                style={harnessReady ? undefined : { cursor: "not-allowed", opacity: 0.55 }}
-                title={harnessReady ? undefined : "Chat needs OpenCode running — the form drafts the same world"}
+                disabled={!canViewChat}
+                style={canViewChat ? undefined : { cursor: "not-allowed", opacity: 0.55 }}
+                title={canViewChat ? undefined : "Chat needs OpenCode running — the form drafts the same world"}
                 onClick={() => {
                   modeTouchedRef.current = true;
                   setGenMode("chat");
@@ -1129,6 +1222,25 @@ export function NewWorldScreen() {
             </span>
           </div>
           <div className="fy-gate__body" style={{ gap: 14 }}>
+            {Object.entries(drafts).some(([, draft]) => (draft.turns.length || draft.blueprint?.name || draft.attachments.length) && !draft.worldId) && (
+              <label>
+                Continue a draft
+                <select aria-label="Continue a draft" value={genesisId} disabled={chatRunning || myBuild?.status === "running"}
+                  onChange={event => setParams({ draft: event.target.value })}>
+                  <option value={genesisId}>{blueprint?.name ?? "This conversation"}</option>
+                  {Object.entries(drafts).filter(([id, draft]) => id !== genesisId && (draft.turns.length || draft.blueprint?.name || draft.attachments.length) && !draft.worldId)
+                    .map(([id, draft]) => <option key={id} value={id}>{draft.blueprint?.name ?? draft.turns[0]?.text.slice(0, 80) ?? "Untitled world"}</option>)}
+                </select>
+              </label>
+            )}
+            {(turns.length > 0 || blueprint?.name || handed.length > 0) && !g?.worldId && !g?.founding && !myBuild && (
+              <Button variant="ghost" disabled={chatRunning} onClick={() => {
+                if (!confirmDiscard) { setConfirmDiscard(true); return; }
+                genesisDiscard(genesisId);
+                setParams({ draft: `gen-${ulid().toLowerCase()}` });
+              }}>{confirmDiscard ? "Discard this conversation and its uploads" : "Discard draft"}</Button>
+            )}
+            {myBuild && <FoundingProgressCard build={myBuild} />}
             {genMode === "chat" ? (
               <>
                 {/* 12a opens with Arke already talking. It opened here with sixty-six words of
@@ -1141,6 +1253,27 @@ export function NewWorldScreen() {
                     {turn.role === "user" ? turn.text : renderInlineMarkdown(turn.text)}
                   </div>
                 ))}
+                {g?.importError && <Callout title="Import review needs attention">{g.importError}</Callout>}
+                {g?.imports && <GenesisImportCards imports={g.imports} blueprint={blueprint} busy={!!g.decisionPending || !!g.readinessPending || chatRunning || buildPressed || !!g.worldId || !!g.founding}
+                  onResolve={resolution => resolveGenesisImport(genesisId, resolution)}
+                  onRefresh={() => reviewGenesisImports(genesisId)}
+                  onExtract={name => setMessage(`Please extract reviewable worldbuilding proposals from attachments/${name}. Cite exact source quotes; keep interpretations and suggested relationships separate from the evidence.`)} />}
+                {g?.review && <GenesisContentCards review={g.review} busy={!!g.decisionPending || !!g.readinessPending || !!g.reviewPending || chatRunning || buildPressed || !!g?.founding || !!g?.worldId || myBuild?.status === "running"}
+                  onDecide={(cards, decision) => decideGenesisDraft(genesisId, cards.map(card => ({ key: card.key, digest: card.digest })), decision)}
+                  onRevise={title => setMessage(`Please revise ${title}: `)} />}
+                {!g?.worldId && <GenesisReadinessCard review={g?.readiness} busy={!!g?.decisionPending || !!g?.reviewPending || chatRunning || buildPressed || !!g?.founding || !!g?.readinessPending}
+                  onRefresh={() => reviewGenesisReadiness(genesisId)} onFix={setMessage}
+                  onLeave={(id, digest) => leaveGenesisFinding(genesisId, id, digest)} />}
+                {g?.voices && <GenesisVoiceCards genesisId={genesisId} voices={g.voices} jobs={voiceJobs} busy={!!g.decisionPending || !!g.readinessPending || chatRunning || buildPressed || !!g.founding || !!g.worldId}
+                  onGenerate={(intentId, digest) => generateGenesisVoice(genesisId, intentId, digest)}
+                  onDecide={(target, decision, candidate) => decideGenesisVoice(genesisId, target, decision, candidate)}
+                  onRevise={setMessage} onRefresh={() => reviewGenesisVoices(genesisId)} onCancel={cancelJob} />}
+                {g?.imageError && <Callout title="Image request needs attention">{g.imageError}</Callout>}
+                {g?.images && blueprint && <GenesisImageCards genesisId={genesisId} blueprint={blueprint} images={g.images} jobs={imageJobs}
+                  busy={!!g.decisionPending || !!g.readinessPending || chatRunning || buildPressed || !!g.founding || myBuild?.status === "running" || !!g.worldId}
+                  onGenerate={(intentId, digest) => generateGenesisImage(genesisId, intentId, digest, models)}
+                  onDecide={(target, decision, candidate) => decideGenesisImage(genesisId, target, decision, candidate)}
+                  onCancel={cancelJob} onRevise={setMessage} />}
                 {/* The look, previewable while the conversation is still a conversation (SPEC-031
                     §1.10): the agent proposed the words; the press and the spend are the author's.
                     Asked in the thread, not in the rail beside it — spend is decided where every
@@ -1196,7 +1329,7 @@ export function NewWorldScreen() {
                             <Button
                               variant="outline"
                               size="sm"
-                              disabled={previewEstimate === null}
+                              disabled={previewEstimate === null || !!g?.founding || buildPressed}
                               onClick={() => generateLookPreview(genesisId, models)}
                             >
                               See the look{previewEstimate !== null ? ` · ~${formatMicroUsd(previewEstimate)}` : ""}
@@ -1213,17 +1346,20 @@ export function NewWorldScreen() {
                 )}
                 {buildMode && buildCardOpen && (
                   <div ref={buildCardRef}>
+                    <label><input type="checkbox" checked={generateImages} disabled={buildPressed || g?.founding}
+                      onChange={event => { setGenerateImages(event.target.checked); plannedAgainst.current = null; }} /> Generate remaining images</label>
                     <BuildCard
                       plan={visibleBuildPlan}
                       startedAt={planStartedAt}
                       pressed={buildPressed}
-                      settling={chatRunning}
+                      settling={chatRunning || !!g?.decisionPending || !!g?.readinessPending || !!g?.reviewPending || plannedAgainst.current?.review !== g?.review || plannedAgainst.current?.images !== g?.images || plannedAgainst.current?.voices !== g?.voices}
                       onDismiss={leaveBuild}
                       onBuild={() => {
+                        if (g?.decisionPending || g?.readinessPending || g?.reviewPending || plannedAgainst.current?.review !== g?.review || plannedAgainst.current?.images !== g?.images || plannedAgainst.current?.voices !== g?.voices || !visibleBuildPlan?.plan) return;
                         if (buildRequestRef.current === null) buildRequestRef.current = ulid();
                         setBuildRequestId(buildRequestRef.current);
                         setBuildPressed(true);
-                        beginFoundingBuild(genesisId, buildRequestRef.current, lookForBuild, models);
+                        beginFoundingBuild(genesisId, buildRequestRef.current, lookForBuild, models, visibleBuildPlan?.plan?.approvalDigest, generateImages);
                       }}
                     />
                   </div>
@@ -1240,7 +1376,7 @@ export function NewWorldScreen() {
                     onSubmit={sendGenesis}
                     placeholder="Keep going, or ask it to surprise you…"
                     agentLabel="world author"
-                    busy={chatRunning || buildPressed || sizingBuild}
+                    busy={chatRunning || buildPressed || !!g?.founding || myBuild?.status === "running" || sizingBuild}
                     busyLabel={buildPressed ? "founding the world…" : sizingBuild ? "sizing the build…" : "shaping the draft…"}
                     onAttach={() => genesisAttachFiles(genesisId)}
                     onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
@@ -1501,7 +1637,7 @@ export function NewWorldScreen() {
             capabilities={WORLD_MODEL_CAPABILITIES}
             choices={models}
             scopeWord="this world"
-            disabled={buildPressed || submittedName !== null}
+            disabled={buildPressed || submittedName !== null || !!g?.founding}
             onChange={(capability, modelId) => setModels((current) => withModelChoice(current, capability, modelId))}
           />
           <div style={{ display: "grid", gap: 8 }}>
@@ -1520,7 +1656,7 @@ export function NewWorldScreen() {
                     conversationLookRef.current = approvedLook;
                     setPresetId(null);
                   }
-                  if (buildMode) openBuildCard(approvedLook);
+                  if (buildMode && genMode !== "form") openBuildCard(approvedLook);
                   else begin(approvedLook);
                 } else {
                   setStep("look");

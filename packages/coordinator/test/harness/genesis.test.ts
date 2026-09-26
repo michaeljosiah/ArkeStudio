@@ -6,7 +6,14 @@ import type { DomainEvent, HarnessAdapter, HarnessEvent } from "@arke-studio/con
 import { tempDir } from "../tmp.js";
 import { attachToSandbox } from "../../src/artifacts/genesis-attachments.js";
 import { GenesisService } from "../../src/harness/genesis.js";
+import { foundingMessages } from "../../src/harness/genesis-conversation.js";
 import { sessionTokenBudget } from "../../src/harness/token-budget.js";
+
+async function sandboxDir(prefix: string): Promise<string> {
+  const dir = join(await tempDir(prefix), "workspace");
+  await mkdir(dir);
+  return dir;
+}
 
 /** An adapter that behaves like a world-author: writes draft.json into its cwd, then replies. */
 function draftingAdapter(): HarnessAdapter & { created: string[] } {
@@ -212,7 +219,7 @@ const DRAFT_JSON = JSON.stringify({
 
 describe("genesis conversations in the sandbox (prototype 12a)", () => {
   it("counts session setup as a running turn so a duplicate start is refused", async () => {
-    const dir = await tempDir("arke-genesis-");
+    const dir = await sandboxDir("arke-genesis-");
     const events: DomainEvent[] = [];
     const adapter = talkingAdapter();
     let release!: () => void;
@@ -243,7 +250,7 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
   });
 
   it("runs the world-author in the sandbox, records both turns, and surfaces the draft", async () => {
-    const dir = await tempDir("arke-genesis-");
+    const dir = await sandboxDir("arke-genesis-");
     const events: DomainEvent[] = [];
     const adapter = draftingAdapter();
     const genesis = new GenesisService(adapter, (e) => events.push(e), {
@@ -284,7 +291,7 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
   it("surfaces the turn in flight, verb by verb — thinking, the tool, then writing", async () => {
     // The first conversation anyone has with the studio must never sit silent for a whole
     // model turn: a quiet stretch is indistinguishable from a hang.
-    const dir = await tempDir("arke-genesis-");
+    const dir = await sandboxDir("arke-genesis-");
     const events: DomainEvent[] = [];
     const subscribers = new Set<{ queue: HarnessEvent[]; wake: (() => void) | null }>();
     const push = (event: HarnessEvent) => {
@@ -352,7 +359,7 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
   it("asks for the draft when the agent only talks, and writes it here", async () => {
     // What a real model does most of the time: answer the question, ignore the file. Measured
     // against OpenCode 1.18.10 — nought for four before this path existed.
-    const dir = await tempDir("arke-genesis-talker-");
+    const dir = await sandboxDir("arke-genesis-talker-");
     const events: DomainEvent[] = [];
     const adapter = talkingAdapter();
     const genesis = new GenesisService(adapter, (e) => events.push(e), {
@@ -401,7 +408,7 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
     // Handing a file over has to mean something in the conversation. It sits in the agent's
     // own working directory, but a model does not go looking — so it is named in the prompt,
     // once. Named every turn it reads as an instruction to keep re-reading it.
-    const dir = await tempDir("arke-genesis-attach-");
+    const dir = await sandboxDir("arke-genesis-attach-");
     const adapter = talkingAdapter();
     const genesis = new GenesisService(adapter, () => {}, { sessionInput: (input) => input });
     await attachToSandbox(dir, await (async () => {
@@ -422,7 +429,7 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
     // The case seen in the packaged app: a session that accepted the prompt but started no
     // turn. Interrupting it produces nothing, so a deadline that waits to be told is not a
     // deadline — the screen sat on "shaping the draft…" for as long as anyone watched.
-    const dir = await tempDir("arke-genesis-mute-");
+    const dir = await sandboxDir("arke-genesis-mute-");
     const events: DomainEvent[] = [];
     const genesis = new GenesisService(muteAdapter(), (e) => events.push(e), {
       sessionInput: (input) => input,
@@ -441,7 +448,7 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
     // The failure the rescue exists for, in its new shape: the agent tore draft.json (or
     // wrote a field past its cap), and the fold would otherwise read it as an empty identity
     // beside intact entity files — erasing the name the rail already held.
-    const dir = await tempDir("arke-genesis-torn-");
+    const dir = await sandboxDir("arke-genesis-torn-");
     await writeFile(join(dir, "draft.json"), "{torn");
     await mkdir(join(dir, "draft", "characters"), { recursive: true });
     await writeFile(
@@ -470,7 +477,7 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
     // The one blueprint change that says nothing at all: the only settled entity retracted.
     // The emit gate must still fire — the rail holding a character the author took out is
     // exactly what "neither the resumed conversation nor Begin sees it again" forbids.
-    const dir = await tempDir("arke-genesis-withdraw-");
+    const dir = await sandboxDir("arke-genesis-withdraw-");
     await mkdir(join(dir, "draft", "characters"), { recursive: true });
     const file = join(dir, "draft", "characters", "old-tom.json");
     await writeFile(file, JSON.stringify({ name: "Old Tom", line: "keeps the ledger" }));
@@ -494,7 +501,7 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
   });
 
   it("a turn that settles nothing is not an error, and does not flicker the rail", async () => {
-    const dir = await tempDir("arke-genesis-empty-");
+    const dir = await sandboxDir("arke-genesis-empty-");
     const events: DomainEvent[] = [];
     const genesis = new GenesisService(talkingAdapter("{}"), (e) => events.push(e), {
       sessionInput: (input) => input,
@@ -516,6 +523,32 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
  * it read, and the turns after were interrupted with "passed the 120,000-token budget".
  */
 describe("what one agent conversation may spend", () => {
+  it("preserves a first message when session creation fails and restores it on retry", async () => {
+    const dir = await sandboxDir("genesis-preflight-failure-");
+    const adapter = talkingAdapter();
+    const create = adapter.createSession.bind(adapter);
+    adapter.createSession = async () => { throw new Error("Harness startup failed"); };
+    const events: DomainEvent[] = [];
+    const service = new GenesisService(adapter, event => events.push(event), { sessionInput: input => input });
+    await service.run(dir, "gen-preflight", "Remember the vanished island.");
+    assert.equal((await foundingMessages(dir))[0]?.text, "Remember the vanished island.");
+    assert.ok(events.some(event => event.type === "genesis.turn" && event.role === "user"));
+    assert.ok(events.some(event => event.type === "genesis.status" && event.status === "failed"));
+    adapter.createSession = create;
+    await service.run(dir, "gen-preflight", "Who remembers it?");
+    assert.match(adapter.prompts[0]!, /Remember the vanished island/);
+    assert.equal(adapter.prompts[0]!.split("Who remembers it?").length - 1, 1, "the current message is not also restored as history");
+  });
+  it("a restarted harness receives the persisted conversation", async () => {
+    const dir = await sandboxDir("genesis-history-");
+    const first = new GenesisService(talkingAdapter(), () => {}, { sessionInput: input => input });
+    await first.run(dir, "gen-history", "The harbour gates must stay shut.");
+    const adapter = talkingAdapter();
+    const restarted = new GenesisService(adapter, () => {}, { sessionInput: input => input });
+    await restarted.run(dir, "gen-history", "Who has the key?");
+    assert.match(adapter.prompts[0]!, /The harbour gates must stay shut/);
+    assert.match(adapter.prompts[0]!, /Who has the key/);
+  });
   /* The two floors in play: world creation's, and sheet authoring's. */
   const CREATION = 120_000;
   const AUTHORING = 200_000;
@@ -536,4 +569,19 @@ describe("what one agent conversation may spend", () => {
     assert.equal(sessionTokenBudget(1_000, CREATION), CREATION);
     assert.equal(sessionTokenBudget(1_000, AUTHORING), AUTHORING);
   });
+});
+it("keeps readiness findings available to the repair turn and invalidates them afterwards", async () => {
+  const dir = await sandboxDir("arke-genesis-readiness-");
+  const adapter = draftingAdapter();
+  const create = adapter.createSession.bind(adapter);
+  let sawFindings = false;
+  adapter.createSession = async input => {
+    sawFindings = (await readFile(join(dir, "readiness-review.json"), "utf8")).includes("Repair this relationship");
+    return create(input);
+  };
+  await writeFile(join(dir, "readiness-review.json"), JSON.stringify({ findings: ["Repair this relationship"] }));
+  const genesis = new GenesisService(adapter, () => {}, { sessionInput: input => input });
+  await genesis.run(dir, "gen-repair", "Propose a fix");
+  assert.equal(sawFindings, true);
+  await assert.rejects(readFile(join(dir, "readiness-review.json")), { code: "ENOENT" });
 });

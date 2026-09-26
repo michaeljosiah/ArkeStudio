@@ -206,6 +206,15 @@ export function foldConversation(
     updatedAt = envelope.at;
     const e = envelope.event;
     switch (e.type) {
+      case "founding.message":
+        addMessage(e.message, envelope.seq);
+        break;
+      case "founding.decisions":
+      case "founding.decision":
+        // Audit decisions stay in the journal without evicting dialogue from its bounded view.
+        break;
+      case "founding.image-decision":
+        break;
       case "production-setup.updated":
         productionSetup = e.state;
         break;

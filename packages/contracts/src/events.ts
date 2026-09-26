@@ -1,3 +1,4 @@
+import { valueSchema } from "./value-schema.js";
 import { StageConstructionDraftSchema } from "./stage-construction.js";
 import { AccountStateSchema } from "./account.js";
 import { MasterAudioReviewSchema, PreparedPerformanceAudioReviewSchema } from "./audio-reference.js";
@@ -21,6 +22,11 @@ import { ComfyUiStatusSchema } from "./comfyui.js";
 import { DiagnosticsSnapshotSchema } from "./diagnostics.js";
 import { BuildReviewSchema, FoundingBuildStateSchema } from "./founding-build.js";
 import { GenesisBlueprintSchema } from "./genesis.js";
+import { GenesisContentReviewSchema } from "./genesis-review.js";
+import { GenesisImagesSchema } from "./genesis-images.js";
+import { GenesisVoicesSchema } from "./genesis-voices.js";
+import { GenesisReadinessSchema } from "./genesis-readiness.js";
+import { GenesisImportsSchema } from "./genesis-imports.js";
 import { FrameRunQuoteSchema, FrameRunStateSchema } from "./frame-run.js";
 import { HarnessStatusSchema } from "./harness.js";
 import {
@@ -39,7 +45,7 @@ import {
   UlidSchema,
 } from "./ids.js";
 import { JobSchema, LedgerEntrySchema, QueueStatusSchema, ReconcileActionSchema } from "./job.js";
-import { ProviderIdSchema, ProviderStatusSchema, ProviderToolStatusSchema } from "./provider.js";
+import { ModelChoicesSchema, ProviderIdSchema, ProviderStatusSchema, ProviderToolStatusSchema } from "./provider.js";
 import { ProviderCallRecordSchema } from "./provider-call.js";
 import { RippleItemSchema } from "./proposal.js";
 import { ShotSelectionSchema } from "./scene.js";
@@ -88,6 +94,7 @@ const base = { at: IsoDateTimeSchema };
 export const QueueCommandSchema = z.enum([
   "dispatch-scene",
   "voice-preview",
+  "genesis-voice-generate",
   "voice-line",
   "read-sheet-section",
   "read-sheet-page",
@@ -100,6 +107,7 @@ export const QueueCommandSchema = z.enum([
   "upload-world-image",
   "generate-master-look",
   "generate-look-preview",
+  "genesis-image-generate",
   "upload-master-look",
   "pick-staged-reference",
   "establish-look",
@@ -126,7 +134,7 @@ export type QueueCommand = z.infer<typeof QueueCommandSchema>;
 // The genesis draft and blueprint schemas moved to ./genesis.js with the blueprint work
 // (SPEC-031 §1.3); the domain event below is what still ties them to this file.
 
-export const DomainEventSchema = z.discriminatedUnion("type", [
+export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("production-narrative.saved"), worldId: UlidSchema,
     productionId: SlugSchema, requestId: UlidSchema }).strict(),
   z.object({ ...base, type: z.literal("production-setup.result"), worldId: UlidSchema,
@@ -1793,11 +1801,32 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("setup.status"), setup: SetupStatusSchema }).strict(),
   z.object({ ...base, type: z.literal("adapters.changed"), adapters: AdapterLibraryStateSchema }).strict(),
   /** Genesis conversation turns — before any world exists, in the sandbox (SPEC-005). */
+  z.object({
+    ...base, type: z.literal("genesis.loaded"), genesisId: z.string().min(1), revision: z.number().int().nonnegative().optional(),
+    conversationId: ConversationIdSchema, worldId: UlidSchema.optional(),
+    founding: z.boolean().optional(),
+    frozenModels: ModelChoicesSchema.optional(),
+    frozenGenerateImages: z.boolean().optional(),
+    formHandoff: z.enum(["pending", "completed"]).optional(),
+    turns: z.array(z.object({ id: z.string(), role: z.enum(["user", "gate"]), text: z.string(), at: IsoDateTimeSchema }).strict()),
+    blueprint: GenesisBlueprintSchema,
+    attachments: z.array(z.object({ name: z.string(), kind: ArtifactKindSchema }).strict()),
+    status: z.enum(["running", "completed", "failed"]), detail: z.string().optional(),
+  }).strict(),
+  z.object({ ...base, type: z.literal("genesis.discarded"), genesisId: z.string().min(1) }).strict(),
+  z.object({ ...base, type: z.literal("genesis.review"), genesisId: z.string().min(1), requestId: z.string().min(1).optional(), review: GenesisContentReviewSchema }).strict(),
+  z.object({ ...base, type: z.literal("genesis.image-error"), genesisId: z.string().min(1), detail: z.string() }).strict(),
+  z.object({ ...base, type: z.literal("genesis.images"), genesisId: z.string().min(1), images: GenesisImagesSchema }).strict(),
+  z.object({ ...base, type: z.literal("genesis.voices"), genesisId: z.string().min(1), voices: GenesisVoicesSchema }).strict(),
+  z.object({ ...base, type: z.literal("genesis.readiness"), genesisId: z.string().min(1), review: GenesisReadinessSchema }).strict(),
+  z.object({ ...base, type: z.literal("genesis.import-error"), genesisId: z.string().min(1), detail: z.string() }).strict(),
+  z.object({ ...base, type: z.literal("genesis.imports"), genesisId: z.string().min(1), imports: GenesisImportsSchema }).strict(),
   z
     .object({
       ...base,
       type: z.literal("genesis.turn"),
       genesisId: z.string().min(1),
+      messageId: z.string().optional(),
       role: z.enum(["user", "gate"]),
       text: z.string().min(1),
     })
@@ -1833,6 +1862,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .object({
       ...base,
       type: z.literal("genesis.blueprint"),
+      revision: z.number().int().nonnegative().optional(),
       genesisId: z.string().min(1),
       blueprint: GenesisBlueprintSchema,
     })
@@ -2005,5 +2035,5 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       reason: z.string().optional(),
     })
     .strict(),
-]);
+]));
 export type DomainEvent = z.infer<typeof DomainEventSchema>;

@@ -1,5 +1,25 @@
 import { z } from "zod";
 import { KeyArtIntentSchema } from "./art-direction.js";
+import { GenesisImageIntentSchema, GenesisImageSelectionSchema } from "./genesis-images.js";
+import { GenesisSourceSchema } from "./genesis-imports.js";
+import { GenesisPropSchema } from "./prop.js";
+import { GenesisVoiceIntentSchema, GenesisVoiceCandidateSchema } from "./genesis-voices.js";
+export const FOUNDING_CONVERSATION_SCHEMA_VERSION = 35;
+
+export const GenesisSheetContentSchema = z.object({
+  sections: z.record(z.string().max(80), z.string().max(8000)),
+  links: z.array(z.string().regex(/^(character|location|faction):[a-z0-9][a-z0-9-]*$/)).max(100).optional(),
+  role: z.string().max(200).optional(),
+  billing: z.string().max(200).optional(),
+  region: z.string().max(200).optional(),
+}).strict();
+
+export const GenesisCanonSchema = z.object({
+  slug: z.string().regex(/^[a-z0-9][a-z0-9-]*$/).max(120),
+  type: z.enum(["rule", "lore", "location", "faction", "timeline", "tone", "thread"]),
+  sources: z.array(GenesisSourceSchema).max(100).optional(),
+  title: z.string().min(1).max(200), statement: z.string().min(1).max(16000),
+}).strict();
 
 /**
  * The blueprint a founding conversation maintains in its sandbox (SPEC-031 §1.3).
@@ -120,6 +140,10 @@ export function keyArtBriefProse(brief: GenesisKeyArtBrief): string {
  */
 export const GenesisDraftSchema = z
   .object({
+    props: z.array(GenesisPropSchema).max(100).refine(props => new Set(props.map(prop => prop.slug)).size === props.length, "Prop slugs must be unique.").optional(),
+    voices: z.array(GenesisVoiceIntentSchema).max(100).refine(voices => new Set(voices.map(voice => voice.id)).size === voices.length, "Voice proposal IDs must be unique.").optional(),
+    images: z.array(GenesisImageIntentSchema).max(100).refine(images => new Set(images.map(image => image.id)).size === images.length, "Image proposal IDs must be unique.").optional(),
+    canon: z.array(GenesisCanonSchema).max(100).refine(entries => new Set(entries.map(entry => entry.slug)).size === entries.length, "Canon entries need unique slugs.").optional(),
     name: z.string().min(1).max(120).optional(),
     logline: z.string().min(1).max(500).optional(),
     tone: z.string().min(1).max(120).optional(),
@@ -166,6 +190,10 @@ export type GenesisDraft = z.infer<typeof GenesisDraftSchema>;
  * removed from the fold and never built.
  */
 const entityFileBase = {
+  // Draft files previously allowed unknown source-shaped data. Keep their authored text
+  // readable; verified import evidence is restored from the private import record.
+  sources: z.array(GenesisSourceSchema).max(100).optional().catch(undefined),
+    sheet: GenesisSheetContentSchema.optional(),
   name: z.string().min(1).max(120),
   line: z.string().min(1).max(300).optional(),
   description: z.string().min(1).max(4000).optional(),
@@ -192,6 +220,8 @@ export type GenesisFactionFile = z.infer<typeof GenesisFactionFileSchema>;
 /** A folded entity: the file's contents under the identity its filename carries. */
 export const BlueprintCharacterSchema = z
   .object({
+    sources: z.array(GenesisSourceSchema).max(100).optional(),
+    sheet: GenesisSheetContentSchema.optional(),
     slug: z.string().min(1).max(120),
     name: z.string().min(1).max(120),
     line: z.string().min(1).max(300).optional(),
@@ -204,6 +234,8 @@ export type BlueprintCharacter = z.infer<typeof BlueprintCharacterSchema>;
 
 export const BlueprintLocationSchema = z
   .object({
+    sources: z.array(GenesisSourceSchema).max(100).optional(),
+    sheet: GenesisSheetContentSchema.optional(),
     slug: z.string().min(1).max(120),
     name: z.string().min(1).max(120),
     line: z.string().min(1).max(300).optional(),
@@ -215,6 +247,8 @@ export type BlueprintLocation = z.infer<typeof BlueprintLocationSchema>;
 
 export const BlueprintFactionSchema = z
   .object({
+    sources: z.array(GenesisSourceSchema).max(100).optional(),
+    sheet: GenesisSheetContentSchema.optional(),
     slug: z.string().min(1).max(120),
     name: z.string().min(1).max(120),
     line: z.string().min(1).max(300).optional(),
@@ -230,6 +264,14 @@ export type BlueprintFaction = z.infer<typeof BlueprintFactionSchema>;
  */
 export const GenesisBlueprintSchema = z
   .object({
+    props: z.array(GenesisPropSchema).max(100).refine(props => new Set(props.map(prop => prop.slug)).size === props.length, "Prop slugs must be unique.").optional(),
+    images: z.array(GenesisImageIntentSchema).refine(images => new Set(images.map(image => image.id)).size === images.length, "Image proposal IDs must be unique.").optional(),
+    selectedImages: z.array(GenesisImageSelectionSchema).optional(),
+    voices: z.array(GenesisVoiceIntentSchema).refine(voices => new Set(voices.map(voice => voice.id)).size === voices.length, "Voice proposal IDs must be unique.").optional(),
+    selectedVoices: z.array(GenesisVoiceCandidateSchema).optional(),
+    /** Coordinator-owned marker; never folded from an agent's draft files. */
+    reviewed: z.boolean().optional(),
+    canon: z.array(GenesisCanonSchema).optional(),
     name: z.string().min(1).max(120).optional(),
     logline: z.string().min(1).max(500).optional(),
     tone: z.string().min(1).max(120).optional(),

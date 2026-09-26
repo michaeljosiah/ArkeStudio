@@ -17,6 +17,7 @@ export interface ConversationSummaryRequest {
   readonly messages: readonly Pick<WorldChatMessage, "id" | "role" | "text">[];
   /** The model the conversation's latest answer ran on, for when the summariser has none of its own. */
   readonly model?: string;
+  readonly signal?: AbortSignal;
 }
 
 export type ConversationSummariser = (input: ConversationSummaryRequest) => Promise<string | null>;
@@ -28,50 +29,67 @@ interface SummaryFlight {
 
 const inFlight = new Map<string, SummaryFlight>();
 
+/** Stop waiting even when an injected summariser does not honour cancellation. */
+function cancellable<T>(promise: Promise<T>, signal: AbortSignal | undefined, fallback: T): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) { void promise.catch(() => {}); return Promise.resolve(fallback); }
+  return new Promise<T>((resolve, reject) => {
+    const stop = () => { signal.removeEventListener("abort", stop); resolve(fallback); };
+    signal.addEventListener("abort", stop, { once: true });
+    promise.then(
+      value => { signal.removeEventListener("abort", stop); resolve(value); },
+      error => { signal.removeEventListener("abort", stop); reject(error); },
+    );
+  });
+}
+
 /** Condense newly completed turns, preserving the previous summary when the model cannot answer. */
 export function refreshConversationSummary(
   store: WorldChatStore,
   summarise: ConversationSummariser,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   const absolute = resolve(store.dir).replaceAll("\\", "/");
   const key = process.platform === "win32" || process.platform === "darwin" ? absolute.toLowerCase() : absolute;
   const existing = inFlight.get(key);
   if (existing) {
     existing.rerun = true;
-    return existing.promise;
+    return cancellable(existing.promise, signal, false);
   }
   const flight: SummaryFlight = { rerun: false, promise: Promise.resolve(false) };
   flight.promise = (async () => {
     let updated = false;
     do {
       flight.rerun = false;
-      updated = await refreshConversationSummaryOnce(store, summarise) || updated;
-    } while (flight.rerun);
+      updated = await refreshConversationSummaryOnce(store, summarise, signal) || updated;
+    } while (flight.rerun && !signal?.aborted);
     return updated;
   })().finally(() => {
     if (inFlight.get(key) === flight) inFlight.delete(key);
   });
   inFlight.set(key, flight);
-  return flight.promise;
+  return cancellable(flight.promise, signal, false);
 }
 
 async function refreshConversationSummaryOnce(
   store: WorldChatStore,
   summarise: ConversationSummariser,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   const { events } = await store.read();
   const previous = [...events].reverse().find((envelope) => envelope.event.type === "summary.updated");
   const through = previous?.event.type === "summary.updated" ? previous.event.throughSeq : 0;
   let throughSeq = through;
   for (const envelope of events) {
-    if (envelope.seq > through && envelope.event.type === "turn.completed") throughSeq = envelope.seq;
+    if (envelope.seq > through && (envelope.event.type === "turn.completed" || envelope.event.type === "founding.message")) throughSeq = envelope.seq;
   }
   const messages: Array<Pick<WorldChatMessage, "id" | "role" | "text">> = [];
   let turnCount = 0;
   let model: string | undefined;
   for (const envelope of events) {
     if (envelope.seq <= through || envelope.seq > throughSeq) continue;
-    if (envelope.event.type === "turn.started") messages.push(envelope.event.message);
+    if (envelope.event.type === "turn.started" || envelope.event.type === "founding.message") messages.push(envelope.event.message);
+    if (envelope.event.type === "founding.message" && envelope.event.message.role === "studio") turnCount++;
     if (envelope.event.type === "turn.completed") {
       messages.push(envelope.event.message);
       turnCount++;
@@ -79,14 +97,15 @@ async function refreshConversationSummaryOnce(
     }
   }
   const recentTurnsLength = messages.reduce((sum, message) => sum + message.text.length, 0);
-  if (!shouldSummarise({ turnCount, recentTurnsLength })) return false;
+  if (signal?.aborted || !shouldSummarise({ turnCount, recentTurnsLength })) return false;
 
-  const text = await summarise({
+  const text = await cancellable(summarise({
+    ...(signal ? { signal } : {}),
     ...(previous?.event.type === "summary.updated" ? { previousSummary: previous.event.text } : {}),
     messages,
     ...(model !== undefined ? { model } : {}),
-  });
-  if (text === null || text.trim() === "") return false;
+  }), signal, null);
+  if (signal?.aborted || text === null || text.trim() === "") return false;
   const summary = boundSummary({
     throughSeq,
     sourceMessageIds: messages.map((message) => message.id),
@@ -114,6 +133,13 @@ export function makeConversationSummariser(
     const scratch = join(scratchRoot, `summary-${newId("run")}`);
     await mkdir(toExtendedLength(scratch), { recursive: true });
     const abort = new AbortController();
+    let sessionId: string | undefined;
+    const stop = () => {
+      abort.abort(input.signal?.reason);
+      if (sessionId) void adapter.interrupt?.(sessionId).catch(() => {});
+    };
+    input.signal?.addEventListener("abort", stop, { once: true });
+    if (input.signal?.aborted) stop();
     let deadline: ReturnType<typeof setTimeout> | undefined;
     try {
       // Configured and created inside the cleanup boundary: the configuration may be refused
@@ -123,7 +149,7 @@ export function makeConversationSummariser(
       // timer would hold every later summary behind it.
       const create = (model?: string) => createPreparedSession(adapter, scratch, sessionInput({
         agent: "conversation-summarizer", ...(model !== undefined ? { model } : {}),
-      }), { purpose: "world-chat", agent: "conversation-summarizer" });
+      }), { purpose: "world-chat", agent: "conversation-summarizer" }, undefined, abort.signal);
       /*
        * Its own model first — a Settings choice for the summariser, or the default — and the
        * conversation's model only when that is refused. With nothing chosen for it and only a
@@ -133,9 +159,11 @@ export function makeConversationSummariser(
       let session: Awaited<ReturnType<typeof create>>;
       try { session = await create(); }
       catch (error) {
-        if (input.model === undefined) throw error;
+        if (abort.signal.aborted || input.model === undefined) throw error;
         session = await create(input.model);
       }
+      sessionId = session.sessionId;
+      if (abort.signal.aborted) { stop(); return null; }
       let finalText = "";
       const collected = (async () => {
       for await (const event of adapter.streamEvents(abort.signal)) {
@@ -157,14 +185,21 @@ export function makeConversationSummariser(
       const timeout = new Promise<never>((_, reject) => {
       deadline = setTimeout(() => reject(new Error("conversation summarisation timed out")), adapter.id === "arke" ? LOCAL_SUMMARY_TIMEOUT_MS : SUMMARY_TIMEOUT_MS);
       });
-      await adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: prompt }] });
-      await Promise.race([collected, timeout]);
+      await cancellable(Promise.race([
+        Promise.all([
+          adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: prompt }] }),
+          collected,
+        ]),
+        timeout,
+      ]).then(() => undefined), abort.signal, undefined);
+      if (abort.signal.aborted) return null;
       const parsed = SummaryResponseSchema.safeParse(extractJson(finalText));
       return parsed.success ? parsed.data.summary.trim() : null;
     } catch {
       return null;
     } finally {
       clearTimeout(deadline);
+      input.signal?.removeEventListener("abort", stop);
       abort.abort();
       await rm(toExtendedLength(scratch), { recursive: true, force: true }).catch(() => {});
     }

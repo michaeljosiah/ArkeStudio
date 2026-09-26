@@ -393,6 +393,7 @@ export function arrivedSince(jobs: readonly Job[], seenAt: string | null): boole
 }
 
 export function canDeleteJob(job: Job): boolean {
+  if (job.target.kind === "genesis-image" && job.status === "succeeded" && job.finalization?.status !== "complete") return false;
   // These rows are also durable source/settlement records for the public engine.
   if (job.target.kind === "story-page-illustration" || job.target.kind === "story-chapter-narration") return false;
   if (job.status !== "succeeded" && job.status !== "failed" && job.status !== "cancelled") return false;
@@ -460,6 +461,7 @@ const REFERENCE_ORIGINS: Record<string, Omit<JobOrigin, "path"> & { segment: str
  * somewhere wrong.
  */
 export function jobOrigin(job: Job): JobOrigin | null {
+  if (job.params["purpose"] === "genesis-voice") return null;
   if (job.target.kind === "voice-preview" && job.params["purpose"] === "bible-section") {
     return { path: `/w/${job.worldId}/bible`, label: "Bible", where: "the bible" };
   }

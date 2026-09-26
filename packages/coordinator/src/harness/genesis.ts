@@ -1,5 +1,6 @@
 import { createPreparedSession, type SessionInput } from "./session-files.js";
 import { basename, join } from "node:path";
+import { readFile, rm } from "node:fs/promises";
 import {
   GenesisDraftSchema,
   type DomainEvent,
@@ -9,7 +10,9 @@ import {
 import { GENESIS_ATTACHMENTS_DIR, sandboxAttachments } from "../artifacts/genesis-attachments.js";
 import { blueprintSaysSomething, foldBlueprint, sameBlueprint } from "./blueprint.js";
 import { sessionTokenBudget } from "./token-budget.js";
-import { atomicWriteFile } from "../world/atomic.js";
+import { foundingMessages, recordFoundingBlueprint, recordFoundingMessage } from "./genesis-conversation.js";
+import { reviewGenesisContent } from "./genesis-review.js";
+import { atomicWriteFile, withTransientRetry } from "../world/atomic.js";
 import { THINKING_LABEL, WRITING_LABEL, workingLabel } from "../world-chat/project.js";
 
 /**
@@ -65,11 +68,12 @@ plus one-line entries for any cast or places you have not yet written files for:
  "characters": [{"name": "...", "line": "one line on who they are"}],
  "locations": [{"name": "...", "line": "one line on the place"}],
  "threads": ["an open question worth pulling later"],
+ "canon": [{"slug":"stable-fact-name","type":"rule","title":"A proposed fact","statement":"The exact proposed fact."}],
  "bible": "a few paragraphs of prose: the through-line, the shape, what it is about",
  "keyArt": {"prompt": "one complete prompt for an image model", "subject": "what the world's one image holds", "moment": "the moment it catches",
   "stakes": "what is at stake in it", "characters": ["names in frame"], "location": "the place in frame"}}
 
-Omit anything not settled. If nothing has been settled yet, return {}.`;
+Preserve existing canon and entity identities. Omit anything not discussed. If nothing has been discussed yet, return {}.`;
 
 /** Repeated on author turns so a hidden JSON recovery turn cannot set the conversation's register. */
 const CONVERSATION = `You are shaping a brand-new story world with its author. Think with them about the
@@ -115,6 +119,64 @@ name inside it can change freely. A character file:
  "description": "a short paragraph of who they are in this story",
  "brief": {"apparentAge": "...", "build": "...", "colouring": "...", "hair": "...",
   "wardrobe": "...", "bearing": "...", "defaultExpression": "..."}}
+
+Each entity may also hold "sheet": {"sections": {...}, "links": ["location:the-vigil"]}.
+These are the full sheet words the author reviews and approves in chat, then saves unchanged.
+Use only these headings: character — Essence, Appearance, Relationships, Voice · written;
+location — Look, Sound, Customs; faction — Essence, Wants, Fears. Keep unknown details explicit.
+Optional sheet fields are role and billing for characters, region for locations.
+Relationship links use the other entity's kind and stable filename slug, not its display name.
+
+For world facts, draft.json may hold "canon": [{"slug":"closed-gates","type":"rule",
+"title":"The gates stay closed","statement":"The harbour gates never open after dusk."}].
+Supported types are rule, lore, location, faction, timeline, tone and thread. A thread is an
+open question; other types propose settled facts. Nothing becomes accepted until the author
+approves its content card. Do not write approval records. ./approved-content.json is an
+application-supplied snapshot of the author's choices, not an editable source of decisions.
+
+For props and objects, draft.json may contain "props": [{"slug":"sword","name":"The sword",
+"states":[{"slug":"intact","name":"Intact"},{"slug":"broken","name":"Broken"}]}].
+Prop and state slugs are permanent identities: renaming changes only name. Props own names and
+ordered named states, not invented sheet fields. The author reviews their exact names in chat.
+Images can target prop:<prop-slug>:<state-slug>; generation and assignment need separate approval.
+
+For voice casting, read ./voice-catalogue.json for currently supported voices. Propose
+draft.json "voices": [{"id":"maren-audition","target":"character:maren",
+"voice":{"provider":"kokoro","model":"kokoro-82m","voiceId":"an-id-from-the-catalogue"},
+"text":"A short audition line in this character's own words."}].
+Use only catalogue identities, with up to 1,000 characters of text. Chat shows the text, voice,
+cost and data transfer before authorization, then plays actual audio for separate selection.
+Never claim a voice is assigned because an audition was authorized. Keep target slugs stable
+on renames. Voices are optional. World-owned cloned recordings cannot be used before founding;
+explain that boundary rather than inventing a voice or bypassing recording-upload consent.
+
+The conversation's Check readiness control reviews approved records, unapproved revisions,
+invalid references and possible import conflicts. ./readiness-review.json, when present, is
+an application-supplied snapshot, not an authority you can edit. Explain possible creative
+contradictions as uncertain, cite their records and propose fixes through the ordinary draft
+and approval flow. Open questions and omitted optional images or voices are valid choices.
+
+For document imports, write one candidate per file at draft/imports/<stable-id>.json:
+{"source":"notes.md","kind":"character","name":"Maren","body":"Proposed interpretation",
+"section":"Essence","quote":"Exact source words","links":["location:the-vigil"]}.
+Supported kinds: character, location, faction, canon. Character sections: Essence, Appearance;
+location: Look, Sound; faction: Essence, Wants. Omit section for canon. Every candidate needs an
+exact quote from that uploaded source. Interpretations and suggested relationship links are
+proposals, not verified facts. Do not invent missing details or write extracted content directly
+into entity files. The author compares duplicates, edits, rejects, merges or retains candidates
+in chat, then separately approves the exact resulting content. Preserve sources metadata when
+later revising prepared content. Do not author or alter source evidence metadata.
+
+When the author asks for a character or location image, prepare a typed generation request in
+draft.json "images": [{"id":"maren-portrait","target":"character:maren","prompt":"Complete image
+prompt including the agreed look and visible subject","references":["uploaded-photo.png"]}].
+Use location:<stable-slug> for an establishing view. Keep the request id stable while revising
+its prompt. References name uploaded images in attachments/; use [] when none are needed.
+The conversation shows the target, full prompt, references, model and price for the author to
+authorize. Generation then runs in chat and displays the result for a separate Use/Reject
+decision. Never claim an image is generated or selected just because you proposed it. Revise
+the prompt when asked for changes. To use an existing upload, tell the author which character
+or location and role it is intended for; the image card offers that explicit assignment.
 
 When the author says a character is unseen, never shown, or must never be pictured, set
 "neverDepicted": true on that character's file. This is a rule, not an appearance description:
@@ -214,153 +276,177 @@ export class GenesisService {
       status("failed", "a turn is already running in this conversation");
       return;
     }
-    if (!this.adapter.readiness().ready) {
-      status("failed", this.adapter.readiness().reason ?? "the harness is not ready");
-      return;
-    }
     const run: ActiveTurn = { sessionId: null, cancelled: false };
     this.turns.set(genesisId, run);
     status("running");
 
-    let sessionId = this.sessions.get(genesisId);
-    const firstTurn = sessionId === undefined;
-    if (sessionId === undefined) {
-      // Same confinement config as authoring sessions — no world, so no world-query MCP. Research
-      // still works here: `web` is a harness tool the confinement grants, not an MCP one, so the
-      // door can go and look something up before there is any world to scope a lookup to.
-      try {
-        const session = await createPreparedSession(this.adapter, dir, this.opts.sessionInput({ agent: "world-author" }), {
-          purpose: "drafting",
-          agent: "world-author",
-        });
-        sessionId = session.sessionId;
-        this.sessions.set(genesisId, sessionId);
-      } catch (err) {
-        this.turns.delete(genesisId);
-        status("failed", `could not create a session: ${err instanceof Error ? err.message : String(err)}`);
+    try {
+      // The composer has handed over these words. Preserve them before session
+      // creation or prompt preparation can fail, so reopening never loses them.
+      const userMessage = await recordFoundingMessage(dir, "user", text);
+      this.emit({ at: userMessage.createdAt, type: "genesis.turn", genesisId, role: "user", text, messageId: userMessage.id });
+      if (!this.adapter.readiness().ready) {
+        status("failed", this.adapter.readiness().reason ?? "the harness is not ready");
         return;
       }
-    }
-    run.sessionId = sessionId;
-
-    // What the rail already holds, so we can tell a blueprint the agent updated from one it
-    // ignored. The fold covers draft.json and every entity file — a turn that only touched
-    // one character's file still reads as a change.
-    const blueprintBefore = await foldBlueprint(dir);
-
-    this.emit({ at: at(), type: "genesis.turn", genesisId, role: "user", text });
-
-    const wallClock = this.opts.wallClockMs ?? DEFAULT_WALL_CLOCK_MS;
-    const tokenBudget =
-      this.opts.tokenBudget ??
-      sessionTokenBudget(this.adapter.knownInputTokenLimit?.(sessionId), FALLBACK_TOKEN_BUDGET);
-    const abort = new AbortController();
-    let ending: { state: "completed" | "cancelled" | "timeout" | "budget-exceeded" | "failed"; detail?: string } | null =
-      null;
-    const timer = setTimeout(() => {
-      ending = { state: "timeout", detail: `hit the ${Math.round(wallClock / 1000)}s wall-clock limit` };
-      const interrupt = (this.adapter as { interrupt?: (id: string) => Promise<void> }).interrupt;
-      void interrupt?.call(this.adapter, sessionId).catch(() => {});
-      // And end the wait ourselves. Asking the harness to stop and then waiting for it to say
-      // so is not a deadline — it is a hope. A session with nothing running answers an
-      // interrupt with silence, and the turn sat on "shaping the draft…" indefinitely.
-      abort.abort();
-    }, wallClock);
-    // Refed, and cleared in `finally` — see AuthoringService for why an unref'd deadline is
-    // no deadline at all.
-    const usage = (this.adapter as { usageTokens?: (id: string) => number }).usageTokens;
-    let replyText = "";
-
-    // The turn in flight, one verb at a time — the same working surface world chat has.
-    // Without it the genesis chat sat silent for a whole model turn, which reads as broken.
-    const progress = (label: string) => this.emit({ at: at(), type: "genesis.progress", genesisId, label });
-    let writing = false;
-
-    try {
-      const events = this.adapter.streamEvents(abort.signal);
-      const handover = await this.handoverNote(dir, genesisId);
-      await this.adapter.dispatchAsync({
-        sessionId,
-        parts: [{ type: "text", text: `${firstTurn ? `${PROTOCOL}\n\n` : ""}${CONVERSATION}\n\nThe author says:\n${text}${handover}` }],
-      });
-      progress(THINKING_LABEL);
-
-      for await (const event of events) {
-        if (!("sessionId" in event) || event.sessionId !== sessionId) continue;
-        if (event.type === "tool.activity") {
-          // The tool, never its summary — the verb is all a progress line is allowed to be.
-          progress(workingLabel(event.tool));
-          writing = false;
-        }
-        if (event.type === "message.delta") {
-          if (!writing) {
-            // Once per stretch of writing, not per token: a label that changes on every delta
-            // is a strobe, and it would say the same word each time anyway.
-            writing = true;
-            progress(WRITING_LABEL);
-          }
-          replyText = event.text;
-        } else if (event.type === "message.completed") {
-          replyText = event.text;
-          if (!ending) ending = { state: run.cancelled ? "cancelled" : "completed" };
-          break;
-        } else if (event.type === "session.error") {
-          ending = { state: "failed", detail: event.message };
-          break;
-        } else if (event.type === "session.ended") {
-          ending = {
-            state: event.reason === "completed" ? "completed" : event.reason === "cancelled" ? "cancelled" : "failed",
-            ...(event.detail !== undefined ? { detail: event.detail } : {}),
-          };
-          break;
-        }
-        if (usage && usage.call(this.adapter, sessionId) > tokenBudget) {
-          ending = { state: "budget-exceeded", detail: `passed the ${tokenBudget.toLocaleString()}-token budget` };
-          const interrupt = (this.adapter as { interrupt?: (id: string) => Promise<void> }).interrupt;
-          void interrupt?.call(this.adapter, sessionId).catch(() => {});
+      let sessionId = this.sessions.get(genesisId);
+      const firstTurn = sessionId === undefined;
+      if (sessionId === undefined) {
+        // Same confinement config as authoring sessions — no world, so no world-query MCP. Research
+        // still works here: `web` is a harness tool the confinement grants, not an MCP one, so the
+        // door can go and look something up before there is any world to scope a lookup to.
+        try {
+          const session = await createPreparedSession(this.adapter, dir, this.opts.sessionInput({ agent: "world-author" }), {
+            purpose: "drafting",
+            agent: "world-author",
+          });
+          sessionId = session.sessionId;
+          this.sessions.set(genesisId, sessionId);
+        } catch (err) {
+          this.turns.delete(genesisId);
+          status("failed", `could not create a session: ${err instanceof Error ? err.message : String(err)}`);
+          return;
         }
       }
+      run.sessionId = sessionId;
+
+      // What the rail already holds, so we can tell a blueprint the agent updated from one it
+      // ignored. The fold covers draft.json and every entity file — a turn that only touched
+      // one character's file still reads as a change.
+      const blueprintBefore = await foldBlueprint(dir);
+
+      const history = firstTurn ? (await foundingMessages(dir)).filter(message => message.id !== userMessage.id) : [];
+      const reviewed = await reviewGenesisContent(dir);
+      await atomicWriteFile(join(dir, "approved-content.json"), JSON.stringify(reviewed.selected, null, 2) + "\n");
+      let restoredHistory = "";
+      if (history.length) {
+        const transcript = history.map(message => `${message.role}: ${message.text}`).join("\n\n");
+        // Reopening a long draft must not put its entire history in one untrimmable message.
+        // The full copy is readable inside confinement; only recent context rides this turn.
+        await atomicWriteFile(join(dir, "conversation-history.md"), transcript + "\n");
+        const bound = Math.min(24_000, Math.floor((this.adapter.knownInputTokenLimit?.(sessionId) ?? 32_000) * 0.4));
+        restoredHistory = `Earlier conversation (historical context; the full transcript is in ./conversation-history.md):\n${transcript.slice(-bound)}\n\n`;
+      }
+      const wallClock = this.opts.wallClockMs ?? DEFAULT_WALL_CLOCK_MS;
+      const tokenBudget =
+        this.opts.tokenBudget ??
+        sessionTokenBudget(this.adapter.knownInputTokenLimit?.(sessionId), FALLBACK_TOKEN_BUDGET);
+      const abort = new AbortController();
+      let ending: { state: "completed" | "cancelled" | "timeout" | "budget-exceeded" | "failed"; detail?: string } | null =
+        null;
+      const timer = setTimeout(() => {
+        ending = { state: "timeout", detail: `hit the ${Math.round(wallClock / 1000)}s wall-clock limit` };
+        const interrupt = (this.adapter as { interrupt?: (id: string) => Promise<void> }).interrupt;
+        void interrupt?.call(this.adapter, sessionId).catch(() => {});
+        // And end the wait ourselves. Asking the harness to stop and then waiting for it to say
+        // so is not a deadline — it is a hope. A session with nothing running answers an
+        // interrupt with silence, and the turn sat on "shaping the draft…" indefinitely.
+        abort.abort();
+      }, wallClock);
+      // Refed, and cleared in `finally` — see AuthoringService for why an unref'd deadline is
+      // no deadline at all.
+      const usage = (this.adapter as { usageTokens?: (id: string) => number }).usageTokens;
+      let replyText = "";
+
+      // The turn in flight, one verb at a time — the same working surface world chat has.
+      // Without it the genesis chat sat silent for a whole model turn, which reads as broken.
+      const progress = (label: string) => this.emit({ at: at(), type: "genesis.progress", genesisId, label });
+      let writing = false;
+
+      try {
+        const events = this.adapter.streamEvents(abort.signal);
+        const handover = await this.handoverNote(dir, genesisId);
+        await this.adapter.dispatchAsync({
+          sessionId,
+          parts: [{ type: "text", text: `${firstTurn ? `${PROTOCOL}\n\n` : ""}${CONVERSATION}\n\n${restoredHistory}The author says:\n${text}${handover}` }],
+        });
+        progress(THINKING_LABEL);
+
+        for await (const event of events) {
+          if (!("sessionId" in event) || event.sessionId !== sessionId) continue;
+          if (event.type === "tool.activity") {
+            // The tool, never its summary — the verb is all a progress line is allowed to be.
+            progress(workingLabel(event.tool));
+            writing = false;
+          }
+          if (event.type === "message.delta") {
+            if (!writing) {
+              // Once per stretch of writing, not per token: a label that changes on every delta
+              // is a strobe, and it would say the same word each time anyway.
+              writing = true;
+              progress(WRITING_LABEL);
+            }
+            replyText = event.text;
+          } else if (event.type === "message.completed") {
+            replyText = event.text;
+            if (!ending) ending = { state: run.cancelled ? "cancelled" : "completed" };
+            break;
+          } else if (event.type === "session.error") {
+            ending = { state: "failed", detail: event.message };
+            break;
+          } else if (event.type === "session.ended") {
+            ending = {
+              state: event.reason === "completed" ? "completed" : event.reason === "cancelled" ? "cancelled" : "failed",
+              ...(event.detail !== undefined ? { detail: event.detail } : {}),
+            };
+            break;
+          }
+          if (usage && usage.call(this.adapter, sessionId) > tokenBudget) {
+            ending = { state: "budget-exceeded", detail: `passed the ${tokenBudget.toLocaleString()}-token budget` };
+            const interrupt = (this.adapter as { interrupt?: (id: string) => Promise<void> }).interrupt;
+            void interrupt?.call(this.adapter, sessionId).catch(() => {});
+          }
+        }
+      } catch (err) {
+        ending = { state: "failed", detail: err instanceof Error ? err.message : String(err) };
+      } finally {
+        clearTimeout(timer);
+        abort.abort();
+      }
+
+      const final = ending ?? {
+        state: "failed" as const,
+        detail: "the studio stopped replying before it finished — nothing was written",
+      };
+      if (final.state !== "completed") this.sessions.delete(genesisId);
+      if (final.state === "completed") {
+        if (replyText.trim().length > 0) {
+          const reply = await recordFoundingMessage(dir, "studio", replyText.trim());
+          this.emit({ at: reply.createdAt, type: "genesis.turn", genesisId, role: "gate", text: reply.text, messageId: reply.id });
+        }
+        // The blueprint the agent wrote, if it wrote to it. Asking a model to hold a
+        // conversation AND keep files up to date gets the conversation and not the files most
+        // of the time — so when nothing moved, OR draft.json itself failed to parse (an
+        // over-cap look, a torn write), we ask for draft.json on its own and write it
+        // ourselves. The rescue is deliberately narrow (§2.2): draft.json is small now, and
+        // the entity files fail one at a time rather than taking the world with them.
+        let blueprint = await foldBlueprint(dir);
+        if (sameBlueprint(blueprint, blueprintBefore) || blueprint.dropped.includes("draft.json")) {
+          const recovered = await this.askForDraft(sessionId, dir);
+          if (recovered !== null) blueprint = await foldBlueprint(dir);
+        }
+        // Emitted when it changed and either side says something — a withdrawal that empties
+        // the plan is still a change the rail must see (R-2). A draft.json that is still
+        // unreadable is not emitted: blanking the identity the rail already holds would trade
+        // a stale name for no name.
+        if (
+          !sameBlueprint(blueprint, blueprintBefore) &&
+          !blueprint.dropped.includes("draft.json") &&
+          (blueprintSaysSomething(blueprint) || (blueprintBefore !== null && blueprintSaysSomething(blueprintBefore)))
+        ) {
+          const revision = await recordFoundingBlueprint(dir, blueprint);
+          this.emit({ at: at(), type: "genesis.blueprint", genesisId, blueprint, revision });
+        }
+      }
+      // The repair turn can read the reviewed findings; subsequent turns need a fresh snapshot.
+      await withTransientRetry(() => rm(join(dir, "readiness-review.json"), { force: true }));
+      status(final.state, final.detail);
     } catch (err) {
-      ending = { state: "failed", detail: err instanceof Error ? err.message : String(err) };
+      this.sessions.delete(genesisId);
+      status("failed", err instanceof Error ? err.message : String(err));
     } finally {
-      clearTimeout(timer);
-      abort.abort();
       this.turns.delete(genesisId);
     }
-
-    const final = ending ?? {
-      state: "failed" as const,
-      detail: "the studio stopped replying before it finished — nothing was written",
-    };
-    if (final.state !== "completed") this.sessions.delete(genesisId);
-    if (final.state === "completed") {
-      if (replyText.trim().length > 0) {
-        this.emit({ at: at(), type: "genesis.turn", genesisId, role: "gate", text: replyText.trim() });
-      }
-      // The blueprint the agent wrote, if it wrote to it. Asking a model to hold a
-      // conversation AND keep files up to date gets the conversation and not the files most
-      // of the time — so when nothing moved, OR draft.json itself failed to parse (an
-      // over-cap look, a torn write), we ask for draft.json on its own and write it
-      // ourselves. The rescue is deliberately narrow (§2.2): draft.json is small now, and
-      // the entity files fail one at a time rather than taking the world with them.
-      let blueprint = await foldBlueprint(dir);
-      if (sameBlueprint(blueprint, blueprintBefore) || blueprint.dropped.includes("draft.json")) {
-        const recovered = await this.askForDraft(sessionId, dir);
-        if (recovered !== null) blueprint = await foldBlueprint(dir);
-      }
-      // Emitted when it changed and either side says something — a withdrawal that empties
-      // the plan is still a change the rail must see (R-2). A draft.json that is still
-      // unreadable is not emitted: blanking the identity the rail already holds would trade
-      // a stale name for no name.
-      if (
-        !sameBlueprint(blueprint, blueprintBefore) &&
-        !blueprint.dropped.includes("draft.json") &&
-        (blueprintSaysSomething(blueprint) || (blueprintBefore !== null && blueprintSaysSomething(blueprintBefore)))
-      ) {
-        this.emit({ at: at(), type: "genesis.blueprint", genesisId, blueprint });
-      }
-    }
-    status(final.state, final.detail);
   }
 
   /**
@@ -383,7 +469,10 @@ export class GenesisService {
           break;
         } else if (event.type === "session.error" || event.type === "session.ended") break;
       }
-      const draft = parseDraftFrom(reply);
+      const existing = await readFile(join(dir, "draft.json"), "utf8").then(raw => JSON.parse(raw) as Record<string, unknown>)
+        .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT" || err instanceof SyntaxError) return {}; throw err; });
+      // Recovery restores missing output; omission is not a request to erase proposals.
+      const draft = parseDraftFrom(reply, existing);
       if (draft === null) return null;
       await atomicWriteFile(join(dir, "draft.json"), JSON.stringify(draft, null, 2) + "\n");
       return draft;
@@ -405,6 +494,10 @@ function saysSomething(draft: GenesisDraft): boolean {
     draft.genre !== undefined ||
     draft.look !== undefined ||
     draft.keyArt !== undefined ||
+    (draft.canon?.length ?? 0) > 0 ||
+    (draft.images?.length ?? 0) > 0 ||
+    (draft.props?.length ?? 0) > 0 ||
+    (draft.voices?.length ?? 0) > 0 ||
     draft.characters.length > 0 ||
     draft.locations.length > 0 ||
     draft.threads.length > 0 ||
@@ -419,16 +512,16 @@ function saysSomething(draft: GenesisDraft): boolean {
  * Pull the draft out of a reply. Models fence JSON, prefix it with a sentence, or answer with
  * it bare; all three are the same answer. The outermost braces win, and the schema decides.
  */
-export function parseDraftFrom(reply: string): GenesisDraft | null {
+export function parseDraftFrom(reply: string, previous: Record<string, unknown> = {}): GenesisDraft | null {
   const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(reply);
   const candidates = [fenced?.[1], reply.slice(reply.indexOf("{"), reply.lastIndexOf("}") + 1), reply];
   for (const candidate of candidates) {
     if (candidate === undefined || candidate.trim() === "") continue;
     try {
-      const parsed = GenesisDraftSchema.safeParse(JSON.parse(candidate));
+      const parsed = GenesisDraftSchema.safeParse({ ...previous, ...JSON.parse(candidate) });
       // `{}` parses cleanly — the schema fills the lists — but says nothing. A draft that
       // settles nothing must not overwrite one that settled something.
-      if (parsed.success && saysSomething(parsed.data)) return parsed.data;
+      if (parsed.success && (saysSomething(parsed.data) || Object.keys(previous).length > 0)) return parsed.data;
     } catch {
       /* try the next shape */
     }

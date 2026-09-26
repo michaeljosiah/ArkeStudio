@@ -103,6 +103,8 @@ async function appendStartedTurn(store: WorldChatStore): Promise<MessageId> {
 describe("conversation summarisation", () => {
   it("runs after eight completed turns and durably bounds its non-authoritative result", async () => {
     const { store, conversationId } = await setup();
+    const foundingMessage = { id: newId("msg"), turnId: newId("turn"), role: "user" as const, text: "The gates never open.", attachmentIds: [], createdAt: new Date().toISOString() };
+    await store.append({ type: "founding.message", message: foundingMessage });
     await appendTurns(store, 8);
     const before = (await store.read()).events.at(-1)!.seq;
     const activeMessageId = await appendStartedTurn(store);
@@ -110,7 +112,8 @@ describe("conversation summarisation", () => {
     const updated = await refreshConversationSummary(store, async (input) => {
       calls++;
       assert.equal(input.previousSummary, undefined);
-      assert.equal(input.messages.length, 16);
+      assert.equal(input.messages.length, 17);
+      assert.equal(input.messages[0]?.text, foundingMessage.text);
       return "s".repeat(9_000);
     });
 
@@ -120,7 +123,7 @@ describe("conversation summarisation", () => {
     const event = events.at(-1)!.event;
     assert.equal(event.type, "summary.updated");
     assert.equal(event.type === "summary.updated" ? event.throughSeq : null, before);
-    assert.equal(event.type === "summary.updated" ? event.sourceMessageIds.length : null, 16);
+    assert.equal(event.type === "summary.updated" ? event.sourceMessageIds.length : null, 17);
     assert.equal(event.type === "summary.updated" ? event.text.length : null, 8_000);
     assert.ok(event.type !== "summary.updated" || !event.sourceMessageIds.includes(activeMessageId),
       "an incomplete later turn stays beyond the summary boundary",
