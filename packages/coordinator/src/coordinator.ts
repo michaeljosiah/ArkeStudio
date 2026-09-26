@@ -5621,6 +5621,10 @@ export class Coordinator {
     }
     if (this.stopping) return;
     await guardProductionSetupAuthority(this.opts.provider.openStore?.(), msg);
+    if ("genesisId" in msg && msg.genesisId && ["genesis-chat", "genesis-propose-world", "genesis-decide", "genesis-import-resolve", "genesis-image-decide", "genesis-image-generate", "genesis-voice-decide", "genesis-voice-generate", "genesis-attach", "genesis-attach-files"].includes(msg.kind)) {
+      const dir = await this.opts.provider.genesisDir?.(msg.genesisId);
+      if (dir) await rm(join(dir, "readiness-review.json"), { force: true });
+    }
     // Adapter downloads and deletion must pass their own policy and ownership boundary,
     // including requests from generic Downloads controls or an older client.
     if ("componentId" in msg && typeof msg.componentId === "string" && msg.componentId.startsWith("adapter-")) {

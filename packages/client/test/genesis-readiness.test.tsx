@@ -22,6 +22,7 @@ it("offers fixes and optional unresolved choices without dismissing blockers", a
     assert.equal(leaves.length, 1);
     await act(async () => leaves[0]!.click());
     assert.deepEqual(calls, ["question:current"]);
+    assert.equal(leaves[0]!.hasAttribute("disabled"), true);
     const fix = [...container.querySelectorAll("button")].find(button => button.textContent === "Propose a fix")!;
     await act(async () => fix.click());
     assert.match(calls[1]!, /character:maren/);
@@ -40,4 +41,10 @@ it("shows failed and held work with retry controls while retaining completed res
   assert.ok(!html.includes(">Retry Maren<"));
   assert.match(html, /Provider offline/);
   assert.match(html, /Keep completed work and leave the rest/);
+  const held = { ...build, items: build.items.map(item => item.key === "photo" ? { ...item, state: "held" as const } : item) };
+  const heldHtml = renderToString(<FoundingProgressCard build={held} />);
+  assert.match(heldHtml, /Resolve in Activity/);
+  assert.doesNotMatch(heldHtml, /Retry/);
+  const completed = { ...build, shortfall: null, items: build.items.map(item => ({ ...item, state: "landed" as const })) };
+  assert.equal(renderToString(<FoundingProgressCard build={completed} />), "");
 });

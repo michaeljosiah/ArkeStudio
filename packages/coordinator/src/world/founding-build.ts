@@ -335,7 +335,7 @@ export class FoundingBuildService {
       return;
     }
     if (blueprint.dropped.length) { refuse("Repair the unreadable draft files before beginning."); return; }
-    const resolved = await this.resolveImageRoute(models);
+    const resolved = generateImages ? await this.resolveImageRoute(models) : { route: null, notes: [] };
     const route = generateImages ? resolved.route : null, notes = generateImages ? resolved.notes : ["No new image generation is authorized. Approved media will be reused."];
     if (this.ports.reviewNotes) notes.push(...await this.ports.reviewNotes(genesisId));
     for (const character of blueprint.characters) {

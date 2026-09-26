@@ -1,6 +1,6 @@
 import { createPreparedSession, type SessionInput } from "./session-files.js";
 import { basename, join } from "node:path";
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import {
   GenesisDraftSchema,
   type DomainEvent,
@@ -285,6 +285,7 @@ export class GenesisService {
     status("running");
 
     try {
+      await rm(join(dir, "readiness-review.json"), { force: true });
       let sessionId = this.sessions.get(genesisId);
       const firstTurn = sessionId === undefined;
       if (sessionId === undefined) {

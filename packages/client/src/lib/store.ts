@@ -1526,7 +1526,7 @@ function handleFrame(json: string): void {
       genesis = { ...genesis, [event.genesisId]: {
         ...emptyGenesis(), ...genesis[event.genesisId],
         turns: [...messages.values()].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)), blueprint: event.blueprint,
-        attachments: event.attachments, status: event.status, conversationId: event.conversationId,
+        attachments: event.attachments, status: event.status, conversationId: event.conversationId, readiness: undefined,
         founding: event.founding,
         formHandoff: event.formHandoff,
         ...(event.detail ? { detail: event.detail } : {}),
@@ -1544,7 +1544,7 @@ function handleFrame(json: string): void {
       };
     } else if (event.type === "genesis.blueprint") {
       const g = genesis[event.genesisId] ?? emptyGenesis();
-      genesis = { ...genesis, [event.genesisId]: { ...g, blueprint: event.blueprint } };
+      genesis = { ...genesis, [event.genesisId]: { ...g, blueprint: event.blueprint, readiness: undefined } };
     } else if (event.type === "world-image.plan") {
       keyArtPlans = {
         ...keyArtPlans,
