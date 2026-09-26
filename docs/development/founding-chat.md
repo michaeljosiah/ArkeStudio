@@ -4,10 +4,10 @@ Issue #1268 adds draft discovery and resumption through `genesis-list` and
 `genesis-load`. The new-world URL carries the draft identity. Returning to New world
 offers unfinished conversations; separate drafts keep separate transcripts and attachments.
 
-Draft content lives in `.genesis/<id>/workspace/`, the harness confinement boundary.
+Draft content lives in `.genesis-v2/<id>/workspace/`, the harness confinement boundary.
 Draft messages use the existing WorldChatStore journal in the sibling
 `.conversation/` directory. Application receipts also live outside the workspace.
-Old draft content is moved into the workspace without promoting agent-authored files to receipts.
+Legacy `.genesis/<id>/` draft content is moved into the workspace without promoting agent-authored files to receipts.
 Messages are flushed before dispatch/display and represented by
 `founding.message` events, which the ordinary world-chat fold also understands. A restarted
 harness receives the stored history and the existing blueprint files.

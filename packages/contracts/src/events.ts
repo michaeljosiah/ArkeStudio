@@ -1668,7 +1668,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("adapters.changed"), adapters: AdapterLibraryStateSchema }).strict(),
   /** Genesis conversation turns — before any world exists, in the sandbox (SPEC-005). */
   z.object({
-    ...base, type: z.literal("genesis.loaded"), genesisId: z.string().min(1),
+    ...base, type: z.literal("genesis.loaded"), genesisId: z.string().min(1), revision: z.number().int().nonnegative().optional(),
     conversationId: ConversationIdSchema, worldId: UlidSchema.optional(),
     founding: z.boolean().optional(),
     frozenModels: ModelChoicesSchema.optional(),
@@ -1722,6 +1722,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .object({
       ...base,
       type: z.literal("genesis.blueprint"),
+      revision: z.number().int().nonnegative().optional(),
       genesisId: z.string().min(1),
       blueprint: GenesisBlueprintSchema,
     })
