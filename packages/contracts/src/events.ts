@@ -1,3 +1,4 @@
+import { valueSchema } from "./value-schema.js";
 import { StageConstructionDraftSchema } from "./stage-construction.js";
 import { AccountStateSchema } from "./account.js";
 import { MasterAudioReviewSchema, PreparedPerformanceAudioReviewSchema } from "./audio-reference.js";
@@ -126,7 +127,7 @@ export type QueueCommand = z.infer<typeof QueueCommandSchema>;
 // The genesis draft and blueprint schemas moved to ./genesis.js with the blueprint work
 // (SPEC-031 §1.3); the domain event below is what still ties them to this file.
 
-export const DomainEventSchema = z.discriminatedUnion("type", [
+export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("production-narrative.saved"), worldId: UlidSchema,
     productionId: SlugSchema, requestId: UlidSchema }).strict(),
   z.object({ ...base, type: z.literal("production-setup.result"), worldId: UlidSchema,
@@ -1985,5 +1986,5 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       reason: z.string().optional(),
     })
     .strict(),
-]);
+]));
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
