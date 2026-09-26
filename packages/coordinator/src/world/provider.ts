@@ -1,8 +1,10 @@
-import { mkdir, readdir, rm, stat, realpath } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, realpath } from "node:fs/promises";
 import { basename, join, relative, isAbsolute, sep } from "node:path";
 import {
   BIBLE_PATH,
   DEFAULT_AUDIO_POLICY,
+  FoundingBuildRecordSchema,
+  UlidSchema,
   ulid,
   unattendedProposalsOf,
   worldSheets,
@@ -690,6 +692,30 @@ export class FsWorldProvider implements WorldProvider {
     const legacy = join(this.appRoot, ".genesis", genesisId);
     return serializeFileMutation(join(root, "layout"), async () => {
       const dir = join(root, "workspace");
+      const currentMarker = await stat(toExtendedLength(join(root, "begun.json"))).catch((err: NodeJS.ErrnoException) => {
+        if (err.code === "ENOENT") return null; throw err;
+      });
+      if (!currentMarker) {
+        const legacyMarker = await readFile(toExtendedLength(join(legacy, "begun.json")), "utf8").catch((err: NodeJS.ErrnoException) => {
+          if (err.code === "ENOENT") return null; throw err;
+        });
+        if (legacyMarker !== null) {
+          // The old sandbox was writable by the harness. Only the world's durable
+          // authorization can turn its marker into an application-owned receipt.
+          try {
+            const marker = JSON.parse(legacyMarker) as { worldId?: unknown; requestId?: unknown };
+            const worldId = UlidSchema.parse(marker.worldId);
+            const worldDir = await this.findWorldDir(worldId);
+            const record = FoundingBuildRecordSchema.parse(JSON.parse(await readFile(toExtendedLength(join(worldDir, "build", "build.json")), "utf8")));
+            if (record.worldId !== worldId || record.genesisId !== genesisId ||
+              (marker.requestId !== undefined && marker.requestId !== record.requestId)) throw new Error("mismatched founding record");
+            await atomicWriteFile(join(root, "creation.json"), JSON.stringify({ worldId }) + "\n");
+            await atomicWriteFile(join(root, "begun.json"), JSON.stringify({ worldId, requestId: record.requestId }) + "\n");
+          } catch {
+            throw new Error("The legacy founding handoff needs repair. Open its existing world; this draft cannot begin another world.");
+          }
+        }
+      }
       await mkdir(toExtendedLength(dir), { recursive: true });
       // Old drafts had no control directory. Move only their known content; never promote
       // agent-authored files into application receipts or approval records.
