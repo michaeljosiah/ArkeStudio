@@ -25,6 +25,7 @@ import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { readKit } from "../../src/references/kit.js";
 import { assembleKeyArt, readKeyArtBrief } from "../../src/references/key-art-references.js";
 import { approvedBlueprintForFounding, decideGenesisContent, reviewGenesisContent } from "../../src/harness/genesis-review.js";
+import { reviewGenesisImports, resolveGenesisImport } from "../../src/harness/genesis-imports.js";
 import { decideGenesisImage, reviewGenesisImages, reviewedGenesisImages } from "../../src/harness/genesis-images.js";
 import { installGenesisImage } from "../../src/harness/genesis-image-carry.js";
 import { fileArtifact } from "../../src/artifacts/filing.js";
@@ -415,6 +416,38 @@ describe("the founding build (SPEC-031)", () => {
     assert.equal(store.getBundle().sheets.length, 1);
     assert.equal(store.getBundle().canon.length, 1);
     assert.equal(store.getBundle().meta.nextCanonId, nextCanonId);
+  });
+
+  it("founds imported approved content with real source artifact links to sheets and canon", async t => {
+    let h!: Harness;
+    h = await makeHarness(t, { manifest: null, reviewedBlueprint: async id => approvedBlueprintForFounding(await h.provider.genesisDir(id)) });
+    const workspace = await h.provider.genesisDir("gen-imported");
+    await mkdir(join(workspace, "attachments"), { recursive: true });
+    await mkdir(join(workspace, "draft", "imports"), { recursive: true });
+    await writeFile(join(workspace, "draft.json"), JSON.stringify({ name: "Harbour" }));
+    await writeFile(join(workspace, "attachments", "notes.txt"), "Maren guards the gate. The gate is always closed.");
+    for (const proposal of [
+      { kind: "character", name: "Maren", body: "Maren guards the gate.", quote: "Maren guards the gate." },
+      { kind: "canon", name: "Closed gate", body: "The gate is always closed.", quote: "The gate is always closed." },
+    ]) {
+      await writeFile(join(workspace, "draft", "imports", proposal.kind + ".json"), JSON.stringify({ ...proposal, source: "notes.txt" }));
+    }
+    for (const initial of (await reviewGenesisImports(workspace)).cards) {
+      const card = (await reviewGenesisImports(workspace)).cards.find(card => card.id === initial.id)!;
+      await resolveGenesisImport(workspace, { id: card.id, digest: card.digest, decision: "prepare", mode: "distinct" });
+    }
+    await decideGenesisContent(workspace, (await reviewGenesisContent(workspace)).cards, "approve", ulid());
+    await h.service.begin("gen-imported", ulid());
+    await until(() => h.lastState()?.status === "completed", "import founding", BUILD_MS);
+    assert.ok(h.lastState()?.items.filter(item => item.authorized).every(item => item.state === "landed"), JSON.stringify(h.lastState()?.items));
+    const bundle = h.provider.openStore()!.getBundle();
+    assert.equal(bundle.artifacts.length, 1);
+    assert.ok(bundle.artifacts[0]!.links.includes(bundle.sheets[0]!.id));
+    assert.ok(bundle.artifacts[0]!.links.includes(bundle.canon[0]!.id));
+    assert.match(bundle.canon[0]!.body, /Source: notes.txt/);
+    assert.equal(bundle.meta.schemaVersion, 31);
+    await h.service.begin("gen-imported", ulid());
+    assert.equal(h.provider.openStore()!.getBundle().artifacts.length, 1);
   });
 
   it("one press makes the whole world: files, sheets, anchors, key art — nothing left to decide", async (t) => {
