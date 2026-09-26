@@ -45,7 +45,7 @@ creates a draft proposal; ordinary content approval is still required before Beg
 Source identities survive entity renames and prose edits. Reimported source bytes and replayed
 resolution requests reuse their existing candidates. Founding files the original source and
 adds artifact links to approved sheets and allocated canon IDs. Worlds whose founding journals
-contain this source metadata require schema 31; worlds without it retain their earlier boundary.
+contain this source metadata require schema 36; worlds without it retain their earlier boundary.
 
 Image proposals in `draft.json` name a stable character or location slug, prompt and optional
 uploaded references. The chat shows the prompt, model, reference images and estimated cost
@@ -58,7 +58,7 @@ main-photo and establishing-view services. Existing selections cost nothing to r
 the corresponding generation in the build plan. Alternatives remain artifacts. Generated
 artifacts retain their producing job, provider, model, parameters, cost and entity links.
 
-Founding image decisions and generated-image provenance require schema version 30. Artifact
+Founding image decisions and generated-image provenance require schema version 35. Artifact
 writes that introduce location reference provenance raise this boundary atomically as well.
 
 - Coordinator `test/harness/genesis-images.test.ts`: immutable previews, exact decisions,

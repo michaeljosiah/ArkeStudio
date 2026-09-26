@@ -531,7 +531,7 @@ describe("the founding build (SPEC-031)", () => {
     assert.ok(bundle.artifacts[0]!.links.includes(bundle.sheets[0]!.id));
     assert.ok(bundle.artifacts[0]!.links.includes(bundle.canon[0]!.id));
     assert.match(bundle.canon[0]!.body, /Source: notes.txt/);
-    assert.equal(bundle.meta.schemaVersion, 31);
+    assert.equal(bundle.meta.schemaVersion, 36);
     await h.service.begin("gen-imported", ulid());
     assert.equal(h.provider.openStore()!.getBundle().artifacts.length, 1);
   });
