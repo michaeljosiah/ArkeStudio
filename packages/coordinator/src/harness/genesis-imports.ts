@@ -149,7 +149,7 @@ export async function resolveGenesisImport(dir: string, input: GenesisImportReso
     if (input.decision !== "prepare") {
       state.resolutions[card.id] = { status: input.decision === "reject" ? "rejected" : "deferred", applied: true };
     } else {
-      const draft = await foldBlueprint(dir);
+      const draft = await restoreGenesisSources(dir, await foldBlueprint(dir));
       if (draft.dropped.length) throw new Error("Repair unreadable draft files before preparing an import.");
       const proposal = card.proposal, name = (input.name ?? proposal.name).trim(), body = input.body ?? proposal.body;
       if (!name) throw new Error("The import needs a name.");
@@ -193,7 +193,7 @@ export async function resolveGenesisImport(dir: string, input: GenesisImportReso
         const entity = completeGenesisSheet(kind, old ?? { name });
         const previous = entity.sheet.sections[section];
         const links = (proposal.links ?? []).map(link => {
-          const candidates = state.cards.filter(other => other.id !== card.id && other.source.hash === card.source.hash &&
+          const candidates = state.cards.filter(other => other.id !== card.id &&
             `${other.proposal.kind}:${slugify(other.proposal.name)}` === link);
           if (!candidates.length) return link;
           const targets = [...new Set(candidates.map(other => state.resolutions[other.id]?.status === "prepared" ? state.resolutions[other.id]?.target : undefined))];
@@ -226,6 +226,7 @@ export async function resolveGenesisImport(dir: string, input: GenesisImportReso
 
 export async function validateGenesisSources(dir: string, blueprint: GenesisBlueprint): Promise<void> {
   const state = await stateFor(dir);
+  const verifiedTexts = new Map<string, string | null>();
   for (const row of genesisContentRows(blueprint)) {
     if (typeof row.content.value !== "object" || !("sources" in row.content.value)) continue;
     for (const source of row.content.value.sources ?? []) {
@@ -235,7 +236,9 @@ export async function validateGenesisSources(dir: string, blueprint: GenesisBlue
       if (!candidate || candidate.source.hash !== source.hash || candidate.source.quote !== source.quote || candidate.source.name !== source.name ||
         candidate.source.line !== source.line || candidate.source.originalName !== source.originalName || candidate.source.originalBody !== source.originalBody)
         throw new Error("An import source does not match its verified evidence.");
-      const text = extractDocumentText(source.name, await sourceBytes(dir, source));
+      const sourceKey = `${source.hash}\n${source.name}`;
+      if (!verifiedTexts.has(sourceKey)) verifiedTexts.set(sourceKey, extractDocumentText(source.name, await sourceBytes(dir, source)));
+      const text = verifiedTexts.get(sourceKey);
       if (!text?.includes(source.quote)) throw new Error("An imported quote cannot be verified.");
     }
   }

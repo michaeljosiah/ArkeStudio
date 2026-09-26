@@ -255,12 +255,13 @@ it("normalizes default sections and whitespace, and preserves edits containing t
   await assert.rejects(resolveGenesisImport(dir, { id: next.id, digest: next.digest, decision: "prepare", name: "Maren " }), /matches an existing/);
 });
 
-it("binds imported relationships to the distinct prepared target", async t => {
+it("binds imported relationships across documents to the distinct prepared target", async t => {
   const { provider, dir } = await setup(); t.after(() => provider.close());
   await mkdir(join(dir, "draft", "locations"), { recursive: true });
   await writeFile(join(dir, "draft", "locations", "the-vigil.json"), JSON.stringify({ name: "The Vigil", line: "Old place" }));
+  await writeFile(join(dir, "attachments", "places.md"), "The gate closes at dusk. A separate document.");
   await writeFile(join(dir, "draft", "imports", "vigil.json"), JSON.stringify({
-    source: "notes.md", kind: "location", name: "The Vigil", body: "The imported place", quote: "The gate closes at dusk.",
+    source: "places.md", kind: "location", name: "The Vigil", body: "The imported place", quote: "The gate closes at dusk.",
   }));
   const maren = JSON.parse(await readFile(join(dir, "draft", "imports", "maren.json"), "utf8"));
   await writeFile(join(dir, "draft", "imports", "maren.json"), JSON.stringify({ ...maren, links: ["location:the-vigil"] }));
