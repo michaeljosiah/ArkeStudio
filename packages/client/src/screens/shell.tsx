@@ -1225,7 +1225,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                     {turn.role === "user" ? turn.text : renderInlineMarkdown(turn.text)}
                   </div>
                 ))}
-                {g?.imports && <GenesisImportCards imports={g.imports} busy={chatRunning || buildPressed || !!g.worldId || !!g.founding}
+                {g?.imports && <GenesisImportCards imports={g.imports} blueprint={blueprint} busy={chatRunning || buildPressed || !!g.worldId || !!g.founding}
                   onResolve={resolution => resolveGenesisImport(genesisId, resolution)}
                   onRefresh={() => reviewGenesisImports(genesisId)}
                   onExtract={name => setMessage(`Please extract reviewable worldbuilding proposals from attachments/${name}. Cite exact source quotes; keep interpretations and suggested relationships separate from the evidence.`)} />}

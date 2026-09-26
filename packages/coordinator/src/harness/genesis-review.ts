@@ -66,7 +66,7 @@ export async function decideGenesisContent(
       if (!card || card.digest !== choice.digest) throw new Error("The proposed content changed. Review the current version before deciding.");
       return card;
     });
-    await validateGenesisSources(dir, await restoreGenesisSources(dir, await foldBlueprint(dir)));
+    if (decision === "approve") await validateGenesisSources(dir, approvedGenesisBlueprint(new Map(cards.map(card => [card.key, card.content]))));
     // Validate the complete batch before appending any decisions.
     for (const card of cards) {
       const record: GenesisDecision = { key: card.key, digest: card.digest, content: card.content, decision, at: new Date().toISOString() };
