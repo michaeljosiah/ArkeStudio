@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import WebSocket from "ws";
-import { FrameSchema, type Frame } from "@arke-studio/contracts";
+import { FrameSchema, ulid, type Frame } from "@arke-studio/contracts";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { createStudioCoordinator } from "../src/application/studio-host.js";
 import type { JobQueue } from "../src/queue/dispatcher.js";
@@ -13,6 +13,29 @@ import { makeTempRoot, WORLD_ID } from "./world/helpers.js";
 import { FakeProvider, pngBytes } from "./queue/fake-provider.js";
 import { devCipher } from "../src/credentials/dev-cipher.js";
 import { genesisControlDir, loadGenesisConversation, recordFoundingMessage } from "../src/harness/genesis-conversation.js";
+import { reviewGenesisContent } from "../src/harness/genesis-review.js";
+
+it("keeps case-only form edits and saves consecutive founding card decisions", async () => {
+  const { root } = await makeTempRoot();
+  const provider = new FsWorldProvider(root), genesisId = "gen-decisions";
+  const sandbox = await provider.genesisDir(genesisId);
+  await writeFile(join(sandbox, "draft.json"), JSON.stringify({ name: "Harbour", characters: [{ name: "Maren", line: "Old summary" }] }));
+  const coordinator = new Coordinator({ provider, adapter: null, appRoot: root,
+    changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test" });
+  const { port, token } = await coordinator.start(0);
+  const client = new TestClient(port); await client.open();
+  try {
+    client.send({ kind: "hello", token, lastSeq: 0 });
+    await client.until(f => f.kind === "snapshot", "snapshot");
+    client.send({ kind: "genesis-propose-world", genesisId, draft: { name: "Harbour", characters: [{ name: "maren", line: "New summary" }] } });
+    await client.until(f => f.kind === "event" && f.event.type === "genesis.loaded" && f.event.genesisId === genesisId, "form edit");
+    const review = await reviewGenesisContent(sandbox);
+    assert.equal(review.cards.length, 2);
+    assert.equal((await loadGenesisConversation(sandbox, genesisId)).blueprint.characters[0]?.line, "New summary");
+    for (const card of review.cards) client.send({ kind: "genesis-decide", genesisId, requestId: ulid(), decision: "approve", choices: [{ key: card.key, digest: card.digest }] });
+    await client.until(f => f.kind === "event" && f.event.type === "genesis.review" && f.event.review.selected.name === "Harbour" && f.event.review.selected.characters.length === 1, "both card decisions");
+  } finally { client.close(); await coordinator.stop(); await provider.close(); }
+});
 
 it("discovery completes interrupted form handoffs in their own world", async () => {
   const { root } = await makeTempRoot();
