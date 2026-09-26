@@ -1,9 +1,10 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { ChapterVoicesSchema, chapterParagraphs, occurrencesOf, type ChapterVoices, type HarnessAdapter } from "@arke-studio/contracts";
+import { ChapterVoicesSchema, chapterParagraphs, occurrencesOf, type ChapterVoicePin, type ChapterVoices, type HarnessAdapter } from "@arke-studio/contracts";
 import type { SessionInput } from "../harness/session-files.js";
 import { atomicWriteFile } from "../world/atomic.js";
+import { VOICE_PINS_SCHEMA_VERSION } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { sha256 } from "../world/text-files.js";
@@ -205,6 +206,16 @@ export async function castLines(
     verified.push(verifyVoices(raw, body, opened.body, cast, verified.flatMap((pass) => pass.lines)));
   }
   const merged = mergeVoicePasses(verified, opened.body);
+  // The author's corrections outlive a new cast (SPEC-012 R-64): each pin whose words are still
+  // at its occurrence is carried, and the derived lines it overlaps give way when the record is
+  // read (`pinnedLines`); a pin whose words are gone is dropped and counted, never re-placed.
+  // Read at the write, not at the press, so a pin written before the run is not lost with it —
+  // a pin cannot be written while the run goes.
+  const prior = await readVoices(store, productionId, summary.file);
+  const priorPins = prior !== null && prior !== "unreadable" ? (prior.pins ?? []) : [];
+  const paragraphs = chapterParagraphs(opened.body);
+  const pins = priorPins.filter((pin) => occurrencesOf(paragraphs[pin.paragraph] ?? "", pin.quote)[pin.occurrence] !== undefined);
+  const lost = priorPins.length - pins.length;
   const record: ChapterVoices = {
     version: opened.version,
     hash: sha256(opened.body),
@@ -213,12 +224,96 @@ export async function castLines(
     dropped: merged.dropped,
     omitted: merged.omitted,
     lines: merged.lines,
+    ...(pins.length > 0 ? { pins } : {}),
+    ...(lost > 0 ? { lost } : {}),
   };
-  const absolute = join(store.dir, fromPortable(voicesPath(productionId, summary.file)));
+  await writeVoices(store, productionId, summary.file, record);
+  return { record, lines: merged.lines.length, dropped: merged.dropped, omitted: merged.omitted };
+}
+
+/**
+ * Write a chapter's cast through the store's ownership-checked path. A record with pins (or a
+ * count of lost ones) raises the world past the builds whose strict reader would take it for
+ * unreadable (SPEC-047 R-49); one without them keeps the shape they read.
+ */
+async function writeVoices(store: WorldStore, productionId: string, chapterFile: string, record: ChapterVoices): Promise<void> {
+  if (record.pins !== undefined || record.lost !== undefined) await store.ensureSchemaVersion(VOICE_PINS_SCHEMA_VERSION, "voice-pins");
+  const absolute = join(store.dir, fromPortable(voicesPath(productionId, chapterFile)));
   await store.ownedWrite(async () => {
     await mkdir(toExtendedLength(join(absolute, "..")), { recursive: true });
     await atomicWriteFile(absolute, `${JSON.stringify(record, null, 2)}\n`);
   });
   await store.reload();
-  return { record, lines: merged.lines.length, dropped: merged.dropped, omitted: merged.omitted };
+}
+
+/** A pin refused, in the one clause the Audiobook view says it in. */
+export class VoicePinRefusal extends Error {}
+
+export interface VoicePinInput {
+  paragraph: number;
+  occurrence: number;
+  quote: string;
+  speaker?: string;
+  sheet?: string;
+  narration?: true;
+  clear?: true;
+}
+
+/**
+ * Set, or clear, the author's word on who speaks a span (design turn 155, SPEC-012 R-62..R-65).
+ * The cast must be current — cast against the prose as it stands — since a pin names a paragraph
+ * and an occurrence in it; the words must be there, at that occurrence, and no longer than a
+ * line; a sheet must be one the production's cast holds. A pin replaces any pin it overlaps, and
+ * one that says what the derivation already says is no pin at all.
+ */
+export async function setVoicePin(store: WorldStore, productionId: string, chapterId: string, input: VoicePinInput): Promise<ChapterVoices> {
+  const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
+  if (!production) throw new VoicePinRefusal("that production is gone");
+  const summary = production.chapters.find((c) => c.id === chapterId || c.file === chapterId);
+  if (!summary) throw new VoicePinRefusal("that chapter is gone");
+  const current = await readVoices(store, productionId, summary.file);
+  if (current === null) throw new VoicePinRefusal("not cast · cast the lines first");
+  if (current === "unreadable") throw new VoicePinRefusal("cast unreadable · cast again");
+  const opened = await openChapter(store, productionId, summary.id);
+  if (sha256(opened.body) !== current.hash) throw new VoicePinRefusal("cast moved · cast again");
+  if (input.quote.length > VOICES_BOUNDS.line) throw new VoicePinRefusal("longer than a line");
+  const paragraphs = chapterParagraphs(opened.body);
+  const span = (pin: { paragraph: number; occurrence: number; quote: string }) =>
+    occurrencesOf(paragraphs[pin.paragraph] ?? "", pin.quote)[pin.occurrence];
+  const hit = span(input);
+  if (hit === undefined) throw new VoicePinRefusal("those words are not there");
+  let pin: ChapterVoicePin | null = null;
+  if (input.clear !== true) {
+    if (input.narration === true) {
+      pin = { paragraph: input.paragraph, occurrence: input.occurrence, quote: input.quote, narration: true };
+    } else {
+      const speaker = input.speaker?.trim() ?? "";
+      if (speaker === "") throw new VoicePinRefusal("no speaker");
+      if (input.sheet !== undefined) {
+        const sheet = store.getBundle().sheets.find((candidate) => candidate.id === input.sheet);
+        const inCast = sheet !== undefined && sheet.type === "character" && !sheet.retired && (sheet.production === undefined || sheet.production === productionId);
+        if (!inCast) throw new VoicePinRefusal("no such character");
+      }
+      pin = { paragraph: input.paragraph, occurrence: input.occurrence, quote: input.quote, speaker, ...(input.sheet !== undefined ? { sheet: input.sheet } : {}) };
+    }
+    // Saying what the derivation says is no correction: the pin is dropped rather than kept.
+    const derived = current.lines.find(
+      (line) => line.paragraph === input.paragraph && line.occurrence === input.occurrence && line.quote === input.quote,
+    );
+    const same = pin.narration === true
+      ? derived === undefined
+      : derived !== undefined && (pin.sheet !== undefined ? derived.sheet === pin.sheet : derived.sheet === undefined && derived.speaker === pin.speaker);
+    if (same) pin = null;
+  }
+  const overlaps = (other: ChapterVoicePin) => {
+    if (other.paragraph !== input.paragraph) return false;
+    const at = span(other);
+    return at !== undefined && at.start < hit.end && hit.start < at.end;
+  };
+  const pins = [...(current.pins ?? []).filter((other) => !overlaps(other)), ...(pin !== null ? [pin] : [])];
+  if (pins.length > VOICES_BOUNDS.lines) throw new VoicePinRefusal("too many corrections");
+  const { pins: _previous, ...rest } = current;
+  const record: ChapterVoices = pins.length > 0 ? { ...rest, pins } : rest;
+  await writeVoices(store, productionId, summary.file, record);
+  return record;
 }

@@ -28,6 +28,7 @@ import { ArkeAdapter } from "@arke-studio/adapter-arke";
 import { ChildSupervisor, type SupervisorDeps } from "../supervisor.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { ownedChildHooks } from "./owned-child.js";
+import { localModelPolicy } from "../setup/catalogue.js";
 
 // This package owns shared desktop/dev composition, so every adapter is a runtime dependency.
 // Keep concrete adapter imports here; Coordinator itself consumes the HarnessAdapter contract.
@@ -218,6 +219,10 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
     const adapter = new ArkeAdapter({
       ...(opts.arke?.baseUrl !== undefined ? { baseUrl: opts.arke.baseUrl } : {}),
       ...(opts.arke?.maxContextTokens !== undefined ? { maxContextTokens: opts.arke.maxContextTokens } : {}),
+      // What the setup catalogue knows about a model Arke installed: its publisher's sampling,
+      // and whether it waits to be chosen by name (issue 1289).
+      modelOptions: (model) => localModelPolicy(model)?.sampling,
+      explicitOnly: (model) => localModelPolicy(model)?.explicitChoiceOnly === true,
       ...(opts.onTrace ? { onTrace: opts.onTrace } : {}),
     });
     return {

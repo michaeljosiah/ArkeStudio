@@ -1034,6 +1034,18 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       reason: z.string().optional(),
     })
     .strict(),
+  /** A pin written or refused (SPEC-012 R-62): the record as it now stands, or why not, in one clause. */
+  z
+    .object({
+      ...base,
+      type: z.literal("voices.record"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      record: ChapterVoicesSchema.optional(),
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
 
   /**
    * A chapter read into kept takes (design turn 146, SPEC-047 R-16..R-18): started with what
@@ -1113,6 +1125,89 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
    * a chapter's directions accepted. The window that asked, and every other, takes the record
    * as a run's finished one — the newer wins — or hears why nothing was written.
    */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.script"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      /** World-relative, under `exports/`. */
+      output: z.string().min(1).optional(),
+      lines: z.number().int().min(0).optional(),
+      chapters: z.number().int().min(0).optional(),
+      /** Chapters whose cast is not current, so their lines could not be named. */
+      notCast: z.number().int().min(0).optional(),
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.lines-staged"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      /** A row a file (R-39): the line it matched and its checks, or the one clause it was refused in. */
+      rows: z
+        .array(
+          z
+            .object({
+              file: z.string().min(1),
+              id: z.string().min(1).optional(),
+              quote: z.string().optional(),
+              words: z.enum(["match", "differ", "unchecked"]).optional(),
+              differences: z.number().int().min(0).optional(),
+              rmsDbfs: z.number().nullable().optional(),
+              samplePeakDbfs: z.number().nullable().optional(),
+              refused: z.string().min(1).optional(),
+            })
+            .strict(),
+        )
+        .max(400),
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.lines-kept"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      kept: z.number().int().min(0),
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.take-staged"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      block: z.string().min(1),
+      requestId: UlidSchema,
+      /**
+       * The file's own name and what it is, as brought in, and the checks on the prepared file
+       * as the dialog shows them (SPEC-047 R-35) — figures and outcomes, never a refusal unless a
+       * check is a hard incompatibility. Deliberately flat: the foundation's own report and
+       * comparison schemas make the event union too large for the engine's declaration build.
+       */
+      file: z.string().min(1).optional(),
+      durationSec: z.number().min(0).nullable().optional(),
+      sampleRateHz: z.number().int().positive().nullable().optional(),
+      channels: z.number().int().positive().nullable().optional(),
+      rmsDbfs: z.number().nullable().optional(),
+      samplePeakDbfs: z.number().nullable().optional(),
+      noiseFloor: z.enum(["pass", "informational", "warning", "hard-incompatibility", "unavailable", "not-applicable"]).optional(),
+      /** The words heard against the block's: `match`, `differ` with how many, or `unchecked`. */
+      words: z.enum(["match", "differ", "unchecked"]).optional(),
+      differences: z.number().int().min(0).optional(),
+      /** Why the file cannot be a take, in one clause. */
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
   z
     .object({
       ...base,

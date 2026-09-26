@@ -20,6 +20,14 @@ The optional setup entry `ollama-gemma4-12b-balanced` provides the manifest mode
 [HauhauCS Balanced model](https://huggingface.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced)
 with Q4_K_M weights. Select it explicitly in Settings; it is not in the automatic
 recommendation order and does not replace standard Gemma 4 12B.
+The catalogue entry enforces that (issue #1289): `explicitChoiceOnly` keeps it out of the
+local default an unchosen agent falls back to, in the coordinator and in Arke's own harness, and
+a session with nothing else installed is refused with where to choose it. The entry also carries
+the model card's sampling (temperature 0.6, top_k 64, top_p 0.9, min_p 0.05, repeat_penalty 1.1),
+which Arke's harness sends with every request: a Hugging Face pull carries only its stop tokens.
+The harness sends `think: false` too — this build reasons before answering even though Ollama
+lists no thinking capability for it, and a one-sentence answer cost 419 tokens and ten times
+the time with thinking left on.
 Settings names the Uncensored variant and displays its requirements before installation
 (issue #1252). Installation and inference remain unverified by Arke; the persistent
 catalogue caveat states that limitation and the mutable upstream weights independently
@@ -46,7 +54,7 @@ the optional vision projector and speculative decoding head are not installed.
 From `packages/coordinator`, run:
 
 ```powershell
-node --import tsx --test test/setup/catalogue-invariants.test.ts test/setup/local-setup.test.ts
+node --import tsx --test test/setup/catalogue-invariants.test.ts test/setup/local-setup.test.ts test/setup/local-model-policy.test.ts
 ```
 
 From `packages/providers`, run:
@@ -58,3 +66,21 @@ node --import tsx --test test/manifest.test.ts test/clients.test.ts
 These tests cover setup/dispatch identities and the existing Ollama transport. They do not
 establish model quality or OpenCode tool-call reliability. A live check must separately verify
 the installed tag, a neutral text completion, and availability in the running harness catalogue.
+
+## Window, memory and compaction on Arke's harness
+
+- **Window.** A session gets the model's own window, from 131,072 to 262,144 tokens (a host may
+  fix it with `maxContextTokens`). Measured on a 10 GB RTX 3080 with Gemma 4 12B: 128k puts 30%
+  of the model on the CPU at 11.8 tokens/s, 256k 44% at 7.8; both recalled a fact from the middle
+  of a 121,000-token prompt. World Chat's assembled context on this lane stops at 64,000 tokens.
+- **Working memory.** Agents whose confinement grants a scratch checklist get `checklist` (this
+  ask only) and `notes`: a page per agent per world under `<appRoot>/agent-memory/<worldId>/`,
+  and one author page, `<appRoot>/agent-memory/author.md`, shared by every agent in every world.
+  Both are read into the instructions when a session opens. Notes are never canon: the world's
+  files decide, and the instructions say so. Hosted harnesses keep their own memory.
+- **Compaction in a session.** Old tool results become placeholders first. When whole exchanges
+  must go, a digest note says what was asked, which tools were used and what was answered,
+  keeping the session's first ask and the newest; the next trim folds it in.
+- **Compaction across a conversation.** World Chat's rolling summary, for every harness, keeps
+  fixed sections — decisions, open threads, where things stand (characters' places, knowledge,
+  relationships), standing instructions, referenced canon by id — and folds new turns into them.
