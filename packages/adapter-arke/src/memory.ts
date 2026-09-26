@@ -100,7 +100,7 @@ export function memoryInstructions(pages: { world: string | null; author: string
   }
   if (pages.author !== null) {
     lines.push(
-      "When you learn something about the author as a writer — their voice, what they like and dislike, how they like to work, instructions they give for every story — add it to the author page (about \"author\"). Every agent reads it, in every world.",
+      "When the author tells you how they write or what they want in every story — their voice, what they like and dislike, how they like to work — call notes with action \"write\" and about \"author\" before you answer, keeping what the page already says. That is how it is remembered. It is not a change to the world: do not propose it as canon or as a candidate. Every agent reads this page, in every world.",
       pages.author.trim() === "" ? "The author page is empty so far." : `The author page:\n<author>\n${pages.author.trim()}\n</author>`,
     );
   }
