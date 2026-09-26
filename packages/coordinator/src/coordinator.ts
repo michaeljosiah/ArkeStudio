@@ -5618,7 +5618,7 @@ export class Coordinator {
     benchDispatchHeld = false,
     genesisDecisionHeld = false,
   ): Promise<void> {
-    if (msg.kind === "genesis-decide" && !genesisDecisionHeld) {
+    if ((msg.kind === "genesis-decide" || msg.kind === "genesis-review") && !genesisDecisionHeld) {
       return serializeFileMutation(`founding-decisions:${msg.genesisId}`, () => this.handleClientMessage(msg, false, false, true));
     }
     if (!benchTakeActionHeld && (msg.kind === "bench-accept" || msg.kind === "bench-discard")) {
@@ -7284,7 +7284,7 @@ export class Coordinator {
           const review = msg.kind === "genesis-decide"
             ? await decideGenesisContent(dir, msg.choices, msg.decision, msg.requestId)
             : await reviewGenesisContent(dir);
-          this.emit({ type: "genesis.review", at: new Date().toISOString(), genesisId: msg.genesisId, review });
+          this.emit({ type: "genesis.review", at: new Date().toISOString(), genesisId: msg.genesisId, ...(msg.requestId ? { requestId: msg.requestId } : {}), review });
         } catch (err) {
           this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: msg.genesisId, status: "failed", detail: describeCoordinatorError(err) });
         } finally { if (deciding) this.genesisDeciding.delete(msg.genesisId); }
