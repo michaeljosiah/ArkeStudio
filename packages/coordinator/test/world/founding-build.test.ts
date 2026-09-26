@@ -1067,6 +1067,12 @@ describe("the founding build (SPEC-031)", () => {
     const retry = h.service.runItems(h.worldId(), key);
     await until(() => [...h.queue.jobs.values()].some(job => job.status === "running"), "retried image running", BUILD_MS);
     const retried = [...h.queue.jobs.values()].find(job => job.status === "running")!;
+    // The retry is the author's press after the Stop, not part of the stopped run (issue 1308):
+    // its own job must not be cancelled by the Stop that came before it. It was, every time,
+    // and this test passed only when the queue showed it running before the cancel landed.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.ok(!h.queue.cancelled.includes(retried.id), "a retry pressed after Stop runs; the earlier Stop does not cancel it");
+    assert.equal(h.queue.jobs.get(retried.id)?.status, "running");
     const queued = h.service.runItems(h.worldId(), key);
     const submissions = h.queue.jobs.size;
     await h.service.stop(h.worldId());

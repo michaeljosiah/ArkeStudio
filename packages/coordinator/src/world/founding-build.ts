@@ -793,7 +793,7 @@ export class FoundingBuildService {
       if ((active.stopGeneration ?? 0) !== stopGeneration) break;
       const item = active.record.items.find((candidate) => candidate.key === key);
       if (!item) continue;
-      await this.runOne(active, item, route?.model ?? null).catch((err) => {
+      await this.runOne(active, item, route?.model ?? null, stopGeneration).catch((err) => {
         this.ports.log({ kind: "build.item-failed", worldId, key, message: err instanceof Error ? err.message : String(err) });
       });
     }
@@ -933,9 +933,10 @@ export class FoundingBuildService {
   // Item runners
   // -------------------------------------------------------------------------
 
-  private async runOne(active: ActiveBuild, item: BuildItem, model: ManifestModel | null): Promise<void> {
+  /** `pressedUnder` is the stop generation an Activity press was made under; the driver passes none. */
+  private async runOne(active: ActiveBuild, item: BuildItem, model: ManifestModel | null, pressedUnder?: number): Promise<void> {
     if (buildItemDispatches(item.kind)) {
-      const jobId = await this.dispatchOne(active, item, model);
+      const jobId = await this.dispatchOne(active, item, model, pressedUnder);
       await this.settleDispatched(active, item, jobId);
       return;
     }
@@ -1306,7 +1307,7 @@ export class FoundingBuildService {
   // Image dispatch and landing (R-19..R-22, R-25..R-28)
   // -------------------------------------------------------------------------
 
-  private async dispatchOne(active: ActiveBuild, item: BuildItem, model: ManifestModel | null): Promise<string | null> {
+  private async dispatchOne(active: ActiveBuild, item: BuildItem, model: ManifestModel | null, pressedUnder?: number): Promise<string | null> {
     const store = this.ports.openStore();
     if (!store || store.worldId !== active.record.worldId) return null;
     const state = this.fold(active);
@@ -1412,8 +1413,13 @@ export class FoundingBuildService {
       const job = await this.ports.enqueue({ ...input, idempotencyKey });
       await this.append(active, { kind: "enqueued", key: item.key, jobId: job.id, at: this.ports.nowIso() });
       // A stop that raced this dispatch still reaches the job (R-35): the sweep in stop()
-      // saw no job id to cancel, so the request is made here instead.
-      if (active.stopped) await this.ports.cancelJob(job.id).catch(() => {});
+      // saw no job id to cancel, so the request is made here instead. For a retry pressed in
+      // Activity that means a stop since the press, not the build's own earlier Stop (issue
+      // 1308): `stopped` stays true for good once a build is stopped, so every retry after it
+      // cancelled its own job the moment it was bought — Retry did nothing, and a test that
+      // waited for the job to run passed only when the queue showed it before the cancel landed.
+      const stoppedSince = pressedUnder !== undefined ? (active.stopGeneration ?? 0) !== pressedUnder : active.stopped;
+      if (stoppedSince) await this.ports.cancelJob(job.id).catch(() => {});
       this.publish(active);
       return job.id;
     } catch (err) {
