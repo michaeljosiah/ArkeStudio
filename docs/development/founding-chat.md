@@ -35,6 +35,18 @@ conversation ID in World Chat. Other entry points can still use the Building scr
 
 Relevant checks:
 
+Document imports use the same Markdown, text and partial PDF reader as established-world
+extraction. The harness proposes individual candidates in `draft/imports/`; the coordinator
+verifies exact source quotes and freezes the source bytes. Chat labels the proposed wording
+as interpretation and shows matching draft records and other imports. The author may edit,
+merge, retain distinct records, reject, or leave a candidate undecided. Preparing a candidate
+creates a draft proposal; ordinary content approval is still required before Begin.
+
+Source identities survive entity renames and prose edits. Reimported source bytes and replayed
+resolution requests reuse their existing candidates. Founding files the original source and
+adds artifact links to approved sheets and allocated canon IDs. Worlds whose founding journals
+contain this source metadata require schema 31; worlds without it retain their earlier boundary.
+
 Image proposals in `draft.json` name a stable character or location slug, prompt and optional
 uploaded references. The chat shows the prompt, model, reference images and estimated cost
 before generation. Generating creates a candidate; it never approves the result. Use image,

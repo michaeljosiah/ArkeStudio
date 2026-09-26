@@ -189,6 +189,26 @@ export async function validateGenesisSources(dir: string, blueprint: GenesisBlue
   }
 }
 
+/** Evidence belongs to the accepted import identity, even when the harness revises its prose. */
+export async function restoreGenesisSources(dir: string, blueprint: GenesisBlueprint): Promise<GenesisBlueprint> {
+  const state = await stateFor(dir);
+  const result = structuredClone(blueprint);
+  for (const card of state.cards) {
+    const resolution = state.resolutions[card.id];
+    if (resolution?.status !== "prepared" || !resolution.target) continue;
+    const [kind, slug] = resolution.target.split(":");
+    const entity = kind === "character" ? result.characters.find(entity => entity.slug === slug) :
+      kind === "location" ? result.locations.find(entity => entity.slug === slug) :
+      kind === "faction" ? result.factions.find(entity => entity.slug === slug) : result.canon?.find(entity => entity.slug === slug);
+    if (!entity) continue;
+    const name = "name" in entity ? entity.name : entity.title;
+    const text = "statement" in entity ? entity.statement : Object.values(entity.sheet?.sections ?? {}).join("\n");
+    const source = { ...card.source, modified: name !== card.source.originalName || !text.includes(card.source.originalBody) };
+    entity.sources = [...(entity.sources ?? []).filter(old => old.candidateId !== card.id), source];
+  }
+  return result;
+}
+
 export async function carryGenesisSources(dir: string, blueprint: GenesisBlueprint, store: WorldStore): Promise<void> {
   await validateGenesisSources(dir, blueprint);
   const ids = genesisSheetIds(blueprint);

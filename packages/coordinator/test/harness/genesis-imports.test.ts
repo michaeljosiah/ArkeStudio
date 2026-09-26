@@ -37,6 +37,12 @@ it("imports verified evidence as an editable proposal and requires separate exac
   await decideGenesisContent(dir, content.cards.map(card => ({ key: card.key, digest: card.digest })), "approve", ulid());
   const approved = await approvedBlueprintForFounding(dir);
   assert.equal(approved.characters[0]!.name, "Maren Kest");
+  const revised = { ...entity, name: "Maren of the Light", sources: undefined };
+  await writeFile(join(dir, "draft", "characters", entity.slug + ".json"), JSON.stringify(revised));
+  const revisedCard = (await reviewGenesisContent(dir)).cards.find(card => card.key === "character:" + entity.slug)!;
+  assert.ok(revisedCard.content.kind === "character");
+  assert.equal(revisedCard.content.value.sources?.[0]?.hash, card.source.hash);
+  assert.equal(revisedCard.content.value.sources?.[0]?.modified, true);
   await writeFile(join(dir, "attachments", "notes.md"), "Replaced document");
   await validateGenesisSources(dir, approved);
   const { worldId } = await provider.createWorld({ name: "Harbour" }); await provider.loadWorld(worldId);

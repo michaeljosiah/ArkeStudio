@@ -7,11 +7,11 @@ import { conversationActionDigest } from "../arke-actions/digest.js";
 import { serializeFileMutation } from "../world/atomic.js";
 import { foldBlueprint } from "./blueprint.js";
 import { genesisControlDir, genesisConversation } from "./genesis-conversation.js";
-import { recoverGenesisImports, validateGenesisSources } from "./genesis-imports.js";
+import { recoverGenesisImports, restoreGenesisSources, validateGenesisSources } from "./genesis-imports.js";
 
 export async function reviewGenesisContent(dir: string): Promise<GenesisContentReview> {
   await recoverGenesisImports(dir);
-  const blueprint = await foldBlueprint(dir);
+  const blueprint = await restoreGenesisSources(dir, await foldBlueprint(dir));
   const log = await genesisConversation(dir);
   const { events, problems: journalProblems } = await log.read();
   if (journalProblems.length) throw new Error("The conversation record needs repair before content can be approved.");

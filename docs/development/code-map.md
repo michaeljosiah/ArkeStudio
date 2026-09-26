@@ -142,8 +142,6 @@ the transcript and `harness/blueprint.ts` for the current draft. `world/founding
 transfers the same conversation into the created world with idempotent appends.
 See [founding chat](founding-chat.md) for lifecycle and recovery checks.
 
-### Accept a proposal
-
 ### Generate and approve founding images
 
 Contracts `genesis-images.ts` defines intents, candidates, selections and review plans;
@@ -158,6 +156,17 @@ Client `components/genesis-images.tsx`, `screens/shell.tsx` and `lib/store.ts` r
 authorization separately from actual-image approval. Tests: coordinator
 `test/harness/genesis-images.test.ts`, `test/dispatch-refusal.test.ts`,
 `test/world/founding-build.test.ts`; client `test/genesis-images.test.tsx`.
+
+### Review founding document imports
+
+Contracts `genesis-imports.ts` defines evidence, candidate review and merge choices.
+Coordinator `harness/genesis-imports.ts` reuses `artifacts/extraction.ts` for supported document
+text and quote verification, freezes source copies, detects name matches and recovers prepared
+draft writes. `harness/genesis-review.ts` preserves evidence through edits and requires ordinary
+exact-content approval. `world/founding-build.ts` carries source artifacts and entity/canon links.
+Client `components/genesis-imports.tsx`, `screens/shell.tsx` and `lib/store.ts` present evidence,
+interpretations and explicit merge/distinct/defer choices. Checks:
+`test/harness/genesis-imports.test.ts` and client `test/genesis-imports.test.tsx`.
 
 ### Accept an authored proposal
 
