@@ -96,7 +96,7 @@ export function HarnessModelStatus({ state }: { state: ClientState | null }) {
         ? state?.app.health.harness.reason ?? "The harness is not running."
         : status?.status !== "ready"
           ? models.length > 0 ? "Models need to be refreshed." : "Model discovery has not started."
-          : models.length === 0 ? "The harness returned no models." : `${models.length} models from ${runningHarnessLabel(state)}`;
+          : models.length === 0 ? "The harness returned no models." : `${models.length} ${models.length === 1 ? "model" : "models"} from ${runningHarnessLabel(state)}`;
   return (
     <div className="fy-set__note" role="status">
       {message}

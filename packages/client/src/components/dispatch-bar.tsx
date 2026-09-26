@@ -551,7 +551,7 @@ export function DispatchBar({
             <>
               {/* One interpolation, not a number beside a word: React splits the latter with a
                   comment node, which puts a stray marker in the middle of the label. */}
-              <span className="fy-dispatchbar__more">{`${models.length} models`}</span>
+              <span className="fy-dispatchbar__more">{`${models.length} ${models.length === 1 ? "model" : "models"}`}</span>
               <span className="fy-dispatchbar__chevron" aria-hidden>
                 <ChevronDown size={13} />
               </span>

@@ -116,6 +116,17 @@ export interface CatalogueEntry {
   optional?: boolean;
   /** Never replace a file that appeared while a managed optional download was running. */
   preserveExistingFiles?: boolean;
+  /**
+   * For a model pull: the sampling its publisher tuned it with, sent with every local request.
+   * A Hugging Face pull carries only stop tokens, so it would otherwise run on Ollama's generic
+   * defaults (issue 1289).
+   */
+  sampling?: Readonly<Record<string, number>>;
+  /**
+   * For a model pull: never chosen for an agent nobody chose a model for. Installing a community
+   * uncensored variant is not choosing it for every agent in the studio (issue 1289).
+   */
+  explicitChoiceOnly?: true;
 }
 
 const KOKORO = "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main";
@@ -319,6 +330,9 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     requires: ["ollama-runtime"],
     provides: ["gemma4-12b-balanced"],
     caveat: "Community Uncensored variant · Requires Ollama 0.34.3 or newer · Installation and inference not verified by Arke · Upstream weights may change",
+    // From the model card, checked 2026-09-25: "part of that" tuning, and not Gemma's stock defaults.
+    sampling: { temperature: 0.6, top_k: 64, top_p: 0.9, min_p: 0.05, repeat_penalty: 1.1 },
+    explicitChoiceOnly: true,
     spec: {
       kind: "pull",
       command: "ollama",
@@ -337,6 +351,23 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     spec: { kind: "pull", command: "ollama", args: ["pull", "gemma4:26b"] },
   },
 ] as const;
+
+/**
+ * What the catalogue says about a pulled Ollama model, by the name Ollama lists it under. A pull
+ * of `gemma4:12b` is listed as `gemma4:12b`, a Hugging Face pull as its whole reference, and a
+ * name pulled without a tag as `:latest`. A model pulled some other way has no policy.
+ */
+export function localModelPolicy(
+  modelId: string,
+  entries: readonly CatalogueEntry[] = SETUP_CATALOGUE,
+): { displayName: string; sampling?: Readonly<Record<string, number>>; explicitChoiceOnly?: true } | undefined {
+  const id = modelId.replace(/^ollama\//, "").toLowerCase();
+  const tagged = (name: string) => (/:[^/]+$/.test(name) ? name : `${name}:latest`).toLowerCase();
+  const entry = entries.find((candidate) => candidate.spec.kind === "pull" && candidate.spec.args[0] === "pull" &&
+    candidate.spec.args[1] !== undefined && tagged(candidate.spec.args[1]) === tagged(id));
+  if (!entry || (entry.sampling === undefined && entry.explicitChoiceOnly === undefined)) return undefined;
+  return { displayName: entry.displayName, ...(entry.sampling ? { sampling: entry.sampling } : {}), ...(entry.explicitChoiceOnly ? { explicitChoiceOnly: true as const } : {}) };
+}
 
 /** What setup fetches unasked — the optional entries are nobody's cost until they are chosen. */
 export function catalogueTotalMb(entries: readonly CatalogueEntry[] = SETUP_CATALOGUE): number {

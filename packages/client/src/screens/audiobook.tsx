@@ -87,11 +87,13 @@ export function useChapterReading(worldId: string | undefined, prodId: string | 
  * where its voice is set (issue 1191) — the narrator's to Settings, a speaker's to their voice
  * page — and one with nowhere to go, the unattributed lines, is plain.
  */
-function VoiceChip({ name, voice, state, blocks, to }: { name: string; voice?: { label: string; provider: string; local: boolean }; state: string; blocks: number; to?: string }) {
+function VoiceChip({ name, voice, state, blocks, awaiting, to }: { name: string; voice?: { label: string; provider: string; local: boolean }; state: string; blocks: number; awaiting?: number; to?: string }) {
   const navigate = useNavigate();
   const warn = state === "no voice" || state === "voice unavailable";
   const what =
-    state === "narrator"
+    state === "recorded"
+      ? `recorded${awaiting !== undefined && awaiting > 0 ? ` · ${awaiting} awaiting` : ""}`
+      : state === "narrator"
       ? `narrator · ${voice?.provider ?? ""}${voice?.local ? " · local" : ""}`
       : state === "reads" && voice !== undefined
         ? `${voice.label} · ${voice.provider}`
@@ -282,6 +284,7 @@ export function AudiobookScreen() {
             voice={voice.voice}
             state={voice.state}
             blocks={voice.blocks}
+            {...(voice.awaiting !== undefined ? { awaiting: voice.awaiting } : {})}
             to={voice.state === "narrator" ? "/settings/general" : voice.sheet !== undefined ? `/w/${worldId}/cast/${encodeURIComponent(voice.sheet)}/voice` : undefined}
           />
         ))}

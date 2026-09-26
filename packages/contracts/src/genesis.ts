@@ -4,7 +4,7 @@ import { GenesisImageIntentSchema, GenesisImageSelectionSchema } from "./genesis
 import { GenesisSourceSchema } from "./genesis-imports.js";
 import { GenesisPropSchema } from "./prop.js";
 import { GenesisVoiceIntentSchema, GenesisVoiceCandidateSchema } from "./genesis-voices.js";
-export const FOUNDING_CONVERSATION_SCHEMA_VERSION = 28;
+export const FOUNDING_CONVERSATION_SCHEMA_VERSION = 33;
 
 export const GenesisSheetContentSchema = z.object({
   sections: z.record(z.string().max(80), z.string().max(8000)),

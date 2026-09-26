@@ -3,8 +3,14 @@ import { EventEmitter, on } from "node:events";
 import type { HarnessAdapter, HarnessEvent, ModelInfo, SendMessageInput, SessionConfigInput } from "@arke-studio/contracts";
 import type { LocalGpu } from "../local-ai/gpu.js";
 
-/** Cover every harness caller, including fire-and-watch turns outside the provider queue. */
-export function withLocalGpu(adapter: HarnessAdapter, gpu: LocalGpu, settled: () => void = () => {}): HarnessAdapter {
+/**
+ * Cover every harness caller, including fire-and-watch turns outside the provider queue.
+ * `onLocalModel` hears each Ollama model a local turn names, so quitting can hand back what this
+ * run loaded and leave another application's models alone (issue 1289).
+ */
+export function withLocalGpu(
+  adapter: HarnessAdapter, gpu: LocalGpu, settled: () => void = () => {}, onLocalModel: (model: string) => void = () => {},
+): HarnessAdapter {
   const prepared = new Map<string, SessionConfigInput>();
   const models = new Map<string, string | undefined>();
   const turns = new Map<string, { abort: AbortController; started: boolean }>();
@@ -47,6 +53,7 @@ export function withLocalGpu(adapter: HarnessAdapter, gpu: LocalGpu, settled: ()
         summary: reason ?? "Writing with Ollama",
       }));
       signal.throwIfAborted();
+      if (local && model !== undefined) onLocalModel(model.replace(/^ollama\//, ""));
       turn.started = true;
       return await adapter.sendMessage(input);
     } finally { release?.(); turns.delete(input.sessionId); settled(); }
@@ -68,10 +75,13 @@ export function withLocalGpu(adapter: HarnessAdapter, gpu: LocalGpu, settled: ()
     async dispatchAsync(input) {
       pump();
       const receipt = { sessionId: input.sessionId, correlationId: input.correlationId ?? randomUUID() };
-      void send({ ...input, correlationId: receipt.correlationId }).catch((error) => publish({
+      // A turn the adapter ended has already said why, as `session.ended` with its reason; this
+      // error follows it rather than racing it, a turn later, so a listener that stops at the
+      // first ending hears "over budget" and not only a message (issue 1265).
+      void send({ ...input, correlationId: receipt.correlationId }).catch((error) => setImmediate(() => publish({
         type: "session.error", sessionId: input.sessionId,
         message: error instanceof Error ? error.message : "Local writing could not start.",
-      }));
+      })));
       return receipt;
     },
     async interrupt(sessionId) {

@@ -62,9 +62,11 @@ consistency is structural rather than a function of prompt luck.
 | **Art direction** | The world's visual language: a master look, a style description, a version. Every image inherits it; every exception says where it came from. |
 | **Sheet** | A character, location or faction. Versioned, with a voice and an identity kit of two images. Sketch until you lock it. |
 | **Production** | A story, film, album or game drawn from the world. Shares the cast and canon by reference. Nothing is copied, nothing is forked. |
+| **Chapter** | The unit of a story production. A page you write on, with Arke docked beside it, versioned like everything else and read aloud into the audiobook. |
 | **Scene → Shot → Take** | The unit of work is the shot. Each is its own brief and its own retry. Accepted takes assemble the cut. |
 | **Stage** | A shot's camera and blocking, worked out in 3D before you spend on a generation: cast and set placed once per scene, camera keys per shot. |
 | **Artifact** | Recordings, documents, references. Filed by provenance, so anything that cited a sheet lands against it automatically. |
+| **Publication** | A finished edition, compiled out of the world into a portable folder or ZIP that plays without it. |
 
 ## How it works
 
@@ -85,10 +87,37 @@ dispatch"*), and then waits.
 operational records; the gate controls what proposed work becomes committed. Authors can
 also save their own chapter edits directly.
 
+## From page to audiobook
+
+A story production is a book. It keeps its chapters, its overview and its cast in one rail,
+and every chapter is a page you write on rather than a form you fill.
+
+<div align="center">
+
+<img src=".github/assets/readme-story-chapter.png" alt="A chapter of The Ledger of Nights: the manuscript in the centre with a passage selected and a menu of asks beside it — tighten, expand, simplify, make it vivid, change tone, critique — the book's word count, the chapter's voices and the sheets and canon it draws on down the right, and Arke docked on the far right." width="100%">
+
+**The chapter is the manuscript.** Select a passage and ask for what you want — tighten it,
+expand it, change its tone, critique it — and Arke's revision comes back as a proposal you can
+take whole or in part. Beside the page sit the sheets and canon entries the chapter draws on,
+the voices that speak in it, and where its characters stand when it ends. Bring an existing
+book in as a `.docx` — Arke says which chapters it found before anything is written — and take
+it out again as `.docx` or EPUB.
+
+<br>
+
+<img src=".github/assets/readme-story-audiobook.png" alt="The Audiobook page of The Ledger of Nights: four chapters, none read yet, a narrator voice chosen, and one button to read the whole book." width="100%">
+
+**The book reads itself aloud.** Read the chapter, or read the book: narration in the narrator's
+voice and each character in their own, priced once before anything is spent. Each chapter's
+audiobook view shows who reads what, a colour a speaker, and a speaker you set on a line by hand
+wins over the one Arke worked out.
+
+</div>
+
 ## From script to screen
 
-The same loop carries a scene from a written beat to a finished cut, and every stage of it
-is a screen you actually work in — not a black box between "generate" and "done."
+In a video production the same loop carries a scene from a written beat to a finished cut, and
+every stage of it is a screen you actually work in — not a black box between "generate" and "done."
 
 <div align="center">
 
@@ -136,18 +165,39 @@ provider actually reports what it charged.
 
 </div>
 
+**A finished cut becomes an edition.** Publishing compiles the cut into a portable video
+publication — the picture, selectable caption tracks and a manifest that verifies every file —
+delivered as a folder or a ZIP. Publications plays it back without the world it came from.
+
 ## What you can make
 
 One world, two production families, all starring the same characters in the same places under the
 same rules. Interactive is a Video kind, not a third family:
 
-- **Story** · novels, novellas, short fiction, screenplays and audio-first scripts, drafted with the canon as editor
+- **Story** · novels, novellas, short fiction, screenplays and audio-first scripts, drafted chapter by chapter with the canon as editor, imported from and exported to `.docx` and EPUB, and read aloud as an audiobook
 - **Video** · *Microdrama* (short-form episodic drama), films, music videos, and interactive branching narratives, with boards and shots dispatched to video models with references attached
 
 Visual assets — concept art, character references, storyboards and promotional material — travel
 with every production as they develop.
 
 A change to a character lands in all of them.
+
+## Models, voices and harnesses
+
+Arke does not assume one provider. Settings chooses the default models; a world can choose its
+own, and a production its own again, each inheriting whatever it leaves unset.
+
+- **Harness** · the agent that does the writing. Claude Code, OpenCode and Codex are all
+  selectable, with per-agent model overrides, and Arke carries a harness of its own that runs
+  against Ollama on your machine. With no harness chosen and no cloud key stored, it runs locally
+  rather than refusing.
+- **Text** · local models through Ollama, among them Gemma 4 12B, or your own cloud accounts.
+- **Images** · cloud image and video models with references attached, or local recipes run on
+  your own graphics card through a managed ComfyUI: Krea 2, and Qwen Image 2.1 as a research
+  recipe whose licence allows noncommercial use only.
+- **Voice** · Kokoro on your machine, or ElevenLabs, Mistral's Voxtral, BreezeBlue's Breeze TTS 2
+  and Fish Audio's S2.1-Pro as hosted readers. A read longer than a reader's limit is split at
+  sentence ends and plays as the pieces arrive.
 
 ## Get it
 
@@ -195,7 +245,8 @@ flowchart TD
 ```
 
 The **engine** exposes a supported Node API for world reads, proposals, portrait generation
-and prose authoring, including AI drafting, revision and committed-manuscript output.
+and prose authoring, including AI drafting, revision and committed-manuscript output, and a
+chapter's page illustration and narration.
 It does not start a server. A product host supplies its permissions, persistence and generation
 integrations. See [engine services and host contracts](docs/development/engine.md).
 
@@ -216,7 +267,8 @@ test selection and generated-file ownership.
 Arke is specified before it is written. A behaviour is decided in a capability spec — with its
 requirements, its design reasoning and its decision log — and only then built. The screens above
 are drawn the same way, in a versioned design master, before a line of the screen's own code
-exists — which is also where their screenshots come from.
+exists — which is where most of their screenshots come from. The two story screenshots are the
+running app, open on the sample world.
 
 The specification set is not published with the code. It is the design record rather than the
 product, and it stays private. That is worth knowing before you read far, because the code cites
@@ -272,6 +324,14 @@ quotations and typed refusals, proposals staged with ripple computation, referen
 travel into every dispatch, real currency shown before spend with running jobs cancellable
 from the Activity panel, a shot page carrying its frame, its camera and its 3D Stage together,
 and a cut that assembles itself from accepted takes.
+
+**Story mode is built through to the audiobook.** Chapters written on the page, passage asks
+accepted whole or in part, `.docx` import, `.docx` and EPUB export, and the book read aloud by a
+narrator and a cast of voices.
+
+**Video publications compile and play.** A cut becomes a portable, verified edition with
+selectable captions, delivered as a folder or ZIP and played from Publications. Books,
+audiobooks and interactive video are not yet publication profiles.
 
 **The reusable engine and standalone Node host are available from source.** Desktop and browser
 hosts share Studio's application services; the public engine exposes a bounded set of those

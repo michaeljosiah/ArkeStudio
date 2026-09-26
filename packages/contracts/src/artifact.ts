@@ -205,6 +205,19 @@ export const ArtifactAudiobookGenerationSchema = z
      * first take, and for one that restores a take whose media was gone.
      */
     remakeOf: ArtifactIdSchema.optional(),
+    /**
+     * A take a person recorded rather than a voice made (SPEC-047 R-34): the file brought in and
+     * the file prepared from it, by hash, and the rights acknowledgement it was kept under (R-36).
+     * The reader fields then name the recording (`recording · recorded`), never a voice.
+     */
+    recording: z
+      .object({
+        sourceHash: z.string().min(1),
+        preparedHash: z.string().min(1),
+        acknowledgementId: z.string().min(1),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type ArtifactAudiobookGeneration = z.infer<typeof ArtifactAudiobookGenerationSchema>;

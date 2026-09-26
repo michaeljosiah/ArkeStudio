@@ -45,6 +45,8 @@ ${text.slice(0, 24_000)}`;
 }
 
 const WALL_CLOCK_MS = 120_000;
+/** On Arke's local harness: a model on the person's own card is slower and costs nothing to wait for (issue 1289). */
+const LOCAL_WALL_CLOCK_MS = 10 * 60_000;
 
 export function makeAdapterExtractor(
   adapter: HarnessAdapter,
@@ -105,7 +107,7 @@ export function makeAdapterExtractor(
       // is parked, so it never fires and the extraction waits forever.
       let deadline: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<never>((_, reject) => {
-        deadline = setTimeout(() => reject(new Error("extraction took too long")), WALL_CLOCK_MS);
+        deadline = setTimeout(() => reject(new Error("extraction took too long")), adapter.id === "arke" ? LOCAL_WALL_CLOCK_MS : WALL_CLOCK_MS);
       });
       try {
         await Promise.race([collected, timeout]);
