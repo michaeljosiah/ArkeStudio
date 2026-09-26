@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const FOUNDING_IMPORTS_SCHEMA_VERSION = 36;
+export const FOUNDING_IMPORTS_SCHEMA_VERSION = 38;
 export const GenesisSourceSchema = z.object({
   hash: z.string().regex(/^sha256:[a-f0-9]{64}$/), name: z.string().min(1).max(240),
   quote: z.string().min(1).max(8000), line: z.number().int().positive(),
