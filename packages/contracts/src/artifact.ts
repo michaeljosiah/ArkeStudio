@@ -105,6 +105,7 @@ export const CharacterReferenceWorkflowSchema = z.enum([
   "character-voice-sample",
   "character-look",
   "reference-tile",
+  "location-view-candidate",
 ]);
 export type CharacterReferenceWorkflow = z.infer<typeof CharacterReferenceWorkflowSchema>;
 
@@ -221,7 +222,16 @@ export const ArtifactAudiobookGenerationSchema = z
   .strict();
 export type ArtifactAudiobookGeneration = z.infer<typeof ArtifactAudiobookGenerationSchema>;
 
+export const ArtifactFoundingGenerationSchema = z.object({
+  recipe: RecipeIdentitySchema.optional(),
+  source: z.literal("founding"), jobId: JobIdSchema, genesisId: z.string(), target: z.string(),
+  label: z.string(), prompt: z.string(), provider: z.string(), model: z.string(),
+  params: z.record(z.string(), z.unknown()), links: z.array(z.string()),
+  estimatedMicroUsd: z.number().int().min(0), costMicroUsd: z.number().int().min(0).nullable(),
+}).strict();
+
 export const ArtifactGenerationSchema = z.union([
+  ArtifactFoundingGenerationSchema,
   ArtifactBenchGenerationSchema,
   ArtifactReferenceGenerationSchema,
   ArtifactAudiobookGenerationSchema,

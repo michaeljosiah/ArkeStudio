@@ -1,4 +1,7 @@
 import { valueSchema } from "./value-schema.js";
+import { GenesisDraftSchema } from "./genesis.js";
+import { GenesisImportResolveSchema } from "./genesis-imports.js";
+import { GenesisImageTargetSchema } from "./genesis-images.js";
 import { AccountPageSchema } from "./account.js";
 import { StageReferenceFrameSchema } from "./scene.js";
 import { isManuscriptLanguage } from "./manuscript.js";
@@ -882,6 +885,27 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("genesis-discard"), genesisId: GenesisIdSchema }).strict(),
   z.object({ kind: z.literal("genesis-list") }).strict(),
   z.object({ kind: z.literal("genesis-load"), genesisId: GenesisIdSchema }).strict(),
+  z.object({ kind: z.literal("genesis-review"), genesisId: GenesisIdSchema, requestId: z.string().min(1).optional() }).strict(),
+  z.object({ kind: z.literal("genesis-images"), genesisId: GenesisIdSchema, models: ModelChoicesSchema.optional() }).strict(),
+  z.object({ kind: z.literal("genesis-voices"), genesisId: GenesisIdSchema }).strict(),
+  z.object({ kind: z.literal("genesis-readiness"), genesisId: GenesisIdSchema }).strict(),
+  z.object({ kind: z.literal("genesis-readiness-leave"), genesisId: GenesisIdSchema, requestId: UlidSchema, digest: z.string(), findingId: z.string() }).strict(),
+  z.object({ kind: z.literal("genesis-voice-generate"), genesisId: GenesisIdSchema, requestId: UlidSchema, intentId: z.string(), digest: z.string() }).strict(),
+  z.object({ kind: z.literal("genesis-voice-decide"), genesisId: GenesisIdSchema, requestId: UlidSchema,
+    target: z.string().regex(/^character:[a-z0-9][a-z0-9-]*$/), candidateId: z.string().optional(), hash: z.string().optional(),
+    decision: z.enum(["approve", "reject", "unassign"]) }).strict(),
+  z.object({ kind: z.literal("genesis-imports"), genesisId: GenesisIdSchema }).strict(),
+  z.object({ kind: z.literal("genesis-import-resolve"), genesisId: GenesisIdSchema, resolution: GenesisImportResolveSchema }).strict(),
+  z.object({ kind: z.literal("genesis-image-generate"), genesisId: GenesisIdSchema, requestId: UlidSchema,
+    intentId: z.string().min(1), digest: z.string().min(1), models: ModelChoicesSchema.optional() }).strict(),
+  z.object({ kind: z.literal("genesis-image-decide"), genesisId: GenesisIdSchema, requestId: UlidSchema, target: GenesisImageTargetSchema,
+    candidateId: z.string().optional(), hash: z.string().optional(), decision: z.enum(["approve", "reject", "unassign"]) }).strict(),
+  z.object({ kind: z.literal("genesis-propose-world"), genesisId: GenesisIdSchema, draft: GenesisDraftSchema }).strict(),
+  z.object({
+    kind: z.literal("genesis-decide"), genesisId: GenesisIdSchema, requestId: UlidSchema,
+    choices: z.array(z.object({ key: z.string().min(1), digest: z.string().regex(/^sha256:[a-f0-9]{64}$/) }).strict()).min(1).max(300),
+    decision: z.enum(["approve", "reject"]),
+  }).strict(),
   /**
    * The review before the press (SPEC-031 R-10..R-12): fold the blueprint, check every
    * precondition, compile the plan. Answered by a `build.plan` event; nothing is created.
@@ -889,6 +913,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("plan-founding-build"),
+      generateImages: z.boolean().optional(),
       genesisId: GenesisIdSchema,
       requestId: UlidSchema,
       /**
@@ -909,6 +934,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("begin-founding-build"),
+      generateImages: z.boolean().optional(),
+      approvalDigest: z.string().optional(),
       genesisId: GenesisIdSchema,
       requestId: UlidSchema,
       /**

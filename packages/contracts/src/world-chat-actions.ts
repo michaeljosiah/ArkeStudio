@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PropAuthoringChangeSchema, PropIdSchema, PropStateIdSchema } from "./prop.js";
 export { ProductionCreationPlanSchema, type ProductionCreationPlan } from "./production-creation.js";
 import { ProductionCreationPlanSchema } from "./production-creation.js";
 import { ConversationActionSemanticIdSchema } from "./arke-actions.js";
@@ -1069,6 +1070,14 @@ export const BenchGenerationModelActionSchema = z
   })
   .strict();
 
+export const PropAuthoringModelActionSchema = z.object({
+  kind: z.literal("prop-authoring"), change: PropAuthoringChangeSchema, checkReceiptIds: CompleteReadIdsSchema,
+}).strict();
+
+export const PropReferenceModelActionSchema = z.object({
+  kind: z.literal("prop-reference"), propId: PropIdSchema, stateId: PropStateIdSchema,
+  artifactId: ArtifactIdSchema, replace: z.boolean().default(false), checkReceiptIds: CompleteReadIdsSchema,
+}).strict();
 export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   WorldMetadataModelActionSchema,
   CanonModelActionSchema,
@@ -1179,6 +1188,8 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ProductionCutExportModelActionSchema,
   ProductionExportCancelModelActionSchema,
   BenchGenerationModelActionSchema,
+  PropAuthoringModelActionSchema,
+  PropReferenceModelActionSchema,
 ]);
 export type ModelWorldChatAction = z.infer<typeof ModelWorldChatActionSchema>;
 
@@ -1190,6 +1201,8 @@ export const WorldChatWorldMetadataActionSchema = preparedAction(
   "world-chat-world-metadata",
   WorldMetadataModelActionSchema,
 );
+export const WorldChatPropAuthoringActionSchema = preparedAction("world-chat-prop-authoring", PropAuthoringModelActionSchema);
+export const WorldChatPropReferenceActionSchema = preparedAction("world-chat-prop-reference", PropReferenceModelActionSchema);
 export const WorldChatCanonActionSchema = preparedAction("world-chat-canon", CanonModelActionSchema);
 export const WorldChatCanonRetireActionSchema = preparedAction("world-chat-canon-retire", CanonRetireModelActionSchema);
 export const WorldChatCanonRestoreActionSchema = preparedAction("world-chat-canon-restore", CanonRestoreModelActionSchema);
@@ -1373,6 +1386,8 @@ export const WorldChatEditorRequestActionSchema = z
 export type WorldChatEditorRequestAction = z.infer<typeof WorldChatEditorRequestActionSchema>;
 
 export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
+  WorldChatPropAuthoringActionSchema,
+  WorldChatPropReferenceActionSchema,
   WorldChatProposalActionSchema,
   WorldChatBibleActionSchema,
   WorldChatSceneActionSchema,

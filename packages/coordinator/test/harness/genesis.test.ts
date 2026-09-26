@@ -570,3 +570,18 @@ describe("what one agent conversation may spend", () => {
     assert.equal(sessionTokenBudget(1_000, AUTHORING), AUTHORING);
   });
 });
+it("keeps readiness findings available to the repair turn and invalidates them afterwards", async () => {
+  const dir = await sandboxDir("arke-genesis-readiness-");
+  const adapter = draftingAdapter();
+  const create = adapter.createSession.bind(adapter);
+  let sawFindings = false;
+  adapter.createSession = async input => {
+    sawFindings = (await readFile(join(dir, "readiness-review.json"), "utf8")).includes("Repair this relationship");
+    return create(input);
+  };
+  await writeFile(join(dir, "readiness-review.json"), JSON.stringify({ findings: ["Repair this relationship"] }));
+  const genesis = new GenesisService(adapter, () => {}, { sessionInput: input => input });
+  await genesis.run(dir, "gen-repair", "Propose a fix");
+  assert.equal(sawFindings, true);
+  await assert.rejects(readFile(join(dir, "readiness-review.json")), { code: "ENOENT" });
+});

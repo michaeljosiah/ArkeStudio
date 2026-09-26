@@ -396,6 +396,7 @@ function ArtifactMeta({
       {generation !== undefined && generation.source === "character-reference" && (
         <Row label="from">{`${generation.workflow} · ${linkName(generation.sheetId, artifact.links)}`}</Row>
       )}
+      {generation?.source === "founding" && <Row label="from">{generation.label} · founding conversation</Row>}
       {artifact.boundaryExtraction !== undefined && (
         <Row label="cut from">{artifact.boundaryExtraction.sourceTakeId}</Row>
       )}

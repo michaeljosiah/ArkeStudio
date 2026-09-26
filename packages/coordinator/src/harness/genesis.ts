@@ -1,5 +1,6 @@
 import { createPreparedSession, type SessionInput } from "./session-files.js";
 import { basename, join } from "node:path";
+import { readFile, rm } from "node:fs/promises";
 import {
   GenesisDraftSchema,
   type DomainEvent,
@@ -10,7 +11,8 @@ import { GENESIS_ATTACHMENTS_DIR, sandboxAttachments } from "../artifacts/genesi
 import { blueprintSaysSomething, foldBlueprint, sameBlueprint } from "./blueprint.js";
 import { sessionTokenBudget } from "./token-budget.js";
 import { foundingMessages, recordFoundingBlueprint, recordFoundingMessage } from "./genesis-conversation.js";
-import { atomicWriteFile } from "../world/atomic.js";
+import { reviewGenesisContent } from "./genesis-review.js";
+import { atomicWriteFile, withTransientRetry } from "../world/atomic.js";
 import { THINKING_LABEL, WRITING_LABEL, workingLabel } from "../world-chat/project.js";
 
 /**
@@ -66,11 +68,12 @@ plus one-line entries for any cast or places you have not yet written files for:
  "characters": [{"name": "...", "line": "one line on who they are"}],
  "locations": [{"name": "...", "line": "one line on the place"}],
  "threads": ["an open question worth pulling later"],
+ "canon": [{"slug":"stable-fact-name","type":"rule","title":"A proposed fact","statement":"The exact proposed fact."}],
  "bible": "a few paragraphs of prose: the through-line, the shape, what it is about",
  "keyArt": {"prompt": "one complete prompt for an image model", "subject": "what the world's one image holds", "moment": "the moment it catches",
   "stakes": "what is at stake in it", "characters": ["names in frame"], "location": "the place in frame"}}
 
-Omit anything not settled. If nothing has been settled yet, return {}.`;
+Preserve existing canon and entity identities. Omit anything not discussed. If nothing has been discussed yet, return {}.`;
 
 /** Repeated on author turns so a hidden JSON recovery turn cannot set the conversation's register. */
 const CONVERSATION = `You are shaping a brand-new story world with its author. Think with them about the
@@ -116,6 +119,64 @@ name inside it can change freely. A character file:
  "description": "a short paragraph of who they are in this story",
  "brief": {"apparentAge": "...", "build": "...", "colouring": "...", "hair": "...",
   "wardrobe": "...", "bearing": "...", "defaultExpression": "..."}}
+
+Each entity may also hold "sheet": {"sections": {...}, "links": ["location:the-vigil"]}.
+These are the full sheet words the author reviews and approves in chat, then saves unchanged.
+Use only these headings: character — Essence, Appearance, Relationships, Voice · written;
+location — Look, Sound, Customs; faction — Essence, Wants, Fears. Keep unknown details explicit.
+Optional sheet fields are role and billing for characters, region for locations.
+Relationship links use the other entity's kind and stable filename slug, not its display name.
+
+For world facts, draft.json may hold "canon": [{"slug":"closed-gates","type":"rule",
+"title":"The gates stay closed","statement":"The harbour gates never open after dusk."}].
+Supported types are rule, lore, location, faction, timeline, tone and thread. A thread is an
+open question; other types propose settled facts. Nothing becomes accepted until the author
+approves its content card. Do not write approval records. ./approved-content.json is an
+application-supplied snapshot of the author's choices, not an editable source of decisions.
+
+For props and objects, draft.json may contain "props": [{"slug":"sword","name":"The sword",
+"states":[{"slug":"intact","name":"Intact"},{"slug":"broken","name":"Broken"}]}].
+Prop and state slugs are permanent identities: renaming changes only name. Props own names and
+ordered named states, not invented sheet fields. The author reviews their exact names in chat.
+Images can target prop:<prop-slug>:<state-slug>; generation and assignment need separate approval.
+
+For voice casting, read ./voice-catalogue.json for currently supported voices. Propose
+draft.json "voices": [{"id":"maren-audition","target":"character:maren",
+"voice":{"provider":"kokoro","model":"kokoro-82m","voiceId":"an-id-from-the-catalogue"},
+"text":"A short audition line in this character's own words."}].
+Use only catalogue identities, with up to 1,000 characters of text. Chat shows the text, voice,
+cost and data transfer before authorization, then plays actual audio for separate selection.
+Never claim a voice is assigned because an audition was authorized. Keep target slugs stable
+on renames. Voices are optional. World-owned cloned recordings cannot be used before founding;
+explain that boundary rather than inventing a voice or bypassing recording-upload consent.
+
+The conversation's Check readiness control reviews approved records, unapproved revisions,
+invalid references and possible import conflicts. ./readiness-review.json, when present, is
+an application-supplied snapshot, not an authority you can edit. Explain possible creative
+contradictions as uncertain, cite their records and propose fixes through the ordinary draft
+and approval flow. Open questions and omitted optional images or voices are valid choices.
+
+For document imports, write one candidate per file at draft/imports/<stable-id>.json:
+{"source":"notes.md","kind":"character","name":"Maren","body":"Proposed interpretation",
+"section":"Essence","quote":"Exact source words","links":["location:the-vigil"]}.
+Supported kinds: character, location, faction, canon. Character sections: Essence, Appearance;
+location: Look, Sound; faction: Essence, Wants. Omit section for canon. Every candidate needs an
+exact quote from that uploaded source. Interpretations and suggested relationship links are
+proposals, not verified facts. Do not invent missing details or write extracted content directly
+into entity files. The author compares duplicates, edits, rejects, merges or retains candidates
+in chat, then separately approves the exact resulting content. Preserve sources metadata when
+later revising prepared content. Do not author or alter source evidence metadata.
+
+When the author asks for a character or location image, prepare a typed generation request in
+draft.json "images": [{"id":"maren-portrait","target":"character:maren","prompt":"Complete image
+prompt including the agreed look and visible subject","references":["uploaded-photo.png"]}].
+Use location:<stable-slug> for an establishing view. Keep the request id stable while revising
+its prompt. References name uploaded images in attachments/; use [] when none are needed.
+The conversation shows the target, full prompt, references, model and price for the author to
+authorize. Generation then runs in chat and displays the result for a separate Use/Reject
+decision. Never claim an image is generated or selected just because you proposed it. Revise
+the prompt when asked for changes. To use an existing upload, tell the author which character
+or location and role it is intended for; the image card offers that explicit assignment.
 
 When the author says a character is unseen, never shown, or must never be pictured, set
 "neverDepicted": true on that character's file. This is a rule, not an appearance description:
@@ -255,6 +316,8 @@ export class GenesisService {
       const blueprintBefore = await foldBlueprint(dir);
 
       const history = firstTurn ? (await foundingMessages(dir)).filter(message => message.id !== userMessage.id) : [];
+      const reviewed = await reviewGenesisContent(dir);
+      await atomicWriteFile(join(dir, "approved-content.json"), JSON.stringify(reviewed.selected, null, 2) + "\n");
       let restoredHistory = "";
       if (history.length) {
         const transcript = history.map(message => `${message.role}: ${message.text}`).join("\n\n");
@@ -375,6 +438,8 @@ export class GenesisService {
           this.emit({ at: at(), type: "genesis.blueprint", genesisId, blueprint, revision });
         }
       }
+      // The repair turn can read the reviewed findings; subsequent turns need a fresh snapshot.
+      await withTransientRetry(() => rm(join(dir, "readiness-review.json"), { force: true }));
       status(final.state, final.detail);
     } catch (err) {
       this.sessions.delete(genesisId);
@@ -404,7 +469,10 @@ export class GenesisService {
           break;
         } else if (event.type === "session.error" || event.type === "session.ended") break;
       }
-      const draft = parseDraftFrom(reply);
+      const existing = await readFile(join(dir, "draft.json"), "utf8").then(raw => JSON.parse(raw) as Record<string, unknown>)
+        .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT" || err instanceof SyntaxError) return {}; throw err; });
+      // Recovery restores missing output; omission is not a request to erase proposals.
+      const draft = parseDraftFrom(reply, existing);
       if (draft === null) return null;
       await atomicWriteFile(join(dir, "draft.json"), JSON.stringify(draft, null, 2) + "\n");
       return draft;
@@ -426,6 +494,10 @@ function saysSomething(draft: GenesisDraft): boolean {
     draft.genre !== undefined ||
     draft.look !== undefined ||
     draft.keyArt !== undefined ||
+    (draft.canon?.length ?? 0) > 0 ||
+    (draft.images?.length ?? 0) > 0 ||
+    (draft.props?.length ?? 0) > 0 ||
+    (draft.voices?.length ?? 0) > 0 ||
     draft.characters.length > 0 ||
     draft.locations.length > 0 ||
     draft.threads.length > 0 ||
@@ -440,16 +512,16 @@ function saysSomething(draft: GenesisDraft): boolean {
  * Pull the draft out of a reply. Models fence JSON, prefix it with a sentence, or answer with
  * it bare; all three are the same answer. The outermost braces win, and the schema decides.
  */
-export function parseDraftFrom(reply: string): GenesisDraft | null {
+export function parseDraftFrom(reply: string, previous: Record<string, unknown> = {}): GenesisDraft | null {
   const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(reply);
   const candidates = [fenced?.[1], reply.slice(reply.indexOf("{"), reply.lastIndexOf("}") + 1), reply];
   for (const candidate of candidates) {
     if (candidate === undefined || candidate.trim() === "") continue;
     try {
-      const parsed = GenesisDraftSchema.safeParse(JSON.parse(candidate));
+      const parsed = GenesisDraftSchema.safeParse({ ...previous, ...JSON.parse(candidate) });
       // `{}` parses cleanly — the schema fills the lists — but says nothing. A draft that
       // settles nothing must not overwrite one that settled something.
-      if (parsed.success && saysSomething(parsed.data)) return parsed.data;
+      if (parsed.success && (saysSomething(parsed.data) || Object.keys(previous).length > 0)) return parsed.data;
     } catch {
       /* try the next shape */
     }

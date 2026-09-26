@@ -118,6 +118,7 @@ export function sheetsFence(bundle: WorldBundle): string {
 
 export function referencesFence(bundle: WorldBundle): string {
   return fence({
+    props: bundle.props,
     kits: bundle.referenceKits,
     takes: bundle.referenceTakes,
     reviews: bundle.referenceReviews,
@@ -560,6 +561,7 @@ export class WorldChatTargetReads {
         assertArgs(args, []);
         readTarget = target("references", bundle.meta.worldId);
         rows = [
+          ...[...bundle.props].sort((a, b) => a.id.localeCompare(b.id)).map(prop => ({ key: `prop:${prop.id}`, value: { kind: "prop", prop } })),
           ...[...bundle.referenceKits]
             .sort((a, b) => a.sheetId.localeCompare(b.sheetId))
             .map((kit) => ({ key: `kit:${kit.sheetId}`, value: { kind: "kit", kit } })),
