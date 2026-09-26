@@ -4658,6 +4658,13 @@ export class Coordinator {
    * surface sees it. Establish candidates just land; the client lists them off the job row.
    */
   private async onJobTerminal(job: Job): Promise<void> {
+    if (job.target.kind === "genesis-image" && job.status === "succeeded") {
+      if (!this.opts.provider.genesisDir) throw new Error("Founding image storage is unavailable.");
+      const dir = await this.opts.provider.genesisDir(job.worldId);
+      const images = await reviewGenesisImages(dir, await foldBlueprint(dir), [job], null);
+      if (!images.candidates.some(candidate => candidate.jobId === job.id)) throw new Error("The generated image could not be preserved. Retry finalization.");
+      return;
+    }
     // A conversation-scoped job (SPEC-031 R-55) has no world to finalize into: its landing
     // was the sandbox, and looking its scope up as a world would scan every world's meta
     // just to throw. The genesis rail reads the job row itself.
@@ -5684,7 +5691,7 @@ export class Coordinator {
     benchDispatchHeld = false,
     genesisDecisionHeld = false,
   ): Promise<void> {
-    if (!genesisDecisionHeld && (msg.kind === "generate-look-preview" || msg.kind === "genesis-discard" || msg.kind === "genesis-chat" || msg.kind === "genesis-decide" || msg.kind === "genesis-review" || msg.kind === "begin-founding-build" || msg.kind === "genesis-attach" || msg.kind === "genesis-attach-files" || msg.kind === "create-world") && msg.genesisId) {
+    if (!genesisDecisionHeld && (msg.kind === "genesis-image-generate" || msg.kind === "genesis-image-decide" || msg.kind === "generate-look-preview" || msg.kind === "genesis-discard" || msg.kind === "genesis-chat" || msg.kind === "genesis-decide" || msg.kind === "genesis-review" || msg.kind === "begin-founding-build" || msg.kind === "genesis-attach" || msg.kind === "genesis-attach-files" || msg.kind === "create-world") && msg.genesisId) {
       return serializeFileMutation(`founding-decisions:${msg.genesisId}`, () => this.handleClientMessage(msg, false, false, true));
     }
     if (!benchTakeActionHeld && (msg.kind === "bench-accept" || msg.kind === "bench-discard")) {
