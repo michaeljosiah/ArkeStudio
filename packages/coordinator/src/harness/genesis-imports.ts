@@ -64,12 +64,15 @@ async function reviewUnlocked(dir: string, state: State) {
   await recover(dir, state);
   const documents: Array<{ name: string; supported: boolean; detail: string }> = [], problems: string[] = [];
   const sources = new Map<string, { text: string; hash: string }>();
+  let sourceBytesTotal = 0;
   for (const path of await sandboxAttachments(dir)) {
     const name = basename(path);
     if (["image", "audio", "video"].includes(kindForFile(name))) continue;
     try {
       const info = await lstat(path);
       if (!info.isFile() || info.isSymbolicLink() || info.size > 10 * 1024 * 1024) throw new Error("Source exceeds 10 MB or is not a regular file.");
+      if (sourceBytesTotal + info.size > 30 * 1024 * 1024 || sources.size >= 50) throw new Error("This review accepts up to 50 documents and 30 MB in total. Import a smaller batch.");
+      sourceBytesTotal += info.size;
       const bytes = await readFile(path), text = extractDocumentText(name, bytes);
       if (!text?.trim()) throw new Error(/\.pdf$/i.test(name) ? "No supported PDF text was found. Upload a text or Markdown copy." : "Upload text, Markdown, or a PDF with supported text.");
       const digest = hash(bytes);
@@ -81,7 +84,8 @@ async function reviewUnlocked(dir: string, state: State) {
   const folder = join(dir, "draft", "imports");
   const names = await readdir(folder).catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return []; throw err; });
   const proposed = new Set<string>();
-  for (const name of names.filter(name => name.endsWith(".json")).slice(0, 300)) {
+  const seenProposals = new Map<string, string>(), conflicting = new Set<string>();
+  for (const name of names.filter(name => name.endsWith(".json")).sort().slice(0, 300)) {
     try {
       const info = await lstat(join(folder, name));
       if (!info.isFile() || info.isSymbolicLink() || info.size > 64000) throw new Error("Invalid import proposal file.");
@@ -94,6 +98,12 @@ async function reviewUnlocked(dir: string, state: State) {
       if (offset < 0) throw new Error("Use an exact quoted span from the source.");
       const id = hash([source.hash, proposal.kind, proposal.name, proposal.section ?? "", proposal.quote].join("\n"));
       proposed.add(id);
+      const proposalDigest = conversationActionDigest({ ...proposal, source: source.hash });
+      if (seenProposals.has(id) && seenProposals.get(id) !== proposalDigest) {
+        conflicting.add(id);
+        throw new Error("Conflicting files propose different interpretations of the same evidence. Keep one proposal before reviewing.");
+      }
+      seenProposals.set(id, proposalDigest);
       const existing = state.cards.find(card => card.id === id);
       if (existing && state.resolutions[id] && state.resolutions[id]!.status !== "deferred") continue;
       const evidence = GenesisSourceSchema.parse({ hash: source.hash, name: proposal.source, quote: proposal.quote,
@@ -103,7 +113,7 @@ async function reviewUnlocked(dir: string, state: State) {
       if (existing) state.cards[state.cards.indexOf(existing)] = card; else state.cards.push(card);
     } catch (err) { problems.push(`${name}: ${err instanceof Error ? err.message : "Unreadable candidate"}`); }
   }
-  state.cards = state.cards.filter(card => proposed.has(card.id) || ["prepared", "rejected"].includes(state.resolutions[card.id]?.status ?? ""));
+  state.cards = state.cards.filter(card => (proposed.has(card.id) && !conflicting.has(card.id)) || ["prepared", "rejected"].includes(state.resolutions[card.id]?.status ?? ""));
   const rows = genesisContentRows(await foldBlueprint(dir));
   for (const card of state.cards) {
     card.matches = rows.filter(row => row.content.kind === card.proposal.kind && row.title.toLocaleLowerCase() === card.proposal.name.toLocaleLowerCase())
@@ -137,6 +147,7 @@ export async function resolveGenesisImport(dir: string, input: GenesisImportReso
       if (draft.dropped.length) throw new Error("Repair unreadable draft files before preparing an import.");
       const proposal = card.proposal, name = input.name ?? proposal.name, body = input.body ?? proposal.body;
       const rows = genesisContentRows(draft), kind = proposal.kind;
+      const section = proposal.section ?? (kind === "location" ? "Look" : "Essence");
       const existing = input.target ? rows.find(row => row.key === input.target && row.content.kind === kind) : undefined;
       const matches = rows.filter(row => row.content.kind === kind && row.title.toLocaleLowerCase() === name.toLocaleLowerCase());
       if (input.target && !existing) throw new Error("The selected merge target is unavailable.");
@@ -146,6 +157,11 @@ export async function resolveGenesisImport(dir: string, input: GenesisImportReso
       let slug = existing?.key.split(":")[1] ?? `${slugify(name) || kind}-${card.id.slice(0, 8)}`;
       if (!existing) { const stem = slug; for (let n = 2; rows.some(row => row.key === `${kind}:${slug}`); n++) slug = `${stem}-${n}`; }
       const source = { ...card.source, modified: name !== proposal.name || body !== proposal.body };
+      const replacedSources = new Set(input.mode === "replace" ? state.cards.filter(previous => {
+        const resolution = state.resolutions[previous.id];
+        const previousSection = previous.proposal.section ?? (kind === "location" ? "Look" : "Essence");
+        return resolution?.target === `${kind}:${slug}` && (kind === "canon" || previousSection === section);
+      }).map(previous => previous.id) : []);
       // The interpretation and exact evidence remain visibly different in the eventual sheet.
       const citation = `Source: ${source.name}, line ${source.line}`;
       const quoted = `${body}\n\n${citation} — "${source.quote}"`;
@@ -165,9 +181,8 @@ export async function resolveGenesisImport(dir: string, input: GenesisImportReso
         const entities = kind === "character" ? draft.characters : kind === "location" ? draft.locations : draft.factions;
         const old = entities.find(entity => entity.slug === slug);
         const entity = completeGenesisSheet(kind, old ?? { name });
-        const section = proposal.section ?? (kind === "location" ? "Look" : "Essence");
         const previous = entity.sheet.sections[section];
-        const next = { ...entity, name, sources: [...(input.mode === "replace" ? [] : old?.sources ?? []), source],
+        const next = { ...entity, name, sources: [...(old?.sources ?? []).filter(source => !replacedSources.has(source.candidateId)), source],
           sheet: { ...entity.sheet, sections: { ...entity.sheet.sections,
             [section]: input.mode === "append" && previous && previous !== "—" ? `${previous}\n\n${sourced}` : sourced },
             links: [...new Set([...(entity.sheet.links ?? []), ...(proposal.links ?? [])])] } };
@@ -178,8 +193,8 @@ export async function resolveGenesisImport(dir: string, input: GenesisImportReso
         GenesisBlueprintSchema.parse({ ...draft, [key]: [...entities.filter(entity => entity.slug !== slug), { ...next, slug }] });
       }
       if (input.mode === "replace") {
-        for (const resolution of Object.values(state.resolutions)) {
-          if (resolution.target === `${kind}:${slug}`) resolution.restoreEvidence = false;
+        for (const [id, resolution] of Object.entries(state.resolutions)) {
+          if (replacedSources.has(id)) resolution.restoreEvidence = false;
         }
       }
       state.resolutions[card.id] = { status: "prepared", target: `${kind}:${slug}`, write: { file, content }, applied: false };

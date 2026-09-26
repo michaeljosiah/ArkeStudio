@@ -3033,6 +3033,12 @@ export class Coordinator {
             },
             queueStatuses: () => this.readModel.getState().app.queues,
             refreshWorldSnapshot: (worldId) => this.refreshWorldSnapshot(worldId),
+            refreshConversations: async worldId => {
+              const store = this.opts.provider.openStore?.();
+              if (store?.worldId !== worldId) return;
+              await this.refreshConversations(store);
+              if (this.stillOpen(store)) this.transport.broadcastSnapshot();
+            },
             refreshWorldList: () => this.refreshWorldList(),
             emit: (event) => this.emit(event),
             log: (record) => void this.appLog?.append(record),
@@ -7390,6 +7396,11 @@ export class Coordinator {
           return;
         }
         const sandbox = await this.opts.provider.genesisDir(msg.genesisId);
+        const founding = await loadGenesisConversation(sandbox, msg.genesisId);
+        if (founding.founding || founding.worldId || this.foundingBuild?.isBeginning(msg.genesisId)) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "World creation has begun. Recover the build before generating another look.");
+          return;
+        }
         const blueprint = await foldBlueprint(sandbox);
         if (blueprint.look === undefined) {
           this.rejectEnqueue(msg.requestId, msg.kind, "The conversation has not settled a look yet.");
@@ -16270,6 +16281,10 @@ export class Coordinator {
       if ((await foundingMessages(dir)).length) {
         await store.ensureSchemaVersion(FOUNDING_CONVERSATION_SCHEMA_VERSION, "founding-chat");
         await carryGenesisConversation(dir, store.dir);
+        if (this.stillOpen(store)) {
+          await this.refreshConversations(store);
+          this.transport.broadcastSnapshot();
+        }
       }
       await atomicWriteFile(join(genesisControlDir(dir), "completed.json"), JSON.stringify({ worldId, form: true }) + "\n");
     });
