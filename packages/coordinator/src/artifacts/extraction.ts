@@ -32,6 +32,7 @@ import type { WorldStatePrecondition, WorldStore } from "../world/store.js";
 // ---------------------------------------------------------------------------
 
 export async function extractText(store: WorldStore, artifact: ArtifactSidecar): Promise<string | null> {
+  if (!/\.(md|txt|pdf)$/i.test(artifact.file)) return null;
   const path = toExtendedLength(join(store.dir, "artifacts", artifact.file));
   return extractDocumentText(artifact.file, await readFile(path));
 }

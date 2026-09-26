@@ -5,9 +5,9 @@ import { Button, Callout } from "./ui.js";
 function ImportCard({ card, busy, onResolve }: { card: GenesisImportCard; busy: boolean; onResolve(input: GenesisImportResolve): void }) {
   const [name, setName] = useState(card.proposal.name), [body, setBody] = useState(card.proposal.body);
   const [target, setTarget] = useState(card.matches[0]?.key ?? "");
-  const [mode, setMode] = useState<"distinct" | "append" | "replace">(card.matches.length ? "append" : "distinct");
+  const [mode, setMode] = useState<"" | "distinct" | "append" | "replace">(card.matches.length ? "append" : "");
   const decide = (decision: GenesisImportResolve["decision"]) => onResolve({
-    id: card.id, digest: card.digest, decision, name, body, mode, ...(mode !== "distinct" && target ? { target } : {}),
+    id: card.id, digest: card.digest, decision, name, body, ...(mode ? { mode } : {}), ...(mode !== "distinct" && target ? { target } : {}),
   });
   return <article className="fy-actioncard" aria-label={card.proposal.name}>
     <h3>{card.proposal.name} · {card.proposal.kind}</h3>
@@ -26,13 +26,15 @@ function ImportCard({ card, busy, onResolve }: { card: GenesisImportCard; busy: 
     {!!card.matches.length && <Callout title="Possible duplicate or conflicting statement">
       <p>These names match. Compare their words; matching names alone do not establish that they are the same entity.</p>
       {card.matches.map(match => <section key={match.key}><h4>{match.name}</h4><p style={{ whiteSpace: "pre-wrap" }}>{match.text}</p></section>)}
+    </Callout>}
       <label>Resolution<select aria-label="Import resolution" value={mode} onChange={e => setMode(e.target.value as typeof mode)}>
-        <option value="append">Append to the existing record</option><option value="replace">Replace this section</option><option value="distinct">Keep as a distinct record</option>
+        <option value="">Create if the name is available</option>
+        {!!card.matches.length && <><option value="append">Append to the existing record</option><option value="replace">Replace this section</option></>}
+        <option value="distinct">Keep as a distinct record</option>
       </select></label>
-      {mode !== "distinct" && <label>Existing record<select aria-label="Import merge target" value={target} onChange={e => setTarget(e.target.value)}>
+      {(mode === "append" || mode === "replace") && <label>Existing record<select aria-label="Import merge target" value={target} onChange={e => setTarget(e.target.value)}>
         {card.matches.map(match => <option key={match.key} value={match.key}>{match.name} ({match.key})</option>)}
       </select></label>}
-    </Callout>}
     {(card.status === "pending" || card.status === "deferred") && <div style={{ display: "flex", gap: 8 }}>
       <Button disabled={busy || !name.trim() || !body.trim()} onClick={() => decide("prepare")}>Prepare for approval</Button>
       <Button variant="ghost" disabled={busy} onClick={() => decide("reject")}>Reject extraction</Button>

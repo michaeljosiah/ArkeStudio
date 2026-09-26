@@ -92,7 +92,7 @@ async function reviewUnlocked(dir: string, state: State) {
       if (offset < 0) throw new Error("Use an exact quoted span from the source.");
       const id = hash([source.hash, proposal.kind, proposal.name, proposal.section ?? "", proposal.quote].join("\n"));
       const existing = state.cards.find(card => card.id === id);
-      if (existing && state.resolutions[id]) continue;
+      if (existing && state.resolutions[id] && state.resolutions[id]!.status !== "deferred") continue;
       const evidence = GenesisSourceSchema.parse({ hash: source.hash, name: proposal.source, quote: proposal.quote,
         line: source.text.slice(0, offset).split("\n").length, candidateId: id,
         originalName: proposal.name, originalBody: proposal.body, modified: false });
@@ -134,15 +134,20 @@ export async function resolveGenesisImport(dir: string, input: GenesisImportReso
       const proposal = card.proposal, name = input.name ?? proposal.name, body = input.body ?? proposal.body;
       const rows = genesisContentRows(draft), kind = proposal.kind;
       const existing = input.target ? rows.find(row => row.key === input.target && row.content.kind === kind) : undefined;
+      const matches = rows.filter(row => row.content.kind === kind && row.title.toLocaleLowerCase() === name.toLocaleLowerCase());
       if (input.target && !existing) throw new Error("The selected merge target is unavailable.");
-      if (card.matches.length && !input.mode) throw new Error("Choose whether to merge or retain a distinct entity.");
-      if (input.mode !== "distinct" && !existing && card.matches.length) throw new Error("Select the record to merge.");
+      if (matches.length && !input.mode) throw new Error("The edited name matches an existing record. Choose whether to merge or retain a distinct entity.");
+      if (input.mode !== "distinct" && !existing && matches.length) throw new Error("Select the record to merge.");
       if (existing && !["append", "replace"].includes(input.mode ?? "")) throw new Error("Choose append or replace for this merge.");
       let slug = existing?.key.split(":")[1] ?? `${slugify(name) || kind}-${card.id.slice(0, 8)}`;
       if (!existing) { const stem = slug; for (let n = 2; rows.some(row => row.key === `${kind}:${slug}`); n++) slug = `${stem}-${n}`; }
       const source = { ...card.source, modified: name !== proposal.name || body !== proposal.body };
       // The interpretation and exact evidence remain visibly different in the eventual sheet.
-      const sourced = `${body}\n\nSource: ${source.name}, line ${source.line} — "${source.quote}"`;
+      const citation = `Source: ${source.name}, line ${source.line}`;
+      const quoted = `${body}\n\n${citation} — "${source.quote}"`;
+      // Full evidence remains on sources and in the review, even when repeating it in
+      // prose would exceed the section limit.
+      const sourced = quoted.length <= 8000 ? quoted : `${body}\n\n${citation}`;
       let file: string, content: string;
       if (kind === "canon") {
         const old = draft.canon?.find(entry => entry.slug === slug);
@@ -165,6 +170,7 @@ export async function resolveGenesisImport(dir: string, input: GenesisImportReso
         file = `draft/${kind === "character" ? "characters" : kind === "location" ? "locations" : "factions"}/${slug}.json`;
         content = JSON.stringify(next, null, 2) + "\n";
         const key = kind === "character" ? "characters" : kind === "location" ? "locations" : "factions";
+        if (next.sheet.sections[section]!.length > 8000) throw new Error("The combined section exceeds 8,000 characters. Shorten the interpretation or replace the section.");
         GenesisBlueprintSchema.parse({ ...draft, [key]: [...entities.filter(entity => entity.slug !== slug), { ...next, slug }] });
       }
       state.resolutions[card.id] = { status: "prepared", target: `${kind}:${slug}`, write: { file, content }, applied: false };
@@ -177,9 +183,12 @@ export async function resolveGenesisImport(dir: string, input: GenesisImportReso
 
 export async function validateGenesisSources(dir: string, blueprint: GenesisBlueprint): Promise<void> {
   const state = await stateFor(dir);
-  for (const entity of [...blueprint.characters, ...blueprint.locations, ...blueprint.factions, ...(blueprint.canon ?? [])]) {
-    for (const source of entity.sources ?? []) {
+  for (const row of genesisContentRows(blueprint)) {
+    if (typeof row.content.value !== "object" || !("sources" in row.content.value)) continue;
+    for (const source of row.content.value.sources ?? []) {
       const candidate = state.cards.find(card => card.id === source.candidateId);
+      const resolution = state.resolutions[source.candidateId];
+      if (resolution?.status !== "prepared" || resolution.target !== row.key) throw new Error("An import source does not belong to this prepared target.");
       if (!candidate || candidate.source.hash !== source.hash || candidate.source.quote !== source.quote || candidate.source.name !== source.name ||
         candidate.source.line !== source.line || candidate.source.originalName !== source.originalName || candidate.source.originalBody !== source.originalBody)
         throw new Error("An import source does not match its verified evidence.");

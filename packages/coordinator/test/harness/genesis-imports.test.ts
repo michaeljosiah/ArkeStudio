@@ -8,7 +8,7 @@ import { tempDir } from "../tmp.js";
 import { reviewGenesisImports, resolveGenesisImport, validateGenesisSources, recoverGenesisImports, carryGenesisSources } from "../../src/harness/genesis-imports.js";
 import { decideGenesisContent, reviewGenesisContent, approvedBlueprintForFounding } from "../../src/harness/genesis-review.js";
 import { foldBlueprint } from "../../src/harness/blueprint.js";
-import { genesisControlDir } from "../../src/harness/genesis-conversation.js";
+import { genesisControlDir, genesisConversation } from "../../src/harness/genesis-conversation.js";
 
 async function setup() {
   const provider = new FsWorldProvider(await tempDir("founding-imports-"));
@@ -98,4 +98,50 @@ it("replays an interrupted prepared write once and refuses altered private sourc
   assert.equal(draft.characters.length, 1);
   await writeFile(join(genesisControlDir(dir), "sources", card.source.hash.slice(7), card.source.name), "tampered");
   await assert.rejects(validateGenesisSources(dir, draft), /source changed/);
+});
+
+it("binds evidence to its prepared target and verifies restored evidence before approval", async () => {
+  const { dir } = await setup();
+  const card = (await reviewGenesisImports(dir)).cards[0]!;
+  await resolveGenesisImport(dir, { id: card.id, digest: card.digest, decision: "prepare" });
+  const draft = await foldBlueprint(dir), original = draft.characters[0]!;
+  const copied = structuredClone(draft);
+  copied.characters.push({ ...original, slug: "impostor", name: "Someone else" });
+  await assert.rejects(validateGenesisSources(dir, copied), /prepared target/);
+  await writeFile(join(dir, "draft", "characters", original.slug + ".json"), JSON.stringify({ ...original, sources: undefined }));
+  const reviewed = await reviewGenesisContent(dir);
+  await writeFile(join(genesisControlDir(dir), "sources", card.source.hash.slice(7), card.source.name), "corrupt");
+  await assert.rejects(decideGenesisContent(dir, reviewed.cards, "approve", ulid()), /source changed/);
+  assert.equal((await (await genesisConversation(dir)).read()).events.filter(row => row.event.type === "founding.decision").length, 0);
+});
+
+it("refreshes deferred interpretations and checks duplicate names submitted by the author", async () => {
+  const { dir } = await setup();
+  const card = (await reviewGenesisImports(dir)).cards[0]!;
+  await resolveGenesisImport(dir, { id: card.id, digest: card.digest, decision: "defer" });
+  const path = join(dir, "draft", "imports", "maren.json");
+  const proposal = JSON.parse(await readFile(path, "utf8"));
+  await writeFile(path, JSON.stringify({ ...proposal, body: "Revised interpretation" }));
+  const revised = (await reviewGenesisImports(dir)).cards[0]!;
+  assert.equal(revised.proposal.body, "Revised interpretation");
+  assert.notEqual(revised.digest, card.digest);
+  await mkdir(join(dir, "draft", "characters"));
+  await writeFile(join(dir, "draft", "characters", "other.json"), JSON.stringify({ name: "Other" }));
+  await assert.rejects(resolveGenesisImport(dir, { id: revised.id, digest: revised.digest, decision: "prepare", name: "Other" }), /edited name matches/);
+  await resolveGenesisImport(dir, { id: revised.id, digest: revised.digest, decision: "prepare", name: "Other", mode: "distinct" });
+  assert.equal((await foldBlueprint(dir)).characters.length, 2);
+});
+
+it("retains long quoted evidence without overflowing the authored section", async () => {
+  const { dir } = await setup();
+  const quote = "a".repeat(7900);
+  await writeFile(join(dir, "attachments", "notes.md"), quote);
+  await writeFile(join(dir, "draft", "imports", "maren.json"), JSON.stringify({
+    source: "notes.md", kind: "character", name: "Maren", body: "Interpretation ".repeat(20), quote, section: "Essence",
+  }));
+  const card = (await reviewGenesisImports(dir)).cards[0]!;
+  await resolveGenesisImport(dir, { id: card.id, digest: card.digest, decision: "prepare" });
+  const entity = (await foldBlueprint(dir)).characters[0]!;
+  assert.ok(entity.sheet!.sections["Essence"]!.length < 8000);
+  assert.equal(entity.sources![0]!.quote, quote);
 });
