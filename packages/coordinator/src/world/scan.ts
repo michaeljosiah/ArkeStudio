@@ -125,7 +125,7 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // and provider-text digest on the generation, which the first audiobook build reads as unknown.
 // Twenty-six adds the evaluator version to the strict playblast pin (#1128).
 // Twenty-seven is a world's own `models` on strict world.json and setup drafts (turn 153, #1235).
-export const SUPPORTED_SCHEMA_VERSION = 29;
+export const SUPPORTED_SCHEMA_VERSION = 34;
 
 export class WorldOpenError extends Error {
   constructor(

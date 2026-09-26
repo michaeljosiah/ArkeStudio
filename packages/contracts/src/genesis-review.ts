@@ -2,7 +2,7 @@ import { z } from "zod";
 import { BlueprintCharacterSchema, BlueprintFactionSchema, BlueprintLocationSchema, GenesisBlueprintSchema, GenesisCanonSchema, type GenesisBlueprint } from "./genesis.js";
 import { SHEET_SHAPES } from "./sheet-shapes.js";
 
-export const FOUNDING_CONTENT_SCHEMA_VERSION = 29;
+export const FOUNDING_CONTENT_SCHEMA_VERSION = 34;
 
 export const GenesisContentSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("world"), value: GenesisBlueprintSchema.omit({ characters: true, locations: true, factions: true, canon: true, threads: true, dropped: true, reviewed: true }) }).strict(),
