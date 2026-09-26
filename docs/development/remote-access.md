@@ -131,13 +131,16 @@ Never use **Tailscale Funnel** for this. Funnel publishes the port to the whole 
 
 ## Stop it
 
-Stop the frontend and the server with Ctrl+C, then remove the mappings:
+Stop the frontend and the server with Ctrl+C, then turn off the two mappings:
 
 ```powershell
-tailscale serve reset
+tailscale serve --https=443 off
+tailscale serve --https=8443 off
 ```
 
-Otherwise they come back after a restart and point at whatever is next on those ports.
+Otherwise they come back after a restart and point at whatever is next on those ports. Avoid
+`tailscale serve reset` unless nothing else on this machine uses Serve: it clears every mapping,
+not only these two.
 
 ## If it doesn't work
 
@@ -157,13 +160,15 @@ Otherwise they come back after a restart and point at whatever is next on those 
 ## What the browser can't do
 
 A few features rely on the desktop app's native bridge and are missing from any browser,
-remote or local:
+remote or local. Studio says so where each one appears:
 
-- dropping files onto the window
+- attaching files, and dropping files onto the window (use Import media instead)
 - stage export
-- saving media and copying images
-- staging performance audio
+- keeping a recorded line
 - opening the data folder
+
+Saving media and copying images do work. They use the browser's own download and clipboard, so
+the browser may ask for permission first.
 
 Provider keys also behave differently. `npm run server` cannot store them securely without a
 cipher from its host, and the development coordinator keeps them only until it stops. The

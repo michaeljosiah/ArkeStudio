@@ -248,7 +248,9 @@
           computer. The engine still answers only on its own machine. A private network that your
           own devices share, Tailscale, listens for them instead: it encrypts the connection and
           passes each request on to the engine's private address. The capability still decides
-          who may do anything, so a device on that network without the link gets nothing.
+          who may reach the engine. A device on that network without the link can load the
+          window's own pages, which hold nothing of yours, but it cannot read a world or send
+          the engine a single command.
         </p>
         <p>
           There is no switch that makes the engine listen on the network itself. The capability
