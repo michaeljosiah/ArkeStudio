@@ -78,8 +78,8 @@ test("only the tools the confinement permits are offered", async (t) => {
   f.ollama.script.push(reply("ok"));
   await f.adapter.sendMessage({ sessionId: readOnly, parts: [{ type: "text", text: "hi" }] });
   const names = (i: number) => (f.ollama.chats[i]!.tools as Array<{ function: { name: string } }>).map((tool) => tool.function.name);
-  assert.deepEqual(names(0), ["read", "list", "search", "write", "edit"]);
-  assert.deepEqual(names(1), ["read", "list", "search"], "a read-only role is never shown a way to write");
+  assert.deepEqual(names(0), ["read", "list", "search", "write", "edit", "checklist"]);
+  assert.deepEqual(names(1), ["read", "list", "search", "checklist"], "a read-only role is never shown a way to write; its checklist is its own");
 });
 
 test("the loop runs a tool inside the session, answers the model, and reports the activity", async (t) => {
@@ -370,7 +370,7 @@ test("a model that must be chosen by name is never the default, but runs a sessi
 test("the reserve a role's prompt, tools and reply take is stated, and a message sized inside it is not refused", async (t) => {
   const f = await fixture(t, { maxContextTokens: 131_072 });
   const reserve = f.adapter.promptReserveTokens("world-builder", 131_072)!;
-  assert.ok(reserve > 10_000 && reserve < 20_000, `the world-builder's instructions and tools are a fixed cost in any window (${reserve})`);
+  assert.ok(reserve > 10_000 && reserve < 28_000, `the world-builder's instructions, tools and notes are a fixed cost in any window (${reserve})`);
   assert.equal(f.adapter.promptReserveTokens("nobody", 131_072), undefined);
   const id = await f.session("world-builder");
   f.ollama.script.push(reply("Fits."));
@@ -378,6 +378,72 @@ test("the reserve a role's prompt, tools and reply take is stated, and a message
   const room = Math.floor((131_072 - f.adapter.promptReserveTokens("world-builder", 131_072)!) * 3.5 * 0.9);
   await f.adapter.sendMessage({ sessionId: id, ...text("the bells ring at slack water ".repeat(Math.ceil(room / 30)).slice(0, room)) });
   assert.equal(f.ollama.chats.length, 1);
+});
+
+test("an agent's notes outlive its session: written once, read into the next one's instructions", async (t) => {
+  const f = await fixture(t);
+  const memoryDir = join(f.base, "agent-memory", "world-1");
+  const first = await f.session("sheet-editor", { memoryDir });
+  f.ollama.script.push(callTool("notes", { action: "write", content: "Author prefers close third. Following: who cut the tenth key." }), reply("Noted."));
+  await f.adapter.sendMessage({ sessionId: first, ...text("Remember my preferences.") });
+  assert.equal(await readFile(join(memoryDir, "sheet-editor.md"), "utf8"), "Author prefers close third. Following: who cut the tenth key.");
+  assert.ok(f.events.some((e) => e.type === "tool.activity" && e.tool === "arke.notes"));
+
+  const second = await f.session("sheet-editor", { memoryDir });
+  f.ollama.script.push(reply("ok"));
+  await f.adapter.sendMessage({ sessionId: second, ...text("Carry on.") });
+  const system = (f.ollama.chats.at(-1)!.messages as Array<{ role: string; content: string }>)[0]!.content;
+  assert.match(system, /<notes>\nAuthor prefers close third\. Following: who cut the tenth key\.\n<\/notes>/);
+  assert.match(system, /Notes are not canon/);
+
+  const other = await f.session("world-builder", { memoryDir });
+  f.ollama.script.push(reply("ok"));
+  await f.adapter.sendMessage({ sessionId: other, ...text("Hello.") });
+  assert.match((f.ollama.chats.at(-1)!.messages as Array<{ content: string }>)[0]!.content, /no notes for this world yet/, "one agent's notes are not another's");
+});
+
+test("notes over their limit are refused whole, and the checklist is this ask's alone", async (t) => {
+  const f = await fixture(t);
+  const memoryDir = join(f.base, "agent-memory", "world-1");
+  const id = await f.session("sheet-editor", { memoryDir });
+  f.ollama.script.push(
+    callTool("notes", { action: "write", content: "x".repeat(6_001) }),
+    callTool("checklist", { items: [{ text: "Read the chapter", done: true }, { text: "Tighten paragraph two" }] }),
+    reply("Done."),
+  );
+  await f.adapter.sendMessage({ sessionId: id, ...text("Plan it.") });
+  const answers = (f.ollama.chats.at(-1)!.messages as Array<{ role: string; tool_name?: string; content: string }>).filter((m) => m.role === "tool");
+  assert.match(answers[0]!.content, /Nothing written: notes are at most 6000 characters/);
+  await assert.rejects(stat(join(memoryDir, "sheet-editor.md")), "nothing half-written");
+  assert.equal(answers[1]!.content, "[x] Read the chapter\n[ ] Tighten paragraph two");
+});
+
+test("what an agent learns about the author is one page every agent reads, in every world", async (t) => {
+  const f = await fixture(t);
+  const authorNotesFile = join(f.base, "agent-memory", "author.md");
+  const first = await f.session("sheet-editor", { memoryDir: join(f.base, "agent-memory", "world-1"), authorNotesFile });
+  f.ollama.script.push(callTool("notes", { action: "write", about: "author", content: "Writes spare, unsettling prose. Dislikes adverbs." }), reply("Noted."));
+  await f.adapter.sendMessage({ sessionId: first, ...text("I hate adverbs, by the way.") });
+  assert.equal(await readFile(authorNotesFile, "utf8"), "Writes spare, unsettling prose. Dislikes adverbs.");
+  assert.ok(f.events.some((e) => e.type === "tool.activity" && e.summary === "noted something about the author"));
+  await assert.rejects(stat(join(f.base, "agent-memory", "world-1", "sheet-editor.md")), "the world's notes are a separate page");
+
+  // Another agent, another world: the same page.
+  const other = await f.session("world-builder", { memoryDir: join(f.base, "agent-memory", "world-2"), authorNotesFile });
+  f.ollama.script.push(reply("ok"));
+  await f.adapter.sendMessage({ sessionId: other, ...text("Hello.") });
+  const system = (f.ollama.chats.at(-1)!.messages as Array<{ content: string }>)[0]!.content;
+  assert.match(system, /<author>\nWrites spare, unsettling prose\. Dislikes adverbs\.\n<\/author>/);
+  assert.match(system, /You have no notes for this world yet/);
+});
+
+test("with no world open there are no notes to keep, only the checklist", async (t) => {
+  const f = await fixture(t);
+  const id = await f.session("sheet-editor");
+  f.ollama.script.push(reply("ok"));
+  await f.adapter.sendMessage({ sessionId: id, ...text("Hi.") });
+  const tools = (f.ollama.chats.at(-1)!.tools as Array<{ function: { name: string } }>).map((tool) => tool.function.name);
+  assert.ok(tools.includes("checklist") && !tools.includes("notes"));
 });
 
 test("a tool call written as the reply is run as a call", async (t) => {

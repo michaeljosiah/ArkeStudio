@@ -2918,6 +2918,10 @@ export class Coordinator {
       ...input,
       // Chosen for the session, or for its agent in Settings: either way it runs on something.
       ...(await this.sessionAgents(input.model !== undefined || (input.agent !== undefined && this.agentOverrides?.[input.agent]?.model !== undefined), input.agent)),
+      // The open world's agent notes: under the app's own root, beside nothing a person edits.
+      ...(this.agentMemoryDir() !== undefined ? { memoryDir: this.agentMemoryDir()! } : {}),
+      // The author's page goes with every session, world open or not: it is about the writer.
+      ...(this.opts.appRoot !== undefined ? { authorNotesFile: join(this.opts.appRoot, "agent-memory", "author.md") } : {}),
       ...(this.skillFamily !== undefined ? { skillFamily: this.skillFamily } : {}),
       // The model too, or a narrowed skill is recorded and never actually injected.
       ...(this.skillModelId !== undefined ? { skillModelId: this.skillModelId } : {}),
@@ -4431,6 +4435,15 @@ export class Coordinator {
       return "None of the local models can write here: each is switched off or cannot call tools, and no cloud key is stored. Pull a model that calls tools, switch one on under AI models, or add a key.";
     }
     return null;
+  }
+
+  /**
+   * Where the open world's agents keep working notes between sessions, or undefined with no world
+   * open or no app root. Per world, so one world's notes never reach another's sessions.
+   */
+  private agentMemoryDir(): string | undefined {
+    const worldId = this.opts.provider.openStore?.()?.worldId;
+    return this.opts.appRoot !== undefined && worldId ? join(this.opts.appRoot, "agent-memory", worldId) : undefined;
   }
 
   private localHarnessDefault(needsImages = false, needsTools = true): string | undefined {

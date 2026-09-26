@@ -99,8 +99,10 @@ test("a re-ask the loop wrote inside a turn is dropped with that turn, never lef
   ];
   // Dropping only up to the correction would already be under the target, leaving it orphaned.
   assert.equal(fitToWindow(messages, [], 600, 5), true);
-  assert.deepEqual(messages.map((m) => m.role), ["system", "user"], "the whole first turn went, correction and all");
-  assert.equal(messages[1]!.content, "now");
+  assert.deepEqual(messages.map((m) => m.role), ["system", "user", "assistant", "user"], "the whole first turn went, correction and all, and a note of it came");
+  assert.match(messages[1]!.content, /^\[Earlier in this session, trimmed to fit the window:\n- Asked: first the bells/);
+  assert.ok(!messages.some((m) => m.content.includes("could not be read")), "the correction is not carried");
+  assert.equal(messages[3]!.content, "now");
 });
 
 test("dense ASCII — base64, hashes, minified JSON — is counted by its shape, not its length", () => {
@@ -135,4 +137,27 @@ test("a session's learned correction shrinks the budget, so an estimate shown to
   const scaled = structuredClone(messages);
   assert.equal(fitToWindow(scaled, [], 1_800, scaled.length - 1, 2), true);
   assert.notDeepEqual(scaled, messages, "at twice the estimate it no longer fits untrimmed");
+});
+
+test("a dropped exchange leaves a line saying what was asked, used and answered, and a later trim carries it on", () => {
+  const messages: ChatMessage[] = [{ role: "system", content: "rules" }];
+  for (let i = 1; i <= 6; i++) messages.push(...exchangeWith(i, 1_500, 100));
+  messages.push({ role: "user", content: "now" });
+  assert.equal(fitToWindow(messages, [], 1_500, messages.length - 1), true);
+  const note = messages[1]!.content;
+  assert.match(note, /^\[Earlier in this session, trimmed to fit the window:/);
+  assert.match(note, /- Asked: question 1 the bells[^\n]* · used read · answered: answer 1/);
+  assert.equal(messages[2]!.role, "assistant");
+  assert.equal(messages[0]!.content, "rules", "the instructions are untouched");
+  assert.equal(messages.at(-1)!.content, "now", "and so is the turn being answered");
+
+  // Later exchanges push the note itself out: its lines go into the next one rather than away.
+  for (let i = 7; i <= 12; i++) messages.push(...exchangeWith(i, 1_500, 100));
+  messages.push({ role: "user", content: "later" });
+  assert.equal(fitToWindow(messages, [], 1_500, messages.length - 1), true);
+  const carried = messages[1]!.content;
+  assert.equal(messages.filter((m) => m.content.startsWith("[Earlier in this session")).length, 1, "one note, not a stack of them");
+  assert.match(carried, /- Asked: question 1 the bells/, "the first dropped exchange is still remembered");
+  assert.match(carried, /- Asked: question 7 the bells/);
+  assert.ok(carried.length < 2_000, "a reminder, not a second copy");
 });

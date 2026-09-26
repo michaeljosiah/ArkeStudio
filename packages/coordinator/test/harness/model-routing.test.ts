@@ -357,6 +357,16 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     } finally { await test.close(); }
   });
 
+  it("tells every session where the open world's agent notes and the author's page live, under the app's root", async () => {
+    const test = await fixture();
+    try {
+      const config = (await test.chat())?.config;
+      assert.ok(config?.memoryDir?.replaceAll("\\", "/").endsWith(`/agent-memory/${WORLD_ID}`), config?.memoryDir);
+      assert.ok(config?.authorNotesFile?.replaceAll("\\", "/").endsWith("/agent-memory/author.md"), config?.authorNotesFile);
+      assert.ok(!config!.memoryDir!.replaceAll("\\", "/").includes("/worlds/"), "never inside the world's own folder");
+    } finally { await test.close(); }
+  });
+
   it("never makes a model that waits to be chosen the default, and names it when it is the only one (issue 1289)", async () => {
     // Listed first, as Ollama lists the model pulled most recently: installing it made it every
     // agent's writer, with Content & safety off.
