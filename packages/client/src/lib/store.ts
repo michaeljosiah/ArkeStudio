@@ -213,6 +213,7 @@ interface StoreState {
       imageError?: string;
       importError?: string;
       reviewPending?: boolean;
+      decisionPending?: "image" | "voice" | "import";
       founding?: boolean;
       frozenModels?: ModelChoices;
       frozenGenerateImages?: boolean;
@@ -1581,17 +1582,17 @@ function handleFrame(json: string): void {
     } else if (event.type === "setup.status") {
       setupStatus = event.setup;
     } else if (event.type === "genesis.image-error") {
-      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], imageError: event.detail } };
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], imageError: event.detail, decisionPending: undefined } };
     } else if (event.type === "genesis.images") {
-      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], images: event.images, imageError: undefined, readiness: undefined } };
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], images: event.images, imageError: undefined, readiness: undefined, decisionPending: genesis[event.genesisId]?.decisionPending === "image" ? undefined : genesis[event.genesisId]?.decisionPending } };
     } else if (event.type === "genesis.voices") {
-      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], voices: event.voices, readiness: undefined } };
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], voices: event.voices, readiness: undefined, decisionPending: genesis[event.genesisId]?.decisionPending === "voice" ? undefined : genesis[event.genesisId]?.decisionPending } };
     } else if (event.type === "genesis.readiness") {
       genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], readiness: event.review, readinessPending: false } };
     } else if (event.type === "genesis.import-error") {
-      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], importError: event.detail } };
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], importError: event.detail, decisionPending: undefined } };
     } else if (event.type === "genesis.imports") {
-      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], imports: event.imports, importError: undefined, readiness: undefined } };
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], imports: event.imports, importError: undefined, readiness: undefined, decisionPending: genesis[event.genesisId]?.decisionPending === "import" ? undefined : genesis[event.genesisId]?.decisionPending } };
     } else if (event.type === "genesis.review") {
       if (genesis[event.genesisId]?.reviewRequestId === event.requestId) {
         genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], review: event.review, reviewPending: false, readiness: undefined } };
@@ -1662,7 +1663,7 @@ function handleFrame(json: string): void {
         [event.genesisId]: {
           ...g,
           status: event.status,
-          ...(event.status === "failed" ? { readinessPending: false, reviewPending: false } : {}),
+          ...(event.status === "failed" ? { readinessPending: false, reviewPending: false, decisionPending: undefined } : {}),
           // The clock starts when the turn does; a settled turn takes its working line with it.
           runStartedAt: event.status === "running" ? event.at : g.runStartedAt,
           working: event.status === "running" ? g.working : null,
@@ -2351,7 +2352,7 @@ function handleFrame(json: string): void {
 
 function handleStatus(status: ConnectionStatus): void {
   if (status !== "open") pendingQueueRequests.clear();
-  emitChange({ ...current, connection: status, ...(status !== "open" ? { genesis: Object.fromEntries(Object.entries(current.genesis).map(([id, draft]) => [id, { ...draft, readinessPending: false }])) } : {}) });
+  emitChange({ ...current, connection: status, ...(status !== "open" ? { genesis: Object.fromEntries(Object.entries(current.genesis).map(([id, draft]) => [id, { ...draft, readinessPending: false, reviewPending: false, decisionPending: undefined }])) } : {}) });
   if (status === "open") {
     reconnectAttempts = 0;
     rejoining = true;
@@ -2889,7 +2890,7 @@ export function reviewGenesisImages(genesisId: string, models?: Partial<Record<i
 }
 export function reviewGenesisVoices(genesisId: string): void { send({ kind: "genesis-voices", genesisId }); }
 function beginReadinessRequest(genesisId: string): boolean {
-  if (!bridge || current.connection !== "open" || (current.genesis[genesisId]?.readinessPending || current.genesis[genesisId]?.reviewPending || current.genesis[genesisId]?.founding)) return false;
+  if (!bridge || current.connection !== "open" || (current.genesis[genesisId]?.decisionPending || current.genesis[genesisId]?.readinessPending || current.genesis[genesisId]?.reviewPending || current.genesis[genesisId]?.founding)) return false;
   emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...emptyGenesis(), ...current.genesis[genesisId], readinessPending: true } } });
   return true;
 }
@@ -2900,21 +2901,32 @@ export function leaveGenesisFinding(genesisId: string, findingId: string, digest
   if (!beginReadinessRequest(genesisId)) return;
   send({ kind: "genesis-readiness-leave", genesisId, requestId: ulid(), findingId, digest });
 }
+function beginGenesisDecision(genesisId: string, kind: "image" | "voice" | "import"): boolean {
+  const draft = current.genesis[genesisId];
+  if (!bridge || current.connection !== "open" || draft?.decisionPending || draft?.readinessPending || draft?.reviewPending || draft?.founding || draft?.worldId) return false;
+  emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...emptyGenesis(), ...draft, decisionPending: kind, readiness: undefined } }, buildPlans: { ...current.buildPlans, [genesisId]: {} } });
+  return true;
+}
 export function generateGenesisVoice(genesisId: string, intentId: string, digest: string): void {
+  if (!beginGenesisDecision(genesisId, "voice")) return;
   send({ kind: "genesis-voice-generate", genesisId, intentId, digest, requestId: ulid() });
 }
 export function decideGenesisVoice(genesisId: string, target: string, decision: "approve" | "reject" | "unassign", candidate?: import("@arke-studio/contracts").GenesisVoiceCandidate): void {
+  if (!beginGenesisDecision(genesisId, "voice")) return;
   send({ kind: "genesis-voice-decide", genesisId, requestId: ulid(), target, decision,
     ...(candidate ? { candidateId: candidate.id, hash: candidate.hash } : {}) });
 }
 export function reviewGenesisImports(genesisId: string): void { send({ kind: "genesis-imports", genesisId }); }
 export function resolveGenesisImport(genesisId: string, resolution: import("@arke-studio/contracts").GenesisImportResolve): void {
+  if (!beginGenesisDecision(genesisId, "import")) return;
   send({ kind: "genesis-import-resolve", genesisId, resolution });
 }
 export function generateGenesisImage(genesisId: string, intentId: string, digest: string, models?: Partial<Record<import("@arke-studio/contracts").Capability, string>>): void {
+  if (!beginGenesisDecision(genesisId, "image")) return;
   send({ kind: "genesis-image-generate", genesisId, intentId, digest, requestId: ulid(), ...(models ? { models } : {}) });
 }
 export function decideGenesisImage(genesisId: string, target: string, decision: "approve" | "reject" | "unassign", candidate?: import("@arke-studio/contracts").GenesisImageCandidate): void {
+  if (!beginGenesisDecision(genesisId, "image")) return;
   send({ kind: "genesis-image-decide", genesisId, requestId: ulid(), target, decision, ...(candidate ? { candidateId: candidate.id, hash: candidate.hash } : {}) });
 }
 export function proposeGenesisWorld(genesisId: string, draft: import("@arke-studio/contracts").GenesisDraft): void {
@@ -2922,7 +2934,7 @@ export function proposeGenesisWorld(genesisId: string, draft: import("@arke-stud
 }
 export function decideGenesisDraft(genesisId: string, choices: Array<{ key: string; digest: string }>, decision: "approve" | "reject"): void {
   const draft = current.genesis[genesisId];
-  if (draft?.reviewPending || draft?.founding || draft?.worldId) return;
+  if (draft?.decisionPending || draft?.readinessPending || draft?.reviewPending || draft?.founding || draft?.worldId) return;
   send({ kind: "genesis-decide", genesisId, choices, decision, requestId: genesisReviewRequest(genesisId) });
 }
 

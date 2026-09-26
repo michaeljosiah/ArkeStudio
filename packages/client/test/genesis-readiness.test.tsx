@@ -87,3 +87,38 @@ it("keeps readiness requests behind a pending content decision", async () => {
     assert.ok(!__stateForTest().genesis["gen-pending-content"]?.readinessPending);
   } finally { __setBridgeForTest(null); __setStateForTest(FIXTURE_STATE); }
 });
+
+it("keeps readiness behind media and import decisions and permits it after settlement", async () => {
+  const store = await import("../src/lib/store.js");
+  const commands = [
+    () => store.generateGenesisImage("gen-pending", "intent", "digest"),
+    () => store.decideGenesisImage("gen-pending", "character:maren", "unassign"),
+    () => store.generateGenesisVoice("gen-pending", "intent", "digest"),
+    () => store.decideGenesisVoice("gen-pending", "maren", "unassign"),
+    () => store.resolveGenesisImport("gen-pending", { id: "source", digest: "digest", decision: "reject" }),
+  ];
+  const sent: string[] = [];
+  __setBridgeForTest({ send: (message: string) => sent.push(message) } as unknown as ArkeBridge);
+  try {
+    for (const command of commands) {
+      __setStateForTest(FIXTURE_STATE);
+      sent.length = 0;
+      command();
+      reviewGenesisReadiness("gen-pending");
+      leaveGenesisFinding("gen-pending", "finding", "digest");
+      assert.equal(sent.length, 1);
+      assert.ok(__stateForTest().genesis["gen-pending"]?.decisionPending);
+      __applyEventForTest({ type: "genesis.status", at: new Date().toISOString(), genesisId: "gen-pending", status: "failed" });
+      reviewGenesisReadiness("gen-pending");
+      assert.equal(sent.length, 2);
+      command();
+      assert.equal(sent.length, 2, "a pending readiness request also fences decisions");
+    }
+    __setStateForTest(FIXTURE_STATE);
+    store.decideGenesisImage("gen-pending", "character:maren", "unassign");
+    __applyEventForTest({ type: "genesis.images", at: new Date().toISOString(), genesisId: "gen-pending", images: {
+      candidates: [], selections: [], plans: [], rejected: [], problems: [],
+    } });
+    assert.equal(__stateForTest().genesis["gen-pending"]?.decisionPending, undefined);
+  } finally { __setBridgeForTest(null); __setStateForTest(FIXTURE_STATE); }
+});

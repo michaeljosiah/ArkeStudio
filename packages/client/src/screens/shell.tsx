@@ -1254,23 +1254,23 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                   </div>
                 ))}
                 {g?.importError && <Callout title="Import review needs attention">{g.importError}</Callout>}
-                {g?.imports && <GenesisImportCards imports={g.imports} blueprint={blueprint} busy={chatRunning || buildPressed || !!g.worldId || !!g.founding}
+                {g?.imports && <GenesisImportCards imports={g.imports} blueprint={blueprint} busy={!!g.decisionPending || !!g.readinessPending || chatRunning || buildPressed || !!g.worldId || !!g.founding}
                   onResolve={resolution => resolveGenesisImport(genesisId, resolution)}
                   onRefresh={() => reviewGenesisImports(genesisId)}
                   onExtract={name => setMessage(`Please extract reviewable worldbuilding proposals from attachments/${name}. Cite exact source quotes; keep interpretations and suggested relationships separate from the evidence.`)} />}
-                {g?.review && <GenesisContentCards review={g.review} busy={!!g.reviewPending || chatRunning || buildPressed || !!g?.founding || !!g?.worldId || myBuild?.status === "running"}
+                {g?.review && <GenesisContentCards review={g.review} busy={!!g.decisionPending || !!g.readinessPending || !!g.reviewPending || chatRunning || buildPressed || !!g?.founding || !!g?.worldId || myBuild?.status === "running"}
                   onDecide={(cards, decision) => decideGenesisDraft(genesisId, cards.map(card => ({ key: card.key, digest: card.digest })), decision)}
                   onRevise={title => setMessage(`Please revise ${title}: `)} />}
-                {!g?.worldId && <GenesisReadinessCard review={g?.readiness} busy={!!g?.reviewPending || chatRunning || buildPressed || !!g?.founding || !!g?.readinessPending}
+                {!g?.worldId && <GenesisReadinessCard review={g?.readiness} busy={!!g?.decisionPending || !!g?.reviewPending || chatRunning || buildPressed || !!g?.founding || !!g?.readinessPending}
                   onRefresh={() => reviewGenesisReadiness(genesisId)} onFix={setMessage}
                   onLeave={(id, digest) => leaveGenesisFinding(genesisId, id, digest)} />}
-                {g?.voices && <GenesisVoiceCards genesisId={genesisId} voices={g.voices} jobs={voiceJobs} busy={chatRunning || buildPressed || !!g.founding || !!g.worldId}
+                {g?.voices && <GenesisVoiceCards genesisId={genesisId} voices={g.voices} jobs={voiceJobs} busy={!!g.decisionPending || !!g.readinessPending || chatRunning || buildPressed || !!g.founding || !!g.worldId}
                   onGenerate={(intentId, digest) => generateGenesisVoice(genesisId, intentId, digest)}
                   onDecide={(target, decision, candidate) => decideGenesisVoice(genesisId, target, decision, candidate)}
                   onRevise={setMessage} onRefresh={() => reviewGenesisVoices(genesisId)} onCancel={cancelJob} />}
                 {g?.imageError && <Callout title="Image request needs attention">{g.imageError}</Callout>}
                 {g?.images && blueprint && <GenesisImageCards genesisId={genesisId} blueprint={blueprint} images={g.images} jobs={imageJobs}
-                  busy={chatRunning || buildPressed || !!g.founding || myBuild?.status === "running" || !!g.worldId}
+                  busy={!!g.decisionPending || !!g.readinessPending || chatRunning || buildPressed || !!g.founding || myBuild?.status === "running" || !!g.worldId}
                   onGenerate={(intentId, digest) => generateGenesisImage(genesisId, intentId, digest, models)}
                   onDecide={(target, decision, candidate) => decideGenesisImage(genesisId, target, decision, candidate)}
                   onCancel={cancelJob} onRevise={setMessage} />}
@@ -1352,10 +1352,10 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                       plan={visibleBuildPlan}
                       startedAt={planStartedAt}
                       pressed={buildPressed}
-                      settling={chatRunning || !!g?.reviewPending || plannedAgainst.current?.review !== g?.review}
+                      settling={chatRunning || !!g?.decisionPending || !!g?.readinessPending || !!g?.reviewPending || plannedAgainst.current?.review !== g?.review}
                       onDismiss={leaveBuild}
                       onBuild={() => {
-                        if (g?.reviewPending || plannedAgainst.current?.review !== g?.review || !visibleBuildPlan?.plan) return;
+                        if (g?.decisionPending || g?.readinessPending || g?.reviewPending || plannedAgainst.current?.review !== g?.review || !visibleBuildPlan?.plan) return;
                         if (buildRequestRef.current === null) buildRequestRef.current = ulid();
                         setBuildRequestId(buildRequestRef.current);
                         setBuildPressed(true);
