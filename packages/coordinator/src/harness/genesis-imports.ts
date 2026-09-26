@@ -85,7 +85,9 @@ async function reviewUnlocked(dir: string, state: State) {
   const names = await readdir(folder).catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return []; throw err; });
   const proposed = new Set<string>();
   const seenProposals = new Map<string, string>(), conflicting = new Set<string>();
-  for (const name of names.filter(name => name.endsWith(".json")).sort().slice(0, 300)) {
+  const proposalFiles = names.filter(name => name.endsWith(".json")).sort();
+  if (proposalFiles.length > 300) problems.push(`${proposalFiles.length - 300} import proposal files exceed the 300-file review limit. Split the import before continuing.`);
+  for (const name of proposalFiles.slice(0, 300)) {
     try {
       const info = await lstat(join(folder, name));
       if (!info.isFile() || info.isSymbolicLink() || info.size > 64000) throw new Error("Invalid import proposal file.");
@@ -154,7 +156,8 @@ export async function resolveGenesisImport(dir: string, input: GenesisImportReso
       if (matches.length && !input.mode) throw new Error("The edited name matches an existing record. Choose whether to merge or retain a distinct entity.");
       if (input.mode !== "distinct" && !existing && matches.length) throw new Error("Select the record to merge.");
       if (existing && !["append", "replace"].includes(input.mode ?? "")) throw new Error("Choose append or replace for this merge.");
-      let slug = existing?.key.split(":")[1] ?? `${slugify(name) || kind}-${card.id.slice(0, 8)}`;
+      const naturalSlug = (slugify(name) || kind).slice(0, 110);
+      let slug = existing?.key.split(":")[1] ?? (input.mode === "distinct" ? `${naturalSlug}-${card.id.slice(0, 8)}` : naturalSlug);
       if (!existing) { const stem = slug; for (let n = 2; rows.some(row => row.key === `${kind}:${slug}`); n++) slug = `${stem}-${n}`; }
       const source = { ...card.source, modified: name !== proposal.name || body !== proposal.body };
       const replacedSources = new Set(input.mode === "replace" ? state.cards.filter(previous => {
