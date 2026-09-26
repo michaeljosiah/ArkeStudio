@@ -297,10 +297,11 @@ describe("the founding build (SPEC-031)", () => {
     const review = await reviewGenesisContent(dir);
     await decideGenesisContent(dir, review.cards, "approve", ulid());
     const approved = await approvedBlueprintForFounding(dir);
+    const reference = (await reviewGenesisImages(dir, approved, [], MODEL)).candidates.find(candidate => candidate.label === "portrait.png")!;
     const now = new Date().toISOString();
     const job = JobSchema.parse({ id: newId("jb"), idempotencyKey: ulid(), worldId: "gen-selected",
       target: { kind: "genesis-image", id: "location:vigil" }, capability: "image", provider: "fal", model: "test-image",
-      params: { prompt: "The lighthouse at dusk.", label: "The Vigil" }, estimatedMicroUsd: 40000, status: "succeeded",
+      params: { prompt: "The lighthouse at dusk.", label: "The Vigil", references: [reference.file] }, estimatedMicroUsd: 40000, status: "succeeded",
       providerJobId: null, attempt: 1, error: null, landedFiles: ["generated/vigil.png"], createdAt: now, updatedAt: now });
     h.queue.jobs.set(job.id, job);
     const images = await reviewGenesisImages(dir, approved, [job], MODEL);
@@ -316,6 +317,9 @@ describe("the founding build (SPEC-031)", () => {
     const character = bundle.sheets.find(sheet => sheet.type === "character")!, location = bundle.sheets.find(sheet => sheet.type === "location")!;
     assert.ok((await readKit(store, character.id))?.kit.mainPhoto?.sourceTakeId);
     assert.ok((await readKit(store, location.id))?.kit.establishingViewId);
+    const carriedReference = bundle.referenceTakes.find(take => take.jobId === job.id)!.references[0]!;
+    assert.match(carriedReference, /^artifacts\//);
+    assert.deepEqual(await readFile(join(store.dir, carriedReference)), PNG);
     assert.equal(bundle.artifacts.length, 4);
     assert.ok(bundle.artifacts.some(artifact => artifact.links.includes(character.id)));
     assert.ok(bundle.artifacts.some(artifact => artifact.links.includes(location.id) && artifact.generation?.source === "founding"));
@@ -329,6 +333,37 @@ describe("the founding build (SPEC-031)", () => {
     await h.service.begin("gen-selected", ulid());
     assert.equal(store.getBundle().artifacts.length, 4);
     assert.equal(store.getBundle().referenceTakes.length, 3);
+  });
+
+  it("replaying a generated main photo keeps the installed take accepted", async t => {
+    let h!: Harness;
+    h = await makeHarness(t, { manifest: null, reviewedBlueprint: async id => reviewedGenesisImages(await h.provider.genesisDir(id),
+      await approvedBlueprintForFounding(await h.provider.genesisDir(id)), [...h.queue.jobs.values()]) });
+    const dir = await h.provider.genesisDir("gen-photo-replay");
+    await mkdir(join(dir, "draft", "characters"), { recursive: true });
+    await mkdir(join(dir, "generated"), { recursive: true });
+    await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Harbour" }));
+    await writeFile(join(dir, "draft", "characters", "maren.json"), JSON.stringify({ name: "Maren" }));
+    await writeFile(join(dir, "generated", "portrait.png"), PNG);
+    await decideGenesisContent(dir, (await reviewGenesisContent(dir)).cards, "approve", ulid());
+    const approved = await approvedBlueprintForFounding(dir), now = new Date().toISOString();
+    const job = JobSchema.parse({ id: newId("jb"), idempotencyKey: ulid(), worldId: "gen-photo-replay",
+      target: { kind: "genesis-image", id: "character:maren" }, capability: "image", provider: "fal", model: "test-image",
+      params: { prompt: "Maren at the gate." }, estimatedMicroUsd: 40000, status: "succeeded", providerJobId: null,
+      attempt: 1, error: null, landedFiles: ["generated/portrait.png"], createdAt: now, updatedAt: now });
+    h.queue.jobs.set(job.id, job);
+    const candidate = (await reviewGenesisImages(dir, approved, [job], MODEL)).candidates[0]!;
+    await decideGenesisImage(dir, approved, { target: "character:maren", candidateId: candidate.id, hash: candidate.hash, decision: "approve", requestId: ulid() });
+    await h.service.begin("gen-photo-replay", ulid());
+    await until(() => h.lastState()?.status === "completed", "selected generated portrait", BUILD_MS);
+    const store = h.provider.openStore()!, sheet = store.getBundle().sheets[0]!;
+    const before = await readKit(store, sheet.id);
+    assert.ok(before?.kit.mainPhoto?.sourceTakeId);
+    const selected = await reviewedGenesisImages(dir, approved, [job]);
+    await installGenesisImage(dir, selected.selectedImages![0]!, selected, store);
+    assert.deepEqual(await readKit(store, sheet.id), before);
+    assert.equal(store.getBundle().referenceTakes.length, 1);
+    assert.equal(h.queue.jobs.size, 1);
   });
 
   it("saves approved sheets, relationships and canon verbatim without reauthoring", async (t) => {
