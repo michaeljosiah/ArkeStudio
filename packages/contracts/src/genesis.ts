@@ -140,7 +140,7 @@ export function keyArtBriefProse(brief: GenesisKeyArtBrief): string {
 export const GenesisDraftSchema = z
   .object({
     props: z.array(GenesisPropSchema).max(100).optional(),
-    images: z.array(GenesisImageIntentSchema).max(100).optional(),
+    images: z.array(GenesisImageIntentSchema).max(100).refine(images => new Set(images.map(image => image.id)).size === images.length, "Image proposal IDs must be unique.").optional(),
     canon: z.array(GenesisCanonSchema).max(100).refine(entries => new Set(entries.map(entry => entry.slug)).size === entries.length, "Canon entries need unique slugs.").optional(),
     name: z.string().min(1).max(120).optional(),
     logline: z.string().min(1).max(500).optional(),
@@ -263,7 +263,7 @@ export type BlueprintFaction = z.infer<typeof BlueprintFactionSchema>;
 export const GenesisBlueprintSchema = z
   .object({
     props: z.array(GenesisPropSchema).max(100).optional(),
-    images: z.array(GenesisImageIntentSchema).optional(),
+    images: z.array(GenesisImageIntentSchema).refine(images => new Set(images.map(image => image.id)).size === images.length, "Image proposal IDs must be unique.").optional(),
     selectedImages: z.array(GenesisImageSelectionSchema).optional(),
     /** Coordinator-owned marker; never folded from an agent's draft files. */
     reviewed: z.boolean().optional(),
