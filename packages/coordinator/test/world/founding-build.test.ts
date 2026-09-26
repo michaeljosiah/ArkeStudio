@@ -347,7 +347,7 @@ describe("the founding build (SPEC-031)", () => {
     await writeFile(join(dir, "attachments", "sword.png"), PNG);
     await decideGenesisContent(dir, (await reviewGenesisContent(dir)).cards, "approve", ulid());
     const approved = await approvedBlueprintForFounding(dir);
-    const candidate = (await reviewGenesisImages(dir, approved, [], undefined)).candidates[0]!;
+    const candidate = (await reviewGenesisImages(dir, approved, [], null)).candidates[0]!;
     await decideGenesisImage(dir, approved, { target: "prop:sword:whole", candidateId: candidate.id, hash: candidate.hash, decision: "approve", requestId: ulid() });
     draft.props[0]!.name = "The restored sword";
     await writeFile(join(dir, "draft.json"), JSON.stringify(draft));
