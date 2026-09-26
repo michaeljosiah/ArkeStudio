@@ -22,7 +22,7 @@ uses that input even if draft files subsequently change. Unreadable drafts block
 recovery restores only the damaged records so valid edits remain visible. Form handoffs also
 retain a pending marker until attachments and conversation history have finished copying.
 
-Worlds containing founding conversation events require schema version 33. Older readers must
+Worlds containing founding conversation events require schema version 35. Older readers must
 refuse the world rather than misread its strict conversation journal.
 
 The founding marker and sandbox remain after completion so a repeated Begin joins its original
@@ -58,7 +58,7 @@ main-photo and establishing-view services. Existing selections cost nothing to r
 the corresponding generation in the build plan. Alternatives remain artifacts. Generated
 artifacts retain their producing job, provider, model, parameters, cost and entity links.
 
-Founding image decisions and generated-image provenance require schema version 35. Artifact
+Founding image decisions and generated-image provenance require schema version 37. Artifact
 writes that introduce location reference provenance raise this boundary atomically as well.
 
 - Coordinator `test/harness/genesis-images.test.ts`: immutable previews, exact decisions,

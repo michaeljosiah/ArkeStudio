@@ -1,4 +1,4 @@
-export const FOUNDING_IMAGES_SCHEMA_VERSION = 35;
+export const FOUNDING_IMAGES_SCHEMA_VERSION = 37;
 import { z } from "zod";
 import { RecipeIdentitySchema } from "./comfyui.js";
 
