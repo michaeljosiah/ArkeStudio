@@ -2763,3 +2763,23 @@ it("adopts a founding image receipt with its permanent media path across reload"
     } finally { restored.queue.dispose(); }
   } finally { h.queue.dispose(); }
 });
+
+it("finishes live founding image preservation before permitting history deletion", async () => {
+  const fake = new FakeProvider({});
+  let release!: () => void;
+  const waiting = new Promise<void>(resolve => { release = resolve; });
+  const h = await makeHarness({ fake }, { onTerminal: async job => {
+    if (job.status === "succeeded") await waiting;
+  } });
+  try {
+    await h.queue.start();
+    const job = await h.queue.enqueue({ ...INPUT, target: { kind: "genesis-image", id: "character:maren" } });
+    await until(() => foldedJob(h, job.id)?.finalization?.status === "pending", "pending founding finalization", FOLD_MS);
+    await h.queue.delete(job.id);
+    assert.ok(foldedJob(h, job.id));
+    release();
+    await until(() => foldedJob(h, job.id)?.finalization?.status === "complete", "completed founding finalization", FOLD_MS);
+    await h.queue.delete(job.id);
+    assert.equal(h.queue.listJobs().some(row => row.id === job.id), false);
+  } finally { release(); h.queue.dispose(); }
+});
