@@ -33,4 +33,7 @@ it("shows resumable drafts and does not duplicate messages replayed after a load
   __applyEventForTest({ type: "genesis.blueprint", at, genesisId: "gen-one", blueprint: { ...snapshot.blueprint, name: "Current world" }, revision: 3 });
   __applyEventForTest(snapshot);
   assert.equal(__stateForTest().genesis["gen-one"]?.blueprint?.name, "Current world");
+  __applyEventForTest({ type: "genesis.discarded", at, genesisId: "gen-one" });
+  __applyEventForTest({ ...snapshot, revision: 4 });
+  assert.equal(__stateForTest().genesis["gen-one"], undefined);
 });
