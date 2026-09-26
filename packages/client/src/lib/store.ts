@@ -1,4 +1,4 @@
-import type { PromptReview, PromptSourceSnapshot } from "@arke-studio/contracts";
+import type { AudiobookReader, PromptReview, PromptSourceSnapshot } from "@arke-studio/contracts";
 import { setMediaStateSource } from "./media.js";
 import { devSession } from "./dev-session.js";
 import { useSyncExternalStore } from "react";
@@ -121,6 +121,13 @@ export interface CanonRefsState {
   canonRevision: number;
   ripples: Array<{ kind: string; summary: string; targets: string[] }>;
 }
+
+export type NarratorQuote =
+  | { state: "working" }
+  | { state: "refused"; refused: string }
+  | { state: "done"; stale: number; held: number; directed: number; estimatedMicroUsd: number; kept: number };
+
+export type HeardLine = { state: "working" } | { state: "done"; file: string } | { state: "refused"; refused: string };
 
 /** A script out, or returned files matched and checked, for a recorded speaker (design turn 155d, SPEC-047 R-39). */
 export interface SpeakerLinesState {
@@ -328,6 +335,10 @@ interface StoreState {
   stagedTakes: Record<string, StagedTake>;
   /** A recorded speaker's script out and files back (turn 155d), by the window's request id. */
   speakerLines: Record<string, SpeakerLinesState>;
+  /** What a narrator switch would do (design turn 155h, SPEC-047 R-46), by the dialog's request id. */
+  narratorQuotes: Record<string, NarratorQuote>;
+  /** A line heard as it would be read (R-45, R-46), by request id: waiting, the file to play, or why not. */
+  heardLines: Record<string, HeardLine>;
   /**
    * The door (turn 146, SPEC-047 R-29), by production: what every chapter stands at, who
    * reads, and the price of a press, as the coordinator last answered; and `Read the book`,
@@ -351,7 +362,7 @@ interface StoreState {
     }
   >;
   /** Directions re-checked against changed readers (R-13): how many controls went, said once on the door. */
-  audiobookNotes: Record<string, { dropped: number; chapters: number; seq: number }>;
+  audiobookNotes: Record<string, { dropped: number; held: number; chapters: number; seq: number }>;
   /** The last word on archiving a world — said once, then dismissed. */
   archiveNote: { worldId: string; text: string; refused: boolean } | null;
   permissions: Record<string, PendingPermission>;
@@ -515,6 +526,8 @@ let current: StoreState = {
   audiobookRecords: {},
   stagedTakes: {},
   speakerLines: {},
+  narratorQuotes: {},
+  heardLines: {},
   audiobookDoor: {},
   audiobookBook: {},
   audiobookNotes: {},
@@ -1330,6 +1343,8 @@ function handleFrame(json: string): void {
       audiobookRecords: changedWorld ? {} : current.audiobookRecords,
       stagedTakes: changedWorld ? {} : current.stagedTakes,
       speakerLines: changedWorld ? {} : current.speakerLines,
+      narratorQuotes: changedWorld ? {} : current.narratorQuotes,
+      heardLines: changedWorld ? {} : current.heardLines,
       audiobookDoor: changedWorld ? {} : current.audiobookDoor,
       audiobookBook: changedWorld || rejoined ? {} : current.audiobookBook,
       audiobookNotes: changedWorld ? {} : current.audiobookNotes,
@@ -1363,6 +1378,8 @@ function handleFrame(json: string): void {
     let audiobookRecords = current.audiobookRecords;
     let stagedTakes = current.stagedTakes;
     let speakerLines = current.speakerLines;
+    let narratorQuotes = current.narratorQuotes;
+    let heardLines = current.heardLines;
     let audiobookDoor = current.audiobookDoor;
     let audiobookBook = current.audiobookBook;
     let audiobookNotes = current.audiobookNotes;
@@ -1788,6 +1805,20 @@ function handleFrame(json: string): void {
           [event.requestId]: event.refused !== undefined ? { kind: "files", state: "refused", refused: event.refused } : { kind: "files", state: "done", rows: event.rows },
         };
       }
+    } else if (event.type === "audiobook.narrator-quote") {
+      if (narratorQuotes[event.requestId] !== undefined) {
+        narratorQuotes = {
+          ...narratorQuotes,
+          [event.requestId]:
+            event.refused !== undefined
+              ? { state: "refused", refused: event.refused }
+              : { state: "done", stale: event.stale ?? 0, held: event.held ?? 0, directed: event.directed ?? 0, estimatedMicroUsd: event.estimatedMicroUsd ?? 0, kept: event.kept ?? 0 },
+        };
+      }
+    } else if (event.type === "audiobook.heard") {
+      if (heardLines[event.requestId] !== undefined) {
+        heardLines = { ...heardLines, [event.requestId]: event.file !== undefined ? { state: "done", file: event.file } : { state: "refused", refused: event.refused ?? "could not hear it" } };
+      }
     } else if (event.type === "audiobook.lines-kept") {
       const held = speakerLines[event.requestId];
       if (held !== undefined) {
@@ -1893,7 +1924,7 @@ function handleFrame(json: string): void {
       }
     } else if (event.type === "audiobook.conformed") {
       if (current.state?.world?.meta.worldId === event.worldId) {
-        audiobookNotes = { ...audiobookNotes, [event.productionId]: { dropped: event.dropped, chapters: event.chapters, seq: (audiobookNotes[event.productionId]?.seq ?? 0) + 1 } };
+        audiobookNotes = { ...audiobookNotes, [event.productionId]: { dropped: event.dropped, held: event.held ?? 0, chapters: event.chapters, seq: (audiobookNotes[event.productionId]?.seq ?? 0) + 1 } };
       }
     } else if (event.type === "direction.started") {
       const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
@@ -2214,6 +2245,8 @@ function handleFrame(json: string): void {
       audiobookRecords,
       stagedTakes,
       speakerLines,
+      narratorQuotes,
+      heardLines,
       audiobookDoor,
       audiobookBook,
       audiobookNotes,
@@ -4660,8 +4693,42 @@ export function stopAudiobook(worldId: string, productionId: string, chapterFile
 }
 
 /** The book's reading (SPEC-047 R-11): every block the narrator's, or each line its speaker's. */
-export function setAudiobookReading(worldId: string, productionId: string, reading: "narrator" | "cast"): boolean {
+export function setAudiobookReading(worldId: string, productionId: string, reading: "narrator" | "performed" | "cast"): boolean {
   return send({ kind: "set-audiobook-reading", worldId, productionId, reading });
+}
+
+/** How the narrator plays a character under `performed` (SPEC-047 R-44); null takes the note away. */
+export function setAudiobookNote(worldId: string, productionId: string, speaker: string, note: string | null): boolean {
+  return send({ kind: "set-audiobook-note", worldId, productionId, speaker, note });
+}
+
+/** The book's own narrator, or null for the app's (R-46). */
+export function setAudiobookNarrator(worldId: string, productionId: string, voice: AudiobookReader | null): boolean {
+  return send({ kind: "set-audiobook-narrator", worldId, productionId, voice });
+}
+
+/** What a narrator switch would do, before it is made (R-46); answered under the returned id. */
+export function quoteAudiobookNarrator(worldId: string, productionId: string, voice: AudiobookReader | null): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "quote-audiobook-narrator", worldId, productionId, requestId, voice })) return null;
+  emitChange({ ...current, narratorQuotes: { ...current.narratorQuotes, [requestId]: { state: "working" } } });
+  return requestId;
+}
+
+/** A block heard as it would be read, in the narrator's voice or the one given (R-45, R-46). */
+export function hearAudiobookLine(worldId: string, productionId: string, chapterFile: string, block: string, voice?: AudiobookReader): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "hear-audiobook-line", worldId, productionId, requestId, chapterFile, block, ...(voice !== undefined ? { voice } : {}) })) return null;
+  emitChange({ ...current, heardLines: { ...current.heardLines, [requestId]: { state: "working" } } });
+  return requestId;
+}
+
+export function useNarratorQuotes(): StoreState["narratorQuotes"] {
+  return useStore().narratorQuotes;
+}
+
+export function useHeardLines(): StoreState["heardLines"] {
+  return useStore().heardLines;
 }
 
 /** A speaker recorded by a person, or given back to their voice (SPEC-047 R-37): `narrator`, a sheet id, or a name. */
@@ -5109,6 +5176,8 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     audiobookRecords: {},
     stagedTakes: {},
     speakerLines: {},
+  narratorQuotes: {},
+  heardLines: {},
     audiobookDoor: {},
     audiobookBook: {},
     audiobookNotes: {},

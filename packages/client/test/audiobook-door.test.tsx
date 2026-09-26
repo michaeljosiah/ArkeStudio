@@ -219,11 +219,22 @@ describe("the Audiobook door (turn 146)", () => {
     assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/cast/odile-sarn/voice`, "a speaker's chip opens their voice page");
   });
 
-  it("the narrator's chip opens the setting that chooses the narrator (issue 1191)", async () => {
+  it("the narrator's chip opens the book's narrator: the app's, or a voice for this book, and nothing written until the press (SPEC-047 R-46)", async () => {
     const m = await mount(inkbound());
     await answerDoor(m, door("narrator"));
+    const where = m.where();
     await act(async () => all(m, '[data-testid="audiobook-voice"]')[0]!.click());
-    assert.equal(m.where(), "/settings/general");
+    assert.equal(m.where(), where, "the chip no longer leaves for Settings, which keeps the app's default");
+    const dialog = dom.document.querySelector('[data-testid="narrator-dialog"]') as HTMLElement | null;
+    assert.ok(dialog, "the Narrator dialog opens");
+    const seg = [...dialog.querySelectorAll('[aria-label="Narrator"] button')] as HTMLButtonElement[];
+    assert.deepEqual(seg.map((b) => b.textContent), ["App narrator · George", "This book"]);
+    assert.equal(seg[0]!.getAttribute("aria-pressed"), "true", "a book with no narrator of its own reads in the app's");
+    const use = dialog.querySelector('[data-testid="narrator-use"]') as HTMLButtonElement;
+    assert.ok(use.disabled, "nothing to write while nothing changed");
+    await act(async () => seg[1]!.click());
+    assert.ok(dialog.querySelector('[role="listbox"][aria-label="Voices"]'), "the voices to choose from");
+    assert.ok((dialog.querySelector('[data-testid="narrator-use"]') as HTMLButtonElement).disabled, "no voice chosen yet");
   });
 
   // A cloud narrator (Charlotte), a cast voice (Anna), a local cast voice on the machine's

@@ -3,10 +3,9 @@ import {
   AUDIOBOOK_DELIVERIES,
   CADENCE_PHRASE_MAX,
   DeliverySchema,
-  audiobookTextHash,
   cadenceSupport,
+  cueStart,
   normalizeSpeechText,
-  type AudiobookDirection,
   type AudiobookDirectionInput,
   type AudiobookReader,
   type CadencePlan,
@@ -17,7 +16,7 @@ import {
 } from "@arke-studio/contracts";
 import type { SessionInput } from "../harness/session-files.js";
 import type { WorldStore } from "../world/store.js";
-import { castRefusal, checkDirection, directionPlan, effectiveReader, planAudiobook, readerLanguage, updateAudiobook, type PlannedBlock } from "./audiobook.js";
+import { castRefusal, checkDirection, directionEntry, directionPlan, effectiveReader, planAudiobook, readerLanguage, updateAudiobook, type PlannedBlock } from "./audiobook.js";
 import { CONTINUITY_BOUNDS, makeAdapterJsonDeriver } from "./continuity.js";
 
 /**
@@ -159,7 +158,11 @@ export function conformInput(input: AudiobookDirectionInput, support: ReturnType
   }
   const cues: CadencePlan["cues"] = [];
   for (const cue of input.cues) {
-    if (cues.length >= 40 || support[cue.kind].status === "unsupported") {
+    const unsupported =
+      cue.kind === "delivery"
+        ? (cue.delivery !== undefined && support.deliveries[cue.delivery]?.status === "unsupported") || (cue.phrase !== undefined && support.phrase.status === "unsupported")
+        : support[cue.kind].status === "unsupported";
+    if (cues.length >= 40 || unsupported) {
       dropped += 1;
       continue;
     }
@@ -202,7 +205,7 @@ export function verifyDirections(raw: RawDirection, blocks: readonly DirectableB
       else if (cue.kind === "breath") cues.push({ kind: "breath", at: span.from, action: cue.action });
       else cues.push({ kind: "emphasis", span: { from: span.from, to: span.to, text: text.slice(span.from, span.to) }, level: cue.level });
     }
-    cues.sort((a, b) => (a.kind === "emphasis" ? a.span.from : a.at) - (b.kind === "emphasis" ? b.span.from : b.at));
+    cues.sort((a, b) => cueStart(a) - cueStart(b));
     const asked = DeliverySchema.safeParse(entry.delivery ?? "measured");
     const phraseAsked = typeof entry.phrase === "string" ? normalizeSpeechText(entry.phrase) : "";
     const conformed = conformInput(
@@ -379,12 +382,13 @@ export async function acceptDirections(
       continue;
     }
     const plan = directionPlan(block.text, entry);
-    if (!checkDirection(block.text, plan, block.model, block.language).ok) {
+    // A reader changed since the card was made holds what it cannot express (R-47) rather
+    // than dropping the block's direction; only a direction wrong for its words is dropped.
+    if (!checkDirection(block.text, plan, block.model, block.language, "hold").ok) {
       dropped += 1;
       continue;
     }
-    const held: AudiobookDirection = { textHash: audiobookTextHash(block.text), plan, at };
-    direction[key] = held;
+    direction[key] = directionEntry(block.text, plan, at);
   }
   const record = await updateAudiobook(store, productionId, chapter, (current) => ({ ...current, updatedAt: at, direction }));
   return { outcome: "accepted", record, dropped };
