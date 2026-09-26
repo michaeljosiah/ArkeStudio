@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it, type TestContext } from "node:test";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   JobSchema,
@@ -318,6 +318,7 @@ describe("the founding build (SPEC-031)", () => {
     const character = bundle.sheets.find(sheet => sheet.type === "character")!, location = bundle.sheets.find(sheet => sheet.type === "location")!;
     assert.ok((await readKit(store, character.id))?.kit.mainPhoto?.sourceTakeId);
     assert.ok((await readKit(store, location.id))?.kit.establishingViewId);
+    assert.deepEqual(await readdir(join(store.dir, "references", location.id, "candidates")), []);
     const carriedReference = bundle.referenceTakes.find(take => take.jobId === job.id)!.references[0]!;
     assert.deepEqual(bundle.referenceTakes.find(take => take.jobId === job.id)?.provenance.recipe, job.recipe);
     const generated = bundle.artifacts.find(artifact => artifact.generation?.source === "founding");
@@ -335,6 +336,7 @@ describe("the founding build (SPEC-031)", () => {
     assert.ok(![...h.queue.jobs.values()].some(job => job.target.kind === "main-photo-candidate" || job.target.kind === "location-view-candidate"));
     const selected = await reviewedGenesisImages(dir, approved, [job]);
     for (const selection of selected.selectedImages ?? []) await installGenesisImage(dir, selection, selected, store);
+    assert.deepEqual(await readdir(join(store.dir, "references", location.id, "candidates")), []);
     await h.service.begin("gen-selected", ulid());
     assert.equal(store.getBundle().artifacts.length, 4);
     assert.equal(store.getBundle().referenceTakes.length, 3);
