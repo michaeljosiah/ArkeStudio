@@ -360,7 +360,7 @@ import {
 } from "./voice/library.js";
 import { hostedReaderDestination, hostedUploadConfirmed, hostedUploadToken, prepareHostedClip, type HostedVoiceSlots } from "./voice/hosted.js";
 import { deleteVoice } from "./voice/library.js";
-import { atomicWriteFile, serializeFileMutation } from "./world/atomic.js";
+import { atomicWriteFile, serializeFileMutation, withTransientRetry } from "./world/atomic.js";
 import { restoreBible, saveBible } from "./world/bible.js";
 import { changesForEntity } from "./world/change-writer.js";
 import { classify, CommitPlanError, MEDIA_HAS_VIDEO_SCHEMA_VERSION } from "./world/commit.js";
@@ -5633,7 +5633,7 @@ export class Coordinator {
     await guardProductionSetupAuthority(this.opts.provider.openStore?.(), msg);
     if ("genesisId" in msg && msg.genesisId && ["genesis-chat", "genesis-propose-world", "genesis-decide", "genesis-import-resolve", "genesis-image-decide", "genesis-image-generate", "genesis-voice-decide", "genesis-voice-generate", "genesis-attach", "genesis-attach-files"].includes(msg.kind)) {
       const dir = await this.opts.provider.genesisDir?.(msg.genesisId);
-      if (dir) await rm(join(dir, "readiness-review.json"), { force: true });
+      if (dir) await withTransientRetry(() => rm(join(dir, "readiness-review.json"), { force: true }));
     }
     // Adapter downloads and deletion must pass their own policy and ownership boundary,
     // including requests from generic Downloads controls or an older client.

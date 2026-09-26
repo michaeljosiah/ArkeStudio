@@ -747,7 +747,7 @@ export function WorldChatScreen() {
           </div>
 
           <div className="fy-gate__body">
-            {state?.app.builds.filter(build => build.worldId === worldId && (!build.noticeDismissed || build.status === "running"))
+            {state?.app.builds.filter(build => build.worldId === worldId && (!build.noticeDismissed || build.status === "running" || build.items.some(item => item.state === "running")))
               .map(build => <FoundingProgressCard key={build.worldId} build={build} />)}
             {missing ? (
               <EmptyState

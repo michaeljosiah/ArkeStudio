@@ -184,6 +184,7 @@ class BuildJournal {
 }
 
 interface ActiveBuild {
+  stopGeneration?: number;
   record: FoundingBuildRecord;
   journal: BuildJournal;
   entries: BuildJournalEntry[];
@@ -397,7 +398,9 @@ export class FoundingBuildService {
     const founded = effectiveLook(blueprint, look);
     const normalized = { ...blueprint, ...(founded !== undefined ? { look: founded } : {}) };
     if (founded === undefined) delete normalized.look;
-    return conversationActionDigest({ blueprint: normalized, models: models ?? null, route,
+    const review = blueprint.reviewed ? await reviewGenesisContent(await this.ports.genesisDir(genesisId)) : null;
+    return conversationActionDigest({ proposals: review?.cards.map(card => ({ key: card.key, digest: card.digest, status: card.status })) ?? null,
+      blueprint: normalized, models: models ?? null, route,
       items: items.map(({ idempotencyKey: _key, ...item }) => item),
       look: await this.masterLookNote(genesisId, founded) });
   }
@@ -687,9 +690,12 @@ export class FoundingBuildService {
 
   async stop(worldId: string): Promise<void> {
     const active = this.builds.get(worldId);
-    if (!active || active.stopped) return;
-    active.stopped = true;
-    await this.append(active, { kind: "stopped", at: this.ports.nowIso() });
+    if (!active) return;
+    active.stopGeneration = (active.stopGeneration ?? 0) + 1;
+    if (!active.stopped) {
+      active.stopped = true;
+      await this.append(active, { kind: "stopped", at: this.ports.nowIso() });
+    }
     // Cancellation of every build job that is not yet terminal is requested, best effort
     // (SPEC-009 R-14). A charge captured anyway is the ledger's to record, and it does.
     const state = this.fold(active);
@@ -761,8 +767,10 @@ export class FoundingBuildService {
     if (keys.length === 0) return;
     // An unauthorized item runs only when a route resolves NOW — the reason it was refused
     // may have been fixed, which is the whole point of the press (R-11).
+    const stopGeneration = active.stopGeneration ?? 0;
     const { route } = await this.resolveImageRoute(this.worldModels(worldId));
     for (const key of keys) {
+      if ((active.stopGeneration ?? 0) !== stopGeneration) break;
       const item = active.record.items.find((candidate) => candidate.key === key);
       if (!item) continue;
       await this.runOne(active, item, route?.model ?? null).catch((err) => {

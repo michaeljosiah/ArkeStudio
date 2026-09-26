@@ -12,7 +12,7 @@ import { blueprintSaysSomething, foldBlueprint, sameBlueprint } from "./blueprin
 import { sessionTokenBudget } from "./token-budget.js";
 import { foundingMessages, recordFoundingBlueprint, recordFoundingMessage } from "./genesis-conversation.js";
 import { reviewGenesisContent } from "./genesis-review.js";
-import { atomicWriteFile } from "../world/atomic.js";
+import { atomicWriteFile, withTransientRetry } from "../world/atomic.js";
 import { THINKING_LABEL, WRITING_LABEL, workingLabel } from "../world-chat/project.js";
 
 /**
@@ -285,7 +285,7 @@ export class GenesisService {
     status("running");
 
     try {
-      await rm(join(dir, "readiness-review.json"), { force: true });
+      await withTransientRetry(() => rm(join(dir, "readiness-review.json"), { force: true }));
       let sessionId = this.sessions.get(genesisId);
       const firstTurn = sessionId === undefined;
       if (sessionId === undefined) {

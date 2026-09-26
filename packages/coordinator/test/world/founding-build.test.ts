@@ -1049,6 +1049,14 @@ describe("the founding build (SPEC-031)", () => {
       state.items.some((item) => item.kind === "key-art" && item.state === "skipped"),
       "what was never dispatched is not dispatched",
     );
+    await h.service.dismissNotice(h.worldId());
+    const key = state.items.find(item => item.kind === "main-photo")!.key;
+    const retry = h.service.runItems(h.worldId(), key);
+    await until(() => [...h.queue.jobs.values()].some(job => job.status === "running"), "retried image running", BUILD_MS);
+    const retried = [...h.queue.jobs.values()].find(job => job.status === "running")!;
+    await h.service.stop(h.worldId());
+    await retry;
+    assert.ok(h.queue.cancelled.includes(retried.id), "Stop cancels a retry after the original build was already stopped");
   });
 });
 
@@ -1081,4 +1089,18 @@ it("never-depicted characters keep their sheet but never enter either image wave
   await h.service.runItems(h.worldId());
   assert.equal(h.queue.jobs.size, before, "Run remaining work cannot resurrect omitted portraits");
   assert.equal((await readKit(store, sheet.id))?.kit.mainPhoto, undefined);
+});
+
+it("invalidates Begin when only an unapproved proposal changes", async t => {
+  let h!: Harness;
+  h = await makeHarness(t, { manifest: null, reviewedBlueprint: async id => approvedBlueprintForFounding(await h.provider.genesisDir(id)) });
+  const id = "gen-pending-digest", dir = await h.provider.genesisDir(id);
+  await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Harbour" }));
+  await decideGenesisContent(dir, (await reviewGenesisContent(dir)).cards, "approve", ulid());
+  await h.service.plan(id, ulid(), undefined, undefined, false);
+  const original = lastPlan(h).approvalDigest;
+  await mkdir(join(dir, "draft", "characters"), { recursive: true });
+  await writeFile(join(dir, "draft", "characters", "maren.json"), JSON.stringify({ name: "Maren", line: "Still a proposal" }));
+  await assert.rejects(h.service.begin(id, ulid(), undefined, undefined, original, false), /estimate changed/);
+  assert.equal(h.provider.openStore(), null);
 });
