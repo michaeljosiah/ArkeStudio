@@ -299,8 +299,16 @@ export class FsWorldProvider implements WorldProvider {
     await this.ensureAppRoot();
     if (input.creationId) {
       if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(input.creationId)) throw new Error("invalid creation identity");
-      const existing = await this.findWorldDir(input.creationId).catch(() => null);
-      if (existing) return { worldId: input.creationId, slug: basename(existing) };
+      // Recovery must prove absence. An unreadable published world may hold the reserved
+      // identity; treating it as absent would publish a second copy with the same identity.
+      for (const entry of await readdir(toExtendedLength(this.worldsDir()), { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const existing = join(this.worldsDir(), entry.name);
+        const meta = await readWorldMeta(existing).catch(() => {
+          throw new Error(`Cannot recover founding while world "${entry.name}" is unreadable. Repair its world.json before retrying.`);
+        });
+        if (meta.worldId === input.creationId) return { worldId: input.creationId, slug: entry.name };
+      }
     }
     const taken = await readdir(toExtendedLength(this.worldsDir())).catch(() => [] as string[]);
     const worldId = input.creationId ?? ulid();

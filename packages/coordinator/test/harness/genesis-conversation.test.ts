@@ -159,3 +159,16 @@ it("migrates legacy draft content without giving the harness the conversation jo
   await provider.genesisDir("gen-old");
   assert.equal((await loadGenesisConversation(workspace, "gen-old")).blueprint.name, "Old Harbour");
 });
+it("refuses reserved creation recovery when a published world's identity is unreadable", async () => {
+  const root = await tempDir("founding-unreadable-");
+  const provider = new FsWorldProvider(root);
+  const input = { creationId: ulid(), name: "Harbour" };
+  const first = await provider.createWorld(input);
+  const path = join(root, "worlds", first.slug, "world.json");
+  const original = await readFile(path, "utf8");
+  await writeFile(path, "{ damaged");
+  await assert.rejects(provider.createWorld(input), /world.*unreadable/);
+  await writeFile(path, original);
+  assert.deepEqual(await provider.createWorld(input), first);
+  assert.equal((await provider.listWorlds()).length, 1);
+});
