@@ -126,8 +126,10 @@ test("cancellation during creation consumes preparation and archives late epheme
     assert.ok(Date.now() < deadline, "session did not reach thread/start"); await delay(10);
   }
   abort.abort();
-  await assert.rejects(create, /cancelled/); await delay(180);
-  assert.ok((await f.requests()).some(request => request.method === "thread/archive"));
+  await assert.rejects(create, /cancelled/);
+  // The archive follows the late thread/start reply; waited for, not slept for (issue 1290) —
+  // a fixed 180 ms lost to a busy Windows runner.
+  await eventually(async () => (await f.requests()).some(request => request.method === "thread/archive"));
 });
 
 test("interruption stops the model turn, and concurrent turns cannot displace their waiter", async t => {

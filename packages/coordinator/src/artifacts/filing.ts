@@ -524,7 +524,9 @@ function generatedIdentity(
     // take names that take, which makes it another artifact than the one on the shelf and
     // still the same one on a retry — and a retired selection, named, cannot be answered by
     // an older take of the same words (codex on PR 1193).
-    const local = (g: ArtifactAudiobookGeneration) => `${g.textHash}/${g.provider}/${g.model}/${g.voiceId}/${g.directionHash ?? ""}/${g.remakeOf ?? ""}`;
+    // A recording is named by its prepared bytes (SPEC-047 R-34): two recordings of one block are
+    // two takes, and the same file kept twice is one.
+    const local = (g: ArtifactAudiobookGeneration) => `${g.textHash}/${g.provider}/${g.model}/${g.voiceId}/${g.directionHash ?? ""}/${g.remakeOf ?? ""}/${g.recording?.preparedHash ?? ""}`;
     const made = generation.jobId ?? local(generation);
     return {
       producedBy: "audiobook",

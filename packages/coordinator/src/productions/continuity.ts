@@ -84,6 +84,13 @@ ${input.body}`;
 }
 
 const WALL_CLOCK_MS = 120_000;
+/**
+ * The same clock on Arke's local harness. Two minutes was sized for hosted models; a 12B model on
+ * a 10 GB card, part of it on the CPU, needed longer for a 76-word chapter with three spoken lines,
+ * and both casts stopped at exactly 120 s (issue 1289). A local model costs nothing while it
+ * works, so the clock is there to catch a stall, not to hurry it.
+ */
+const LOCAL_WALL_CLOCK_MS = 10 * 60_000;
 
 /**
  * The built-in runner behind every derivation from the prose (turns 129 and 130): a sandboxed
@@ -147,7 +154,7 @@ export function makeAdapterJsonDeriver<T>(
           // wait, and a generation left running behind it would go on spending.
           void adapter.interrupt?.(session.sessionId).catch(() => {});
           reject(new Error("deriving took too long"));
-        }, WALL_CLOCK_MS);
+        }, adapter.id === "arke" ? LOCAL_WALL_CLOCK_MS : WALL_CLOCK_MS);
       });
       try {
         // Dispatch under the same cleanup as collection (codex on PR 907, round five) and under

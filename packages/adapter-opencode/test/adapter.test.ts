@@ -580,9 +580,11 @@ describe("session configuration (R-5, R-6, R-10)", () => {
       // Explicit allows, never a wildcard — a wildcard was observed to override the denies.
       assert.equal(agents[name]!.permission["bash"], "deny");
       assert.equal(agents[name]!.permission["webfetch"], "deny");
-      assert.equal(agents[name]!.permission["edit"], "allow");
+      assert.equal(agents[name]!.permission["edit"], name === "canon-qa" ? "deny" : "allow");
       assert.equal("*" in agents[name]!.permission, false);
     }
+    // canon-qa answers from retrieved canon; nothing it does needs a file written.
+    assert.equal(agents["canon-qa"]!.tools["write"], false);
     const mcp = config["mcp"] as Record<string, { type: string; url: string }>;
     assert.equal(mcp["arke-world"]!.type, "remote");
     const raw = JSON.stringify(config).toLowerCase();
