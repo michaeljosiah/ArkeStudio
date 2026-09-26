@@ -318,6 +318,10 @@ describe("the founding build (SPEC-031)", () => {
     assert.ok((await readKit(store, character.id))?.kit.mainPhoto?.sourceTakeId);
     assert.ok((await readKit(store, location.id))?.kit.establishingViewId);
     assert.deepEqual(await readdir(join(store.dir, "references", location.id, "candidates")), []);
+    const picker = await h.provider.listReferenceImages(bundle.meta.slug);
+    const locationArtifact = bundle.artifacts.find(artifact => artifact.generation?.source === "founding")!;
+    assert.ok(picker.some(row => row.sheetId === location.id));
+    assert.ok(!picker.some(row => row.file === `artifacts/${locationArtifact.file}`), "verified founding copies use one reference slot");
     const carriedReference = bundle.referenceTakes.find(take => take.jobId === job.id)!.references[0]!;
     assert.deepEqual(bundle.referenceTakes.find(take => take.jobId === job.id)?.provenance.recipe, job.recipe);
     const generated = bundle.artifacts.find(artifact => artifact.generation?.source === "founding");
