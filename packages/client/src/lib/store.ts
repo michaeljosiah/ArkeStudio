@@ -164,6 +164,7 @@ interface StoreState {
       images?: import("@arke-studio/contracts").GenesisImages;
       voices?: import("@arke-studio/contracts").GenesisVoices;
       readiness?: import("@arke-studio/contracts").GenesisReadiness;
+      readinessPending?: boolean;
       imports?: import("@arke-studio/contracts").GenesisImports;
       founding?: boolean;
       formHandoff?: "pending" | "completed";
@@ -1510,7 +1511,7 @@ function handleFrame(json: string): void {
     } else if (event.type === "genesis.voices") {
       genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], voices: event.voices, readiness: undefined } };
     } else if (event.type === "genesis.readiness") {
-      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], readiness: event.review } };
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], readiness: event.review, readinessPending: false } };
     } else if (event.type === "genesis.imports") {
       genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], imports: event.imports, readiness: undefined } };
     } else if (event.type === "genesis.review") {
@@ -1526,7 +1527,7 @@ function handleFrame(json: string): void {
       genesis = { ...genesis, [event.genesisId]: {
         ...emptyGenesis(), ...genesis[event.genesisId],
         turns: [...messages.values()].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)), blueprint: event.blueprint,
-        attachments: event.attachments, status: event.status, conversationId: event.conversationId, readiness: undefined,
+        attachments: event.attachments, status: event.status, conversationId: event.conversationId, readiness: undefined, readinessPending: false,
         founding: event.founding,
         formHandoff: event.formHandoff,
         ...(event.detail ? { detail: event.detail } : {}),
@@ -1575,6 +1576,7 @@ function handleFrame(json: string): void {
         [event.genesisId]: {
           ...g,
           status: event.status,
+          ...(event.status === "failed" ? { readinessPending: false } : {}),
           // The clock starts when the turn does; a settled turn takes its working line with it.
           runStartedAt: event.status === "running" ? event.at : g.runStartedAt,
           working: event.status === "running" ? g.working : null,
@@ -2181,7 +2183,7 @@ function handleFrame(json: string): void {
 
 function handleStatus(status: ConnectionStatus): void {
   if (status !== "open") pendingQueueRequests.clear();
-  emitChange({ ...current, connection: status });
+  emitChange({ ...current, connection: status, ...(status !== "open" ? { genesis: Object.fromEntries(Object.entries(current.genesis).map(([id, draft]) => [id, { ...draft, readinessPending: false }])) } : {}) });
   if (status === "open") {
     reconnectAttempts = 0;
     rejoining = true;
@@ -2709,8 +2711,16 @@ export function reviewGenesisImages(genesisId: string, models?: Partial<Record<i
   send({ kind: "genesis-images", genesisId, ...(models ? { models } : {}) });
 }
 export function reviewGenesisVoices(genesisId: string): void { send({ kind: "genesis-voices", genesisId }); }
-export function reviewGenesisReadiness(genesisId: string): void { send({ kind: "genesis-readiness", genesisId }); }
+function beginReadinessRequest(genesisId: string): boolean {
+  if (!bridge || current.connection !== "open" || current.genesis[genesisId]?.readinessPending) return false;
+  emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...emptyGenesis(), ...current.genesis[genesisId], readinessPending: true } } });
+  return true;
+}
+export function reviewGenesisReadiness(genesisId: string): void {
+  if (beginReadinessRequest(genesisId)) send({ kind: "genesis-readiness", genesisId });
+}
 export function leaveGenesisFinding(genesisId: string, findingId: string, digest: string): void {
+  if (!beginReadinessRequest(genesisId)) return;
   send({ kind: "genesis-readiness-leave", genesisId, requestId: ulid(), findingId, digest });
 }
 export function generateGenesisVoice(genesisId: string, intentId: string, digest: string): void {

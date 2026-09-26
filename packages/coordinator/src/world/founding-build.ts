@@ -355,7 +355,8 @@ export class FoundingBuildService {
         `${blueprint.dropped.length} blueprint file${blueprint.dropped.length === 1 ? "" : "s"} could not be read and will not build: ${blueprint.dropped.join(", ")}`,
       );
     }
-    const items = compileBuildItems(blueprint, route === null ? null : { model: route.model, referenceImages: route.referenceImages });
+    const items = compileBuildItems(blueprint, route === null ? null : { model: route.model, referenceImages: route.referenceImages }, undefined,
+      generateImages ? undefined : "New image generation was declined. Authorize it later in Activity if wanted.");
     if (keyArtBriefSettled(blueprint.keyArt) && !items.some((item) => item.kind === "key-art")) {
       notes.push("Key art names a character who is never depicted — key art will not be made.");
     }
@@ -469,6 +470,7 @@ export class FoundingBuildService {
     const items = compileBuildItems(
       blueprint,
       route === null ? null : { model: route.model, referenceImages: route.referenceImages },
+      undefined, generateImages ? undefined : "New image generation was declined. Authorize it later in Activity if wanted.",
     );
     const capMicroUsd = items.filter((item) => item.authorized).reduce((sum, item) => sum + item.estimatedMicroUsd, 0);
     if (!frozen && approvalDigest !== undefined && approvalDigest !== await this.approvalDigest(genesisId, folded, look, models, route, items))

@@ -396,6 +396,7 @@ describe("the founding build (SPEC-031)", () => {
     await until(() => h.lastState()?.status === "completed", "text-only build", BUILD_MS);
     assert.equal(h.queue.jobs.size, 0);
     assert.equal(h.provider.openStore()!.getBundle().sheets.length, 3);
+    assert.ok(h.lastState()!.items.filter(item => !item.authorized).every(item => item.detail?.includes("declined")));
   });
 
   it("saves an approved founding voice through sheet assignment without another audition", async t => {

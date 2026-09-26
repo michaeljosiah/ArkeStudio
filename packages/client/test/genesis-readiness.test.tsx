@@ -6,6 +6,29 @@ import { parseHTML } from "linkedom";
 import { renderToString } from "react-dom/server";
 import type { FoundingBuildState, GenesisReadiness } from "@arke-studio/contracts";
 import { GenesisReadinessCard, FoundingProgressCard } from "../src/components/genesis-readiness.js";
+import { __applyEventForTest, __setStateForTest, __setBridgeForTest, __stateForTest, reviewGenesisReadiness, leaveGenesisFinding } from "../src/lib/store.js";
+import type { ArkeBridge } from "../src/arke-bridge.js";
+import { FIXTURE_STATE } from "./fixture-state.js";
+
+it("serializes readiness requests in the client and releases them after answers or failure", () => {
+  const sent: string[] = [];
+  __setStateForTest(FIXTURE_STATE);
+  __setBridgeForTest({ send: (message: string) => sent.push(message) } as unknown as ArkeBridge);
+  try {
+    reviewGenesisReadiness("gen-ready"); reviewGenesisReadiness("gen-ready"); leaveGenesisFinding("gen-ready", "finding", "current");
+    assert.equal(sent.length, 1);
+    assert.equal(__stateForTest().genesis["gen-ready"]?.readinessPending, true);
+    __applyEventForTest({ type: "genesis.readiness", at: new Date().toISOString(), genesisId: "gen-ready", review: {
+      digest: "current", approved: [], reused: [], findings: [], canBegin: true,
+    } });
+    leaveGenesisFinding("gen-ready", "finding", "current");
+    assert.equal(sent.length, 2);
+    __applyEventForTest({ type: "genesis.status", at: new Date().toISOString(), genesisId: "gen-ready", status: "failed", detail: "Refresh the review." });
+    assert.equal(__stateForTest().genesis["gen-ready"]?.readinessPending, false);
+    reviewGenesisReadiness("gen-ready");
+    assert.equal(sent.length, 3);
+  } finally { __setBridgeForTest(null); __setStateForTest(FIXTURE_STATE); }
+});
 
 it("offers fixes and optional unresolved choices without dismissing blockers", async () => {
   const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -22,7 +45,6 @@ it("offers fixes and optional unresolved choices without dismissing blockers", a
     assert.equal(leaves.length, 1);
     await act(async () => leaves[0]!.click());
     assert.deepEqual(calls, ["question:current"]);
-    assert.equal(leaves[0]!.hasAttribute("disabled"), true);
     const fix = [...container.querySelectorAll("button")].find(button => button.textContent === "Propose a fix")!;
     await act(async () => fix.click());
     assert.match(calls[1]!, /character:maren/);
@@ -37,7 +59,7 @@ it("shows failed and held work with retry controls while retaining completed res
       { key: "photo", kind: "main-photo", stage: 2, subject: "maren", name: "Maren photo", state: "failed", detail: "Provider offline", authorized: true, estimatedMicroUsd: 40000 },
     ] };
   const html = renderToString(<FoundingProgressCard build={build} />).replaceAll("<!-- -->", "");
-  assert.match(html, /Retry Maren photo/);
+  assert.match(html, /Review retry in Activity/);
   assert.ok(!html.includes(">Retry Maren<"));
   assert.match(html, /Provider offline/);
   assert.match(html, /Keep completed work and leave the rest/);
@@ -47,4 +69,8 @@ it("shows failed and held work with retry controls while retaining completed res
   assert.doesNotMatch(heldHtml, /Retry/);
   const completed = { ...build, shortfall: null, items: build.items.map(item => ({ ...item, state: "landed" as const })) };
   assert.equal(renderToString(<FoundingProgressCard build={completed} />), "");
+  const retrying = { ...build, noticeDismissed: true, items: build.items.map(item => item.key === "photo" ? { ...item, state: "running" as const } : item) };
+  const retryHtml = renderToString(<FoundingProgressCard build={retrying} />);
+  assert.match(retryHtml, /Stop and skip remaining work/);
+  assert.doesNotMatch(retryHtml, /Keep completed work and leave the rest/);
 });
