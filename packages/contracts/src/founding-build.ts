@@ -626,6 +626,7 @@ export const BuildReviewSchema = z
         characters: z.number().int().min(0),
         locations: z.number().int().min(0),
         factions: z.number().int().min(0),
+        canon: z.number().int().min(0).default(0),
         threads: z.number().int().min(0),
       })
       .strict(),

@@ -7114,7 +7114,8 @@ export class Coordinator {
       case "genesis-decide": {
         if (!this.opts.provider.genesisDir) return;
         if (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) return;
-        this.genesisDeciding.add(msg.genesisId);
+        const deciding = msg.kind === "genesis-decide";
+        if (deciding) this.genesisDeciding.add(msg.genesisId);
         try {
           const dir = await this.opts.provider.genesisDir(msg.genesisId);
           const loadedDraft = await loadGenesisConversation(dir, msg.genesisId);
@@ -7125,7 +7126,7 @@ export class Coordinator {
           this.emit({ type: "genesis.review", at: new Date().toISOString(), genesisId: msg.genesisId, review });
         } catch (err) {
           this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: msg.genesisId, status: "failed", detail: describeCoordinatorError(err) });
-        } finally { this.genesisDeciding.delete(msg.genesisId); }
+        } finally { if (deciding) this.genesisDeciding.delete(msg.genesisId); }
         return;
       }
       case "genesis-list":

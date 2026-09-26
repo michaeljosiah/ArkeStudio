@@ -209,16 +209,9 @@ export function foldConversation(
       case "founding.message":
         addMessage(e.message, envelope.seq);
         break;
-      case "founding.decision": {
-        const content = e.decision.content;
-        const title = content.kind === "thread" ? content.value
-          : typeof content.value === "object" && "name" in content.value ? content.value.name
-          : content.kind === "canon" ? content.value.title : content.kind === "remove" ? "removal" : "world content";
-        addMessage({ id: envelope.eventId.replace("wce_", "msg_"), turnId: envelope.eventId.replace("wce_", "turn_"),
-          role: "studio", text: `You ${e.decision.decision === "approve" ? "approved" : "rejected"} ${title} for founding.`,
-          attachmentIds: [], createdAt: e.decision.at }, envelope.seq);
+      case "founding.decision":
+        // Audit decisions stay in the journal without evicting dialogue from its bounded view.
         break;
-      }
       case "production-setup.updated":
         productionSetup = e.state;
         break;
