@@ -236,3 +236,62 @@ it("reports proposal files beyond the review cap", async () => {
   await Promise.all(Array.from({ length: 300 }, (_, index) => writeFile(join(dir, "draft", "imports", `copy-${index}.json`), proposal)));
   assert.ok((await reviewGenesisImports(dir)).problems.some(problem => problem.includes("1 import proposal files exceed")));
 });
+it("normalizes default sections and whitespace, and preserves edits containing the original wording", async t => {
+  const { provider, dir } = await setup(); t.after(() => provider.close());
+  const file = join(dir, "draft", "imports", "maren.json");
+  const proposal = JSON.parse(await readFile(file, "utf8"));
+  delete proposal.section;
+  await writeFile(file, JSON.stringify(proposal));
+  const first = (await reviewGenesisImports(dir)).cards[0]!;
+  await writeFile(file, JSON.stringify({ ...proposal, section: "Essence", name: " Maren " }));
+  const normalized = (await reviewGenesisImports(dir)).cards[0]!;
+  assert.equal(normalized.id, first.id);
+  await resolveGenesisImport(dir, { id: normalized.id, digest: normalized.digest, decision: "prepare", body: proposal.body + " and harbour" });
+  const reviewed = (await reviewGenesisContent(dir)).cards.find(card => card.content.kind === "character")!;
+  assert.ok(reviewed.content.kind === "character");
+  assert.equal(reviewed.content.value.sources?.[0]?.modified, true);
+  await writeFile(file, JSON.stringify({ ...proposal, quote: "The gate closes at dusk.", name: " Maren " }));
+  const next = (await reviewGenesisImports(dir)).cards.find(card => card.status === "pending")!;
+  await assert.rejects(resolveGenesisImport(dir, { id: next.id, digest: next.digest, decision: "prepare", name: "Maren " }), /matches an existing/);
+});
+
+it("binds imported relationships to the distinct prepared target", async t => {
+  const { provider, dir } = await setup(); t.after(() => provider.close());
+  await mkdir(join(dir, "draft", "locations"), { recursive: true });
+  await writeFile(join(dir, "draft", "locations", "the-vigil.json"), JSON.stringify({ name: "The Vigil", line: "Old place" }));
+  await writeFile(join(dir, "draft", "imports", "vigil.json"), JSON.stringify({
+    source: "notes.md", kind: "location", name: "The Vigil", body: "The imported place", quote: "The gate closes at dusk.",
+  }));
+  const maren = JSON.parse(await readFile(join(dir, "draft", "imports", "maren.json"), "utf8"));
+  await writeFile(join(dir, "draft", "imports", "maren.json"), JSON.stringify({ ...maren, links: ["location:the-vigil"] }));
+  let cards = (await reviewGenesisImports(dir)).cards;
+  const character = cards.find(card => card.proposal.kind === "character")!;
+  await assert.rejects(resolveGenesisImport(dir, { id: character.id, digest: character.digest, decision: "prepare" }), /Prepare the imported relationship target/);
+  const location = cards.find(card => card.proposal.kind === "location")!;
+  await resolveGenesisImport(dir, { id: location.id, digest: location.digest, decision: "prepare", mode: "distinct" });
+  cards = (await reviewGenesisImports(dir)).cards;
+  const prepared = cards.find(card => card.id === location.id)!;
+  const current = cards.find(card => card.id === character.id)!;
+  await resolveGenesisImport(dir, { id: current.id, digest: current.digest, decision: "prepare" });
+  assert.deepEqual((await foldBlueprint(dir)).characters[0]!.sheet!.links, [prepared.target]);
+  assert.notEqual(prepared.target, "location:the-vigil");
+});
+
+it("bounds duplicate excerpts and refuses a canon import beyond the persisted limit", async t => {
+  const { provider, dir } = await setup(); t.after(() => provider.close());
+  await mkdir(join(dir, "draft", "characters"), { recursive: true });
+  for (let i = 0; i < 25; i++) await writeFile(join(dir, "draft", "characters", "maren-" + i + ".json"),
+    JSON.stringify({ name: "Maren", sheet: { sections: { Essence: "word ".repeat(1200) }, links: [] } }));
+  const card = (await reviewGenesisImports(dir)).cards[0]!;
+  assert.equal(card.matches.length, 20);
+  assert.ok(card.matches.every(match => match.text.length <= 601));
+  await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Harbour",
+    canon: Array.from({ length: 100 }, (_, i) => ({ slug: "entry-" + i, title: "Entry " + i, type: "lore", statement: "Existing" })) }));
+  await writeFile(join(dir, "draft", "imports", "canon.json"), JSON.stringify({
+    source: "notes.md", kind: "canon", name: "The gate", body: "Closed at dusk", quote: "The gate closes at dusk.",
+  }));
+  const canon = (await reviewGenesisImports(dir)).cards.find(card => card.proposal.kind === "canon")!;
+  await assert.rejects(resolveGenesisImport(dir, { id: canon.id, digest: canon.digest, decision: "prepare" }));
+  assert.equal((await foldBlueprint(dir)).canon?.length, 100);
+  assert.equal((await reviewGenesisImports(dir)).cards.find(card => card.id === canon.id)?.status, "pending");
+});

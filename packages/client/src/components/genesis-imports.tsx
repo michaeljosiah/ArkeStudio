@@ -5,10 +5,10 @@ import { Button, Callout } from "./ui.js";
 function ImportCard({ card, blueprint, busy, onResolve }: { card: GenesisImportCard; blueprint?: GenesisBlueprint | null; busy: boolean; onResolve(input: GenesisImportResolve): void }) {
   const [name, setName] = useState(card.proposal.name), [body, setBody] = useState(card.proposal.body);
   const [target, setTarget] = useState(card.matches[0]?.key ?? "");
-  const [mode, setMode] = useState<"" | "distinct" | "append" | "replace">(card.matches.length ? "append" : "");
+  const [mode, setMode] = useState<"" | "distinct" | "append" | "replace">("");
   const prior = useRef(card.proposal);
-  const matches = blueprint ? genesisContentRows(blueprint).filter(row => row.content.kind === card.proposal.kind && row.title.toLowerCase() === name.toLowerCase())
-    .map(row => ({ key: row.key, name: row.title, text: row.content.kind === "canon" ? row.content.value.statement :
+  const matches = blueprint ? genesisContentRows(blueprint).filter(row => row.content.kind === card.proposal.kind && row.title.trim().toLowerCase() === name.trim().toLowerCase())
+    .slice(0, 20).map(row => ({ key: row.key, name: row.title, text: row.content.kind === "canon" ? row.content.value.statement :
       typeof row.content.value === "object" && "sheet" in row.content.value ? Object.values(row.content.value.sheet?.sections ?? {}).join("\n") : "" })) : card.matches;
   const effectiveTarget = matches.some(match => match.key === target) ? target : matches[0]?.key ?? "";
   useEffect(() => {
@@ -36,11 +36,12 @@ function ImportCard({ card, blueprint, busy, onResolve }: { card: GenesisImportC
       {card.related.map((other, index) => <p key={index}>{other.source}: {other.text}</p>)}
     </Callout>}
     {!!matches.length && <Callout title="Possible duplicate or conflicting statement">
+      <p>Up to twenty matching records are shown with excerpts.</p>
       <p>These names match. Compare their words; matching names alone do not establish that they are the same entity.</p>
-      {matches.map(match => <section key={match.key}><h4>{match.name}</h4><p style={{ whiteSpace: "pre-wrap" }}>{match.text}</p></section>)}
+      {matches.map(match => <section key={match.key}><h4>{match.name}</h4><p style={{ whiteSpace: "pre-wrap" }}>{match.text.slice(0, 600)}</p></section>)}
     </Callout>}
       <label>Resolution<select aria-label="Import resolution" value={mode} onChange={e => setMode(e.target.value as typeof mode)}>
-        <option value="">Create if the name is available</option>
+        <option value="">{matches.length ? "Choose a resolution" : "Create if the name is available"}</option>
         {!!matches.length && <><option value="append">Append to the existing record</option><option value="replace">Replace this section</option></>}
         <option value="distinct">Keep as a distinct record</option>
       </select></label>
@@ -48,7 +49,7 @@ function ImportCard({ card, blueprint, busy, onResolve }: { card: GenesisImportC
         {matches.map(match => <option key={match.key} value={match.key}>{match.name} ({match.key})</option>)}
       </select></label>}
     {(card.status === "pending" || card.status === "deferred") && <div style={{ display: "flex", gap: 8 }}>
-      <Button disabled={busy || !name.trim() || !body.trim() || name.length > 120 || body.length > 6000} onClick={() => decide("prepare")}>Prepare for approval</Button>
+      <Button disabled={busy || (!!matches.length && !mode) || !name.trim() || !body.trim() || name.length > 120 || body.length > 6000} onClick={() => decide("prepare")}>Prepare for approval</Button>
       <Button variant="ghost" disabled={busy} onClick={() => decide("reject")}>Reject extraction</Button>
       <Button variant="ghost" disabled={busy} onClick={() => decide("defer")}>Leave undecided</Button>
     </div>}
