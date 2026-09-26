@@ -4,7 +4,7 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { GenesisBlueprintSchema, newId, type DomainEvent } from "@arke-studio/contracts";
 import { NewWorldScreen } from "../src/screens/shell.js";
-import { __applyEventForTest, __setStateForTest, useGenesis } from "../src/lib/store.js";
+import { __applyEventForTest, __setStateForTest, __stateForTest, useGenesis } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 it("shows resumable drafts and does not duplicate messages replayed after a load", () => {
@@ -13,7 +13,7 @@ it("shows resumable drafts and does not duplicate messages replayed after a load
   const at = "2026-09-25T10:00:00.000Z";
   const messageId = newId("msg");
   const snapshot: Extract<DomainEvent, { type: "genesis.loaded" }> = {
-    type: "genesis.loaded", at, genesisId: "gen-one", conversationId: newId("cv"),
+    type: "genesis.loaded", at, revision: 1, genesisId: "gen-one", conversationId: newId("cv"),
     blueprint: GenesisBlueprintSchema.parse({ name: "Harbour", characters: [], locations: [], factions: [], threads: [], dropped: [] }),
     turns: [{ id: messageId, role: "user", text: "Remember the closed gate.", at }],
     attachments: [], status: "completed",
@@ -30,4 +30,7 @@ it("shows resumable drafts and does not duplicate messages replayed after a load
   __applyEventForTest({ type: "genesis.turn", at: "2026-09-25T10:01:00.000Z", genesisId: "gen-one", role: "gate", text: "A newer reply.", messageId: newId("msg") });
   __applyEventForTest(snapshot);
   assert.ok(renderToString(<Transcript />).includes("A newer reply."));
+  __applyEventForTest({ type: "genesis.blueprint", at, genesisId: "gen-one", blueprint: { ...snapshot.blueprint, name: "Current world" }, revision: 3 });
+  __applyEventForTest(snapshot);
+  assert.equal(__stateForTest().genesis["gen-one"]?.blueprint?.name, "Current world");
 });
