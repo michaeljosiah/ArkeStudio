@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  agentPromptFor, confinementFor, findHarnessModel, harnessModelMissingInput, HarnessEventSchema, meetsLocalModelMinimum, ROSTER, sessionSkillForAgent,
+  agentPromptFor, confinementFor, findHarnessModel, harnessModelMissingInput, HarnessEventSchema, meetsLocalModelMinimum, permits, ROSTER, sessionSkillForAgent,
   type CreateSessionInput, type HarnessAdapter, type HarnessCapability, type HarnessEvent, type ModelInfo,
   type Readiness, type SendMessageInput, type SendReceipt, type SessionConfigInput, type SessionRef,
 } from "@arke-studio/contracts";
@@ -14,6 +14,7 @@ import {
 } from "./ollama.js";
 import { estimateTokens, fitToWindow, promptBudget, WITHIN_TURN } from "./context.js";
 import { recoverToolCall } from "./tool-calls.js";
+import { AUTHOR_NOTES_LIMIT, authorPath, memoryInstructions, MEMORY_TOOL_NAMES, MEMORY_TOOLS, NOTES_LIMIT, notesPath, readNotes, runMemoryTool } from "./memory.js";
 
 /**
  * Arke's own local writing harness (issue 1247, Phase 2).
@@ -88,8 +89,8 @@ const DEFAULT_STEPS = 24;
 const CATALOGUE_DEADLINE_MS = 15_000;
 const DISPOSE_RELEASE_MS = 2_000;
 const REPROBE_MS = 5_000;
-/** The world-builder's seventeen tool schemas, as `estimateTokens` counts them. */
-const TOOL_ALLOWANCE = 2_700;
+/** The world-builder's seventeen tool schemas and the two memory tools, as `estimateTokens` counts them. */
+const TOOL_ALLOWANCE = 3_000;
 const NO_USABLE_MODEL = "No pulled model has a 256k context window and calls tools. Pull one, such as Gemma 4 12B.";
 /**
  * Only models stating a 256k context are offered, the same rule as the OpenCode lane
@@ -148,6 +149,10 @@ interface Session extends ToolSession {
   messages: ChatMessage[];
   turn: Turn | null;
   usage: number;
+  /** This ask's checklist, and where the agent's notes for the open world live (null: none kept). */
+  checklist: Array<{ text: string; done: boolean }>;
+  notesPath: string | null;
+  authorPath: string | null;
   /**
    * How far Ollama's real prompt counts have exceeded the estimate, at most, in this session.
    * One until a reply shows the estimate was low; never shrinks.
@@ -322,7 +327,10 @@ export class ArkeAdapter implements HarnessAdapter {
   promptReserveTokens(agent: string, window: number): number | undefined {
     const member = ROSTER.find((candidate) => candidate.name === agent);
     if (!member) return undefined;
-    const prompt = agentPromptFor({ ...member, researchWeb: false });
+    const remembers = !PROMPT_ONLY_AGENTS.has(agent) && permits(confinementFor(member, { web: false }), "todo");
+    // At its fullest: the notes a session reads in can be up to their limit.
+    const prompt = agentPromptFor({ ...member, researchWeb: false }) +
+      (remembers ? `\n\n${memoryInstructions({ world: "x".repeat(NOTES_LIMIT), author: "x".repeat(AUTHOR_NOTES_LIMIT) })}` : "");
     const tools = PROMPT_ONLY_AGENTS.has(agent) ? 0 : this.toolCost.get(agent) ?? TOOL_ALLOWANCE;
     return estimateTokens([{ role: "system", content: prompt }], []) + tools + (window - promptBudget(window));
   }
@@ -379,14 +387,24 @@ export class ArkeAdapter implements HarnessAdapter {
     const numCtx = this.contextFor(stated);
     // Only what the confinement permits is ever offered: the tool list IS the confinement here,
     // rather than a list of tools a harness already has with some of them denied.
-    const tools: ChatTool[] = promptOnly ? [] : toolsFor(toolSession).map((tool) => ({
+    // Working memory (issue 1289 follow-up): where the confinement grants the agent a scratch
+    // checklist, this harness now has one to give, and notes kept between sessions beside it.
+    const remembers = !promptOnly && permits(toolSession.confinement, "todo");
+    const notes = remembers ? notesPath(prepared.memoryDir, member.name) : null;
+    const author = remembers ? authorPath(prepared.authorNotesFile) : null;
+    const memoryTools = remembers ? MEMORY_TOOLS.filter((tool) => notes !== null || author !== null || tool.function.name !== "notes") : [];
+    const tools: ChatTool[] = promptOnly ? [] : [...toolsFor(toolSession).map((tool): ChatTool => ({
       type: "function", function: { name: tool.name, description: COMPACT_DESCRIPTIONS[tool.name] ?? tool.description, parameters: tool.parameters },
-    }));
-    const known = new Set([...FILE_TOOLS, ...toolSession.worldTools.keys()]);
+    })), ...memoryTools];
+    const known = new Set([...FILE_TOOLS, ...toolSession.worldTools.keys(), ...(remembers ? MEMORY_TOOL_NAMES : [])]);
     // The instructions must fit before anything else can. A window smaller than the role's own
     // prompt would have Ollama cut the prompt's beginning — the confinement statement — on every
     // turn, so the session is refused here, where the person can still choose another model.
-    const system: ChatMessage = { role: "system", content: prompt };
+    const pages = {
+      world: notes === null ? null : await readNotes(notes),
+      author: author === null ? null : await readNotes(author, AUTHOR_NOTES_LIMIT),
+    };
+    const system: ChatMessage = { role: "system", content: remembers ? `${prompt}\n\n${memoryInstructions(pages)}` : prompt };
     if (!fitToWindow([system], tools, promptBudget(numCtx), 1)) {
       throw new Error(`This model's context window (${numCtx} tokens) is too small for this role's instructions. Choose a model with a larger window.`);
     }
@@ -395,7 +413,7 @@ export class ArkeAdapter implements HarnessAdapter {
     if (this.disposed) throw new Error("The Arke harness is disposed.");
     this.toolCost.set(member.name, estimateTokens([], tools));
     const id = randomUUID();
-    this.sessions.set(id, { ...toolSession, id, model: selected.id, numCtx, tools, known, messages: [system], turn: null, usage: 0, scale: 1 });
+    this.sessions.set(id, { ...toolSession, id, model: selected.id, numCtx, tools, known, messages: [system], turn: null, usage: 0, scale: 1, checklist: [], notesPath: notes, authorPath: author });
     this.opts.onTrace?.({ at: "arke.session-created", sessionId: id, model: selected.id, agent: member.name, numCtx, tools: tools.map((tool) => tool.function.name) });
     this.emit({ type: "session.created", sessionId: id });
     return { sessionId: id };
@@ -537,6 +555,11 @@ export class ArkeAdapter implements HarnessAdapter {
       return { role: "tool", tool_name: name, content: text, ...(images.length > 0 ? { images } : {}) };
     };
     try {
+      if (MEMORY_TOOL_NAMES.has(name) && session.tools.some((tool) => tool.function.name === name)) {
+        const text = await runMemoryTool(name, args, session);
+        if (!signal.aborted) this.emit({ type: "tool.activity", sessionId: session.id, tool: `arke.${name}`, summary: name === "notes" ? (args.about === "author" ? "noted something about the author" : "kept notes") : "updated its checklist" });
+        return answer({ success: true, content: [{ type: "text", text }] });
+      }
       const executed = await executeTool(session, name, args, signal);
       if (executed.summary && !signal.aborted) this.emit({ type: "tool.activity", sessionId: session.id, tool: `arke.${name}`, summary: executed.summary });
       return answer(executed.result);

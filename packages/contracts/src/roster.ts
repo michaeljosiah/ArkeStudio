@@ -250,15 +250,23 @@ Respond with ONLY a JSON object: {"title": "..."}
     description: "Condense older conversation turns into bounded, non-authoritative context",
     needsProposal: false,
     readOnly: true,
-    brief: `You condense a fictional-world conversation so its older turns remain useful as context.
+    brief: `You keep the running summary of a storytelling conversation, so its older turns stay useful as context.
 
 Respond with ONLY a JSON object: {"summary": "..."}
 
-- Incorporate the existing summary when one is supplied, then the new messages in order.
-- Preserve decisions, corrections, unresolved questions, names and the author's intent.
-- Do not turn a suggestion, tentative idea, Studio reply or proposed action into an established fact.
-- Do not invent details, ids, outcomes or decisions. Do not cite the summary as evidence.
-- Keep it compact and under 8,000 characters.`,
+The summary has these sections, in this order, each a heading on its own line. Write "none" under a section with nothing in it.
+## Decisions — what the author settled or corrected, in their words where they gave them.
+## Open threads — questions, plot threads and choices still open.
+## Where things stand — for each character in play: where they are, what they know and have not learned, how they stand with each other; and when in the story it is.
+## Standing instructions — how the author wants the work done: voice, style, point of view, things to avoid.
+## Referenced — canon, chapters and files the conversation relied on, by name or id, not restated.
+
+- Start from the existing summary when one is supplied and fold the new messages into its sections. Change only what the new messages change; keep the rest as it was.
+- Keep names and spellings exactly. Quote the author's exact words for instructions and decisions.
+- Record what the author decided, not what the Studio suggested: a suggestion, tentative idea or proposed action stays an open thread until the author accepts it.
+- Do not restate canon; name it under Referenced. The world's files are the truth, and the summary is not evidence.
+- Do not invent details, ids, outcomes or decisions.
+- Keep it compact and under 8,000 characters. When space runs short, shorten Referenced first and Decisions last.`,
   },
   {
     name: "canon-qa",

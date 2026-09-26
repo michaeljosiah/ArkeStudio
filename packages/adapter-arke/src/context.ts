@@ -138,12 +138,63 @@ export function fitToWindow(messages: ChatMessage[], tools: readonly ChatTool[],
     messages[at] = { role: "tool", ...(message.tool_name !== undefined ? { tool_name: message.tool_name } : {}), content: TRIMMED_TOOL_RESULT };
   }
   let start = turnStart;
+  const lines: string[] = [];
   while (estimateTokens(messages, tools) > target) {
     // One exchange: from the first user message after the system prompt up to the next one.
     const next = messages.findIndex((message, index) => index > 1 && message.role === "user" && !WITHIN_TURN.has(message));
     if (next < 0 || next > start || messages[1]?.role !== "user") break;
-    messages.splice(1, next - 1);
+    lines.push(...digestOf(messages.splice(1, next - 1)));
     start -= next - 1;
   }
+  if (lines.length > 0) {
+    // What went is said, briefly, rather than simply gone (issue 1289 follow-up): a writing
+    // session that forgot it had been asked for close third, or had already read the chapter,
+    // would ask again or contradict itself. A note and its acknowledgement, so the roles still
+    // alternate and neither the instructions nor the current turn is touched; the next trim
+    // folds this note into its own.
+    const kept = boundedLines(lines);
+    const note: ChatMessage = { role: "user", content: `[Earlier in this session, trimmed to fit the window:\n${kept.join("\n")}]` };
+    DIGEST_LINES.set(note, kept);
+    messages.splice(1, 0, note, { role: "assistant", content: "Noted." });
+    // A digest is worth having only if it fits; the turn itself comes first.
+    if (estimateTokens(messages, tools) > budget) messages.splice(1, 2);
+  }
   return estimateTokens(messages, tools) <= budget;
+}
+
+/** The lines a trim note carries, kept so the next trim can carry them on. */
+const DIGEST_LINES = new WeakMap<ChatMessage, string[]>();
+/** A digest is a reminder, not a second copy of the conversation. */
+const DIGEST_CHARS = 1_600;
+
+/** One dropped exchange in a line: what was asked, which tools it used, what was answered. */
+function digestOf(exchange: readonly ChatMessage[]): string[] {
+  const carried = DIGEST_LINES.get(exchange[0]!);
+  if (carried) return carried;
+  const clip = (text: string, length: number) => {
+    const flat = text.replace(/\s+/g, " ").trim();
+    return flat.length > length ? `${flat.slice(0, length - 1)}…` : flat;
+  };
+  const asked = exchange.find((message) => message.role === "user")?.content ?? "";
+  const answered = [...exchange].reverse().find((message) => message.role === "assistant" && !message.tool_calls?.length && message.content.trim() !== "")?.content ?? "";
+  const used = [...new Set(exchange.flatMap((message) => message.tool_calls?.map((call) => call.function.name) ?? []))];
+  return [`- Asked: ${clip(asked, 120)}${used.length > 0 ? ` · used ${used.join(", ")}` : ""}${answered !== "" ? ` · answered: ${clip(answered, 160)}` : ""}`];
+}
+
+/**
+ * The first line and the newest that fit. The first ask of a session is usually its brief — the
+ * chapter, the voice, what the author wants — and the recent ones are what the next turn builds
+ * on; the middle is what a reminder can lose.
+ */
+function boundedLines(lines: readonly string[]): string[] {
+  const [first, ...rest] = lines;
+  if (first === undefined) return [];
+  const kept: string[] = [];
+  let length = first.length + 1;
+  for (const line of [...rest].reverse()) {
+    if (length + line.length > DIGEST_CHARS) break;
+    kept.unshift(line);
+    length += line.length + 1;
+  }
+  return [first, ...(kept.length < rest.length ? ["- …"] : []), ...kept];
 }
