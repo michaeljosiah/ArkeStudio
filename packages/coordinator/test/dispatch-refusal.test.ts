@@ -35,6 +35,11 @@ it("discovery completes interrupted form handoffs in their own world", async () 
     await client.until(f => f.kind === "event" && f.event.type === "genesis.loaded" && f.event.genesisId === genesisId && f.event.formHandoff === "completed", "recovered handoff");
     assert.equal(provider.openStore()?.worldId, WORLD_ID, "discovery preserves the chosen world");
     assert.equal((await loadGenesisConversation(sandbox, genesisId)).formHandoff, "completed");
+    const late = join(root, "late.txt");
+    await writeFile(late, "Late attachment");
+    client.send({ kind: "genesis-attach", genesisId, sourcePath: late });
+    await client.until(f => f.kind === "event" && f.event.type === "genesis.attachment" && f.event.genesisId === genesisId && f.event.outcome === "refused", "frozen attachment refused");
+    assert.equal((await loadGenesisConversation(sandbox, genesisId)).attachments.length, 0);
   } finally { client.close(); await coordinator.stop(); await provider.close(); }
 });
 

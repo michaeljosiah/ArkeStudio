@@ -764,7 +764,7 @@ export class FsWorldProvider implements WorldProvider {
   /**
    * Read-only media from a genesis sandbox — the look preview, before any world exists
    * (SPEC-031 R-50). Same guarding as `serveMedia`, different root: sandboxes live under
-   * `.genesis/`, deliberately outside the worlds directory.
+   * `.genesis-v2/`, deliberately outside the worlds directory.
    *
    * Media only — a sandbox holds a look preview and nothing a text viewer would open, so the
    * artifact-shelf text types (issue 477) deliberately do not reach here.
@@ -776,7 +776,7 @@ export class FsWorldProvider implements WorldProvider {
     const ext = portable.slice(portable.lastIndexOf(".")).toLowerCase();
     const contentType = FsWorldProvider.MEDIA_TYPES[ext];
     if (contentType === undefined) return null;
-    const abs = join(await this.genesisDir(genesisId), fromPortable(portable));
+    const abs = join(this.appRoot, ".genesis-v2", genesisId, "workspace", fromPortable(portable));
     try {
       const info = await stat(toExtendedLength(abs));
       if (!info.isFile()) return null;

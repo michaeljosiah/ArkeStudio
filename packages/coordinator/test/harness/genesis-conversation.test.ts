@@ -7,6 +7,7 @@ import { tempDir } from "../tmp.js";
 import { carryGenesisConversation, genesisConversation, genesisControlDir, loadGenesisConversation, recordFoundingBlueprint, recordFoundingMessage } from "../../src/harness/genesis-conversation.js";
 import { foldBlueprint } from "../../src/harness/blueprint.js";
 import { WorldChatStore, conversationDir } from "../../src/world-chat/store.js";
+import { discoverConversations } from "../../src/world-chat/discover.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 
@@ -73,12 +74,17 @@ it("replays an interrupted handoff exactly once into the ordinary world chat fol
   const meta = (await source.readMeta())!;
   const { events } = await source.read();
   const target = new WorldChatStore(conversationDir(world, meta.id));
+  await mkdir(target.dir, { recursive: true });
+  await writeFile(join(target.dir, ".founding-incomplete"), "incomplete");
   await target.create(meta.id, meta.createdAt);
   for (const envelope of events.slice(0, 2)) {
     await target.append(envelope.event, { at: envelope.at, requestId: `founding:${envelope.eventId}` });
   }
+  assert.equal((await discoverConversations(world)).summaries.length, 0);
+  assert.equal(await target.readMeta(), null);
   await carryGenesisConversation(dir, world);
   await carryGenesisConversation(dir, world);
+  assert.equal((await discoverConversations(world)).summaries.length, 1);
   const restored = await target.read();
   assert.equal(restored.events.length, events.length);
   const folded = foldConversation(meta.id, meta.createdAt, restored.events);

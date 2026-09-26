@@ -159,6 +159,7 @@ interface StoreState {
     {
       turns: Array<{ id?: string; role: "user" | "gate"; text: string; at: string }>;
       conversationId?: string;
+      revision?: number;
       worldId?: string;
       founding?: boolean;
       frozenModels?: ModelChoices;
@@ -1505,6 +1506,7 @@ function handleFrame(json: string): void {
       genesis = { ...genesis };
       delete genesis[event.genesisId];
     } else if (event.type === "genesis.loaded") {
+      if ((event.revision ?? 0) < (genesis[event.genesisId]?.revision ?? 0)) return;
       const messages = new Map(event.turns.map(turn => [turn.id, turn]));
       for (const turn of genesis[event.genesisId]?.turns ?? []) {
         if (turn.id && !messages.has(turn.id)) messages.set(turn.id, { ...turn, id: turn.id });
@@ -1512,7 +1514,7 @@ function handleFrame(json: string): void {
       genesis = { ...genesis, [event.genesisId]: {
         ...emptyGenesis(), ...genesis[event.genesisId],
         turns: [...messages.values()].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)), blueprint: event.blueprint,
-        attachments: event.attachments, status: event.status, conversationId: event.conversationId,
+        revision: event.revision, attachments: event.attachments, status: event.status, conversationId: event.conversationId,
         founding: event.founding,
         formHandoff: event.formHandoff,
         frozenModels: event.frozenModels,
@@ -1531,7 +1533,7 @@ function handleFrame(json: string): void {
       };
     } else if (event.type === "genesis.blueprint") {
       const g = genesis[event.genesisId] ?? emptyGenesis();
-      genesis = { ...genesis, [event.genesisId]: { ...g, blueprint: event.blueprint } };
+      genesis = { ...genesis, [event.genesisId]: { ...g, blueprint: event.blueprint, revision: event.revision } };
     } else if (event.type === "world-image.plan") {
       keyArtPlans = {
         ...keyArtPlans,
