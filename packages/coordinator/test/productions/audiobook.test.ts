@@ -346,7 +346,7 @@ describe("a direction held to its block and its reader (SPEC-047 R-10)", () => {
     });
     // A cap the first sentence fits within but not with its tags: the split at sentence ends
     // leaves a piece whose rendering runs over, and that piece is split again until it fits.
-    const parts = renderParts(text, plan, V3, undefined, 120);
+    const parts = renderParts(text, plan, V3, undefined, 120).map((part) => part.text);
     assert.ok(parts.length >= 3, `split: ${parts.length}`);
     for (const part of parts) {
       assert.ok(part.startsWith("[whispers] [to the water] "), `every part leads with the delivery's tag then the phrase's: ${part}`);
@@ -914,7 +914,9 @@ describe("the audiobook run (turn 146)", () => {
         type Directed = Extract<DomainEvent, { type: "direction.finished" }>;
         const directed = events.find((e): e is Directed => e.type === "direction.finished")!;
         await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H4", hash: directed.hash!, directions: directed.proposed! });
-        assert.equal(await schema(), 24, "a direction on the record fences the world past the build that cannot read it");
+        // A direction now keeps the words it was written for (R-43), a field the builds before
+        // markers cannot read, so the world is fenced past them too.
+        assert.equal(await schema(), 33, "a direction on the record fences the world past the builds that cannot read it");
         assert.ok("direction" in (JSON.parse(await readFile(recordPath(worldDir), "utf8")) as Record<string, unknown>));
       },
     ));
@@ -1032,7 +1034,7 @@ describe("the audiobook run (turn 146)", () => {
       },
     ));
 
-  it("a direction the reader cannot express flags the block with the reason rather than reading it neutral (R-9)", () =>
+  it("a direction the reader cannot express is held: the block is read without it and the record keeps it (R-47)", () =>
     withHarness(
       {
         before: async (worldDir) => {
@@ -1050,9 +1052,111 @@ describe("the audiobook run (turn 146)", () => {
         await read(send);
         const finished = events.find((e): e is Finished => e.type === "audiobook.finished");
         assert.equal(finished?.outcome, "read");
+        assert.equal(finished?.flagged, 0, "a held control never reaches the reader, so it never flags the block");
+        const record = await readRecord(worldDir);
+        assert.equal(record.flags["title"], undefined);
+        assert.ok(record.takes["title"], "made, without the whisper Kokoro cannot read");
+        assert.equal(record.direction["title"]?.plan.delivery, "whispered", "kept for a reader that can");
+      },
+    ));
+
+  it("a marker on a settings-only reader is made in parts, each read with its own delivery and joined into one take (R-41)", () =>
+    withHarness({}, async ({ worldDir, events, requests, send }) => {
+      const text = "Chapter 1 · Neap";
+      await send({
+        kind: "set-audiobook-block",
+        worldId: WORLD_ID,
+        productionId: LEDGER,
+        chapterFile: "01-neap",
+        block: "title",
+        direction: { delivery: "measured", speed: 1, cues: [{ kind: "delivery", span: { from: text.indexOf("Neap"), to: text.length, text: "Neap" }, delivery: "urgent" }] },
+      });
+      type Recorded = Extract<DomainEvent, { type: "audiobook.record" }>;
+      const written = events.filter((e): e is Recorded => e.type === "audiobook.record").at(-1);
+      assert.ok(written?.record, written?.refused);
+      await read(send, { blocks: ["title"] });
+      const title = requests.filter((r) => r.text === "Chapter 1 ·" || r.text === "Neap");
+      assert.deepEqual(title.map((r) => [r.text, r.params?.speed]), [["Chapter 1 ·", 0.92], ["Neap", 1.15]], "Kokoro's measured, then its urgent over the marker");
+      const record = await readRecord(worldDir);
+      assert.ok(record.takes["title"], "one take of the block");
+      assert.equal(record.takes["title"]?.parts, 2);
+      assert.equal(JSON.parse(await readFile(join(worldDir, "world.json"), "utf8")).schemaVersion, 33, "a marker fences the world past the builds that cannot read it (R-49)");
+    }));
+
+  it("a marker the reader cannot express is refused where it is placed, and one already held is carried by a write of another control (R-42, R-47)", () =>
+    withHarness(
+      {
+        before: async (worldDir) => {
+          // Held already: a whisper over the title, written when an Eleven voice read the book.
+          const text = "Chapter 1 · Neap";
+          const plan = directionPlan(text, { delivery: "measured", speed: 1, cues: [{ kind: "delivery", span: { from: 12, to: 16, text: "Neap" }, delivery: "whispered" }] });
+          await mkdir(join(worldDir, "productions", LEDGER, ".audiobook", "chapters"), { recursive: true });
+          await writeFile(
+            join(worldDir, audiobookPath(LEDGER, "01-neap")),
+            JSON.stringify({ schemaVersion: 1, chapterVersion: 4, hash: "sha256:x", updatedAt: CLOCK, takes: {}, flags: {}, direction: { title: { textHash: audiobookTextHash(text), plan, at: CLOCK, text } } }),
+          );
+        },
+      },
+      async ({ events, send }) => {
+        type Recorded = Extract<DomainEvent, { type: "audiobook.record" }>;
+        const last = () => events.filter((e): e is Recorded => e.type === "audiobook.record").at(-1);
+        const whisper = { kind: "delivery" as const, span: { from: 12, to: 16, text: "Neap" }, delivery: "whispered" as const };
+        await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "title", direction: { delivery: "urgent", speed: 1, cues: [whisper] } });
+        assert.ok(last()?.record, `the held whisper rides along with the new delivery: ${last()?.refused}`);
+        assert.equal(last()!.record!.direction["title"]?.plan.delivery, "urgent");
+        const cold = { kind: "delivery" as const, span: { from: 0, to: 9, text: "Chapter 1" }, delivery: "cold" as const };
+        await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "title", direction: { delivery: "urgent", speed: 1, cues: [cold, whisper] } });
+        assert.equal(last()?.refused, "[cold] · Kokoro reads measured · urgent", "a new marker Kokoro cannot read is refused, never accepted to be flagged");
+      },
+    ));
+
+  it("changed words carry a direction's markers to their new place rather than dropping it (R-43)", () =>
+    withHarness(
+      {
+        before: async (worldDir) => {
+          // Written for the title's earlier words; `Neap` is still found once in the new ones.
+          const was = "Chapter One · Neap";
+          const plan = directionPlan(was, { delivery: "measured", speed: 1, cues: [{ kind: "delivery", span: { from: 14, to: 18, text: "Neap" }, delivery: "urgent" }] });
+          await mkdir(join(worldDir, "productions", LEDGER, ".audiobook", "chapters"), { recursive: true });
+          await writeFile(
+            join(worldDir, audiobookPath(LEDGER, "01-neap")),
+            JSON.stringify({ schemaVersion: 1, chapterVersion: 4, hash: "sha256:x", updatedAt: CLOCK, takes: {}, flags: {}, direction: { title: { textHash: audiobookTextHash(was), plan, at: CLOCK, text: was } } }),
+          );
+        },
+      },
+      async ({ worldDir, requests, send }) => {
+        await read(send, { blocks: ["title"] });
+        assert.deepEqual(requests.filter((r) => r.text === "Neap").map((r) => r.params?.speed), [1.15], "the marker read where its word now is");
+        const record = await readRecord(worldDir);
+        assert.ok(record.takes["title"]);
+        // Carried on the next write of the record, with the words it now stands for.
+        await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p0.1", direction: null });
+        const after = await readRecord(worldDir);
+        assert.equal(after.direction["title"]?.text, "Chapter 1 · Neap");
+        const marker = after.direction["title"]?.plan.cues[0];
+        assert.deepEqual(marker?.kind === "delivery" ? [marker.span.from, marker.span.to] : null, [12, 16]);
+      },
+    ));
+
+  it("a direction wrong for its words still flags the block with the reason (R-9)", () =>
+    withHarness(
+      {
+        before: async (worldDir) => {
+          const text = "Chapter 1 · Neap";
+          const plan = directionPlan(text, { delivery: "measured", speed: 1, cues: [{ kind: "emphasis", span: { from: 0, to: 4, text: "Book" }, level: "strong" }] });
+          await mkdir(join(worldDir, "productions", LEDGER, ".audiobook", "chapters"), { recursive: true });
+          await writeFile(
+            join(worldDir, audiobookPath(LEDGER, "01-neap")),
+            JSON.stringify({ schemaVersion: 1, chapterVersion: 4, hash: "sha256:x", updatedAt: CLOCK, takes: {}, flags: {}, direction: { title: { textHash: audiobookTextHash(text), plan, at: CLOCK } } }),
+          );
+        },
+      },
+      async ({ worldDir, events, send }) => {
+        await read(send);
+        const finished = events.find((e): e is Finished => e.type === "audiobook.finished");
         assert.equal(finished?.flagged, 1);
         const record = await readRecord(worldDir);
-        assert.match(record.flags["title"]?.reason ?? "", /^whispered · Kokoro/);
+        assert.match(record.flags["title"]?.reason ?? "", /Emphasis must match/);
         assert.equal(record.takes["title"], undefined, "not made neutral in silence");
       },
     ));
@@ -1416,10 +1520,11 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
       type Conformed = Extract<DomainEvent, { type: "audiobook.conformed" }>;
       const conformed = events.find((e): e is Conformed => e.type === "audiobook.conformed");
       assert.ok(conformed, "said how many");
-      assert.deepEqual([conformed.dropped, conformed.chapters], [2, 1]);
+      assert.deepEqual([conformed.dropped, conformed.held, conformed.chapters], [0, 2, 1]);
+      // Held, not dropped (R-47): kept for a narrator that can read them again.
       const record = await readRecord(worldDir);
-      assert.equal(record.direction["title"]?.plan.delivery, "measured");
-      assert.equal(record.direction["title"]?.plan.phrase, undefined);
+      assert.equal(record.direction["title"]?.plan.delivery, "whispered");
+      assert.equal(record.direction["title"]?.plan.phrase, "under her breath");
     }));
 
   it("a chapter read pressed while the book is being read is refused in a word, and a chapter its own run holds is left to that run (codex on PR 1187)", async () => {
@@ -1513,7 +1618,7 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
     );
   });
 
-  it("switching the reading re-checks every standing direction against its new reader, dropping what that row cannot carry and saying how many (R-13)", () =>
+  it("switching the reading re-checks every standing direction against its new reader, holding what that row cannot carry and saying how many (R-13, R-47)", () =>
     withHarness(
       {
         models: [ELEVEN, KOKORO, FISH, V3],
@@ -1543,11 +1648,12 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
         type Conformed = Extract<DomainEvent, { type: "audiobook.conformed" }>;
         const conformed = events.find((e): e is Conformed => e.type === "audiobook.conformed");
         assert.ok(conformed, "said how many");
-        assert.equal(conformed.dropped, 2, "the whisper and the phrase");
+        assert.equal(conformed.held, 2, "the whisper and the phrase");
+        assert.equal(conformed.dropped, 0);
         assert.equal(conformed.chapters, 1);
         const record = await readRecord(worldDir);
-        assert.equal(record.direction["p0.1"]?.plan.delivery, "measured", "fallen to what Kokoro reads");
-        assert.equal(record.direction["p0.1"]?.plan.phrase, undefined);
+        assert.equal(record.direction["p0.1"]?.plan.delivery, "whispered", "held on the record, not fallen to what Kokoro reads");
+        assert.equal(record.direction["p0.1"]?.plan.phrase, "under her breath");
       },
     ));
 });

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CadencePlanSchema, type CadencePlan } from "./cadence.js";
+import { CadencePlanSchema, cueStart, normalizeSpeechText, type CadenceCue, type CadencePlan } from "./cadence.js";
 import { ArtifactIdSchema, IsoDateTimeSchema, SlugSchema } from "./ids.js";
 import { isSceneBreak } from "./manuscript.js";
 import { DeliverySchema } from "./voice.js";
@@ -193,6 +193,14 @@ export const AudiobookDirectionSchema = z
     textHash: z.string().min(1),
     plan: CadencePlanSchema,
     at: IsoDateTimeSchema,
+    /**
+     * The words the direction was written for (R-43), so a changed wording can carry each
+     * marker to its new place by its anchor rather than drop the whole direction. Absent on a
+     * direction an earlier build wrote, which is dropped on a wording change as it always was.
+     */
+    text: z.string().min(1).optional(),
+    /** Markers a wording change could not carry (R-43), counted until the block is directed again. */
+    dropped: z.number().int().positive().optional(),
   })
   .strict();
 export type AudiobookDirection = z.infer<typeof AudiobookDirectionSchema>;
@@ -214,7 +222,9 @@ export function audiobookDirectionHash(plan: CadencePlan): string {
     cues: plan.cues.map((cue) =>
       cue.kind === "emphasis"
         ? { kind: cue.kind, from: cue.span.from, to: cue.span.to, text: cue.span.text, level: cue.level }
-        : cue.kind === "pause"
+        : cue.kind === "delivery"
+          ? { kind: cue.kind, from: cue.span.from, to: cue.span.to, text: cue.span.text, ...(cue.delivery !== undefined ? { delivery: cue.delivery } : {}), ...(cue.phrase !== undefined ? { phrase: cue.phrase } : {}) }
+          : cue.kind === "pause"
           ? { kind: cue.kind, at: cue.at, length: cue.length }
           : { kind: cue.kind, at: cue.at, action: cue.action },
     ),
@@ -227,6 +237,78 @@ export function audiobookDirectionFor(record: Pick<ChapterAudiobook, "direction"
   const held = record?.direction[block.key];
   if (held === undefined || held.textHash !== audiobookTextHash(block.text)) return null;
   return held;
+}
+
+/**
+ * Cues carried from the words they were written for to changed words (R-43). A span cue — an
+ * emphasis or a marker — is anchored by its span text, a point cue by the word before it, or
+ * by the word after it when it sits at the block's start. A cue whose anchor is found exactly
+ * once in the new words moves there; every other is dropped and counted. A carried cue that
+ * would now break the plan's rules — overlapping another, an emphasis across a marker's edge,
+ * a second pause at one place — is dropped too, so what is carried always maps.
+ */
+export function rekeyCues(oldText: string, cues: readonly CadenceCue[], newText: string): { cues: CadenceCue[]; dropped: number } {
+  const before = normalizeSpeechText(oldText);
+  const after = normalizeSpeechText(newText);
+  const once = (anchor: string): number | null => {
+    const first = after.indexOf(anchor);
+    return first < 0 || after.indexOf(anchor, first + 1) >= 0 ? null : first;
+  };
+  const moved: CadenceCue[] = [];
+  let dropped = 0;
+  for (const cue of cues) {
+    if (cue.kind === "emphasis" || cue.kind === "delivery") {
+      const at = once(cue.span.text);
+      if (at === null) dropped += 1;
+      else moved.push({ ...cue, span: { ...cue.span, from: at, to: at + cue.span.text.length } });
+      continue;
+    }
+    const head = before.slice(0, cue.at).match(/(\S+)\s*$/);
+    if (head !== null) {
+      const wordEnd = cue.at - (head[0].length - head[1]!.length);
+      const found = once(head[1]!);
+      if (found === null) dropped += 1;
+      else moved.push({ ...cue, at: Math.min(after.length, found + head[1]!.length + (cue.at - wordEnd)) });
+      continue;
+    }
+    const tail = before.slice(cue.at).match(/^(\s*)(\S+)/);
+    const found = tail === null ? null : once(tail[2]!);
+    if (tail === null || found === null) dropped += 1;
+    else moved.push({ ...cue, at: Math.max(0, found - tail[1]!.length) });
+  }
+  moved.sort((a, b) => cueStart(a) - cueStart(b));
+  const kept: CadenceCue[] = [];
+  const clashes = (cue: CadenceCue): boolean =>
+    kept.some((other) => {
+      if (cue.kind === "pause" || cue.kind === "breath") return other.kind === cue.kind && other.at === cue.at;
+      if (other.kind === "pause" || other.kind === "breath") return false;
+      const overlaps = cue.span.from < other.span.to && cue.span.to > other.span.from;
+      if (!overlaps) return false;
+      if (cue.kind === other.kind) return true;
+      const [marker, emphasis] = cue.kind === "delivery" ? [cue, other] : [other, cue];
+      return emphasis.span.from < marker.span.from || emphasis.span.to > marker.span.to;
+    });
+  for (const cue of moved) {
+    if (clashes(cue)) dropped += 1;
+    else kept.push(cue);
+  }
+  return { cues: kept, dropped };
+}
+
+/**
+ * A direction written for other words, carried to the block's words now (R-43): the block's
+ * delivery, phrase and speed kept, its cues re-keyed, and the count of what could not be
+ * carried. Null when the direction stands for these words already, or was written by a build
+ * that did not keep its words, which a wording change drops whole as before.
+ */
+export function audiobookRekeyed(record: Pick<ChapterAudiobook, "direction"> | null, block: Pick<AudiobookBlock, "key" | "text">): { input: AudiobookDirectionInput; dropped: number } | null {
+  const held = record?.direction[block.key];
+  if (held === undefined || held.text === undefined || held.textHash === audiobookTextHash(block.text)) return null;
+  const { cues, dropped } = rekeyCues(held.text, held.plan.cues, block.text);
+  return {
+    input: { delivery: held.plan.delivery, speed: held.plan.speed, cues, ...(held.plan.phrase !== undefined ? { phrase: held.plan.phrase } : {}) },
+    dropped: dropped + (held.dropped ?? 0),
+  };
 }
 
 /** The deliveries, for a panel's seg and a prompt's list. */

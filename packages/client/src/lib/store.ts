@@ -351,7 +351,7 @@ interface StoreState {
     }
   >;
   /** Directions re-checked against changed readers (R-13): how many controls went, said once on the door. */
-  audiobookNotes: Record<string, { dropped: number; chapters: number; seq: number }>;
+  audiobookNotes: Record<string, { dropped: number; held: number; chapters: number; seq: number }>;
   /** The last word on archiving a world — said once, then dismissed. */
   archiveNote: { worldId: string; text: string; refused: boolean } | null;
   permissions: Record<string, PendingPermission>;
@@ -1893,7 +1893,7 @@ function handleFrame(json: string): void {
       }
     } else if (event.type === "audiobook.conformed") {
       if (current.state?.world?.meta.worldId === event.worldId) {
-        audiobookNotes = { ...audiobookNotes, [event.productionId]: { dropped: event.dropped, chapters: event.chapters, seq: (audiobookNotes[event.productionId]?.seq ?? 0) + 1 } };
+        audiobookNotes = { ...audiobookNotes, [event.productionId]: { dropped: event.dropped, held: event.held ?? 0, chapters: event.chapters, seq: (audiobookNotes[event.productionId]?.seq ?? 0) + 1 } };
       }
     } else if (event.type === "direction.started") {
       const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;

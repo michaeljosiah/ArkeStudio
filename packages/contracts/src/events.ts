@@ -1297,7 +1297,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .strict(),
   /** Directions re-checked against changed readers (SPEC-047 R-13): how many controls were dropped, across how many chapters. */
   z
-    .object({ ...base, type: z.literal("audiobook.conformed"), worldId: UlidSchema, productionId: SlugSchema, dropped: z.number().int().min(0), chapters: z.number().int().min(0) })
+    .object({ ...base, type: z.literal("audiobook.conformed"), worldId: UlidSchema, productionId: SlugSchema, dropped: z.number().int().min(0), held: z.number().int().min(0).optional(), chapters: z.number().int().min(0) })
     .strict(),
   z
     .object({ ...base, type: z.literal("direction.started"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema })

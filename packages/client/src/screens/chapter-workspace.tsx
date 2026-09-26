@@ -1641,6 +1641,10 @@ export function ChapterWorkspace({
                 <AudiobookBlocks
                   {...(pinChoices !== null ? { choices: pinChoices, onPin: pinBlock } : {})}
                   filter={audiobook.filter}
+                  marker={audiobook.marker}
+                  onMarker={audiobook.setMarker}
+                  modelOf={audiobook.modelOf}
+                  onDirect={audiobook.setDirection}
                   rows={audiobook.rows}
                   sounding={audiobook.sounding}
                   selected={audiobook.selected}
@@ -1873,6 +1877,7 @@ export function ChapterWorkspace({
                 chapterTitle={chapter.title}
                 modelOf={audiobook.modelOf}
                 onSetDirection={audiobook.setDirection}
+                onMarker={audiobook.setMarker}
                 onMakeAgain={audiobook.makeAgain}
                 refused={audiobook.lastRecord?.refused ?? null}
                 onUpload={audiobook.uploadTake}

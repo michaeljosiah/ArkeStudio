@@ -1,9 +1,6 @@
 import { createHash } from "node:crypto";
 import {
   audiobookDirectionFor,
-  audiobookDirectionHash,
-  audiobookTextHash,
-  cadenceSupport,
   DEFAULT_AUDIOBOOK_BOOK,
   type AudiobookDoor,
   type AudiobookPriceLine,
@@ -14,8 +11,8 @@ import {
   type ClonedVoice,
 } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
-import { checkDirection, directionPlan, effectiveReader, readAudiobookBook, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
-import { conformInput, directableBlocks, type DirectableBlock } from "./audiobook-direction.js";
+import { checkDirection, effectiveReader, readAudiobookBook, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
+import { directableBlocks, type DirectableBlock } from "./audiobook-direction.js";
 import { chapterPriceToken, missIdentity, prepareChapter, type ChapterPreparation, type ReadingRoom, type Speaking } from "./audiobook-run.js";
 
 /**
@@ -329,17 +326,18 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
 }
 
 /**
- * Directions re-checked against changed readers (R-13): the reading switched, or a sheet's
- * voice reassigned, moves blocks to the narrator or to a new voice, and a direction accepted
- * for one row is not carried to another to be flagged on every retry. Each standing direction
- * is conformed to its new reader — the controls that reader declares unsupported dropped and
- * counted — and written where anything changed. A chapter whose cast is not current is left
- * alone: its run refuses before any direction matters.
+ * Directions re-checked against changed readers (R-13, amended by R-47): the reading switched,
+ * or a sheet's voice reassigned, moves blocks to the narrator or to a new voice. What the new
+ * reader cannot express is held, not dropped — kept on the record, left out of what is sent,
+ * counted here — so a reader that can express it again gets it back. Only a direction wrong for
+ * its words is dropped and written. A chapter whose cast is not current is left alone: its run
+ * refuses before any direction matters.
  */
-export async function conformDirections(store: WorldStore, productionId: string, room: ReadingRoom): Promise<{ dropped: number; chapters: number }> {
+export async function conformDirections(store: WorldStore, productionId: string, room: ReadingRoom): Promise<{ dropped: number; held: number; chapters: number }> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
-  if (!production) return { dropped: 0, chapters: 0 };
+  if (!production) return { dropped: 0, held: 0, chapters: 0 };
   let dropped = 0;
+  let heldCount = 0;
   let chapters = 0;
   for (const summary of production.chapters.filter((c) => !c.retired)) {
     const stamp = summary.audiobook;
@@ -350,33 +348,26 @@ export async function conformDirections(store: WorldStore, productionId: string,
     // erased by a stale map, and two changes of reading or voice close together are judged
     // in the order they land, each against the readers that stand when its turn comes, rather
     // than the slower one applying a superseded reader's limits last.
-    const conform = (blocks: DirectableBlock[], record: Pick<ChapterAudiobook, "direction">): { direction: ChapterAudiobook["direction"]; dropped: number; changed: boolean } => {
+    const conform = (blocks: DirectableBlock[], record: Pick<ChapterAudiobook, "direction">): { direction: ChapterAudiobook["direction"]; dropped: number; held: number; changed: boolean } => {
       const next: ChapterAudiobook["direction"] = { ...record.direction };
       let count = 0;
+      let held = 0;
       let changed = false;
       for (const block of blocks) {
         const direction = audiobookDirectionFor(record, block);
         if (direction === null) continue;
-        const support = cadenceSupport(block.model, block.language);
-        const input = { delivery: direction.plan.delivery, speed: direction.plan.speed, cues: direction.plan.cues, ...(direction.plan.phrase !== undefined ? { phrase: direction.plan.phrase } : {}) };
-        const conformed = conformInput(input, support);
-        const plan = conformed.input === null ? null : directionPlan(block.text, conformed.input);
-        const ok = plan !== null && checkDirection(block.text, plan, block.model, block.language).ok;
-        if (conformed.dropped === 0 && ok) continue;
-        if (!ok || plan === null) {
-          count += conformed.dropped + 1;
-          delete next[block.key];
-          changed = true;
+        const check = checkDirection(block.text, direction.plan, block.model, block.language, "hold");
+        if (check.ok) {
+          held += check.held.length;
           continue;
         }
-        if (audiobookDirectionHash(plan) === audiobookDirectionHash(direction.plan)) continue;
-        count += conformed.dropped;
-        next[block.key] = { textHash: audiobookTextHash(block.text), plan, at: store.now() };
+        count += 1;
+        delete next[block.key];
         changed = true;
       }
-      return { direction: next, dropped: count, changed };
+      return { direction: next, dropped: count, held, changed };
     };
-    let applied = { dropped: 0, changed: false };
+    let applied = { dropped: 0, held: 0, changed: false };
     await updateAudiobook(store, productionId, { file: summary.file, version: summary.version, hash: summary.bodyHash }, async (current) => {
       if (Object.keys(current.direction).length === 0) return null;
       let readable: Awaited<ReturnType<typeof directableBlocks>>;
@@ -388,11 +379,12 @@ export async function conformDirections(store: WorldStore, productionId: string,
         return null;
       }
       const conformed = conform(readable.blocks, current);
-      applied = { dropped: conformed.dropped, changed: conformed.changed };
+      applied = { dropped: conformed.dropped, held: conformed.held, changed: conformed.changed };
       return conformed.changed ? { ...current, updatedAt: store.now(), direction: conformed.direction } : null;
     });
     dropped += applied.dropped;
-    if (applied.changed) chapters += 1;
+    heldCount += applied.held;
+    if (applied.changed || applied.held > 0) chapters += 1;
   }
-  return { dropped, chapters };
+  return { dropped, held: heldCount, chapters };
 }

@@ -302,7 +302,7 @@ export function AudiobookScreen() {
           )}
           {note !== undefined && (
             <span>
-              {note.dropped} control{note.dropped === 1 ? "" : "s"} dropped · {note.chapters} chapter{note.chapters === 1 ? "" : "s"}
+              {[...(note.held > 0 ? [`${note.held} held`] : []), ...(note.dropped > 0 ? [`${note.dropped} dropped`] : [])].join(" · ")} · {note.chapters} chapter{note.chapters === 1 ? "" : "s"}
               <button type="button" className="fy-ab__cue-x" aria-label="Put away" onClick={() => dismissAudiobookNote(prodId)}>
                 ×
               </button>

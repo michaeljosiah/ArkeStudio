@@ -145,7 +145,6 @@ import {
   type AudiobookDirection,
   type AudiobookDirectionInput,
   type AudiobookReader,
-  audiobookTextHash,
   narratorFor,
   voiceFormatForModel,
   hostedReaderKeepsSlot,
@@ -275,7 +274,7 @@ import { discardRecording, keepRecording, RECORDED_TAKE_EXTENSIONS, RecordedTake
 import { exportScript, matchFiles, type MatchedFile } from "./productions/audiobook-lines.js";
 import { acceptDirections, directChapter, directableBlocks, makeAdapterDirectionDeriver, type DirectionDeriver } from "./productions/audiobook-direction.js";
 import { audiobookDoor, conformDirections, runAudiobookBook } from "./productions/audiobook-book.js";
-import { checkDirection, directionPlan, readAudiobookBook, writeAudiobookBook, writeBlockDirection } from "./productions/audiobook.js";
+import { checkDirection, currentDirection, directionEntry, directionPlan, heldKey, readAudiobook, readAudiobookBook, writeAudiobookBook, writeBlockDirection } from "./productions/audiobook.js";
 import { runAudiobookChapter } from "./productions/audiobook-run.js";
 import { exportManuscript, importManuscript, readManuscript } from "./productions/manuscript.js";
 import { manuscriptChapters, productionShape, type StructuredDocument } from "@arke-studio/contracts";
@@ -1307,9 +1306,9 @@ export class Coordinator {
     for (const productionId of productionIds) {
       try {
         const conformed = await conformDirections(store, productionId, room);
-        if (conformed.chapters > 0) written = true;
+        if (conformed.dropped > 0) written = true;
         if (conformed.dropped > 0 || conformed.chapters > 0) {
-          this.emit({ at: new Date().toISOString(), type: "audiobook.conformed", worldId, productionId, dropped: conformed.dropped, chapters: conformed.chapters });
+          this.emit({ at: new Date().toISOString(), type: "audiobook.conformed", worldId, productionId, dropped: conformed.dropped, held: conformed.held, chapters: conformed.chapters });
         }
       } catch (err) {
         void this.appLog?.append({ kind: "audiobook.conform-failed", production: productionId, message: err instanceof Error ? err.message : String(err) });
@@ -12927,12 +12926,21 @@ export class Coordinator {
           let direction: AudiobookDirection | null = null;
           if (msg.direction !== null) {
             const plan = directionPlan(block.text, msg.direction);
-            const check = checkDirection(block.text, plan, block.model, block.language);
+            // What the block's direction already holds for this reader (R-47) is carried on by a
+            // write of another control; anything newly asked of it is refused in one clause (R-42).
+            const stored = await readAudiobook(store, msg.productionId, opened.file);
+            const before = currentDirection(stored === "unreadable" ? null : stored, block, store.now());
+            const alreadyHeld: string[] = [];
+            if (before !== null) {
+              const standing = checkDirection(block.text, before.plan, block.model, block.language, "hold");
+              if (standing.ok) alreadyHeld.push(...standing.held.map((control) => heldKey(before.plan, control)));
+            }
+            const check = checkDirection(block.text, plan, block.model, block.language, "strict", alreadyHeld);
             if (!check.ok) {
               this.emit({ at: at(), type: "audiobook.record", ...ids, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}), refused: check.reason });
               return;
             }
-            direction = { textHash: audiobookTextHash(block.text), plan, at: store.now() };
+            direction = directionEntry(block.text, plan, store.now());
           }
           const record = await writeBlockDirection(store, msg.productionId, opened, planned.map((p) => p.block), msg.block, direction);
           this.refreshIfStillOpen(store);

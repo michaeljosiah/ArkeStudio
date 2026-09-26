@@ -317,6 +317,14 @@ export const VOICE_PINS_SCHEMA_VERSION = 31;
  * as damaged — so the world is raised before the first of them is written.
  */
 export const RECORDED_TAKE_SCHEMA_VERSION = 32;
+/**
+ * Markers and the words a direction was written for (design turn 155e/f, SPEC-047 R-40, R-43):
+ * the `delivery` cue kind in a block's plan, and `text` and `dropped` on the direction entry. The
+ * builds before it read the chapter's audiobook record strictly and would take it for
+ * unreadable — every take of the chapter lost to a run that makes them again — so the world is
+ * raised before the first direction carrying any of them is written.
+ */
+export const AUDIOBOOK_MARKERS_SCHEMA_VERSION = 33;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {

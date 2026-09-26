@@ -5,12 +5,16 @@ import {
   ChapterAudiobookSchema,
   DEFAULT_AUDIOBOOK_BOOK,
   audiobookBlocks,
+  audiobookDirectionFor,
+  audiobookRekeyed,
   audiobookBlockState,
   audiobookRecordingKey,
   audiobookHeading,
   audiobookTextHash,
   legacyVoiceModel,
+  holdDirection,
   mapCadence,
+  markerSegments,
   normalizeSpeechText,
   voiceSourceFor,
   type AudiobookBlock,
@@ -23,6 +27,7 @@ import {
   type AudiobookSubstitution,
   type CadencePlan,
   type ChapterAudiobook,
+  type HeldControl,
   type ChapterVoices,
   type ClonedVoice,
   type ManifestModel,
@@ -33,7 +38,7 @@ import { audioHash } from "../audio/qc.js";
 import { clipFor } from "../voice/library.js";
 import { splitForSpeech } from "../voice/service.js";
 import { atomicWriteFile } from "../world/atomic.js";
-import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION } from "../world/commit.js";
+import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { sha256 } from "../world/text-files.js";
@@ -133,6 +138,10 @@ export async function writeAudiobook(store: WorldStore, productionId: string, ch
   const { direction, ...undirected } = record;
   const directed = Object.keys(direction).length > 0;
   if (directed) await store.ensureSchemaVersion(AUDIOBOOK_DIRECTION_SCHEMA_VERSION, "audiobook-direction");
+  // A marker, or the words a direction was written for, is a field the build before it reads
+  // as unreadable (R-49): raised before the first record that carries one.
+  const marked = Object.values(direction).some((entry) => entry.text !== undefined || entry.dropped !== undefined || entry.plan.cues.some((cue) => cue.kind === "delivery"));
+  if (marked) await store.ensureSchemaVersion(AUDIOBOOK_MARKERS_SCHEMA_VERSION, "audiobook-markers");
   await writeOwned(store, audiobookPath(productionId, chapterFile), directed ? record : undirected, chapterFile === "book" ? undefined : legacyAudiobookPath(productionId, chapterFile));
 }
 
@@ -250,7 +259,16 @@ export function readerLanguage(clonedVoices: readonly ClonedVoice[], reader: Aud
   return source.kind === "cloned" ? source.voice.language : undefined;
 }
 
-export type DirectionCheck = { ok: true; mapped: ReturnType<typeof mapCadence>; parts: string[] } | { ok: false; reason: string };
+/** One request's worth of a directed block: the words as sent, and the settings and sentence beside them. */
+export interface RenderedPart {
+  text: string;
+  voiceSettings: Record<string, number>;
+  instructions?: string;
+}
+
+export type DirectionCheck =
+  | { ok: true; mapped: ReturnType<typeof mapCadence>; parts: RenderedPart[]; held: HeldControl[] }
+  | { ok: false; reason: string };
 
 /**
  * A directed block in parts, each rendered on its own (R-5; codex on PR 1186): the words are
@@ -261,25 +279,37 @@ export type DirectionCheck = { ok: true; mapped: ReturnType<typeof mapCadence>; 
  * bound holds after rendering for any authored text. An emphasis whose span a seam would cut
  * cannot be carried by either piece: the direction is refused in one clause rather than sent
  * with the emphasis silently gone and its name on the take. One part for a block within the cap.
+ *
+ * Before the cap, a block is cut at the edges of every marker its row makes in parts (R-41):
+ * a settings-only or sentence-carried delivery cannot change inside one request, so the
+ * marker's words are a request of their own, with its delivery's settings and sentence, and
+ * the block's reading resumes in the next.
  */
-export function renderParts(text: string, plan: CadencePlan, model: ManifestModel, language: string | undefined, cap: number | undefined): string[] {
-  const whole = normalizeSpeechText(text);
-  const render = (piece: string, cues: CadencePlan["cues"]): string =>
-    mapCadence(piece, directionSourceHash(piece), { ...plan, sourceTextHash: directionSourceHash(piece), cues }, model, language).providerText;
+export function renderParts(text: string, plan: CadencePlan, model: ManifestModel, language: string | undefined, cap: number | undefined): RenderedPart[] {
+  const out: RenderedPart[] = [];
+  for (const segment of markerSegments(text, plan, model, language)) out.push(...renderSegment(segment.text, segment.plan, model, language, cap));
+  return out;
+}
+
+function renderSegment(whole: string, plan: CadencePlan, model: ManifestModel, language: string | undefined, cap: number | undefined): RenderedPart[] {
+  const render = (piece: string, cues: CadencePlan["cues"]): RenderedPart => {
+    const mapped = mapCadence(piece, directionSourceHash(piece), { ...plan, sourceTextHash: directionSourceHash(piece), cues }, model, language);
+    return { text: mapped.providerText, voiceSettings: mapped.voiceSettings, ...(mapped.instructions !== undefined ? { instructions: mapped.instructions } : {}) };
+  };
   if (cap === undefined) return [render(whole, plan.cues)];
-  const out: string[] = [];
+  const out: RenderedPart[] = [];
   const place = (piece: string, from: number, max: number): void => {
     const to = from + piece.length;
     for (const cue of plan.cues) {
-      if (cue.kind === "emphasis" && ((cue.span.from < from && cue.span.to > from) || (cue.span.from < to && cue.span.to > to))) {
-        throw new Error(`emphasis “${cue.span.text}” straddles the cap's split · shorten the span`);
+      if ((cue.kind === "emphasis" || cue.kind === "delivery") && ((cue.span.from < from && cue.span.to > from) || (cue.span.from < to && cue.span.to > to))) {
+        throw new Error(`${cue.kind === "emphasis" ? "emphasis" : "marker"} “${cue.span.text}” straddles the cap's split · shorten the span`);
       }
     }
     const cues = plan.cues
-      .filter((cue) => (cue.kind === "emphasis" ? cue.span.from >= from && cue.span.to <= to : cue.at >= from && cue.at <= to))
-      .map((cue) => (cue.kind === "emphasis" ? { ...cue, span: { ...cue.span, from: cue.span.from - from, to: cue.span.to - from } } : { ...cue, at: cue.at - from }));
+      .filter((cue) => (cue.kind === "emphasis" || cue.kind === "delivery" ? cue.span.from >= from && cue.span.to <= to : cue.at >= from && cue.at <= to))
+      .map((cue) => (cue.kind === "emphasis" || cue.kind === "delivery" ? { ...cue, span: { ...cue.span, from: cue.span.from - from, to: cue.span.to - from } } : { ...cue, at: cue.at - from }));
     const rendered = render(piece, cues);
-    if (rendered.length <= cap || max <= 1 || piece.length <= 1) {
+    if (rendered.text.length <= cap || max <= 1 || piece.length <= 1) {
       out.push(rendered);
       return;
     }
@@ -301,38 +331,85 @@ export function renderParts(text: string, plan: CadencePlan, model: ManifestMode
 }
 
 /**
- * A direction held to its block and its reader (R-9): the plan must map with every control
- * `mapped` or `best-effort` — a delivery the row lacks, a phrase it takes nowhere, a cue it
- * cannot place is refused in one clause, before a run could only flag it. Every cue is checked
- * by `mapCadence` against the words it names, and the parts the reader's cap makes of the block
- * are rendered here too, so a cue no part can carry is refused where the direction is written.
+ * A direction held to its block and its reader (R-9): every cue is checked by `mapCadence`
+ * against the words it names, and the parts the reader's cap makes of the block are rendered
+ * here too, so a cue no part can carry is refused where the direction is written.
+ *
+ * `strict` is the author's write (R-42): a control the reader cannot express is refused in one
+ * clause, never accepted to be flagged later — except one the stored direction already holds,
+ * which a write of another control carries on unchanged. `hold` is everything after (R-47): a
+ * reader change, a run, an accepted card — what the reader cannot express is left out of what
+ * is sent and named in `held`, and the direction stands for a reader that can.
  */
-export function checkDirection(text: string, plan: CadencePlan, model: ManifestModel, language?: string): DirectionCheck {
+export function checkDirection(text: string, plan: CadencePlan, model: ManifestModel, language?: string, mode: "strict" | "hold" = "strict", alreadyHeld: readonly string[] = []): DirectionCheck {
+  let sent: CadencePlan;
+  let held: HeldControl[];
   let mapped: ReturnType<typeof mapCadence>;
   try {
     mapped = mapCadence(text, directionSourceHash(text), plan, model, language);
+    ({ plan: sent, held } = holdDirection(text, plan, model, language));
   } catch (err) {
     return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
-  const refused = mapped.controls.find((control) => control.status === "unsupported");
-  if (refused !== undefined) {
-    const name = refused.control === "delivery" ? plan.delivery : refused.control;
-    return { ok: false, reason: `${name} · ${model.displayName} ${refused.reason ?? `takes no ${refused.control}`}`.replace(/\.$/, "") };
+  if (mode === "strict") {
+    const fresh = held.find((control) => !alreadyHeld.includes(heldKey(plan, control)));
+    if (fresh !== undefined) {
+      const name = fresh.control === "delivery" ? plan.delivery : fresh.control === "marker" ? markerName(plan, fresh.cueIndex) : fresh.control;
+      return { ok: false, reason: `${name} · ${model.displayName} ${fresh.reason}`.replace(/\.$/, "") };
+    }
   }
-  let parts: string[];
+  let parts: RenderedPart[];
   try {
-    parts = renderParts(text, plan, model, language, model.limits.maxPromptChars);
+    parts = renderParts(text, sent, model, language, model.limits.maxPromptChars);
   } catch (err) {
     return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
-  return { ok: true, mapped, parts };
+  return { ok: true, mapped, parts, held };
+}
+
+function markerName(plan: CadencePlan, cueIndex: number | undefined): string {
+  const cue = cueIndex === undefined ? undefined : plan.cues[cueIndex];
+  return cue?.kind === "delivery" ? `[${cue.delivery ?? cue.phrase}]` : "marker";
+}
+
+/**
+ * A held control named by what it is rather than where it sits, so the same control held
+ * before and after a write matches although other cues moved around it.
+ */
+export function heldKey(plan: CadencePlan, control: HeldControl): string {
+  if (control.cueIndex !== undefined) return `cue:${JSON.stringify(plan.cues[control.cueIndex])}`;
+  if (control.control === "delivery") return `delivery:${plan.delivery}`;
+  if (control.control === "phrase") return `phrase:${plan.phrase ?? ""}`;
+  if (control.control === "speed") return `speed:${plan.speed}`;
+  return control.control;
+}
+
+/**
+ * A direction entry for these words (R-6, R-43): keyed by the words' hash, and keeping the
+ * words themselves, so a later change of wording can carry its markers rather than drop them.
+ */
+export function directionEntry(text: string, plan: CadencePlan, at: string, dropped?: number): AudiobookDirection {
+  return { textHash: audiobookTextHash(text), plan, at, text: normalizeSpeechText(text), ...(dropped !== undefined && dropped > 0 ? { dropped } : {}) };
+}
+
+/**
+ * The block's direction for its words now (R-43): the record's when it was written for them,
+ * otherwise the one written for earlier words carried here — delivery, phrase and speed kept,
+ * each cue moved by its anchor, the rest counted in `dropped`. Null when there is none, or it
+ * was written by a build that did not keep its words.
+ */
+export function currentDirection(record: Pick<ChapterAudiobook, "direction"> | null, block: Pick<AudiobookBlock, "key" | "text">, at: string): AudiobookDirection | null {
+  const standing = audiobookDirectionFor(record, block);
+  if (standing !== null) return standing;
+  const carried = audiobookRekeyed(record, block);
+  return carried === null ? null : directionEntry(block.text, directionPlan(block.text, carried.input), at, carried.dropped);
 }
 
 /**
  * One block's direction set or cleared (R-6): written into the record beside the chapter,
  * keyed to the block's words, through the same ownership-checked path a run writes by. The
- * record is made if the chapter has none yet; a direction authored for other words than the
- * block's now is dropped on the way (R-9), since nothing can read it again.
+ * record is made if the chapter has none yet. The other blocks' directions written for earlier
+ * words are carried to the words now on the way (R-43), or dropped when they kept no words.
  */
 export async function writeBlockDirection(
   store: WorldStore,
@@ -344,12 +421,12 @@ export async function writeBlockDirection(
 ): Promise<ChapterAudiobook> {
   return updateAudiobook(store, productionId, chapter, (record) => {
     const { [key]: _was, ...rest } = record.direction;
-    const kept = Object.fromEntries(
-      Object.entries(rest).filter(([other, entry]) => {
-        const block = blocks.find((candidate) => candidate.key === other);
-        return block !== undefined && entry.textHash === audiobookTextHash(block.text);
-      }),
-    );
+    const kept: ChapterAudiobook["direction"] = {};
+    for (const other of Object.keys(rest)) {
+      const block = blocks.find((candidate) => candidate.key === other);
+      const carried = block === undefined ? null : currentDirection(record, block, store.now());
+      if (carried !== null) kept[other] = carried;
+    }
     return { ...record, updatedAt: store.now(), direction: direction === null ? kept : { ...kept, [key]: direction } };
   });
 }

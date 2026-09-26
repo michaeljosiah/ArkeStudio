@@ -6791,6 +6791,24 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ab__menu-meta { flex: none; font: 400 11px/1 var(--font-mono); color: var(--muted-foreground); }
 .fy-ab__menu-tick { flex: none; width: 14px; color: var(--foreground); }
 .fy-ab__menu-sep { height: 1px; margin: 5px -6px; background: var(--border); }
+/* Markers (design turn 155e/f, SPEC-047 R-42): a word in brackets on an 8% plate, drawn from
+   data-mk so the plate is no text of the page and a selection counts the words alone; the span a
+   delivery marker covers underlined; a control the reader cannot express struck (R-47). */
+.fy-ab__mk { display: inline-block; margin: 0 3px; padding: 0 6px; border-radius: 5px; background: color-mix(in srgb, var(--foreground) 8%, transparent); font: 400 12px/1.6 var(--font-mono); color: var(--foreground); cursor: pointer; user-select: none; }
+.fy-ab__mk::before { content: attr(data-mk); }
+.fy-ab__mk--cue { color: var(--muted-foreground); }
+.fy-ab__mk--held { text-decoration: line-through; color: var(--neutral-400); }
+.fy-ab__mks { text-decoration: underline dotted var(--neutral-400); text-decoration-thickness: 1.5px; text-underline-offset: 6px; }
+.fy-ab__emph { font-weight: 600; }
+.fy-ab__menu--marker { width: 268px; }
+.fy-ab__mgrid { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 6px 6px; }
+.fy-ab__mchip { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--foreground); font: 400 11px/1.4 var(--font-mono); cursor: pointer; }
+.fy-ab__mchip:hover:not(:disabled) { background: var(--secondary); }
+.fy-ab__mchip--on { background: var(--foreground); color: var(--background); border-color: transparent; }
+.fy-ab__mchip--struck { text-decoration: line-through; color: var(--neutral-400); cursor: default; }
+.fy-ab__cue--held { color: var(--neutral-400); }
+.fy-ab__row--top { align-items: flex-start; }
+.fy-ab__sent { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 11px; line-height: 1.5; color: var(--foreground); overflow-wrap: anywhere; }
 .fy-ab__source--recorded { color: var(--foreground); }
 .fy-ab__recorded { display: flex; align-items: center; gap: 7px; margin-top: 10px; font: 400 12px/1.4 var(--font-sans); color: var(--muted-foreground); cursor: pointer; }
 /* Upload a take (design turn 155c, SPEC-047 R-35): 540 wide; the checks are data, a warning never refuses. */

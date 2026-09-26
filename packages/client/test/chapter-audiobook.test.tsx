@@ -693,6 +693,76 @@ describe("the Audiobook view (turn 146)", () => {
     assert.equal(q(m, '[data-testid="audiobook-report"]')?.textContent, "whispered · Kokoro 82M reads measured · urgent");
   });
 
+  it("markers sit in the words as plates, what the reader cannot express is struck, the side says what is sent, and a plate opens the menu (SPEC-047 R-41, R-42, R-47)", async () => {
+    const m = await mount(voiced(inkbound()));
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." };
+    const held = record(NARRATION_KEYS, texts);
+    // Urgent over the bells, which Kokoro makes in parts; a pause after Maren, which it cannot read.
+    held.direction["p0.0"] = directed(texts["p0.0"], "measured", {
+      cues: [
+        { kind: "pause", at: 5, length: "short" },
+        { kind: "delivery", span: { from: 14, to: 24, text: "the bells." }, delivery: "urgent" },
+      ],
+    });
+    await answerOpen(m, { audiobook: held });
+    const block = all(m, ".fy-ab__block")[1]!;
+    const words = block.querySelector(".fy-ab__text") as HTMLElement;
+    assert.equal(words.textContent, "Maren counted the bells.", "the plates are no text of the page, so a selection counts the words alone");
+    const plates = [...words.querySelectorAll(".fy-ab__mk")] as HTMLElement[];
+    assert.deepEqual(plates.map((plate) => plate.getAttribute("data-mk")), ["[pause]", "[urgent]"]);
+    assert.ok(plates[0]!.className.includes("fy-ab__mk--held"), "Kokoro reads no pause: held, struck");
+    assert.equal(words.querySelector(".fy-ab__mks")?.textContent, "the bells.", "the span a delivery marker covers is underlined");
+
+    await act(async () => block.click());
+    const side = q(m, '[data-testid="audiobook-direction"]')!;
+    assert.match(side.querySelector('[data-testid="audiobook-held"]')?.textContent ?? "", /^1 held · Kokoro 82M$/);
+    const sent = [...side.querySelectorAll('[data-testid="audiobook-sent-as"] > span')].map((part) => part.textContent);
+    assert.deepEqual(sent, ["Maren counted", "the bells."], "a settings-only reader makes the marker a part of its own, and the held pause is not sent");
+
+    await act(async () => plates[1]!.click());
+    const menu = q(m, '[role="menu"][aria-label="Marker"]');
+    assert.ok(menu, "a press on a plate opens the menu to change or remove it");
+    const chips = [...menu.querySelectorAll(".fy-ab__mchip")] as HTMLButtonElement[];
+    const whispered = chips.find((chip) => chip.textContent === "whispered")!;
+    assert.ok(whispered.disabled, "what the reader cannot do is struck");
+    assert.equal(whispered.getAttribute("title"), "Kokoro 82M reads measured · urgent", "with the reason as its hint");
+    assert.ok(chips.find((chip) => chip.textContent === "urgent")!.className.includes("fy-ab__mchip--on"));
+    await act(async () => chips.find((chip) => chip.textContent === "measured")!.click());
+    const set = m.sent.findLast((message) => message.kind === "set-audiobook-block") as Extract<ClientMessage, { kind: "set-audiobook-block" }>;
+    assert.equal(set.block, "p0.0");
+    assert.deepEqual(set.direction?.cues, [
+      { kind: "pause", at: 5, length: "short" },
+      { kind: "delivery", span: { from: 14, to: 24, text: "the bells." }, delivery: "measured" },
+    ], "the marker changed in place, the held pause carried along");
+
+    await act(async () => (all(m, ".fy-ab__block")[1]!.querySelectorAll(".fy-ab__mk")[1] as HTMLElement).click());
+    const remove = [...q(m, '[role="menu"][aria-label="Marker"]')!.querySelectorAll(".fy-ab__menu-opt")].find((option) => option.textContent === "Remove") as HTMLElement;
+    await act(async () => remove.click());
+    const removed = m.sent.findLast((message) => message.kind === "set-audiobook-block") as Extract<ClientMessage, { kind: "set-audiobook-block" }>;
+    assert.deepEqual(removed.direction?.cues, [{ kind: "pause", at: 5, length: "short" }]);
+  });
+
+  it("a direction written for earlier words shows carried to the words now, with what could not be carried counted (SPEC-047 R-43)", async () => {
+    const m = await mount(voiced(inkbound()));
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." };
+    const held = record(NARRATION_KEYS, texts);
+    const was = "Maren slowly counted all the bells.";
+    held.direction["p0.0"] = {
+      ...directed(was, "measured", {
+        cues: [
+          { kind: "emphasis", span: { from: 6, to: 12, text: "slowly" }, level: "strong" },
+          { kind: "delivery", span: { from: 25, to: 35, text: "the bells." }, delivery: "urgent" },
+        ],
+      }),
+      text: was,
+    };
+    await answerOpen(m, { audiobook: held });
+    const words = all(m, ".fy-ab__block")[1]!.querySelector(".fy-ab__text") as HTMLElement;
+    assert.deepEqual([...words.querySelectorAll(".fy-ab__mk")].map((plate) => plate.getAttribute("data-mk")), ["[urgent]"], "the marker found once is carried; the emphasis on a word gone is not");
+    await act(async () => all(m, ".fy-ab__block")[1]!.click());
+    assert.match(q(m, '[data-testid="audiobook-held"]')?.textContent ?? "", /1 marker dropped · words changed/);
+  });
+
   it("Direct this chapter is the dock's prompt, its card is accepted whole, and the prompt becomes Direct again (SPEC-047 R-10, R-31)", async () => {
     const m = await mount(voiced(inkbound()));
     await answerOpen(m);
