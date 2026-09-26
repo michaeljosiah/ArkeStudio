@@ -114,7 +114,7 @@ export async function loadGenesisConversation(dir: string, genesisId: string, ru
     status: running ? "running" : messages.at(-1)?.role === "user" ? "failed" : "completed",
     ...(!running && messages.at(-1)?.role === "user" ? { detail: "The previous reply did not finish. Your message and draft are saved; continue when ready." } : {}),
     ...(begun ? { worldId: begun.worldId } : {}),
-    ...(frozen ? { founding: true, frozenModels: frozen.models ?? {} } : {}),
+    ...(frozen ? { founding: true, frozenModels: frozen.models ?? {}, frozenGenerateImages: frozen.generateImages ?? true } : {}),
     ...(begun?.form ? { formHandoff: complete ? "completed" as const : "pending" as const } : {}),
   };
 }

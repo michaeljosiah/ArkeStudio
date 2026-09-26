@@ -815,10 +815,11 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
   useEffect(() => {
     if (!g?.founding) return;
     setModels(g.frozenModels);
+    setGenerateImages(g.frozenGenerateImages ?? true);
     setLook(g.blueprint?.look ?? "");
     setLookForBuild(g.blueprint?.look ?? "");
     setGenMode("chat");
-  }, [g?.founding, g?.frozenModels, g?.blueprint?.look]);
+  }, [g?.founding, g?.frozenModels, g?.frozenGenerateImages, g?.blueprint?.look]);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   useEffect(() => {
     if (connection !== "open") return;
@@ -1342,7 +1343,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                 )}
                 {buildMode && buildCardOpen && (
                   <div ref={buildCardRef}>
-                    <label><input type="checkbox" checked={generateImages} disabled={buildPressed}
+                    <label><input type="checkbox" checked={generateImages} disabled={buildPressed || g?.founding}
                       onChange={event => { setGenerateImages(event.target.checked); plannedAgainst.current = null; }} /> Generate remaining images</label>
                     <BuildCard
                       plan={visibleBuildPlan}

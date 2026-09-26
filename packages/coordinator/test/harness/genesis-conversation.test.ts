@@ -35,10 +35,11 @@ it("keeps the frozen founding input after creation starts and marks form handoff
   const dir = await sandboxDir("founding-frozen-");
   await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Original" }));
   const blueprint = await foldBlueprint(dir);
-  await writeFile(join(genesisControlDir(dir), "founding-input.json"), JSON.stringify({ blueprint, models: { image: "frozen-image-model" } }));
+  await writeFile(join(genesisControlDir(dir), "founding-input.json"), JSON.stringify({ blueprint, models: { image: "frozen-image-model" }, generateImages: false }));
   await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Changed after crash" }));
   let loaded = await loadGenesisConversation(dir, "gen-frozen");
   assert.equal(loaded.founding, true);
+  assert.equal(loaded.frozenGenerateImages, false);
   assert.deepEqual(loaded.frozenModels, { image: "frozen-image-model" });
   assert.equal(loaded.blueprint.name, "Original");
   const worldId = ulid();

@@ -1677,6 +1677,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     conversationId: ConversationIdSchema, worldId: UlidSchema.optional(),
     founding: z.boolean().optional(),
     frozenModels: ModelChoicesSchema.optional(),
+    frozenGenerateImages: z.boolean().optional(),
     formHandoff: z.enum(["pending", "completed"]).optional(),
     turns: z.array(z.object({ id: z.string(), role: z.enum(["user", "gate"]), text: z.string(), at: IsoDateTimeSchema }).strict()),
     blueprint: GenesisBlueprintSchema,
