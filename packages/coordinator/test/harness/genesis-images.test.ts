@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { GenesisBlueprintSchema, JobSchema, newId, ulid, compileBuildItems, type ManifestModel } from "@arke-studio/contracts";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -83,6 +83,18 @@ it("a corrupted frozen image cannot be approved or founded", async () => {
   await writeFile(join(genesisControlDir(dir), candidate.file), "corrupt");
   await assert.rejects(reviewedGenesisImages(dir, draft, []), /repair/);
   await assert.rejects(decideGenesisImage(dir, draft, { target: "location:vigil", requestId: ulid(), decision: "approve", candidateId: candidate.id, hash: candidate.hash }), /changed/);
+});
+
+it("journal recovery preserves selected candidates and validates their bytes without the image cache", async () => {
+  const { dir } = await setup();
+  const draft = blueprint();
+  const candidate = (await reviewGenesisImages(dir, draft, [], model)).candidates[0]!;
+  await decideGenesisImage(dir, draft, { target: "character:maren", requestId: ulid(), decision: "approve", candidateId: candidate.id, hash: candidate.hash });
+  await rm(join(genesisControlDir(dir), "images.json"));
+  assert.equal((await savedGenesisImages(dir)).candidates[0]?.hash, candidate.hash);
+  await reviewedGenesisImages(dir, draft, []);
+  await writeFile(join(genesisControlDir(dir), candidate.file), "corrupted");
+  await assert.rejects(reviewedGenesisImages(dir, draft, []), /changed|image/i);
 });
 
 it("unselected retained candidates are validated before any world is published", async () => {

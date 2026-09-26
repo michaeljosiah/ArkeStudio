@@ -49,7 +49,7 @@ export async function carryGenesisImageArtifacts(workspace: string, genesisId: s
 }
 
 /** Reuse the selected bytes through the same reference-take and kit gates as open-world imports. */
-export async function installGenesisImage(workspace: string, selection: GenesisImageSelection, blueprint: GenesisBlueprint, store: WorldStore): Promise<void> {
+export async function installGenesisImage(workspace: string, selection: GenesisImageSelection, blueprint: GenesisBlueprint, store: WorldStore, ledger?: LedgerEntry): Promise<void> {
   if (selection.target.startsWith("prop:")) {
     const [, slug, stateSlug] = selection.target.split(":");
     const genesisId = basename(genesisControlDir(workspace));
@@ -61,7 +61,7 @@ export async function installGenesisImage(workspace: string, selection: GenesisI
     const take = await recordUploadedPropImage(store, propId, stateId, `founding-${candidate.hash.slice(7, 23)}${extname(candidate.file)}`, bytes, {
       requestId, ...(candidate.source === "generated" ? { source: {
         provider: candidate.provider!, model: candidate.model!, jobId: JobIdSchema.parse(candidate.jobId), prompt: candidate.prompt ?? "",
-        params: candidate.params ?? {}, cost: { estimatedMicroUsd: candidate.estimatedMicroUsd ?? 0, actualMicroUsd: null },
+        params: candidate.params ?? {}, cost: { estimatedMicroUsd: candidate.estimatedMicroUsd ?? 0, actualMicroUsd: ledger?.actualMicroUsd ?? null },
         dispatchedAt: candidate.createdAt,
       } } : {}),
     });
@@ -77,8 +77,10 @@ export async function installGenesisImage(workspace: string, selection: GenesisI
   const requestId = `founding-image:${selection.target}:${candidate.id}`;
   const media = `founding-${candidate.hash.slice(7, 23)}${extname(candidate.file)}`;
   let take;
+  let sourceCandidate: string | undefined;
   if (candidate.source === "generated" && candidate.jobId) {
     const path = `references/${sheet.id}/candidates/${media}`;
+    sourceCandidate = path;
     await store.ownedWrite(() => atomicWriteFile(join(store.dir, path), bytes));
     const job = JobSchema.parse({
       id: candidate.jobId, idempotencyKey: candidate.jobId.slice(3), worldId: store.worldId,
@@ -89,7 +91,7 @@ export async function installGenesisImage(workspace: string, selection: GenesisI
       estimatedMicroUsd: candidate.estimatedMicroUsd ?? 0, status: "succeeded", providerJobId: null, attempt: 1, error: null,
       landedFiles: [path], createdAt: candidate.createdAt, updatedAt: candidate.createdAt,
     });
-    take = await recordReferenceTake(store, job);
+    take = await recordReferenceTake(store, job, ledger);
   } else {
     take = sheet.type === "character"
       ? await recordUploadedMainPhotoTake(store, sheet.id, media, bytes, { requestId })
@@ -98,8 +100,8 @@ export async function installGenesisImage(workspace: string, selection: GenesisI
   if (!take?.media) throw new Error("The approved image could not be recorded.");
   const kit = (await readKit(store, sheet.id))?.kit;
   if (sheet.type === "character") {
-    if (kit?.mainPhoto?.sourceTakeId === take.id) return;
-    const result = await acceptMainPhoto(store, sheet, store.getBundle(), { source: "take", takeId: take.id });
+    if (kit?.mainPhoto?.sourceTakeId === take.id && !sourceCandidate) return;
+    const result = await acceptMainPhoto(store, sheet, store.getBundle(), { source: "take", takeId: take.id }, sourceCandidate);
     if (result.status !== "accepted") throw new Error("The approved main photo could not be assigned.");
   } else {
     if (kit?.locationViews?.some(view => view.sourceTakeId === take.id && view.id === kit.establishingViewId)) return;

@@ -58,6 +58,13 @@ async function verify(dir: string, candidate: GenesisVoiceCandidate) {
   const bytes = await readFile(path);
   if (hash(bytes) !== candidate.hash || !cachedVoiceAudioLooksRight(bytes, candidate.plan.format)) throw new Error("The audition changed. Audition again before selecting.");
 }
+export async function hasUsableGenesisAudition(dir: string, candidates: readonly GenesisVoiceCandidate[], digest: string): Promise<boolean> {
+  for (const candidate of candidates) {
+    if (candidate.plan.digest !== digest) continue;
+    try { await verify(dir, candidate); return true; } catch { /* A new explicit request may replace damaged cached audio. */ }
+  }
+  return false;
+}
 export async function reviewGenesisVoices(dir: string, blueprint: GenesisBlueprint, jobs: readonly Job[], catalogue: VoiceCandidate[], models: readonly ManifestModel[]): Promise<GenesisVoices> {
   return serializeFileMutation(pathFor(dir), async () => {
     const state = await savedGenesisVoices(dir);
@@ -106,7 +113,7 @@ export function genesisVoiceRequest(genesisId: string, plan: GenesisVoicePlan, r
 export async function generateLocalGenesisVoice(dir: string, plan: GenesisVoicePlan, requestId: string, synthesize: () => Promise<Uint8Array>): Promise<void> {
   await serializeFileMutation(pathFor(dir), async () => {
     const state = await savedGenesisVoices(dir);
-    if (state.candidates.some(one => one.plan.digest === plan.digest)) return;
+    if (await hasUsableGenesisAudition(dir, state.candidates, plan.digest)) return;
     if (state.attempts[requestId]) {
       if (state.attempts[requestId]!.status === "completed") return;
       throw new Error("This audition was interrupted or failed. Request another audition; it will not be repeated automatically.");
