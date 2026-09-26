@@ -26,6 +26,7 @@ import { installSampleWorld } from "./sample-world.js";
 import { findKeyArt, hashMedia, readWorldMeta, scanWorld, WorldOpenError } from "./scan.js";
 import { uniqueSlug } from "./slug.js";
 import { WorldStore } from "./store.js";
+import { WorldChatStore } from "../world-chat/store.js";
 
 /**
  * The real filesystem WorldProvider (SPEC-002 T-14), replacing SPEC-001's mock. Owns the app
@@ -711,6 +712,7 @@ export class FsWorldProvider implements WorldProvider {
 
   async discardGenesis(genesisId: string): Promise<void> {
     if (!/^[a-z0-9][a-z0-9-]{2,40}$/.test(genesisId)) return;
+    await WorldChatStore.discard(join(this.appRoot, ".genesis-v2", genesisId, ".conversation"));
     await rm(toExtendedLength(join(this.appRoot, ".genesis", genesisId)), { recursive: true, force: true });
     await rm(toExtendedLength(join(this.appRoot, ".genesis-v2", genesisId)), { recursive: true, force: true });
   }

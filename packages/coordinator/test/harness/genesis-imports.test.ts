@@ -113,6 +113,8 @@ it("binds evidence to its prepared target and verifies restored evidence before 
   await writeFile(join(genesisControlDir(dir), "sources", card.source.hash.slice(7), card.source.name), "corrupt");
   await assert.rejects(decideGenesisContent(dir, reviewed.cards, "approve", ulid()), /source changed/);
   assert.equal((await (await genesisConversation(dir)).read()).events.filter(row => row.event.type === "founding.decision").length, 0);
+  const rejected = await decideGenesisContent(dir, reviewed.cards, "reject", ulid());
+  assert.ok(rejected.cards.every(card => card.status === "rejected"));
 });
 
 it("refreshes deferred interpretations and checks duplicate names submitted by the author", async () => {
@@ -179,4 +181,32 @@ it("bounds duplicate excerpts in large import reviews", async () => {
   const review = await reviewGenesisImports(dir);
   assert.equal(review.cards.length, 13);
   assert.ok(review.cards.every(card => card.related.length <= 5 && card.related.every(other => other.text.length <= 601)));
+});
+
+it("replacing one section preserves the other section's evidence", async () => {
+  const { dir } = await setup();
+  const proposalPath = join(dir, "draft", "imports", "maren.json");
+  const original = JSON.parse(await readFile(proposalPath, "utf8"));
+  const first = (await reviewGenesisImports(dir)).cards[0]!;
+  await resolveGenesisImport(dir, { id: first.id, digest: first.digest, decision: "prepare" });
+  const target = "character:" + (await foldBlueprint(dir)).characters[0]!.slug;
+  await writeFile(proposalPath, JSON.stringify({ ...original, section: "Appearance", body: "A dark coat." }));
+  const appearance = (await reviewGenesisImports(dir)).cards.find(card => card.status === "pending")!;
+  await resolveGenesisImport(dir, { id: appearance.id, digest: appearance.digest, decision: "prepare", target, mode: "replace" });
+  await writeFile(proposalPath, JSON.stringify({ ...original, quote: "The gate closes at dusk.", body: "Closes the gate." }));
+  const replacement = (await reviewGenesisImports(dir)).cards.find(card => card.status === "pending")!;
+  await resolveGenesisImport(dir, { id: replacement.id, digest: replacement.digest, decision: "prepare", target, mode: "replace" });
+  const card = (await reviewGenesisContent(dir)).cards.find(card => card.key === target)!;
+  assert.ok(card.content.kind === "character");
+  assert.deepEqual(card.content.value.sources?.map(source => source.candidateId).sort(), [appearance.id, replacement.id].sort());
+  assert.match(card.content.value.sheet!.sections["Appearance"]!, /dark coat/);
+});
+
+it("conflicting duplicate proposal identities are visible and cannot be prepared", async () => {
+  const { dir } = await setup();
+  const original = JSON.parse(await readFile(join(dir, "draft", "imports", "maren.json"), "utf8"));
+  await writeFile(join(dir, "draft", "imports", "conflict.json"), JSON.stringify({ ...original, body: "A different interpretation." }));
+  const review = await reviewGenesisImports(dir);
+  assert.equal(review.cards.length, 0);
+  assert.match(review.problems.join(" "), /Conflicting files/);
 });

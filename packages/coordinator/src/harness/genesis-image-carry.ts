@@ -19,6 +19,24 @@ async function candidateBytes(workspace: string, candidate: GenesisImageCandidat
   return bytes;
 }
 
+/** Provider inputs were sandbox-relative; permanent take provenance must travel with the world. */
+async function worldImageParams(workspace: string, candidate: GenesisImageCandidate, store: WorldStore): Promise<Record<string, unknown>> {
+  const params = { ...candidate.params };
+  if (params.references === undefined) return params;
+  if (!Array.isArray(params.references)) throw new Error("The image reference provenance is unreadable.");
+  const references: string[] = [];
+  for (const file of params.references) {
+    if (typeof file !== "string" || !/^media\/[a-f0-9]{64}\.(png|jpg|webp)$/.test(file)) throw new Error("The founding reference path is invalid.");
+    const sourcePath = join(genesisControlDir(workspace), file);
+    const bytes = await readFile(sourcePath);
+    if (createHash("sha256").update(bytes).digest("hex") !== basename(file, extname(file))) throw new Error("A founding input image changed.");
+    const filed = await fileArtifact(store, { sourcePath });
+    if (filed.outcome === "refused" || filed.outcome === "needs-consent") throw new Error(filed.reason);
+    references.push(`artifacts/${filed.artifact.file}`);
+  }
+  return { ...params, references };
+}
+
 export async function carryGenesisImageArtifacts(workspace: string, genesisId: string, blueprint: GenesisBlueprint, store: WorldStore,
   ledger: (jobId: string) => Promise<LedgerEntry | undefined>): Promise<void> {
   const images = await savedGenesisImages(workspace);
@@ -36,7 +54,7 @@ export async function carryGenesisImageArtifacts(workspace: string, genesisId: s
       const entry = await ledger(candidate.jobId);
       await fileGeneratedArtifact(store, { sourcePath: join(genesisControlDir(workspace), candidate.file), generation: {
         source: "founding", genesisId, jobId: candidate.jobId, target: candidate.target!, label: candidate.label,
-        provider: candidate.provider!, model: candidate.model!, prompt: candidate.prompt ?? "", params: candidate.params ?? {},
+        provider: candidate.provider!, model: candidate.model!, prompt: candidate.prompt ?? "", params: await worldImageParams(workspace, candidate, store),
         estimatedMicroUsd: candidate.estimatedMicroUsd ?? 0, costMicroUsd: entry?.actualMicroUsd ?? null, links,
       } });
     } else {
@@ -61,7 +79,7 @@ export async function installGenesisImage(workspace: string, selection: GenesisI
     const take = await recordUploadedPropImage(store, propId, stateId, `founding-${candidate.hash.slice(7, 23)}${extname(candidate.file)}`, bytes, {
       requestId, ...(candidate.source === "generated" ? { source: {
         provider: candidate.provider!, model: candidate.model!, jobId: JobIdSchema.parse(candidate.jobId), prompt: candidate.prompt ?? "",
-        params: candidate.params ?? {}, cost: { estimatedMicroUsd: candidate.estimatedMicroUsd ?? 0, actualMicroUsd: ledger?.actualMicroUsd ?? null },
+        params: await worldImageParams(workspace, candidate, store), cost: { estimatedMicroUsd: candidate.estimatedMicroUsd ?? 0, actualMicroUsd: ledger?.actualMicroUsd ?? null },
         dispatchedAt: candidate.createdAt,
       } } : {}),
     });
@@ -85,7 +103,7 @@ export async function installGenesisImage(workspace: string, selection: GenesisI
     const job = JobSchema.parse({
       id: candidate.jobId, idempotencyKey: candidate.jobId.slice(3), worldId: store.worldId,
       target: { kind: sheet.type === "character" ? "main-photo-candidate" : "location-view-candidate", id: `${sheet.id}/founding` },
-      capability: "image", provider: candidate.provider, model: candidate.model, params: { ...candidate.params,
+      capability: "image", provider: candidate.provider, model: candidate.model, params: { ...await worldImageParams(workspace, candidate, store),
         provenance: { canonRevision: store.getBundle().meta.canonRevision, sheets: { [sheet.id]: sheet.version },
           artDirectionVersion: store.getBundle().artDirection.version } },
       estimatedMicroUsd: candidate.estimatedMicroUsd ?? 0, status: "succeeded", providerJobId: null, attempt: 1, error: null,
