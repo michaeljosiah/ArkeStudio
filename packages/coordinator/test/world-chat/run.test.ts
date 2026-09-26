@@ -941,7 +941,7 @@ it("durably cancels a turn stopped while its chapter brief is being read", async
   assert.equal((await h.runner.send(h.store, h.conversationId, "Continue")).status, "completed");
 });
 
-it("summarizes long founding history before the first world-chat reply", async () => {
+it("summarizes founding history before it exceeds the recent prompt window", async () => {
   const prompts: string[] = [];
   const { runner, store, conversationId } = await setup(fakeAdapter(["not json", "not json"], { prompts }), {
     summarise: async input => {
@@ -950,7 +950,7 @@ it("summarizes long founding history before the first world-chat reply", async (
       return "The first founding decision must be remembered.";
     },
   });
-  for (let index = 0; index < 52; index++) await store.append({ type: "founding.message", message: {
+  for (let index = 0; index < 18; index++) await store.append({ type: "founding.message", message: {
     id: newId("msg"), turnId: newId("turn"), role: index % 2 ? "studio" : "user",
     text: index ? `Later founding message ${index}` : "The first founding decision.", attachmentIds: [], createdAt: AT,
   } });
