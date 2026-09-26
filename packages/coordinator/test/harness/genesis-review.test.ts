@@ -26,6 +26,27 @@ it("recovery keeps omitted canon, and a canon-only proposal is meaningful", () =
   assert.deepEqual(parseDraftFrom('{"canon":[]}', { canon })?.canon, []);
 });
 
+it("partial sheets retain their summary and reordered questions retain approval identities", async () => {
+  const { dir, path } = await draft();
+  await writeFile(path, JSON.stringify({ name: "Maren", line: "She keeps the gate.", sheet: { sections: { Appearance: "A red coat." } } }));
+  await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Harbour", threads: ["Who built the gate?", "What lies beyond?"] }));
+  await decideGenesisContent(dir, (await reviewGenesisContent(dir)).cards, "approve", ulid());
+  await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Harbour", threads: ["What lies beyond?", "Who built the gate?"] }));
+  const review = await reviewGenesisContent(dir);
+  assert.equal(review.selected.characters[0]?.sheet?.sections["Essence"], "She keeps the gate.");
+  assert.ok(review.cards.every(card => card.status === "approved"));
+  assert.equal(review.selected.threads.length, 2);
+});
+
+it("renaming an approved character invalidates key art naming the old identity", async () => {
+  const { dir, path } = await draft();
+  await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Harbour", keyArt: { characters: ["Maren"] } }));
+  await decideGenesisContent(dir, (await reviewGenesisContent(dir)).cards, "approve", ulid());
+  await writeFile(path, JSON.stringify({ name: "The unseen keeper", neverDepicted: true }));
+  await decideGenesisContent(dir, (await reviewGenesisContent(dir)).cards.filter(card => card.key === "character:maren"), "approve", ulid());
+  await assert.rejects(approvedBlueprintForFounding(dir), /Key art names Maren/);
+});
+
 it("reverting to the selected version is approved, while an older superseded version needs approval", async () => {
   const { dir, path } = await draft();
   const first = (await reviewGenesisContent(dir)).cards.find(card => card.key === "character:maren")!;

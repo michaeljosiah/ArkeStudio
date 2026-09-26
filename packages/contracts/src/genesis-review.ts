@@ -50,8 +50,8 @@ export function genesisContentChanges(previous: GenesisContent, next: GenesisCon
 export function completeGenesisSheet<T extends { name: string; line?: string; description?: string; sheet?: z.infer<typeof import("./genesis.js").GenesisSheetContentSchema> }>(kind: "character" | "location" | "faction", entity: T) {
   const shape = SHEET_SHAPES[kind];
   const sections = { ...entity.sheet?.sections };
-  if (!entity.sheet) {
-    const first = shape.sections.find(section => section.required)!.heading;
+  const first = shape.sections.find(section => section.required)!.heading;
+  if (!sections[first]?.trim()) {
     sections[first] = entity.description ?? entity.line ?? entity.name;
   }
   for (const section of shape.sections) {
@@ -72,7 +72,7 @@ export function genesisContentRows(blueprint: GenesisBlueprint): Array<{ key: st
       }))),
     ...(props ?? []).map(prop => ({ key: `prop:${prop.slug}`, title: prop.name, content: { kind: "prop", value: prop } as GenesisContent })),
     ...(canon ?? []).map(entry => ({ key: `canon:${entry.slug}`, title: entry.title, content: { kind: "canon", value: entry } as GenesisContent })),
-    ...threads.map((question, index) => ({ key: `thread:${index}`, title: question, content: { kind: "thread", value: question } as GenesisContent })),
+    ...[...new Set(threads)].map(question => ({ key: `thread:${question}`, title: question, content: { kind: "thread", value: question } as GenesisContent })),
   ];
 }
 

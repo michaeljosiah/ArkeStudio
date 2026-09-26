@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ulid } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
@@ -105,6 +105,20 @@ it("a reserved founding identity reuses the world after a lost Begin response", 
   const second = await new FsWorldProvider(root).createWorld(input);
   assert.deepEqual(second, first);
   assert.equal((await provider.listWorlds()).length, 1);
+});
+
+it("rebuilds unpublished reserved worlds without stale optional documents", async () => {
+  const root = await tempDir("founding-staging-");
+  const provider = new FsWorldProvider(root);
+  const creationId = ulid();
+  const staging = join(root, ".world-creations", creationId);
+  await mkdir(join(staging, "art-direction"), { recursive: true });
+  await writeFile(join(staging, "art-direction", "art-direction.json"), "stale");
+  await writeFile(join(staging, "bible.md"), "stale");
+  const created = await provider.createWorld({ creationId, name: "Fresh" });
+  const world = join(root, "worlds", created.slug);
+  await assert.rejects(readFile(join(world, "bible.md")), { code: "ENOENT" });
+  await assert.rejects(readFile(join(world, "art-direction", "art-direction.json")), { code: "ENOENT" });
 });
 
 it("migrates legacy draft content without giving the harness the conversation journal", async () => {
