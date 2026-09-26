@@ -1,4 +1,6 @@
 import { stageReferenceFrames } from "@arke-studio/contracts";
+import { createProp, addPropState } from "../../src/references/props.js";
+import { fileArtifact } from "../../src/artifacts/filing.js";
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -80,6 +82,55 @@ import {
 const AT = "2026-09-04T12:00:00.000Z";
 const NOW = () => AT;
 const PRODUCTION = "saltlight";
+
+describe("conversational props", () => {
+  async function prepare(w: Awaited<ReturnType<typeof setup>>, input: Record<string, unknown>, reads: ArkeReadRequirement[]) {
+    const receipts = reads.map(read => currentReceipt(w.store, read));
+    const action = ModelWorldChatActionSchema.parse({ ...input, checkReceiptIds: receipts.map(receipt => receipt.id) });
+    const one = turn(w.conversationId, w.entryContext, { actions: [action], receipts });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+    await appendTurn(w.log, one, prepared);
+    await bindAll(w.lifecycle, prepared);
+    return (await loaded(w.log)).actions.find(card => card.actionId === prepared[0]!.intent.actionId)!;
+  }
+  it("creates exact states only on approval and keeps identities on rename and replay", async () => {
+    const w = await setup();
+    const denied = await prepare(w, { kind: "prop-authoring", change: { operation: "create", name: "Denied sword", states: ["Whole"] } }, ["references", "sheets"]);
+    assert.equal((await decide(w.lifecycle, w.log, denied, "deny")).status, "denied");
+    assert.equal(w.store.getBundle().props.length, 0);
+    const card = await prepare(w, { kind: "prop-authoring", change: { operation: "create", name: "Tide sword", states: ["Intact", "Broken"] } }, ["references", "sheets"]);
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    const prop = w.store.getBundle().props[0]!;
+    assert.deepEqual(prop.states.map(state => state.name), ["Intact", "Broken"]);
+    await decide(w.lifecycle, w.log, card);
+    assert.equal(w.store.getBundle().props.length, 1);
+    const rename = await prepare(w, { kind: "prop-authoring", change: { operation: "rename-state", propId: prop.id, stateId: prop.states[0]!.id, name: "Restored" } }, ["references", "sheets"]);
+    assert.equal((await decide(w.lifecycle, w.log, rename)).status, "completed");
+    assert.equal(w.store.getBundle().props[0]!.states[0]!.id, prop.states[0]!.id);
+    assert.equal(w.store.getBundle().props[0]!.states[0]!.name, "Restored");
+    const stale = await prepare(w, { kind: "prop-authoring", change: { operation: "add-state", propId: prop.id, name: "Glowing" } }, ["references", "sheets"]);
+    await addPropState(w.store, prop.id, "Faded");
+    assert.equal((await decide(w.lifecycle, w.log, stale)).status, "stale");
+    assert.ok(!w.store.getBundle().props[0]!.states.some(state => state.name === "Glowing"));
+  });
+  it("shows the uploaded image and atomically accepts its exact state with an artifact link", async () => {
+    const w = await setup();
+    const prop = (await createProp(w.store, "Tide sword"))!;
+    const state = (await addPropState(w.store, prop.id, "Intact"))!;
+    const source = join(w.store.dir, "sword.png");
+    await writeFile(source, encodePng(solidImage(4, 4, [12, 34, 56, 255])));
+    await fileArtifact(w.store, { sourcePath: source });
+    const artifact = w.store.getBundle().artifacts.find(artifact => artifact.file === "sword.png")!;
+    const card = await prepare(w, { kind: "prop-reference", propId: prop.id, stateId: state.id, artifactId: artifact.id }, ["references", "artifacts"]);
+    assert.equal(card.shown.body.family, "take-review");
+    assert.ok("mediaPath" in card.shown.body && card.shown.body.mediaPath?.includes(artifact.file));
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    await decide(w.lifecycle, w.log, card);
+    assert.equal(w.store.getBundle().referenceTakes.length, 1);
+    assert.equal(w.store.getBundle().props[0]!.states[0]!.reference?.sourceTakeId, w.store.getBundle().referenceTakes[0]!.id);
+    assert.deepEqual(w.store.getBundle().artifacts.find(one => one.id === artifact.id)!.links, [prop.id]);
+  });
+});
 
 async function setup(
   entryContext: WorldChatContext = { kind: "world" },

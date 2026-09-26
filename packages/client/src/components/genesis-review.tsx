@@ -1,4 +1,4 @@
-import { genesisContentChanges, type GenesisContent, type GenesisContentReview, type GenesisReviewCard } from "@arke-studio/contracts";
+import { genesisContentChanges, genesisContentRows, type GenesisBlueprint, type GenesisContent, type GenesisContentReview, type GenesisReviewCard } from "@arke-studio/contracts";
 import { renderInlineMarkdown } from "./inline-markdown.js";
 import { Button, Callout } from "./ui.js";
 function Sources({ sources }: { sources?: import("@arke-studio/contracts").GenesisSource[] }) {
@@ -11,6 +11,8 @@ function Sources({ sources }: { sources?: import("@arke-studio/contracts").Genes
 function Content({ content, review }: { content: GenesisContent; review: GenesisContentReview }) {
   if (content.kind === "remove") return <p>Remove this item from the approved founding content.</p>;
   if (content.kind === "thread") return <p>Open question: {content.value}</p>;
+  if (content.kind === "prop") return <><p>Prop: {content.value.name}</p><ol>{content.value.states.map(state => <li key={state.slug}>{state.name}</li>)}</ol>
+    {!content.value.states.length && <p>No states proposed yet.</p>}</>;
   if (content.kind === "canon") return <>
     <p>{content.value.type === "thread" ? "Open question" : `Established ${content.value.type}`}</p>
     <div style={{ whiteSpace: "pre-wrap" }}>{renderInlineMarkdown(content.value.statement)}</div>
@@ -39,6 +41,12 @@ function Content({ content, review }: { content: GenesisContent; review: Genesis
   </>;
 }
 
+export function ApprovedGenesisContent({ blueprint }: { blueprint: GenesisBlueprint }) {
+  const cards = genesisContentRows(blueprint).map(row => ({ ...row, digest: "", status: "approved" as const }));
+  return <details><summary>Exact approved content to save</summary>{cards.map(card => <section key={card.key}>
+    <h3>{card.title}</h3><Content content={card.content} review={{ cards, selected: blueprint, problems: [] }} />
+  </section>)}</details>;
+}
 export function GenesisContentCards({ review, busy, onDecide, onRevise }: {
   review: GenesisContentReview; busy: boolean;
   onDecide(cards: GenesisReviewCard[], decision: "approve" | "reject"): void;
@@ -66,6 +74,6 @@ export function GenesisContentCards({ review, busy, onDecide, onRevise }: {
         <Button variant="ghost" disabled={busy} onClick={() => onRevise(card.title)}>Request changes</Button>
       </div>
     </article>)}
-    {pending.length > 1 && <Button disabled={busy} onClick={() => onDecide(pending, "approve")}>Approve all {pending.length} pending items shown above</Button>}
+    {pending.length > 1 && <Button disabled={busy} onClick={() => onDecide(pending.slice(0, 300), "approve")}>Approve {pending.length > 300 ? "the next" : "all"} {Math.min(pending.length, 300)} pending items shown above</Button>}
   </section>;
 }

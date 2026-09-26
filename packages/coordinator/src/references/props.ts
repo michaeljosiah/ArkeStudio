@@ -5,8 +5,9 @@ import { WorldStateStaleError } from "../world/store.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
-import { commitReferenceRecord } from "./kit.js";
+import { commitReferenceRecord, type ReferenceMutationOptions } from "./kit.js";
 import { pendingPropStateTake, recordUploadedPropTake, referenceReviewDecision } from "./takes.js";
+import { prepareArtifactLinks } from "../artifacts/filing.js";
 
 /**
  * Prop-state references (design turn 105, `referenceOwner: accepted-state-record`; issue 535).
@@ -38,6 +39,7 @@ export type PropStateAcceptance =
 export async function acceptPropStateReference(
   store: WorldStore,
   input: { propId: string; stateId: string; selection: PropStateSelection; replace?: boolean },
+  options: ReferenceMutationOptions & { artifactId?: string } = {},
 ): Promise<PropStateAcceptance> {
   const found = await readProp(store, input.propId);
   if (!found) return { status: "refused", reason: `no prop ${input.propId}` };
@@ -83,6 +85,9 @@ export async function acceptPropStateReference(
   // The prior reference is replaced on the record and nowhere else: its take stays on disk and
   // in the bundle, which is the history a shot that already cites it may still want.
   const acceptedAt = store.now();
+  const artifact = options.artifactId ? store.getBundle().artifacts.find(artifact => artifact.id === options.artifactId) : undefined;
+  if (options.artifactId && !artifact) throw new Error("The source artifact is unavailable.");
+  const artifactFiles = artifact ? [await prepareArtifactLinks(store, artifact, [input.propId])] : [];
   const accepted = take;
   const next: Prop = {
     ...found.prop,
@@ -105,6 +110,7 @@ export async function acceptPropStateReference(
   await commitReferenceRecord(
     store,
     [
+      ...artifactFiles,
       {
         path: propPath(input.propId),
         action: "replace",
@@ -113,6 +119,7 @@ export async function acceptPropStateReference(
       },
     ],
     referenceReviewDecision(acceptedAt, accepted, "accept"),
+    options,
   );
   // Best effort, as for a main photo: the take holds the bytes now, and a candidate that outlives
   // its accept only reappears as a choice already made.
@@ -129,20 +136,26 @@ export async function acceptPropStateReference(
  * inside the serialised write after its rescan, so two equivalent requests in flight at once
  * cannot both read a bundle that knows neither and both land: the second sees the first.
  */
-export async function createProp(store: WorldStore, name: string): Promise<Prop | null> {
+export async function createProp(store: WorldStore, name: string, options: ReferenceMutationOptions & { id?: string; states?: PropState[] } = {}): Promise<Prop | null> {
+  if (options.id) {
+    const existing = store.getBundle().props.find(prop => prop.id === options.id);
+    if (existing) return existing;
+  }
   const free = (): string | null => {
     const bundle = store.getBundle();
     const check = checkPropName(name, bundle.props, bundle.sheets);
     return check.ok ? null : `@${check.slug || name.trim()} is not free to cite a prop by`;
   };
   if (free() !== null) return null;
-  const prop: Prop = { id: newId("prop"), name: name.trim(), states: [] };
+  const prop: Prop = PropSchema.parse({ id: options.id ?? newId("prop"), name: name.trim(), states: options.states ?? [] });
+  if (new Set(prop.states.map(state => state.id)).size !== prop.states.length ||
+    new Set(prop.states.map(state => state.name.toLowerCase())).size !== prop.states.length) throw new Error("Prop states must have distinct identities and names.");
   try {
     await commitReferenceRecord(
       store,
       [{ path: propPath(prop.id), action: "create", content: `${JSON.stringify(prop, null, 2)}\n`, baseHash: null }],
       undefined,
-      { precondition: free },
+      { ...options, precondition: () => options.precondition?.() ?? free() },
     );
   } catch (error) {
     if (error instanceof WorldStateStaleError) return null;
@@ -152,13 +165,31 @@ export async function createProp(store: WorldStore, name: string): Promise<Prop 
 }
 
 /** One more named state at the end of the order; its id is what shots will cite, so the name may change later. */
-export async function addPropState(store: WorldStore, propId: string, name: string): Promise<PropState | null> {
+export async function addPropState(store: WorldStore, propId: string, name: string, options: ReferenceMutationOptions & { id?: string } = {}): Promise<PropState | null> {
   const found = await readProp(store, propId);
   if (!found) return null;
-  const state: PropState = { id: newId("pst"), name: name.trim() };
+  const known = options.id ? found.prop.states.find(state => state.id === options.id) : undefined;
+  if (known) return known;
+  if (found.prop.states.some(state => state.name.toLowerCase() === name.trim().toLowerCase())) throw new Error("That state name already exists.");
+  const state: PropState = { id: options.id ?? newId("pst"), name: name.trim() };
   const next: Prop = { ...found.prop, states: [...found.prop.states, state] };
   await commitReferenceRecord(store, [
     { path: propPath(propId), action: "replace", content: `${JSON.stringify(next, null, 2)}\n`, baseHash: sha256(found.raw) },
-  ]);
+  ], undefined, options);
   return state;
+}
+
+export async function renameProp(store: WorldStore, propId: string, name: string, stateId?: string, options: ReferenceMutationOptions = {}): Promise<void> {
+  const found = await readProp(store, propId);
+  if (!found) throw new Error("The prop is unavailable.");
+  if (stateId && !found.prop.states.some(state => state.id === stateId)) throw new Error("The state is unavailable.");
+  if (stateId && found.prop.states.some(state => state.id !== stateId && state.name.toLowerCase() === name.trim().toLowerCase())) throw new Error("That state name already exists.");
+  const free = () => {
+    const bundle = store.getBundle();
+    return stateId || checkPropName(name, bundle.props.filter(prop => prop.id !== propId), bundle.sheets).ok ? null : "The prop name is already in use.";
+  };
+  const next = PropSchema.parse(stateId ? { ...found.prop, states: found.prop.states.map(state => state.id === stateId ? { ...state, name: name.trim() } : state) }
+    : { ...found.prop, name: name.trim() });
+  await commitReferenceRecord(store, [{ path: propPath(propId), action: "replace", baseHash: sha256(found.raw), content: JSON.stringify(next, null, 2) + "\n" }],
+    undefined, { ...options, precondition: () => options.precondition?.() ?? free() });
 }

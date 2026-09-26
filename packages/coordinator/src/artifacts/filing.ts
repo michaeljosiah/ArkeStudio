@@ -216,6 +216,14 @@ async function artifactMediaMatches(
 }
 
 /** Merge links into an existing artifact — dedupe keeps one copy, many uses (R-4, D9). */
+export async function prepareArtifactLinks(store: WorldStore, artifact: ArtifactSidecar, links: string[]): Promise<import("../world/commit.js").CommitFileInput> {
+  if (basename(artifact.file) !== artifact.file || artifact.file === "..") throw new Error("Invalid artifact file.");
+  const current = await currentSidecar(store, artifact);
+  if (!current?.raw || current.sidecar.id !== artifact.id || current.sidecar.hash !== artifact.hash) throw new Error("The artifact changed.");
+  const next = { ...current.sidecar, links: [...new Set([...current.sidecar.links, ...links])] };
+  return { path: `artifacts/${artifact.file}.json`, action: "replace", content: JSON.stringify(next, null, 2) + "\n", baseHash: sha256(current.raw) };
+}
+
 export async function addLinks(
   store: WorldStore,
   artifact: ArtifactSidecar,

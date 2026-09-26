@@ -1,6 +1,6 @@
 import { createPreparedSession, type SessionInput } from "./session-files.js";
 import { basename, join } from "node:path";
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import {
   GenesisDraftSchema,
   type DomainEvent,
@@ -12,7 +12,7 @@ import { blueprintSaysSomething, foldBlueprint, sameBlueprint } from "./blueprin
 import { sessionTokenBudget } from "./token-budget.js";
 import { foundingMessages, recordFoundingBlueprint, recordFoundingMessage } from "./genesis-conversation.js";
 import { reviewGenesisContent } from "./genesis-review.js";
-import { atomicWriteFile } from "../world/atomic.js";
+import { atomicWriteFile, withTransientRetry } from "../world/atomic.js";
 import { THINKING_LABEL, WRITING_LABEL, workingLabel } from "../world-chat/project.js";
 
 /**
@@ -133,6 +133,28 @@ Supported types are rule, lore, location, faction, timeline, tone and thread. A 
 open question; other types propose settled facts. Nothing becomes accepted until the author
 approves its content card. Do not write approval records. ./approved-content.json is an
 application-supplied snapshot of the author's choices, not an editable source of decisions.
+
+For props and objects, draft.json may contain "props": [{"slug":"sword","name":"The sword",
+"states":[{"slug":"intact","name":"Intact"},{"slug":"broken","name":"Broken"}]}].
+Prop and state slugs are permanent identities: renaming changes only name. Props own names and
+ordered named states, not invented sheet fields. The author reviews their exact names in chat.
+Images can target prop:<prop-slug>:<state-slug>; generation and assignment need separate approval.
+
+For voice casting, read ./voice-catalogue.json for currently supported voices. Propose
+draft.json "voices": [{"id":"maren-audition","target":"character:maren",
+"voice":{"provider":"kokoro","model":"kokoro-82m","voiceId":"an-id-from-the-catalogue"},
+"text":"A short audition line in this character's own words."}].
+Use only catalogue identities, with up to 1,000 characters of text. Chat shows the text, voice,
+cost and data transfer before authorization, then plays actual audio for separate selection.
+Never claim a voice is assigned because an audition was authorized. Keep target slugs stable
+on renames. Voices are optional. World-owned cloned recordings cannot be used before founding;
+explain that boundary rather than inventing a voice or bypassing recording-upload consent.
+
+The conversation's Check readiness control reviews approved records, unapproved revisions,
+invalid references and possible import conflicts. ./readiness-review.json, when present, is
+an application-supplied snapshot, not an authority you can edit. Explain possible creative
+contradictions as uncertain, cite their records and propose fixes through the ordinary draft
+and approval flow. Open questions and omitted optional images or voices are valid choices.
 
 For document imports, write one candidate per file at draft/imports/<stable-id>.json:
 {"source":"notes.md","kind":"character","name":"Maren","body":"Proposed interpretation",
@@ -416,6 +438,8 @@ export class GenesisService {
           this.emit({ at: at(), type: "genesis.blueprint", genesisId, blueprint, revision });
         }
       }
+      // The repair turn can read the reviewed findings; subsequent turns need a fresh snapshot.
+      await withTransientRetry(() => rm(join(dir, "readiness-review.json"), { force: true }));
       status(final.state, final.detail);
     } catch (err) {
       this.sessions.delete(genesisId);
@@ -472,6 +496,8 @@ function saysSomething(draft: GenesisDraft): boolean {
     draft.keyArt !== undefined ||
     (draft.canon?.length ?? 0) > 0 ||
     (draft.images?.length ?? 0) > 0 ||
+    (draft.props?.length ?? 0) > 0 ||
+    (draft.voices?.length ?? 0) > 0 ||
     draft.characters.length > 0 ||
     draft.locations.length > 0 ||
     draft.threads.length > 0 ||

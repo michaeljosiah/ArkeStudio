@@ -192,7 +192,7 @@ export interface RunDeps {
     baseVersion: number | null;
   }) => Promise<void>;
   /** Build digest-bound intents before the assistant event is appended. This callback must be pure. */
-  prepareActions?: (turn: WorldChatActionTurn) => readonly PreparedWorldChatAction[];
+  prepareActions?: (turn: WorldChatActionTurn) => readonly PreparedWorldChatAction[] | Promise<readonly PreparedWorldChatAction[]>;
   /** Bind authority records only after the assistant event and all its intents are durable. */
   bindActions?: (actions: readonly PreparedWorldChatAction[]) => Promise<void>;
   /** Separate bounded model pass; its output is context only and failure leaves the prior summary. */
@@ -1104,7 +1104,7 @@ export class WorldChatRunner {
     const completedRun = runFrom(events, runId);
     let actions: readonly PreparedWorldChatAction[] = [];
     try {
-      actions = this.deps.prepareActions?.({
+      actions = await this.deps.prepareActions?.({
         conversationId,
         turnId: completedRun.turnId,
         entryContext: folded.entryContext,

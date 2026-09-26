@@ -1,4 +1,7 @@
-import { WorldChatProductionStageConstructActionSchema } from "@arke-studio/contracts";
+import { WorldChatProductionStageConstructActionSchema, WorldChatPropAuthoringActionSchema, WorldChatPropReferenceActionSchema, checkPropName, newId } from "@arke-studio/contracts";
+import { createProp, addPropState, renameProp, acceptPropStateReference } from "../references/props.js";
+import { createHash } from "node:crypto";
+import { readContainedImageReferences } from "../world/reference-files.js";
 import { readFile, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
@@ -209,6 +212,7 @@ import {
 import { acceptMainPhoto } from "../references/main-photo.js";
 import {
   pendingReferenceTake,
+  recordUploadedPropImage,
   recordReferenceReview,
   referenceReviewDecision,
 } from "../references/takes.js";
@@ -394,6 +398,8 @@ function completeObservation(
 }
 
 const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly ArkeReadRequirement[]> = {
+  "prop-authoring": ["references", "sheets"],
+  "prop-reference": ["references", "artifacts"],
   "world-metadata": ["world-metadata", "art-direction"],
   canon: ["canon", "sheets"],
   "canon-retire": ["canon", "sheets"],
@@ -763,6 +769,8 @@ function preparedWorldPayload(
     case "reference-master-look-result-use": return WorldChatReferenceMasterLookResultUseActionSchema.parse({ kind: "world-chat-reference-master-look-result-use", ...common });
     case "reference-image-discard": return WorldChatReferenceImageDiscardActionSchema.parse({ kind: "world-chat-reference-image-discard", ...common });
     case "voice-assignment": return WorldChatVoiceAssignmentActionSchema.parse({ kind: "world-chat-voice-assignment", ...common });
+    case "prop-authoring": return WorldChatPropAuthoringActionSchema.parse({ kind: "world-chat-prop-authoring", ...common });
+    case "prop-reference": return WorldChatPropReferenceActionSchema.parse({ kind: "world-chat-prop-reference", ...common });
     case "voice-audition": return WorldChatVoiceAuditionActionSchema.parse({ kind: "world-chat-voice-audition", ...common });
     case "voice-clone": return WorldChatVoiceCloneActionSchema.parse({ kind: "world-chat-voice-clone", ...common });
     case "voice-clip-review": return WorldChatVoiceClipReviewActionSchema.parse({ kind: "world-chat-voice-clip-review", ...common });
@@ -989,6 +997,8 @@ function worldActionTargets(
 ): ConversationActionTarget[] {
   switch (action.kind) {
     case "world-metadata": return [{ kind: "world", id: "metadata", label: "World metadata" }];
+    case "prop-authoring": return [{ kind: "prop", id: "propId" in action.change ? action.change.propId : fallbackId, label: action.change.name }];
+    case "prop-reference": return [{ kind: "prop", id: action.propId, label: action.stateId }, { kind: "artifact", id: action.artifactId, label: action.artifactId }];
     case "canon-retire":
     case "canon-restore": return [{ kind: "canon", id: action.entryId, label: action.entryId }];
     case "canon": {
@@ -2270,6 +2280,49 @@ async function sharedResourceProjection(
       };
       break;
     }
+    case "world-chat-prop-authoring": {
+      authority = { kind: "reference-kit", id: intent.actionId };
+      const change = payload.action.change;
+      const existing = "propId" in change ? bundle.props.find(prop => prop.id === change.propId) : undefined;
+      if ("propId" in change && !existing) throw new Error("The prop is no longer available.");
+      if ((change.operation === "create" || change.operation === "rename") &&
+        !checkPropName(change.name, bundle.props.filter(prop => prop.id !== existing?.id), bundle.sheets).ok) throw new Error("The prop name is already in use.");
+      if (change.operation === "rename-state" && !existing?.states.some(state => state.id === change.stateId)) throw new Error("The state is no longer available.");
+      if (change.operation === "create" && new Set(change.states.map(name => name.toLowerCase())).size !== change.states.length) throw new Error("State names must be distinct.");
+      if ((change.operation === "add-state" || change.operation === "rename-state") && existing?.states.some(state =>
+        (change.operation !== "rename-state" || state.id !== change.stateId) && state.name.toLowerCase() === change.name.toLowerCase())) throw new Error("That state name already exists.");
+      shown = {
+        title: change.operation === "create" ? "Create a prop and its states" : "Change a prop",
+        consequence: "Saves the displayed prop and state names through the prop domain. References are approved separately.",
+        affectedTargets: [...intent.targets], ripples: [], permissionReason: "authored-change",
+        body: { family: "command", commands: [
+          { label: change.operation, detail: change.name },
+          ...(change.operation === "rename-state" ? [{ label: "Current state", detail: existing!.states.find(state => state.id === change.stateId)!.name }] : []),
+          ...(existing ? [{ label: "Current prop", detail: existing.name + " · " + existing.states.map(state => state.name).join(", ") }] : []),
+          ...(change.operation === "create" ? change.states.map(name => ({ label: "State", detail: name })) : []),
+        ], expectedResult: "The exact names shown are saved with stable prop and state identities.", undoAvailable: false },
+      };
+      break;
+    }
+    case "world-chat-prop-reference": {
+      authority = { kind: "reference-kit", id: intent.actionId };
+      const prop = bundle.props.find(prop => prop.id === payload.action.propId);
+      const state = prop?.states.find(state => state.id === payload.action.stateId);
+      const artifact = bundle.artifacts.find(artifact => artifact.id === payload.action.artifactId);
+      if (!prop || !state || !artifact || !["image", "board"].includes(artifact.kind)) throw new Error("The prop, state, or image artifact is unavailable.");
+      if (state.reference && !payload.action.replace) throw new Error("This state already has a reference; propose an explicit replacement.");
+      const path = `artifacts/${artifact.file}`;
+      const [image] = await readContainedImageReferences(store.dir, [path]);
+      if ("sha256:" + createHash("sha256").update(image!.data).digest("hex").slice(0, 16) !== artifact.hash) throw new Error("The artifact image changed.");
+      shown = {
+        title: payload.action.replace ? "Replace the prop state reference" : "Use this prop state reference",
+        consequence: "Links the retained artifact and accepts an immutable reference for this exact state.",
+        affectedTargets: [...intent.targets], ripples: [], permissionReason: "authored-change",
+        body: { family: "take-review", mediaKind: "image", mediaId: artifact.id, mediaPath: path,
+          destination: prop.name + " · " + state.name, currentSelection: state.reference?.id ?? null },
+      };
+      break;
+    }
     case "world-chat-voice-audition":
       authority = { kind: "voice", id: intent.actionId };
       shown = {
@@ -3446,6 +3499,44 @@ async function executeSharedResource(
       );
       return { status: "completed", receipt: { kind: "sheet-version", id: result.commitId, summary: payload.action.voice ? "The voice was assigned." : "The voice assignment was removed." } };
     }
+    case "world-chat-prop-authoring": {
+      const change = payload.action.change;
+      let id: string;
+      if (change.operation === "create") {
+        const prop = await createProp(store, change.name, { ...options, id: `prop_${action.actionId.slice(4)}`,
+          states: change.states.map(name => ({ id: newId("pst"), name })) });
+        if (!prop) throw new Error("That prop name is no longer available.");
+        id = prop.id;
+      } else if (change.operation === "add-state") {
+        const state = await addPropState(store, change.propId, change.name, { ...options, id: `pst_${action.actionId.slice(4)}` });
+        if (!state) throw new Error("The prop is no longer available.");
+        id = state.id;
+      } else {
+        await renameProp(store, change.propId, change.name, change.operation === "rename-state" ? change.stateId : undefined, options);
+        id = change.propId;
+      }
+      return { status: "completed", receipt: { kind: "prop", id, summary: "The approved prop change was saved." } };
+    }
+    case "world-chat-prop-reference": {
+      const input = payload.action;
+      const prop = store.getBundle().props.find(prop => prop.id === input.propId);
+      const artifact = store.getBundle().artifacts.find(artifact => artifact.id === input.artifactId);
+      if (!prop || !artifact) throw new Error("The target or source is unavailable.");
+      const [image] = await readContainedImageReferences(store.dir, [`artifacts/${artifact.file}`]);
+      if ("sha256:" + createHash("sha256").update(image!.data).digest("hex").slice(0, 16) !== artifact.hash) throw new Error("The artifact image changed.");
+      const take = await recordUploadedPropImage(store, input.propId, input.stateId, image!.name, image!.data,
+        { requestId: action.actionId, precondition });
+      // Creating our pending take changes the collection fence. Preserve the reviewed target
+      // and artifact individually while committing the reference and its artifact link together.
+      const stable = () => JSON.stringify(store.getBundle().props.find(one => one.id === prop.id)) !== JSON.stringify(prop) ||
+        JSON.stringify(store.getBundle().artifacts.find(one => one.id === artifact.id)) !== JSON.stringify(artifact)
+        ? "The prop or artifact changed during acceptance." : null;
+      const result = await acceptPropStateReference(store, { propId: input.propId, stateId: input.stateId,
+        selection: { source: "take", takeId: take.id }, replace: input.replace },
+        { ...options, artifactId: artifact.id, precondition: stable });
+      if (result.status !== "accepted") throw new Error(result.reason);
+      return { status: "completed", receipt: { kind: "prop-reference", id: take.id, summary: "The image was approved for this state and linked from its artifact." } };
+    }
     case "world-chat-voice-clone": {
       const selected = await deps.pickFiles?.({ accept: [...CLONEABLE_AUDIO_EXTENSIONS] }) ?? [];
       if (selected.length === 0) return { status: "cancelled", detail: "No recording was selected." };
@@ -4504,6 +4595,8 @@ export function worldChatActionAdapters(
   };
 
   const sharedResources = [
+    "world-chat-prop-authoring",
+    "world-chat-prop-reference",
     "world-chat-artifact-import",
     "world-chat-artifact-metadata",
     "world-chat-artifact-extraction",

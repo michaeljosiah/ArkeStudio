@@ -2,7 +2,7 @@ export const FOUNDING_IMAGES_SCHEMA_VERSION = 37;
 import { z } from "zod";
 import { RecipeIdentitySchema } from "./comfyui.js";
 
-export const GenesisImageTargetSchema = z.string().regex(/^(character|location):[a-z0-9][a-z0-9-]*$/);
+export const GenesisImageTargetSchema = z.string().regex(/^(?:(character|location):[a-z0-9][a-z0-9-]*|prop:[a-z0-9][a-z0-9-]*:[a-z0-9][a-z0-9-]*)$/);
 export const GenesisImageIntentSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/).max(80),
   target: GenesisImageTargetSchema,
@@ -26,7 +26,7 @@ export const GenesisImageSelectionSchema = z.object({
 }).strict();
 export type GenesisImageSelection = z.infer<typeof GenesisImageSelectionSchema>;
 export const GenesisImagePlanSchema = z.object({
-  intent: GenesisImageIntentSchema, title: z.string(), role: z.enum(["Main photo", "Establishing view"]),
+  intent: GenesisImageIntentSchema, title: z.string(), role: z.enum(["Main photo", "Establishing view", "Prop state reference"]),
   digest: z.string(), model: z.string(), provider: z.string(), modelName: z.string(), prompt: z.string(),
   output: z.record(z.string(), z.unknown()), references: z.array(GenesisImageCandidateSchema),
   estimatedMicroUsd: z.number().int().min(0),
