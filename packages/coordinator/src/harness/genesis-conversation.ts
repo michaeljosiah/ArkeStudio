@@ -1,6 +1,6 @@
 import { basename, dirname, join } from "node:path";
 import { readFile, stat, rm } from "node:fs/promises";
-import { CapabilitySchema, GenesisBlueprintSchema, newId, ulid, UlidSchema, type DomainEvent, type GenesisBlueprint, type WorldChatMessage } from "@arke-studio/contracts";
+import { CapabilitySchema, GenesisBlueprintSchema, BuildItemSchema, ManifestModelSchema, newId, ulid, UlidSchema, type DomainEvent, type GenesisBlueprint, type WorldChatMessage } from "@arke-studio/contracts";
 import { z } from "zod";
 import { WorldChatStore, conversationDir } from "../world-chat/store.js";
 import { foldBlueprint } from "./blueprint.js";
@@ -14,7 +14,13 @@ export function genesisControlDir(workspace: string): string {
   return dirname(workspace);
 }
 
-const FrozenFoundingSchema = z.object({ blueprint: GenesisBlueprintSchema, models: z.record(CapabilitySchema, z.string()).optional() }).strict();
+const FrozenFoundingSchema = z.object({ blueprint: GenesisBlueprintSchema, models: z.record(CapabilitySchema, z.string()).optional(), generateImages: z.boolean().optional(),
+  authorization: z.object({
+    route: z.object({ model: ManifestModelSchema, referenceImages: z.number().int().nonnegative() }).strict().nullable(),
+    items: z.array(BuildItemSchema), capMicroUsd: z.number().int().nonnegative(),
+    preview: z.object({ jobId: z.string(), hash: z.string(), file: z.string().regex(/^approved-look\.(png|jpg|jpeg|webp)$/), extension: z.enum([".png", ".jpg", ".jpeg", ".webp"]) }).strict().nullable(),
+  }).strict().optional(),
+}).strict();
 export async function frozenFoundingInput(dir: string) {
   return readFile(join(genesisControlDir(dir), "founding-input.json"), "utf8")
     .then(raw => FrozenFoundingSchema.parse(JSON.parse(raw)))
@@ -115,7 +121,7 @@ export async function loadGenesisConversation(dir: string, genesisId: string, ru
     status: running ? "running" : messages.at(-1)?.role === "user" ? "failed" : "completed",
     ...(!running && messages.at(-1)?.role === "user" ? { detail: "The previous reply did not finish. Your message and draft are saved; continue when ready." } : {}),
     ...(begun ? { worldId: begun.worldId } : {}),
-    ...(frozen ? { founding: true, frozenModels: frozen.models ?? {} } : {}),
+    ...(frozen ? { founding: true, frozenModels: frozen.models ?? {}, frozenGenerateImages: frozen.generateImages ?? true } : {}),
     ...(begun?.form ? { formHandoff: complete ? "completed" as const : "pending" as const } : {}),
   };
 }
@@ -136,7 +142,7 @@ export async function carryGenesisConversation(dir: string, worldDir: string): P
   await atomicWriteFile(incomplete, "Founding conversation transfer in progress.\n");
   await target.create(meta.id, meta.createdAt);
   for (const envelope of events) {
-    if (envelope.event.type !== "founding.message" && envelope.event.type !== "founding.image-decision" && envelope.event.type !== "founding.blueprint" && envelope.event.type !== "founding.decisions" && envelope.event.type !== "founding.decision" && envelope.event.type !== "conversation.created") {
+    if (envelope.event.type !== "founding.message" && envelope.event.type !== "founding.voice-decision" && envelope.event.type !== "founding.image-decision" && envelope.event.type !== "founding.blueprint" && envelope.event.type !== "founding.decisions" && envelope.event.type !== "founding.decision" && envelope.event.type !== "conversation.created") {
       throw new Error("The founding sandbox contains an unsupported conversation event.");
     }
     await target.append(envelope.event, { at: envelope.at, requestId: `founding:${envelope.eventId}` });

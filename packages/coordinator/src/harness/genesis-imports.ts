@@ -158,6 +158,7 @@ export async function resolveGenesisImport(dir: string, input: GenesisImportReso
       const existing = input.target ? rows.find(row => row.key === input.target && row.content.kind === kind) : undefined;
       const matches = rows.filter(row => row.content.kind === kind && normalizedName(row.title) === normalizedName(name));
       if (input.target && !existing) throw new Error("The selected merge target is unavailable.");
+      if ((input.mode === "append" || input.mode === "replace") && !existing) throw new Error("Select the record to merge.");
       if (matches.length && !input.mode) throw new Error("The edited name matches an existing record. Choose whether to merge or retain a distinct entity.");
       if (input.mode !== "distinct" && !existing && matches.length) throw new Error("Select the record to merge.");
       if (existing && !["append", "replace"].includes(input.mode ?? "")) throw new Error("Choose append or replace for this merge.");

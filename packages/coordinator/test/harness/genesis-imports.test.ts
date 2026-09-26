@@ -53,6 +53,15 @@ it("imports verified evidence as an editable proposal and requires separate exac
   await resolveGenesisImport(dir, { id: card.id, digest: card.digest, decision: "prepare", mode: "distinct" });
   assert.equal((await foldBlueprint(dir)).characters.length, 1);
 });
+
+it("refuses append or replace when the edited import has no merge target", async t => {
+  const { provider, dir } = await setup(); t.after(() => provider.close());
+  const card = (await reviewGenesisImports(dir)).cards[0]!;
+  for (const mode of ["append", "replace"] as const) {
+    await assert.rejects(resolveGenesisImport(dir, { id: card.id, digest: card.digest, decision: "prepare", mode }), /Select the record/);
+  }
+  assert.equal((await foldBlueprint(dir)).characters.length, 0);
+});
 it("shows current conflicts, refuses stale merges, and leaves deferred material unapproved", async () => {
   const { dir } = await setup();
   await mkdir(join(dir, "draft", "characters"));

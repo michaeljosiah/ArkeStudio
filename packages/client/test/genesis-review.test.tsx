@@ -94,3 +94,15 @@ it("keeps a content decision pending and invalidates the displayed build until i
     assert.ok(!store.__stateForTest().genesis["gen-frozen"]?.reviewPending);
   } finally { store.__setBridgeForTest(null); store.__setStateForTest(FIXTURE_STATE); }
 });
+
+it("keeps bulk approval commands within the transport limit", async () => {
+  const store = await import("../src/lib/store.js");
+  const { FIXTURE_STATE } = await import("./fixture-state.js");
+  const sent: Array<{ choices: unknown[] }> = [];
+  store.__setStateForTest(FIXTURE_STATE);
+  store.__setBridgeForTest({ send: (message: string) => sent.push(JSON.parse(message)) } as unknown as import("../src/arke-bridge.js").ArkeBridge);
+  try {
+    store.decideGenesisDraft("gen-large", Array.from({ length: 301 }, (_, index) => ({ key: "character:" + index, digest: "reviewed" })), "approve");
+    assert.equal(sent[0]?.choices.length, 300);
+  } finally { store.__setBridgeForTest(null); store.__setStateForTest(FIXTURE_STATE); }
+});

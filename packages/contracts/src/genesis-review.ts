@@ -7,7 +7,7 @@ export const FOUNDING_CONTENT_SCHEMA_VERSION = 36;
 
 export const GenesisContentSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("prop"), value: GenesisPropSchema }).strict(),
-  z.object({ kind: z.literal("world"), value: GenesisBlueprintSchema.omit({ characters: true, locations: true, factions: true, canon: true, threads: true, dropped: true, reviewed: true, images: true, selectedImages: true, props: true }) }).strict(),
+  z.object({ kind: z.literal("world"), value: GenesisBlueprintSchema.omit({ characters: true, locations: true, factions: true, canon: true, threads: true, dropped: true, reviewed: true, images: true, selectedImages: true, props: true, voices: true, selectedVoices: true }) }).strict(),
   z.object({ kind: z.literal("character"), value: BlueprintCharacterSchema }).strict(),
   z.object({ kind: z.literal("location"), value: BlueprintLocationSchema }).strict(),
   z.object({ kind: z.literal("faction"), value: BlueprintFactionSchema }).strict(),
@@ -61,8 +61,8 @@ export function completeGenesisSheet<T extends { name: string; line?: string; de
 }
 
 export function genesisContentRows(blueprint: GenesisBlueprint): Array<{ key: string; title: string; content: GenesisContent }> {
-  const { characters, locations, factions, threads, canon, dropped, reviewed, images, selectedImages, props, ...world } = blueprint;
-  void dropped; void reviewed; void images; void selectedImages;
+  const { characters, locations, factions, threads, canon, dropped, reviewed, images, selectedImages, props, voices, selectedVoices, ...world } = blueprint;
+  void dropped; void reviewed; void images; void selectedImages; void voices; void selectedVoices;
   return [
     { key: "world", title: world.name ?? "World identity and bible", content: { kind: "world", value: world } as GenesisContent },
     ...(["character", "location", "faction"] as const).flatMap((kind, index) =>

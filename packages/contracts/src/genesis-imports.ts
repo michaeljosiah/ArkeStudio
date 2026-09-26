@@ -5,7 +5,7 @@ export const GenesisSourceSchema = z.object({
   hash: z.string().regex(/^sha256:[a-f0-9]{64}$/), name: z.string().min(1).max(240),
   quote: z.string().min(1).max(8000), line: z.number().int().positive(),
   candidateId: z.string().regex(/^[a-f0-9]{64}$/),
-  originalName: z.string(), originalBody: z.string(), modified: z.boolean(),
+  originalName: z.string().max(120), originalBody: z.string().max(6000), modified: z.boolean(),
 }).strict();
 export type GenesisSource = z.infer<typeof GenesisSourceSchema>;
 export const GenesisImportProposalSchema = z.object({
