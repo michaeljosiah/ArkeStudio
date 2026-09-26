@@ -434,8 +434,8 @@ export class GenesisService {
           !blueprint.dropped.includes("draft.json") &&
           (blueprintSaysSomething(blueprint) || (blueprintBefore !== null && blueprintSaysSomething(blueprintBefore)))
         ) {
-          await recordFoundingBlueprint(dir, blueprint);
-          this.emit({ at: at(), type: "genesis.blueprint", genesisId, blueprint });
+          const revision = await recordFoundingBlueprint(dir, blueprint);
+          this.emit({ at: at(), type: "genesis.blueprint", genesisId, blueprint, revision });
         }
       }
       status(final.state, final.detail);

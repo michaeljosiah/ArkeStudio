@@ -4,10 +4,10 @@ Issue #1268 adds draft discovery and resumption through `genesis-list` and
 `genesis-load`. The new-world URL carries the draft identity. Returning to New world
 offers unfinished conversations; separate drafts keep separate transcripts and attachments.
 
-Draft content lives in `.genesis/<id>/workspace/`, the harness confinement boundary.
+Draft content lives in `.genesis-v2/<id>/workspace/`, the harness confinement boundary.
 Draft messages use the existing WorldChatStore journal in the sibling
 `.conversation/` directory. Application receipts also live outside the workspace.
-Old draft content is moved into the workspace without promoting agent-authored files to receipts.
+Legacy `.genesis/<id>/` draft content is moved into the workspace without promoting agent-authored files to receipts.
 Messages are flushed before dispatch/display and represented by
 `founding.message` events, which the ordinary world-chat fold also understands. A restarted
 harness receives the stored history and the existing blueprint files.
@@ -110,9 +110,10 @@ current cost. Its digest binds Begin to those inputs; changed content, choices o
 require a fresh review. Uncheck Generate remaining images to create a text-only world or reuse
 approved media without new image spend. This choice survives interrupted founding.
 
-Build progress and failures appear in chat. Retry delegates to the existing per-item recovery
-and cap checks; stop skips remaining work while keeping completed records. Leaving unfinished
-work dismisses its notice without claiming it succeeded.
+Build progress and failures appear in chat. Local writes retry directly; generation failures
+and held work open Activity for the existing approval and current-cost checks. Stop skips
+remaining work while keeping completed records. Leaving unfinished work dismisses its notice
+without claiming it succeeded.
 # Reviewing founding content
 
 Issue #1269 adds versioned content decisions to the founding conversation. The agent proposes
@@ -126,6 +127,6 @@ display-name changes. Begin materializes the approved blueprint through the ordi
 gate without asking a harness to expand the content again. Canon threads remain open.
 
 The inline review shows current proposals, changes since approval and the approved counts.
-Unapproved proposals are carried into the continuing conversation as explicitly unestablished
-content; subsequent edits use the normal world-chat approval workflow. The founding plan calls
+Unapproved proposals are saved as readable artifacts and indexed in the continuing
+conversation as explicitly unestablished content; subsequent edits use the normal world-chat approval workflow. The founding plan calls
 out partial approval. Image selection and generation are tracked separately in #1267.
