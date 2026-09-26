@@ -58,7 +58,7 @@ main-photo and establishing-view services. Existing selections cost nothing to r
 the corresponding generation in the build plan. Alternatives remain artifacts. Generated
 artifacts retain their producing job, provider, model, parameters, cost and entity links.
 
-Founding image decisions and generated-image provenance require schema version 30. Artifact
+Founding image decisions and generated-image provenance require schema version 35. Artifact
 writes that introduce location reference provenance raise this boundary atomically as well.
 
 - Coordinator `test/harness/genesis-images.test.ts`: immutable previews, exact decisions,
