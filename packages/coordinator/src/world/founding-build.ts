@@ -888,7 +888,8 @@ export class FoundingBuildService {
         case "selected-image": {
           const selection = active.record.blueprint.selectedImages?.find(selection => selection.target === `${item.sheetType}:${item.subject}`);
           if (!selection) throw new Error("The approved image selection is missing.");
-          await installGenesisImage(await this.ports.genesisDir(active.record.genesisId), selection, active.record.blueprint, store);
+          await installGenesisImage(await this.ports.genesisDir(active.record.genesisId), selection, active.record.blueprint, store,
+            selection.candidate.jobId ? await this.ports.ledgerEntryFor(selection.candidate.jobId) : undefined);
           await this.ports.refreshWorldSnapshot(active.record.worldId);
           break;
         }
