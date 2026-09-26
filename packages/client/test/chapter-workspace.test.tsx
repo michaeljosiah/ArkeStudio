@@ -463,6 +463,23 @@ describe("the craft loop (turn 128)", () => {
     });
   };
 
+  it("a suggested question is asked for its answer alone (issue 1295)", async () => {
+    const plain = inkbound();
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const m = await mount({ ...plain, world: { ...plain.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState);
+    await answerOpen(m);
+    const ask = [...m.container.querySelectorAll("button.fy-arke__prompt")].find((b) => b.textContent === "What does this chapter draw on?") as HTMLElement;
+    assert.ok(ask, "the question is offered with no style settled");
+    await act(async () => {
+      ask.click();
+    });
+    const sent = m.sent.find((message) => message.kind === "world-chat-send" && (message as { text: string }).text.endsWith("What does this chapter draw on?")) as { replyOnly?: boolean } | undefined;
+    assert.equal(sent?.replyOnly, true, "a 12B model answered it with an invented action, and the whole reply was rejected");
+  });
+
   it("a selection of three words or more is the subject: the press beside it, the prompts a revision's, the passage said before what is asked", async () => {
     const styled = inkbound([], STYLE);
     const workspace = {

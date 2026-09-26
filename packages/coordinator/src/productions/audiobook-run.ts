@@ -218,7 +218,7 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
     plan.record === null || plan.record === "unreadable"
       ? emptyAudiobook(plan.chapter.version, plan.chapter.hash, now())
       : { ...plan.record, takes: { ...plan.record.takes }, flags: { ...plan.record.flags } };
-  const toMake = only !== undefined ? plan.blocks.filter((planned) => only.includes(planned.block.key)) : plan.blocks.filter((planned) => planned.state !== "made");
+  const toMake = only !== undefined ? plan.blocks.filter((planned) => only.includes(planned.block.key)) : plan.blocks.filter((planned) => planned.state !== "made" && planned.state !== "awaiting");
   const clonedVoices = store.getBundle().clonedVoices ?? [];
 
   // Who actually speaks each block (R-12): the one rule the direction was verified against.

@@ -270,10 +270,12 @@ import {
 import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachments.js";
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { deriveContinuity, makeAdapterContinuityDeriver, type ContinuityDeriver } from "./productions/continuity.js";
-import { castLines, makeAdapterVoicesDeriver, readVoices, type VoicesDeriver } from "./productions/voices.js";
+import { castLines, makeAdapterVoicesDeriver, readVoices, setVoicePin, VoicePinRefusal, type VoicesDeriver } from "./productions/voices.js";
+import { discardRecording, keepRecording, RECORDED_TAKE_EXTENSIONS, RecordedTakeRefusal, stageRecording, type StagedRecording } from "./productions/audiobook-recorded.js";
+import { exportScript, matchFiles, type MatchedFile } from "./productions/audiobook-lines.js";
 import { acceptDirections, directChapter, directableBlocks, makeAdapterDirectionDeriver, type DirectionDeriver } from "./productions/audiobook-direction.js";
 import { audiobookDoor, conformDirections, runAudiobookBook } from "./productions/audiobook-book.js";
-import { checkDirection, directionPlan, writeAudiobookBook, writeBlockDirection } from "./productions/audiobook.js";
+import { checkDirection, directionPlan, readAudiobookBook, writeAudiobookBook, writeBlockDirection } from "./productions/audiobook.js";
 import { runAudiobookChapter } from "./productions/audiobook-run.js";
 import { exportManuscript, importManuscript, readManuscript } from "./productions/manuscript.js";
 import { manuscriptChapters, productionShape, type StructuredDocument } from "@arke-studio/contracts";
@@ -310,6 +312,11 @@ const BENCH_POSTER_BACKFILL_MS = 5_000;
  * open-world snapshot so the Library's first render already has its pictures.
  */
 const ARTIFACT_POSTER_BACKFILL_MS = 5_000;
+/**
+ * How long quitting waits for Ollama to hand back its models. The unload is a request Ollama
+ * answers at once, so this only bounds an unresponsive server — quitting must not wait on it.
+ */
+const OLLAMA_SHUTDOWN_RELEASE_MS = 2_000;
 
 /** Stable per candidate revision, so a retried handoff reopens instead of creating duplicates. */
 function mediaSessionId(candidateId: string, revision: number): SessionId {
@@ -363,7 +370,7 @@ import { deleteVoice } from "./voice/library.js";
 import { atomicWriteFile, serializeFileMutation } from "./world/atomic.js";
 import { restoreBible, saveBible } from "./world/bible.js";
 import { changesForEntity } from "./world/change-writer.js";
-import { classify, CommitPlanError, MEDIA_HAS_VIDEO_SCHEMA_VERSION } from "./world/commit.js";
+import { classify, CommitPlanError, MEDIA_HAS_VIDEO_SCHEMA_VERSION, RECORDED_TAKE_SCHEMA_VERSION } from "./world/commit.js";
 import { describeCoordinatorError } from "./errors/user-message.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
 import { WorldOpenError, scanWorld } from "./world/scan.js";
@@ -469,6 +476,7 @@ import {
   SETUP_CATALOGUE,
   VOXA_SETUP_COMPONENT_IDS,
   voxaSetupCompleted,
+  localModelPolicy,
   type CatalogueEntry,
 } from "./setup/catalogue.js";
 import { sanitizeComfyUiMedia } from "./comfyui/sanitize.js";
@@ -1061,6 +1069,8 @@ export class Coordinator {
   private publishedLocalHarnessModels: string | null = null;
   /** The rows behind that fingerprint, for checking a later catalogue read against them. */
   private publishedLocalHarnessRows: readonly import("@arke-studio/contracts").LocalHarnessModel[] = [];
+  /** Ollama models a local harness turn named in this run, for quitting's release. */
+  private readonly harnessOllamaModels = new Set<string>();
   /** Pulled models the last listing held back for stating less than a 256k context. */
   private localModelsBelowMinimum = 0;
   /** Whether any cloud language-model key is stored, read with the harness environment (issue 1247). */
@@ -1122,6 +1132,10 @@ export class Coordinator {
   private readonly derivingContinuity = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
   /** Chapters whose lines are being cast right now, keyed the same way (turn 130). */
   private readonly castingVoices = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
+  /** Recordings staged for a block and not yet kept or let go (turn 155c), by the window's request id. */
+  private readonly stagedRecordings = new Map<string, { worldId: string; staged: StagedRecording }>();
+  /** A speaker's returned files, matched and staged, until kept or let go (turn 155d), by request id. */
+  private readonly stagedLines = new Map<string, { worldId: string; productionId: string; matched: MatchedFile[] }>();
   /** `Direct this chapter` runs (turn 146), keyed like the cast's: one per chapter, ended with the world. */
   private readonly directingChapters = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
   /**
@@ -2413,7 +2427,7 @@ export class Coordinator {
       this.clearLocalResidency(engine === "Ollama" ? "ollama" : "comfyui");
     });
     if (opts.adapter) opts.adapter = withModelValidation(
-      withLocalGpu(opts.adapter, this.localGpu, () => { void this.refreshLocalResidency(); }),
+      withLocalGpu(opts.adapter, this.localGpu, () => { void this.refreshLocalResidency(); }, (model) => this.harnessOllamaModels.add(model)),
       (reference, needsImages, signal) => this.validateLanguageModel(reference, needsImages, signal),
     );
     const storage = opts.storage ?? createStudioStorage(opts);
@@ -2918,6 +2932,10 @@ export class Coordinator {
       ...input,
       // Chosen for the session, or for its agent in Settings: either way it runs on something.
       ...(await this.sessionAgents(input.model !== undefined || (input.agent !== undefined && this.agentOverrides?.[input.agent]?.model !== undefined), input.agent)),
+      // The open world's agent notes: under the app's own root, beside nothing a person edits.
+      ...(this.agentMemoryDir() !== undefined ? { memoryDir: this.agentMemoryDir()! } : {}),
+      // The author's page goes with every session, world open or not: it is about the writer.
+      ...(this.opts.appRoot !== undefined ? { authorNotesFile: join(this.opts.appRoot, "agent-memory", "author.md") } : {}),
       ...(this.skillFamily !== undefined ? { skillFamily: this.skillFamily } : {}),
       // The model too, or a narrowed skill is recorded and never actually injected.
       ...(this.skillModelId !== undefined ? { skillModelId: this.skillModelId } : {}),
@@ -4445,11 +4463,26 @@ export class Coordinator {
     // Local rows the default passed over — switched off, or unable to call tools — are not
     // nothing local: a session going unmodelled past them would run on the cloud default with
     // a local runtime right there. Stage refuses on its own when no model reads images.
+    // Held back by name, not by what it can do: the person's move is to choose it, and "pull a
+    // model that calls tools" would send them to replace a model that already does (issue 1289).
+    const waiting = this.readModel.getState().app.harnessModels.filter((model) => model.provider === "ollama" && localModelPolicy(model.id)?.explicitChoiceOnly === true);
+    if (offered && waiting.length > 0) {
+      return `${localModelPolicy(waiting[0]!.id)!.displayName} runs only where you choose it. Choose it for this agent in Settings → Harness → Advanced, or install Gemma 4 12B.`;
+    }
     if (!needsImages && offered) {
       if (localLane) return "None of the local models can write here: each is switched off or cannot call tools. Pull a model that calls tools, or switch one on under AI models.";
       return "None of the local models can write here: each is switched off or cannot call tools, and no cloud key is stored. Pull a model that calls tools, switch one on under AI models, or add a key.";
     }
     return null;
+  }
+
+  /**
+   * Where the open world's agents keep working notes between sessions, or undefined with no world
+   * open or no app root. Per world, so one world's notes never reach another's sessions.
+   */
+  private agentMemoryDir(): string | undefined {
+    const worldId = this.opts.provider.openStore?.()?.worldId;
+    return this.opts.appRoot !== undefined && worldId ? join(this.opts.appRoot, "agent-memory", worldId) : undefined;
   }
 
   private localHarnessDefault(needsImages = false, needsTools = true): string | undefined {
@@ -4466,7 +4499,10 @@ export class Coordinator {
     // unattended: nothing says it completes. Explicit choices are still admitted: unknown is
     // offered, and a stated refusal is one the person can read; a default has no reader.
     const assumed = new Set(this.publishedLocalHarnessRows.filter((model) => model.assumed).map((model) => model.id));
-    const local = app.harnessModels.filter((model) => model.provider === "ollama" && (!needsTools || model.tools !== false) && !assumed.has(model.id));
+    // Nor a model the catalogue says waits to be chosen by name: installing a community
+    // uncensored variant made it every agent's writer, Content & safety off (issue 1289).
+    const local = app.harnessModels.filter((model) => model.provider === "ollama" && (!needsTools || model.tools !== false) &&
+      !assumed.has(model.id) && localModelPolicy(model.id)?.explicitChoiceOnly !== true);
     // Admission lets an unstated modality through — unknown is offered, not withheld — but a
     // default is a choice nobody is looking at, so for Stage a model that says it reads images
     // comes before one that merely does not say it cannot.
@@ -12839,10 +12875,249 @@ export class Coordinator {
         }
         return;
       }
+      case "set-voice-pin": {
+        // A correction to the cast (design turn 155, SPEC-012 R-62..R-65): written beside the
+        // derived lines, never into the world, refused in one clause while a cast is running or
+        // when the words, the cast or the character are not what the pin says, and answered to
+        // every window with the record as it now stands.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const answer = (extra: { record?: ChapterVoices; refused?: string }) =>
+          this.emit({ at: new Date().toISOString(), type: "voices.record", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, ...extra });
+        if (this.castingVoices.has(`${msg.worldId}/${msg.productionId}/${chapter.file}`)) {
+          answer({ refused: "casting… · wait for the cast" });
+          return;
+        }
+        try {
+          const record = await setVoicePin(store, msg.productionId, chapter.id, {
+            paragraph: msg.paragraph,
+            occurrence: msg.occurrence,
+            quote: msg.quote,
+            ...(msg.speaker !== undefined ? { speaker: msg.speaker } : {}),
+            ...(msg.sheet !== undefined ? { sheet: msg.sheet } : {}),
+            ...(msg.narration === true ? { narration: true as const } : {}),
+            ...(msg.clear === true ? { clear: true as const } : {}),
+          });
+          // A pin changes who reads the block (SPEC-047 R-13): the chapter's standing directions
+          // are re-checked against the reader that speaks it now, as a new cast's are.
+          await this.conformAudiobookDirections(store, msg.worldId, [msg.productionId]);
+          this.refreshIfStillOpen(store);
+          answer({ record });
+        } catch (err) {
+          answer({ refused: err instanceof VoicePinRefusal ? err.message : describeCoordinatorError(err) });
+        }
+        return;
+      }
       case "stop-audiobook": {
         const store = this.opts.provider.openStore?.();
         const chapter = store?.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
         this.readingAudiobooks.get(`${msg.worldId}/${msg.productionId}/${chapter?.file ?? msg.chapterFile}`)?.control.abort();
+        return;
+      }
+      case "stage-audiobook-take": {
+        // A take a person recorded (design turn 155c, SPEC-047 R-34, R-35): the host's picker
+        // chooses the file, the foundation prepares and checks it on this machine, and the window
+        // is answered with the checks as data — or the one clause that says why it cannot be a take.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, block: msg.block, requestId: msg.requestId };
+        const staged = (extra: Omit<Extract<DomainEvent, { type: "audiobook.take-staged" }>, "at" | "type" | keyof typeof ids>) =>
+          this.emit({ at: new Date().toISOString(), type: "audiobook.take-staged", ...ids, ...extra });
+        if (!this.opts.audioMediaTools) {
+          staged({ refused: "audio preparation is not available here" });
+          return;
+        }
+        if (!this.opts.pickFiles) {
+          staged({ refused: "choosing a file needs the desktop app" });
+          return;
+        }
+        const control = new AbortController();
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        try {
+          const [chosen] = await this.opts.pickFiles({ accept: [...RECORDED_TAKE_EXTENSIONS] });
+          if (chosen === undefined) return;
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService);
+          const voice = this.voiceService;
+          const recording = await stageRecording(
+            store,
+            {
+              tools: this.opts.audioMediaTools,
+              transcribe: voice === null ? null : (bytes, contentType) => voice.transcribe(bytes, contentType),
+              narrator,
+              signal: control.signal,
+            },
+            { productionId: msg.productionId, chapterId: chapter.id, block: msg.block, sourcePath: chosen },
+          );
+          const previous = this.stagedRecordings.get(msg.requestId);
+          if (previous !== undefined) await discardRecording(previous.staged);
+          this.stagedRecordings.set(msg.requestId, { worldId: msg.worldId, staged: recording });
+          const report = recording.qc.status === "complete" ? recording.qc.report : null;
+          staged({
+            file: recording.file,
+            durationSec: recording.source.durationSec,
+            sampleRateHz: recording.source.sampleRateHz,
+            channels: recording.source.channels,
+            ...(report !== null ? { rmsDbfs: report.measurements.rmsDbfs, samplePeakDbfs: report.measurements.samplePeakDbfs, noiseFloor: report.checks.noiseFloor.outcome } : {}),
+            ...(recording.words.status === "compared"
+              ? { words: recording.words.result === "exact" ? ("match" as const) : ("differ" as const), differences: recording.words.differences.length }
+              : { words: "unchecked" as const }),
+          });
+        } catch (err) {
+          staged({ refused: err instanceof RecordedTakeRefusal ? err.message : describeCoordinatorError(err) });
+        } finally {
+          store.closingSignal.removeEventListener("abort", onClose);
+        }
+        return;
+      }
+      case "keep-audiobook-take": {
+        // Kept under the rights given once (SPEC-047 R-36) and answered as the block's record is.
+        const store = this.opts.provider.openStore?.();
+        const held = this.stagedRecordings.get(msg.requestId);
+        if (!store || store.worldId !== msg.worldId || held === undefined || held.worldId !== msg.worldId) return;
+        const ids = { worldId: msg.worldId, productionId: held.staged.productionId, chapterId: held.staged.chapterId, requestId: msg.requestId };
+        try {
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService);
+          const record = await keepRecording(store, held.staged, {
+            basis: msg.basis,
+            ...(msg.performer !== undefined ? { performer: msg.performer } : {}),
+            narrator,
+            ackId: `ack_${ulid()}`,
+            now: () => store.now(),
+            ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
+          });
+          this.stagedRecordings.delete(msg.requestId);
+          this.refreshIfStillOpen(store);
+          this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, record });
+        } catch (err) {
+          this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, refused: err instanceof RecordedTakeRefusal ? err.message : describeCoordinatorError(err) });
+        }
+        return;
+      }
+      case "export-audiobook-script": {
+        // A recorded speaker's script (design turn 155d, SPEC-047 R-39): written under exports/.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const answer = (extra: Omit<Extract<DomainEvent, { type: "audiobook.script" }>, "at" | "type" | "worldId" | "productionId" | "requestId">) =>
+          this.emit({ at: new Date().toISOString(), type: "audiobook.script", worldId: msg.worldId, productionId: msg.productionId, requestId: msg.requestId, ...extra });
+        try {
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService);
+          const made = await exportScript(store, msg.productionId, msg.speaker, { scope: msg.scope, label: msg.label, narrator, exportId: ulid(), now: () => store.now() });
+          answer({ output: made.output, lines: made.lines, chapters: made.chapters, notCast: made.notCast });
+        } catch (err) {
+          answer({ refused: err instanceof RecordedTakeRefusal ? err.message : describeCoordinatorError(err) });
+        }
+        return;
+      }
+      case "stage-audiobook-lines": {
+        // The files a performer sent back (R-39): chosen together, matched by id, each checked.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const staged = (extra: { rows?: Extract<DomainEvent, { type: "audiobook.lines-staged" }>["rows"]; refused?: string }) =>
+          this.emit({ at: new Date().toISOString(), type: "audiobook.lines-staged", worldId: msg.worldId, productionId: msg.productionId, requestId: msg.requestId, rows: extra.rows ?? [], ...(extra.refused !== undefined ? { refused: extra.refused } : {}) });
+        if (!this.opts.audioMediaTools) {
+          staged({ refused: "audio preparation is not available here" });
+          return;
+        }
+        if (!this.opts.pickFiles) {
+          staged({ refused: "choosing files needs the desktop app" });
+          return;
+        }
+        const control = new AbortController();
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        try {
+          const chosen = await this.opts.pickFiles({ accept: [...RECORDED_TAKE_EXTENSIONS] });
+          if (chosen.length === 0) return;
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService);
+          const voice = this.voiceService;
+          const matched = await matchFiles(store, msg.productionId, msg.speaker, chosen.slice(0, 400), {
+            tools: this.opts.audioMediaTools,
+            transcribe: voice === null ? null : (bytes, contentType) => voice.transcribe(bytes, contentType),
+            narrator,
+            signal: control.signal,
+          });
+          const previous = this.stagedLines.get(msg.requestId);
+          if (previous !== undefined) for (const row of previous.matched) if (row.staged !== undefined) await discardRecording(row.staged);
+          this.stagedLines.set(msg.requestId, { worldId: msg.worldId, productionId: msg.productionId, matched });
+          staged({
+            rows: matched.map((row) => {
+              const report = row.staged?.qc.status === "complete" ? row.staged.qc.report : null;
+              const words = row.staged?.words;
+              return {
+                file: row.file,
+                ...(row.id !== undefined ? { id: row.id } : {}),
+                ...(row.quote !== undefined ? { quote: row.quote } : {}),
+                ...(words !== undefined ? (words.status === "compared" ? { words: words.result === "exact" ? ("match" as const) : ("differ" as const), differences: words.differences.length } : { words: "unchecked" as const }) : {}),
+                ...(report !== null ? { rmsDbfs: report.measurements.rmsDbfs, samplePeakDbfs: report.measurements.samplePeakDbfs } : {}),
+                ...(row.refused !== undefined ? { refused: row.refused } : {}),
+              };
+            }),
+          });
+        } catch (err) {
+          staged({ refused: err instanceof RecordedTakeRefusal ? err.message : describeCoordinatorError(err) });
+        } finally {
+          store.closingSignal.removeEventListener("abort", onClose);
+        }
+        return;
+      }
+      case "keep-audiobook-lines": {
+        // The ticked files kept as takes under the rights given once (R-36, R-39); each chapter's
+        // record written through its own lane and answered as the block's record is.
+        const store = this.opts.provider.openStore?.();
+        const held = this.stagedLines.get(msg.requestId);
+        if (!store || store.worldId !== msg.worldId || held === undefined || held.worldId !== msg.worldId) return;
+        this.stagedLines.delete(msg.requestId);
+        const wanted = new Set(msg.files);
+        let kept = 0;
+        let refused: string | undefined;
+        try {
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService);
+          for (const row of held.matched) {
+            if (row.staged === undefined) continue;
+            if (!wanted.has(row.file)) {
+              await discardRecording(row.staged);
+              continue;
+            }
+            try {
+              const record = await keepRecording(store, row.staged, {
+                basis: msg.basis,
+                ...(msg.performer !== undefined ? { performer: msg.performer } : {}),
+                narrator,
+                ackId: `ack_${ulid()}`,
+                now: () => store.now(),
+                ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
+              });
+              kept += 1;
+              this.emit({ at: new Date().toISOString(), type: "audiobook.record", worldId: msg.worldId, productionId: held.productionId, chapterId: row.staged.chapterId, record });
+            } catch (err) {
+              await discardRecording(row.staged);
+              refused ??= `${row.file} · ${err instanceof RecordedTakeRefusal ? err.message : describeCoordinatorError(err)}`;
+            }
+          }
+          this.refreshIfStillOpen(store);
+        } catch (err) {
+          refused ??= describeCoordinatorError(err);
+        }
+        this.emit({ at: new Date().toISOString(), type: "audiobook.lines-kept", worldId: msg.worldId, productionId: held.productionId, requestId: msg.requestId, kept, ...(refused !== undefined ? { refused } : {}) });
+        return;
+      }
+      case "discard-audiobook-lines": {
+        const held = this.stagedLines.get(msg.requestId);
+        if (held === undefined || held.worldId !== msg.worldId) return;
+        this.stagedLines.delete(msg.requestId);
+        for (const row of held.matched) if (row.staged !== undefined) await discardRecording(row.staged);
+        return;
+      }
+      case "discard-audiobook-take": {
+        const held = this.stagedRecordings.get(msg.requestId);
+        if (held === undefined || held.worldId !== msg.worldId) return;
+        this.stagedRecordings.delete(msg.requestId);
+        await discardRecording(held.staged);
         return;
       }
       case "set-audiobook-block": {
@@ -12994,7 +13269,10 @@ export class Coordinator {
           return;
         }
         try {
-          await writeAudiobookBook(store, msg.productionId, { schemaVersion: 1, reading: msg.reading });
+          // Only the reading moves: the speakers a person records stay as they were (R-37).
+          const held = await readAudiobookBook(store, msg.productionId);
+          const recorded = held === null || held === "unreadable" ? undefined : held.recorded;
+          await writeAudiobookBook(store, msg.productionId, { schemaVersion: 1, reading: msg.reading, ...(recorded !== undefined ? { recorded } : {}) });
           // The reading switched moves blocks between the narrator and the cast's voices (R-13):
           // every standing direction is re-checked against its new reader's row, the controls
           // that row cannot carry dropped and counted, so a direction accepted for one voice is
@@ -13003,6 +13281,34 @@ export class Coordinator {
           this.refreshIfStillOpen(store);
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.reading-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+      case "set-audiobook-recorded": {
+        // A speaker a person records (design turn 155, SPEC-047 R-37): the book's choice, kept
+        // beside the reading. Refused while the book or a chapter of it is being read, as the
+        // reading is — a run half way through would make the lines it now should wait on.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
+        const reading = this.readingBooks.has(`${msg.worldId}/${msg.productionId}`) || [...this.readingAudiobooks.values()].some((run) => run.worldId === msg.worldId && run.productionId === msg.productionId);
+        if (reading) {
+          void this.appLog?.append({ kind: "audiobook.recorded-refused", production: msg.productionId, message: "the book is being read" });
+          return;
+        }
+        try {
+          const held = await readAudiobookBook(store, msg.productionId);
+          const base = held === null || held === "unreadable" ? { schemaVersion: 1 as const, reading: "narrator" as const, recorded: [] as string[] } : held;
+          const list = new Set(base.recorded ?? []);
+          if (msg.recorded) list.add(msg.speaker);
+          else list.delete(msg.speaker);
+          const next = { schemaVersion: 1 as const, reading: base.reading, ...(list.size > 0 ? { recorded: [...list] } : {}) };
+          // A book record with speakers recorded is read strictly by the builds before it.
+          if (next.recorded !== undefined) await store.ensureSchemaVersion(RECORDED_TAKE_SCHEMA_VERSION, "recorded-speakers");
+          await writeAudiobookBook(store, msg.productionId, next);
+          this.refreshIfStillOpen(store);
+        } catch (err) {
+          void this.appLog?.append({ kind: "audiobook.recorded-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
         }
         return;
       }
@@ -17777,6 +18083,33 @@ export class Coordinator {
     });
   }
 
+  /**
+   * Ollama is its own service and outlives Arke, so the models this run loaded would otherwise
+   * hold memory until Ollama's idle timeout: five minutes for dispatch requests, and whatever
+   * OpenCode or Codex asked for. The Arke harness releases its own on dispose; this covers the
+   * rest. It is the same whole-runtime unload a GPU handover makes, so it runs only after a run
+   * that used Ollama — one that never did has no claim on another application's models. Called
+   * once the queue, harness children and adapter have stopped, so nothing can load after it.
+   */
+  private async releaseOllama(): Promise<void> {
+    const client = this.opts.dispatchClients?.["ollama"];
+    if (!client?.unload || !this.localGpu.hasRun("Ollama")) return;
+    // Only what this run named: the dispatches' models and the harness turns'. A whole-runtime
+    // unload also emptied models another application had loaded into the same Ollama (issue
+    // 1289). The Arke harness hands back its own on dispose, whatever it was asked for by.
+    const only = new Set([...client.usedModels?.() ?? [], ...this.harnessOllamaModels]);
+    if (only.size === 0) return;
+    const signal = AbortSignal.timeout(OLLAMA_SHUTDOWN_RELEASE_MS);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Raced as well as signalled: the signal bounds the requests, the timer bounds a client
+    // that does not honour it.
+    await Promise.race([
+      client.unload(signal, only).catch(() => {}),
+      new Promise<void>((resolve) => { timer = setTimeout(resolve, OLLAMA_SHUTDOWN_RELEASE_MS); }),
+    ]);
+    clearTimeout(timer);
+  }
+
   async stop(): Promise<void> {
     if (this.legacyServer) return this.legacyServer.stop();
     return this.stopApplication(Promise.resolve());
@@ -17839,6 +18172,7 @@ export class Coordinator {
       await this.jobQueue?.drain();
       await Promise.all([...this.supervisors.values()].map((s) => s.stop()));
       await this.opts.adapter?.dispose?.().catch(() => {});
+      await this.releaseOllama();
       await this.worldQuery.stop();
       // Provider close is the critical gate: it saves pending state and releases the world lock.
       this.engineClosed = true;

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ProseReadSourceSchema, changedSpan, chapterParagraphs, composePassage, countWords, overviewMoved, passageDiff, passageOf, targetWords } from "../src/prose.js";
 import { ChapterContinuitySchema, ChapterFrontmatterSchema, ChapterImpliesWriteSchema, ChapterSummarySchema, ChapterVoicesSchema, ProseStyleSchema, summariseContinuity, summariseVoices } from "../src/world.js";
-import { occurrencesOf, voicedBlocks } from "../src/prose.js";
+import { occurrencesOf, pinnedLines, pinTarget, voicedBlocks } from "../src/prose.js";
 import { ClientMessageSchema } from "../src/frames.js";
 
 /**
@@ -268,5 +268,58 @@ describe("a passage revision taken apart into edits", () => {
     const segments = passageDiff("The big red dog ran home.", "The small blue dog walked home.");
     assert.equal(composePassage(segments, new Set([0])), "The small blue dog ran home.");
     assert.equal(composePassage(segments, new Set([1])), "The big red dog walked home.");
+  });
+});
+
+describe("pins over the cast (SPEC-012 R-62..R-65)", () => {
+  const body = "Odile went up. “No,” she said. “No,” he said.\n\n“Whoever rang that, it wasn’t one of mine.”";
+  const record = {
+    version: 1, hash: "h", derivedAt: "2026-09-25T00:00:00.000Z", passes: 1, dropped: 0, omitted: 0,
+    lines: [
+      { speaker: "Odile", sheet: "odile-sarn", paragraph: 0, occurrence: 0, quote: "“No,”" },
+      { speaker: "Maren", sheet: "maren-kest", paragraph: 0, occurrence: 1, quote: "“No,”" },
+      { speaker: "the harbourmaster", paragraph: 1, occurrence: 0, quote: "“Whoever rang that, it wasn’t one of mine.”" },
+    ],
+  };
+  it("a pin gives its span a speaker and the derived line it overlaps gives way", () => {
+    const pins = [{ paragraph: 1, occurrence: 0, quote: "“Whoever rang that, it wasn’t one of mine.”", speaker: "Bram Tull", sheet: "bram-tull" }];
+    const applied = pinnedLines(record.lines, pins, body);
+    assert.equal(applied.lost, 0);
+    assert.equal(applied.lines.filter((line) => line.paragraph === 1).length, 1, "the harbourmaster's line gives way");
+    const { blocks } = voicedBlocks(body, { ...record, pins });
+    const bram = blocks.find((block) => block.sheet === "bram-tull");
+    assert.ok(bram && bram.pinned === true, "the block is Bram's, and marked as set by hand");
+    assert.ok(ChapterVoicesSchema.safeParse({ ...record, pins }).success);
+    assert.equal(summariseVoices({ ...record, pins }).pins, 1);
+    assert.deepEqual(summariseVoices({ ...record, pins }).speakers.map((who) => who.sheet ?? who.speaker).sort(), ["bram-tull", "maren-kest", "odile-sarn"]);
+  });
+  it("a pin to narration takes the line away; a pin whose words are gone is lost and counted", () => {
+    const narration = [{ paragraph: 0, occurrence: 1, quote: "“No,”", narration: true as const }];
+    const { blocks } = voicedBlocks(body, { ...record, pins: narration });
+    assert.ok(!blocks.some((block) => block.sheet === "maren-kest"), "Maren's line is narration now");
+    const gone = pinnedLines(record.lines, [{ paragraph: 1, occurrence: 0, quote: "“Nobody rang it.”", speaker: "Bram" }], body);
+    assert.equal(gone.lost, 1);
+    assert.equal(gone.lines.length, 3, "a lost pin changes nothing");
+  });
+  it("a pin on one of two twins names its occurrence, where the derivation could not", () => {
+    const twins = { ...record, lines: record.lines.filter((line) => line.paragraph === 1) };
+    const pins = [{ paragraph: 0, occurrence: 1, quote: "“No,”", speaker: "Maren", sheet: "maren-kest" }];
+    const { blocks } = voicedBlocks(body, { ...twins, pins });
+    assert.equal(blocks.filter((block) => block.sheet === "maren-kest").length, 1, "the second “No,” is Maren's; the first stays narration");
+  });
+  it("pinTarget names a block, or words selected in it, by paragraph, words and the occurrence the paragraph holds", () => {
+    const { blocks } = voicedBlocks(body, record);
+    const maren = blocks.findIndex((block) => block.sheet === "maren-kest");
+    assert.deepEqual(pinTarget(body, blocks, maren), { paragraph: 0, occurrence: 1, quote: "“No,”" }, "the second No is the second occurrence");
+    const narration = blocks.findIndex((block) => block.speaker === undefined && block.text.startsWith("Odile went"));
+    assert.deepEqual(pinTarget(body, blocks, narration, { from: 0, to: 5 }), { paragraph: 0, occurrence: 0, quote: "Odile" });
+    assert.equal(pinTarget(body, blocks, narration, { from: 3, to: 3 }), null, "an empty selection names nothing");
+  });
+
+  it("the schema refuses a pin with neither a speaker nor narration, or both", () => {
+    const base = { paragraph: 0, occurrence: 0, quote: "x" };
+    assert.ok(!ChapterVoicesSchema.safeParse({ ...record, pins: [base] }).success);
+    assert.ok(!ChapterVoicesSchema.safeParse({ ...record, pins: [{ ...base, speaker: "a", narration: true }] }).success);
+    assert.ok(!ChapterVoicesSchema.safeParse({ ...record, pins: [{ ...base, narration: true, sheet: "a" }] }).success);
   });
 });

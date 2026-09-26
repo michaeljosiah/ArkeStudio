@@ -315,7 +315,13 @@ export interface ProviderClient {
   /** Drop source-bound optional transports while keeping the client reusable. */
   resetTransport?(): void;
   /** Coordinator-owned local GPU handover; remote engines must leave their models alone. */
-  unload?(signal?: AbortSignal): Promise<void>;
+  /**
+   * Given `only`, just the loaded models named in it: quitting hands back what this run used and
+   * leaves another application's models where they are (issue 1289). A handover takes them all.
+   */
+  unload?(signal?: AbortSignal, only?: ReadonlySet<string>): Promise<void>;
+  /** The local models this client has sent work to since it was made. */
+  usedModels?(): ReadonlySet<string>;
   residency?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").ModelResidency[]>;
   /** The language models a local runtime has pulled, for the writing harness's catalogue (issue 1247). */
   listModels?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").LocalHarnessModel[]>;

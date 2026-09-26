@@ -3,7 +3,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { voicedBlocks } from "@arke-studio/contracts";
-import { castLines, mergeVoicePasses, readVoices, verifyVoices, voicesPath, type RawVoices, type VoicesDeriverInput } from "../../src/productions/voices.js";
+import { castLines, mergeVoicePasses, readVoices, setVoicePin, verifyVoices, voicesPath, type RawVoices, type VoicesDeriverInput } from "../../src/productions/voices.js";
+import { VOICE_PINS_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { openChapter, saveChapter } from "../../src/productions/ops.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -157,5 +158,58 @@ describe("cast by a press, kept beside the chapter, keyed to the prose (R-44, R-
     await store.reload();
     assert.equal(await readVoices(store, PRODUCTION, "02-the-same-ink"), "unreadable");
     assert.deepEqual(chapterOf(store, "the-same-ink").voices, { unreadable: true });
+  });
+});
+
+describe("the author's corrections to the cast (design turn 155, SPEC-012 R-62..R-65)", () => {
+  const worldSchema = async (dir: string) => (JSON.parse(await readFile(join(dir, "world.json"), "utf8")) as { schemaVersion: number }).schemaVersion;
+
+  it("a pin is written beside the derived lines, raises the world first, and the read applies it", async () => {
+    const { dir, store } = await open();
+    await castLines(store, PRODUCTION, "neap", async () => ({ lines: [{ speaker: "maren-kest", quote: SPAN }] }));
+    assert.ok((await worldSchema(dir)) < VOICE_PINS_SCHEMA_VERSION, "a cast with no pins leaves the world where earlier builds read it");
+    const body = (await openChapter(store, PRODUCTION, "neap")).body;
+    const record = await setVoicePin(store, PRODUCTION, "neap", { paragraph: 0, occurrence: 0, quote: SPAN, narration: true });
+    assert.deepEqual(record.pins, [{ paragraph: 0, occurrence: 0, quote: SPAN, narration: true }]);
+    assert.equal(await worldSchema(dir), VOICE_PINS_SCHEMA_VERSION, "raised before the first record with pins");
+    assert.deepEqual(await readVoices(store, PRODUCTION, "01-neap"), record);
+    assert.ok(!voicedBlocks(body, record).blocks.some((block) => block.sheet === "maren-kest"), "the span reads as narration now");
+    const stamp = chapterOf(store, "neap").voices;
+    assert.ok(stamp && !("unreadable" in stamp) && stamp.pins === 1, "the stamp counts the correction");
+
+    // Choosing what the derivation said is no correction: the pin goes and the record keeps the old shape.
+    const back = await setVoicePin(store, PRODUCTION, "neap", { paragraph: 0, occurrence: 0, quote: SPAN, speaker: "maren-kest", sheet: "maren-kest" });
+    assert.equal(back.pins, undefined);
+    const onDisk = JSON.parse(await readFile(join(dir, ...voicesPath(PRODUCTION, "01-neap").split("/")), "utf8"));
+    assert.ok(!("pins" in onDisk), "a record with no pins is written without the field");
+  });
+
+  it("refuses in one clause: words not there, a character not in the cast, a cast the prose has moved under, no cast", async () => {
+    const { store } = await open();
+    await assert.rejects(() => setVoicePin(store, PRODUCTION, "neap", { paragraph: 0, occurrence: 0, quote: SPAN, narration: true }), /not cast/);
+    await castLines(store, PRODUCTION, "neap", async () => ({ lines: [{ speaker: "maren-kest", quote: SPAN }] }));
+    await assert.rejects(() => setVoicePin(store, PRODUCTION, "neap", { paragraph: 0, occurrence: 0, quote: "not in the chapter", narration: true }), /not there/);
+    await assert.rejects(() => setVoicePin(store, PRODUCTION, "neap", { paragraph: 0, occurrence: 0, quote: SPAN, speaker: "Nobody", sheet: "nobody-at-all" }), /no such character/);
+    const live = await openChapter(store, PRODUCTION, "neap");
+    await saveChapter(store, PRODUCTION, "01-neap", `${live.body}\n\nAnd one more line.`, { baseHash: live.hash });
+    await assert.rejects(() => setVoicePin(store, PRODUCTION, "neap", { paragraph: 0, occurrence: 0, quote: SPAN, narration: true }), /cast moved/);
+  });
+
+  it("Cast again keeps every pin whose words stand, and drops and counts one whose words are gone", async () => {
+    const { store } = await open();
+    const derive = async () => ({ lines: [{ speaker: "maren-kest", quote: SPAN }] });
+    await castLines(store, PRODUCTION, "neap", derive);
+    await setVoicePin(store, PRODUCTION, "neap", { paragraph: 0, occurrence: 0, quote: SPAN, speaker: "Odile", });
+    const again = await castLines(store, PRODUCTION, "neap", derive);
+    assert.equal(again.record.pins?.length, 1, "the correction outlives a new cast");
+    assert.equal(again.record.lost, undefined);
+
+    const live = await openChapter(store, PRODUCTION, "neap");
+    await saveChapter(store, PRODUCTION, "01-neap", live.body.replace(/\s+/g, " ").replace(SPAN, "kept by nobody at all"), { baseHash: live.hash });
+    const moved = await castLines(store, PRODUCTION, "neap", async () => ({ lines: [] }));
+    assert.equal(moved.record.pins, undefined, "a pin whose words are gone is not re-placed");
+    assert.equal(moved.record.lost, 1, "and it is counted");
+    const stamp = chapterOf(store, "neap").voices;
+    assert.ok(stamp && !("unreadable" in stamp) && stamp.lost === 1);
   });
 });

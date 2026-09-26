@@ -483,6 +483,9 @@ const CLIENT_COMMAND_METADATA = {
   // The cast of lines (turn 130): the same discipline, turned on speech.
   "cast-voices": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),
   "stop-voices": action("production", "command", "extraction", "external-network-action", ["chapters"]),
+  // A correction to the cast (turn 155): the author's word on who speaks, written beside the
+  // derived lines and never into the world.
+  "set-voice-pin": action("production", "command", "extraction", "authored-change", ["chapters", "sheets"]),
   // The audiobook (design turn 146, SPEC-047): a chapter read into kept takes is a generation
   // that may leave the machine; stopping it and choosing the reading are commands on the record.
   "read-audiobook-chapter": action("production", "generation", "voice", "external-network-action", ["chapters", "sheets"]),
@@ -491,6 +494,16 @@ const CLIENT_COMMAND_METADATA = {
   // Direction beside the prose (SPEC-047 R-6..R-10): a block's plan set by hand and a card
   // accepted whole are commands on the record; directing a chapter is the cast's derivation
   // turned on performance — a model run over the prose that writes nothing.
+  // A take a person recorded (turn 155c): chosen on this machine, prepared and checked here, and
+  // kept under the rights given once; nothing leaves the machine.
+  "set-audiobook-recorded": action("production", "command", "voice", "authored-change", ["chapters"]),
+  "export-audiobook-script": action("production", "command", "voice", "export", ["chapters"]),
+  "stage-audiobook-lines": action("production", "command", "voice", "host-file-access", ["chapters"]),
+  "keep-audiobook-lines": action("production", "command", "voice", "privacy-sensitive", ["chapters"]),
+  "discard-audiobook-lines": action("production", "command", "voice", "host-file-access", []),
+  "stage-audiobook-take": action("production", "command", "voice", "host-file-access", ["chapters"]),
+  "keep-audiobook-take": action("production", "command", "voice", "privacy-sensitive", ["chapters"]),
+  "discard-audiobook-take": action("production", "command", "voice", "host-file-access", []),
   "set-audiobook-block": action("production", "command", "voice", "external-network-action", ["chapters"]),
   "direct-chapter": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),
   "discard-direction": action("production", "command", "extraction", "external-network-action", ["chapters"]),

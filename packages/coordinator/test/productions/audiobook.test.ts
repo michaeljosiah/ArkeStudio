@@ -485,6 +485,22 @@ describe("the audiobook run (turn 146)", () => {
       assert.equal(shelf().length, 3, "three unretired takes: the first, the second, the fourth");
     }));
 
+  it("a speaker a person records: the book keeps them across a reading switch, and a run makes nothing that waits on a recording (SPEC-047 R-37, R-38)", () =>
+    withHarness({}, async ({ worldDir, events, spoken, send, bundle }) => {
+      await send({ kind: "set-audiobook-recorded", worldId: WORLD_ID, productionId: LEDGER, speaker: "narrator", recorded: true });
+      await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "cast" });
+      const book = bundle().productions.find((p) => p.meta.id === LEDGER)?.audiobook;
+      assert.deepEqual({ reading: book?.reading, recorded: book?.recorded }, { reading: "cast", recorded: ["narrator"] }, "switching the reading keeps who is recorded");
+      await read(send);
+      assert.equal(spoken.filter((text) => !text.includes(SPAN)).length, 0, "no narration is made: it waits on the narrator's recording");
+      const finished = events.filter((e): e is Finished => e.type === "audiobook.finished");
+      assert.deepEqual(finished.map((e) => [e.outcome, e.made]), [["read", 1]], "the run reads: the one cast line, and nothing of the narrator's");
+      assert.equal(spoken.length, 1);
+      void worldDir;
+      await send({ kind: "set-audiobook-recorded", worldId: WORLD_ID, productionId: LEDGER, speaker: "narrator", recorded: false });
+      assert.equal(bundle().productions.find((p) => p.meta.id === LEDGER)?.audiobook?.recorded, undefined, "given back to the voice, the list is gone");
+    }));
+
   it("under cast, a cloud voice is priced once and named before anything leaves; confirmed, the narration is still made locally (R-17)", () =>
     withHarness({ cloud: [LOW_TIDE] }, async ({ events, spoken, send, bundle }) => {
       await send({ kind: "set-credential", provider: "elevenlabs", key: "k-test" });

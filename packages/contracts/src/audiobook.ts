@@ -57,6 +57,65 @@ export function audiobookBlocks(
   return { blocks, ambiguous: voiced.ambiguous };
 }
 
+/**
+ * A recording's level against `Retail`'s figures (SPEC-047 R-23, R-35): RMS between −23 and −18
+ * dBFS and a peak at or under −3 dB. The foundation measures RMS and sample peak on every file;
+ * outside the window is a warning, never a refusal, and an unmeasured figure is neither.
+ */
+export const RETAIL_RMS_DBFS = { min: -23, max: -18 } as const;
+export const RETAIL_PEAK_DBFS = -3;
+export function retailLevel(measurements: { rmsDbfs: number | null; samplePeakDbfs: number | null }): { loudness: "pass" | "warning" | "unavailable"; peak: "pass" | "warning" | "unavailable" } {
+  const rms = measurements.rmsDbfs;
+  const peak = measurements.samplePeakDbfs;
+  return {
+    loudness: rms === null ? "unavailable" : rms >= RETAIL_RMS_DBFS.min && rms <= RETAIL_RMS_DBFS.max ? "pass" : "warning",
+    peak: peak === null ? "unavailable" : peak <= RETAIL_PEAK_DBFS ? "pass" : "warning",
+  };
+}
+
+/** How many speaker colours there are (SPEC-047 R-33): `--voice-1` to `--voice-6`, repeated past the sixth. */
+export const AUDIOBOOK_VOICE_COLOURS = 6;
+
+/** Who speaks a block, as the cast keys a speaker (`summariseVoices`): the sheet, else the name; null for narration and the title. */
+export function audiobookSpeakerKey(block: Pick<VoicedBlock, "speaker" | "sheet">): string | null {
+  return block.sheet ?? block.speaker ?? null;
+}
+
+/** What a chapter summary holds that the colours are read from: its order, whether it is retired, and its cast's stamp. */
+export interface SpeakerColourChapter {
+  order: number;
+  retired?: boolean;
+  voices?: { speakers: readonly { speaker: string; sheet?: string }[] } | { unreadable: true };
+}
+
+/**
+ * A colour for every speaker with a sheet, the same in every chapter (SPEC-047 R-33): the book's
+ * speakers numbered in the order they first speak in it — chapter by chapter, and within a chapter
+ * in its cast stamp's order — then wrapped past the sixth. The stamp is what every chapter summary
+ * carries, so the door, the chapter and another chapter all count the same list; `extra` names
+ * speakers the stamps do not hold yet (a cast derived in this window, a chapter with no stamp),
+ * numbered after them. A name no sheet carries takes no colour: it is drawn as a dashed dot.
+ */
+export function audiobookSpeakerColours(
+  chapters: readonly SpeakerColourChapter[],
+  extra: readonly string[] = [],
+): Map<string, number> {
+  const order: string[] = [];
+  const seen = new Set<string>();
+  const add = (sheet: string | undefined): void => {
+    if (sheet === undefined || seen.has(sheet)) return;
+    seen.add(sheet);
+    order.push(sheet);
+  };
+  for (const chapter of [...chapters].filter((c) => c.retired !== true).sort((a, b) => a.order - b.order)) {
+    const voices = chapter.voices;
+    if (voices === undefined || "unreadable" in voices) continue;
+    for (const who of voices.speakers) add(who.sheet);
+  }
+  for (const sheet of extra) add(sheet);
+  return new Map(order.map((sheet, index) => [sheet, (index % AUDIOBOOK_VOICE_COLOURS) + 1]));
+}
+
 /** The fingerprint a take is keyed to: the block's text with whitespace folded, as it was spoken. */
 export function audiobookTextHash(text: string): string {
   return textDigest(text.replace(/\s+/g, " ").trim());
@@ -100,6 +159,22 @@ export const AudiobookTakeSchema = z
     costMicroUsd: z.number().int().min(0).nullable(),
     /** True when the take was adopted from the speech cache rather than made (R-19). */
     adopted: z.literal(true).optional(),
+    /**
+     * `recorded` for a take a person recorded (SPEC-047 R-34); absent for one a voice made. A
+     * recording is current while its words are: no reader or direction made it, so neither can
+     * make it stale.
+     */
+    source: z.literal("recorded").optional(),
+    /** What the recording was kept with (R-35, R-36): the performer's own label, the checks' warnings, the words' check. */
+    recording: z
+      .object({
+        acknowledgementId: z.string().min(1),
+        performer: z.string().min(1).max(80).optional(),
+        warnings: z.array(z.string().min(1)).max(20),
+        words: z.enum(["match", "differ", "unchecked"]),
+      })
+      .strict()
+      .optional(),
     /** The direction the take was made under (R-6, R-14), as `audiobookDirectionHash` names it; absent for a take made with none. */
     directionHash: z.string().min(1).optional(),
     madeAt: IsoDateTimeSchema,
@@ -216,11 +291,26 @@ export type AudiobookReading = z.infer<typeof AudiobookReadingSchema>;
  * chapters' records sit under `chapters/`, since a chapter's file stem is unconstrained and one
  * named `book` would otherwise share this path (codex on PR 1180).
  */
-export const AudiobookBookSchema = z.object({ schemaVersion: z.literal(1), reading: AudiobookReadingSchema }).strict();
+export const AudiobookBookSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    reading: AudiobookReadingSchema,
+    /**
+     * The speakers a person records (SPEC-047 R-37): `narrator`, a sheet id, or a name no sheet
+     * carries. The book's choice, never the sheet's; their blocks are made only by a recording.
+     */
+    recorded: z.array(z.string().min(1).max(120)).max(200).optional(),
+  })
+  .strict();
 export type AudiobookBook = z.infer<typeof AudiobookBookSchema>;
 export const DEFAULT_AUDIOBOOK_BOOK: AudiobookBook = { schemaVersion: 1, reading: "narrator" };
 
-export type AudiobookBlockState = "not made" | "made" | "stale" | "flagged";
+export type AudiobookBlockState = "not made" | "made" | "stale" | "flagged" | "awaiting";
+
+/** Who records a block, as the book's `recorded` names them (R-37): the narrator for narration and the title, else the sheet, else the name. */
+export function audiobookRecordingKey(block: Pick<AudiobookBlock, "speaker" | "sheet"> & { text?: string }): string {
+  return block.speaker === undefined ? "narrator" : (block.sheet ?? block.speaker);
+}
 
 const sameReader = (a: AudiobookReader, b: AudiobookReader): boolean =>
   a.provider === b.provider && a.voiceId === b.voiceId && a.model === b.model;
@@ -241,7 +331,15 @@ export function audiobookBlockState(
   record: ChapterAudiobook | null,
   assigned: AudiobookReader,
   hasArtifact?: (artifactId: string) => boolean,
+  /** The block's speaker is recorded by a person (R-37, R-38): made only by a current recording, `awaiting` until then. */
+  recorded = false,
 ): AudiobookBlockState {
+  if (recorded) {
+    const take = record?.takes[block.key];
+    const current =
+      take !== undefined && take.source === "recorded" && (hasArtifact === undefined || hasArtifact(take.artifactId)) && take.textHash === audiobookTextHash(block.text);
+    return current ? "made" : "awaiting";
+  }
   if (record === null) return "not made";
   const take = record.takes[block.key];
   const flag = record.flags[block.key];
@@ -249,6 +347,8 @@ export function audiobookBlockState(
   if (take === undefined) return "not made";
   if (hasArtifact !== undefined && !hasArtifact(take.artifactId)) return "not made";
   if (take.textHash !== audiobookTextHash(block.text)) return "stale";
+  // A recording is current while its words are (R-34): no reader and no direction made it.
+  if (take.source === "recorded") return "made";
   if (!sameReader(take.assigned ?? take.reader, assigned)) return "stale";
   // The direction the take was made under against the one that stands (R-14): a direction
   // added, changed or dropped since is a different take; one authored for other words is none.
@@ -263,7 +363,9 @@ export interface AudiobookCounts {
   stale: number;
   flagged: number;
   notMade: number;
-  /** The keys a run makes (R-16): everything that is not `made`, in reading order. */
+  /** Blocks waiting on a person's recording (R-38): never made by a run, never priced. */
+  awaiting: number;
+  /** The keys a run makes (R-16): everything that is not `made` or `awaiting`, in reading order. */
   toMake: string[];
 }
 
@@ -272,11 +374,13 @@ export function audiobookCounts(
   record: ChapterAudiobook | null,
   assignedOf: (block: AudiobookBlock) => AudiobookReader,
   hasArtifact?: (artifactId: string) => boolean,
+  recordedOf: (block: AudiobookBlock) => boolean = () => false,
 ): AudiobookCounts {
-  const counts: AudiobookCounts = { total: blocks.length, made: 0, stale: 0, flagged: 0, notMade: 0, toMake: [] };
+  const counts: AudiobookCounts = { total: blocks.length, made: 0, stale: 0, flagged: 0, notMade: 0, awaiting: 0, toMake: [] };
   for (const block of blocks) {
-    const state = audiobookBlockState(block, record, assignedOf(block), hasArtifact);
+    const state = audiobookBlockState(block, record, assignedOf(block), hasArtifact, recordedOf(block));
     if (state === "made") counts.made += 1;
+    else if (state === "awaiting") counts.awaiting += 1;
     else {
       if (state === "stale") counts.stale += 1;
       else if (state === "flagged") counts.flagged += 1;
@@ -312,6 +416,8 @@ export const AudiobookRowSchema = z
     stale: z.number().int().min(0),
     flagged: z.number().int().min(0),
     notMade: z.number().int().min(0),
+    /** Blocks waiting on a person's recording (R-38); absent when none. */
+    awaiting: z.number().int().min(1).optional(),
     /** The made takes' running time, summed from their measurements; null while any made take is unmeasured. */
     seconds: z.number().min(0).nullable(),
     /** Under `cast`, the run's refusal (R-12) when the cast is not current — said on the row. */
@@ -326,9 +432,11 @@ export const AudiobookVoiceRowSchema = z
     sheet: SlugSchema.optional(),
     name: z.string().min(1),
     voice: z.object({ label: z.string().min(1), provider: z.string().min(1), local: z.boolean() }).strict().optional(),
-    state: z.enum(["narrator", "reads", "no voice", "voice unavailable"]),
+    state: z.enum(["narrator", "reads", "no voice", "voice unavailable", "recorded"]),
     /** Blocks this reader has across the book: the narrator's narration, a speaker's lines. */
     blocks: z.number().int().min(0),
+    /** A recorded speaker's blocks still waiting on a recording (R-38). */
+    awaiting: z.number().int().min(0).optional(),
   })
   .strict();
 export type AudiobookVoiceRow = z.infer<typeof AudiobookVoiceRowSchema>;
@@ -392,9 +500,15 @@ export function audiobookRowLabel(row: AudiobookRow): string {
   if (row.planned) return "planned";
   if (row.castTrouble !== undefined) return row.castTrouble;
   if (row.total > 0 && row.made === row.total) return row.seconds === null ? "read" : `read · ${formatRunningTime(row.seconds)}`;
-  if (row.made === 0 && row.stale === 0 && row.flagged === 0) return "not read";
-  if (row.flagged === 0 && row.notMade === 0 && row.stale > 0) return `moved · ${row.stale} of ${row.total} stale`;
-  return [`${row.made} of ${row.total} made`, ...(row.stale > 0 ? [`${row.stale} stale`] : []), ...(row.flagged > 0 ? [`${row.flagged} flagged`] : [])].join(" · ");
+  const awaiting = row.awaiting ?? 0;
+  if (row.made === 0 && row.stale === 0 && row.flagged === 0 && awaiting === 0) return "not read";
+  if (row.flagged === 0 && row.notMade === 0 && awaiting === 0 && row.stale > 0) return `moved · ${row.stale} of ${row.total} stale`;
+  return [
+    `${row.made} of ${row.total} made`,
+    ...(row.stale > 0 ? [`${row.stale} stale`] : []),
+    ...(row.flagged > 0 ? [`${row.flagged} flagged`] : []),
+    ...(awaiting > 0 ? [`${awaiting} awaiting`] : []),
+  ].join(" · ");
 }
 
 /** The door's line and the rail's count (R-29): chapters read of those with prose, the running time, the planned ones apart. */
