@@ -79,11 +79,18 @@ it("keeps a content decision pending and invalidates the displayed build until i
   try {
     store.decideGenesisDraft("gen-decision", [{ key: "world", digest: "current" }], "approve");
     assert.equal(store.__stateForTest().genesis["gen-decision"]?.reviewPending, true);
+    store.decideGenesisDraft("gen-decision", [{ key: "world", digest: "current" }], "reject");
+    assert.equal(sent.length, 1, "a second click cannot overtake the pending decision");
     assert.deepEqual(store.__stateForTest().buildPlans["gen-decision"], {});
     const review = GenesisContentReviewSchema.parse({ selected: { name: "Harbour", characters: [], locations: [], factions: [], threads: [], dropped: [] }, cards: [], problems: [] });
     store.__applyEventForTest({ type: "genesis.review", at: new Date().toISOString(), genesisId: "gen-decision", requestId: "old", review });
     assert.equal(store.__stateForTest().genesis["gen-decision"]?.reviewPending, true);
     store.__applyEventForTest({ type: "genesis.review", at: new Date().toISOString(), genesisId: "gen-decision", requestId: sent[0]!.requestId, review });
     assert.equal(store.__stateForTest().genesis["gen-decision"]?.reviewPending, false);
+    store.__applyEventForTest({ type: "genesis.loaded", at: new Date().toISOString(), genesisId: "gen-frozen",
+      conversationId: "cv_01J00000000000000000000001", turns: [], blueprint: review.selected, attachments: [], status: "completed", founding: true });
+    store.reviewGenesisDraft("gen-frozen");
+    assert.equal(sent.length, 1, "frozen drafts do not wait for a review the server refuses");
+    assert.ok(!store.__stateForTest().genesis["gen-frozen"]?.reviewPending);
   } finally { store.__setBridgeForTest(null); store.__setStateForTest(FIXTURE_STATE); }
 });
