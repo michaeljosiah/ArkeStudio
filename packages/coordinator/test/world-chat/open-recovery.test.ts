@@ -25,7 +25,13 @@ const MODELS: ModelInfo[] = [
   { provider: "anthropic", id: "sonnet", displayName: "Sonnet", inputTokenLimit: 200_000 },
 ];
 
-/** A harness that holds the session open until the test lets go, then declines it. */
+/**
+ * A harness that holds the turn's session open until the test lets go, then declines it.
+ *
+ * Only the turn's: the first line of a conversation also starts a naming pass, which creates a
+ * session of its own and, on a loaded runner, can get there before the turn does. That one is
+ * declined at once, so reaching the harness means the turn did.
+ */
 class HeldAdapter implements HarnessAdapter {
   readonly id = "open-recovery-test";
   created = false;
@@ -42,7 +48,8 @@ class HeldAdapter implements HarnessAdapter {
   async listModels() { return MODELS; }
   prepareSession(input: SessionConfigInput) { this.preparations.add(input.preparationId!); }
   abandonSessionPreparation(id: string) { this.preparations.delete(id); }
-  async createSession(_input: CreateSessionInput): Promise<{ sessionId: string }> {
+  async createSession(input: CreateSessionInput): Promise<{ sessionId: string }> {
+    if (input.agent !== "world-builder") throw new Error("Test declines every session but the turn's.");
     this.created = true;
     this.reached();
     await this.held;
