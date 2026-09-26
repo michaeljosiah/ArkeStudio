@@ -1109,3 +1109,42 @@ it("invalidates Begin when only an unapproved proposal changes", async t => {
   await assert.rejects(h.service.begin(id, ulid(), undefined, undefined, original, false), /estimate changed/);
   assert.equal(h.provider.openStore(), null);
 });
+it("recovers the authorized route, items and cap after a crash before world creation", async t => {
+  let failCreation = true;
+  const manifest = structuredClone(MANIFEST);
+  const h = await makeHarness(t, { manifest, createWorld: async input => {
+    if (failCreation) throw new Error("simulated crash before publish");
+    return h.provider.createWorld(input);
+  } });
+  const id = "gen-frozen-authorization";
+  await makeSandbox(h.root, id);
+  await h.service.plan(id, ulid());
+  const approved = lastPlan(h);
+  await assert.rejects(h.service.begin(id, ulid(), undefined, undefined, approved.approvalDigest), /simulated crash/);
+  const frozen = JSON.parse(await readFile(join(h.root, ".genesis-v2", id, "founding-input.json"), "utf8"));
+  assert.ok(frozen.authorization.route);
+  manifest.models.splice(0, manifest.models.length);
+  failCreation = false;
+  await h.service.plan(id, ulid());
+  assert.deepEqual(lastPlan(h).work, approved.work);
+  await h.service.begin(id, ulid());
+  const record = JSON.parse(await readFile(join(h.provider.openStore()!.dir, "build", "build.json"), "utf8"));
+  assert.equal(record.capMicroUsd, frozen.authorization.capMicroUsd);
+  assert.deepEqual(record.items, frozen.authorization.items);
+  assert.equal(record.image.model, frozen.authorization.route.model.id);
+  await until(() => h.lastState()?.status === "completed", BUILD_MS);
+});
+
+it("refuses a different successful look receipt even when its look words are unchanged", async t => {
+  const h = await makeHarness(t);
+  const id = "gen-look-digest", look = "salt-bleached watercolour, cold light off the water";
+  const dir = await makeSandbox(h.root, id);
+  await writePreview(dir, look);
+  const first = addPreviewReceipt(h, id, look);
+  await h.service.plan(id, ulid());
+  const approved = lastPlan(h);
+  h.queue.jobs.delete(first);
+  addPreviewReceipt(h, id, look);
+  await assert.rejects(h.service.begin(id, ulid(), undefined, undefined, approved.approvalDigest), /changed/);
+  assert.equal(h.worldId(), "");
+});

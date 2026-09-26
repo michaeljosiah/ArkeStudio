@@ -285,7 +285,6 @@ export class GenesisService {
     status("running");
 
     try {
-      await withTransientRetry(() => rm(join(dir, "readiness-review.json"), { force: true }));
       let sessionId = this.sessions.get(genesisId);
       const firstTurn = sessionId === undefined;
       if (sessionId === undefined) {
@@ -438,6 +437,8 @@ export class GenesisService {
           this.emit({ at: at(), type: "genesis.blueprint", genesisId, blueprint, revision });
         }
       }
+      // The repair turn can read the reviewed findings; subsequent turns need a fresh snapshot.
+      await withTransientRetry(() => rm(join(dir, "readiness-review.json"), { force: true }));
       status(final.state, final.detail);
     } catch (err) {
       this.sessions.delete(genesisId);

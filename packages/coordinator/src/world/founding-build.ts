@@ -324,9 +324,10 @@ export class FoundingBuildService {
         reason,
       });
     let blueprint: GenesisBlueprint;
+    let frozen: Awaited<ReturnType<typeof frozenFoundingInput>>;
     try {
       const sandbox = await this.ports.genesisDir(genesisId);
-      const frozen = await frozenFoundingInput(sandbox);
+      frozen = await frozenFoundingInput(sandbox);
       blueprint = frozen?.blueprint ?? (this.ports.reviewedBlueprint ? await this.ports.reviewedBlueprint(genesisId) : await foldBlueprint(sandbox));
       if (frozen) { models = frozen.models; look = frozen.blueprint.look; generateImages = frozen.generateImages ?? true; }
     } catch (err) {
@@ -338,7 +339,7 @@ export class FoundingBuildService {
       return;
     }
     if (blueprint.dropped.length) { refuse("Repair the unreadable draft files before beginning."); return; }
-    const resolved = generateImages ? await this.resolveImageRoute(models) : { route: null, notes: [] };
+    const resolved = frozen?.authorization ? { route: frozen.authorization.route, notes: [] as string[] } : generateImages ? await this.resolveImageRoute(models) : { route: null, notes: [] };
     const route = generateImages ? resolved.route : null, notes = generateImages ? resolved.notes : ["No new image generation is authorized. Approved media will be reused."];
     if (this.ports.reviewNotes) notes.push(...await this.ports.reviewNotes(genesisId));
     for (const character of blueprint.characters) {
@@ -358,7 +359,7 @@ export class FoundingBuildService {
         `${blueprint.dropped.length} blueprint file${blueprint.dropped.length === 1 ? "" : "s"} could not be read and will not build: ${blueprint.dropped.join(", ")}`,
       );
     }
-    const items = compileBuildItems(blueprint, route === null ? null : { model: route.model, referenceImages: route.referenceImages }, undefined,
+    const items = frozen?.authorization?.items ?? compileBuildItems(blueprint, route === null ? null : { model: route.model, referenceImages: route.referenceImages }, undefined,
       generateImages ? undefined : "New image generation was declined. Authorize it later in Activity if wanted.");
     if (keyArtBriefSettled(blueprint.keyArt) && !items.some((item) => item.kind === "key-art")) {
       notes.push("Key art names a character who is never depicted — key art will not be made.");
@@ -394,7 +395,7 @@ export class FoundingBuildService {
   // -------------------------------------------------------------------------
 
   private async approvalDigest(genesisId: string, blueprint: GenesisBlueprint, look: string | undefined,
-    models: Partial<Record<Capability, string>> | undefined, route: ImageRoute | null, items: BuildItem[]): Promise<string> {
+    models: Partial<Record<Capability, string>> | undefined, route: ImageRoute | null, items: BuildItem[], preview?: { jobId: string; hash: string } | null): Promise<string> {
     const founded = effectiveLook(blueprint, look);
     const normalized = { ...blueprint, ...(founded !== undefined ? { look: founded } : {}) };
     if (founded === undefined) delete normalized.look;
@@ -402,7 +403,8 @@ export class FoundingBuildService {
     return conversationActionDigest({ proposals: review?.cards.map(card => ({ key: card.key, digest: card.digest, status: card.status })) ?? null,
       blueprint: normalized, models: models ?? null, route,
       items: items.map(({ idempotencyKey: _key, ...item }) => item),
-      look: await this.masterLookNote(genesisId, founded) });
+      look: await this.masterLookNote(genesisId, founded),
+      preview: preview === undefined ? await this.previewIdentity(genesisId, founded) : preview });
   }
 
   async begin(
@@ -471,16 +473,34 @@ export class FoundingBuildService {
       });
       return;
     }
-    const route = generateImages ? (await this.resolveImageRoute(models)).route : null;
-    const items = compileBuildItems(
+    const route = frozen?.authorization ? frozen.authorization.route : generateImages ? (await this.resolveImageRoute(models)).route : null;
+    const items = frozen?.authorization?.items ?? compileBuildItems(
       blueprint,
       route === null ? null : { model: route.model, referenceImages: route.referenceImages },
       undefined, generateImages ? undefined : "New image generation was declined. Authorize it later in Activity if wanted.",
     );
-    const capMicroUsd = items.filter((item) => item.authorized).reduce((sum, item) => sum + item.estimatedMicroUsd, 0);
-    if (!frozen && approvalDigest !== undefined && approvalDigest !== await this.approvalDigest(genesisId, folded, look, models, route, items))
+    const capMicroUsd = frozen?.authorization?.capMicroUsd ?? items.filter((item) => item.authorized).reduce((sum, item) => sum + item.estimatedMicroUsd, 0);
+    const reviewedPreview = await this.previewIdentity(genesisId, founded);
+    if (!frozen && approvalDigest !== undefined && approvalDigest !== await this.approvalDigest(genesisId, folded, look, models, route, items, reviewedPreview))
       throw new Error("The approved content, media choices or generation estimate changed. Review the current build before Begin.");
-    if (!frozen) await atomicWriteFile(join(genesisControlDir(sandbox), "founding-input.json"), JSON.stringify({ blueprint, generateImages, ...(models ? { models } : {}) }) + "\n");
+    if (!frozen?.authorization) {
+      if (frozen && route && approvalDigest !== await this.approvalDigest(genesisId, folded, founded, models, route, items))
+        throw new Error("Review the current build before recovering this older founding approval.");
+      const identity = reviewedPreview;
+      let preview = null;
+      if (identity) {
+        const carried = await this.carriablePreview(genesisId, founded);
+        if (!carried || carried.jobId !== identity.jobId) throw new Error("The reviewed look preview is unavailable.");
+        const bytes = await readFile(carried.image);
+        if (sha256(bytes) !== identity.hash) throw new Error("The reviewed look preview changed.");
+        const file = `approved-look${carried.extension}`;
+        await atomicWriteFile(join(genesisControlDir(sandbox), file), bytes);
+        preview = { ...identity, file, extension: carried.extension };
+      }
+      await atomicWriteFile(join(genesisControlDir(sandbox), "founding-input.json"), JSON.stringify({
+        blueprint, generateImages, ...(models ? { models } : {}), authorization: { route, items, capMicroUsd, preview },
+      }) + "\n");
+    }
 
     // Wave 0 is the world itself: world.json, art direction v1 from the look the conversation
     // proposed, and the bible it wrote (R-18). The marker is written the moment the world's
@@ -1030,7 +1050,7 @@ export class FoundingBuildService {
   private async carriablePreview(
     genesisId: string,
     foundedLook: string | undefined,
-  ): Promise<{ image: string; extension: string } | null> {
+  ): Promise<{ image: string; jobId: string; extension: string } | null> {
     if (foundedLook === undefined) return null;
     const sandbox = await this.ports.genesisDir(genesisId).catch(() => null);
     if (sandbox === null) return null;
@@ -1061,7 +1081,7 @@ export class FoundingBuildService {
     if (landed === undefined) return null;
     const image = join(sandbox, fromPortable(landed));
     if ((await stat(toExtendedLength(image)).catch(() => null))?.isFile() !== true) return null;
-    return { image, extension: landed.slice(landed.lastIndexOf(".")).toLowerCase() || ".png" };
+    return { image, jobId: latest.id, extension: landed.slice(landed.lastIndexOf(".")).toLowerCase() || ".png" };
   }
 
   /**
@@ -1070,10 +1090,21 @@ export class FoundingBuildService {
    * look the world was founded on. A preview of rejected words is not carried: a wrong master
    * look is worse than none, because nothing downstream ever asks again.
    */
+  private async previewIdentity(genesisId: string, look: string | undefined) {
+    const preview = await this.carriablePreview(genesisId, look);
+    return preview ? { jobId: preview.jobId, hash: sha256(await readFile(preview.image)) } : null;
+  }
+
   private async carryLookPreview(active: ActiveBuild): Promise<void> {
     const store = this.ports.openStore();
     if (!store || store.worldId !== active.record.worldId) return;
-    const carried = await this.carriablePreview(active.record.genesisId, active.record.blueprint.look);
+    const sandbox = await this.ports.genesisDir(active.record.genesisId);
+    const frozen = await frozenFoundingInput(sandbox);
+    const approved = frozen?.authorization?.preview;
+    const carried = frozen?.authorization
+      ? approved ? { image: join(genesisControlDir(sandbox), approved.file), extension: approved.extension } : null
+      : await this.carriablePreview(active.record.genesisId, active.record.blueprint.look);
+    if (approved && carried && sha256(await readFile(carried.image)) !== approved.hash) throw new Error("The approved look preview changed.");
     if (carried === null) return;
     const { image, extension } = carried;
     const destination = masterLookFile(active.record.artDirectionVersion, extension);
@@ -1331,6 +1362,8 @@ export class FoundingBuildService {
     let input: EnqueueInput;
     try {
       input = await this.compileDispatch(active, item, store, model);
+      if (state.status === "running" && input.estimatedMicroUsd > item.estimatedMicroUsd)
+        throw new Error("The current image estimate exceeds the approved amount. Review and retry this item in Activity.");
     } catch (err) {
       // Same as runOne's catch: this resolves normally, so the journal's translated `detail` is
       // the failure's only trace unless the raw diagnostic is logged here too.

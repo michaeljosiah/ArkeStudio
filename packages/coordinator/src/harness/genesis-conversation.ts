@@ -1,6 +1,6 @@
 import { basename, dirname, join } from "node:path";
 import { readFile, stat, rm } from "node:fs/promises";
-import { CapabilitySchema, GenesisBlueprintSchema, newId, ulid, UlidSchema, type DomainEvent, type GenesisBlueprint, type WorldChatMessage } from "@arke-studio/contracts";
+import { CapabilitySchema, GenesisBlueprintSchema, BuildItemSchema, ManifestModelSchema, newId, ulid, UlidSchema, type DomainEvent, type GenesisBlueprint, type WorldChatMessage } from "@arke-studio/contracts";
 import { z } from "zod";
 import { WorldChatStore, conversationDir } from "../world-chat/store.js";
 import { foldBlueprint } from "./blueprint.js";
@@ -14,7 +14,13 @@ export function genesisControlDir(workspace: string): string {
   return dirname(workspace);
 }
 
-const FrozenFoundingSchema = z.object({ blueprint: GenesisBlueprintSchema, models: z.record(CapabilitySchema, z.string()).optional(), generateImages: z.boolean().optional() }).strict();
+const FrozenFoundingSchema = z.object({ blueprint: GenesisBlueprintSchema, models: z.record(CapabilitySchema, z.string()).optional(), generateImages: z.boolean().optional(),
+  authorization: z.object({
+    route: z.object({ model: ManifestModelSchema, referenceImages: z.number().int().nonnegative() }).strict().nullable(),
+    items: z.array(BuildItemSchema), capMicroUsd: z.number().int().nonnegative(),
+    preview: z.object({ jobId: z.string(), hash: z.string(), file: z.string().regex(/^approved-look\.(png|jpg|jpeg|webp)$/), extension: z.enum([".png", ".jpg", ".jpeg", ".webp"]) }).strict().nullable(),
+  }).strict().optional(),
+}).strict();
 export async function frozenFoundingInput(dir: string) {
   return readFile(join(genesisControlDir(dir), "founding-input.json"), "utf8")
     .then(raw => FrozenFoundingSchema.parse(JSON.parse(raw)))
