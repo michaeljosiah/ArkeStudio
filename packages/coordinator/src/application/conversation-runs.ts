@@ -153,8 +153,9 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     validateSceneEdits: ({ entryContext, edits, baseVersion }) =>
       applySceneEdits(store, { entryContext, edits, baseVersion, dryRun: true }),
     prepareActions: async (turn) => {
+      const prepared = await prepareWorldChatActions(store, actionLifecycle, turn, { getExports: () => deps.actionExports() });
       if (turn.actions.some(action => action.kind === "prop-authoring" || action.kind === "prop-reference")) await store.ensureSchemaVersion(CONVERSATIONAL_PROPS_SCHEMA_VERSION, "world-chat");
-      return prepareWorldChatActions(store, actionLifecycle, turn, { getExports: () => deps.actionExports() });
+      return prepared;
     },
     bindActions: async (actions) => {
       // Every binding appends to the same conversation, and proposal staging is also guarded per

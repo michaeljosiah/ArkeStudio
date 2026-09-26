@@ -25,6 +25,7 @@ import { GenesisBlueprintSchema } from "./genesis.js";
 import { GenesisContentReviewSchema } from "./genesis-review.js";
 import { GenesisImagesSchema } from "./genesis-images.js";
 import { GenesisVoicesSchema } from "./genesis-voices.js";
+import { GenesisReadinessSchema } from "./genesis-readiness.js";
 import { GenesisImportsSchema } from "./genesis-imports.js";
 import { FrameRunQuoteSchema, FrameRunStateSchema } from "./frame-run.js";
 import { HarnessStatusSchema } from "./harness.js";
@@ -1805,6 +1806,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     conversationId: ConversationIdSchema, worldId: UlidSchema.optional(),
     founding: z.boolean().optional(),
     frozenModels: ModelChoicesSchema.optional(),
+    frozenGenerateImages: z.boolean().optional(),
     formHandoff: z.enum(["pending", "completed"]).optional(),
     turns: z.array(z.object({ id: z.string(), role: z.enum(["user", "gate"]), text: z.string(), at: IsoDateTimeSchema }).strict()),
     blueprint: GenesisBlueprintSchema,
@@ -1816,6 +1818,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("genesis.image-error"), genesisId: z.string().min(1), detail: z.string() }).strict(),
   z.object({ ...base, type: z.literal("genesis.images"), genesisId: z.string().min(1), images: GenesisImagesSchema }).strict(),
   z.object({ ...base, type: z.literal("genesis.voices"), genesisId: z.string().min(1), voices: GenesisVoicesSchema }).strict(),
+  z.object({ ...base, type: z.literal("genesis.readiness"), genesisId: z.string().min(1), review: GenesisReadinessSchema }).strict(),
   z.object({ ...base, type: z.literal("genesis.import-error"), genesisId: z.string().min(1), detail: z.string() }).strict(),
   z.object({ ...base, type: z.literal("genesis.imports"), genesisId: z.string().min(1), imports: GenesisImportsSchema }).strict(),
   z

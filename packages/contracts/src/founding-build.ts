@@ -465,11 +465,12 @@ export function compileBuildItems(
   blueprint: GenesisBlueprint,
   route: BuildImageRoute | null,
   mintKey: () => string = ulid,
+  noImageReason?: string,
 ): BuildItem[] {
   const items: BuildItem[] = [];
   const worldName = blueprint.name ?? "The world";
   const noImages = route === null;
-  const refusal = noImages ? "no image model resolves — add a provider key and run it from Activity" : undefined;
+  const refusal = noImages ? noImageReason ?? "no image model resolves — add a provider key and run it from Activity" : undefined;
   const sheetsRefused =
     route !== null && route.referenceImages === 0
       ? `${route.model.displayName} takes no reference images, so character sheets cannot carry the main photo`
@@ -648,6 +649,9 @@ export function compileBuildItems(
 
 export const BuildReviewSchema = z
   .object({
+    approvalDigest: z.string().optional(),
+    approvedContent: GenesisBlueprintSchema.optional(),
+    work: z.array(z.object({ key: z.string(), name: z.string(), kind: BuildItemKindSchema, authorized: z.boolean(), estimatedMicroUsd: z.number() }).strict()).optional(),
     genesisId: GenesisIdSchema,
     requestId: UlidSchema,
     worldName: z.string().min(1),

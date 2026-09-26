@@ -9,6 +9,9 @@ import { renderInlineMarkdown } from "../components/inline-markdown.js";
 import { GenesisContentCards } from "../components/genesis-review.js";
 import { GenesisImageCards } from "../components/genesis-images.js";
 import { GenesisVoiceCards } from "../components/genesis-voices.js";
+import { GenesisReadinessCard, FoundingProgressCard } from "../components/genesis-readiness.js";
+import { ApprovedGenesisContent } from "../components/genesis-review.js";
+import { reviewGenesisReadiness, leaveGenesisFinding } from "../lib/store.js";
 import { reviewGenesisVoices, generateGenesisVoice, decideGenesisVoice } from "../lib/store.js";
 import { GenesisImportCards } from "../components/genesis-imports.js";
 import { reviewGenesisImports, resolveGenesisImport } from "../lib/store.js";
@@ -62,7 +65,6 @@ import {
   cancelJob,
   proposeGenesisWorld,
   genesisDiscard,
-  stopFoundingBuild,
   hostCanAttach,
   chooseClaudeExecutable,
   clearClaudeExecutable,
@@ -708,6 +710,17 @@ function BuildCard({
         <p className="fy-actioncard__notice">{entry.reason ?? "the build could not be sized"}</p>
       ) : (
         <>
+          {plan.approvedContent && <ApprovedGenesisContent blueprint={plan.approvedContent} />}
+          {plan.approvedContent?.selectedImages?.map(selection => <details key={selection.target}>
+            <summary>Reuse {selection.candidate.label} for {selection.target}</summary>
+            <img className="fy-actioncard__media" src={genesisMediaUrl(plan.genesisId, selection.candidate.file)} alt={selection.candidate.label} />
+          </details>)}
+          {plan.approvedContent?.selectedVoices?.map(selection => <p key={selection.plan.intent.target}>
+            Assign {selection.plan.voice.label} ({selection.plan.voice.provider}) to {selection.plan.title}; no new audition.
+          </p>)}
+          {plan.work && <details><summary>Work and reused selections</summary>{plan.work.map(item => <p key={item.key}>
+            {item.name} · {item.kind.replaceAll("-", " ")} · {item.authorized ? formatMicroUsd(item.estimatedMicroUsd) : "not authorized"}
+          </p>)}</details>}
           <p className="fy-actioncard__consequence">
             {counts
               .filter(([count]) => count > 0)
@@ -774,6 +787,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
   // the thread and founded in one press there; a bare form still creates and seeds the old way.
   const [lookForBuild, setLookForBuild] = useState("");
   const [buildPressed, setBuildPressed] = useState(false);
+  const [generateImages, setGenerateImages] = useState(true);
   const [planRequestId, setPlanRequestId] = useState<string | null>(null);
   const [planStartedAt, setPlanStartedAt] = useState<string | null>(null);
   const buildCardRef = useRef<HTMLDivElement>(null);
@@ -801,10 +815,11 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
   useEffect(() => {
     if (!g?.founding) return;
     setModels(g.frozenModels);
+    setGenerateImages(g.frozenGenerateImages ?? true);
     setLook(g.blueprint?.look ?? "");
     setLookForBuild(g.blueprint?.look ?? "");
     setGenMode("chat");
-  }, [g?.founding, g?.frozenModels, g?.blueprint?.look]);
+  }, [g?.founding, g?.frozenModels, g?.frozenGenerateImages, g?.blueprint?.look]);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   useEffect(() => {
     if (connection !== "open") return;
@@ -1000,8 +1015,8 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
     setPlanStartedAt(new Date().toISOString());
     // A refusal answered the blueprint that moved; the fresh plan is the review it asked for.
     setBuildRequestId(null);
-    planFoundingBuild(genesisId, requestId, lookText, models);
-  }, [buildCardOpen, buildPressed, previewJob?.status, blueprint, g?.review, g?.images, g?.voices, lookForBuild, look, lookSource, genesisId, models, imageRoute]);
+    planFoundingBuild(genesisId, requestId, lookText, models, generateImages);
+  }, [buildCardOpen, buildPressed, previewJob?.status, blueprint, g?.review, g?.images, g?.voices, lookForBuild, look, lookSource, genesisId, models, imageRoute, generateImages]);
 
   const openBuildCard = (lookText: string) => {
     setLookForBuild(lookText);
@@ -1010,7 +1025,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
     const requestId = ulid();
     setPlanRequestId(requestId);
     setPlanStartedAt(new Date().toISOString());
-    planFoundingBuild(genesisId, requestId, lookText, models);
+    planFoundingBuild(genesisId, requestId, lookText, models, generateImages);
     setStep("draft");
   };
 
@@ -1225,10 +1240,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                 setParams({ draft: `gen-${ulid().toLowerCase()}` });
               }}>{confirmDiscard ? "Discard this conversation and its uploads" : "Discard draft"}</Button>
             )}
-            {myBuild?.status === "running" && <Callout title={`Building ${myBuild.worldName}`}>
-              {myBuild.progress.terminal} of {myBuild.progress.authorized} complete. {myBuild.working.join(", ")}
-              <Button onClick={() => stopFoundingBuild(myBuild.worldId)}>Stop</Button>
-            </Callout>}
+            {myBuild && <FoundingProgressCard build={myBuild} />}
             {genMode === "chat" ? (
               <>
                 {/* 12a opens with Arke already talking. It opened here with sixty-six words of
@@ -1242,20 +1254,23 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                   </div>
                 ))}
                 {g?.importError && <Callout title="Import review needs attention">{g.importError}</Callout>}
-                {g?.imports && <GenesisImportCards imports={g.imports} blueprint={blueprint} busy={chatRunning || buildPressed || !!g.worldId || !!g.founding}
+                {g?.imports && <GenesisImportCards imports={g.imports} blueprint={blueprint} busy={!!g.decisionPending || !!g.readinessPending || chatRunning || buildPressed || !!g.worldId || !!g.founding}
                   onResolve={resolution => resolveGenesisImport(genesisId, resolution)}
                   onRefresh={() => reviewGenesisImports(genesisId)}
                   onExtract={name => setMessage(`Please extract reviewable worldbuilding proposals from attachments/${name}. Cite exact source quotes; keep interpretations and suggested relationships separate from the evidence.`)} />}
-                {g?.review && <GenesisContentCards review={g.review} busy={!!g.reviewPending || chatRunning || buildPressed || !!g?.founding || !!g?.worldId || myBuild?.status === "running"}
+                {g?.review && <GenesisContentCards review={g.review} busy={!!g.decisionPending || !!g.readinessPending || !!g.reviewPending || chatRunning || buildPressed || !!g?.founding || !!g?.worldId || myBuild?.status === "running"}
                   onDecide={(cards, decision) => decideGenesisDraft(genesisId, cards.map(card => ({ key: card.key, digest: card.digest })), decision)}
                   onRevise={title => setMessage(`Please revise ${title}: `)} />}
-                {g?.voices && <GenesisVoiceCards genesisId={genesisId} voices={g.voices} jobs={voiceJobs} busy={chatRunning || buildPressed}
+                {!g?.worldId && <GenesisReadinessCard review={g?.readiness} busy={!!g?.decisionPending || !!g?.reviewPending || chatRunning || buildPressed || !!g?.founding || !!g?.readinessPending}
+                  onRefresh={() => reviewGenesisReadiness(genesisId)} onFix={setMessage}
+                  onLeave={(id, digest) => leaveGenesisFinding(genesisId, id, digest)} />}
+                {g?.voices && <GenesisVoiceCards genesisId={genesisId} voices={g.voices} jobs={voiceJobs} busy={!!g.decisionPending || !!g.readinessPending || chatRunning || buildPressed || !!g.founding || !!g.worldId}
                   onGenerate={(intentId, digest) => generateGenesisVoice(genesisId, intentId, digest)}
                   onDecide={(target, decision, candidate) => decideGenesisVoice(genesisId, target, decision, candidate)}
                   onRevise={setMessage} onRefresh={() => reviewGenesisVoices(genesisId)} onCancel={cancelJob} />}
                 {g?.imageError && <Callout title="Image request needs attention">{g.imageError}</Callout>}
                 {g?.images && blueprint && <GenesisImageCards genesisId={genesisId} blueprint={blueprint} images={g.images} jobs={imageJobs}
-                  busy={chatRunning || buildPressed || myBuild?.status === "running" || !!g.worldId}
+                  busy={!!g.decisionPending || !!g.readinessPending || chatRunning || buildPressed || !!g.founding || myBuild?.status === "running" || !!g.worldId}
                   onGenerate={(intentId, digest) => generateGenesisImage(genesisId, intentId, digest, models)}
                   onDecide={(target, decision, candidate) => decideGenesisImage(genesisId, target, decision, candidate)}
                   onCancel={cancelJob} onRevise={setMessage} />}
@@ -1331,18 +1346,20 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                 )}
                 {buildMode && buildCardOpen && (
                   <div ref={buildCardRef}>
+                    <label><input type="checkbox" checked={generateImages} disabled={buildPressed || g?.founding}
+                      onChange={event => { setGenerateImages(event.target.checked); plannedAgainst.current = null; }} /> Generate remaining images</label>
                     <BuildCard
                       plan={visibleBuildPlan}
                       startedAt={planStartedAt}
                       pressed={buildPressed}
-                      settling={chatRunning || !!g?.reviewPending || plannedAgainst.current?.review !== g?.review}
+                      settling={chatRunning || !!g?.decisionPending || !!g?.readinessPending || !!g?.reviewPending || plannedAgainst.current?.review !== g?.review || plannedAgainst.current?.images !== g?.images || plannedAgainst.current?.voices !== g?.voices}
                       onDismiss={leaveBuild}
                       onBuild={() => {
-                        if (g?.reviewPending || plannedAgainst.current?.review !== g?.review || !visibleBuildPlan?.plan) return;
+                        if (g?.decisionPending || g?.readinessPending || g?.reviewPending || plannedAgainst.current?.review !== g?.review || plannedAgainst.current?.images !== g?.images || plannedAgainst.current?.voices !== g?.voices || !visibleBuildPlan?.plan) return;
                         if (buildRequestRef.current === null) buildRequestRef.current = ulid();
                         setBuildRequestId(buildRequestRef.current);
                         setBuildPressed(true);
-                        beginFoundingBuild(genesisId, buildRequestRef.current, lookForBuild, models);
+                        beginFoundingBuild(genesisId, buildRequestRef.current, lookForBuild, models, visibleBuildPlan?.plan?.approvalDigest, generateImages);
                       }}
                     />
                   </div>

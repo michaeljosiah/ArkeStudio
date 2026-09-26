@@ -61,6 +61,8 @@ it("refuses a stale removal after another image has been selected", async () => 
   await decideGenesisImage(dir, draft, { target: "character:maren", requestId: ulid(), decision: "approve", candidateId: second.id, hash: second.hash });
   await assert.rejects(decideGenesisImage(dir, draft, { target: "character:maren", requestId: ulid(), decision: "unassign", candidateId: first.id, hash: first.hash }), /selected image changed/);
   assert.equal((await savedGenesisImages(dir)).selections[0]?.candidate.id, second.id);
+  await decideGenesisImage(dir, draft, { target: "character:maren", requestId: ulid(), decision: "reject", candidateId: second.id, hash: second.hash });
+  assert.equal((await savedGenesisImages(dir)).selections.length, 0, "the latest rejection also removes the durable selection");
 });
 
 it("preserves a completed generation during finalization before its Activity row can be deleted", async () => {

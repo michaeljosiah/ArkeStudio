@@ -31,7 +31,10 @@ export async function savedGenesisImages(dir: string): Promise<GenesisImages> {
     else if (event.candidate && event.decision === "approve") {
       state.selections = [...state.selections.filter(selection => selection.target !== event.target), { target: event.target, candidate: event.candidate }];
       state.rejected = state.rejected.filter(id => id !== `${event.target}/${event.candidate!.id}`);
-    } else if (event.candidate) state.rejected.push(`${event.target}/${event.candidate.id}`);
+    } else if (event.candidate) {
+      state.selections = state.selections.filter(selection => selection.target !== event.target || selection.candidate.id !== event.candidate!.id);
+      state.rejected.push(`${event.target}/${event.candidate.id}`);
+    }
   }
   return state;
 }
@@ -151,6 +154,7 @@ export async function decideGenesisImage(dir: string, blueprint: GenesisBlueprin
         state.selections = [...state.selections.filter(selection => selection.target !== input.target), { target: input.target, candidate }];
         state.rejected = state.rejected.filter(id => id !== `${input.target}/${candidate.id}`);
       } else {
+        state.selections = state.selections.filter(selection => selection.target !== input.target || selection.candidate.id !== candidate.id);
         state.rejected = [...new Set([...state.rejected, `${input.target}/${candidate.id}`])];
       }
     }

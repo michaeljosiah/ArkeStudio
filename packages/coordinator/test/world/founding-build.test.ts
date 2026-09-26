@@ -387,6 +387,33 @@ describe("the founding build (SPEC-031)", () => {
     assert.equal(h.queue.jobs.size, 0);
   });
 
+  it("binds Begin to current content and estimate, and supports declining all new images", async t => {
+    let brokenCredential = false;
+    const h = await makeHarness(t, { credentialFor: async () => {
+      if (brokenCredential) throw new Error("Credential storage is unavailable");
+      return "key";
+    } });
+    const dir = await makeSandbox(h.root, "gen-stale-review");
+    await h.service.plan("gen-stale-review", ulid());
+    const old = lastPlan(h);
+    assert.ok(old.approvalDigest);
+    const raw = JSON.parse(await readFile(join(dir, "draft.json"), "utf8"));
+    await writeFile(join(dir, "draft.json"), JSON.stringify({ ...raw, bible: "A changed argument." }));
+    await assert.rejects(h.service.begin("gen-stale-review", ulid(), undefined, undefined, old.approvalDigest), /estimate changed/);
+    assert.equal(h.provider.openStore(), null);
+    brokenCredential = true;
+    await h.service.plan("gen-stale-review", ulid(), undefined, undefined, false);
+    const current = lastPlan(h);
+    assert.equal(current.generations, 0);
+    assert.equal(current.estimateMicroUsd, 0);
+    assert.match(current.approvedContent!.bible!, /changed argument/);
+    await h.service.begin("gen-stale-review", ulid(), undefined, undefined, current.approvalDigest, false);
+    await until(() => h.lastState()?.status === "completed", "text-only build", BUILD_MS);
+    assert.equal(h.queue.jobs.size, 0);
+    assert.equal(h.provider.openStore()!.getBundle().sheets.length, 3);
+    assert.ok(h.lastState()!.items.filter(item => !item.authorized).every(item => item.detail?.includes("declined")));
+  });
+
   it("saves an approved founding voice through sheet assignment without another audition", async t => {
     const voice = { provider: "kokoro", model: "kokoro-82m", voiceId: "af_heart", label: "Heart", attributes: [], local: true, canClone: false };
     let h!: Harness;
@@ -462,7 +489,7 @@ describe("the founding build (SPEC-031)", () => {
     const workspace = await h.provider.genesisDir("gen-reviewed");
     await mkdir(join(workspace, "draft", "characters"), { recursive: true });
     await mkdir(join(workspace, "draft", "locations"), { recursive: true });
-    await writeFile(join(workspace, "draft.json"), JSON.stringify({ name: "Harbour", bible: "The gate stays closed.",
+    await writeFile(join(workspace, "draft.json"), JSON.stringify({ name: "Harbour", bible: "The gate stays closed.", tone: "Neo-Noir", genre: "Science Fiction",
       canon: [
         { slug: "gate-rule", type: "rule", title: "The gate", statement: "Nobody opens the gate." },
         { slug: "gate-maker", type: "thread", title: "Who made it?", statement: "Who made the gate?" },
@@ -488,6 +515,8 @@ describe("the founding build (SPEC-031)", () => {
     assert.ok(h.lastState()?.items.filter(item => item.authorized).every(item => item.state === "landed"), JSON.stringify(h.lastState()?.items));
     const bundle = h.provider.openStore()!.getBundle();
     const maren = bundle.sheets.find(sheet => sheet.name === "Maren")!;
+    assert.equal(bundle.meta.tone, "Neo-Noir");
+    assert.equal(bundle.meta.genre, "Science Fiction");
     const vigil = bundle.sheets.find(sheet => sheet.name === "The Vigil")!;
     assert.ok(maren && vigil);
     assert.deepEqual(maren.links, [vigil.id]);
@@ -1033,6 +1062,18 @@ describe("the founding build (SPEC-031)", () => {
       state.items.some((item) => item.kind === "key-art" && item.state === "skipped"),
       "what was never dispatched is not dispatched",
     );
+    await h.service.dismissNotice(h.worldId());
+    const key = state.items.find(item => item.kind === "main-photo")!.key;
+    const retry = h.service.runItems(h.worldId(), key);
+    await until(() => [...h.queue.jobs.values()].some(job => job.status === "running"), "retried image running", BUILD_MS);
+    const retried = [...h.queue.jobs.values()].find(job => job.status === "running")!;
+    const queued = h.service.runItems(h.worldId(), key);
+    const submissions = h.queue.jobs.size;
+    await h.service.stop(h.worldId());
+    await retry;
+    await queued;
+    assert.equal(h.queue.jobs.size, submissions, "Stop also cancels a retry queued behind the running retry");
+    assert.ok(h.queue.cancelled.includes(retried.id), "Stop cancels a retry after the original build was already stopped");
   });
 });
 
@@ -1065,4 +1106,59 @@ it("never-depicted characters keep their sheet but never enter either image wave
   await h.service.runItems(h.worldId());
   assert.equal(h.queue.jobs.size, before, "Run remaining work cannot resurrect omitted portraits");
   assert.equal((await readKit(store, sheet.id))?.kit.mainPhoto, undefined);
+});
+
+it("invalidates Begin when only an unapproved proposal changes", async t => {
+  let h!: Harness;
+  h = await makeHarness(t, { manifest: null, reviewedBlueprint: async id => approvedBlueprintForFounding(await h.provider.genesisDir(id)) });
+  const id = "gen-pending-digest", dir = await h.provider.genesisDir(id);
+  await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Harbour" }));
+  await decideGenesisContent(dir, (await reviewGenesisContent(dir)).cards, "approve", ulid());
+  await h.service.plan(id, ulid(), undefined, undefined, false);
+  const original = lastPlan(h).approvalDigest;
+  await mkdir(join(dir, "draft", "characters"), { recursive: true });
+  await writeFile(join(dir, "draft", "characters", "maren.json"), JSON.stringify({ name: "Maren", line: "Still a proposal" }));
+  await assert.rejects(h.service.begin(id, ulid(), undefined, undefined, original, false), /estimate changed/);
+  assert.equal(h.provider.openStore(), null);
+});
+it("recovers the authorized route, items and cap after a crash before world creation", async t => {
+  let failCreation = true;
+  const manifest = structuredClone(MANIFEST);
+  const h = await makeHarness(t, { manifest, createWorld: async input => {
+    if (failCreation) throw new Error("simulated crash before publish");
+    return h.provider.createWorld(input);
+  } });
+  const id = "gen-frozen-authorization";
+  await makeSandbox(h.root, id);
+  await h.service.plan(id, ulid());
+  const approved = lastPlan(h);
+  await assert.rejects(h.service.begin(id, ulid(), undefined, undefined, approved.approvalDigest), /simulated crash/);
+  const frozen = JSON.parse(await readFile(join(h.root, ".genesis-v2", id, "founding-input.json"), "utf8"));
+  assert.ok(frozen.authorization.route);
+  manifest.models[0]!.pricing = { kind: "perImage", microUsdPerImage: 400000 };
+  failCreation = false;
+  await h.service.plan(id, ulid());
+  assert.deepEqual(lastPlan(h).work, approved.work);
+  await h.service.begin(id, ulid());
+  const record = JSON.parse(await readFile(join(h.provider.openStore()!.dir, "build", "build.json"), "utf8"));
+  assert.equal(record.capMicroUsd, frozen.authorization.capMicroUsd);
+  assert.deepEqual(record.items, frozen.authorization.items);
+  assert.equal(record.image.model, frozen.authorization.route.model.id);
+  await until(() => h.lastState()?.status === "completed", "recovered founding completes", BUILD_MS);
+  assert.equal(h.queue.jobs.size, 0, "higher current pricing cannot spend the earlier approval");
+  assert.ok(h.lastState()?.items.some(item => item.detail?.includes("exceeds the approved amount")));
+});
+
+it("refuses a different successful look receipt even when its look words are unchanged", async t => {
+  const h = await makeHarness(t);
+  const id = "gen-look-digest", look = "salt-bleached watercolour, cold light off the water";
+  const dir = await makeSandbox(h.root, id);
+  await writePreview(dir, look);
+  const first = addPreviewReceipt(h, id, look);
+  await h.service.plan(id, ulid());
+  const approved = lastPlan(h);
+  h.queue.jobs.delete(first);
+  addPreviewReceipt(h, id, look);
+  await assert.rejects(h.service.begin(id, ulid(), undefined, undefined, approved.approvalDigest), /changed/);
+  assert.equal(h.worldId(), "");
 });
