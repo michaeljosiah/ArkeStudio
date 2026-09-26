@@ -136,6 +136,8 @@ export async function decideGenesisImage(dir: string, blueprint: GenesisBlueprin
     const state = await savedGenesisImages(dir);
     const log = await genesisConversation(dir);
     if (input.decision === "unassign") {
+      const selected = state.selections.find(selection => selection.target === input.target)?.candidate;
+      if (!selected || selected.id !== input.candidateId || selected.hash !== input.hash) throw new Error("The selected image changed. Review the current assignment before removing it.");
       await log.append({ type: "founding.image-decision", target: input.target, decision: input.decision }, { at: new Date().toISOString(), requestId: input.requestId });
       state.selections = state.selections.filter(selection => selection.target !== input.target);
     } else {

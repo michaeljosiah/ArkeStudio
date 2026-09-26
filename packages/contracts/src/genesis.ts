@@ -142,7 +142,7 @@ export const GenesisDraftSchema = z
   .object({
     props: z.array(GenesisPropSchema).max(100).optional(),
     voices: z.array(GenesisVoiceIntentSchema).max(100).optional(),
-    images: z.array(GenesisImageIntentSchema).max(100).optional(),
+    images: z.array(GenesisImageIntentSchema).max(100).refine(images => new Set(images.map(image => image.id)).size === images.length, "Image proposal IDs must be unique.").optional(),
     canon: z.array(GenesisCanonSchema).max(100).refine(entries => new Set(entries.map(entry => entry.slug)).size === entries.length, "Canon entries need unique slugs.").optional(),
     name: z.string().min(1).max(120).optional(),
     logline: z.string().min(1).max(500).optional(),
@@ -265,7 +265,7 @@ export type BlueprintFaction = z.infer<typeof BlueprintFactionSchema>;
 export const GenesisBlueprintSchema = z
   .object({
     props: z.array(GenesisPropSchema).max(100).optional(),
-    images: z.array(GenesisImageIntentSchema).optional(),
+    images: z.array(GenesisImageIntentSchema).refine(images => new Set(images.map(image => image.id)).size === images.length, "Image proposal IDs must be unique.").optional(),
     selectedImages: z.array(GenesisImageSelectionSchema).optional(),
     voices: z.array(GenesisVoiceIntentSchema).optional(),
     selectedVoices: z.array(GenesisVoiceCandidateSchema).optional(),
