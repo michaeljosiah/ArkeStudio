@@ -186,7 +186,9 @@ export type GenesisDraft = z.infer<typeof GenesisDraftSchema>;
  * removed from the fold and never built.
  */
 const entityFileBase = {
-  sources: z.array(GenesisSourceSchema).max(100).optional(),
+  // Draft files previously allowed unknown source-shaped data. Keep their authored text
+  // readable; verified import evidence is restored from the private import record.
+  sources: z.array(GenesisSourceSchema).max(100).optional().catch(undefined),
     sheet: GenesisSheetContentSchema.optional(),
   name: z.string().min(1).max(120),
   line: z.string().min(1).max(300).optional(),
