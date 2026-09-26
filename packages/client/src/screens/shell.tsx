@@ -1261,7 +1261,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                 {g?.review && <GenesisContentCards review={g.review} busy={chatRunning || buildPressed || !!g?.founding || !!g?.worldId || myBuild?.status === "running"}
                   onDecide={(cards, decision) => decideGenesisDraft(genesisId, cards.map(card => ({ key: card.key, digest: card.digest })), decision)}
                   onRevise={title => setMessage(`Please revise ${title}: `)} />}
-                {!g?.worldId && <GenesisReadinessCard review={g?.readiness} busy={chatRunning || buildPressed || !!g?.founding || !!g?.readinessPending}
+                {!g?.worldId && <GenesisReadinessCard review={g?.readiness} busy={!!g?.reviewPending || chatRunning || buildPressed || !!g?.founding || !!g?.readinessPending}
                   onRefresh={() => reviewGenesisReadiness(genesisId)} onFix={setMessage}
                   onLeave={(id, digest) => leaveGenesisFinding(genesisId, id, digest)} />}
                 {g?.voices && <GenesisVoiceCards genesisId={genesisId} voices={g.voices} jobs={voiceJobs} busy={chatRunning || buildPressed || !!g.founding || !!g.worldId}

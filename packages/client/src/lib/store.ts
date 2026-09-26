@@ -2853,7 +2853,7 @@ export function reviewGenesisImages(genesisId: string, models?: Partial<Record<i
 }
 export function reviewGenesisVoices(genesisId: string): void { send({ kind: "genesis-voices", genesisId }); }
 function beginReadinessRequest(genesisId: string): boolean {
-  if (!bridge || current.connection !== "open" || current.genesis[genesisId]?.readinessPending) return false;
+  if (!bridge || current.connection !== "open" || (current.genesis[genesisId]?.readinessPending || current.genesis[genesisId]?.reviewPending || current.genesis[genesisId]?.founding)) return false;
   emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...emptyGenesis(), ...current.genesis[genesisId], readinessPending: true } } });
   return true;
 }

@@ -2986,9 +2986,9 @@ export class Coordinator {
               const jobs = (this.jobQueue?.listJobs() ?? []).filter(job => job.worldId === genesisId);
               await reviewGenesisImages(dir, await foldBlueprint(dir), jobs, null);
               const images = await reviewedGenesisImages(dir, await approvedBlueprintForFounding(dir), jobs);
-              return reviewedGenesisVoices(dir, images, jobs, await this.voiceService?.catalogue() ?? [], this.opts.manifest?.models ?? []);
+              return reviewedGenesisVoices(dir, images, jobs, await this.genesisVoiceCatalogue(), this.opts.manifest?.models ?? []);
             },
-            voiceAvailable: async voice => (await this.voiceService?.catalogue() ?? []).some(candidate =>
+            voiceAvailable: async voice => (await this.genesisVoiceCatalogue()).some(candidate =>
               candidate.provider === voice.provider && candidate.model === voice.model && candidate.voiceId === voice.voiceId && !candidate.unavailableReason && !candidate.readsClone),
             reviewNotes: async (genesisId) => {
               const review = await reviewGenesisContent(await this.opts.provider.genesisDir!(genesisId));
@@ -7161,7 +7161,7 @@ export class Coordinator {
           const loaded = await loadGenesisConversation(dir, msg.genesisId);
           if (loaded.worldId || loaded.founding) throw new Error("Continue repairs in the world's conversation.");
           const inputs = { jobs: (this.jobQueue?.listJobs() ?? []).filter(job => job.worldId === msg.genesisId),
-            catalogue: await this.voiceService?.catalogue() ?? [], models: this.opts.manifest?.models ?? [] };
+            catalogue: await this.genesisVoiceCatalogue(), models: this.opts.manifest?.models ?? [] };
           const review = msg.kind === "genesis-readiness-leave" ? await leaveGenesisFinding(dir, inputs, msg.digest, msg.findingId) : await reviewGenesisReadiness(dir, inputs);
           await atomicWriteFile(join(dir, "readiness-review.json"), JSON.stringify(review, null, 2));
           this.emit({ type: "genesis.readiness", at: new Date().toISOString(), genesisId: msg.genesisId, review });
@@ -7183,9 +7183,7 @@ export class Coordinator {
           const loaded = await loadGenesisConversation(dir, msg.genesisId);
           if (loaded.worldId || loaded.founding) throw new Error("Continue voice work in the founded world's conversation.");
           const blueprint = await foldBlueprint(dir);
-          const disabled = this.readModel.getState().app.models.disabled;
-          const catalogue = (await this.voiceService?.catalogue() ?? []).map(voice => disabled.includes(voice.model)
-            ? { ...voice, unavailableReason: "This voice model is disabled in Settings." } : voice);
+          const catalogue = await this.genesisVoiceCatalogue();
           const jobs = () => (this.jobQueue?.listJobs() ?? []).filter(job => job.worldId === msg.genesisId);
           let voices = await reviewGenesisVoices(dir, blueprint, jobs(), catalogue, this.opts.manifest?.models ?? []);
           if (msg.kind === "genesis-voice-generate") {
@@ -16494,6 +16492,12 @@ export class Coordinator {
    * Hold a file for a conversation that has no world yet. It lands in the sandbox the agent
    * works in, so it can be read during the conversation, and is filed properly at Begin.
    */
+  private async genesisVoiceCatalogue() {
+    const disabled = this.readModel.getState().app.models.disabled;
+    return (await this.voiceService?.catalogue() ?? []).map(voice => disabled.includes(voice.model)
+      ? { ...voice, unavailableReason: "This voice model is disabled in Settings." } : voice);
+  }
+
   private async attachToGenesis(genesisId: string, sourcePath: string): Promise<void> {
     const at = new Date().toISOString();
     const dir = await this.opts.provider.genesisDir?.(genesisId).catch(() => null);
