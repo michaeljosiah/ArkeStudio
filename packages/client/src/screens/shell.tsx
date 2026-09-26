@@ -1352,10 +1352,10 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                       plan={visibleBuildPlan}
                       startedAt={planStartedAt}
                       pressed={buildPressed}
-                      settling={chatRunning || !!g?.decisionPending || !!g?.readinessPending || !!g?.reviewPending || plannedAgainst.current?.review !== g?.review}
+                      settling={chatRunning || !!g?.decisionPending || !!g?.readinessPending || !!g?.reviewPending || plannedAgainst.current?.review !== g?.review || plannedAgainst.current?.images !== g?.images || plannedAgainst.current?.voices !== g?.voices}
                       onDismiss={leaveBuild}
                       onBuild={() => {
-                        if (g?.decisionPending || g?.readinessPending || g?.reviewPending || plannedAgainst.current?.review !== g?.review || !visibleBuildPlan?.plan) return;
+                        if (g?.decisionPending || g?.readinessPending || g?.reviewPending || plannedAgainst.current?.review !== g?.review || plannedAgainst.current?.images !== g?.images || plannedAgainst.current?.voices !== g?.voices || !visibleBuildPlan?.plan) return;
                         if (buildRequestRef.current === null) buildRequestRef.current = ulid();
                         setBuildRequestId(buildRequestRef.current);
                         setBuildPressed(true);
