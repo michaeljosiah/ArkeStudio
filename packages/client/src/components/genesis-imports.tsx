@@ -27,7 +27,7 @@ function ImportCard({ card, blueprint, busy, onResolve }: { card: GenesisImportC
     <details><summary>Source identity</summary><code>{card.source.hash}</code></details>
     <blockquote style={{ whiteSpace: "pre-wrap" }}>{card.source.quote}</blockquote>
     <p>The quote is verified. The wording below is an interpretation for you to review.</p>
-    <label>Name<input aria-label="Imported name" maxLength={120} value={name} disabled={busy || card.status === "prepared" || card.status === "rejected"} onChange={e => setName(e.target.value)} /></label>
+    <label>Name<input aria-label="Imported name" maxLength={120} value={name} disabled={busy || card.status === "prepared" || card.status === "rejected"} onChange={e => { setName(e.target.value); setMode(""); }} /></label>
     <label>Proposed interpretation<textarea aria-label="Imported interpretation" maxLength={6000} value={body} disabled={busy || card.status === "prepared" || card.status === "rejected"} onChange={e => setBody(e.target.value)} /></label>
     {!!card.proposal.links?.length && <p>Suggested relationships, requiring approval: {card.proposal.links.join(", ")}</p>}
     {!!card.related.length && <Callout title="Other imports with the same name">

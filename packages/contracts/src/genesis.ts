@@ -140,7 +140,7 @@ export function keyArtBriefProse(brief: GenesisKeyArtBrief): string {
  */
 export const GenesisDraftSchema = z
   .object({
-    props: z.array(GenesisPropSchema).max(100).optional(),
+    props: z.array(GenesisPropSchema).max(100).refine(props => new Set(props.map(prop => prop.slug)).size === props.length, "Prop slugs must be unique.").optional(),
     voices: z.array(GenesisVoiceIntentSchema).max(100).refine(voices => new Set(voices.map(voice => voice.id)).size === voices.length, "Voice proposal IDs must be unique.").optional(),
     images: z.array(GenesisImageIntentSchema).max(100).refine(images => new Set(images.map(image => image.id)).size === images.length, "Image proposal IDs must be unique.").optional(),
     canon: z.array(GenesisCanonSchema).max(100).refine(entries => new Set(entries.map(entry => entry.slug)).size === entries.length, "Canon entries need unique slugs.").optional(),
@@ -264,7 +264,7 @@ export type BlueprintFaction = z.infer<typeof BlueprintFactionSchema>;
  */
 export const GenesisBlueprintSchema = z
   .object({
-    props: z.array(GenesisPropSchema).max(100).optional(),
+    props: z.array(GenesisPropSchema).max(100).refine(props => new Set(props.map(prop => prop.slug)).size === props.length, "Prop slugs must be unique.").optional(),
     images: z.array(GenesisImageIntentSchema).refine(images => new Set(images.map(image => image.id)).size === images.length, "Image proposal IDs must be unique.").optional(),
     selectedImages: z.array(GenesisImageSelectionSchema).optional(),
     voices: z.array(GenesisVoiceIntentSchema).refine(voices => new Set(voices.map(voice => voice.id)).size === voices.length, "Voice proposal IDs must be unique.").optional(),

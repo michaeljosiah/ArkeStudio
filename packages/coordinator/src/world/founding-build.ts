@@ -514,8 +514,8 @@ export class FoundingBuildService {
         creationId: reservedWorldId,
         name: blueprint.name,
         ...(blueprint.logline !== undefined ? { logline: blueprint.logline } : {}),
-        ...(blueprint.tone !== undefined ? { tone: blueprint.tone.toLowerCase() } : {}),
-        ...(blueprint.genre !== undefined ? { genre: blueprint.genre.toLowerCase() } : {}),
+        ...(blueprint.tone !== undefined ? { tone: blueprint.reviewed ? blueprint.tone : blueprint.tone.toLowerCase() } : {}),
+        ...(blueprint.genre !== undefined ? { genre: blueprint.reviewed ? blueprint.genre : blueprint.genre.toLowerCase() } : {}),
         ...(blueprint.look !== undefined ? { artDirection: blueprint.look } : {}),
         ...(blueprint.bible !== undefined ? { bible: blueprint.bible } : {}),
         ...(models !== undefined ? { models } : {}),
@@ -550,7 +550,7 @@ export class FoundingBuildService {
           // window moves on. Artifact filing deduplicates an interrupted handoff by bytes.
           const path = join(genesisControlDir(sandbox), "carried-proposals", `founding-proposal-${sha256(card.key).slice(7)}.md`);
           await mkdir(dirname(path), { recursive: true });
-          await atomicWriteFile(path, `# ${card.title} � ${card.status}\n\nThis proposal is not established world content. Any previously approved version remains in force. Changes still need approval.\n\n${JSON.stringify(card.content, null, 2)}\n`);
+          await atomicWriteFile(path, `# ${card.title} - ${card.status}\n\nThis proposal is not established world content. Any previously approved version remains in force. Changes still need approval.\n\n${JSON.stringify(card.content, null, 2)}\n`);
           const filed = await fileArtifact(store, { sourcePath: path });
           if (filed.outcome !== "filed" && filed.outcome !== "deduplicated") throw new Error(filed.reason);
           const at = this.ports.nowIso();

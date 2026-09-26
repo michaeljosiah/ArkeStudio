@@ -74,6 +74,6 @@ export function GenesisContentCards({ review, busy, onDecide, onRevise }: {
         <Button variant="ghost" disabled={busy} onClick={() => onRevise(card.title)}>Request changes</Button>
       </div>
     </article>)}
-    {pending.length > 1 && <Button disabled={busy} onClick={() => onDecide(pending, "approve")}>Approve all {pending.length} pending items shown above</Button>}
+    {pending.length > 1 && <Button disabled={busy} onClick={() => onDecide(pending.slice(0, 300), "approve")}>Approve {pending.length > 300 ? "the next" : "all"} {Math.min(pending.length, 300)} pending items shown above</Button>}
   </section>;
 }

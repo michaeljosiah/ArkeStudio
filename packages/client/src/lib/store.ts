@@ -2904,7 +2904,7 @@ export function leaveGenesisFinding(genesisId: string, findingId: string, digest
 function beginGenesisDecision(genesisId: string, kind: "image" | "voice" | "import"): boolean {
   const draft = current.genesis[genesisId];
   if (!bridge || current.connection !== "open" || draft?.decisionPending || draft?.readinessPending || draft?.reviewPending || draft?.founding || draft?.worldId) return false;
-  emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...emptyGenesis(), ...draft, decisionPending: kind, readiness: undefined } }, buildPlans: { ...current.buildPlans, [genesisId]: {} } });
+  emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...emptyGenesis(), ...draft, decisionPending: kind, readiness: undefined } } });
   return true;
 }
 export function generateGenesisVoice(genesisId: string, intentId: string, digest: string): void {
@@ -2935,7 +2935,7 @@ export function proposeGenesisWorld(genesisId: string, draft: import("@arke-stud
 export function decideGenesisDraft(genesisId: string, choices: Array<{ key: string; digest: string }>, decision: "approve" | "reject"): void {
   const draft = current.genesis[genesisId];
   if (draft?.decisionPending || draft?.readinessPending || draft?.reviewPending || draft?.founding || draft?.worldId) return;
-  send({ kind: "genesis-decide", genesisId, choices, decision, requestId: genesisReviewRequest(genesisId) });
+  send({ kind: "genesis-decide", genesisId, choices: choices.slice(0, 300), decision, requestId: genesisReviewRequest(genesisId) });
 }
 
 export function genesisDiscard(genesisId: string): void {

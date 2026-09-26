@@ -5704,7 +5704,7 @@ export class Coordinator {
     benchDispatchHeld = false,
     genesisDecisionHeld = false,
   ): Promise<void> {
-    if (!genesisDecisionHeld && (msg.kind === "genesis-import-resolve" || msg.kind === "genesis-voice-generate" || msg.kind === "genesis-voice-decide" || msg.kind === "genesis-image-generate" || msg.kind === "genesis-image-decide" || msg.kind === "generate-look-preview" || msg.kind === "genesis-discard" || msg.kind === "genesis-chat" || msg.kind === "genesis-decide" || msg.kind === "genesis-review" || msg.kind === "begin-founding-build" || msg.kind === "genesis-attach" || msg.kind === "genesis-attach-files" || msg.kind === "create-world") && msg.genesisId) {
+    if (!genesisDecisionHeld && (msg.kind === "genesis-propose-world" || msg.kind === "genesis-import-resolve" || msg.kind === "genesis-voice-generate" || msg.kind === "genesis-voice-decide" || msg.kind === "genesis-image-generate" || msg.kind === "genesis-image-decide" || msg.kind === "generate-look-preview" || msg.kind === "genesis-discard" || msg.kind === "genesis-chat" || msg.kind === "genesis-decide" || msg.kind === "genesis-review" || msg.kind === "begin-founding-build" || msg.kind === "genesis-attach" || msg.kind === "genesis-attach-files" || msg.kind === "create-world") && msg.genesisId) {
       return serializeFileMutation(`founding-decisions:${msg.genesisId}`, () => this.handleClientMessage(msg, false, false, true));
     }
     if (!benchTakeActionHeld && (msg.kind === "bench-accept" || msg.kind === "bench-discard")) {

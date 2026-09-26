@@ -489,7 +489,7 @@ describe("the founding build (SPEC-031)", () => {
     const workspace = await h.provider.genesisDir("gen-reviewed");
     await mkdir(join(workspace, "draft", "characters"), { recursive: true });
     await mkdir(join(workspace, "draft", "locations"), { recursive: true });
-    await writeFile(join(workspace, "draft.json"), JSON.stringify({ name: "Harbour", bible: "The gate stays closed.",
+    await writeFile(join(workspace, "draft.json"), JSON.stringify({ name: "Harbour", bible: "The gate stays closed.", tone: "Neo-Noir", genre: "Science Fiction",
       canon: [
         { slug: "gate-rule", type: "rule", title: "The gate", statement: "Nobody opens the gate." },
         { slug: "gate-maker", type: "thread", title: "Who made it?", statement: "Who made the gate?" },
@@ -515,6 +515,8 @@ describe("the founding build (SPEC-031)", () => {
     assert.ok(h.lastState()?.items.filter(item => item.authorized).every(item => item.state === "landed"), JSON.stringify(h.lastState()?.items));
     const bundle = h.provider.openStore()!.getBundle();
     const maren = bundle.sheets.find(sheet => sheet.name === "Maren")!;
+    assert.equal(bundle.meta.tone, "Neo-Noir");
+    assert.equal(bundle.meta.genre, "Science Fiction");
     const vigil = bundle.sheets.find(sheet => sheet.name === "The Vigil")!;
     assert.ok(maren && vigil);
     assert.deepEqual(maren.links, [vigil.id]);
