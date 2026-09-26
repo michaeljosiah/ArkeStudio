@@ -120,7 +120,7 @@ const BUILD_REVIEW: BuildReview = {
   genesisId: GENESIS_ID,
   requestId: BUILD_REQUEST_ID,
   worldName: "Glass Harbor",
-  counts: { characters: 0, locations: 0, factions: 0, threads: 0 },
+  counts: { characters: 0, locations: 0, factions: 0, threads: 0, canon: 0 },
   generations: 0,
   estimateMicroUsd: 0,
   imageModel: null,
