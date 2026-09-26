@@ -377,7 +377,7 @@ describe("live harness model controls (#1123, #1124)", () => {
     await act(async () => __setStateForTest({ ...state, app: { ...state.app,
       harnessModelStatus: { status: "ready" }, harnessModels: [state.app.harnessModels[1]!],
     } }));
-    assert.match(container.textContent!, /1 models from Claude Code/);
+    assert.match(container.textContent!, /1 model from Claude Code/);
     assert.equal([...select("Language model").options].find(option => option.value === OPUS)!.hasAttribute("disabled"), false);
     assert.equal(button("Explain the scene").disabled, false);
     await press("Remember for this production");

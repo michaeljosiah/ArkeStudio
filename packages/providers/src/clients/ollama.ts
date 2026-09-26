@@ -24,6 +24,8 @@ export class OllamaClient implements ProviderClient {
 
   private readonly completed = new Map<string, { artifacts: FetchedArtifact[] }>();
   private counter = 0;
+  /** Every model a dispatch asked for, so quitting can release those and nothing else. */
+  private readonly used = new Set<string>();
 
   constructor(
     private readonly fetchImpl: FetchLike,
@@ -49,6 +51,7 @@ export class OllamaClient implements ProviderClient {
 
   async submit(_key: string, request: SubmitRequest): Promise<SubmitResult> {
     const remoteId = `ollama-${++this.counter}-${Date.now()}`;
+    this.used.add(request.model);
     const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/api/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -179,7 +182,9 @@ export class OllamaClient implements ProviderClient {
   }
 
   /** Query the runtime, including models loaded by the writing harness, before a GPU handover. */
-  async unload(signal?: AbortSignal): Promise<void> {
+  usedModels(): ReadonlySet<string> { return this.used; }
+
+  async unload(signal?: AbortSignal, only?: ReadonlySet<string>): Promise<void> {
     const bounded = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(15_000)]);
     let response: Awaited<ReturnType<typeof jsonRequest>>;
     try {
@@ -194,6 +199,7 @@ export class OllamaClient implements ProviderClient {
       throw new Error("Ollama could not report its loaded models. Check the Ollama engine and try again.");
     }
     for (const model of models) {
+      if (only !== undefined && !only.has(model.name!)) continue;
       const result = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/api/generate`, {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: bounded,
         body: JSON.stringify({ model: model.name, keep_alive: 0, stream: false }),

@@ -6755,12 +6755,87 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ch__draft { border-left: 2px solid var(--border); padding-left: 14px; }
 .fy-ch__side { width: 250px; flex: none; display: flex; flex-direction: column; gap: 20px; padding-top: 6px; overflow: auto; }
 /* The Audiobook view (design turn 146): a row a block, the reader in a 70px mark column, an 8px dot for its state. */
-.fy-ab__blocks { flex: 1; min-height: 0; overflow: auto; padding: 6px 2px 0; max-width: 640px; }
-.fy-ab__block { display: grid; grid-template-columns: 70px minmax(0, 1fr) 14px; gap: 10px; align-items: start; padding: 4px 6px; margin: 0 -6px 6px; border-radius: 6px; cursor: pointer; }
+.fy-ab__blocks { flex: 1; min-height: 0; overflow: auto; padding: 6px 8px 0; max-width: 640px; }
+.fy-ab__block { display: grid; grid-template-columns: 96px minmax(0, 1fr) 44px; gap: 10px; align-items: start; padding: 5px 8px; margin: 0 -8px 4px; border-radius: 7px; cursor: pointer; box-sizing: border-box; }
+/* Who speaks (SPEC-047 R-33): a colour a speaker, grey for the narrator, a dashed dot for a name
+   no sheet carries. A line is tinted in its speaker's colour and ruled; narration is neither. */
+.fy-voice--narrator { --fy-voice: var(--neutral-400); }
+.fy-voice--none { --fy-voice: var(--neutral-400); }
+.fy-voice--1 { --fy-voice: var(--voice-1); }
+.fy-voice--2 { --fy-voice: var(--voice-2); }
+.fy-voice--3 { --fy-voice: var(--voice-3); }
+.fy-voice--4 { --fy-voice: var(--voice-4); }
+.fy-voice--5 { --fy-voice: var(--voice-5); }
+.fy-voice--6 { --fy-voice: var(--voice-6); }
+.fy-ab__block--line { background: color-mix(in srgb, var(--fy-voice) 7%, transparent); box-shadow: inset 2px 0 0 var(--fy-voice); }
+.fy-ab__block--dim { opacity: 0.4; }
+.fy-ab__speaker { display: inline-flex; align-items: center; gap: 6px; max-width: 96px; height: 22px; margin-top: 3px; min-width: 0; font: 400 12px/1.2 var(--font-sans); color: var(--fy-voice); }
+.fy-ab__speaker-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--fy-voice); box-sizing: border-box; }
+.fy-voice--none .fy-ab__speaker-dot, .fy-ab__speaker-dot.fy-voice--none { background: transparent; border: 1px dashed var(--fy-voice); }
+.fy-ch__who-name:has(.fy-ab__speaker-dot) { display: flex; align-items: baseline; gap: 7px; }
+.fy-ch__who-name .fy-ab__speaker-dot { align-self: center; }
+.fy-voice--none .fy-ab__speaker, .fy-voice--narrator .fy-ab__speaker { color: var(--muted-foreground); }
+.fy-ab__block { position: relative; }
+.fy-ab__speaker--press { border: 0; background: transparent; padding: 0 7px 0 6px; margin-left: -6px; border-radius: 6px; cursor: pointer; }
+.fy-ab__speaker--press:hover, .fy-ab__speaker--open { background: var(--background); box-shadow: 0 0 0 1px var(--ring); }
+.fy-voice--plain { --fy-voice: var(--neutral-300); }
+.fy-ab__pin { display: inline-flex; color: var(--muted-foreground); }
+/* The speaker menu (design turn 155b, SPEC-012 R-63): 236 wide, under the chip. */
+.fy-ab__menu { position: absolute; left: 0; top: 32px; z-index: 5; width: 236px; padding: 6px; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-lg); box-sizing: border-box; cursor: default; }
+.fy-ab__menu-search { width: 100%; height: 30px; box-sizing: border-box; margin-bottom: 4px; padding: 0 8px; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--foreground); font: 400 12px/1.4 var(--font-sans); outline: none; }
+.fy-ab__menu-eb { padding: 6px 8px 3px; font: 500 11px/1.2 var(--font-sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted-foreground); }
+.fy-ab__menu-opt { display: flex; align-items: center; gap: 9px; width: 100%; height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--foreground); font: 400 13px/1.4 var(--font-sans); text-align: left; cursor: pointer; box-sizing: border-box; }
+.fy-ab__menu-opt:hover, .fy-ab__menu-opt:focus-visible { background: var(--secondary); outline: none; }
+.fy-ab__menu-opt .fy-ab__speaker-dot { background: var(--fy-voice); }
+.fy-ab__menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-ab__menu-meta { flex: none; font: 400 11px/1 var(--font-mono); color: var(--muted-foreground); }
+.fy-ab__menu-tick { flex: none; width: 14px; color: var(--foreground); }
+.fy-ab__menu-sep { height: 1px; margin: 5px -6px; background: var(--border); }
+.fy-ab__source--recorded { color: var(--foreground); }
+.fy-ab__recorded { display: flex; align-items: center; gap: 7px; margin-top: 10px; font: 400 12px/1.4 var(--font-sans); color: var(--muted-foreground); cursor: pointer; }
+/* Upload a take (design turn 155c, SPEC-047 R-35): 540 wide; the checks are data, a warning never refuses. */
+.fy-rectake { display: flex; flex-direction: column; gap: 14px; }
+.fy-rectake__quote { padding: 10px 12px; border-radius: 8px; box-shadow: inset 2px 0 0 var(--fy-voice); background: color-mix(in srgb, var(--fy-voice) 7%, transparent); font: 400 15px/1.6 var(--font-sans); }
+.fy-rectake__file { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.fy-rectake__name { font: 500 12px/1.3 var(--font-sans); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-rectake__tech { flex: 1; font-size: 11px; color: var(--muted-foreground); }
+.fy-rectake__checks { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; }
+.fy-rectake__check { display: flex; align-items: center; gap: 8px; height: 28px; border-bottom: 1px solid var(--border); font: 400 13px/1.4 var(--font-sans); }
+.fy-rectake__check-label { flex: 1; color: var(--muted-foreground); }
+.fy-rectake__check-value { font-size: 11px; }
+.fy-rectake__check--pass .fy-rectake__check-value { color: var(--success); }
+.fy-rectake__check--warning .fy-rectake__check-value { color: var(--warning); }
+.fy-rectake__check--unavailable .fy-rectake__check-value, .fy-rectake__check--not-applicable .fy-rectake__check-value { color: var(--muted-foreground); }
+.fy-rectake__who { display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: end; }
+.fy-rectake__field { display: flex; flex-direction: column; gap: 6px; font: 500 12px/1.2 var(--font-sans); color: var(--muted-foreground); }
+.fy-rectake__input { height: 34px; box-sizing: border-box; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--background); color: var(--foreground); font: 400 13px/1.4 var(--font-sans); }
+.fy-rectake__refused { margin: 0; color: var(--warning); font: 400 12px/1.4 var(--font-sans); }
+.fy-rectake__foot { display: flex; align-items: center; gap: 8px; }
+.fy-rectake__push { flex: 1; }
+/* A speaker's lines out and back (design turn 155d, SPEC-047 R-39): 680 wide; rows in a 38 band. */
+.fy-rectake__sect { display: flex; align-items: center; gap: 8px; }
+.fy-rectake__sect-title { font: 600 13px/1.3 var(--font-sans); }
+.fy-rectake__table { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; max-height: 260px; overflow-y: auto; }
+.fy-rectake__tr { display: grid; grid-template-columns: 18px 130px minmax(0, 1fr) 150px; gap: 10px; align-items: center; height: 38px; padding: 0 12px; border-top: 1px solid var(--border); font: 400 13px/1.4 var(--font-sans); box-sizing: border-box; cursor: pointer; }
+.fy-rectake__tr:first-child { border-top: 0; }
+.fy-rectake__tr--off { color: var(--muted-foreground); cursor: default; }
+.fy-rectake__cell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-rectake__verdict { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fy-rectake__verdict--pass { color: var(--success); }
+.fy-rectake__verdict--warning { color: var(--warning); }
+.fy-rectake__verdict--refused, .fy-rectake__verdict--unavailable { color: var(--muted-foreground); }
+.fy-ab__marks { display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding-top: 9px; }
+.fy-ab__source { display: inline-flex; color: var(--neutral-400); }
+.fy-ab__marks .fy-ab__dot { margin-top: 0; }
+.fy-ab__filter { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.fy-ab__fchip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--muted-foreground); font: 400 12px/1 var(--font-sans); cursor: pointer; box-sizing: border-box; }
+.fy-ab__fchip--on { background: var(--foreground); color: var(--background); border-color: transparent; }
+.fy-ab__fcount { font: 400 11px/1 var(--font-mono); color: var(--neutral-400); }
+.fy-ab__fchip--on .fy-ab__fcount { color: var(--background); opacity: 0.7; }
 .fy-ab__block--selected { background: var(--muted); }
-.fy-ab__block--sounding { background: var(--secondary); box-shadow: inset 2px 0 0 var(--foreground); }
-.fy-ab__mark { padding-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--foreground); }
-.fy-ab__mark--faint { color: var(--neutral-400); }
+.fy-ab__block--line.fy-ab__block--selected { background: color-mix(in srgb, var(--fy-voice) 7%, transparent); box-shadow: inset 2px 0 0 var(--fy-voice), inset 0 0 0 1px color-mix(in srgb, var(--fy-voice) 45%, transparent); }
+.fy-ab__block--sounding { background: var(--secondary); box-shadow: inset 2px 0 0 var(--fy-voice, var(--foreground)); }
+.fy-ab__mark { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fy-ab__mark--warn { color: var(--warning); }
 .fy-ab__text { font: 400 15px/1.75 var(--font-sans); }
 .fy-ab__dot { width: 8px; height: 8px; margin-top: 9px; padding: 0; border-radius: 50%; border: 1px solid var(--neutral-400); background: transparent; cursor: pointer; flex: none; box-sizing: border-box; }

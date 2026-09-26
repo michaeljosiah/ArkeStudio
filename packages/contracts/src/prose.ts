@@ -149,6 +149,58 @@ export interface VoicedBlock {
   /** The line's speaker as the chapter names them, and the sheet when the cast has one; absent for narration. */
   speaker?: string;
   sheet?: string;
+  /** The author set this line's speaker by hand (SPEC-012 R-62): a pin, not the derivation. */
+  pinned?: true;
+}
+
+/**
+ * A correction to the cast (design turn 155, SPEC-012 R-62..R-65): a span of the chapter — its
+ * paragraph, its words and which occurrence of them there — given a speaker by the author, or
+ * `narration` for words the derivation made a line that are not one.
+ */
+export interface VoicePin {
+  paragraph: number;
+  occurrence: number;
+  quote: string;
+  speaker?: string;
+  sheet?: string;
+  narration?: true;
+}
+
+type CastLine = { speaker: string; sheet?: string; paragraph: number; occurrence: number; quote: string };
+
+/**
+ * The cast's lines with the author's pins applied (SPEC-012 R-64): a pin stands only while its
+ * words are still at its occurrence in its paragraph — otherwise it is lost and counted, never
+ * re-placed by guess — and a derived line whose words overlap a standing pin's gives way to it.
+ * A pin to narration removes what it overlaps and adds nothing. The one rule every reader of the
+ * cast goes through: the voiced read, the audiobook's blocks, the Voices panel and the stamp.
+ */
+export function pinnedLines(
+  lines: readonly CastLine[],
+  pins: readonly VoicePin[] | undefined,
+  body: string,
+): { lines: Array<CastLine & { pinned?: true }>; lost: number; standing: number } {
+  if (pins === undefined || pins.length === 0) return { lines: [...lines], lost: 0, standing: 0 };
+  const paragraphs = chapterParagraphs(body);
+  const spans: Array<{ pin: VoicePin; start: number; end: number }> = [];
+  let lost = 0;
+  for (const pin of pins) {
+    const hit = occurrencesOf(paragraphs[pin.paragraph] ?? "", pin.quote)[pin.occurrence];
+    if (hit === undefined) lost += 1;
+    else spans.push({ pin, ...hit });
+  }
+  const overlaps = (paragraph: number, start: number, end: number) =>
+    spans.some((span) => span.pin.paragraph === paragraph && start < span.end && span.start < end);
+  const kept: Array<CastLine & { pinned?: true }> = lines.filter((line) => {
+    const hit = occurrencesOf(paragraphs[line.paragraph] ?? "", line.quote)[line.occurrence];
+    return hit === undefined || !overlaps(line.paragraph, hit.start, hit.end);
+  });
+  for (const { pin } of spans) {
+    if (pin.narration === true || pin.speaker === undefined) continue;
+    kept.push({ speaker: pin.speaker, ...(pin.sheet !== undefined ? { sheet: pin.sheet } : {}), paragraph: pin.paragraph, occurrence: pin.occurrence, quote: pin.quote, pinned: true });
+  }
+  return { lines: kept, lost, standing: spans.length };
 }
 
 /**
@@ -162,13 +214,13 @@ export interface VoicedBlock {
  */
 export function voicedBlocks(
   body: string,
-  record: { lines: ReadonlyArray<{ speaker: string; sheet?: string; paragraph: number; occurrence: number; quote: string }> } | null,
+  record: { lines: ReadonlyArray<CastLine>; pins?: readonly VoicePin[] } | null,
 ): { blocks: VoicedBlock[]; ambiguous: number } {
   const paragraphs = chapterParagraphs(body);
   const blocks: VoicedBlock[] = [];
   let ambiguous = 0;
   const fold = (text: string) => text.replace(/\s+/g, " ").trim();
-  const lines = record?.lines ?? [];
+  const lines = record === null ? [] : pinnedLines(record.lines, record.pins, body).lines;
   // How often the whole chapter holds each quoted line, against how often the cast names it
   // (codex on PR 914): a line copied into another paragraph while the original stands is two
   // spans for one attribution, and neither is the one the cast meant.
@@ -180,7 +232,7 @@ export function voicedBlocks(
     if (!held.has(key)) held.set(key, paragraphs.reduce((sum, paragraph) => sum + occurrencesOf(paragraph, line.quote).length, 0));
   }
   for (const [index, paragraph] of paragraphs.entries()) {
-    const spans: Array<{ start: number; end: number; speaker: string; sheet?: string }> = [];
+    const spans: Array<{ start: number; end: number; speaker: string; sheet?: string; pinned?: true }> = [];
     const here = lines.filter((line) => line.paragraph === index);
     for (const line of here) {
       // The paragraph must hold these words exactly as many times as the cast says it does
@@ -190,13 +242,15 @@ export function voicedBlocks(
       const key = fold(line.quote);
       const twins = here.filter((other) => fold(other.quote) === key).length;
       const hits = occurrencesOf(paragraph, line.quote);
-      const hit = hits.length === twins && held.get(key) === named.get(key) ? hits[line.occurrence] : undefined;
+      // A pin names its occurrence itself (SPEC-012 R-64): the author said which of the twins
+      // is the line, so the count that keeps a derived twin from guessing does not apply.
+      const hit = line.pinned === true || (hits.length === twins && held.get(key) === named.get(key)) ? hits[line.occurrence] : undefined;
       // Not there, or not at that occurrence: narration.
       if (hit === undefined) {
         ambiguous += 1;
         continue;
       }
-      spans.push({ ...hit, speaker: line.speaker, ...(line.sheet !== undefined ? { sheet: line.sheet } : {}) });
+      spans.push({ ...hit, speaker: line.speaker, ...(line.sheet !== undefined ? { sheet: line.sheet } : {}), ...(line.pinned === true ? { pinned: true as const } : {}) });
     }
     // Two spans sharing bytes are neither speaker's (codex on PR 914): the extractor gave two
     // people words that overlap, and keeping whichever came first would voice the shared words
@@ -209,13 +263,53 @@ export function voicedBlocks(
     for (const span of kept) {
       const before = paragraph.slice(cursor, span.start).trim();
       if (before !== "") blocks.push({ paragraph: index, text: before });
-      blocks.push({ paragraph: index, text: paragraph.slice(span.start, span.end), speaker: span.speaker, ...(span.sheet !== undefined ? { sheet: span.sheet } : {}) });
+      blocks.push({
+        paragraph: index,
+        text: paragraph.slice(span.start, span.end),
+        speaker: span.speaker,
+        ...(span.sheet !== undefined ? { sheet: span.sheet } : {}),
+        ...(span.pinned === true ? { pinned: true as const } : {}),
+      });
       cursor = span.end;
     }
     const after = paragraph.slice(cursor).trim();
     if (after !== "") blocks.push({ paragraph: index, text: after });
   }
   return { blocks, ambiguous };
+}
+
+/**
+ * What a pin names for a block, or for words selected inside one (SPEC-012 R-63): its paragraph,
+ * the words, and which occurrence of them in the paragraph — found by walking the paragraph's
+ * blocks in order, since a block is an exact slice of its paragraph. `from`/`to` are offsets in
+ * the block's text; the whole block when absent. Null when the words cannot be placed.
+ */
+export function pinTarget(
+  body: string,
+  blocks: readonly Pick<VoicedBlock, "paragraph" | "text">[],
+  index: number,
+  selection?: { from: number; to: number },
+): { paragraph: number; occurrence: number; quote: string } | null {
+  const block = blocks[index];
+  if (block === undefined || block.paragraph < 0) return null;
+  const paragraph = chapterParagraphs(body)[block.paragraph];
+  if (paragraph === undefined) return null;
+  let cursor = 0;
+  let start = -1;
+  for (let at = 0; at <= index; at += 1) {
+    const other = blocks[at]!;
+    if (other.paragraph !== block.paragraph) continue;
+    const found = paragraph.indexOf(other.text, cursor);
+    if (found < 0) return null;
+    if (at === index) start = found;
+    cursor = found + other.text.length;
+  }
+  const from = selection?.from ?? 0;
+  const to = selection?.to ?? block.text.length;
+  const quote = block.text.slice(from, to);
+  if (quote.trim() === "") return null;
+  const occurrence = occurrencesOf(paragraph, quote).findIndex((hit) => hit.start === start + from);
+  return occurrence < 0 ? null : { paragraph: block.paragraph, occurrence, quote };
 }
 
 /** The count every surface shows for a chapter: whitespace-separated words of the body. */

@@ -471,6 +471,174 @@ describe("the Audiobook view (turn 146)", () => {
     assert.deepEqual(all(m, ".fy-ab__block").map((row) => row.getAttribute("data-state")), ["made", "made", "made", "made"], "the run's record is newer, and what it found gone it has made again");
   });
 
+  it("the margin names who speaks in a colour of their own, and the filter dims the rest and plays only them (SPEC-047 R-33)", async () => {
+    const m = await mount(inkbound("cast"));
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": "“You hear it too,”", "p1.1": "she said.", "p3.0": "Six, and the tide <br> not yet called." };
+    await answerOpen(m, { audiobook: record(Object.keys(texts), texts), voices: CAST });
+    const rows = all(m, ".fy-ab__block");
+    assert.deepEqual(rows.map((row) => row.getAttribute("data-speaker")), ["narrator", "narrator", "maren-kest", "narrator", "narrator"]);
+    assert.ok(rows[2]!.className.includes("fy-voice--1") && rows[2]!.className.includes("fy-ab__block--line"), "Maren's line takes the first colour and the line's tint");
+    assert.ok(rows[1]!.className.includes("fy-voice--narrator") && !rows[1]!.className.includes("fy-ab__block--line"), "narration is grey and untinted");
+    assert.ok(rows[2]!.querySelector(".fy-ab__source"), "a made take shows how it was made");
+    const chips = all(m, ".fy-ab__fchip");
+    assert.deepEqual(chips.map((chip) => chip.textContent), ["Everyone5", "Narrator4", `${rows[2]!.querySelector(".fy-ab__mark")!.textContent}1`]);
+    await act(async () => chips[2]!.click());
+    assert.deepEqual(
+      all(m, ".fy-ab__block").map((row) => row.className.includes("fy-ab__block--dim")),
+      [true, true, false, true, true],
+      "one speaker chosen, everyone else is dimmed",
+    );
+    assert.equal(all(m, ".fy-ab__fchip")[2]!.getAttribute("aria-pressed"), "true");
+    await act(async () => all(m, ".fy-ab__fchip")[2]!.click());
+    assert.ok(all(m, ".fy-ab__block").every((row) => !row.className.includes("fy-ab__block--dim")), "a second press clears it");
+  });
+
+  it("the speaker's chip opens a menu; a choice writes a pin, and the answer marks the block as set by hand (SPEC-012 R-62, R-63)", async () => {
+    const m = await mount(inkbound("cast"));
+    await answerOpen(m, { voices: CAST });
+    const line = all(m, ".fy-ab__block").find((row) => row.getAttribute("data-speaker") === "maren-kest")!;
+    const chip = line.querySelector("button.fy-ab__speaker") as HTMLElement;
+    assert.ok(chip, "the speaker is a press while the cast is current");
+    await act(async () => chip.click());
+    const options = [...line.querySelectorAll(".fy-ab__menu-opt")].map((option) => option.textContent);
+    assert.equal(options[0], "Narration");
+    assert.ok(options.some((label) => label?.includes("✓")), "the current speaker is ticked");
+    await act(async () => (line.querySelector(".fy-ab__menu-opt") as HTMLElement).click());
+    const asked = m.sent.findLast((message) => message.kind === "set-voice-pin") as Extract<ClientMessage, { kind: "set-voice-pin" }>;
+    assert.ok(asked, "the choice writes a pin");
+    assert.deepEqual(
+      { paragraph: asked.paragraph, occurrence: asked.occurrence, quote: asked.quote, narration: asked.narration },
+      { paragraph: 1, occurrence: 0, quote: "“You hear it too,”", narration: true },
+      "named by the paragraph, the words and the occurrence the saved prose holds",
+    );
+    const pinned = { ...CAST, lines: [], pins: [{ paragraph: 1, occurrence: 0, quote: "“You hear it too,”", speaker: "Tam Rusk" }] };
+    await act(async () => __applyEventForTest({ at: AT, type: "voices.record", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", record: pinned }));
+    const again = all(m, ".fy-ab__block").find((row) => row.getAttribute("data-speaker") === "Tam Rusk");
+    assert.ok(again, "the record as it now stands is read");
+    assert.ok(again!.querySelector(".fy-ab__pin"), "and the block is marked as set by hand");
+    await act(async () => __applyEventForTest({ at: AT, type: "voices.record", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", refused: "cast moved · cast again" }));
+    assert.match(text(m), /cast moved · cast again/, "a refusal is one clause");
+  });
+
+  it("Upload opens the host's picker for the block; the checks come back as a dialog, the rights are given once, and a kept recording is marked (SPEC-047 R-34..R-36)", async () => {
+    const m = await mount(inkbound());
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." };
+    await answerOpen(m, { audiobook: record(NARRATION_KEYS, texts) });
+    await act(async () => all(m, ".fy-ab__block")[1]!.click());
+    await act(async () => q(m, '[data-testid="audiobook-upload"]')!.click());
+    const asked = m.sent.findLast((message) => message.kind === "stage-audiobook-take") as Extract<ClientMessage, { kind: "stage-audiobook-take" }>;
+    assert.ok(asked, "the press asks the coordinator to choose and check a file");
+    assert.equal(asked.block, "p0.0");
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", block: "p0.0", requestId: asked.requestId };
+    await act(async () =>
+      __applyEventForTest({
+        at: AT,
+        type: "audiobook.take-staged",
+        ...ids,
+        file: "07-011-1.wav",
+        durationSec: 3.8,
+        sampleRateHz: 48_000,
+        channels: 2,
+        words: "unchecked",
+      }),
+    );
+    const dialog = dom.document.querySelector('[data-testid="recorded-take-dialog"]') as HTMLElement | null;
+    assert.ok(dialog, "the checks come back as a dialog");
+    assert.match(dialog.textContent ?? "", /07-011-1\.wav/);
+    assert.match(dialog.textContent ?? "", /3\.8 s · 48 kHz · stereo/);
+    assert.match(dialog.textContent ?? "", /Wordsunchecked/, "no transcriber: the words are unchecked, not refused");
+    const keep = dialog.querySelector('[data-testid="recorded-take-keep"]') as HTMLButtonElement;
+    assert.ok(keep.disabled, "the rights come first");
+    await act(async () => ([...dialog.querySelectorAll('[aria-label="Rights"] button')] as HTMLElement[]).find((b) => b.textContent === "Authorized")!.click());
+    assert.ok(!keep.disabled);
+    await act(async () => keep.click());
+    const kept = m.sent.findLast((message) => message.kind === "keep-audiobook-take") as Extract<ClientMessage, { kind: "keep-audiobook-take" }>;
+    assert.deepEqual({ requestId: kept.requestId, basis: kept.basis }, { requestId: asked.requestId, basis: "authorized" });
+
+    const recorded = record(NARRATION_KEYS, texts);
+    recorded.takes["p0.0"] = { ...recorded.takes["p0.0"]!, source: "recorded", recording: { acknowledgementId: "ack_1", warnings: [], words: "unchecked" } };
+    recorded.updatedAt = "2026-09-25T10:00:00.000Z";
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", requestId: asked.requestId, record: recorded }));
+    assert.equal(dom.document.querySelector('[data-testid="recorded-take-dialog"]'), null, "kept: the dialog goes");
+    assert.ok(all(m, ".fy-ab__block")[1]!.querySelector(".fy-ab__source--recorded"), "the block says it was recorded");
+  });
+
+  it("a speaker a person records waits for a recording: the block says so, the press leaves it out, and the toggle writes the book (SPEC-047 R-37, R-38)", async () => {
+    const state = inkbound();
+    const world = state.world!;
+    const m = await mount({
+      ...state,
+      world: {
+        ...world,
+        productions: world.productions.map((p) => (p.meta.id === "inkbound" ? { ...p, audiobook: { schemaVersion: 1 as const, reading: "narrator" as const, recorded: ["narrator"] } } : p)),
+      },
+    });
+    await answerOpen(m);
+    assert.deepEqual(all(m, ".fy-ab__block").map((row) => row.getAttribute("data-state")), ["awaiting", "awaiting", "awaiting", "awaiting"], "every block is the narrator's, and the narrator is recorded");
+    assert.equal(q(m, '[data-testid="read-audiobook"]'), null, "nothing for a run to make");
+    assert.match(text(m), /4 awaiting recording/);
+    await act(async () => all(m, ".fy-ab__block")[1]!.click());
+    const toggle = q(m, '[data-testid="audiobook-recorded"] input') as HTMLInputElement;
+    assert.ok(toggle.checked);
+    await act(async () => toggle.click());
+    const sent = m.sent.findLast((message) => message.kind === "set-audiobook-recorded") as Extract<ClientMessage, { kind: "set-audiobook-recorded" }>;
+    assert.deepEqual({ speaker: sent.speaker, recorded: sent.recorded }, { speaker: "narrator", recorded: false });
+  });
+
+  it("a recorded speaker's lines go out as a script and come back as files, matched, checked, and kept under one set of rights (SPEC-047 R-39)", async () => {
+    const state = inkbound();
+    const world = state.world!;
+    const m = await mount({
+      ...state,
+      world: {
+        ...world,
+        productions: world.productions.map((p) => (p.meta.id === "inkbound" ? { ...p, audiobook: { schemaVersion: 1 as const, reading: "narrator" as const, recorded: ["narrator"] } } : p)),
+      },
+    });
+    await answerOpen(m);
+    await act(async () => all(m, ".fy-ab__block")[1]!.click());
+    await act(async () => q(m, '[data-testid="audiobook-lines"]')!.click());
+    const dialog = () => dom.document.querySelector('[data-testid="speaker-lines-dialog"]') as HTMLElement | null;
+    assert.ok(dialog(), "Lines… opens the sheet");
+
+    await act(async () => (dialog()!.querySelector('[data-testid="speaker-lines-export"]') as HTMLElement).click());
+    const exported = m.sent.findLast((message) => message.kind === "export-audiobook-script") as Extract<ClientMessage, { kind: "export-audiobook-script" }>;
+    assert.deepEqual({ speaker: exported.speaker, scope: exported.scope, label: exported.label }, { speaker: "narrator", scope: "awaiting", label: "Narrator" });
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.script", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", requestId: exported.requestId, output: "exports/inkbound-narrator-lines-20260926-abcdef.pdf", lines: 4, chapters: 1, notCast: 0 }));
+    assert.match(dialog()!.textContent ?? "", /inkbound-narrator-lines-20260926-abcdef\.pdf/);
+    assert.match(dialog()!.textContent ?? "", /4 lines/);
+
+    await act(async () => (dialog()!.querySelector('[data-testid="speaker-lines-add"]') as HTMLElement).click());
+    const staged = m.sent.findLast((message) => message.kind === "stage-audiobook-lines") as Extract<ClientMessage, { kind: "stage-audiobook-lines" }>;
+    assert.equal(staged.speaker, "narrator");
+    await act(async () =>
+      __applyEventForTest({
+        at: AT,
+        type: "audiobook.lines-staged",
+        worldId: FIXTURE_WORLD_ID,
+        productionId: "inkbound",
+        requestId: staged.requestId,
+        rows: [
+          { file: "02-001-1.wav", id: "02-001-1", quote: "Maren counted the bells.", words: "match" },
+          { file: "take-final.wav", refused: "no line id" },
+        ],
+      }),
+    );
+    const rows = [...dialog()!.querySelectorAll(".fy-rectake__tr")] as HTMLElement[];
+    assert.equal(rows.length, 2);
+    assert.ok((rows[1]!.querySelector("input") as HTMLInputElement).disabled, "a refused file cannot be ticked");
+    assert.match(rows[1]!.textContent ?? "", /no line id/);
+    const keep = dialog()!.querySelector('[data-testid="speaker-lines-keep"]') as HTMLButtonElement;
+    assert.equal(keep.textContent, "Keep 1 take");
+    assert.ok(keep.disabled, "the rights come first");
+    await act(async () => ([...dialog()!.querySelectorAll('[aria-label="Rights"] button')] as HTMLElement[]).find((b) => b.textContent === "My voice")!.click());
+    await act(async () => keep.click());
+    const kept = m.sent.findLast((message) => message.kind === "keep-audiobook-lines") as Extract<ClientMessage, { kind: "keep-audiobook-lines" }>;
+    assert.deepEqual({ basis: kept.basis, files: kept.files }, { basis: "self", files: ["02-001-1.wav"] });
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.lines-kept", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", requestId: staged.requestId, kept: 1 }));
+    assert.match(dialog()!.querySelector('[data-testid="speaker-lines-kept"]')?.textContent ?? "", /kept 1/);
+  });
+
   it("a retired character keeps its name in the margin and loses its voice, so the narrator's take for it is made, not stale (codex on PR 1180)", async () => {
     const state = inkbound("cast");
     const world = state.world!;

@@ -22,7 +22,7 @@ uses that input even if draft files subsequently change. Unreadable drafts block
 recovery restores only the damaged records so valid edits remain visible. Form handoffs also
 retain a pending marker until attachments and conversation history have finished copying.
 
-Worlds containing founding conversation events require schema version 28. Older readers must
+Worlds containing founding conversation events require schema version 33. Older readers must
 refuse the world rather than misread its strict conversation journal.
 
 The founding marker and sandbox remain after completion so a repeated Begin joins its original

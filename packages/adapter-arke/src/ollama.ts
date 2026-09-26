@@ -45,6 +45,10 @@ export interface ChatRequest {
   messages: ChatMessage[];
   tools: ChatTool[];
   numCtx: number;
+  /** Sampling options beside the window; the window is always this request's own. */
+  options?: Readonly<Record<string, number>>;
+  /** Sent as Ollama's `think`. Omitted, a model that reasons first does. */
+  think?: boolean;
   keepAlive?: string | number;
 }
 
@@ -80,7 +84,8 @@ export async function streamChat(
       body: JSON.stringify({
         model: request.model, messages: request.messages, stream: true,
         ...(request.tools.length > 0 ? { tools: request.tools } : {}),
-        options: { num_ctx: request.numCtx },
+        options: { ...request.options, num_ctx: request.numCtx },
+        ...(request.think !== undefined ? { think: request.think } : {}),
         ...(request.keepAlive !== undefined ? { keep_alive: request.keepAlive } : {}),
       }),
     });

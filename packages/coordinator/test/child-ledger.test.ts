@@ -167,7 +167,11 @@ describe("ChildLedger", () => {
       await ledger.record(
         record(orphan.pid!, { ownerPid: await deadPid(), ownerStartedAt: 1_000 }),
       );
-      const report = await ledger.reapStale();
+      let report = await ledger.reapStale();
+      // A loaded Windows runner can starve PowerShell past the 30 s inspection budget (issue
+      // 1290). A sweep that cannot probe reaps nothing and keeps the record for the next one —
+      // what the app does at its next start — so the test sweeps again, once.
+      if (report.skipped !== undefined && /timed out/.test(report.skipped)) report = await ledger.reapStale();
       assert.equal(report.reaped.length, 1, `expected a reap, got ${JSON.stringify(report)}`);
       assert.equal(report.reaped[0]!.pid, orphan.pid);
       // 30s: process death behind a taskkill spawn — the settle tier from supervisor.test.ts's

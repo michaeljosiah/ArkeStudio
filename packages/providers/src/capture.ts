@@ -502,7 +502,8 @@ export function captureProviderClient(
       run("fetch-artifacts", context, () => client.fetchArtifacts(key, remoteId, context)),
     cancel: (key, remoteId, context) => run("cancel", context, () => client.cancel(key, remoteId, context)),
     ...(client.resetTransport ? { resetTransport: () => client.resetTransport!() } : {}),
-    ...(client.unload ? { unload: (signal?: AbortSignal) => client.unload!(signal) } : {}),
+    ...(client.unload ? { unload: (signal?: AbortSignal, only?: ReadonlySet<string>) => client.unload!(signal, only) } : {}),
+    ...(client.usedModels ? { usedModels: () => client.usedModels!() } : {}),
     ...(client.residency ? { residency: (signal?: AbortSignal) => client.residency!(signal) } : {}),
     // A listing, not a call: nothing is charged and nothing is journalled, like residency.
     ...(client.listModels ? { listModels: (signal?: AbortSignal) => client.listModels!(signal) } : {}),

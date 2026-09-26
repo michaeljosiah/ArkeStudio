@@ -654,6 +654,11 @@ function frameRunFailureCopy(state: { status: string; failureClass: string | nul
  * unverifiable quotation and the screen offered nothing but "try again".
  */
 export function failureLine(failure: { status: string; detail?: string }): string {
+  // Refused before anything was asked: the reason is the whole of it, in its own words.
+  if (failure.detail?.startsWith("unavailable: ")) {
+    const reason = failure.detail.slice("unavailable: ".length).trim();
+    return `${reason}${/[.!?]$/.test(reason) ? "" : "."} Your message is still here.`;
+  }
   const rejected = failure.detail?.startsWith("rejected: ") === true;
   if (rejected) {
     return `The studio answered and the answer was refused — ${failure.detail!.slice("rejected: ".length)}. Your message is still here; asking a different way usually gets past it.`;
@@ -664,7 +669,9 @@ export function failureLine(failure: { status: string; detail?: string }): strin
       : failure.status === "interrupted"
         ? "That turn was interrupted. You can retry it."
         : failure.status === "budget-exceeded"
-          ? "That turn ran past its budget and stopped."
+          // The detail says which budget and what to do about it (issue 1265): a turn too big for
+          // a local model's window is not fixed by pressing retry.
+          ? failure.detail ? `${failure.detail[0]!.toUpperCase()}${failure.detail.slice(1)}.` : "That turn ran past its budget and stopped."
           : "That did not go through.";
   return `${opening} Nothing was lost — your message is still here.`;
 }

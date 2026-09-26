@@ -200,6 +200,13 @@ options: `start()` returns its generated token alongside the port for trusted ho
   address bar and stores it for that tab/endpoint. Media uses a query credential in this mode
   because there is no isolated preload. Restart Vite for a fresh link after a coordinator
   restart. Custom ports/origins are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
+- **Remote browsers:** the coordinator stays on loopback. Another device reaches it only through
+  a TLS proxy (Tailscale Serve): a `wss:` `VITE_ARKE_WS`, an `https:` `ARKE_DEV_ORIGIN` and the
+  loopback `ARKE_DEV_LOCAL_WS` it forwards to. Do not add a non-loopback bind or accept a remote
+  `ws:` or `http:` end: either puts the capability, or a page that reads it, on the wire. Only an
+  accepted proxied session widens Vite's allowed hosts and the page policy, for that one origin
+  and server, and narrows `/@fs` to the client, contracts and `node_modules`. The built page
+  keeps its loopback-only policy.
 - **The dev handoff is private:** `.dev/transport-<port>.json` must remain gitignored and denied
   by Vite's filesystem-serving rules, including `/@fs` and raw/import requests. Never put the
   token in public HTML, a bootstrap endpoint or a build-time `VITE_*` variable. A public token
