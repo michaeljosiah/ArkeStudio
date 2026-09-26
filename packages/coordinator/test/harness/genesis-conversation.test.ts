@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ulid } from "@arke-studio/contracts";
+import { ulid, newId, compileBuildItems, GenesisBlueprintSchema } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { carryGenesisConversation, genesisConversation, genesisControlDir, loadGenesisConversation, recordFoundingBlueprint, recordFoundingMessage } from "../../src/harness/genesis-conversation.js";
 import { foldBlueprint } from "../../src/harness/blueprint.js";
@@ -146,7 +146,6 @@ it("migrates legacy draft content without giving the harness the conversation jo
   const old = join(root, ".genesis", "gen-old");
   await mkdir(old, { recursive: true });
   await writeFile(join(old, "draft.json"), JSON.stringify({ name: "Old Harbour" }));
-  await writeFile(join(old, "begun.json"), JSON.stringify({ worldId: ulid() }));
   await writeFile(join(old, "creation.json"), JSON.stringify({ worldId: ulid() }));
   const provider = new FsWorldProvider(root);
   const workspace = await provider.genesisDir("gen-old");
@@ -170,4 +169,31 @@ it("refuses reserved creation recovery when a published world's identity is unre
   await writeFile(path, original);
   assert.deepEqual(await provider.createWorld(input), first);
   assert.equal((await provider.listWorlds()).length, 1);
+});
+
+it("validates legacy founding markers against the existing world's authorization before migrating", async () => {
+  const root = await tempDir("founding-legacy-begun-");
+  const provider = new FsWorldProvider(root);
+  const world = await provider.createWorld({ name: "Already founded" });
+  const old = join(root, ".genesis", "gen-old-begun");
+  await mkdir(old, { recursive: true });
+  await writeFile(join(old, "draft.json"), JSON.stringify({ name: "Already founded" }));
+  const requestId = ulid();
+  await writeFile(join(old, "begun.json"), JSON.stringify({ worldId: world.worldId, requestId }));
+  await assert.rejects(provider.genesisDir("gen-old-begun"), /legacy founding handoff needs repair/);
+  const buildDir = join(root, "worlds", world.slug, "build");
+  await mkdir(buildDir, { recursive: true });
+  const blueprint = GenesisBlueprintSchema.parse({ name: "Already founded" });
+  const record = { buildId: newId("fb"), requestId, worldId: world.worldId, genesisId: "gen-other",
+    blueprint, artDirectionVersion: 1, capMicroUsd: 0, image: null,
+    items: compileBuildItems(blueprint, null), createdAt: new Date().toISOString() };
+  await writeFile(join(buildDir, "build.json"), JSON.stringify(record));
+  await assert.rejects(provider.genesisDir("gen-old-begun"), /legacy founding handoff needs repair/);
+  await writeFile(join(buildDir, "build.json"), JSON.stringify({ ...record, genesisId: "gen-old-begun" }));
+  const workspace = await provider.genesisDir("gen-old-begun");
+  assert.equal((await loadGenesisConversation(workspace, "gen-old-begun")).worldId, world.worldId);
+  assert.equal(JSON.parse(await readFile(join(genesisControlDir(workspace), "creation.json"), "utf8")).worldId, world.worldId);
+  await provider.genesisDir("gen-old-begun");
+  assert.equal((await provider.listWorlds()).length, 1);
+  await provider.close();
 });
