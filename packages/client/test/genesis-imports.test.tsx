@@ -24,6 +24,11 @@ it("shows exact source evidence separately from interpretation and sends the rev
     assert.match(container.textContent!, /interpretation/);
     assert.match(container.textContent!, /Lives inland/);
     const button = (text: string) => [...container.querySelectorAll("button")].find(button => button.textContent === text)!;
+    assert.equal(button("Prepare for approval").disabled, true);
+    const resolution = container.querySelector('[aria-label="Import resolution"]')!;
+    const resolutionProps = (resolution as unknown as Record<string, { onChange(event: { target: { value: string } }): void }>)[Object.keys(resolution).find(key => key.startsWith("__reactProps$"))!]!;
+    await act(async () => resolutionProps.onChange({ target: { value: "append" } }));
+    assert.equal(button("Prepare for approval").disabled, false);
     await act(async () => button("Prepare for approval").click());
     assert.equal(decisions[0]?.digest, "reviewed-digest");
     assert.equal(decisions[0]?.target, "character:maren");

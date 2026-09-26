@@ -140,6 +140,12 @@ Client `screens/shell.tsx` and `lib/store.ts` send `genesis-list` / `genesis-loa
 Coordinator `harness/genesis-conversation.ts` uses the existing world-chat journal for
 the transcript and `harness/blueprint.ts` for the current draft. `world/founding-build.ts`
 transfers the same conversation into the created world with idempotent appends.
+Contracts `genesis-review.ts` defines exact content cards and decisions; `frames.ts` and
+`events.ts` carry `genesis-review`, `genesis-decide` and correlated review responses.
+Client `components/genesis-review.tsx` and `lib/store.ts` track pending decisions;
+coordinator `harness/genesis-review.ts` journals decisions and selects the approved blueprint
+for `world/founding-build.ts`. Checks: coordinator `test/harness/genesis-review.test.ts`
+and client `test/genesis-review.test.tsx`.
 See [founding chat](founding-chat.md) for lifecycle and recovery checks.
 
 ### Audition founding voices

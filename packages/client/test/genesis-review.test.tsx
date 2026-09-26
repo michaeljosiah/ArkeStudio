@@ -70,3 +70,20 @@ it("ignores out-of-order reviews and clears approval cards when the blueprint ch
     assert.equal(store.__stateForTest().genesis["gen-review"]?.review, undefined);
   } finally { store.__setBridgeForTest(null); store.__setStateForTest(FIXTURE_STATE); }
 });
+it("keeps a content decision pending and invalidates the displayed build until its review arrives", async () => {
+  const store = await import("../src/lib/store.js");
+  const { FIXTURE_STATE } = await import("./fixture-state.js");
+  const sent: Array<{ requestId: string }> = [];
+  store.__setStateForTest(FIXTURE_STATE);
+  store.__setBridgeForTest({ send: (message: string) => sent.push(JSON.parse(message)) } as unknown as import("../src/arke-bridge.js").ArkeBridge);
+  try {
+    store.decideGenesisDraft("gen-decision", [{ key: "world", digest: "current" }], "approve");
+    assert.equal(store.__stateForTest().genesis["gen-decision"]?.reviewPending, true);
+    assert.deepEqual(store.__stateForTest().buildPlans["gen-decision"], {});
+    const review = GenesisContentReviewSchema.parse({ selected: { name: "Harbour", characters: [], locations: [], factions: [], threads: [], dropped: [] }, cards: [], problems: [] });
+    store.__applyEventForTest({ type: "genesis.review", at: new Date().toISOString(), genesisId: "gen-decision", requestId: "old", review });
+    assert.equal(store.__stateForTest().genesis["gen-decision"]?.reviewPending, true);
+    store.__applyEventForTest({ type: "genesis.review", at: new Date().toISOString(), genesisId: "gen-decision", requestId: sent[0]!.requestId, review });
+    assert.equal(store.__stateForTest().genesis["gen-decision"]?.reviewPending, false);
+  } finally { store.__setBridgeForTest(null); store.__setStateForTest(FIXTURE_STATE); }
+});

@@ -125,9 +125,13 @@ export async function installGenesisImage(workspace: string, selection: GenesisI
     const result = await acceptMainPhoto(store, sheet, store.getBundle(), { source: "take", takeId: take.id }, sourceCandidate);
     if (result.status !== "accepted") throw new Error("The approved main photo could not be assigned.");
   } else {
-    if (kit?.locationViews?.some(view => view.sourceTakeId === take.id && view.id === kit.establishingViewId)) return;
+    if (kit?.locationViews?.some(view => view.sourceTakeId === take.id && view.id === kit.establishingViewId)) {
+      if (sourceCandidate) await store.ownedWrite(() => rm(join(store.dir, sourceCandidate!), { force: true }));
+      return;
+    }
     await acceptLocationView(store, sheet, { id: take.id, name: "Establishing view", file: `takes/${take.id}/${take.media}`, takeId: take.id,
       sheetVersion: sheet.version, artDirectionVersion: store.getBundle().artDirection.version, establishing: true,
       review: referenceReviewDecision(store.now(), take, "accept") });
+    if (sourceCandidate) await store.ownedWrite(() => rm(join(store.dir, sourceCandidate!), { force: true }));
   }
 }
