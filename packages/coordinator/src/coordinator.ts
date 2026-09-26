@@ -459,7 +459,7 @@ import { GenesisService } from "./harness/genesis.js";
 import { carryGenesisConversation, foundingMessages, genesisControlDir, loadGenesisConversation, reserveGenesisWorld } from "./harness/genesis-conversation.js";
 import { approvedBlueprintForFounding, decideGenesisContent, reviewGenesisContent } from "./harness/genesis-review.js";
 import { decideGenesisImage, genesisImageRequest, reviewGenesisImages, reviewedGenesisImages } from "./harness/genesis-images.js";
-import { decideGenesisVoice, genesisVoiceRequest, generateLocalGenesisVoice, reviewGenesisVoices, reviewedGenesisVoices } from "./harness/genesis-voices.js";
+import { decideGenesisVoice, genesisVoiceRequest, generateLocalGenesisVoice, hasUsableGenesisAudition, reviewGenesisVoices, reviewedGenesisVoices } from "./harness/genesis-voices.js";
 import { reviewGenesisImports, resolveGenesisImport, recoverGenesisImports } from "./harness/genesis-imports.js";
 import { FOUNDING_CONVERSATION_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { FoundingBuildService } from "./world/founding-build.js";
@@ -7118,14 +7118,17 @@ export class Coordinator {
           const dir = await this.opts.provider.genesisDir(msg.genesisId);
           const loaded = await loadGenesisConversation(dir, msg.genesisId);
           if (loaded.worldId || loaded.founding) throw new Error("Continue voice work in the founded world's conversation.");
-          const blueprint = await foldBlueprint(dir), catalogue = await this.voiceService?.catalogue() ?? [];
+          const blueprint = await foldBlueprint(dir);
+          const disabled = this.readModel.getState().app.models.disabled;
+          const catalogue = (await this.voiceService?.catalogue() ?? []).map(voice => disabled.includes(voice.model)
+            ? { ...voice, unavailableReason: "This voice model is disabled in Settings." } : voice);
           const jobs = () => (this.jobQueue?.listJobs() ?? []).filter(job => job.worldId === msg.genesisId);
           let voices = await reviewGenesisVoices(dir, blueprint, jobs(), catalogue, this.opts.manifest?.models ?? []);
           if (msg.kind === "genesis-voice-generate") {
             if (!this.voiceService) throw new Error("Voice audition is unavailable.");
             const plan = voices.plans.find(plan => plan.intent.id === msg.intentId && plan.digest === msg.digest);
             if (!plan) throw new Error("The audition proposal changed. Review its current text, voice and cost.");
-            if (!voices.candidates.some(one => one.plan.digest === plan.digest) && !jobs().some(job => job.idempotencyKey === msg.requestId)) {
+            if (!await hasUsableGenesisAudition(dir, voices.candidates, plan.digest) && !jobs().some(job => job.idempotencyKey === msg.requestId)) {
               if (jobs().some(job => job.params["purpose"] === "genesis-voice" && job.target.id === plan.intent.target && !["succeeded", "failed", "cancelled"].includes(job.status))) throw new Error("An audition for this character is already running.");
               if (plan.voice.provider === "kokoro" && plan.voice.model === "kokoro-82m") {
                 const control = new AbortController(), key = "genesis:" + msg.genesisId;

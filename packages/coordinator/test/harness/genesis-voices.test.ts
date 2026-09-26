@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { GenesisBlueprintSchema, JobSchema, newId, ulid, type VoiceCandidate, type ManifestModel } from "@arke-studio/contracts";
+import { GenesisBlueprintSchema, JobSchema, newId, ulid, jobOrigin, type VoiceCandidate, type ManifestModel } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { decideGenesisVoice, generateLocalGenesisVoice, reviewGenesisVoices, reviewedGenesisVoices, savedGenesisVoices, genesisVoiceRequest } from "../../src/harness/genesis-voices.js";
@@ -48,6 +48,8 @@ it("auditions once, plays immutable audio and selects separately across rename a
   assert.equal((await reviewedGenesisVoices(dir, draft, [], [])).selectedVoices, undefined);
   await writeFile(join(genesisControlDir(dir), candidate.file), "corrupt");
   await assert.rejects(decideGenesisVoice(dir, draft, [voice], { ...choice, requestId: ulid() }), /changed/);
+  await generateLocalGenesisVoice(dir, plan, ulid(), async () => { calls++; return wav(); });
+  assert.equal(calls, 2, "an explicit new request regenerates corrupt cached audio");
 });
 it("does not repeat an uncertain local audition and quotes queued previews before selection", async () => {
   const { dir, draft } = await setup();
@@ -67,5 +69,13 @@ it("does not repeat an uncertain local audition and quotes queued previews befor
   assert.equal(request.params["text"], quoted.text);
   const now = new Date().toISOString();
   const job = JobSchema.parse({ ...request, id: newId("jb"), status: "running", providerJobId: null, attempt: 1, error: null, createdAt: now, updatedAt: now });
+  assert.equal(jobOrigin(job), null, "a founding audition has no character-preview retry route");
   await assert.rejects(reviewedGenesisVoices(dir, draft, [job], [cloud]), /finish or cancel/);
+});
+
+it("disabled catalogue voices cannot produce a generation plan", async () => {
+  const { dir, draft } = await setup();
+  const review = await reviewGenesisVoices(dir, draft, [], [{ ...voice, unavailableReason: "This voice model is disabled in Settings." }], []);
+  assert.equal(review.plans.length, 0);
+  assert.match(review.problems.join(" "), /disabled/);
 });

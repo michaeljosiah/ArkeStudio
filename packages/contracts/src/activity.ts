@@ -460,6 +460,7 @@ const REFERENCE_ORIGINS: Record<string, Omit<JobOrigin, "path"> & { segment: str
  * somewhere wrong.
  */
 export function jobOrigin(job: Job): JobOrigin | null {
+  if (job.params["purpose"] === "genesis-voice") return null;
   if (job.target.kind === "voice-preview" && job.params["purpose"] === "bible-section") {
     return { path: `/w/${job.worldId}/bible`, label: "Bible", where: "the bible" };
   }
