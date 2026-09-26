@@ -198,6 +198,7 @@ interface StoreState {
       worldId?: string;
       review?: import("@arke-studio/contracts").GenesisContentReview;
       reviewRequestId?: string;
+      reviewPending?: boolean;
       founding?: boolean;
       frozenModels?: ModelChoices;
       formHandoff?: "pending" | "completed";
@@ -1556,7 +1557,7 @@ function handleFrame(json: string): void {
       setupStatus = event.setup;
     } else if (event.type === "genesis.review") {
       if (genesis[event.genesisId]?.reviewRequestId === event.requestId) {
-        genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], review: event.review } };
+        genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], review: event.review, reviewPending: false } };
       }
     } else if (event.type === "genesis.discarded") {
       discardedGenesis.add(event.genesisId);
@@ -1576,7 +1577,7 @@ function handleFrame(json: string): void {
         founding: event.founding,
         formHandoff: event.formHandoff,
         frozenModels: event.frozenModels,
-        review: undefined, reviewRequestId: ulid(),
+        review: undefined, reviewRequestId: ulid(), reviewPending: false,
         ...(event.detail ? { detail: event.detail } : {}),
         ...(event.worldId ? { worldId: event.worldId } : {}),
       } };
@@ -1623,6 +1624,7 @@ function handleFrame(json: string): void {
         [event.genesisId]: {
           ...g,
           status: event.status,
+          ...(event.status === "failed" ? { reviewPending: false } : {}),
           // The clock starts when the turn does; a settled turn takes its working line with it.
           runStartedAt: event.status === "running" ? event.at : g.runStartedAt,
           working: event.status === "running" ? g.working : null,
@@ -2821,7 +2823,7 @@ export function listGenesisDrafts(): void { send({ kind: "genesis-list" }); }
 export function loadGenesisDraft(genesisId: string): void { if (discardedGenesis.has(genesisId)) return; send({ kind: "genesis-load", genesisId }); }
 function genesisReviewRequest(genesisId: string): string {
   const requestId = ulid();
-  emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...emptyGenesis(), ...current.genesis[genesisId], reviewRequestId: requestId } } });
+  emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...emptyGenesis(), ...current.genesis[genesisId], reviewRequestId: requestId, reviewPending: true }, }, buildPlans: { ...current.buildPlans, [genesisId]: {} } });
   return requestId;
 }
 export function reviewGenesisDraft(genesisId: string): void { send({ kind: "genesis-review", genesisId, requestId: genesisReviewRequest(genesisId) }); }

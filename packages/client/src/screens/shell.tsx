@@ -1012,7 +1012,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
     1 + railCharacters.length + railLocations.length + railFactions.length + (blueprint?.threads.length ?? 0);
 
   const begin = (artDirection?: string) => {
-    if (turns.length) {
+    if (turns.length || buildMode) {
       proposeGenesisWorld(genesisId, {
         name: shownName, ...(shownLogline ? { logline: shownLogline } : {}),
         ...(shownTone ? { tone: shownTone } : {}), ...(shownGenre ? { genre: shownGenre } : {}),
@@ -1091,7 +1091,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                 <span style={{ flex: 1 }} />
                 {/* Skippable, but not hidden: a world with no look is a real state, and it is
                     better said out loud than arrived at by closing a screen. */}
-                <Button variant="ghost" disabled={!canCreate} onClick={() => (buildMode ? openBuildCard("") : begin())}>
+                <Button variant="ghost" disabled={!canCreate} onClick={() => (buildMode && genMode !== "form" ? openBuildCard("") : begin())}>
                   Decide later
                 </Button>
               </div>
@@ -1133,7 +1133,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                 <Button
                   variant="primary"
                   disabled={!canCreate || look.trim().length === 0}
-                  onClick={() => (buildMode ? openBuildCard(look.trim()) : begin(look))}
+                  onClick={() => (buildMode && genMode !== "form" ? openBuildCard(look.trim()) : begin(look))}
                 >
                   {submittedName ? "Creating…" : "Looks right"}
                 </Button>
@@ -1297,9 +1297,10 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                       plan={visibleBuildPlan}
                       startedAt={planStartedAt}
                       pressed={buildPressed}
-                      settling={chatRunning}
+                      settling={chatRunning || !!g?.reviewPending || plannedAgainst.current?.review !== g?.review}
                       onDismiss={leaveBuild}
                       onBuild={() => {
+                        if (g?.reviewPending || plannedAgainst.current?.review !== g?.review || !visibleBuildPlan?.plan) return;
                         if (buildRequestRef.current === null) buildRequestRef.current = ulid();
                         setBuildRequestId(buildRequestRef.current);
                         setBuildPressed(true);
@@ -1600,7 +1601,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                     conversationLookRef.current = approvedLook;
                     setPresetId(null);
                   }
-                  if (buildMode) openBuildCard(approvedLook);
+                  if (buildMode && genMode !== "form") openBuildCard(approvedLook);
                   else begin(approvedLook);
                 } else {
                   setStep("look");
