@@ -62,13 +62,14 @@ async function refreshConversationSummaryOnce(
   const through = previous?.event.type === "summary.updated" ? previous.event.throughSeq : 0;
   let throughSeq = through;
   for (const envelope of events) {
-    if (envelope.seq > through && envelope.event.type === "turn.completed") throughSeq = envelope.seq;
+    if (envelope.seq > through && (envelope.event.type === "turn.completed" || envelope.event.type === "founding.message")) throughSeq = envelope.seq;
   }
   const messages: Array<Pick<WorldChatMessage, "id" | "role" | "text">> = [];
   let turnCount = 0;
   for (const envelope of events) {
     if (envelope.seq <= through || envelope.seq > throughSeq) continue;
     if (envelope.event.type === "turn.started" || envelope.event.type === "founding.message") messages.push(envelope.event.message);
+    if (envelope.event.type === "founding.message" && envelope.event.message.role === "studio") turnCount++;
     if (envelope.event.type === "turn.completed") {
       messages.push(envelope.event.message);
       turnCount++;

@@ -480,7 +480,12 @@ export class WorldChatRunner {
      * what has been said and understood, so it is what the model is given — bounded by §8.5, and
      * with retractions travelling as keys so a withdrawn idea is not put back in front of it.
      */
-    const { events } = await store.read();
+    let { events } = await store.read();
+    if (this.deps.summarise && !events.some(envelope => envelope.event.type === "summary.updated") &&
+      events.filter(envelope => envelope.event.type === "founding.message").length > 50) {
+      await refreshConversationSummary(store, this.deps.summarise);
+      events = (await store.read()).events;
+    }
     const meta = await store.readMeta();
     const view = foldConversation(conversationId, meta?.createdAt ?? at, events).view;
     const modelChoice = this.deps.resolveLanguageModel
