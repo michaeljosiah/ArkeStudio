@@ -164,6 +164,7 @@ interface StoreState {
       review?: import("@arke-studio/contracts").GenesisContentReview;
       reviewRequestId?: string;
       images?: import("@arke-studio/contracts").GenesisImages;
+      imageError?: string;
       founding?: boolean;
       frozenModels?: ModelChoices;
       formHandoff?: "pending" | "completed";
@@ -1505,8 +1506,10 @@ function handleFrame(json: string): void {
       };
     } else if (event.type === "setup.status") {
       setupStatus = event.setup;
+    } else if (event.type === "genesis.image-error") {
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], imageError: event.detail } };
     } else if (event.type === "genesis.images") {
-      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], images: event.images } };
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], images: event.images, imageError: undefined } };
     } else if (event.type === "genesis.review") {
       if (genesis[event.genesisId]?.reviewRequestId === event.requestId) {
         genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], review: event.review } };

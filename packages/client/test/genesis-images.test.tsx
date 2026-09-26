@@ -41,3 +41,17 @@ it("previews character and location results inline and sends the displayed versi
     container.remove();
   }
 });
+
+it("keeps image failures separate from conversation lifecycle and clears them on recovery", async () => {
+  const store = await import("../src/lib/store.js");
+  const { FIXTURE_STATE } = await import("./fixture-state.js");
+  store.__setStateForTest(FIXTURE_STATE);
+  const at = new Date().toISOString(), genesisId = "gen-image-error";
+  store.__applyEventForTest({ type: "genesis.status", at, genesisId, status: "completed" });
+  store.__applyEventForTest({ type: "genesis.image-error", at, genesisId, detail: "Review the changed prompt." });
+  assert.equal(store.__stateForTest().genesis[genesisId]?.status, "completed");
+  assert.equal(store.__stateForTest().genesis[genesisId]?.imageError, "Review the changed prompt.");
+  store.__applyEventForTest({ type: "genesis.images", at, genesisId, images: GenesisImagesSchema.parse({ plans: [], candidates: [], selections: [], rejected: [], problems: [] }) });
+  assert.equal(store.__stateForTest().genesis[genesisId]?.imageError, undefined);
+  store.__setStateForTest(FIXTURE_STATE);
+});

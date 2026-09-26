@@ -19,7 +19,7 @@ async function candidateBytes(workspace: string, candidate: GenesisImageCandidat
 
 /** Provider inputs were sandbox-relative; permanent take provenance must travel with the world. */
 async function worldImageParams(workspace: string, candidate: GenesisImageCandidate, store: WorldStore): Promise<Record<string, unknown>> {
-  const params = { ...candidate.params };
+  const params: Record<string, unknown> = { ...candidate.params, ...(candidate.recipe ? { recipe: candidate.recipe } : {}) };
   if (params.references === undefined) return params;
   if (!Array.isArray(params.references)) throw new Error("The image reference provenance is unreadable.");
   const references: string[] = [];
@@ -48,7 +48,7 @@ export async function carryGenesisImageArtifacts(workspace: string, genesisId: s
     if (candidate.source === "generated" && candidate.jobId) {
       const entry = await ledger(candidate.jobId);
       await fileGeneratedArtifact(store, { sourcePath: join(genesisControlDir(workspace), candidate.file), generation: {
-        source: "founding", genesisId, jobId: candidate.jobId, target: candidate.target!, label: candidate.label,
+        source: "founding", genesisId, ...(candidate.recipe ? { recipe: candidate.recipe } : {}), jobId: candidate.jobId, target: candidate.target!, label: candidate.label,
         provider: candidate.provider!, model: candidate.model!, prompt: candidate.prompt ?? "", params: await worldImageParams(workspace, candidate, store),
         estimatedMicroUsd: candidate.estimatedMicroUsd ?? 0, costMicroUsd: entry?.actualMicroUsd ?? null, links,
       } });
@@ -76,7 +76,7 @@ export async function installGenesisImage(workspace: string, selection: GenesisI
     sourceCandidate = path;
     await store.ownedWrite(() => atomicWriteFile(join(store.dir, path), bytes));
     const job = JobSchema.parse({
-      id: candidate.jobId, idempotencyKey: candidate.jobId.slice(3), worldId: store.worldId,
+      ...(candidate.recipe ? { recipe: candidate.recipe } : {}), id: candidate.jobId, idempotencyKey: candidate.jobId.slice(3), worldId: store.worldId,
       target: { kind: sheet.type === "character" ? "main-photo-candidate" : "location-view-candidate", id: `${sheet.id}/founding` },
       capability: "image", provider: candidate.provider, model: candidate.model, params: { ...await worldImageParams(workspace, candidate, store),
         provenance: { canonRevision: store.getBundle().meta.canonRevision, sheets: { [sheet.id]: sheet.version },
