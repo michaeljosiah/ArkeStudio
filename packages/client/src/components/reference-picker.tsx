@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   admitReference,
+  artifactReferenceFile,
   benchSourceKey,
   benchTokenFor,
   formatSeconds,
@@ -138,15 +139,16 @@ export function characterPickerSources(
    */
   const artifactByFile = new Map<string, ArtifactSidecar>();
   for (const artifact of pickableArtifacts(world.artifacts ?? [])) {
-    if (artifact.generation?.source !== "character-reference") continue;
-    const existing = artifactByFile.get(artifact.generation.sourceFile);
+    const sourceFile = artifactReferenceFile(artifact, world.referenceTakes);
+    if (!sourceFile) continue;
+    const existing = artifactByFile.get(sourceFile);
     // Newest wins, explicitly (Codex round 1). The legacy tile path lands every regeneration of
     // an angle on ONE filename, so two artifacts can name one source file — and bundle order is
     // the scan's alphabetical sort, where the collision name `…-front-2.png.json` sorts BEFORE
     // `…-front.png.json`. Last-write-wins therefore handed back the OLDEST bytes while the row's
     // thumbnail showed the current ones: a paid generation carrying a picture nobody could see.
     if (existing === undefined || newerArtifact(artifact, existing)) {
-      artifactByFile.set(artifact.generation.sourceFile, artifact);
+      artifactByFile.set(sourceFile, artifact);
     }
   }
   const nameOf = new Map(world.sheets.map((sheet) => [sheet.id, sheet.name]));
