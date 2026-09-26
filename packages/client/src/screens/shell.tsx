@@ -816,8 +816,8 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
     if (g && connection === "open" && !chatRunning && !g.worldId && !g.founding) reviewGenesisImports(genesisId);
   }, [connection, chatRunning, blueprint, g?.attachments, genesisId]);
   useEffect(() => {
-    if (connection === "open" && blueprint && !chatRunning && !g?.worldId) reviewGenesisDraft(genesisId);
-  }, [connection, blueprint, chatRunning, g?.worldId, genesisId]);
+    if (connection === "open" && blueprint && !chatRunning && !g?.worldId && !g?.founding) reviewGenesisDraft(genesisId);
+  }, [connection, blueprint, chatRunning, g?.worldId, g?.founding, genesisId]);
 
   // With a healthy harness, talking is the front door (prototype 12a) — unless the author
   // already picked the form themselves.
@@ -1238,7 +1238,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                   onResolve={resolution => resolveGenesisImport(genesisId, resolution)}
                   onRefresh={() => reviewGenesisImports(genesisId)}
                   onExtract={name => setMessage(`Please extract reviewable worldbuilding proposals from attachments/${name}. Cite exact source quotes; keep interpretations and suggested relationships separate from the evidence.`)} />}
-                {g?.review && <GenesisContentCards review={g.review} busy={chatRunning || buildPressed || !!g?.founding || !!g?.worldId || myBuild?.status === "running"}
+                {g?.review && <GenesisContentCards review={g.review} busy={!!g.reviewPending || chatRunning || buildPressed || !!g?.founding || !!g?.worldId || myBuild?.status === "running"}
                   onDecide={(cards, decision) => decideGenesisDraft(genesisId, cards.map(card => ({ key: card.key, digest: card.digest })), decision)}
                   onRevise={title => setMessage(`Please revise ${title}: `)} />}
                 {g?.imageError && <Callout title="Image request needs attention">{g.imageError}</Callout>}
