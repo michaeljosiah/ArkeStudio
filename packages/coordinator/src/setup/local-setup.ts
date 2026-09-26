@@ -46,7 +46,11 @@ export interface SetupDeps {
     body: AsyncIterable<Uint8Array>;
   }>;
   /** Run a program to completion. Used for the third-party installer and `ollama pull`. */
-  run(command: string, args: readonly string[], signal: AbortSignal): Promise<{ code: number; output: string }>;
+  run(
+    command: string, args: readonly string[], signal: AbortSignal,
+    /** Each piece of output as it arrives, for a program that reports its own progress. */
+    onOutput?: (text: string) => void,
+  ): Promise<{ code: number; output: string }>;
   /** Absolute path of a command on PATH, or null. */
   which(command: string): Promise<string | null>;
   /** Does something answer here? Ollama's own API is the surest sign it is installed. */
@@ -1018,7 +1022,9 @@ export class LocalSetupService {
         return;
       }
 
-      // A pull: the runtime fetches its own model and reports its own progress; ours is coarse.
+      // A pull: the runtime fetches its own model and prints its own progress, which is read
+      // back here. Read as a finished program only, a 7 GB pull said "0%" for ten minutes and
+      // then "installed", which looks like a hang the whole way (issue 1289).
       this.set(entry.id, {
         state: "installing",
         detail: `${spec.command} ${spec.args.join(" ")}`,
@@ -1026,7 +1032,14 @@ export class LocalSetupService {
         pauseSupported: false,
       });
       this.publish();
-      const pulled = await this.deps.run(spec.command, spec.args, this.abort.signal);
+      const progress = new PullProgress();
+      let published = 0;
+      const pulled = await this.deps.run(spec.command, spec.args, this.abort.signal, (text) => {
+        if (!progress.read(text)) return;
+        this.set(entry.id, { bytesDone: progress.done, bytesPerSecond: progress.perSecond });
+        // Twice a second is a moving bar; every chunk would be a frame per carriage return.
+        if (Date.now() - published >= 500) { published = Date.now(); this.publish(); }
+      });
       if (pulled.code !== 0) {
         this.set(entry.id, { state: "failed", detail: firstLine(pulled.output) || `${spec.command} exited ${pulled.code}` });
       } else {
@@ -1803,6 +1816,48 @@ export class LocalSetupService {
 
 function gb(mb: number): string {
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
+}
+
+/**
+ * `ollama pull`'s own progress, read from what it prints (issue 1289). Off a terminal it still
+ * draws its bars: each redraw begins at column one (`ESC[1G`), several layers redraw together
+ * after a cursor-up, and a layer reads `pulling 59656d7494d6:  45% ▕██▏ 3.3 GB/7.4 GB 30 MB/s`
+ * until it is finished, when the pair becomes its size alone. Sizes are decimal, as Ollama
+ * prints them. A line that does not match changes nothing, so a format this does not know
+ * leaves the bar where it was rather than moving it wrongly.
+ */
+export class PullProgress {
+  private readonly layers = new Map<string, number>();
+  private carry = "";
+  done = 0;
+  perSecond: number | null = null;
+
+  /** Whether this text moved the count. */
+  read(text: string): boolean {
+    // eslint-disable-next-line no-control-regex
+    const pieces = (this.carry + text).split(/\r|\n|\u001b\[\d*[AG]/);
+    this.carry = pieces.pop() ?? "";
+    let moved = false;
+    for (const piece of pieces) {
+      // eslint-disable-next-line no-control-regex
+      const line = piece.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "");
+      const layer = /pulling ([0-9a-f]{6,}):\s+\d+%.*?([\d.]+\s*[KMGT]?B)(?:\s*\/\s*([\d.]+\s*[KMGT]?B))?(?:\s+([\d.]+\s*[KMGT]?B)\/s)?/.exec(line);
+      if (!layer) continue;
+      const done = bytes(layer[2]!);
+      if (done === null) continue;
+      if (this.layers.get(layer[1]!) !== done) { this.layers.set(layer[1]!, done); moved = true; }
+      if (layer[4] !== undefined) this.perSecond = bytes(layer[4]);
+    }
+    if (moved) this.done = [...this.layers.values()].reduce((sum, value) => sum + value, 0);
+    return moved;
+  }
+}
+
+function bytes(size: string): number | null {
+  const found = /^([\d.]+)\s*([KMGT]?)B$/.exec(size.trim());
+  if (!found) return null;
+  const scale = { "": 1, K: 1e3, M: 1e6, G: 1e9, T: 1e12 }[found[2] as "" | "K" | "M" | "G" | "T"];
+  return Math.round(Number(found[1]) * scale);
 }
 
 function firstLine(text: string): string {

@@ -28,6 +28,7 @@ export class LocalGpu {
   private owner: LocalGpuEngine | null = null;
   private readonly queue: WaitingTurn[] = [];
   private readonly stopped = new AbortController();
+  private readonly ran = new Set<LocalGpuEngine>();
 
   constructor(private readonly unload: (engine: LocalGpuEngine, signal: AbortSignal) => Promise<void>) {}
 
@@ -70,9 +71,12 @@ export class LocalGpu {
     // Own the card during unloading too: another submit must not race the handover.
     void Promise.resolve().then(() => this.unload(turn.engine === "Ollama" ? "ComfyUI" : "Ollama", turn.signal)).then(() => {
       if (turn.signal.aborted) { release(); turn.reject(turn.signal.reason); }
-      else turn.resolve(release);
+      else { this.ran.add(turn.engine); turn.resolve(release); }
     }, (error) => { release(); turn.reject(error); });
   }
+
+  /** Whether this engine was handed the card at least once in this run: shutdown's claim on it. */
+  hasRun(engine: LocalGpuEngine): boolean { return this.ran.has(engine); }
 
   stop(): void { this.stopped.abort(new Error("Local inference is stopping.")); }
 }

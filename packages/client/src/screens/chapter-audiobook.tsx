@@ -8,6 +8,10 @@ import {
   audiobookCounts,
   audiobookDirectionFor,
   audiobookHeading,
+  audiobookRecordingKey,
+  audiobookSpeakerColours,
+  audiobookSpeakerKey,
+  retailLevel,
   billableCharacters,
   cadenceSupport,
   estimateMicroUsd,
@@ -32,6 +36,8 @@ import {
   type ManifestModel,
 } from "@arke-studio/contracts";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
+import { Mic, Pin, Waveform } from "../components/icons.js";
+import { EditorDialog } from "../components/editor-dialog.js";
 import { Button } from "../components/ui.js";
 import { clearQueue, dismissPlayback, enqueueClip, jumpQueue, playClip, playbackSnapshot, usePlayback, useQueueAt } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
@@ -39,7 +45,17 @@ import {
   acceptDirection,
   directChapter,
   dismissAudiobookRun,
+  discardAudiobookLines,
+  discardAudiobookTake,
+  exportAudiobookScript,
+  keepAudiobookLines,
+  openExportsFolder,
+  stageAudiobookLines,
+  useSpeakerLines,
   dismissDirection,
+  keepAudiobookTake,
+  stageAudiobookTake,
+  useStagedTakes,
   readAudiobookBlocks,
   readAudiobookChapter,
   requestVoiceCatalogue,
@@ -70,6 +86,8 @@ export interface ChapterAudiobookInput {
   /** The takes the record names that the coordinator found gone from the shelf when the chapter was opened. */
   missing?: readonly string[];
   reading: AudiobookReading;
+  /** The book's recorded speakers (SPEC-047 R-37), by `audiobookRecordingKey`. */
+  recorded?: readonly string[];
   connection: string;
   locked: boolean;
   /**
@@ -100,9 +118,27 @@ export interface BlockRow {
   /** The cloned voice's recording language, the line's (issue 1163); none for a catalogue voice. */
   language?: string;
   artifact: ArtifactSidecar | null;
+  /** Who speaks the block by the cast (SPEC-047 R-33): the sheet, else the name; null for narration and the title. */
+  speakerKey: string | null;
+  /** The speaker's colour, `--voice-N`, the same in every chapter; null for the narrator and a name no sheet carries. */
+  colour: number | null;
+  /** The kept take was recorded by a person (SPEC-047 R-34), not made by a voice. */
+  recorded: boolean;
+  /** The block's speaker is recorded by a person (R-37): made only by a recording. */
+  byPerson: boolean;
 }
 
-const STATE_LABEL: Record<AudiobookBlockState, string> = { "not made": "not made", made: "made", stale: "stale", flagged: "flagged" };
+/** The filter over the blocks (R-33): everyone, the narrator, or one speaker by key. */
+export type AudiobookFilter = null | "narrator" | { speaker: string };
+
+/** Whether a row passes the filter. */
+export function inAudiobookFilter(row: Pick<BlockRow, "speakerKey">, filter: AudiobookFilter): boolean {
+  if (filter === null) return true;
+  if (filter === "narrator") return row.speakerKey === null;
+  return row.speakerKey === filter.speaker;
+}
+
+const STATE_LABEL: Record<AudiobookBlockState, string> = { "not made": "not made", made: "made", stale: "stale", flagged: "flagged", awaiting: "awaiting recording" };
 
 function readerOf(voice: { provider: string; model?: string; voiceId: string; label?: string }, clonedVoices: readonly ClonedVoice[] | undefined): AudiobookReader | null {
   const model = voice.model ?? legacyVoiceModel(voice.provider, voice.voiceId, clonedVoices ?? []);
@@ -113,6 +149,8 @@ function readerOf(voice: { provider: string; model?: string; voiceId: string; la
 /** The blocks, their states and the counts, from the one rule both ends use. */
 export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const { worldId, prodId, chapter, body, cast, record, missing, reading, connection, locked } = input;
+  const recordedList = input.recorded;
+  const recordedKeys = useMemo(() => new Set(recordedList ?? []), [recordedList]);
   const { state } = useStore();
   const world = state?.world ?? null;
   const catalogue = useStore().voiceCatalogue;
@@ -143,6 +181,13 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const hasArtifact = useCallback(
     (artifactId: string) => !(missing ?? []).includes(artifactId) && (world?.artifacts.some((candidate) => candidate.id === artifactId && candidate.retiredAt === undefined) ?? false),
     [world, missing],
+  );
+  // One colour a speaker across the book (R-33): read from every chapter's cast stamp, this
+  // chapter's own speakers numbered after them when its stamp has not caught up yet.
+  const chapters = world?.productions.find((candidate) => candidate.meta.id === prodId)?.chapters;
+  const colours = useMemo(
+    () => audiobookSpeakerColours(chapters ?? [], derived.blocks.flatMap((block) => (block.sheet !== undefined ? [block.sheet] : []))),
+    [chapters, derived.blocks],
   );
   const rows = useMemo<BlockRow[]>(() => {
     return derived.blocks.map((block) => {
@@ -175,17 +220,46 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       const speaker = cannot ? narrator : assigned;
       const spokenSource = voiceSourceFor(world?.clonedVoices ?? [], speaker.provider, speaker.model, speaker.voiceId);
       const language = spokenSource.kind === "cloned" ? spokenSource.voice.language : undefined;
-      return { block, state: audiobookBlockState(block, recordOrNull, assigned, hasArtifact), mark, markWarn, assigned, speaker, ...(language !== undefined ? { language } : {}), artifact };
+      const speakerKey = audiobookSpeakerKey(block);
+      const colour = block.sheet === undefined ? null : (colours.get(block.sheet) ?? null);
+      const recorded = take?.source === "recorded";
+      const byPerson = recordedKeys.has(audiobookRecordingKey(block));
+      return { block, state: audiobookBlockState(block, recordOrNull, assigned, hasArtifact, byPerson), mark, markWarn, assigned, speaker, ...(language !== undefined ? { language } : {}), artifact, speakerKey, colour, recorded, byPerson };
     });
-  }, [derived.blocks, narrator, reading, world, recordOrNull, hasArtifact, catalogue, modelOf]);
+  }, [derived.blocks, narrator, reading, world, recordOrNull, hasArtifact, catalogue, modelOf, colours, recordedKeys]);
+  // The filter is the page's (R-33): not kept, and gone with the chapter.
+  const [filter, setFilter] = useState<AudiobookFilter>(null);
+  useEffect(() => setFilter(null), [chapter.id]);
+  /** The filter row: everyone, the narrator, then each speaker in colour order and the names no sheet carries after. */
+  const filters = useMemo(() => {
+    const speakers = new Map<string, { key: string; label: string; colour: number | null; count: number }>();
+    for (const row of rows) {
+      if (row.speakerKey === null) continue;
+      const held = speakers.get(row.speakerKey);
+      if (held !== undefined) held.count += 1;
+      else speakers.set(row.speakerKey, { key: row.speakerKey, label: row.mark, colour: row.colour, count: 1 });
+    }
+    return {
+      everyone: rows.length,
+      narrator: rows.filter((row) => row.speakerKey === null).length,
+      speakers: [...speakers.values()].sort((a, b) => (a.colour ?? Infinity) - (b.colour ?? Infinity) || a.label.localeCompare(b.label)),
+    };
+  }, [rows]);
   // The catalogue says who can speak now (turn 130's rule): asked for once the view is open,
   // so the panel's readers are the run's.
   useEffect(() => {
     if (connection === "open") requestVoiceCatalogue(worldId);
   }, [connection, worldId]);
   const counts = useMemo(
-    () => audiobookCounts(derived.blocks, recordOrNull, (block) => rows.find((row) => row.block.key === block.key)?.assigned ?? narrator, hasArtifact),
-    [derived.blocks, recordOrNull, rows, narrator, hasArtifact],
+    () =>
+      audiobookCounts(
+        derived.blocks,
+        recordOrNull,
+        (block) => rows.find((row) => row.block.key === block.key)?.assigned ?? narrator,
+        hasArtifact,
+        (block) => recordedKeys.has(audiobookRecordingKey(block)),
+      ),
+    [derived.blocks, recordOrNull, rows, narrator, hasArtifact, recordedKeys],
   );
   // What a press would spend, before the run asks: the cloud blocks not made, by the character
   // as the row bills it (SPEC-046 R-8) — bytes or doubled CJK for the readers that count so.
@@ -193,7 +267,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const estimate = useMemo(
     () =>
       rows.reduce((sum, row) => {
-        if (row.state === "made" || row.speaker.provider === "kokoro") return sum;
+        if (row.state === "made" || row.state === "awaiting" || row.speaker.provider === "kokoro") return sum;
         const model = modelOf(row.speaker);
         return model === null ? sum : sum + estimateMicroUsd(model, { characters: billableCharacters(model, row.block.text) });
       }, 0),
@@ -201,7 +275,8 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   );
 
   // The player: the made takes in order, through the one queue the page read uses (R-20).
-  const playable = useMemo(() => rows.filter((row) => row.state === "made" && row.artifact !== null), [rows]);
+  // With a speaker chosen, Play plays that speaker's takes alone (R-33).
+  const playable = useMemo(() => rows.filter((row) => row.state === "made" && row.artifact !== null && inAudiobookFilter(row, filter)), [rows, filter]);
   const queueId = `audiobook:${worldId}/${prodId}/${chapter.id}`;
   // A queue that has run dry rests on `ended` with `at` one past its last piece (codex on PR
   // 1180): that is not playing, and the head goes back to Play rather than `N+1 of N · Stop`.
@@ -226,6 +301,8 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     clearQueue();
   }, [queueId]);
   useEffect(() => stopPlaying, [stopPlaying, chapter.id]);
+  // A queue built for one filter is not another's: changing it stops what was playing.
+  useEffect(() => stopPlaying, [stopPlaying, filter]);
   const sounding = playing && at !== null ? (playable[at] ?? null) : null;
 
   // A cloned voice's recording leaving the machine (SPEC-022, SPEC-046): asked once, by the run's request.
@@ -335,6 +412,38 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     [locked, connection, worldId, prodId, chapter.file],
   );
   const lastRecord = useAudiobookRecords()[`${worldId}/${prodId}/${chapter.id}`];
+  // A take a person recorded (turn 155c): the host's picker opens for the block, the checks come
+  // back as a dialog, and the keep answers as the block's record does.
+  const [uploadId, setUploadId] = useState<string | null>(null);
+  const staged = useStagedTakes()[uploadId ?? ""];
+  useEffect(() => setUploadId(null), [chapter.id]);
+  const uploadTake = useCallback(
+    (key: string) => {
+      if (locked || connection !== "open") return;
+      if (uploadId !== null) discardAudiobookTake(worldId, uploadId);
+      setUploadId(stageAudiobookTake(worldId, prodId, chapter.file, key));
+    },
+    [locked, connection, uploadId, worldId, prodId, chapter.file],
+  );
+  const closeUpload = useCallback(() => {
+    if (uploadId !== null) discardAudiobookTake(worldId, uploadId);
+    setUploadId(null);
+  }, [uploadId, worldId]);
+  const uploadRow = staged === undefined ? null : (rows.find((row) => row.block.key === staged.block) ?? null);
+  const uploadDialog =
+    uploadId !== null && staged !== undefined && staged.state !== "choosing" && uploadRow !== null ? (
+      <RecordedTakeDialog
+        staged={staged}
+        row={uploadRow}
+        onCancel={closeUpload}
+        onReplace={() => uploadTake(uploadRow.block.key)}
+        onKeep={(basis, performer) => keepAudiobookTake(worldId, uploadId, basis, performer)}
+      />
+    ) : null;
+  // Kept: the store lets the entry go when the record answers, and the dialog with it.
+  useEffect(() => {
+    if (uploadId !== null && staged === undefined) setUploadId(null);
+  }, [uploadId, staged]);
 
   const head = (() => {
     if (upload !== null && run?.state !== "read") {
@@ -425,6 +534,9 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     rows,
     counts,
     estimate,
+    filter,
+    setFilter,
+    filters,
     head,
     note,
     selected,
@@ -444,44 +556,244 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     setDirection,
     /** The last write outside a run — a block's direction set or refused (R-9): the refusal is said on the panel. */
     lastRecord,
+    uploadTake,
+    uploadDialog,
   };
 }
 
 /** The manuscript column in the Audiobook view: a row a block, the reader in the margin, the state as a dot. */
-export function AudiobookBlocks({ rows, sounding, selected, onSelect, onPlayOne, slug }: {
+/** Who a block can be given to (SPEC-012 R-63): the chapter's speakers first, then the rest of the cast. */
+export interface SpeakerChoices {
+  chapter: { key: string; label: string; sheet?: string; colour: number | null }[];
+  cast: { sheet: string; label: string; voice: string | null; colour: number | null }[];
+}
+
+/** What a choice in the speaker menu writes: a speaker, narration, or the correction taken back. */
+export type SpeakerPick = { speaker: string; sheet?: string } | { narration: true } | { clear: true };
+
+/** The raw offsets of a selection inside a block's text, which holds the text alone. */
+function rawSelection(host: HTMLElement): { from: number; to: number } | null {
+  const selection = typeof window === "undefined" ? null : window.getSelection?.();
+  if (selection === null || selection === undefined || selection.rangeCount === 0 || selection.isCollapsed) return null;
+  const range = selection.getRangeAt(0);
+  if (!host.contains(range.startContainer) || !host.contains(range.endContainer)) return null;
+  const offset = (node: Node, at: number) => {
+    const before = document.createRange();
+    before.selectNodeContents(host);
+    before.setEnd(node, at);
+    return before.toString().length;
+  };
+  const a = offset(range.startContainer, range.startOffset);
+  const b = offset(range.endContainer, range.endOffset);
+  return a === b ? null : { from: Math.min(a, b), to: Math.max(a, b) };
+}
+
+/** The speaker menu (design turn 155b, SPEC-012 R-63): a search, this chapter's speakers, the rest of the cast. */
+function SpeakerMenu({ row, choices, onPick, onClose }: {
+  row: BlockRow;
+  choices: SpeakerChoices;
+  onPick: (pick: SpeakerPick) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const match = (label: string) => label.toLowerCase().includes(query.trim().toLowerCase());
+  const typed = query.trim();
+  const known = [...choices.chapter.map((who) => who.label), ...choices.cast.map((who) => who.label)].some((label) => label.toLowerCase() === typed.toLowerCase());
+  const option = (key: string, label: string, tone: string, current: boolean, pick: SpeakerPick, meta?: string) => (
+    <button key={key} type="button" role="menuitem" className="fy-ab__menu-opt" onClick={() => onPick(pick)}>
+      <i className={`fy-ab__speaker-dot fy-voice--${tone}`} aria-hidden="true" />
+      <span className="fy-ab__menu-label">{label}</span>
+      {meta !== undefined && <span className="fy-ab__menu-meta">{meta}</span>}
+      {current && <span className="fy-ab__menu-tick" aria-label="current">✓</span>}
+    </button>
+  );
+  return (
+    <div className="fy-ab__menu" role="menu" aria-label="Speaker" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.key === "Escape" && onClose()}>
+      <input
+        className="fy-ab__menu-search"
+        placeholder="Speaker"
+        aria-label="Speaker"
+        value={query}
+        autoFocus
+        onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && typed !== "" && !known) onPick({ speaker: typed });
+        }}
+      />
+      <div className="fy-ab__menu-eb">In this chapter</div>
+      {match("Narration") && option("narration", "Narration", "narrator", row.speakerKey === null, { narration: true })}
+      {choices.chapter.filter((who) => match(who.label)).map((who) =>
+        option(`c:${who.key}`, who.label, who.sheet === undefined ? "none" : String(who.colour ?? "none"), row.speakerKey === who.key, { speaker: who.label, ...(who.sheet !== undefined ? { sheet: who.sheet } : {}) }),
+      )}
+      {choices.cast.some((who) => match(who.label)) && <div className="fy-ab__menu-eb">Cast</div>}
+      {choices.cast.filter((who) => match(who.label)).map((who) =>
+        option(`s:${who.sheet}`, who.label, who.colour === null ? "plain" : String(who.colour), false, { speaker: who.label, sheet: who.sheet }, who.voice ?? "no voice"),
+      )}
+      {typed !== "" && !known && option("typed", `“${typed}”`, "none", false, { speaker: typed }, "no sheet")}
+      {row.block.pinned === true && (
+        <>
+          <div className="fy-ab__menu-sep" />
+          <button type="button" role="menuitem" className="fy-ab__menu-opt" onClick={() => onPick({ clear: true })}>
+            <span className="fy-ab__menu-label">Undo correction</span>
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+export function AudiobookBlocks({ rows, sounding, selected, onSelect, onPlayOne, slug, filter = null, choices, onPin }: {
   rows: BlockRow[];
   sounding: BlockRow | null;
   selected: string | null;
   onSelect: (key: string) => void;
   onPlayOne: (row: BlockRow) => void;
   slug: string | undefined;
+  filter?: AudiobookFilter;
+  /** Offered only while the cast is current and can be written (SPEC-012 R-62): who a block can be given to. */
+  choices?: SpeakerChoices;
+  /** A choice made for a block, or for words selected inside a narration block. */
+  onPin?: (row: BlockRow, pick: SpeakerPick, selection?: { from: number; to: number }) => void;
 }) {
+  const [menu, setMenu] = useState<{ key: string; selection?: { from: number; to: number } } | null>(null);
+  useEffect(() => {
+    if (menu === null) return;
+    const close = () => setMenu(null);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [menu]);
   if (rows.length === 0) return <p className="fy-bible__empty">Nothing to read yet.</p>;
+  const pinnable = choices !== undefined && onPin !== undefined;
   return (
     <div className="fy-ab__blocks" data-testid="audiobook-blocks">
-      {rows.map((row) => (
-        <div
-          key={row.block.key}
-          className={`fy-ab__block${sounding?.block.key === row.block.key ? " fy-ab__block--sounding" : ""}${selected === row.block.key ? " fy-ab__block--selected" : ""}`}
-          data-state={row.state}
-          data-block={row.block.key}
-          onClick={() => onSelect(row.block.key)}
-        >
-          <span className={`fy-ab__mark fy-mono${row.markWarn ? " fy-ab__mark--warn" : ""}${row.mark === "narrator" || row.mark === "title" ? " fy-ab__mark--faint" : ""}`}>{row.mark}</span>
-          <span className="fy-ab__text">{row.block.text}</span>
-          <button
-            type="button"
-            className={`fy-ab__dot fy-ab__dot--${row.state.replace(" ", "-")}`}
-            title={STATE_LABEL[row.state]}
-            aria-label={`${STATE_LABEL[row.state]}${row.state === "made" && slug !== undefined ? " · play" : ""}`}
-            disabled={row.state !== "made" || row.artifact === null}
-            onClick={(event) => {
-              event.stopPropagation();
-              onPlayOne(row);
-            }}
-          />
-        </div>
-      ))}
+      {rows.map((row) => {
+        // The margin names who speaks (R-33): a colour a speaker with a sheet, grey for the
+        // narrator, a dashed dot for a name no sheet carries; a line is tinted, narration is not.
+        const tone = row.speakerKey === null ? "narrator" : row.colour === null ? "none" : String(row.colour);
+        return (
+          <div
+            key={row.block.key}
+            className={`fy-ab__block fy-voice--${tone}${row.speakerKey !== null ? " fy-ab__block--line" : ""}${sounding?.block.key === row.block.key ? " fy-ab__block--sounding" : ""}${selected === row.block.key ? " fy-ab__block--selected" : ""}${inAudiobookFilter(row, filter) ? "" : " fy-ab__block--dim"}`}
+            data-state={row.state}
+            data-block={row.block.key}
+            data-speaker={row.speakerKey ?? "narrator"}
+            onClick={() => onSelect(row.block.key)}
+          >
+            {pinnable && row.block.paragraph >= 0 ? (
+              <button
+                type="button"
+                className={`fy-ab__speaker fy-ab__speaker--press${menu?.key === row.block.key && menu.selection === undefined ? " fy-ab__speaker--open" : ""}`}
+                title={row.markWarn ? `${row.mark} · narrator` : row.mark}
+                aria-haspopup="menu"
+                aria-expanded={menu?.key === row.block.key}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setMenu(menu?.key === row.block.key ? null : { key: row.block.key });
+                }}
+              >
+                <i className="fy-ab__speaker-dot" aria-hidden="true" />
+                <span className={`fy-ab__mark${row.markWarn ? " fy-ab__mark--warn" : ""}`}>{row.mark}</span>
+              </button>
+            ) : (
+              <span className="fy-ab__speaker" title={row.markWarn ? `${row.mark} · narrator` : row.mark}>
+                <i className="fy-ab__speaker-dot" aria-hidden="true" />
+                <span className={`fy-ab__mark${row.markWarn ? " fy-ab__mark--warn" : ""}`}>{row.mark}</span>
+              </span>
+            )}
+            <span
+              className="fy-ab__text"
+              onMouseUp={(event) => {
+                // Words selected in narration can be made a line (SPEC-012 R-63): within one block,
+                // between 1 and 600 characters; the menu opens for the selection.
+                if (!pinnable || row.speakerKey !== null || row.block.paragraph < 0) return;
+                const span = rawSelection(event.currentTarget);
+                if (span === null) return;
+                const words = row.block.text.slice(span.from, span.to);
+                if (words.trim() === "" || words.length > 600) return;
+                event.stopPropagation();
+                setMenu({ key: row.block.key, selection: span });
+              }}
+            >
+              {row.block.text}
+            </span>
+            {menu?.key === row.block.key && choices !== undefined && onPin !== undefined && (
+              <SpeakerMenu
+                row={row}
+                choices={choices}
+                onClose={() => setMenu(null)}
+                onPick={(pick) => {
+                  setMenu(null);
+                  onPin(row, pick, menu.selection);
+                }}
+              />
+            )}
+            <span className="fy-ab__marks">
+              {row.block.pinned === true && (
+                <span className="fy-ab__pin" title="set by you" aria-label="set by you">
+                  <Pin size={11} />
+                </span>
+              )}
+              {row.state === "awaiting" && (
+                <span className="fy-ab__source" title="awaiting recording" aria-label="awaiting recording">
+                  <Mic size={11} />
+                </span>
+              )}
+              {row.artifact !== null && row.state !== "awaiting" &&
+                (row.recorded ? (
+                  <span className="fy-ab__source fy-ab__source--recorded" title="recorded" aria-label="recorded">
+                    <Mic size={11} />
+                  </span>
+                ) : (
+                  <span className="fy-ab__source" title="made by a voice" aria-label="made by a voice">
+                    <Waveform size={11} />
+                  </span>
+                ))}
+              <button
+                type="button"
+                className={`fy-ab__dot fy-ab__dot--${row.state.replace(" ", "-")}`}
+                title={STATE_LABEL[row.state]}
+                aria-label={`${STATE_LABEL[row.state]}${row.state === "made" && slug !== undefined ? " · play" : ""}`}
+                disabled={row.state !== "made" || row.artifact === null}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onPlayOne(row);
+                }}
+              />
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The row over the blocks (R-33): everyone, the narrator, each speaker with a count. Choosing one dims the rest. */
+export function AudiobookFilterRow({ filters, filter, onFilter }: {
+  filters: { everyone: number; narrator: number; speakers: { key: string; label: string; colour: number | null; count: number }[] };
+  filter: AudiobookFilter;
+  onFilter: (filter: AudiobookFilter) => void;
+}) {
+  if (filters.everyone === 0) return null;
+  const chip = (key: string, label: string, count: number, on: boolean, next: AudiobookFilter, tone: string | null) => (
+    <button
+      key={key}
+      type="button"
+      className={`fy-ab__fchip${tone !== null ? ` fy-voice--${tone}` : ""}${on ? " fy-ab__fchip--on" : ""}`}
+      aria-pressed={on}
+      onClick={() => onFilter(on && next !== null ? null : next)}
+    >
+      {tone !== null && <i className="fy-ab__speaker-dot" aria-hidden="true" />}
+      {label}
+      <span className="fy-ab__fcount">{count}</span>
+    </button>
+  );
+  return (
+    <div className="fy-ab__filter" role="group" aria-label="Speakers" data-testid="audiobook-filter">
+      {chip("everyone", "Everyone", filters.everyone, filter === null, null, null)}
+      {filters.narrator > 0 && chip("narrator", "Narrator", filters.narrator, filter === "narrator", "narrator", "narrator")}
+      {filters.speakers.map((who) =>
+        chip(who.key, who.label, who.count, typeof filter === "object" && filter !== null && filter.speaker === who.key, { speaker: who.key }, who.colour === null ? "none" : String(who.colour)),
+      )}
     </div>
   );
 }
@@ -542,7 +854,7 @@ function reportLine(plan: CadencePlan, controls: ReturnType<typeof mapCadence>["
 }
 
 /** The side in the Audiobook view: the block pressed, its direction, then its takes. */
-export function AudiobookSide({ rows, selected, record, artifacts, slug, productionId, chapterId, chapterTitle, modelOf, onSetDirection, onMakeAgain, refused, blockHost }: {
+export function AudiobookSide({ rows, selected, record, artifacts, slug, productionId, chapterId, chapterTitle, modelOf, onSetDirection, onMakeAgain, onUpload, onRecorded, onLines, refused, blockHost }: {
   rows: BlockRow[];
   selected: string | null;
   record: ChapterAudiobook | null;
@@ -554,6 +866,12 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
   modelOf: (reader: AudiobookReader) => ManifestModel | null;
   onSetDirection: (key: string, direction: AudiobookDirectionInput | null) => void;
   onMakeAgain: (key: string) => void;
+  /** A recording for the block, from the host's picker (SPEC-047 R-35). */
+  onUpload?: (key: string) => void;
+  /** The block's speaker recorded by a person, or given back to their voice (R-37). */
+  onRecorded?: (speaker: string, recorded: boolean) => void;
+  /** A recorded speaker's lines out as a script and back as files (R-39). */
+  onLines?: (speaker: string, label: string) => void;
   /** The last write's refusal (R-9), said on the panel until the next write answers. */
   refused: string | null;
   /** The element the block's words are shown in, for a cue placed at the selection. */
@@ -784,9 +1102,15 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
                     </button>
                     <span className="fy-ch__who-name">v{takes.length - index}</span>
                     <span className="fy-ch__who-where fy-mono">
-                      {generation !== null ? `${generation.voiceLabel ?? generation.voiceId} · ${generation.provider}` : ""}
-                      {generation?.delivery !== undefined ? ` · ${generation.delivery}` : ""}
-                      {generation !== null ? ` · ${generation.costMicroUsd === null ? formatMicroUsd(generation.estimatedMicroUsd) : formatMicroUsd(generation.costMicroUsd)}` : ""}
+                      {generation?.recording !== undefined
+                        ? `recorded${generation.voiceLabel !== undefined ? ` · ${generation.voiceLabel}` : ""}`
+                        : (
+                          <>
+                            {generation !== null ? `${generation.voiceLabel ?? generation.voiceId} · ${generation.provider}` : ""}
+                            {generation?.delivery !== undefined ? ` · ${generation.delivery}` : ""}
+                            {generation !== null ? ` · ${generation.costMicroUsd === null ? formatMicroUsd(generation.estimatedMicroUsd) : formatMicroUsd(generation.costMicroUsd)}` : ""}
+                          </>
+                        )}
                     </span>
                     <span className="fy-ch__who-count fy-mono">{chosen ? "✓" : ""}</span>
                   </div>
@@ -795,11 +1119,29 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
             })}
           </ul>
         )}
-        {takes.length > 0 && (
-          <div className="fy-ab__again">
+        <div className="fy-ab__again">
+          {takes.length > 0 && (
             <Button variant="ghost" onClick={() => onMakeAgain(row.block.key)} data-testid="audiobook-make-again">
               Make again
               {model !== null && row.speaker.provider !== "kokoro" ? ` · ${formatMicroUsd(estimateMicroUsd(model, { characters: billableCharacters(model, row.block.text) }))}` : ""}
+            </Button>
+          )}
+          {onUpload !== undefined && (
+            <Button variant="ghost" onClick={() => onUpload(row.block.key)} data-testid="audiobook-upload" title="a recording of these words, from a file">
+              <Mic size={11} /> Upload
+            </Button>
+          )}
+        </div>
+        {onRecorded !== undefined && (
+          <label className="fy-ab__recorded" data-testid="audiobook-recorded">
+            <input type="checkbox" checked={row.byPerson} onChange={() => onRecorded(audiobookRecordingKey(row.block), !row.byPerson)} />
+            <span>{row.speakerKey === null ? "Narrator" : row.mark} · recorded by a person</span>
+          </label>
+        )}
+        {onLines !== undefined && row.byPerson && (
+          <div className="fy-ab__again">
+            <Button variant="ghost" onClick={() => onLines(audiobookRecordingKey(row.block), row.speakerKey === null ? "Narrator" : row.mark)} data-testid="audiobook-lines">
+              Lines…
             </Button>
           </div>
         )}
@@ -853,5 +1195,261 @@ export function DirectionCard({ run, chapterOrder, onAccept, onDiscard }: {
         </>
       )}
     </section>
+  );
+}
+
+/** A figure the checks measured, or a dash. */
+const db = (value: number | null | undefined, unit: string) => (value === null || value === undefined ? "—" : `${value.toFixed(1).replace("-", "\u2212")} ${unit}`);
+
+/**
+ * Upload a take (design turn 155c, SPEC-047 R-35, R-36): the block's words in its speaker's
+ * colour over the file and what it is, the checks as data — a warning never refuses — then the
+ * performer and the rights, given once, and `Keep as take`.
+ */
+export function RecordedTakeDialog({ staged, row, onCancel, onReplace, onKeep }: {
+  staged: import("../lib/store.js").StagedTake;
+  row: BlockRow;
+  onCancel: () => void;
+  onReplace: () => void;
+  onKeep: (basis: "self" | "authorized" | "licensed", performer?: string) => void;
+}) {
+  const [performer, setPerformer] = useState("");
+  const [basis, setBasis] = useState<"self" | "authorized" | "licensed" | null>(null);
+  const tone = row.speakerKey === null ? "narrator" : row.colour === null ? "none" : String(row.colour);
+  const checks = staged.checks;
+  // Level against Retail's figures (R-23, R-35): the foundation measures RMS and peak on every file.
+  const level = checks === undefined ? null : retailLevel(checks);
+  const noise = checks?.noiseFloor ?? "unavailable";
+  const rows: { key: string; label: string; value: string; outcome: string }[] = [
+    {
+      key: "words",
+      label: "Words",
+      value: checks === undefined || checks.words === "unchecked" ? "unchecked" : checks.words === "match" ? "match" : `${checks.differences} differ`,
+      outcome: checks === undefined || checks.words === "unchecked" ? "unavailable" : checks.words === "match" ? "pass" : "warning",
+    },
+    { key: "loudness", label: "Loudness", value: db(checks?.rmsDbfs, "dBFS"), outcome: level?.loudness ?? "unavailable" },
+    { key: "peak", label: "Peak", value: db(checks?.samplePeakDbfs, "dBFS"), outcome: level?.peak ?? "unavailable" },
+    { key: "noise", label: "Noise floor", value: noise === "unavailable" ? "—" : noise, outcome: noise },
+  ];
+  const source = checks;
+  const technical = source === undefined ? "" : [
+    source.durationSec !== null ? `${source.durationSec.toFixed(1)} s` : null,
+    source.sampleRateHz !== null ? `${Math.round(source.sampleRateHz / 100) / 10} kHz` : null,
+    source.channels === 1 ? "mono" : source.channels === 2 ? "stereo" : source.channels !== null ? `${source.channels} ch` : null,
+  ].filter((part) => part !== null).join(" · ");
+  const refused = staged.state === "refused" ? staged.refused : undefined;
+  return (
+    <EditorDialog open title="Upload a take" subtitle={`${row.mark} · ${row.block.key}`} onClose={onCancel} width={540}>
+      <div className="fy-rectake" data-testid="recorded-take-dialog">
+        <div className={`fy-rectake__quote fy-voice--${tone}`}>{row.block.text}</div>
+        {refused !== undefined ? (
+          <p className="fy-rectake__refused">{refused}</p>
+        ) : (
+          <>
+            <div className="fy-rectake__file">
+              <span className="fy-rectake__name">{staged.file ?? ""}</span>
+              <span className="fy-mono fy-rectake__tech">{technical}</span>
+              <Button variant="ghost" onClick={onReplace}>Replace</Button>
+            </div>
+            <div className="fy-rectake__checks" data-testid="recorded-take-checks">
+              {rows.map((item) => (
+                <div key={item.key} className={`fy-rectake__check fy-rectake__check--${item.outcome}`}>
+                  <span className="fy-rectake__check-label">{item.label}</span>
+                  <span className="fy-mono fy-rectake__check-value">{item.value}</span>
+                </div>
+              ))}
+            </div>
+            <div className="fy-rectake__who">
+              <label className="fy-rectake__field">
+                <span>Performer</span>
+                <input className="fy-rectake__input" value={performer} maxLength={80} onChange={(event) => setPerformer(event.target.value)} />
+              </label>
+              <div className="fy-rectake__field">
+                <span>Rights</span>
+                <span className="fy-seg" role="group" aria-label="Rights">
+                  {([["self", "My voice"], ["authorized", "Authorized"], ["licensed", "Licensed"]] as const).map(([value, label]) => (
+                    <button key={value} type="button" className={`fy-seg__item${basis === value ? " fy-seg__item--active" : ""}`} aria-pressed={basis === value} onClick={() => setBasis(value)}>
+                      {label}
+                    </button>
+                  ))}
+                </span>
+              </div>
+            </div>
+            {staged.refused !== undefined && <p className="fy-rectake__refused">{staged.refused}</p>}
+          </>
+        )}
+        <div className="fy-rectake__foot">
+          <span className="fy-mono fy-rectake__tech">{refused === undefined ? "wav · mono" : ""}</span>
+          <span className="fy-rectake__push" />
+          <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+          {refused !== undefined ? (
+            <Button variant="primary" onClick={onReplace}>Choose another</Button>
+          ) : (
+            <Button
+              variant="primary"
+              disabled={basis === null || staged.state === "keeping"}
+              title={basis === null ? "say whose voice it is" : undefined}
+              onClick={() => basis !== null && onKeep(basis, performer.trim() === "" ? undefined : performer.trim())}
+              data-testid="recorded-take-keep"
+            >
+              Keep as take
+            </Button>
+          )}
+        </div>
+      </div>
+    </EditorDialog>
+  );
+}
+
+/**
+ * A recorded speaker's lines out and back (design turn 155d, SPEC-047 R-39): the script as a PDF
+ * — the lines awaiting, or all of them — and the files a performer sends back, each matched by
+ * the id in its name and checked; what passes or warns is ticked, what is refused is not and
+ * cannot be; the rights are given once for the batch.
+ */
+export function SpeakerLinesDialog({ worldId, productionId, speaker, label, tone, onClose }: {
+  worldId: string;
+  productionId: string;
+  speaker: string;
+  label: string;
+  tone: string;
+  onClose: () => void;
+}) {
+  const all = useSpeakerLines();
+  const [scope, setScope] = useState<"awaiting" | "all">("awaiting");
+  const [scriptId, setScriptId] = useState<string | null>(null);
+  const [filesId, setFilesId] = useState<string | null>(null);
+  const [untick, setUntick] = useState<ReadonlySet<string>>(new Set());
+  const [performer, setPerformer] = useState("");
+  const [basis, setBasis] = useState<"self" | "authorized" | "licensed" | null>(null);
+  const script = scriptId === null ? undefined : all[scriptId];
+  const files = filesId === null ? undefined : all[filesId];
+  const hosted = typeof window !== "undefined" && window.arke?.openDataFolder !== undefined;
+  const rows = files?.rows ?? [];
+  const keepable = rows.filter((row) => row.refused === undefined && !untick.has(row.file));
+  const refusedCount = rows.filter((row) => row.refused !== undefined).length;
+  const close = () => {
+    if (filesId !== null && files?.kept === undefined) discardAudiobookLines(worldId, filesId);
+    onClose();
+  };
+  const addFiles = () => {
+    if (filesId !== null && files?.kept === undefined) discardAudiobookLines(worldId, filesId);
+    setUntick(new Set());
+    setFilesId(stageAudiobookLines(worldId, productionId, speaker));
+  };
+  const check = (row: (typeof rows)[number]): { text: string; tone: string } => {
+    if (row.refused !== undefined) return { text: row.refused, tone: "refused" };
+    const level = retailLevel({ rmsDbfs: row.rmsDbfs ?? null, samplePeakDbfs: row.samplePeakDbfs ?? null });
+    if (row.words === "differ") return { text: `${row.differences ?? 0} words differ`, tone: "warning" };
+    if (level.loudness === "warning") return { text: "loudness outside retail", tone: "warning" };
+    if (level.peak === "warning") return { text: "peak over retail", tone: "warning" };
+    return { text: row.words === "match" ? "match" : "unchecked", tone: row.words === "match" ? "pass" : "unavailable" };
+  };
+  return (
+    <EditorDialog open title={label} onClose={close} width={680}>
+      <div className="fy-rectake" data-testid="speaker-lines-dialog">
+        <div className="fy-rectake__sect">
+          <span className="fy-rectake__sect-title">Script</span>
+          <span className="fy-rectake__push" />
+          <span className="fy-seg" role="group" aria-label="Lines">
+            {(["awaiting", "all"] as const).map((value) => (
+              <button key={value} type="button" className={`fy-seg__item${scope === value ? " fy-seg__item--active" : ""}`} aria-pressed={scope === value} onClick={() => setScope(value)}>
+                {value === "awaiting" ? "Awaiting" : "All"}
+              </button>
+            ))}
+          </span>
+          <Button variant="ghost" disabled={script?.state === "working"} onClick={() => setScriptId(exportAudiobookScript(worldId, productionId, speaker, label, scope))} data-testid="speaker-lines-export">
+            Export
+          </Button>
+        </div>
+        {script?.state === "done" && script.output !== undefined && (
+          <div className="fy-rectake__file">
+            <span className="fy-rectake__name">{script.output.split("/").pop()}</span>
+            <span className="fy-mono fy-rectake__tech">
+              {script.lines} line{script.lines === 1 ? "" : "s"}
+              {script.notCast !== undefined && script.notCast > 0 ? ` · ${script.notCast} chapter${script.notCast === 1 ? "" : "s"} not cast` : ""}
+            </span>
+            {hosted && <Button variant="ghost" onClick={() => openExportsFolder(worldId)}>Show in folder</Button>}
+          </div>
+        )}
+        {script?.state === "refused" && <p className="fy-rectake__refused">{script.refused}</p>}
+        <div className="fy-rectake__sect">
+          <span className="fy-rectake__sect-title">Recordings</span>
+          <span className="fy-rectake__push" />
+          <Button variant="ghost" disabled={files?.state === "working" || files?.state === "keeping"} onClick={addFiles} data-testid="speaker-lines-add">
+            <Mic size={11} /> Add files
+          </Button>
+        </div>
+        {files?.state === "refused" && <p className="fy-rectake__refused">{files.refused}</p>}
+        {rows.length > 0 && (
+          <div className="fy-rectake__table" data-testid="speaker-lines-rows">
+            {rows.map((row) => {
+              const verdict = check(row);
+              const on = row.refused === undefined && !untick.has(row.file);
+              return (
+                <label key={row.file} className={`fy-rectake__tr${row.refused !== undefined ? " fy-rectake__tr--off" : ""}`}>
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    disabled={row.refused !== undefined || files?.kept !== undefined}
+                    onChange={() => setUntick((held) => {
+                      const next = new Set(held);
+                      if (next.has(row.file)) next.delete(row.file);
+                      else next.add(row.file);
+                      return next;
+                    })}
+                  />
+                  <span className="fy-mono fy-rectake__cell">{row.file}</span>
+                  <span className="fy-rectake__cell">{row.quote ?? "—"}</span>
+                  <span className={`fy-mono fy-rectake__verdict fy-rectake__verdict--${verdict.tone}`}>{verdict.text}</span>
+                </label>
+              );
+            })}
+          </div>
+        )}
+        {rows.length > 0 && files?.kept === undefined && (
+          <div className={`fy-rectake__who fy-voice--${tone}`}>
+            <label className="fy-rectake__field">
+              <span>Performer</span>
+              <input className="fy-rectake__input" value={performer} maxLength={80} onChange={(event) => setPerformer(event.target.value)} />
+            </label>
+            <div className="fy-rectake__field">
+              <span>Rights</span>
+              <span className="fy-seg" role="group" aria-label="Rights">
+                {([["self", "My voice"], ["authorized", "Authorized"], ["licensed", "Licensed"]] as const).map(([value, text]) => (
+                  <button key={value} type="button" className={`fy-seg__item${basis === value ? " fy-seg__item--active" : ""}`} aria-pressed={basis === value} onClick={() => setBasis(value)}>
+                    {text}
+                  </button>
+                ))}
+              </span>
+            </div>
+          </div>
+        )}
+        {files?.kept !== undefined && (
+          <p className="fy-mono fy-rectake__tech" data-testid="speaker-lines-kept">
+            kept {files.kept}
+            {files.refused !== undefined ? ` · ${files.refused}` : ""}
+          </p>
+        )}
+        <div className="fy-rectake__foot">
+          <span className="fy-mono fy-rectake__tech">
+            {rows.length > 0 ? `${rows.length} file${rows.length === 1 ? "" : "s"} · ${keepable.length} to keep · ${refusedCount} refused` : ""}
+          </span>
+          <span className="fy-rectake__push" />
+          <Button variant="ghost" onClick={close}>{files?.kept !== undefined ? "Done" : "Cancel"}</Button>
+          {files?.kept === undefined && (
+            <Button
+              variant="primary"
+              disabled={filesId === null || keepable.length === 0 || basis === null || files?.state === "keeping"}
+              title={basis === null ? "say whose voice it is" : undefined}
+              onClick={() => filesId !== null && basis !== null && keepAudiobookLines(worldId, filesId, basis, keepable.map((row) => row.file), performer.trim() === "" ? undefined : performer.trim())}
+              data-testid="speaker-lines-keep"
+            >
+              Keep {keepable.length} take{keepable.length === 1 ? "" : "s"}
+            </Button>
+          )}
+        </div>
+      </div>
+    </EditorDialog>
   );
 }

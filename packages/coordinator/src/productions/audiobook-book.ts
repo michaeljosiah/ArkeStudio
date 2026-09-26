@@ -139,17 +139,30 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
     }
     const plan = preparation.kind === "ready" ? preparation.prepared.plan : preparation.plan;
     unattributed += plan.cast !== null && plan.cast !== "unreadable" ? plan.ambiguous : 0;
-    const counts = { total: plan.blocks.length, made: 0, stale: 0, flagged: 0, notMade: 0 };
+    const counts: { total: number; made: number; stale: number; flagged: number; notMade: number; awaiting?: number } = { total: plan.blocks.length, made: 0, stale: 0, flagged: 0, notMade: 0 };
     for (const planned of plan.blocks) {
       if (planned.state === "made") counts.made += 1;
       else if (planned.state === "stale") counts.stale += 1;
       else if (planned.state === "flagged") counts.flagged += 1;
+      else if (planned.state === "awaiting") counts.awaiting = (counts.awaiting ?? 0) + 1;
       else counts.notMade += 1;
     }
     // Who reads what, across the book (R-12): the narrator's row counts narration and every
     // block that falls to it; a speaker's row names the voice that reads them, or why it does
     // not — no sheet, no voice, or a voice that cannot speak now.
     for (const planned of plan.blocks) {
+      // A speaker a person records is their own chip under every reading (R-37, R-38): who
+      // records them, and how many of their blocks wait on a recording.
+      if (planned.recorded === true && planned.block.speaker !== undefined) {
+        const key = planned.sheet ?? planned.block.sheet ?? `:${planned.block.speaker}`;
+        const sheet = planned.sheet ?? planned.block.sheet;
+        const held = voices.get(key) ?? { ...(sheet !== undefined ? { sheet } : {}), name: sheet !== undefined ? sheetName(sheet) : planned.block.speaker, state: "recorded" as const, blocks: 0 };
+        held.state = "recorded";
+        held.blocks += 1;
+        if (planned.state === "awaiting") held.awaiting = (held.awaiting ?? 0) + 1;
+        voices.set(key, held);
+        continue;
+      }
       if (planned.block.speaker === undefined || plan.reading !== "cast") {
         narratorRow.blocks += 1;
         continue;

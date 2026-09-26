@@ -15,6 +15,9 @@ import {
   type ChapterVoices,
   type ChapterAudiobook,
   DEFAULT_NARRATOR,
+  audiobookSpeakerColours,
+  pinTarget,
+  pinnedLines,
   legacyVoiceModel,
   voicedBlocks,
   type ProductionBundle,
@@ -37,7 +40,7 @@ import { continuityStamp } from "../lib/continuity.js";
 import { passageAction, passageActions, type PassageAction } from "../lib/passage-actions.js";
 import { useProduction } from "../lib/selectors.js";
 import { EditableText, SceneTitle } from "./storyboard.js";
-import { AudiobookBlocks, AudiobookSide, DirectionCard, useChapterAudiobook, type AudiobookIntent } from "./chapter-audiobook.js";
+import { AudiobookBlocks, AudiobookFilterRow, AudiobookSide, DirectionCard, SpeakerLinesDialog, useChapterAudiobook, type AudiobookIntent, type BlockRow, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
 import { playClip } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
 import {
@@ -54,6 +57,8 @@ import {
   stopContinuity,
   useDeriving,
   castVoices,
+  setAudiobookRecorded,
+  setVoicePin,
   requestVoiceCatalogue,
   stopVoices,
   useCasting,
@@ -108,6 +113,11 @@ type OpenedRecord = {
   /** The takes that record names that are gone from the shelf, as the coordinator found them at open (codex on PR 1183). */
   audiobookMissing: readonly string[];
 };
+
+/** A suggested question: asked for its answer, so nothing is staged from it (issue 1295). */
+function question(label: string): { label: string; replyOnly: true } {
+  return { label, replyOnly: true };
+}
 
 /**
  * A save that must follow one still in flight after the screen is gone (codex, PR 879): the
@@ -992,17 +1002,24 @@ export function ChapterWorkspace({
     castVoices(worldId, prodId, chapter.file);
   };
   /** Who speaks, by lines, the narration first: the Voices panel's rows. */
+  // The lines as read, the author's pins applied (SPEC-012 R-64): what the panel counts is what is voiced.
+  const castLinesRead = useMemo(() => (voicesRecord === null ? [] : pinnedLines(voicesRecord.lines, voicesRecord.pins, live).lines), [voicesRecord, live]);
   const speakers = useMemo(() => {
     const counts = new Map<string, { speaker: string; sheet?: string; lines: number }>();
-    for (const line of voicesRecord?.lines ?? []) {
+    for (const line of castLinesRead) {
       const key = line.sheet ?? line.speaker;
       const held = counts.get(key);
       if (held !== undefined) held.lines += 1;
       else counts.set(key, { speaker: line.speaker, ...(line.sheet !== undefined ? { sheet: line.sheet } : {}), lines: 1 });
     }
     return [...counts.values()].sort((a, b) => b.lines - a.lines || a.speaker.localeCompare(b.speaker));
-  }, [voicesRecord]);
+  }, [castLinesRead]);
   const narrationBlocks = voiced.blocks.filter((block) => block.speaker === undefined).length;
+  // The Voices dot is the Audiobook view's speaker colour (SPEC-047 R-33), one a speaker across the book.
+  const speakerColours = useMemo(
+    () => audiobookSpeakerColours(production?.chapters ?? [], speakers.flatMap((who) => (who.sheet !== undefined ? [who.sheet] : []))),
+    [production?.chapters, speakers],
+  );
   const narratorName = useStore().state?.app.narrator?.label ?? DEFAULT_NARRATOR.label;
   // The catalogue says whether an assigned voice can speak now (turn 130's rule, codex on PR
   // 914): asked for once a cast is shown, and a voice it lacks or marks reads in the
@@ -1089,6 +1106,7 @@ export function ChapterWorkspace({
     record: audiobookRecord.record,
     missing: audiobookRecord.missing,
     reading: production.audiobook?.reading ?? "narrator",
+    ...(production.audiobook?.recorded !== undefined ? { recorded: production.audiobook.recorded } : {}),
     connection,
     locked: locked || record === null,
     // The press waits out the autosave (turn 126's fourth rule, codex on PR 1180): a read of
@@ -1102,6 +1120,28 @@ export function ChapterWorkspace({
       return true;
     },
   });
+  // Who a block can be given to (design turn 155b, SPEC-012 R-63): offered only while the cast is
+  // current and can be written — a pin names a paragraph and an occurrence in the saved prose.
+  const pinChoices = useMemo((): SpeakerChoices | null => {
+    if (voicesRecord === null || voicesStale || castingNow || locked || record === null || connection !== "open") return null;
+    const chapterSpeakers = new Map<string, SpeakerChoices["chapter"][number]>();
+    for (const row of audiobook.rows) {
+      if (row.speakerKey === null || chapterSpeakers.has(row.speakerKey)) continue;
+      chapterSpeakers.set(row.speakerKey, { key: row.speakerKey, label: row.mark, ...(row.block.sheet !== undefined ? { sheet: row.block.sheet } : {}), colour: row.colour });
+    }
+    const cast = world.sheets
+      .filter((sheet) => sheet.type === "character" && !sheet.retired && (sheet.production === undefined || sheet.production === prodId) && !chapterSpeakers.has(sheet.id))
+      .map((sheet) => ({ sheet: sheet.id, label: sheet.name, voice: sheet.voice === undefined ? null : (sheet.voice.label ?? sheet.voice.voiceId), colour: null }));
+    return { chapter: [...chapterSpeakers.values()], cast };
+  }, [voicesRecord, voicesStale, castingNow, locked, record, connection, audiobook.rows, world.sheets, prodId]);
+  const pinBlock = (row: BlockRow, pick: SpeakerPick, selection?: { from: number; to: number }) => {
+    const index = audiobook.rows.indexOf(row);
+    const target = pinTarget(record?.body ?? "", audiobook.rows.map((candidate) => candidate.block), index, selection);
+    if (target === null) return;
+    setVoicePin(worldId, prodId, chapter.file, { ...target, ...pick });
+  };
+  // A recorded speaker's lines out and back (turn 155d), opened from the block's Takes panel.
+  const [linesFor, setLinesFor] = useState<{ speaker: string; label: string } | null>(null);
   const audiobookColumn = useRef<HTMLDivElement | null>(null);
   audiobookResume.current = audiobook.resume;
   const directionStands = audiobook.directedBlocks > 0;
@@ -1601,7 +1641,11 @@ export function ChapterWorkspace({
               ) : record === null ? (
                 <p className="fy-bible__empty">Opening…</p>
               ) : (
+                <>
+                <AudiobookFilterRow filters={audiobook.filters} filter={audiobook.filter} onFilter={audiobook.setFilter} />
                 <AudiobookBlocks
+                  {...(pinChoices !== null ? { choices: pinChoices, onPin: pinBlock } : {})}
+                  filter={audiobook.filter}
                   rows={audiobook.rows}
                   sounding={audiobook.sounding}
                   selected={audiobook.selected}
@@ -1612,11 +1656,27 @@ export function ChapterWorkspace({
                     void playClip({ id: row.artifact.id, url: mediaUrl(worldSlug, `artifacts/${row.artifact.file}`), title: `${chapter.title} · ${row.mark}`, sub: "audiobook · one block" });
                   }}
                 />
+                </>
+              )}
+              {audiobook.uploadDialog}
+              {linesFor !== null && (
+                <SpeakerLinesDialog
+                  worldId={worldId}
+                  productionId={prodId}
+                  speaker={linesFor.speaker}
+                  label={linesFor.label}
+                  tone={(() => {
+                    const row = audiobook.rows.find((candidate) => (candidate.speakerKey === null ? "narrator" : (candidate.block.sheet ?? candidate.block.speaker)) === linesFor.speaker);
+                    return row === undefined || row.speakerKey === null ? "narrator" : row.colour === null ? "none" : String(row.colour);
+                  })()}
+                  onClose={() => setLinesFor(null)}
+                />
               )}
               <div className="fy-ab__foot" data-testid="audiobook-foot">
                 <span>{`Saved · v${record?.version ?? chapter.version} · ${words.toLocaleString()} words`}</span>
                 <span className="fy-ab__foot-push" />
                 {audiobook.note !== null && <span className="fy-ch__who-where--warn">{audiobook.note}</span>}
+                {castingState?.pinRefused !== undefined && <span className="fy-ch__who-where--warn">{castingState.pinRefused}</span>}
                 <span>
                   {[
                     `${audiobook.counts.total} block${audiobook.counts.total === 1 ? "" : "s"}`,
@@ -1624,6 +1684,7 @@ export function ChapterWorkspace({
                     ...(audiobook.counts.stale > 0 ? [`${audiobook.counts.stale} stale`] : []),
                     ...(audiobook.counts.flagged > 0 ? [`${audiobook.counts.flagged} flagged`] : []),
                     ...(audiobook.counts.notMade > 0 ? [`${audiobook.counts.notMade} not made`] : []),
+                    ...(audiobook.counts.awaiting > 0 ? [`${audiobook.counts.awaiting} awaiting recording`] : []),
                   ].join(" · ")}
                 </span>
               </div>
@@ -1819,6 +1880,9 @@ export function ChapterWorkspace({
                 onSetDirection={audiobook.setDirection}
                 onMakeAgain={audiobook.makeAgain}
                 refused={audiobook.lastRecord?.refused ?? null}
+                onUpload={audiobook.uploadTake}
+                onRecorded={(speaker, on) => setAudiobookRecorded(worldId, prodId, speaker, on)}
+                onLines={(speaker, label) => setLinesFor({ speaker, label })}
                 blockHost={(key) => audiobookColumn.current?.querySelector<HTMLElement>(`[data-block="${key}"] .fy-ab__text`) ?? null}
               />
             )}
@@ -1936,7 +2000,7 @@ export function ChapterWorkspace({
                 <ul className="fy-ch__who">
                   <li>
                     <div className="fy-ch__who-head">
-                      <span className="fy-ch__who-name">Narration</span>
+                      <span className="fy-ch__who-name"><i className="fy-ab__speaker-dot fy-voice--narrator" aria-hidden="true" /><span>Narration</span></span>
                       <span className="fy-ch__who-where fy-mono">{narratorName} · narrator</span>
                       <span className="fy-ch__who-count fy-mono">{narrationBlocks} blocks</span>
                     </div>
@@ -1947,7 +2011,10 @@ export function ChapterWorkspace({
                     return (
                       <li key={who.sheet ?? who.speaker}>
                         <div className="fy-ch__who-head">
-                          <span className="fy-ch__who-name">{sheet?.name ?? who.speaker}</span>
+                          <span className="fy-ch__who-name">
+                            <i className={`fy-ab__speaker-dot fy-voice--${who.sheet === undefined ? "none" : (speakerColours.get(who.sheet) ?? "none")}`} aria-hidden="true" />
+                            <span>{sheet?.name ?? who.speaker}</span>
+                          </span>
                           {voice !== undefined && voiceUnavailable(voice) ? (
                             <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">voice unavailable · narrator</span>
                           ) : voice !== undefined ? (
@@ -1968,11 +2035,13 @@ export function ChapterWorkspace({
                 <p className="fy-ch__stamp fy-mono">
                   {[
                     `cast · v${voicesRecord.version}`,
-                    `${voicesRecord.lines.length} line${voicesRecord.lines.length === 1 ? "" : "s"}`,
+                    `${castLinesRead.length} line${castLinesRead.length === 1 ? "" : "s"}`,
                     `${speakers.length} speaker${speakers.length === 1 ? "" : "s"}`,
                     voicesRecord.dropped === 0 ? "every line is the chapter’s own words" : `${voicesRecord.dropped} line${voicesRecord.dropped === 1 ? "" : "s"} dropped, not in the chapter`,
                     ...(voicesRecord.omitted > 0 ? [`${voicesRecord.omitted} line${voicesRecord.omitted === 1 ? "" : "s"} over the cap`] : []),
                     ...(voiced.ambiguous > 0 ? [`${voiced.ambiguous} ambiguous`] : []),
+                    ...((voicesRecord.pins?.length ?? 0) > 0 ? [`${voicesRecord.pins!.length} set by you`] : []),
+                    ...(voicesRecord.lost !== undefined ? [`${voicesRecord.lost} correction${voicesRecord.lost === 1 ? "" : "s"} lost`] : []),
                   ].join(" · ")}
                 </p>
               )}
@@ -2127,20 +2196,23 @@ export function ChapterWorkspace({
             // under a stale one, the press that reads again and a question the prose answers.
             // In the Audiobook view the prompts are the reading's (turn 146, SPEC-047 R-31):
             // the direction, again once one stands, and two questions the blocks answer.
+            // A question is asked for its answer and nothing else (issue 1295): sent as an open
+            // ask, a 12B model answered "What does this chapter draw on?" with an invented action,
+            // and the whole reply was rejected twice.
             prompts: view === "audiobook"
-              ? [{ label: directionStands ? "Direct again" : "Direct this chapter", press: audiobook.directPress }, "Who reads this chapter?", "Which blocks are stale?"]
+              ? [{ label: directionStands ? "Direct again" : "Direct this chapter", press: audiobook.directPress }, question("Who reads this chapter?"), question("Which blocks are stale?")]
               : passage !== null
               // Held against the style only when there is one (codex on PR 1232), as the menu does.
               ? [TIGHTEN.line, { label: (style !== null ? HOLD_TO_STYLE : passageAction("critique")!).line, replyOnly: true }]
               : voicesRecord !== null && voicesStale
-                ? [{ label: "Cast again", press: castLinesPress }, "Who speaks in this chapter?"]
+                ? [{ label: "Cast again", press: castLinesPress }, question("Who speaks in this chapter?")]
                 : voicesRecord !== null && speakers.length > 0 && !(continuityRecord !== null && continuityStale)
-                  ? ["Who speaks in this chapter?", `Which lines are ${speakers[0]!.sheet !== undefined ? sheetNameOf(speakers[0]!.sheet) : speakers[0]!.speaker}’s?`]
+                  ? [question("Who speaks in this chapter?"), question(`Which lines are ${speakers[0]!.sheet !== undefined ? sheetNameOf(speakers[0]!.sheet) : speakers[0]!.speaker}’s?`)]
               : continuityRecord !== null && continuityStale
-                ? [{ label: "Derive again", press: derive }, "Who is in this chapter?"]
+                ? [{ label: "Derive again", press: derive }, question("Who is in this chapter?")]
                 : continuityRecord !== null && placedFirst !== undefined
-                  ? [`What does ${named(placedFirst)} learn here?`, `Where is ${named(placedSecond ?? placedFirst)} now?`]
-                  : [firstPrompt(live, chapter.synopsis), style !== null ? { label: "Hold this against the style", replyOnly: true } : "What does this chapter draw on?"],
+                  ? [question(`What does ${named(placedFirst)} learn here?`), question(`Where is ${named(placedSecond ?? placedFirst)} now?`)]
+                  : [firstPrompt(live, chapter.synopsis), style !== null ? { label: "Hold this against the style", replyOnly: true } : question("What does this chapter draw on?")],
             // The thread is the production's own (no new entry context, turn 126): the chapter
             // the dock names has to be in the words themselves or the studio never hears it.
             subjectPrefix: dockPrefix,

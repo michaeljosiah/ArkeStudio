@@ -2967,6 +2967,26 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({ kind: z.literal("stop-voices"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
     .strict(),
   /**
+   * A correction to the cast (design turn 155, SPEC-012 R-62..R-65): the span — its paragraph,
+   * words and occurrence — given a speaker, given to narration, or cleared of the author's pin.
+   * Answered with `voices.record`, the record or the refusal in one clause.
+   */
+  z
+    .object({
+      kind: z.literal("set-voice-pin"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      paragraph: z.number().int().min(0),
+      occurrence: z.number().int().min(0),
+      quote: z.string().min(1).max(600),
+      speaker: z.string().min(1).max(120).optional(),
+      sheet: SlugSchema.optional(),
+      narration: z.literal(true).optional(),
+      clear: z.literal(true).optional(),
+    })
+    .strict(),
+  /**
    * The audiobook (design turn 146, SPEC-047): read a chapter into kept takes — every block
    * that is not made, in reading order, priced once and confirmed by token when any of it is a
    * cloud voice — stop the run, leaving the takes made so far standing, and choose the book's
@@ -2992,12 +3012,75 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({ kind: z.literal("set-audiobook-reading"), worldId: UlidSchema, productionId: SlugSchema, reading: AudiobookReadingSchema })
     .strict(),
   /**
+   * A speaker recorded by a person, or given back to their voice (design turn 155, SPEC-047
+   * R-37): `narrator`, a sheet id, or a name no sheet carries. The book's choice, kept beside
+   * `reading`; their blocks wait for a recording rather than being made.
+   */
+  z
+    .object({ kind: z.literal("set-audiobook-recorded"), worldId: UlidSchema, productionId: SlugSchema, speaker: z.string().min(1).max(120), recorded: z.boolean() })
+    .strict(),
+  /**
    * Direction beside the prose (SPEC-047 R-6..R-10): one block's plan set by hand, or cleared;
    * a chapter directed by the model — a derivation in the cast's discipline whose result is a
    * card accepted whole or discarded; and the acceptance, which writes the record and nothing
    * else. The coordinator supplies every hash from the block's words and refuses a control the
    * block's reader declares unsupported, so nothing reaches a run that could only flag it.
    */
+  /**
+   * A take a person recorded (design turn 155c, SPEC-047 R-34..R-36): the host's picker chooses
+   * the file, the coordinator prepares and checks it and answers `audiobook.take-staged` under
+   * the window's `requestId`; `keep` files it as the block's take under the rights given once,
+   * answered as `audiobook.record` with the same id; `discard` lets the staged copy go.
+   */
+  z
+    .object({
+      kind: z.literal("stage-audiobook-take"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      block: z.string().min(1),
+      requestId: UlidSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("keep-audiobook-take"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
+      basis: z.enum(["self", "authorized", "licensed"]),
+      performer: z.string().trim().min(1).max(80).optional(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("discard-audiobook-take"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
+  /**
+   * A recorded speaker's lines out and back (design turn 155d, SPEC-047 R-39): the script as a
+   * PDF under `exports/`, answered `audiobook.script`; files the host's picker chooses, matched
+   * by the id in each name and checked, answered `audiobook.lines-staged`; the files kept under
+   * the rights given once, answered `audiobook.lines-kept`; or let go.
+   */
+  z
+    .object({
+      kind: z.literal("export-audiobook-script"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      speaker: z.string().min(1).max(120),
+      label: z.string().min(1).max(120),
+      scope: z.enum(["awaiting", "all"]),
+      requestId: UlidSchema,
+    })
+    .strict(),
+  z.object({ kind: z.literal("stage-audiobook-lines"), worldId: UlidSchema, productionId: SlugSchema, speaker: z.string().min(1).max(120), requestId: UlidSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("keep-audiobook-lines"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
+      basis: z.enum(["self", "authorized", "licensed"]),
+      performer: z.string().trim().min(1).max(80).optional(),
+      files: z.array(z.string().min(1).max(260)).max(400),
+    })
+    .strict(),
+  z.object({ kind: z.literal("discard-audiobook-lines"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
   z
     .object({
       kind: z.literal("set-audiobook-block"),

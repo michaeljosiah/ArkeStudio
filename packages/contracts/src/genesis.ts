@@ -3,7 +3,7 @@ import { KeyArtIntentSchema } from "./art-direction.js";
 import { GenesisImageIntentSchema, GenesisImageSelectionSchema } from "./genesis-images.js";
 import { GenesisSourceSchema } from "./genesis-imports.js";
 import { GenesisPropSchema } from "./prop.js";
-export const FOUNDING_CONVERSATION_SCHEMA_VERSION = 28;
+export const FOUNDING_CONVERSATION_SCHEMA_VERSION = 33;
 
 export const GenesisSheetContentSchema = z.object({
   sections: z.record(z.string().max(80), z.string().max(8000)),

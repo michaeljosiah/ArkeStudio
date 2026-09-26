@@ -41,6 +41,20 @@ it("Ollama unload queries actual loaded models and awaits keep_alive=0 for each"
   await assert.rejects(new OllamaClient(async () => Response.json({})).unload(), /loaded models/);
 });
 
+it("Ollama remembers what it dispatched, and an unload given `only` leaves every other loaded model alone (issue 1289)", async () => {
+  const unloaded: string[] = [];
+  const client = new OllamaClient(async (url, init) => {
+    if (url.endsWith("/api/ps")) return Response.json({ models: [{ name: "gemma4:12b" }, { name: "another-app:7b" }] });
+    const body = JSON.parse(String(init?.body)) as { model: string; keep_alive?: number };
+    if (body.keep_alive === 0) unloaded.push(body.model);
+    return Response.json({ response: "ok", done: true });
+  });
+  await client.submit("", { model: "gemma4:12b", capability: "llm", params: {} } as never);
+  assert.deepEqual([...client.usedModels()], ["gemma4:12b"]);
+  await client.unload(undefined, client.usedModels());
+  assert.deepEqual(unloaded, ["gemma4:12b"], "another application's model stays loaded");
+});
+
 it("Ollama residency retries late reports and distinguishes processor fallback from missing data", async () => {
   for (const [first, second, expected] of [
     [0, 100, "gpu"], [0, 0, "cpu"], [undefined, undefined, "unknown"],

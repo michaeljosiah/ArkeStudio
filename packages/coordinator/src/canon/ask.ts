@@ -30,6 +30,8 @@ export interface AskOptions {
 }
 
 const DEFAULT_WALL_CLOCK_MS = 90_000;
+/** On Arke's local harness: a model on the person's own card is slower and costs nothing to wait for (issue 1289). */
+const LOCAL_WALL_CLOCK_MS = 10 * 60_000;
 
 /** Whitespace and unicode normalisation — formatting artefacts are not fabrication (§3.2). */
 export function normalizeForVerify(text: string): string {
@@ -186,7 +188,7 @@ export class AskService {
         const timeout = new Promise<never>((_, reject) => {
           deadline = setTimeout(
             () => reject(new Error("the answer took too long")),
-            this.opts.wallClockMs ?? DEFAULT_WALL_CLOCK_MS,
+            this.opts.wallClockMs ?? (this.adapter!.id === "arke" ? LOCAL_WALL_CLOCK_MS : DEFAULT_WALL_CLOCK_MS),
           );
         });
         try {

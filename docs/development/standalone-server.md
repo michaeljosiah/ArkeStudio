@@ -30,6 +30,48 @@ For a different server port, set `$env:VITE_ARKE_WS = "ws://127.0.0.1:8792"` bef
 the frontend. For a different frontend port, set `PORT` in that terminal and pass its exact
 origin to the server. Press Ctrl+C in the server terminal to drain work and close the world.
 
+## From another device on your tailnet
+
+The server never listens beyond loopback. To use Studio from a phone or another computer,
+put [Tailscale Serve](https://tailscale.com/kb/1312/serve) in front of it: Serve terminates
+TLS with the machine's `ts.net` certificate, is reachable only from your tailnet, and forwards
+to loopback. Do not use Funnel, which publishes to the internet. Use the Vite frontend; a build
+keeps its loopback-only content policy and cannot reach a proxied server.
+
+With `studio.example.ts.net` standing for the machine's tailnet name:
+
+```powershell
+npm run server -- --root C:\ArkeData --origin https://studio.example.ts.net
+tailscale serve --bg --https=8443 http://127.0.0.1:8791
+tailscale serve --bg --https=443 http://localhost:5173
+```
+
+Then, in the frontend terminal:
+
+```powershell
+$env:VITE_ARKE_WS = "wss://studio.example.ts.net:8443"
+$env:ARKE_DEV_LOCAL_WS = "ws://127.0.0.1:8791"
+$env:ARKE_DEV_ORIGIN = "https://studio.example.ts.net"
+npm run dev
+```
+
+`VITE_ARKE_WS` is where the remote browser reaches the server; `ARKE_DEV_LOCAL_WS` is the
+loopback server it forwards to, whose handoff Vite reads; `ARKE_DEV_ORIGIN` is the `https:`
+address the browser opens. Vite checks the session through the server's proxy before printing a
+link. It does not check the page's own route, so if the link fails to load, check the 443 Serve
+mapping. Open the link on the other device. With `npm run dev:coordinator` instead of the
+server, set `ARKE_DEV_ORIGIN` in its terminal in place of `--origin`.
+
+Vite refuses to print a link unless the server is `wss:` and the page `https:`: neither the
+capability nor the page that holds it crosses a network unencrypted. Every server connection
+still needs the capability; media requests carry it as a query parameter, inside TLS.
+
+Vite itself asks nobody for a capability, so anyone on your tailnet can load its pages. In this
+mode it serves only the client and contracts packages and `node_modules`, not the rest of the
+checkout, and allows only the declared host name. If your tailnet has other people or shared
+devices, restrict ports 443 and 8443 on this machine to your own devices in the tailnet policy.
+Stop Serve (`tailscale serve reset`) when you are done.
+
 ## What works
 
 The Node host uses the same Studio command routing, world persistence, proposal acceptance,
