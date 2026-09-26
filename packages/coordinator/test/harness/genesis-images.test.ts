@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { GenesisBlueprintSchema, JobSchema, newId, ulid, compileBuildItems, type ManifestModel } from "@arke-studio/contracts";
+import { GenesisBlueprintSchema, GenesisDraftSchema, JobSchema, newId, ulid, compileBuildItems, canDeleteJob, isReplayableFinalization, type Job, type ManifestModel } from "@arke-studio/contracts";
+import { Coordinator } from "../../src/coordinator.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { tempDir } from "../tmp.js";
 import { pngBytes } from "../queue/fake-provider.js";
@@ -46,8 +47,50 @@ it("uploaded selection freezes the displayed bytes, survives rename and excludes
   assert.equal(photo.idempotencyKey, undefined);
   await decideGenesisImage(dir, draft, { target: "character:maren", requestId, decision: "approve", candidateId: candidate.id, hash: candidate.hash });
   assert.equal((await (await genesisConversation(dir)).read()).events.filter(row => row.event.type === "founding.image-decision").length, 1);
-  await decideGenesisImage(dir, draft, { target: "character:maren", requestId: ulid(), decision: "unassign" });
+  await decideGenesisImage(dir, draft, { target: "character:maren", requestId: ulid(), decision: "unassign", candidateId: candidate.id, hash: candidate.hash });
   assert.equal((await savedGenesisImages(dir)).selections.length, 0);
+});
+
+it("refuses a stale removal after another image has been selected", async () => {
+  const { dir } = await setup();
+  const draft = blueprint();
+  const first = (await reviewGenesisImages(dir, draft, [], model)).candidates[0]!;
+  await decideGenesisImage(dir, draft, { target: "character:maren", requestId: ulid(), decision: "approve", candidateId: first.id, hash: first.hash });
+  await writeFile(join(dir, "attachments", "second.png"), Buffer.concat([pngBytes(), Buffer.from("second")]));
+  const second = (await reviewGenesisImages(dir, draft, [], model)).candidates.find(candidate => candidate.label === "second.png")!;
+  await decideGenesisImage(dir, draft, { target: "character:maren", requestId: ulid(), decision: "approve", candidateId: second.id, hash: second.hash });
+  await assert.rejects(decideGenesisImage(dir, draft, { target: "character:maren", requestId: ulid(), decision: "unassign", candidateId: first.id, hash: first.hash }), /selected image changed/);
+  assert.equal((await savedGenesisImages(dir)).selections[0]?.candidate.id, second.id);
+});
+
+it("preserves a completed generation during finalization before its Activity row can be deleted", async () => {
+  const { dir, provider } = await setup();
+  await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Harbour", reviewed: true }));
+  const plan = (await reviewGenesisImages(dir, blueprint(), [], model)).plans[0]!;
+  const request = genesisImageRequest("gen-images", plan, ulid());
+  await mkdir(join(dir, "generated"), { recursive: true });
+  const landed = "generated/portrait.png";
+  await writeFile(join(dir, landed), pngBytes());
+  const job = JobSchema.parse({ ...request, id: newId("jb"), status: "succeeded", providerJobId: null, attempt: 1, error: null,
+    landedFiles: [landed], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+  assert.equal(isReplayableFinalization(job), true);
+  assert.equal(canDeleteJob(job), false, "legacy rows also remain protected until repaired");
+  const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(dir, "changes.jsonl"), appVersion: "test" });
+  const finalizer = coordinator as unknown as { onJobTerminal(job: Job): Promise<void> };
+  await finalizer.onJobTerminal(job);
+  await finalizer.onJobTerminal(job);
+  assert.equal((await savedGenesisImages(dir)).candidates.filter(candidate => candidate.jobId === job.id).length, 1);
+  assert.equal(canDeleteJob({ ...job, finalization: { status: "complete", error: null, updatedAt: job.updatedAt } }), true);
+  await rm(join(dir, landed));
+  assert.ok((await reviewGenesisImages(dir, blueprint(), [], model)).candidates.some(candidate => candidate.jobId === job.id));
+  await provider.close();
+});
+
+it("rejects duplicate image proposal identities in drafts and blueprints", () => {
+  const draft = blueprint();
+  const images = [draft.images![0]!, { ...draft.images![1]!, id: draft.images![0]!.id }];
+  assert.equal(GenesisBlueprintSchema.safeParse({ ...draft, images }).success, false);
+  assert.equal(GenesisDraftSchema.safeParse({ name: "Harbour", images }).success, false);
 });
 
 it("character and location generation authorizes a request but needs a separate exact-image decision", async () => {
