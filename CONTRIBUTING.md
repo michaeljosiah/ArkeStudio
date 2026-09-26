@@ -74,7 +74,7 @@ For a custom coordinator port, set `VITE_ARKE_WS` in the client terminal to its 
 URL. For a custom Vite port/origin, set `ARKE_DEV_ORIGIN` to that exact origin in both terminals
 (and `PORT` separately for each server). The defaults allow `http://localhost:5173` and
 `http://127.0.0.1:5173`. To open the browser frontend from another device through Tailscale
-Serve, see [the standalone server guide](docs/development/standalone-server.md#from-another-device-on-your-tailnet).
+Serve, see [Opening Studio from another device](docs/development/remote-access.md).
 
 Run lint, typecheck, build and tests before pushing code changes. CI checks Windows and Linux;
 local success does not establish correctness on the other platform. For focused tests, fixtures,

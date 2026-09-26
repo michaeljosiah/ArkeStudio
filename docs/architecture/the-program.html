@@ -241,6 +241,25 @@
           paths, never a credential. Where a feature needs a file dialog, the dialog belongs to the
           shell and so does the path it returns; the window learns only that an attachment exists.
         </p>
+
+        <h4>From another device</h4>
+        <p>
+          When Studio runs from source, its browser window can be opened on a phone or a second
+          computer. The engine still answers only on its own machine. A private network that your
+          own devices share, Tailscale, listens for them instead: it encrypts the connection and
+          passes each request on to the engine's private address. The capability still decides
+          who may do anything, so a device on that network without the link gets nothing.
+        </p>
+        <p>
+          There is no switch that makes the engine listen on the network itself. The capability
+          would then cross the network in the clear, readable by anything on the same Wi-Fi.
+          Encryption is the proxy's job, so the engine never has to do it and never has to leave
+          its own machine.
+        </p>
+        <p class="note">
+          The desktop app does not offer this. The steps are in the developer guide,
+          <a href="../development/remote-access.md">opening Studio from another device</a>.
+        </p>
       </section>
 
       <section id="video">

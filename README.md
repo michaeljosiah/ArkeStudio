@@ -313,7 +313,9 @@ npm run server -- --root C:\ArkeData
 
 In a second terminal, run `npm run dev` and open the private **Arke session** link it prints.
 The server uses the supplied local data root; the frontend runs separately. This initial
-host serves one local session over loopback. Provider-key storage needs a host-supplied
+host serves one session over loopback. To open it from a phone or another computer, see
+[Opening Studio from another device](docs/development/remote-access.md), which uses Tailscale
+Serve and keeps the server on loopback. Provider-key storage needs a host-supplied
 secure cipher, and native tools need their platform adapters. See the
 [standalone server guide](docs/development/standalone-server.md) for configuration and limits.
 
