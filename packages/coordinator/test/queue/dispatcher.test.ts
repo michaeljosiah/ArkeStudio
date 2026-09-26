@@ -2766,6 +2766,7 @@ it("adopts a founding image receipt with its permanent media path across reload"
 
 it("finishes live founding image preservation before permitting history deletion", async () => {
   const fake = new FakeProvider({});
+  fake.artifacts = [{ name: "portrait.png", contentType: "image/png", data: pngBytes() }];
   let release!: () => void;
   const waiting = new Promise<void>(resolve => { release = resolve; });
   const h = await makeHarness({ fake }, { onTerminal: async job => {
@@ -2773,7 +2774,8 @@ it("finishes live founding image preservation before permitting history deletion
   } });
   try {
     await h.queue.start();
-    const job = await h.queue.enqueue({ ...INPUT, target: { kind: "genesis-image", id: "character:maren" } });
+    const job = await h.queue.enqueue({ ...INPUT, capability: "image", target: { kind: "genesis-image", id: "character:maren" },
+      landing: { dir: "generated", name: "portrait.png" } });
     await until(() => foldedJob(h, job.id)?.finalization?.status === "pending", "pending founding finalization", FOLD_MS);
     await h.queue.delete(job.id);
     assert.ok(foldedJob(h, job.id));
