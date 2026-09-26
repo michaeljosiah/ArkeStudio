@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { VoiceCandidateSchema } from "./voice.js";
 
-export const FOUNDING_VOICES_SCHEMA_VERSION = 33;
+export const FOUNDING_VOICES_SCHEMA_VERSION = 38;
 export const GenesisVoiceIdentitySchema = z.object({
   provider: z.string().min(1), model: z.string().min(1), voiceId: z.string().min(1),
 }).strict();
