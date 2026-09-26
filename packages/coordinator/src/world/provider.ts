@@ -7,6 +7,7 @@ import {
   unattendedProposalsOf,
   worldSheets,
   worldImageReferences,
+  artifactReferenceFile,
   type WorldImageReference,
   type ArtDirectionRecord,
   type Capability,
@@ -737,9 +738,10 @@ export class FsWorldProvider implements WorldProvider {
     }
     const aliases = new Set<string>();
     for (const artifact of bundle.artifacts) {
-      if (artifact.generation?.source !== "character-reference") continue;
+      const sourceFile = artifactReferenceFile(artifact, bundle.referenceTakes);
+      if (!sourceFile) continue;
       const file = `artifacts/${artifact.file}`;
-      const source = available.get(artifact.generation.sourceFile), copy = available.get(file);
+      const source = available.get(sourceFile), copy = available.get(file);
       if (!source || !copy) continue;
       // A source path can be regenerated, removed or externally edited. Suppress its filed
       // copy only when both current files still match the artifact's recorded identity.

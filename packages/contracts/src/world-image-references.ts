@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { WorldBundle } from "./client-state.js";
-import { pickableArtifacts } from "./artifact.js";
+import { pickableArtifacts, type ArtifactSidecar } from "./artifact.js";
+import type { Take } from "./take.js";
 
 export const WorldImageReferenceSchema = z.object({
   file: z.string(),
@@ -16,6 +17,14 @@ export type WorldImageReference = z.infer<typeof WorldImageReferenceSchema>;
 export function isWorldImagePath(file: string): boolean {
   return !/[\\:]/.test(file) && ![...file].some((char) => char.charCodeAt(0) < 32) && file.split("/").every((part) => part !== "" && part !== "." && part !== "..")
     && /\.(png|jpe?g|webp)$/i.test(file);
+}
+
+/** A generated artifact and its immutable reference take share one picker identity. */
+export function artifactReferenceFile(artifact: ArtifactSidecar, takes: readonly Take[]): string | undefined {
+  const generation = artifact.generation;
+  if (generation?.source === "character-reference") return generation.sourceFile;
+  const take = generation?.source === "founding" ? takes.find(take => take.jobId === generation.jobId) : undefined;
+  return take?.media && take.reference ? `references/${take.reference.sheetId}/takes/${take.id}/${take.media}` : undefined;
 }
 
 /** The same current-world catalogue supplies the picker and validates its selections. */
@@ -62,10 +71,8 @@ export function worldImageReferences(world: WorldBundle): WorldImageReference[] 
   }
   for (const artifact of pickableArtifacts(world.artifacts)) {
     if (artifact.kind !== "image" && artifact.kind !== "board") continue;
-    const generation = artifact.generation;
-    const foundingTake = generation?.source === "founding" ? world.referenceTakes.find(take => take.jobId === generation.jobId) : undefined;
-    const source = generation?.source === "character-reference" ? rows.get(generation.sourceFile)
-      : foundingTake?.media && foundingTake.reference ? rows.get(`references/${foundingTake.reference.sheetId}/takes/${foundingTake.id}/${foundingTake.media}`) : undefined;
+    const sourceFile = artifactReferenceFile(artifact, world.referenceTakes);
+    const source = sourceFile ? rows.get(sourceFile) : undefined;
     add(`artifacts/${artifact.file}`, source?.name ?? artifact.file, source?.group ?? (artifact.generation || artifact.boundaryExtraction ? "Takes and stills" : "Uploads"), source?.role ?? "style", source?.sheetId);
   }
   return [...rows.values()];
