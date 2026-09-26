@@ -29,6 +29,19 @@ const MODELS: ModelInfo[] = [
   { provider: "ollama", id: "qwen3-vl:8b", displayName: "Qwen3 VL", inputModalities: ["text", "image"] },
 ];
 const LOCAL_VISION = "ollama/qwen3-vl:8b";
+/**
+ * The budget for a wait that polls by holding a whole chat — a conversation created and a turn
+ * sent on every attempt (issue 1290). Idle, the condition holds within a few attempts; on a
+ * loaded four-shard Windows runner one attempt can take seconds, and a 10-12 s budget failed
+ * unrelated PRs. The cap only decides how long a genuinely broken case takes to report.
+ */
+const CHAT_POLL_MS = 30_000;
+/**
+ * How long a Stop may take to end a turn (issue 1290). What it must be told apart from is the
+ * session's creation timeout, 30 s (`createPreparedSession`), which ends a stuck turn on its
+ * own; 10 s is well inside that, where 2 s only measured how busy the runner was.
+ */
+const STOP_MS = 10_000;
 /** The catalogue with nothing local in it: what a machine without Ollama sees. */
 const CLOUD_ONLY = MODELS.filter((model) => model.provider !== "ollama");
 const LOCAL = "ollama/gemma4:12b";
@@ -386,7 +399,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       await until(() => test.coordinator.getState().app.providers.some((p) => p.id === "ollama" && p.validation === "valid"), "Ollama answering");
       assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL);
       await test.send({ kind: "set-model-enabled", modelId: "gemma4-12b", enabled: false });
-      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL_SMALL, "the next admissible local row once the first is switched off");
+      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL_SMALL, "the next admissible local row once the first is switched off", CHAT_POLL_MS);
     } finally { await test.close(); }
   });
 
@@ -424,7 +437,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       await untilAsync(async () => {
         assert.equal(await test.chat(), undefined);
         return /Local's models could not be read/.test(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "");
-      }, "the Local refusal");
+      }, "the Local refusal", CHAT_POLL_MS);
       assert.doesNotMatch(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /cloud key|add a key/);
     } finally { await test.close(); }
   });
@@ -545,7 +558,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       await test.probeLocalRuntimes();
       // Listed, published, and not yet in the catalogue: still not decided on the old catalogue.
       assert.equal(await test.chat(), undefined, "the reload window after a changed listing is refused, not run unmodelled");
-      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the runtime has listed", 10_000);
+      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the runtime has listed", CHAT_POLL_MS);
     } finally { await test.close(); }
   });
 
@@ -651,7 +664,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       await test.send({ kind: "world-chat-cancel", worldId: WORLD_ID, conversationId });
       // Well inside the reload delay the configuration is waiting on: the Stop ended the wait.
       // (The send itself also awaits the conversation's naming pass, which is not the turn.)
-      await until(() => test.coordinator.getState().worldChat?.runStatus === null, "the turn ended at the Stop", 2_000);
+      await until(() => test.coordinator.getState().worldChat?.runStatus === null, "the turn ended at the Stop", STOP_MS);
       await pending;
       assert.equal(test.adapter.sessions.filter((session) => session.agent === "world-builder").length, 0, "no session was built for a stopped turn");
     } finally { await test.close(); }
@@ -669,7 +682,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       adapter.list = async () => MODELS;
       // The listing is unchanged, so nothing is published; the catalogue is asked again.
       await test.probeLocalRuntimes();
-      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the catalogue lists the published rows");
+      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the catalogue lists the published rows", CHAT_POLL_MS);
     } finally { await test.close(); }
   });
 
@@ -683,7 +696,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /not available to the harness yet/);
       adapter.list = async () => [...CLOUD_ONLY, MODELS.find((model) => model.id === "gemma4:12b")!];
       await test.probeLocalRuntimes();
-      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the catalogue lists exactly what was handed");
+      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the catalogue lists exactly what was handed", CHAT_POLL_MS);
     } finally { await test.close(); }
   });
 
@@ -699,7 +712,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       adapter.list = async () => stated(false);
       await test.probeLocalRuntimes();
       // Carried now — and passed over, since it cannot call tools: refused for that reason instead.
-      await untilAsync(async () => { await test.chat(); return /None of the local models/.test(test.coordinator.getState().worldChat?.lastFailure?.detail ?? ""); }, "the row read back as written, then judged on it");
+      await untilAsync(async () => { await test.chat(); return /None of the local models/.test(test.coordinator.getState().worldChat?.lastFailure?.detail ?? ""); }, "the row read back as written, then judged on it", CHAT_POLL_MS);
     } finally { await test.close(); }
   });
 
@@ -759,7 +772,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     const test = await fixture({ adapter, supervisor, localModels: PULLED });
     try {
       supervisor.emit("status", { id: "harness", status: "healthy" });
-      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the first lifecycle carried the rows", 12_000);
+      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the first lifecycle carried the rows", CHAT_POLL_MS);
       // The child restarts, and the replacement's first answer is its cloud-only start-up catalogue.
       adapter.list = async () => CLOUD_ONLY;
       supervisor.emit("status", { id: "harness", status: "unhealthy", reason: "the child exited" });
@@ -771,7 +784,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /not available to the harness yet/);
       adapter.list = async () => MODELS;
       await test.probeLocalRuntimes();
-      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the returned harness lists the rows");
+      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the returned harness lists the rows", CHAT_POLL_MS);
     } finally { await test.close(); }
   });
 
@@ -822,7 +835,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
         text: "Explain the current production.", attachmentIds: [], modelId: CHAT });
       await until(() => test.coordinator.getState().worldChat?.runStatus !== null, "the turn admitted and verifying its model");
       await test.send({ kind: "world-chat-cancel", worldId: WORLD_ID, conversationId });
-      await until(() => test.coordinator.getState().worldChat?.runStatus === null, "the turn ended at the Stop", 2_000);
+      await until(() => test.coordinator.getState().worldChat?.runStatus === null, "the turn ended at the Stop", STOP_MS);
       release();
       await pending;
       assert.equal(test.adapter.sessions.filter((session) => session.agent === "world-builder").length, 0, "no session was built for a stopped turn");
@@ -863,7 +876,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       await untilAsync(async () => {
         assert.equal(await none.chat(), undefined, "no session goes to a cloud default nobody can pay for");
         return /None of the pulled local models has a 256k context window/.test(none.coordinator.getState().worldChat?.lastFailure?.detail ?? "");
-      }, "refused, naming the minimum");
+      }, "refused, naming the minimum", CHAT_POLL_MS);
       const staged = await none.stage();
       assert.match(staged?.type === "stage.construction" ? staged.detail : "", /256k context window/, "Stage is told the same, not sent to choose a model that reads images");
     } finally { await none.close(); }
@@ -899,7 +912,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     const test = await fixture({ adapter, supervisor });
     try {
       supervisor.emit("status", { id: "harness", status: "healthy" });
-      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === undefined && test.adapter.sessions.length > 0, "the first lifecycle's read decides for the connected account");
+      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === undefined && test.adapter.sessions.length > 0, "the first lifecycle's read decides for the connected account", CHAT_POLL_MS);
       hold = new Promise<void>((resolve) => { release = resolve; });
       supervisor.emit("status", { id: "harness", status: "unhealthy", reason: "the child exited" });
       supervisor.emit("status", { id: "harness", status: "healthy" });
@@ -931,12 +944,13 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       const started = Date.now();
       const before = test.adapter.sessions.length;
       await test.chat();
-      assert.ok(Date.now() - started < 10_000, "refused promptly rather than held to the creation timeout");
+      // Promptly means well inside the 30 s creation timeout, not a figure a busy runner can miss (issue 1290).
+      assert.ok(Date.now() - started < 20_000, "refused promptly rather than held to the creation timeout");
       assert.equal(test.adapter.sessions.length, before, "and not run unmodelled: the rows are unpublished");
       assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /not available to the harness yet/);
       publishFails = false;
       await test.probeLocalRuntimes();
-      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the publication succeeds");
+      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the publication succeeds", CHAT_POLL_MS);
     } finally { await test.close(); }
   });
 
@@ -999,7 +1013,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
         text: "Explain the current production.", attachmentIds: [], modelId: CHAT });
       await until(() => test.coordinator.getState().worldChat?.runStatus !== null, "the turn admitted and verifying its model");
       await test.send({ kind: "world-chat-cancel", worldId: WORLD_ID, conversationId });
-      await until(() => test.coordinator.getState().worldChat?.runStatus === null, "the turn ended at the Stop", 2_000);
+      await until(() => test.coordinator.getState().worldChat?.runStatus === null, "the turn ended at the Stop", STOP_MS);
       await Promise.race([pending, new Promise((resolve) => setTimeout(resolve, 500))]);
       const closing = test.close().then(() => { closed = true; });
       await new Promise((resolve) => setTimeout(resolve, 300));
@@ -1043,7 +1057,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       test.adapter.list = async () => MODELS;
       // The listing is unchanged, so nothing is published; the failed read is what is retried.
       await test.probeLocalRuntimes();
-      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the catalogue reads again");
+      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the catalogue reads again", CHAT_POLL_MS);
     } finally { await test.close(); }
   });
 
@@ -1061,7 +1075,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /sign-in state could not be read/);
       signInReadable = true;
       await test.probeLocalRuntimes();
-      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the sign-in state has been read");
+      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the sign-in state has been read", CHAT_POLL_MS);
     } finally { await test.close(); }
   });
 
