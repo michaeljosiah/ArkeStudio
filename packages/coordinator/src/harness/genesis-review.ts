@@ -12,7 +12,7 @@ export async function reviewGenesisContent(dir: string): Promise<GenesisContentR
   const blueprint = await foldBlueprint(dir);
   const log = await genesisConversation(dir);
   const { events, problems: journalProblems } = await log.read();
-  if (journalProblems.length) throw new Error("The conversation record needs repair before content can be approved.");
+  if (journalProblems.some(problem => problem.kind !== "torn-tail")) throw new Error("The conversation record needs repair before content can be approved.");
   const decisions = events.flatMap(({ event }) => event.type === "founding.decision" ? [event.decision] : []);
   const selected = approvedGenesisContent(decisions);
   const rows = genesisContentRows(blueprint);

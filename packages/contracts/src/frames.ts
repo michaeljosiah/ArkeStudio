@@ -883,7 +883,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("genesis-discard"), genesisId: GenesisIdSchema }).strict(),
   z.object({ kind: z.literal("genesis-list") }).strict(),
   z.object({ kind: z.literal("genesis-load"), genesisId: GenesisIdSchema }).strict(),
-  z.object({ kind: z.literal("genesis-review"), genesisId: GenesisIdSchema }).strict(),
+  z.object({ kind: z.literal("genesis-review"), genesisId: GenesisIdSchema, requestId: z.string().min(1).optional() }).strict(),
   z.object({ kind: z.literal("genesis-propose-world"), genesisId: GenesisIdSchema, draft: GenesisDraftSchema }).strict(),
   z.object({
     kind: z.literal("genesis-decide"), genesisId: GenesisIdSchema, requestId: UlidSchema,
