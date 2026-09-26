@@ -393,6 +393,7 @@ export function arrivedSince(jobs: readonly Job[], seenAt: string | null): boole
 }
 
 export function canDeleteJob(job: Job): boolean {
+  if (job.target.kind === "genesis-image" && job.status === "succeeded" && job.finalization?.status !== "complete") return false;
   // These rows are also durable source/settlement records for the public engine.
   if (job.target.kind === "story-page-illustration" || job.target.kind === "story-chapter-narration") return false;
   if (job.status !== "succeeded" && job.status !== "failed" && job.status !== "cancelled") return false;

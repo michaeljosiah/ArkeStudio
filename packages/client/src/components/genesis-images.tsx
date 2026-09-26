@@ -22,7 +22,7 @@ function Candidate({ genesisId, candidate, targets, images, busy, onDecide, onRe
     </select></label>
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
       {!selected && <Button disabled={busy || !target} onClick={() => onDecide(chosen, "approve", candidate)}>Use this image</Button>}
-      {selected && <Button variant="ghost" disabled={busy} onClick={() => onDecide(chosen, "unassign")}>Remove assignment</Button>}
+      {selected && <Button variant="ghost" disabled={busy} onClick={() => onDecide(chosen, "unassign", candidate)}>Remove assignment</Button>}
       {!selected && !rejected && <Button variant="ghost" disabled={busy || !target} onClick={() => onDecide(chosen, "reject", candidate)}>Reject</Button>}
       <Button variant="ghost" disabled={busy || !target} onClick={() => onRevise(`Please revise the image for ${target?.label}: `)}>Request changes</Button>
     </div>

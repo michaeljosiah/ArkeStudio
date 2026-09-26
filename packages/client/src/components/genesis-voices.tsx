@@ -40,10 +40,10 @@ export function GenesisVoiceCards({ genesisId, voices, jobs, busy, onGenerate, o
         <p>{selected ? "Selected voice" : rejected ? "Rejected" : "Not assigned"}</p>
         {!selected && <Button disabled={busy} onClick={() => onDecide(candidate.plan.intent.target, "approve", candidate)}>Use this voice</Button>}
         {!selected && !rejected && <Button variant="ghost" disabled={busy} onClick={() => onDecide(candidate.plan.intent.target, "reject", candidate)}>Reject voice</Button>}
-        {selected && <Button variant="ghost" disabled={busy} onClick={() => onDecide(candidate.plan.intent.target, "unassign")}>Continue without this voice</Button>}
+        {selected && <Button variant="ghost" disabled={busy} onClick={() => onDecide(candidate.plan.intent.target, "unassign", candidate)}>Continue without this voice</Button>}
       </article>;
     })}
     {voices.selections.filter(selected => !voices.candidates.some(candidate => candidate.id === selected.id)).map(selected =>
-      <Button key={selected.id} disabled={busy} onClick={() => onDecide(selected.plan.intent.target, "unassign")}>Remove unavailable voice for {selected.plan.title}</Button>)}
+      <Button key={selected.id} disabled={busy} onClick={() => onDecide(selected.plan.intent.target, "unassign", selected)}>Remove unavailable voice for {selected.plan.title}</Button>)}
   </section>;
 }

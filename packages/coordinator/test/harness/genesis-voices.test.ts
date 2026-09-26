@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { GenesisBlueprintSchema, JobSchema, newId, ulid, jobOrigin, type VoiceCandidate, type ManifestModel } from "@arke-studio/contracts";
+import { GenesisBlueprintSchema, JobSchema, newId, ulid, jobOrigin, type Job, type VoiceCandidate, type ManifestModel } from "@arke-studio/contracts";
+import { Coordinator } from "../../src/coordinator.js";
 import { tempDir } from "../tmp.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { decideGenesisVoice, generateLocalGenesisVoice, reviewGenesisVoices, reviewedGenesisVoices, savedGenesisVoices, genesisVoiceRequest } from "../../src/harness/genesis-voices.js";
@@ -44,7 +45,7 @@ it("auditions once, plays immutable audio and selects separately across rename a
   draft.characters[0]!.name = "Maren Kest";
   assert.equal((await reviewedGenesisVoices(dir, draft, [], [voice])).selectedVoices?.[0]?.plan.voice.voiceId, voice.voiceId);
   await assert.rejects(reviewedGenesisVoices(dir, draft, [], []), /unavailable/);
-  await decideGenesisVoice(dir, draft, [], { target: "character:maren", decision: "unassign", requestId: ulid() });
+  await decideGenesisVoice(dir, draft, [], { target: "character:maren", decision: "unassign", requestId: ulid(), candidateId: candidate.id, hash: candidate.hash });
   assert.equal((await reviewedGenesisVoices(dir, draft, [], [])).selectedVoices, undefined);
   await writeFile(join(genesisControlDir(dir), candidate.file), "corrupt");
   await assert.rejects(decideGenesisVoice(dir, draft, [voice], { ...choice, requestId: ulid() }), /changed/);
@@ -78,4 +79,26 @@ it("disabled catalogue voices cannot produce a generation plan", async () => {
   const review = await reviewGenesisVoices(dir, draft, [], [{ ...voice, unavailableReason: "This voice model is disabled in Settings." }], []);
   assert.equal(review.plans.length, 0);
   assert.match(review.problems.join(" "), /disabled/);
+});
+
+it("finalizes a queued audition without opening its chat and preserves it after job deletion", async () => {
+  const { dir, draft, provider } = await setup();
+  const plan = (await reviewGenesisVoices(dir, draft, [], [voice], [])).plans[0]!;
+  const requestId = ulid();
+  await mkdir(join(dir, "auditions"), { recursive: true });
+  await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Harbour" }));
+  const landed = "auditions/" + requestId + ".wav";
+  await writeFile(join(dir, landed), wav());
+  const now = new Date().toISOString();
+  const job = JobSchema.parse({ ...genesisVoiceRequest("gen-voices", plan, requestId), id: newId("jb"),
+    status: "succeeded", providerJobId: null, attempt: 1, error: null, createdAt: now, updatedAt: now, landedFiles: [landed] });
+  const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(dir, "changes.jsonl"), appVersion: "test" });
+  const finalizer = coordinator as unknown as { onJobTerminal(job: Job): Promise<void> };
+  await finalizer.onJobTerminal(job);
+  await finalizer.onJobTerminal(job);
+  await rm(join(dir, landed));
+  const review = await reviewGenesisVoices(dir, draft, [], [voice], []);
+  assert.equal(review.candidates.filter(candidate => candidate.jobId === job.id).length, 1);
+  assert.ok(await provider.serveGenesisMedia("gen-voices", review.candidates[0]!.file));
+  await provider.close();
 });
