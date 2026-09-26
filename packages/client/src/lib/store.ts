@@ -40,6 +40,8 @@ import {
 import type { ArkeBridge, AttachTarget } from "../arke-bridge.js";
 
 /** A conversation nobody has said anything in yet. */
+const discardedGenesis = new Set<string>();
+
 function emptyGenesis(): StoreState["genesis"][string] {
   return {
     turns: [],
@@ -1503,9 +1505,11 @@ function handleFrame(json: string): void {
     } else if (event.type === "setup.status") {
       setupStatus = event.setup;
     } else if (event.type === "genesis.discarded") {
+      discardedGenesis.add(event.genesisId);
       genesis = { ...genesis };
       delete genesis[event.genesisId];
     } else if (event.type === "genesis.loaded") {
+      if (discardedGenesis.has(event.genesisId)) return;
       if ((event.revision ?? 0) < (genesis[event.genesisId]?.revision ?? 0)) return;
       const messages = new Map(event.turns.map(turn => [turn.id, turn]));
       for (const turn of genesis[event.genesisId]?.turns ?? []) {
@@ -2688,11 +2692,12 @@ export function refreshDiagnostics(): void {
 }
 
 export function genesisChat(genesisId: string, text: string): void {
+  discardedGenesis.delete(genesisId);
   send({ kind: "genesis-chat", genesisId, text });
 }
 
 export function listGenesisDrafts(): void { send({ kind: "genesis-list" }); }
-export function loadGenesisDraft(genesisId: string): void { send({ kind: "genesis-load", genesisId }); }
+export function loadGenesisDraft(genesisId: string): void { if (discardedGenesis.has(genesisId)) return; send({ kind: "genesis-load", genesisId }); }
 
 export function genesisDiscard(genesisId: string): void {
   send({ kind: "genesis-discard", genesisId });

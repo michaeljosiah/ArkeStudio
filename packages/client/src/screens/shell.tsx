@@ -796,6 +796,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
     listGenesisDrafts();
     if (params.has("draft")) loadGenesisDraft(genesisId);
   }, [connection, genesisId]);
+  const canViewChat = harnessReady || Boolean(g?.blueprint || g?.turns.length);
   const turns = g?.turns ?? [];
   const chatRunning = g?.status === "running";
   const blueprint = g?.blueprint ?? null;
@@ -803,8 +804,8 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
   // With a healthy harness, talking is the front door (prototype 12a) — unless the author
   // already picked the form themselves.
   useEffect(() => {
-    if (harnessReady && !modeTouchedRef.current) setGenMode("chat");
-  }, [harnessReady]);
+    if (canViewChat && !modeTouchedRef.current) setGenMode("chat");
+  }, [canViewChat]);
 
   const charSeed = parseSeed(firstCharacter);
   const locSeed = parseSeed(firstLocation);
@@ -1139,9 +1140,9 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
               <button
                 type="button"
                 className={cx("fy-seg__item", genMode === "chat" && "fy-seg__item--active")}
-                disabled={!harnessReady}
-                style={harnessReady ? undefined : { cursor: "not-allowed", opacity: 0.55 }}
-                title={harnessReady ? undefined : "Chat needs OpenCode running — the form drafts the same world"}
+                disabled={!canViewChat}
+                style={canViewChat ? undefined : { cursor: "not-allowed", opacity: 0.55 }}
+                title={canViewChat ? undefined : "Chat needs OpenCode running — the form drafts the same world"}
                 onClick={() => {
                   modeTouchedRef.current = true;
                   setGenMode("chat");
