@@ -210,3 +210,29 @@ it("conflicting duplicate proposal identities are visible and cannot be prepared
   assert.equal(review.cards.length, 0);
   assert.match(review.problems.join(" "), /Conflicting files/);
 });
+
+it("new imported entities retain natural relationship keys and legacy source-shaped data stays readable", async () => {
+  const { dir } = await setup();
+  await writeFile(join(dir, "draft", "imports", "maren.json"), JSON.stringify({ source: "notes.md", kind: "character", name: "Maren",
+    body: "Keeper", quote: "Maren keeps the lighthouse.", links: ["location:the-vigil"] }));
+  await writeFile(join(dir, "draft", "imports", "vigil.json"), JSON.stringify({ source: "notes.md", kind: "location", name: "The Vigil",
+    body: "Lighthouse", quote: "Maren keeps the lighthouse." }));
+  for (const name of ["Maren", "The Vigil"]) {
+    const card = (await reviewGenesisImports(dir)).cards.find(card => card.proposal.name === name)!;
+    await resolveGenesisImport(dir, { id: card.id, digest: card.digest, decision: "prepare" });
+  }
+  await decideGenesisContent(dir, (await reviewGenesisContent(dir)).cards, "approve", ulid());
+  const approved = await approvedBlueprintForFounding(dir);
+  assert.equal(approved.locations[0]?.slug, "the-vigil");
+  assert.deepEqual(approved.characters[0]?.sheet?.links, ["location:the-vigil"]);
+  await writeFile(join(dir, "draft", "characters", "legacy.json"), JSON.stringify({ name: "Legacy keeper", sources: ["Old handwritten notes"], line: "Keeps the gate" }));
+  const folded = await foldBlueprint(dir);
+  assert.equal(folded.characters.find(entity => entity.slug === "legacy")?.line, "Keeps the gate");
+  assert.deepEqual(folded.dropped, []);
+});
+it("reports proposal files beyond the review cap", async () => {
+  const { dir } = await setup();
+  const proposal = await readFile(join(dir, "draft", "imports", "maren.json"));
+  await Promise.all(Array.from({ length: 300 }, (_, index) => writeFile(join(dir, "draft", "imports", `copy-${index}.json`), proposal)));
+  assert.ok((await reviewGenesisImports(dir)).problems.some(problem => problem.includes("1 import proposal files exceed")));
+});
