@@ -134,6 +134,17 @@ For persistence work read WorldStore → Committer → `world/atomic.ts` and the
 
 ## Workflow traces
 
+### Review readiness and repair a founding build
+
+Contracts `genesis-readiness.ts` separates blockers, approval work, possible conflicts and
+optional/open choices. Coordinator `harness/genesis-readiness.ts` joins approved content,
+verified import evidence and media selections; private choices are fenced by review digest.
+`world/founding-build.ts` binds Begin to the current approved blueprint, model/estimate and
+media choices. Client `components/genesis-readiness.tsx` hosts review and existing build
+retry/stop controls in founding and world chat. Checks: coordinator
+`test/harness/genesis-readiness.test.ts`, `test/world/founding-build.test.ts`;
+client `test/genesis-readiness.test.tsx`.
+
 ### Resume a founding conversation
 
 Client `screens/shell.tsx` and `lib/store.ts` send `genesis-list` / `genesis-load`.
@@ -148,7 +159,16 @@ for `world/founding-build.ts`. Checks: coordinator `test/harness/genesis-review.
 and client `test/genesis-review.test.tsx`.
 See [founding chat](founding-chat.md) for lifecycle and recovery checks.
 
-### Accept a proposal
+### Audition founding voices
+
+Contracts `genesis-voices.ts` defines voice intents and immutable audition candidates.
+Coordinator `harness/genesis-voices.ts` owns preview plans, private audio and decisions;
+`voice/service.ts` supplies the catalogue and serialized local synthesis. Cloud auditions
+use the existing queue and ledger. `coordinator.ts` finalizes queued auditions into private
+candidates before their Activity rows become deletable. `world/founding-build.ts` installs approved voices through
+`sheets/authoring.ts`. Client `components/genesis-voices.tsx` renders audio and separate
+generation/assignment controls. Checks: coordinator `test/harness/genesis-voices.test.ts`,
+`test/world/founding-build.test.ts`; client `test/genesis-voices.test.tsx`.
 
 ### Generate and approve founding images
 
@@ -158,12 +178,35 @@ Contracts `genesis-images.ts` defines intents, candidates, selections and review
 `harness/genesis-images.ts`, which freezes media and persists exact-hash decisions outside
 the harness workspace. `harness/genesis-image-carry.ts` files artifacts and installs approved
 main photos and location views through reference services. `world/founding-build.ts` replaces
-the corresponding paid work with the selected image.
+the corresponding paid work with the selected image. Queue finalization in `coordinator.ts`
+preserves generated candidates before Activity allows deletion; retrying this local filing
+never contacts the provider again.
 
 Client `components/genesis-images.tsx`, `screens/shell.tsx` and `lib/store.ts` render generation
 authorization separately from actual-image approval. Tests: coordinator
 `test/harness/genesis-images.test.ts`, `test/dispatch-refusal.test.ts`,
 `test/world/founding-build.test.ts`; client `test/genesis-images.test.tsx`.
+
+### Author props and state references in chat
+
+Contracts `prop.ts`, `genesis-review.ts` and `world-chat-actions.ts` define founding
+props and the typed `prop-authoring` / `prop-reference` actions. Coordinator
+`harness/genesis-props.ts` derives stable founding identities; `references/props.ts`
+owns names, states and acceptance. `world-chat/actions.ts` previews exact changes and
+filed images, then uses those services after approval. Artifact links and state acceptance
+commit together. `harness/genesis-image-carry.ts` installs approved founding references.
+Checks: coordinator `test/world-chat/actions.test.ts`, `test/world/founding-build.test.ts`.
+
+### Review founding document imports
+
+Contracts `genesis-imports.ts` defines evidence, candidate review and merge choices.
+Coordinator `harness/genesis-imports.ts` reuses `artifacts/extraction.ts` for supported document
+text and quote verification, freezes source copies, detects name matches and recovers prepared
+draft writes. `harness/genesis-review.ts` preserves evidence through edits and requires ordinary
+exact-content approval. `world/founding-build.ts` carries source artifacts and entity/canon links.
+Client `components/genesis-imports.tsx`, `screens/shell.tsx` and `lib/store.ts` present evidence,
+interpretations and explicit merge/distinct/defer choices. Checks:
+`test/harness/genesis-imports.test.ts` and client `test/genesis-imports.test.tsx`.
 
 ### Accept an authored proposal
 

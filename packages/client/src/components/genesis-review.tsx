@@ -1,13 +1,22 @@
-import { genesisContentChanges, type GenesisContent, type GenesisContentReview, type GenesisReviewCard } from "@arke-studio/contracts";
+import { genesisContentChanges, genesisContentRows, type GenesisBlueprint, type GenesisContent, type GenesisContentReview, type GenesisReviewCard } from "@arke-studio/contracts";
 import { renderInlineMarkdown } from "./inline-markdown.js";
 import { Button, Callout } from "./ui.js";
+function Sources({ sources }: { sources?: import("@arke-studio/contracts").GenesisSource[] }) {
+  return <>{sources?.map(source => <section key={source.candidateId}><h4>Source: {source.name}, line {source.line}</h4>
+    <blockquote>{source.quote}</blockquote><p>{source.modified ? "Interpretation edited during import review." : "Imported interpretation; later draft edits may revise it."}</p>
+    <details><summary>Source identity and original interpretation</summary><code>{source.hash}</code><p>{source.originalName}: {source.originalBody}</p></details>
+  </section>)}</>;
+}
 
 function Content({ content, review }: { content: GenesisContent; review: GenesisContentReview }) {
   if (content.kind === "remove") return <p>Remove this item from the approved founding content.</p>;
   if (content.kind === "thread") return <p>Open question: {content.value}</p>;
+  if (content.kind === "prop") return <><p>Prop: {content.value.name}</p><ol>{content.value.states.map(state => <li key={state.slug}>{state.name}</li>)}</ol>
+    {!content.value.states.length && <p>No states proposed yet.</p>}</>;
   if (content.kind === "canon") return <>
     <p>{content.value.type === "thread" ? "Open question" : `Established ${content.value.type}`}</p>
     <div style={{ whiteSpace: "pre-wrap" }}>{renderInlineMarkdown(content.value.statement)}</div>
+    <Sources sources={content.value.sources} />
   </>;
   if (content.kind === "world") return <>
     {Object.entries(content.value).filter(([key]) => key !== "keyArt").map(([key, value]) =>
@@ -18,6 +27,7 @@ function Content({ content, review }: { content: GenesisContent; review: Genesis
   </>;
   const entity = content.value;
   return <>
+    <Sources sources={entity.sources} />
     {entity.line && <p>{entity.line}</p>}
     {entity.description && <p style={{ whiteSpace: "pre-wrap" }}>{entity.description}</p>}
     {"brief" in entity && entity.brief && <section><h4>Image brief</h4>{Object.entries(entity.brief).map(([field, value]) =>
@@ -31,6 +41,12 @@ function Content({ content, review }: { content: GenesisContent; review: Genesis
   </>;
 }
 
+export function ApprovedGenesisContent({ blueprint }: { blueprint: GenesisBlueprint }) {
+  const cards = genesisContentRows(blueprint).map(row => ({ ...row, digest: "", status: "approved" as const }));
+  return <details><summary>Exact approved content to save</summary>{cards.map(card => <section key={card.key}>
+    <h3>{card.title}</h3><Content content={card.content} review={{ cards, selected: blueprint, problems: [] }} />
+  </section>)}</details>;
+}
 export function GenesisContentCards({ review, busy, onDecide, onRevise }: {
   review: GenesisContentReview; busy: boolean;
   onDecide(cards: GenesisReviewCard[], decision: "approve" | "reject"): void;
@@ -58,6 +74,6 @@ export function GenesisContentCards({ review, busy, onDecide, onRevise }: {
         <Button variant="ghost" disabled={busy} onClick={() => onRevise(card.title)}>Request changes</Button>
       </div>
     </article>)}
-    {pending.length > 1 && <Button disabled={busy} onClick={() => onDecide(pending, "approve")}>Approve all {pending.length} pending items shown above</Button>}
+    {pending.length > 1 && <Button disabled={busy} onClick={() => onDecide(pending.slice(0, 300), "approve")}>Approve {pending.length > 300 ? "the next" : "all"} {Math.min(pending.length, 300)} pending items shown above</Button>}
   </section>;
 }

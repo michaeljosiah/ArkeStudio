@@ -25,8 +25,11 @@ import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { readKit } from "../../src/references/kit.js";
 import { assembleKeyArt, readKeyArtBrief } from "../../src/references/key-art-references.js";
 import { approvedBlueprintForFounding, decideGenesisContent, reviewGenesisContent } from "../../src/harness/genesis-review.js";
+import { reviewGenesisImports, resolveGenesisImport } from "../../src/harness/genesis-imports.js";
 import { decideGenesisImage, reviewGenesisImages, reviewedGenesisImages } from "../../src/harness/genesis-images.js";
 import { installGenesisImage } from "../../src/harness/genesis-image-carry.js";
+import { genesisPropId, genesisPropStateId } from "../../src/harness/genesis-props.js";
+import { decideGenesisVoice, reviewGenesisVoices, reviewedGenesisVoices, generateLocalGenesisVoice } from "../../src/harness/genesis-voices.js";
 import { fileArtifact } from "../../src/artifacts/filing.js";
 import { sandboxAttachments } from "../../src/artifacts/genesis-attachments.js";
 
@@ -345,6 +348,105 @@ describe("the founding build (SPEC-031)", () => {
     assert.equal(store.getBundle().referenceTakes.length, 3);
   });
 
+  it("founds approved props and references with stable identities and no replay duplicates", async t => {
+    let h!: Harness;
+    h = await makeHarness(t, { manifest: null,
+      reviewedBlueprint: async id => {
+        const workspace = await h.provider.genesisDir(id);
+        return reviewedGenesisImages(workspace, await approvedBlueprintForFounding(workspace), []);
+      },
+    });
+    const id = "gen-props", dir = await h.provider.genesisDir(id);
+    const draft = { name: "Harbour", props: [{ slug: "sword", name: "Tide sword", states: [{ slug: "whole", name: "Intact" }, { slug: "broken", name: "Broken" }] }] };
+    await writeFile(join(dir, "draft.json"), JSON.stringify(draft));
+    await mkdir(join(dir, "attachments"), { recursive: true });
+    await writeFile(join(dir, "attachments", "sword.png"), PNG);
+    await decideGenesisContent(dir, (await reviewGenesisContent(dir)).cards, "approve", ulid());
+    const approved = await approvedBlueprintForFounding(dir);
+    const candidate = (await reviewGenesisImages(dir, approved, [], null)).candidates[0]!;
+    await decideGenesisImage(dir, approved, { target: "prop:sword:whole", candidateId: candidate.id, hash: candidate.hash, decision: "approve", requestId: ulid() });
+    draft.props[0]!.name = "The restored sword";
+    await writeFile(join(dir, "draft.json"), JSON.stringify(draft));
+    const renamed = (await reviewGenesisContent(dir)).cards.find(card => card.key === "prop:sword")!;
+    await decideGenesisContent(dir, [renamed], "approve", ulid());
+    await h.service.begin(id, ulid());
+    await until(() => h.lastState()?.status === "completed", "approved props", BUILD_MS);
+    assert.ok(h.lastState()?.items.filter(item => item.authorized).every(item => item.state === "landed"), JSON.stringify(h.lastState()?.items));
+    const store = h.provider.openStore()!, prop = store.getBundle().props[0]!;
+    assert.equal(prop.id, genesisPropId(id, "sword"));
+    assert.equal(prop.name, "The restored sword");
+    assert.equal(prop.states[0]!.id, genesisPropStateId(id, "sword", "whole"));
+    assert.ok(prop.states[0]!.reference?.sourceTakeId);
+    assert.ok(!prop.states[1]!.reference);
+    assert.ok(store.getBundle().artifacts.some(artifact => artifact.links.includes(prop.id)));
+    await h.service.begin(id, ulid());
+    const selected = await reviewedGenesisImages(dir, await approvedBlueprintForFounding(dir), []);
+    await installGenesisImage(dir, selected.selectedImages![0]!, selected, store);
+    assert.equal(store.getBundle().props.length, 1);
+    assert.equal(store.getBundle().referenceTakes.length, 1);
+    assert.equal(h.queue.jobs.size, 0);
+  });
+
+  it("binds Begin to current content and estimate, and supports declining all new images", async t => {
+    let brokenCredential = false;
+    const h = await makeHarness(t, { credentialFor: async () => {
+      if (brokenCredential) throw new Error("Credential storage is unavailable");
+      return "key";
+    } });
+    const dir = await makeSandbox(h.root, "gen-stale-review");
+    await h.service.plan("gen-stale-review", ulid());
+    const old = lastPlan(h);
+    assert.ok(old.approvalDigest);
+    const raw = JSON.parse(await readFile(join(dir, "draft.json"), "utf8"));
+    await writeFile(join(dir, "draft.json"), JSON.stringify({ ...raw, bible: "A changed argument." }));
+    await assert.rejects(h.service.begin("gen-stale-review", ulid(), undefined, undefined, old.approvalDigest), /estimate changed/);
+    assert.equal(h.provider.openStore(), null);
+    brokenCredential = true;
+    await h.service.plan("gen-stale-review", ulid(), undefined, undefined, false);
+    const current = lastPlan(h);
+    assert.equal(current.generations, 0);
+    assert.equal(current.estimateMicroUsd, 0);
+    assert.match(current.approvedContent!.bible!, /changed argument/);
+    await h.service.begin("gen-stale-review", ulid(), undefined, undefined, current.approvalDigest, false);
+    await until(() => h.lastState()?.status === "completed", "text-only build", BUILD_MS);
+    assert.equal(h.queue.jobs.size, 0);
+    assert.equal(h.provider.openStore()!.getBundle().sheets.length, 3);
+    assert.ok(h.lastState()!.items.filter(item => !item.authorized).every(item => item.detail?.includes("declined")));
+  });
+
+  it("saves an approved founding voice through sheet assignment without another audition", async t => {
+    const voice = { provider: "kokoro", model: "kokoro-82m", voiceId: "af_heart", label: "Heart", attributes: [], local: true, canClone: false };
+    let h!: Harness;
+    h = await makeHarness(t, { manifest: null, reviewedBlueprint: async id =>
+      reviewedGenesisVoices(await h.provider.genesisDir(id), await approvedBlueprintForFounding(await h.provider.genesisDir(id)), [], [voice]) });
+    const dir = await h.provider.genesisDir("gen-voice");
+    await mkdir(join(dir, "draft", "characters"), { recursive: true });
+    await writeFile(join(dir, "draft", "characters", "maren.json"), JSON.stringify({ name: "Maren", neverDepicted: true }));
+    await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Harbour", voices: [{ id: "audition", target: "character:maren",
+      voice: { provider: voice.provider, model: voice.model, voiceId: voice.voiceId }, text: "The gate stays closed." }] }));
+    await decideGenesisContent(dir, (await reviewGenesisContent(dir)).cards, "approve", ulid());
+    const { foldBlueprint } = await import("../../src/harness/blueprint.js");
+    const draft = await foldBlueprint(dir), plan = (await reviewGenesisVoices(dir, draft, [], [voice], [])).plans[0]!;
+    const wav = Buffer.alloc(52);
+    wav.write("RIFF"); wav.writeUInt32LE(44, 4); wav.write("WAVE", 8); wav.write("fmt ", 12); wav.writeUInt32LE(16, 16);
+    wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(24000, 24); wav.writeUInt32LE(48000, 28);
+    wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write("data", 36); wav.writeUInt32LE(8, 40);
+    let syntheses = 0;
+    await generateLocalGenesisVoice(dir, plan, ulid(), async () => { syntheses++; return wav; });
+    const candidate = (await reviewGenesisVoices(dir, draft, [], [voice], [])).candidates[0]!;
+    await decideGenesisVoice(dir, draft, [voice], { target: "character:maren", decision: "approve", requestId: ulid(), candidateId: candidate.id, hash: candidate.hash });
+    await h.service.begin("gen-voice", ulid());
+    await until(() => h.lastState()?.status === "completed", "voice founding", BUILD_MS);
+    assert.ok(h.lastState()?.items.filter(item => item.authorized).every(item => item.state === "landed"), JSON.stringify(h.lastState()?.items));
+    const store = h.provider.openStore()!, sheet = store.getBundle().sheets[0]!;
+    assert.equal(sheet.voice?.voiceId, voice.voiceId);
+    assert.equal(sheet.voice?.assignedAtVersion, sheet.version);
+    await h.service.begin("gen-voice", ulid()); await h.service.runItems(store.worldId);
+    assert.equal(store.getBundle().sheets[0]!.version, sheet.version);
+    assert.equal(syntheses, 1);
+    assert.equal(h.queue.jobs.size, 0);
+  });
+
   it("replaying a generated main photo keeps the installed take accepted", async t => {
     let h!: Harness;
     h = await makeHarness(t, { manifest: null, reviewedBlueprint: async id => reviewedGenesisImages(await h.provider.genesisDir(id),
@@ -387,7 +489,7 @@ describe("the founding build (SPEC-031)", () => {
     const workspace = await h.provider.genesisDir("gen-reviewed");
     await mkdir(join(workspace, "draft", "characters"), { recursive: true });
     await mkdir(join(workspace, "draft", "locations"), { recursive: true });
-    await writeFile(join(workspace, "draft.json"), JSON.stringify({ name: "Harbour", bible: "The gate stays closed.",
+    await writeFile(join(workspace, "draft.json"), JSON.stringify({ name: "Harbour", bible: "The gate stays closed.", tone: "Neo-Noir", genre: "Science Fiction",
       canon: [
         { slug: "gate-rule", type: "rule", title: "The gate", statement: "Nobody opens the gate." },
         { slug: "gate-maker", type: "thread", title: "Who made it?", statement: "Who made the gate?" },
@@ -413,6 +515,8 @@ describe("the founding build (SPEC-031)", () => {
     assert.ok(h.lastState()?.items.filter(item => item.authorized).every(item => item.state === "landed"), JSON.stringify(h.lastState()?.items));
     const bundle = h.provider.openStore()!.getBundle();
     const maren = bundle.sheets.find(sheet => sheet.name === "Maren")!;
+    assert.equal(bundle.meta.tone, "Neo-Noir");
+    assert.equal(bundle.meta.genre, "Science Fiction");
     const vigil = bundle.sheets.find(sheet => sheet.name === "The Vigil")!;
     assert.ok(maren && vigil);
     assert.deepEqual(maren.links, [vigil.id]);
@@ -467,6 +571,38 @@ describe("the founding build (SPEC-031)", () => {
     assert.equal(store.getBundle().sheets.length, 1);
     assert.equal(store.getBundle().canon.length, 1);
     assert.equal(store.getBundle().meta.nextCanonId, nextCanonId);
+  });
+
+  it("founds imported approved content with real source artifact links to sheets and canon", async t => {
+    let h!: Harness;
+    h = await makeHarness(t, { manifest: null, reviewedBlueprint: async id => approvedBlueprintForFounding(await h.provider.genesisDir(id)) });
+    const workspace = await h.provider.genesisDir("gen-imported");
+    await mkdir(join(workspace, "attachments"), { recursive: true });
+    await mkdir(join(workspace, "draft", "imports"), { recursive: true });
+    await writeFile(join(workspace, "draft.json"), JSON.stringify({ name: "Harbour" }));
+    await writeFile(join(workspace, "attachments", "notes.txt"), "Maren guards the gate. The gate is always closed.");
+    for (const proposal of [
+      { kind: "character", name: "Maren", body: "Maren guards the gate.", quote: "Maren guards the gate." },
+      { kind: "canon", name: "Closed gate", body: "The gate is always closed.", quote: "The gate is always closed." },
+    ]) {
+      await writeFile(join(workspace, "draft", "imports", proposal.kind + ".json"), JSON.stringify({ ...proposal, source: "notes.txt" }));
+    }
+    for (const initial of (await reviewGenesisImports(workspace)).cards) {
+      const card = (await reviewGenesisImports(workspace)).cards.find(card => card.id === initial.id)!;
+      await resolveGenesisImport(workspace, { id: card.id, digest: card.digest, decision: "prepare", mode: "distinct" });
+    }
+    await decideGenesisContent(workspace, (await reviewGenesisContent(workspace)).cards, "approve", ulid());
+    await h.service.begin("gen-imported", ulid());
+    await until(() => h.lastState()?.status === "completed", "import founding", BUILD_MS);
+    assert.ok(h.lastState()?.items.filter(item => item.authorized).every(item => item.state === "landed"), JSON.stringify(h.lastState()?.items));
+    const bundle = h.provider.openStore()!.getBundle();
+    assert.equal(bundle.artifacts.length, 1);
+    assert.ok(bundle.artifacts[0]!.links.includes(bundle.sheets[0]!.id));
+    assert.ok(bundle.artifacts[0]!.links.includes(bundle.canon[0]!.id));
+    assert.match(bundle.canon[0]!.body, /Source: notes.txt/);
+    assert.equal(bundle.meta.schemaVersion, 38);
+    await h.service.begin("gen-imported", ulid());
+    assert.equal(h.provider.openStore()!.getBundle().artifacts.length, 1);
   });
 
   it("one press makes the whole world: files, sheets, anchors, key art — nothing left to decide", async (t) => {
@@ -926,6 +1062,18 @@ describe("the founding build (SPEC-031)", () => {
       state.items.some((item) => item.kind === "key-art" && item.state === "skipped"),
       "what was never dispatched is not dispatched",
     );
+    await h.service.dismissNotice(h.worldId());
+    const key = state.items.find(item => item.kind === "main-photo")!.key;
+    const retry = h.service.runItems(h.worldId(), key);
+    await until(() => [...h.queue.jobs.values()].some(job => job.status === "running"), "retried image running", BUILD_MS);
+    const retried = [...h.queue.jobs.values()].find(job => job.status === "running")!;
+    const queued = h.service.runItems(h.worldId(), key);
+    const submissions = h.queue.jobs.size;
+    await h.service.stop(h.worldId());
+    await retry;
+    await queued;
+    assert.equal(h.queue.jobs.size, submissions, "Stop also cancels a retry queued behind the running retry");
+    assert.ok(h.queue.cancelled.includes(retried.id), "Stop cancels a retry after the original build was already stopped");
   });
 });
 
@@ -958,4 +1106,59 @@ it("never-depicted characters keep their sheet but never enter either image wave
   await h.service.runItems(h.worldId());
   assert.equal(h.queue.jobs.size, before, "Run remaining work cannot resurrect omitted portraits");
   assert.equal((await readKit(store, sheet.id))?.kit.mainPhoto, undefined);
+});
+
+it("invalidates Begin when only an unapproved proposal changes", async t => {
+  let h!: Harness;
+  h = await makeHarness(t, { manifest: null, reviewedBlueprint: async id => approvedBlueprintForFounding(await h.provider.genesisDir(id)) });
+  const id = "gen-pending-digest", dir = await h.provider.genesisDir(id);
+  await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Harbour" }));
+  await decideGenesisContent(dir, (await reviewGenesisContent(dir)).cards, "approve", ulid());
+  await h.service.plan(id, ulid(), undefined, undefined, false);
+  const original = lastPlan(h).approvalDigest;
+  await mkdir(join(dir, "draft", "characters"), { recursive: true });
+  await writeFile(join(dir, "draft", "characters", "maren.json"), JSON.stringify({ name: "Maren", line: "Still a proposal" }));
+  await assert.rejects(h.service.begin(id, ulid(), undefined, undefined, original, false), /estimate changed/);
+  assert.equal(h.provider.openStore(), null);
+});
+it("recovers the authorized route, items and cap after a crash before world creation", async t => {
+  let failCreation = true;
+  const manifest = structuredClone(MANIFEST);
+  const h = await makeHarness(t, { manifest, createWorld: async input => {
+    if (failCreation) throw new Error("simulated crash before publish");
+    return h.provider.createWorld(input);
+  } });
+  const id = "gen-frozen-authorization";
+  await makeSandbox(h.root, id);
+  await h.service.plan(id, ulid());
+  const approved = lastPlan(h);
+  await assert.rejects(h.service.begin(id, ulid(), undefined, undefined, approved.approvalDigest), /simulated crash/);
+  const frozen = JSON.parse(await readFile(join(h.root, ".genesis-v2", id, "founding-input.json"), "utf8"));
+  assert.ok(frozen.authorization.route);
+  manifest.models[0]!.pricing = { kind: "perImage", microUsdPerImage: 400000 };
+  failCreation = false;
+  await h.service.plan(id, ulid());
+  assert.deepEqual(lastPlan(h).work, approved.work);
+  await h.service.begin(id, ulid());
+  const record = JSON.parse(await readFile(join(h.provider.openStore()!.dir, "build", "build.json"), "utf8"));
+  assert.equal(record.capMicroUsd, frozen.authorization.capMicroUsd);
+  assert.deepEqual(record.items, frozen.authorization.items);
+  assert.equal(record.image.model, frozen.authorization.route.model.id);
+  await until(() => h.lastState()?.status === "completed", "recovered founding completes", BUILD_MS);
+  assert.equal(h.queue.jobs.size, 0, "higher current pricing cannot spend the earlier approval");
+  assert.ok(h.lastState()?.items.some(item => item.detail?.includes("exceeds the approved amount")));
+});
+
+it("refuses a different successful look receipt even when its look words are unchanged", async t => {
+  const h = await makeHarness(t);
+  const id = "gen-look-digest", look = "salt-bleached watercolour, cold light off the water";
+  const dir = await makeSandbox(h.root, id);
+  await writePreview(dir, look);
+  const first = addPreviewReceipt(h, id, look);
+  await h.service.plan(id, ulid());
+  const approved = lastPlan(h);
+  h.queue.jobs.delete(first);
+  addPreviewReceipt(h, id, look);
+  await assert.rejects(h.service.begin(id, ulid(), undefined, undefined, approved.approvalDigest), /changed/);
+  assert.equal(h.worldId(), "");
 });

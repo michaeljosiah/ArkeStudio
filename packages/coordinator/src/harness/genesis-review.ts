@@ -1,15 +1,17 @@
 import { join } from "node:path";
 import {
-  CHARACTER_ROLE_MAX, GenesisContentReviewSchema, SHEET_SHAPES, approvedGenesisBlueprint, approvedGenesisContent, genesisContentRows,
+  CHARACTER_ROLE_MAX, GenesisContentReviewSchema, SHEET_SHAPES, approvedGenesisBlueprint, approvedGenesisContent, genesisContentRows, genesisSheetIds, checkPropName,
   type GenesisContentReview, type GenesisDecision, type GenesisReviewCard,
 } from "@arke-studio/contracts";
 import { conversationActionDigest } from "../arke-actions/digest.js";
 import { serializeFileMutation } from "../world/atomic.js";
 import { foldBlueprint } from "./blueprint.js";
 import { genesisControlDir, genesisConversation } from "./genesis-conversation.js";
+import { recoverGenesisImports, restoreGenesisSources, validateGenesisSources } from "./genesis-imports.js";
 
 export async function reviewGenesisContent(dir: string): Promise<GenesisContentReview> {
-  const blueprint = await foldBlueprint(dir);
+  await recoverGenesisImports(dir);
+  const blueprint = await restoreGenesisSources(dir, await foldBlueprint(dir));
   const log = await genesisConversation(dir);
   const { events, problems: journalProblems } = await log.read();
   if (journalProblems.some(problem => problem.kind !== "torn-tail")) throw new Error("The conversation record needs repair before content can be approved.");
@@ -30,7 +32,17 @@ export async function reviewGenesisContent(dir: string): Promise<GenesisContentR
     return { ...row, digest, ...(previous ? { previous } : {}), status: decision?.decision === "reject" ? "rejected" : isSelected || removed ? "approved" : "pending" };
   });
   const approved = approvedGenesisBlueprint(selected);
+  await validateGenesisSources(dir, approved);
   const problems = blueprint.dropped.map(file => `Cannot read ${file}; repair it before founding.`);
+  const propNames = new Set<string>();
+  const propSlugs = new Set<string>();
+  const sheetNames = [...genesisSheetIds(approved).values()].map(id => ({ id, name: id }));
+  for (const prop of approved.props ?? []) {
+    if (!checkPropName(prop.name, (approved.props ?? []).filter(other => other !== prop).map(other => ({ id: other.slug, name: other.name })), sheetNames).ok) problems.push(`${prop.name}: the prop name conflicts with another entity.`);
+    if (propSlugs.has(prop.slug) || propNames.has(prop.name.toLowerCase())) problems.push(`${prop.name}: prop identities and names must be unique.`);
+    propSlugs.add(prop.slug); propNames.add(prop.name.toLowerCase());
+    if (new Set(prop.states.map(state => state.name.toLowerCase())).size !== prop.states.length) problems.push(`${prop.name}: state names must be distinct.`);
+  }
   for (const name of approved.keyArt?.characters ?? []) {
     if (approved.characters.filter(character => character.name === name).length !== 1) problems.push(`Key art names ${name}, who is not an approved character. Update and approve the key-art brief before founding.`);
   }
@@ -66,6 +78,7 @@ export async function decideGenesisContent(
       if (!card || card.digest !== choice.digest) throw new Error("The proposed content changed. Review the current version before deciding.");
       return card;
     });
+    if (decision === "approve") await validateGenesisSources(dir, approvedGenesisBlueprint(new Map(cards.map(card => [card.key, card.content]))));
     // One flushed record makes a multi-card decision all-or-nothing on recovery.
     const at = new Date().toISOString();
     const decisions: GenesisDecision[] = cards.map(card => ({ key: card.key, digest: card.digest, content: card.content, decision, at }));

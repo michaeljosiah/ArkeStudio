@@ -46,7 +46,9 @@ export const BuildItemKindSchema = z.enum([
   /** One canon thread opened. */
   "thread",
   "canon",
+  "prop",
   "selected-image",
+  "selected-voice",
   /** One main photo, generated at count 1, landing as the identity anchor (R-21, R-26). */
   "main-photo",
   /** One establishing view per location, landing as the location's anchor (R-28). */
@@ -268,7 +270,9 @@ export function buildWorkingLine(item: Pick<BuildItem, "kind" | "name">): string
     "author-sheet": "sheet",
     thread: "thread",
     canon: "canon",
+    prop: "prop",
     "selected-image": "approved image",
+    "selected-voice": "approved voice",
     "main-photo": "main photo",
     "establishing-view": "establishing view",
     "sheet-image": "character sheet",
@@ -461,11 +465,12 @@ export function compileBuildItems(
   blueprint: GenesisBlueprint,
   route: BuildImageRoute | null,
   mintKey: () => string = ulid,
+  noImageReason?: string,
 ): BuildItem[] {
   const items: BuildItem[] = [];
   const worldName = blueprint.name ?? "The world";
   const noImages = route === null;
-  const refusal = noImages ? "no image model resolves — add a provider key and run it from Activity" : undefined;
+  const refusal = noImages ? noImageReason ?? "no image model resolves — add a provider key and run it from Activity" : undefined;
   const sheetsRefused =
     route !== null && route.referenceImages === 0
       ? `${route.model.displayName} takes no reference images, so character sheets cannot carry the main photo`
@@ -528,6 +533,16 @@ export function compileBuildItems(
     items.push({ key: `canon:${entry.slug}`, kind: "canon", stage: 1, subject: entry.slug,
       name: entry.title, estimatedMicroUsd: 0, authorized: true });
   }
+  for (const prop of blueprint.props ?? []) {
+    items.push({ key: `prop:${prop.slug}`, kind: "prop", stage: 1, subject: prop.slug,
+      name: prop.name, estimatedMicroUsd: 0, authorized: true });
+    for (const state of prop.states) {
+      const target = `prop:${prop.slug}:${state.slug}`;
+      if (blueprint.selectedImages?.some(selection => selection.target === target))
+        items.push({ key: `selected-image:${target}`, kind: "selected-image", stage: 2, subject: target,
+          name: `${prop.name} · ${state.name}`, estimatedMicroUsd: 0, authorized: true });
+    }
+  }
 
   for (const character of blueprint.characters) {
     items.push({
@@ -540,6 +555,10 @@ export function compileBuildItems(
       estimatedMicroUsd: 0,
       authorized: true,
     });
+    if (blueprint.selectedVoices?.some(selection => selection.plan.intent.target === `character:${character.slug}`)) {
+      items.push({ key: `selected-voice:${character.slug}`, kind: "selected-voice", stage: 3, subject: character.slug,
+        sheetType: "character", name: character.name, estimatedMicroUsd: 0, authorized: true });
+    }
     if (character.neverDepicted === true) continue;
     if (blueprint.selectedImages?.some(selection => selection.target === `character:${character.slug}`)) {
       items.push({ key: `main-photo:${character.slug}`, kind: "selected-image", stage: 2, subject: character.slug,
@@ -630,6 +649,9 @@ export function compileBuildItems(
 
 export const BuildReviewSchema = z
   .object({
+    approvalDigest: z.string().optional(),
+    approvedContent: GenesisBlueprintSchema.optional(),
+    work: z.array(z.object({ key: z.string(), name: z.string(), kind: BuildItemKindSchema, authorized: z.boolean(), estimatedMicroUsd: z.number() }).strict()).optional(),
     genesisId: GenesisIdSchema,
     requestId: UlidSchema,
     worldName: z.string().min(1),
@@ -639,6 +661,7 @@ export const BuildReviewSchema = z
         locations: z.number().int().min(0),
         factions: z.number().int().min(0),
         canon: z.number().int().min(0).default(0),
+        props: z.number().int().min(0).default(0),
         threads: z.number().int().min(0),
       })
       .strict(),

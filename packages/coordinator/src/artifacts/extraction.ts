@@ -32,14 +32,17 @@ import type { WorldStatePrecondition, WorldStore } from "../world/store.js";
 // ---------------------------------------------------------------------------
 
 export async function extractText(store: WorldStore, artifact: ArtifactSidecar): Promise<string | null> {
+  if (!/\.(md|txt|pdf)$/i.test(artifact.file)) return null;
   const path = toExtendedLength(join(store.dir, "artifacts", artifact.file));
-  if (/\.(md|txt)$/i.test(artifact.file)) {
-    return readFile(path, "utf8");
-  }
-  if (/\.pdf$/i.test(artifact.file)) {
+  return extractDocumentText(artifact.file, await readFile(path));
+}
+
+/** Shared supported-document reader for filed artifacts and pre-world uploads. */
+export function extractDocumentText(name: string, bytes: Buffer): string | null {
+  if (/\.(md|txt)$/i.test(name)) return bytes.toString("utf8");
+  if (/\.pdf$/i.test(name)) {
     // Uncompressed text operators only: honest partial support, reported when it yields nothing.
-    const raw = await readFile(path);
-    const latin = raw.toString("latin1");
+    const latin = bytes.toString("latin1");
     const pieces: string[] = [];
     for (const match of latin.matchAll(/\(((?:[^()\\]|\\.)*)\)\s*Tj/g)) {
       pieces.push(match[1]!.replace(/\\([()\\])/g, "$1"));
