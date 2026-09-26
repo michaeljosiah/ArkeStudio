@@ -6809,6 +6809,32 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ab__cue--held { color: var(--neutral-400); }
 .fy-ab__row--top { align-items: flex-start; }
 .fy-ab__sent { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 11px; line-height: 1.5; color: var(--foreground); overflow-wrap: anywhere; }
+/* One narrator performs the cast (design turn 155g, SPEC-047 R-44, R-45): a speaker's row in
+   Voices is the name and count over a 28 note field with its count; the focused row adds Hear
+   and what the line is sent as. */
+.fy-ab__performer { display: flex; flex-direction: column; gap: 6px; }
+.fy-ab__note { display: flex; align-items: center; gap: 8px; }
+.fy-ab__note-input { flex: 1; min-width: 0; height: 28px; box-sizing: border-box; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: 400 12px/1.4 var(--font-sans); outline: none; }
+.fy-ab__note-input:focus { border-color: var(--ring); }
+.fy-ab__note-count { flex: none; font-size: 11px; color: var(--muted-foreground); }
+.fy-ab__note-more { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.fy-ab__narrator-press { border: 0; padding: 0; background: transparent; cursor: pointer; text-align: right; }
+.fy-ab__narrator-press:hover { color: var(--foreground); text-decoration: underline; }
+/* The book's narrator (design turn 155h, SPEC-047 R-46): 48 rows, a play, the name over the
+   reader, the price as data, a tick; what the switch does as data rows before the press. */
+.fy-abnarr { display: flex; flex-direction: column; gap: 12px; }
+.fy-abnarr__list { display: flex; flex-direction: column; max-height: 300px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+.fy-abnarr__row { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 12px; box-sizing: border-box; border-bottom: 1px solid var(--border); cursor: pointer; }
+.fy-abnarr__row:last-child { border-bottom: 0; }
+.fy-abnarr__row:hover { background: var(--secondary); }
+.fy-abnarr__row--on { background: var(--secondary); }
+.fy-abnarr__who { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.fy-abnarr__name { font: 500 13px/1.3 var(--font-sans); color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-abnarr__reader { font-size: 11px; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-abnarr__price { flex: none; font-size: 11px; color: var(--muted-foreground); }
+.fy-abnarr__tick { flex: none; width: 14px; color: var(--foreground); }
+.fy-abnarr__facts { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--foreground); }
+.fy-abnarr__now { font-size: 11px; color: var(--muted-foreground); }
 .fy-ab__source--recorded { color: var(--foreground); }
 .fy-ab__recorded { display: flex; align-items: center; gap: 7px; margin-top: 10px; font: 400 12px/1.4 var(--font-sans); color: var(--muted-foreground); cursor: pointer; }
 /* Upload a take (design turn 155c, SPEC-047 R-35): 540 wide; the checks are data, a warning never refuses. */

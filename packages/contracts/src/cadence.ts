@@ -308,6 +308,21 @@ export function markerSegments(text: string, plan: CadencePlan, model: Pick<Mani
   return out;
 }
 
+/**
+ * How a row plays a speaker's performance note (SPEC-047 R-45): the line's leading phrase, by
+ * R-7's path — a tag ahead of the rendered words on a row that takes the phrase as a tag, an
+ * instruction ahead of the rest on a row that takes one — or not at all, with the reason: a
+ * narrator whose row takes no phrase cannot perform.
+ */
+export function performanceNote(note: string, model: Pick<ManifestModel, "cadence">, language?: string): { mode: "tag"; tag: string } | { mode: "instruction" } | { mode: "unsupported"; reason: string } {
+  const cap = model.cadence;
+  const paren = cap?.tagSyntax === "paren";
+  const tagged = !paren || language === "en";
+  if (cap?.phrase === "best-effort-tag" && tagged) return { mode: "tag", tag: paren ? `(${note})` : `[${note}]` };
+  if (cap?.phrase === "best-effort-instruction") return { mode: "instruction" };
+  return { mode: "unsupported", reason: cap?.phrase === "best-effort-tag" ? "tags need a line stated English" : "no phrase" };
+}
+
 export interface HeldControl {
   control: "delivery" | "speed" | "phrase" | "pause" | "breath" | "emphasis" | "marker";
   cueIndex?: number;

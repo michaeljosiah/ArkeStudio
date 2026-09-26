@@ -8,6 +8,7 @@ import {
   audiobookCounts,
   audiobookDirectionFor,
   audiobookHeading,
+  audiobookNoteFor,
   audiobookRekeyed,
   audiobookRecordingKey,
   audiobookSpeakerColours,
@@ -21,6 +22,7 @@ import {
   mapCadence,
   markerMode,
   markerSegments,
+  performanceNote,
   normalizeSpeechText,
   formatMicroUsd,
   legacyVoiceModel,
@@ -60,6 +62,9 @@ import {
   openExportsFolder,
   stageAudiobookLines,
   useSpeakerLines,
+  useHeardLines,
+  hearAudiobookLine,
+  setAudiobookNote,
   dismissDirection,
   keepAudiobookTake,
   stageAudiobookTake,
@@ -96,6 +101,10 @@ export interface ChapterAudiobookInput {
   reading: AudiobookReading;
   /** The book's recorded speakers (SPEC-047 R-37), by `audiobookRecordingKey`. */
   recorded?: readonly string[];
+  /** How the narrator plays each character under `performed` (R-44), by `audiobookNoteKey`. */
+  notes?: Readonly<Record<string, string>>;
+  /** The book's own narrator (R-46); absent is the app's. */
+  bookNarrator?: AudiobookReader;
   connection: string;
   locked: boolean;
   /**
@@ -143,6 +152,8 @@ export interface BlockRow {
   held: HeldControl[];
   /** What that reader is sent (R-42): each part's text, tags in; null without a direction. */
   sentAs: string[] | null;
+  /** The speaker's note the line is played with under `performed` (R-44). */
+  note?: string;
 }
 
 /** A plan for the view alone: the window holds no digest of the words, and none is checked here. */
@@ -166,10 +177,15 @@ export function rowDirection(record: ChapterAudiobook | null, block: Pick<Audiob
  * sent, part by part — a marker it makes in parts is a part of its own. Null when the plan is
  * wrong for the words, which the coordinator refuses and says.
  */
-export function directionView(text: string, input: AudiobookDirectionInput, model: ManifestModel, language?: string): { held: HeldControl[]; sentAs: string[] } | null {
+export function directionView(text: string, input: AudiobookDirectionInput | null, model: ManifestModel, language?: string, note?: string): { held: HeldControl[]; sentAs: string[] } | null {
   try {
+    // The speaker's note leads every part on a row that takes it as a tag (R-45); on a row that
+    // takes an instruction it rides beside the words, and on one that takes neither it is held.
+    const playing = note === undefined ? null : performanceNote(note, model, language);
+    const lead = (part: string) => (playing?.mode === "tag" ? `${playing.tag} ${part}` : part);
+    if (input === null) return { held: [], sentAs: [lead(normalizeSpeechText(text))] };
     const { plan: sent, held } = holdDirection(text, viewPlan(input), model, language);
-    const sentAs = markerSegments(text, sent, model, language).map((segment) => mapCadence(segment.text, VIEW_HASH, { ...segment.plan, sourceTextHash: VIEW_HASH }, model, language).providerText);
+    const sentAs = markerSegments(text, sent, model, language).map((segment) => lead(mapCadence(segment.text, VIEW_HASH, { ...segment.plan, sourceTextHash: VIEW_HASH }, model, language).providerText));
     return { held, sentAs };
   } catch {
     return null;
@@ -220,11 +236,15 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   // The narrator as the coordinator chooses it (codex on PR 1180): a stored narrator whose
   // voice cannot speak now falls back the same way on both sides, or the client would judge
   // every take of the local fallback stale against a voice the run never used.
+  // The book's own narrator when it has one that can speak now (R-46), by the coordinator's rule.
+  const bookNarrator = input.bookNarrator;
   const narrator = useMemo<AudiobookReader>(() => {
     const speakable = (catalogue ?? []).filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined);
-    const chosen = narratorFor(state?.app.narrator ?? null, speakable);
+    const own = bookNarrator === undefined ? null : narratorFor(bookNarrator, speakable);
+    const chosen = own !== null && !own.fallback ? own : narratorFor(state?.app.narrator ?? null, speakable);
     return { provider: chosen.provider, model: chosen.model, voiceId: chosen.voiceId, label: chosen.label ?? DEFAULT_NARRATOR.label };
-  }, [state?.app.narrator, catalogue]);
+  }, [state?.app.narrator, catalogue, bookNarrator]);
+  const notes = input.notes;
   const models = state?.app.manifest?.models ?? [];
   const modelOf = useCallback(
     (reader: AudiobookReader): ManifestModel | null => models.find((m) => m.provider === reader.provider && m.id === reader.model && m.capability === "voice-tts") ?? null,
@@ -284,10 +304,12 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       const byPerson = recordedKeys.has(audiobookRecordingKey(block));
       const direction = rowDirection(recordOrNull, block);
       const speakerModel = modelOf(speaker);
-      const view = direction === null || speakerModel === null ? null : directionView(block.text, direction.input, speakerModel, language);
+      const note = audiobookNoteFor({ reading, ...(notes !== undefined ? { notes: { ...notes } } : {}) }, block);
+      const view = (direction === null && note === undefined) || speakerModel === null ? null : directionView(block.text, direction?.input ?? null, speakerModel, language, note);
       return {
         block,
-        state: audiobookBlockState(block, recordOrNull, assigned, hasArtifact, byPerson),
+        state: audiobookBlockState(block, recordOrNull, assigned, hasArtifact, byPerson, note),
+        ...(note !== undefined ? { note } : {}),
         mark,
         markWarn,
         assigned,
@@ -303,7 +325,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         sentAs: view?.sentAs ?? null,
       };
     });
-  }, [derived.blocks, narrator, reading, world, recordOrNull, hasArtifact, catalogue, modelOf, colours, recordedKeys]);
+  }, [derived.blocks, narrator, reading, world, recordOrNull, hasArtifact, catalogue, modelOf, colours, recordedKeys, notes]);
   // The filter is the page's (R-33): not kept, and gone with the chapter.
   const [filter, setFilter] = useState<AudiobookFilter>(null);
   useEffect(() => setFilter(null), [chapter.id]);
@@ -1211,6 +1233,93 @@ export function markerAtSelection(rows: readonly BlockRow[]): MarkerAt | null {
   if (host === null || row === undefined) return null;
   const span = selectedSpan(host, row.block.text);
   return span === null ? null : { key: row.block.key, span };
+}
+
+/**
+ * A speaker the narrator performs (design turn 155g, SPEC-047 R-44, R-45): the note on how the
+ * narrator plays them, 60 characters, written when the field is left. The focused row adds
+ * `Hear <name>` — the selected line if it is theirs, else their first in the chapter, as it
+ * would be read, priced on the button for a cloud narrator — and what that line is sent as.
+ */
+export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKey, name, lines, tone, note, noteHeld, line, model, slug, focused, onFocus }: {
+  worldId: string;
+  productionId: string;
+  chapterFile: string;
+  speakerKey: string;
+  name: string;
+  lines: number;
+  tone: string;
+  note?: string;
+  noteHeld: boolean;
+  /** The line Hear plays and Sent as shows. */
+  line: BlockRow | null;
+  model: ManifestModel | null;
+  slug: string | undefined;
+  focused: boolean;
+  onFocus: () => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const value = draft ?? note ?? "";
+  const commit = () => {
+    if (draft === null) return;
+    const trimmed = draft.trim();
+    setDraft(null);
+    if (trimmed === (note ?? "")) return;
+    setAudiobookNote(worldId, productionId, speakerKey, trimmed === "" ? null : trimmed.slice(0, 60));
+  };
+  const [hearId, setHearId] = useState<string | null>(null);
+  const heard = useHeardLines()[hearId ?? ""];
+  useEffect(() => {
+    if (heard?.state !== "done" || slug === undefined) return;
+    void playClip({ id: `hear-${hearId}`, url: mediaUrl(slug, heard.file), title: name, sub: note ?? "plain" });
+  }, [heard?.state]);
+  const sent = line?.sentAs?.join(" ") ?? (line === null ? null : normalizeSpeechText(line.block.text));
+  const price = model === null || sent === null ? 0 : estimateMicroUsd(model, { characters: billableCharacters(model, sent) });
+  return (
+    <li className={`fy-ab__performer${focused ? " fy-ab__performer--focused" : ""}`} onFocus={onFocus} onClick={onFocus} data-testid="performed-speaker">
+      <div className="fy-ch__who-head">
+        <span className="fy-ch__who-name">
+          <i className={`fy-ab__speaker-dot fy-voice--${tone}`} aria-hidden="true" />
+          <span>{name}</span>
+        </span>
+        {noteHeld && note !== undefined && <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">note · not on this reader</span>}
+        <span className="fy-ch__who-count fy-mono">
+          {lines} line{lines === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div className="fy-ab__note">
+        <input
+          className="fy-ab__note-input"
+          value={value}
+          maxLength={60}
+          placeholder="note"
+          aria-label={`Note · ${name}`}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") (event.target as HTMLInputElement).blur();
+          }}
+        />
+        <span className="fy-ab__note-count fy-mono">{value.length}/60</span>
+      </div>
+      {focused && line !== null && (
+        <div className="fy-ab__note-more">
+          <button
+            type="button"
+            className="fy-ch__derive"
+            disabled={heard?.state === "working"}
+            onClick={() => setHearId(hearAudiobookLine(worldId, productionId, chapterFile, line.block.key))}
+            data-testid="performed-hear"
+          >
+            Hear {name}
+            {price > 0 ? ` · ${formatMicroUsd(price)}` : ""}
+          </button>
+          {heard?.state === "refused" && <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">{heard.refused}</span>}
+          {sent !== null && <span className="fy-ab__sent fy-mono" data-testid="performed-sent-as">{sent}</span>}
+        </div>
+      )}
+    </li>
+  );
 }
 
 /** The side in the Audiobook view: the block pressed, its direction, then its takes. */

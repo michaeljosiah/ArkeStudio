@@ -1,7 +1,15 @@
 import { createHash } from "node:crypto";
+import { stat } from "node:fs/promises";
+import { join } from "node:path";
 import {
   audiobookDirectionFor,
+  audiobookTakeDirectionHash,
+  audiobookTextHash,
+  holdDirection,
+  performanceNote,
   DEFAULT_AUDIOBOOK_BOOK,
+  type AudiobookReader,
+  type AudiobookTake,
   type AudiobookDoor,
   type AudiobookPriceLine,
   type AudiobookRow,
@@ -10,8 +18,9 @@ import {
   type ChapterSummary,
   type ClonedVoice,
 } from "@arke-studio/contracts";
+import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
-import { checkDirection, effectiveReader, readAudiobookBook, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
+import { castRefusal, checkDirection, effectiveReader, planAudiobook, readAudiobookBook, readerLanguage, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
 import { directableBlocks, type DirectableBlock } from "./audiobook-direction.js";
 import { chapterPriceToken, missIdentity, prepareChapter, type ChapterPreparation, type ReadingRoom, type Speaking } from "./audiobook-run.js";
 
@@ -127,6 +136,13 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
   // a production with no chapter yet still holds the seg where it was put (codex on PR 1187).
   const bookFile = await readAudiobookBook(store, productionId);
   const reading: AudiobookDoor["reading"] = bookFile === null || bookFile === "unreadable" ? DEFAULT_AUDIOBOOK_BOOK.reading : bookFile.reading;
+  // The book's own narrator, when it has one and it speaks now (R-46), is said on its chip.
+  const own = bookFile === null || bookFile === "unreadable" ? undefined : bookFile.narrator;
+  if (own !== undefined && sameVoice(own, room.narrator)) narratorRow.book = true;
+  // A narrator whose row takes no phrase cannot play a note (R-45): said on each noted speaker
+  // before anything is made.
+  const narratorModel = room.models.find((m) => m.provider === room.narrator.provider && m.id === room.narrator.model && m.capability === "voice-tts") ?? null;
+  const narratorLanguage = readerLanguage(store.getBundle().clonedVoices ?? [], room.narrator);
   const toRead: Array<Extract<ChapterPreparation, { kind: "ready" }>["prepared"]> = [];
   for (const { summary, preparation } of book.chapters) {
     const base = { chapterId: summary.id, file: summary.file, order: summary.order, title: summary.title, version: summary.version };
@@ -157,6 +173,21 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
         held.state = "recorded";
         held.blocks += 1;
         if (planned.state === "awaiting") held.awaiting = (held.awaiting ?? 0) + 1;
+        voices.set(key, held);
+        continue;
+      }
+      if (plan.reading === "performed" && planned.block.speaker !== undefined) {
+        // One narrator performs the cast (R-44): the narrator reads the line, and the speaker's
+        // row carries the note it is played with.
+        narratorRow.blocks += 1;
+        const key = planned.sheet ?? planned.block.sheet ?? `:${planned.block.speaker}`;
+        const sheet = planned.sheet ?? planned.block.sheet;
+        const held = voices.get(key) ?? { ...(sheet !== undefined ? { sheet } : {}), name: sheet !== undefined ? sheetName(sheet) : planned.block.speaker, state: "narrator" as const, blocks: 0 };
+        held.blocks += 1;
+        if (planned.note !== undefined) {
+          held.note = planned.note;
+          if (narratorModel === null || performanceNote(planned.note, narratorModel, narratorLanguage).mode === "unsupported") held.noteHeld = true;
+        }
         voices.set(key, held);
         continue;
       }
@@ -387,4 +418,120 @@ export async function conformDirections(store: WorldStore, productionId: string,
     if (applied.changed || applied.held > 0) chapters += 1;
   }
   return { dropped, held: heldCount, chapters };
+}
+
+/**
+ * Takes follow the reader (design turn 155h, SPEC-047 R-48): when a block's reader changes, a
+ * take on the shelf that is current for the block now — the same words, the reader it is meant
+ * for, the same direction and note, not retired, its media still there — becomes the record's
+ * choice again without a call, the newest if several. Switching back to a narrator makes their
+ * kept takes current at no cost; a switch never deletes a take. A recorded speaker's blocks are
+ * left to their recordings. Returns how many blocks it chose a take for.
+ */
+export async function followTakes(store: WorldStore, productionId: string, room: ReadingRoom): Promise<number> {
+  const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
+  if (!production) return 0;
+  let chosen = 0;
+  for (const summary of production.chapters.filter((c) => !c.retired)) {
+    let plan: AudiobookPlan;
+    try {
+      plan = await planAudiobook(store, productionId, summary.id, { narrator: room.narrator });
+    } catch {
+      continue;
+    }
+    if (castRefusal(plan) !== null || plan.record === null || plan.record === "unreadable") continue;
+    const record = plan.record;
+    const picks: Record<string, AudiobookTake> = {};
+    for (const planned of plan.blocks) {
+      if (planned.recorded === true || (planned.state !== "stale" && planned.state !== "not made" && planned.state !== "flagged")) continue;
+      const textHash = audiobookTextHash(planned.block.text);
+      const want = audiobookTakeDirectionHash(audiobookDirectionFor(record, planned.block)?.plan ?? null, planned.note);
+      const candidates = store
+        .getBundle()
+        .artifacts.filter((artifact) => {
+          const g = artifact.generation;
+          return (
+            artifact.retiredAt === undefined &&
+            g?.source === "audiobook" &&
+            g.recording === undefined &&
+            g.productionId === productionId &&
+            g.chapterId === plan.chapter.id &&
+            g.block === planned.block.key &&
+            g.textHash === textHash &&
+            sameVoice(g, planned.assigned) &&
+            g.directionHash === want
+          );
+        })
+        .sort((a, b) => (a.created < b.created ? 1 : -1));
+      for (const artifact of candidates) {
+        if (artifact.id === record.takes[planned.block.key]?.artifactId) break;
+        const there = await stat(toExtendedLength(join(store.dir, "artifacts", fromPortable(artifact.file)))).then((s) => s.isFile(), () => false);
+        if (!there) continue;
+        const g = artifact.generation as Extract<NonNullable<typeof artifact.generation>, { source: "audiobook" }>;
+        const format = artifact.file.toLowerCase().endsWith(".mp3") ? "mp3" : artifact.file.toLowerCase().endsWith(".flac") ? "flac" : "wav";
+        picks[planned.block.key] = {
+          artifactId: artifact.id,
+          textHash,
+          reader: { provider: g.provider, model: g.model, voiceId: g.voiceId, ...(g.voiceLabel !== undefined ? { label: g.voiceLabel } : {}) },
+          ...(g.sheetId !== undefined ? { sheet: g.sheetId } : {}),
+          format,
+          characters: g.characters,
+          parts: g.parts,
+          estimatedMicroUsd: g.estimatedMicroUsd,
+          costMicroUsd: g.costMicroUsd,
+          ...(g.directionHash !== undefined ? { directionHash: g.directionHash } : {}),
+          madeAt: artifact.created,
+        };
+        break;
+      }
+    }
+    if (Object.keys(picks).length === 0) continue;
+    await updateAudiobook(store, productionId, { file: summary.file, version: plan.chapter.version, hash: plan.chapter.hash }, (current) => {
+      const flags = Object.fromEntries(Object.entries(current.flags).filter(([key]) => picks[key] === undefined));
+      return { ...current, updatedAt: store.now(), takes: { ...current.takes, ...picks }, flags };
+    });
+    chosen += Object.keys(picks).length;
+  }
+  return chosen;
+}
+
+function sameVoice(g: { provider: string; model: string; voiceId: string }, reader: AudiobookReader): boolean {
+  return g.provider === reader.provider && g.model === reader.model && g.voiceId === reader.voiceId;
+}
+
+/**
+ * What a narrator switch would do, before it is made (R-46): the blocks made now that the new
+ * narrator would leave stale or unmade, the direction controls it would hold of all those that
+ * stand, the price of reading the book again as `Read the book` would price it, and the takes
+ * of the narrator now kept on the shelf. Nothing written.
+ */
+export async function quoteNarrator(store: WorldStore, productionId: string, now: ReadingRoom, next: ReadingRoom, at: () => string): Promise<{ stale: number; held: number; directed: number; estimatedMicroUsd: number; kept: number }> {
+  const before = await prepareBook(store, productionId, now, at);
+  const after = await prepareBook(store, productionId, next, at);
+  const ready = (book: PreparedBook) => book.chapters.flatMap((chapter) => (chapter.preparation.kind === "ready" ? [chapter.preparation.prepared] : []));
+  const toMake = (book: PreparedBook) => ready(book).reduce((sum, prepared) => sum + prepared.toMake.length, 0);
+  const stale = Math.max(0, toMake(after) - toMake(before));
+  const estimatedMicroUsd = ready(after).reduce((sum, prepared) => sum + prepared.estimate, 0);
+  let held = 0;
+  let directed = 0;
+  let kept = 0;
+  const clonedVoices = store.getBundle().clonedVoices ?? [];
+  for (const prepared of ready(after)) {
+    const record = prepared.record;
+    for (const take of Object.values(record.takes)) if (sameVoice(take.reader, now.narrator)) kept += 1;
+    for (const planned of prepared.plan.blocks) {
+      const direction = audiobookDirectionFor(record, planned.block);
+      if (direction === null) continue;
+      const speaks = await effectiveReader(store, planned.assigned, next);
+      if (speaks === null) continue;
+      const controls = 1 + (direction.plan.speed !== 1 ? 1 : 0) + (direction.plan.phrase !== undefined ? 1 : 0) + direction.plan.cues.length;
+      directed += controls;
+      try {
+        held += holdDirection(planned.block.text, direction.plan, speaks.model, readerLanguage(clonedVoices, speaks.reader)).held.length;
+      } catch {
+        /* a direction wrong for its words is the run's to refuse */
+      }
+    }
+  }
+  return { stale, held, directed, estimatedMicroUsd, kept };
 }

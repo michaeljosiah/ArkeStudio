@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CadencePlanSchema, cueStart, normalizeSpeechText, type CadenceCue, type CadencePlan } from "./cadence.js";
+import { CADENCE_PHRASE_MAX, CadencePlanSchema, cueStart, normalizeSpeechText, type CadenceCue, type CadencePlan } from "./cadence.js";
 import { ArtifactIdSchema, IsoDateTimeSchema, SlugSchema } from "./ids.js";
 import { isSceneBreak } from "./manuscript.js";
 import { DeliverySchema } from "./voice.js";
@@ -177,6 +177,8 @@ export const AudiobookTakeSchema = z
       .optional(),
     /** The direction the take was made under (R-6, R-14), as `audiobookDirectionHash` names it; absent for a take made with none. */
     directionHash: z.string().min(1).optional(),
+    /** The speaker's note could not be applied (R-45): this narrator's row takes no phrase, so the line was read without it. */
+    noteHeld: z.literal(true).optional(),
     madeAt: IsoDateTimeSchema,
   })
   .strict();
@@ -364,8 +366,11 @@ export function summariseAudiobook(record: ChapterAudiobook): ChapterAudiobookSu
   };
 }
 
-/** The book's reading (R-11): every block the narrator's, or each line its speaker's. */
-export const AudiobookReadingSchema = z.enum(["narrator", "cast"]);
+/**
+ * The book's reading (R-11, R-44): every block the narrator's; the narrator's too, with each
+ * line played by its speaker's performance note; or each line its speaker's own voice.
+ */
+export const AudiobookReadingSchema = z.enum(["narrator", "performed", "cast"]);
 export type AudiobookReading = z.infer<typeof AudiobookReadingSchema>;
 
 /**
@@ -382,9 +387,42 @@ export const AudiobookBookSchema = z
      * carries. The book's choice, never the sheet's; their blocks are made only by a recording.
      */
     recorded: z.array(z.string().min(1).max(120)).max(200).optional(),
+    /**
+     * How the narrator plays each character under `performed` (R-44): a phrase of at most 60
+     * characters, keyed by sheet id or by a name no sheet carries. The book's, not the sheet's,
+     * since another narrator plays a character another way.
+     */
+    notes: z.record(z.string().min(1).max(120), z.string().min(1).max(CADENCE_PHRASE_MAX)).optional(),
+    /**
+     * The voice that reads this book (R-46); absent is the app's narrator, followed as it changes.
+     * Settings keeps the app's default, which every read outside the audiobook still uses.
+     */
+    narrator: AudiobookReaderSchema.optional(),
   })
   .strict();
 export type AudiobookBook = z.infer<typeof AudiobookBookSchema>;
+
+/** Whose note a line is played with (R-44): the sheet, else the name; none for narration and the title. */
+export function audiobookNoteKey(block: Pick<AudiobookBlock, "speaker" | "sheet">): string | null {
+  return block.speaker === undefined ? null : (block.sheet ?? block.speaker);
+}
+
+/** The note a block is played with under the book's reading (R-44): only under `performed`, only on a line. */
+export function audiobookNoteFor(book: Pick<AudiobookBook, "reading" | "notes"> | null, block: Pick<AudiobookBlock, "speaker" | "sheet">): string | undefined {
+  if (book?.reading !== "performed") return undefined;
+  const key = audiobookNoteKey(block);
+  return key === null ? undefined : book.notes?.[key];
+}
+
+/**
+ * The direction a take is made under, as it remembers it (R-14, R-45): the block's plan and,
+ * under `performed`, its speaker's note — so a note changed makes every line of theirs stale.
+ * The same name as before for a take with no note, so no take made before notes goes stale.
+ */
+export function audiobookTakeDirectionHash(plan: CadencePlan | null, note?: string): string | undefined {
+  if (note === undefined) return plan === null ? undefined : audiobookDirectionHash(plan);
+  return textDigest(`performed-v1:${JSON.stringify({ note, direction: plan === null ? null : audiobookDirectionHash(plan) })}`);
+}
 export const DEFAULT_AUDIOBOOK_BOOK: AudiobookBook = { schemaVersion: 1, reading: "narrator" };
 
 export type AudiobookBlockState = "not made" | "made" | "stale" | "flagged" | "awaiting";
@@ -415,6 +453,8 @@ export function audiobookBlockState(
   hasArtifact?: (artifactId: string) => boolean,
   /** The block's speaker is recorded by a person (R-37, R-38): made only by a current recording, `awaiting` until then. */
   recorded = false,
+  /** The note the line is played with under `performed` (R-45), part of the direction a take is judged by. */
+  note?: string,
 ): AudiobookBlockState {
   if (recorded) {
     const take = record?.takes[block.key];
@@ -435,7 +475,7 @@ export function audiobookBlockState(
   // The direction the take was made under against the one that stands (R-14): a direction
   // added, changed or dropped since is a different take; one authored for other words is none.
   const direction = audiobookDirectionFor(record, block);
-  if ((direction === null ? undefined : audiobookDirectionHash(direction.plan)) !== take.directionHash) return "stale";
+  if (audiobookTakeDirectionHash(direction?.plan ?? null, note) !== take.directionHash) return "stale";
   return "made";
 }
 
@@ -519,6 +559,12 @@ export const AudiobookVoiceRowSchema = z
     blocks: z.number().int().min(0),
     /** A recorded speaker's blocks still waiting on a recording (R-38). */
     awaiting: z.number().int().min(0).optional(),
+    /** The speaker's performance note under `performed` (R-44). */
+    note: z.string().min(1).optional(),
+    /** The narrator's row takes no phrase, so the note cannot be played (R-45). */
+    noteHeld: z.literal(true).optional(),
+    /** On the narrator's row: the book has a narrator of its own (R-46), not the app's. */
+    book: z.literal(true).optional(),
   })
   .strict();
 export type AudiobookVoiceRow = z.infer<typeof AudiobookVoiceRowSchema>;

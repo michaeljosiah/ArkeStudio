@@ -325,6 +325,13 @@ export const RECORDED_TAKE_SCHEMA_VERSION = 32;
  * raised before the first direction carrying any of them is written.
  */
 export const AUDIOBOOK_MARKERS_SCHEMA_VERSION = 33;
+/**
+ * One narrator performs the cast, and a narrator for the book (design turn 155g/h, SPEC-047
+ * R-44..R-46): `reading: "performed"`, `notes` and `narrator` on the strict book record, and
+ * `noteHeld` on a take. A build before it reads the book record as unreadable — the reading
+ * lost, the narrator the app's — and the chapter's record as unreadable, every take lost.
+ */
+export const AUDIOBOOK_PERFORMED_SCHEMA_VERSION = 34;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {

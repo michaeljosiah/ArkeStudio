@@ -126,7 +126,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Twenty-six adds the evaluator version to the strict playblast pin (#1128).
 // Twenty-seven is a world's own `models` on strict world.json and setup drafts (turn 153, #1235).
 // Thirty-three is a direction's markers and its words on the chapter's audiobook record (SPEC-047 R-40, R-43).
-export const SUPPORTED_SCHEMA_VERSION = 33;
+// Thirty-four is the performed reading, its notes and the book's narrator (SPEC-047 R-44..R-46).
+export const SUPPORTED_SCHEMA_VERSION = 34;
 
 export class WorldOpenError extends Error {
   constructor(

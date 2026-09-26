@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { audiobookDoorLine, audiobookRowLabel, formatMicroUsd, type AudiobookPriceLine, type AudiobookRow } from "@arke-studio/contracts";
+import { DEFAULT_NARRATOR, audiobookDoorLine, audiobookRowLabel, formatMicroUsd, type AudiobookPriceLine, type AudiobookRow } from "@arke-studio/contracts";
+import { NarratorDialog } from "./audiobook-narrator.js";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { ChevronRight } from "../components/icons.js";
 import { EmptyState } from "../components/layout.js";
@@ -87,14 +88,32 @@ export function useChapterReading(worldId: string | undefined, prodId: string | 
  * where its voice is set (issue 1191) — the narrator's to Settings, a speaker's to their voice
  * page — and one with nowhere to go, the unattributed lines, is plain.
  */
-function VoiceChip({ name, voice, state, blocks, awaiting, to }: { name: string; voice?: { label: string; provider: string; local: boolean }; state: string; blocks: number; awaiting?: number; to?: string }) {
+function VoiceChip({ name, voice, state, blocks, awaiting, to, onPress, performer, note, noteHeld, book }: {
+  name: string;
+  voice?: { label: string; provider: string; local: boolean };
+  state: string;
+  blocks: number;
+  awaiting?: number;
+  to?: string;
+  /** The narrator's chip opens the book's narrator (R-46) rather than going anywhere. */
+  onPress?: () => void;
+  /** A speaker the narrator performs under `performed` (R-44): their note, or plain. */
+  performer?: boolean;
+  note?: string;
+  noteHeld?: boolean;
+  /** The narrator is the book's own (R-46). */
+  book?: boolean;
+}) {
   const navigate = useNavigate();
-  const warn = state === "no voice" || state === "voice unavailable";
-  const what =
-    state === "recorded"
+  const warn = state === "no voice" || state === "voice unavailable" || noteHeld === true;
+  const what = performer
+    ? noteHeld
+      ? "note · not on this reader"
+      : (note ?? "plain")
+    : state === "recorded"
       ? `recorded${awaiting !== undefined && awaiting > 0 ? ` · ${awaiting} awaiting` : ""}`
       : state === "narrator"
-      ? `narrator · ${voice?.provider ?? ""}${voice?.local ? " · local" : ""}`
+      ? `${book ? "this book" : "narrator"} · ${voice?.provider ?? ""}${voice?.local ? " · local" : ""}`
       : state === "reads" && voice !== undefined
         ? `${voice.label} · ${voice.provider}`
         : `${state} · narrator`;
@@ -107,6 +126,12 @@ function VoiceChip({ name, voice, state, blocks, awaiting, to }: { name: string;
     </>
   );
   const className = cx("fy-abdoor__voice", warn && "fy-abdoor__voice--warn");
+  if (onPress !== undefined)
+    return (
+      <button type="button" className={className} data-testid="audiobook-voice" data-state={state} onClick={onPress}>
+        {inside}
+      </button>
+    );
   return to === undefined ? (
     <span className={className} data-testid="audiobook-voice" data-state={state}>
       {inside}
@@ -160,6 +185,8 @@ export function AudiobookScreen() {
   // voice gone unavailable, or back, moves the voices row and the price (codex on PR 1187).
   const app = useStore().state?.app;
   const engines = JSON.stringify([app?.runtime ?? null, app?.comfyui ?? null]);
+  // The book's narrator (R-46): opened from the narrator's chip.
+  const [narrating, setNarrating] = useState(false);
   useEffect(() => {
     if (connection === "open") requestVoiceCatalogue(worldId);
   }, [connection, worldId, engines]);
@@ -273,11 +300,14 @@ export function AudiobookScreen() {
           <button type="button" className={cx("fy-seg__item", reading === "narrator" && "fy-seg__item--active")} disabled={running} onClick={() => setAudiobookReading(worldId, prodId, "narrator")}>
             Narrator
           </button>
+          <button type="button" className={cx("fy-seg__item", reading === "performed" && "fy-seg__item--active")} disabled={running} onClick={() => setAudiobookReading(worldId, prodId, "performed")}>
+            Performed
+          </button>
           <button type="button" className={cx("fy-seg__item", reading === "cast" && "fy-seg__item--active")} disabled={running} onClick={() => setAudiobookReading(worldId, prodId, "cast")}>
             Cast
           </button>
         </nav>
-        {(door?.voices ?? []).map((voice) => (
+        {(door?.voices ?? []).map((voice, index) => (
           <VoiceChip
             key={`${voice.sheet ?? ""}:${voice.name}`}
             name={voice.name}
@@ -285,11 +315,29 @@ export function AudiobookScreen() {
             state={voice.state}
             blocks={voice.blocks}
             {...(voice.awaiting !== undefined ? { awaiting: voice.awaiting } : {})}
-            to={voice.state === "narrator" ? "/settings/general" : voice.sheet !== undefined ? `/w/${worldId}/cast/${encodeURIComponent(voice.sheet)}/voice` : undefined}
+            {...(index > 0 && voice.state === "narrator" ? { performer: true } : {})}
+            {...(voice.note !== undefined ? { note: voice.note } : {})}
+            {...(voice.noteHeld === true ? { noteHeld: true } : {})}
+            {...(voice.book === true ? { book: true } : {})}
+            {...(index === 0 && voice.state === "narrator" ? { onPress: () => setNarrating(true) } : {})}
+            to={voice.sheet !== undefined ? `/w/${worldId}/cast/${encodeURIComponent(voice.sheet)}/voice` : undefined}
           />
         ))}
         {door !== null && door.unattributed > 0 && <VoiceChip name="unattributed" state="no voice" blocks={door.unattributed} />}
       </div>
+      {narrating && door !== null && worldId !== undefined && prodId !== undefined && (
+        <NarratorDialog
+          worldId={worldId}
+          productionId={prodId}
+          narratorLabel={door.voices[0]?.name ?? DEFAULT_NARRATOR.label}
+          {...(production?.audiobook?.narrator !== undefined ? { bookNarrator: production.audiobook.narrator } : {})}
+          appLabel={app?.narrator?.label ?? DEFAULT_NARRATOR.label}
+          trial={door.rows[0] !== undefined ? { chapterFile: door.rows[0].file, block: "title" } : null}
+          slug={world?.meta.slug}
+          data={line.line}
+          onClose={() => setNarrating(false)}
+        />
+      )}
       {(bookNote !== null || note !== undefined) && (
         <div className="fy-abdoor__note fy-mono" data-testid="audiobook-note">
           {bookNote !== null && (

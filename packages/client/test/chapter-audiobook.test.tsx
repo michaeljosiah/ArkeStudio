@@ -742,6 +742,42 @@ describe("the Audiobook view (turn 146)", () => {
     assert.deepEqual(removed.direction?.cues, [{ kind: "pause", at: 5, length: "short" }]);
   });
 
+  it("under Performed a speaker's row in Voices holds the note, says a narrator that cannot play it, and the focused row hears the line (SPEC-047 R-44, R-45)", async () => {
+    const state = voiced(inkbound());
+    const world = state.world!;
+    const m = await mount({
+      ...state,
+      world: {
+        ...world,
+        productions: world.productions.map((p) => (p.meta.id === "inkbound" ? { ...p, audiobook: { schemaVersion: 1 as const, reading: "performed" as const, notes: { "maren-kest": "low, clipped" } } } : p)),
+      },
+    });
+    await answerOpen(m, { voices: CAST });
+    const row = q(m, '[data-testid="performed-speaker"]');
+    assert.ok(row, "the speaker the narrator performs");
+    const input = row.querySelector("input") as HTMLInputElement;
+    assert.equal(input.value, "low, clipped");
+    assert.match(row.textContent ?? "", /12\/60/, "the note's count");
+    assert.match(row.textContent ?? "", /note · not on this reader/, "Kokoro takes no phrase");
+    const line = q(m, '.fy-ab__block[data-speaker="maren-kest"]')!;
+    assert.equal(line.getAttribute("data-state"), "not made");
+
+    await act(async () => row.click());
+    const hear = q(m, '[data-testid="performed-hear"]')!;
+    assert.equal(hear.textContent, "Hear Maren Kest", "a local narrator is free, so no price");
+    assert.equal(q(m, '[data-testid="performed-sent-as"]')?.textContent, "“You hear it too,”", "held on Kokoro, so sent plain");
+    await act(async () => hear.click());
+    const heard = m.sent.findLast((message) => message.kind === "hear-audiobook-line") as Extract<ClientMessage, { kind: "hear-audiobook-line" }>;
+    assert.equal(heard.block, line.getAttribute("data-block"));
+
+    const key = Object.keys(input).find((k) => k.startsWith("__reactProps$"))!;
+    const props = (input as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void; onBlur: () => void }>)[key]!;
+    await act(async () => props.onChange({ target: { value: "flat, far off" } }));
+    await act(async () => (input as unknown as Record<string, { onBlur: () => void }>)[key]!.onBlur());
+    const note = m.sent.findLast((message) => message.kind === "set-audiobook-note") as Extract<ClientMessage, { kind: "set-audiobook-note" }>;
+    assert.deepEqual({ speaker: note.speaker, note: note.note }, { speaker: "maren-kest", note: "flat, far off" });
+  });
+
   it("a direction written for earlier words shows carried to the words now, with what could not be carried counted (SPEC-047 R-43)", async () => {
     const m = await mount(voiced(inkbound()));
     const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." };
