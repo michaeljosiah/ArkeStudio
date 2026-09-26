@@ -68,7 +68,7 @@ async function refreshConversationSummaryOnce(
   let turnCount = 0;
   for (const envelope of events) {
     if (envelope.seq <= through || envelope.seq > throughSeq) continue;
-    if (envelope.event.type === "turn.started") messages.push(envelope.event.message);
+    if (envelope.event.type === "turn.started" || envelope.event.type === "founding.message") messages.push(envelope.event.message);
     if (envelope.event.type === "turn.completed") {
       messages.push(envelope.event.message);
       turnCount++;

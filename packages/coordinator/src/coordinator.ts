@@ -5617,7 +5617,7 @@ export class Coordinator {
     benchDispatchHeld = false,
     genesisDecisionHeld = false,
   ): Promise<void> {
-    if ((msg.kind === "genesis-decide" || msg.kind === "genesis-review") && !genesisDecisionHeld) {
+    if (!genesisDecisionHeld && (msg.kind === "genesis-decide" || msg.kind === "genesis-review" || msg.kind === "begin-founding-build" || msg.kind === "genesis-attach" || msg.kind === "genesis-attach-files" || msg.kind === "create-world") && msg.genesisId) {
       return serializeFileMutation(`founding-decisions:${msg.genesisId}`, () => this.handleClientMessage(msg, false, false, true));
     }
     if (!benchTakeActionHeld && (msg.kind === "bench-accept" || msg.kind === "bench-discard")) {
@@ -16173,6 +16173,12 @@ export class Coordinator {
       });
       return;
     }
+    const draft = await loadGenesisConversation(dir, genesisId);
+    if (draft.founding || draft.worldId || this.foundingBuild?.isBeginning(genesisId) || this.carrying.has(genesisId)) {
+      this.emit({ at, type: "genesis.attachment", genesisId, name: basename(sourcePath), kind: "other", outcome: "refused",
+        reason: "World creation has begun. Attach this file in the world's conversation after founding finishes." });
+      return;
+    }
     const outcome = await attachToSandbox(dir, sourcePath);
     if ("reason" in outcome) {
       this.emit({
@@ -16263,14 +16269,15 @@ export class Coordinator {
   }
 
   private async fileGenesisAttachments(dir: string, store: WorldStore): Promise<void> {
-    for (const sourcePath of await sandboxAttachments(dir)) {
-      const outcome = await fileArtifact(store, { sourcePath,
-        ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
-        abandoned: () => this.stopping,
-      });
-      if (outcome.outcome === "refused" || outcome.outcome === "needs-consent") throw new Error(outcome.reason);
-    }
-    this.refreshIfStillOpen(store);
+    try {
+      for (const sourcePath of await sandboxAttachments(dir)) {
+        const outcome = await fileArtifact(store, { sourcePath,
+          ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
+          abandoned: () => this.stopping,
+        });
+        if (outcome.outcome === "refused" || outcome.outcome === "needs-consent") throw new Error(outcome.reason);
+      }
+    } finally { this.refreshIfStillOpen(store); }
   }
 
   private async completeGenesisFormHandoff(genesisId: string, worldId: string): Promise<void> {

@@ -1,4 +1,4 @@
-import { open, mkdir, readFile, rename, writeFile, rm } from "node:fs/promises";
+import { open, mkdir, readFile, rename, writeFile, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import {
@@ -170,6 +170,7 @@ export class WorldChatStore {
 
   async readMeta(): Promise<WorldChatConversationMeta | null> {
     try {
+      if (await stat(join(this.dir, ".founding-incomplete")).then(() => true).catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return false; throw err; })) return null;
       const raw = await readFile(toExtendedLength(this.metaPath), "utf8");
       const parsed = WorldChatConversationMetaSchema.safeParse(JSON.parse(raw));
       return parsed.success ? parsed.data : null;
