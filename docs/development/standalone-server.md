@@ -30,6 +30,44 @@ For a different server port, set `$env:VITE_ARKE_WS = "ws://127.0.0.1:8792"` bef
 the frontend. For a different frontend port, set `PORT` in that terminal and pass its exact
 origin to the server. Press Ctrl+C in the server terminal to drain work and close the world.
 
+## From another device on your tailnet
+
+The server never listens beyond loopback. To use Studio from a phone or another computer,
+put [Tailscale Serve](https://tailscale.com/kb/1312/serve) in front of it: Serve terminates
+TLS with the machine's `ts.net` certificate, is reachable only from your tailnet, and forwards
+to loopback. Do not use Funnel, which publishes to the internet. Use the Vite frontend; a build
+keeps its loopback-only content policy and cannot reach a proxied server.
+
+With `studio.example.ts.net` standing for the machine's tailnet name:
+
+```powershell
+npm run server -- --root C:\ArkeData --origin https://studio.example.ts.net
+tailscale serve --bg --https=8443 http://127.0.0.1:8791
+tailscale serve --bg --https=443 http://localhost:5173
+```
+
+Then, in the frontend terminal:
+
+```powershell
+$env:VITE_ARKE_WS = "wss://studio.example.ts.net:8443"
+$env:ARKE_DEV_LOCAL_WS = "ws://127.0.0.1:8791"
+$env:ARKE_DEV_ORIGIN = "https://studio.example.ts.net"
+npm run dev
+```
+
+`VITE_ARKE_WS` is where the remote browser reaches the server; `ARKE_DEV_LOCAL_WS` is the
+loopback server it forwards to, whose handoff Vite reads; `ARKE_DEV_ORIGIN` is the address the
+browser opens. Vite checks the session through the proxy before printing a link, so a printed
+link has already worked along the path the browser will take. Open it on the other device. With
+`npm run dev:coordinator` instead of the server, set `ARKE_DEV_ORIGIN` in its terminal in place of
+`--origin`.
+
+A remote endpoint must be `wss:`, and Vite refuses to print a link otherwise: the capability
+never crosses a network unencrypted. Only the declared origin's host name is added to Vite's
+allowed hosts and only the declared server is added to the page's content policy. Every
+connection still needs the session capability. Browser media requests carry it as a query
+parameter, inside the TLS connection.
+
 ## What works
 
 The Node host uses the same Studio command routing, world persistence, proposal acceptance,
