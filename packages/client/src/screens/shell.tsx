@@ -1240,6 +1240,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                 {g?.review && <GenesisContentCards review={g.review} busy={chatRunning || buildPressed || !!g?.founding || !!g?.worldId || myBuild?.status === "running"}
                   onDecide={(cards, decision) => decideGenesisDraft(genesisId, cards.map(card => ({ key: card.key, digest: card.digest })), decision)}
                   onRevise={title => setMessage(`Please revise ${title}: `)} />}
+                {g?.imageError && <Callout title="Image request needs attention">{g.imageError}</Callout>}
                 {g?.images && blueprint && <GenesisImageCards genesisId={genesisId} blueprint={blueprint} images={g.images} jobs={imageJobs}
                   busy={chatRunning || buildPressed || myBuild?.status === "running" || !!g.worldId}
                   onGenerate={(intentId, digest) => generateGenesisImage(genesisId, intentId, digest, models)}

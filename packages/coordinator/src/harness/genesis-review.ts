@@ -15,7 +15,7 @@ export async function reviewGenesisContent(dir: string): Promise<GenesisContentR
   const log = await genesisConversation(dir);
   const { events, problems: journalProblems } = await log.read();
   if (journalProblems.some(problem => problem.kind !== "torn-tail")) throw new Error("The conversation record needs repair before content can be approved.");
-  const decisions = events.flatMap(({ event }) => event.type === "founding.decision" ? [event.decision] : []);
+  const decisions = events.flatMap(({ event }) => event.type === "founding.decision" ? [event.decision] : event.type === "founding.decisions" ? event.decisions : []);
   const selected = approvedGenesisContent(decisions);
   const rows = genesisContentRows(blueprint);
   for (const [key, content] of selected) {
@@ -35,7 +35,10 @@ export async function reviewGenesisContent(dir: string): Promise<GenesisContentR
   await validateGenesisSources(dir, approved);
   const problems = blueprint.dropped.map(file => `Cannot read ${file}; repair it before founding.`);
   for (const name of approved.keyArt?.characters ?? []) {
-    if (!approved.characters.some(character => character.name === name)) problems.push(`Key art names ${name}, who is not an approved character. Update and approve the key-art brief before founding.`);
+    if (approved.characters.filter(character => character.name === name).length !== 1) problems.push(`Key art names ${name}, who is not an approved character. Update and approve the key-art brief before founding.`);
+  }
+  if (approved.keyArt?.location && approved.locations.filter(location => location.name === approved.keyArt!.location).length !== 1) {
+    problems.push(`Key art names ${approved.keyArt.location}, which does not identify one approved location. Update and approve the key-art brief before founding.`);
   }
   const ids = new Set([...approved.characters.map(c => `character:${c.slug}`), ...approved.locations.map(c => `location:${c.slug}`), ...approved.factions.map(c => `faction:${c.slug}`)]);
   for (const [kind, entities] of [["character", approved.characters], ["location", approved.locations], ["faction", approved.factions]] as const) {
@@ -67,11 +70,10 @@ export async function decideGenesisContent(
       return card;
     });
     if (decision === "approve") await validateGenesisSources(dir, approvedGenesisBlueprint(new Map(cards.map(card => [card.key, card.content]))));
-    // Validate the complete batch before appending any decisions.
-    for (const card of cards) {
-      const record: GenesisDecision = { key: card.key, digest: card.digest, content: card.content, decision, at: new Date().toISOString() };
-      await log.append({ type: "founding.decision", decision: record }, { at: record.at, requestId: `${requestId}:${card.key}` });
-    }
+    // One flushed record makes a multi-card decision all-or-nothing on recovery.
+    const at = new Date().toISOString();
+    const decisions: GenesisDecision[] = cards.map(card => ({ key: card.key, digest: card.digest, content: card.content, decision, at }));
+    if (decisions.length) await log.append({ type: "founding.decisions", decisions }, { at, requestId });
     return reviewGenesisContent(dir);
   });
 }
