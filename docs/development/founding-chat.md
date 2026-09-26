@@ -98,7 +98,7 @@ Audio is frozen privately and played inline. Choosing the heard voice is separat
 for its audition. Decisions survive resume and character renames; unavailable choices can be
 removed without blocking text-only founding. Begin installs selections through ordinary sheet
 voice assignment and reuses them after recovery. Audition retries do not resubmit uncertain
-requests. Worlds carrying these decisions require schema 38.
+requests. Worlds carrying these decisions require schema 40.
 # Reviewing founding content
 
 Issue #1269 adds versioned content decisions to the founding conversation. The agent proposes
