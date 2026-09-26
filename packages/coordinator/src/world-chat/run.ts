@@ -504,7 +504,7 @@ export class WorldChatRunner {
     let { events } = await store.read();
     if (this.deps.summarise && !events.some(envelope => envelope.event.type === "summary.updated") &&
       events.some(envelope => envelope.event.type === "founding.message")) {
-      await refreshConversationSummary(store, this.deps.summarise);
+      await refreshConversationSummary(store, this.deps.summarise, controller.signal);
       events = (await store.read()).events;
     }
     const meta = await store.readMeta();
