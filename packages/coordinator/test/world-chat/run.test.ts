@@ -78,6 +78,7 @@ async function setup(
   adapter: HarnessAdapter,
   options: {
     timeoutMs?: number;
+    summarise?: RunDeps["summarise"];
     entryContext?: import("@arke-studio/contracts").WorldChatContext;
     chapterBrief?: RunDeps["chapterBrief"];
     resolveLanguageModel?: RunDeps["resolveLanguageModel"];
@@ -98,6 +99,7 @@ async function setup(
   const released: RunId[] = [];
   const runner = new WorldChatRunner({
     adapter,
+    ...(options.summarise ? { summarise: options.summarise } : {}),
     ...(options.chapterBrief ? { chapterBrief: options.chapterBrief } : {}),
     ...(options.resolveLanguageModel ? { resolveLanguageModel: options.resolveLanguageModel } : {}),
     ...(options.createdModels
@@ -919,4 +921,21 @@ it("durably cancels a turn stopped while its chapter brief is being read", async
   assert.equal(finished.run.status, "cancelled");
   assert.equal(h.released.length, 1);
   assert.equal((await h.runner.send(h.store, h.conversationId, "Continue")).status, "completed");
+});
+
+it("summarizes long founding history before the first world-chat reply", async () => {
+  const prompts: string[] = [];
+  const { runner, store, conversationId } = await setup(fakeAdapter(["not json", "not json"], { prompts }), {
+    summarise: async input => {
+      assert.equal(prompts.length, 0);
+      assert.equal(input.messages[0]?.text, "The first founding decision.");
+      return "The first founding decision must be remembered.";
+    },
+  });
+  for (let index = 0; index < 52; index++) await store.append({ type: "founding.message", message: {
+    id: newId("msg"), turnId: newId("turn"), role: index % 2 ? "studio" : "user",
+    text: index ? `Later founding message ${index}` : "The first founding decision.", attachmentIds: [], createdAt: AT,
+  } });
+  await runner.send(store, conversationId, "What did we decide first?");
+  assert.match(prompts[0]!, /The first founding decision must be remembered/);
 });
