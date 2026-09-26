@@ -22,6 +22,7 @@ const pathFor = (dir: string) => join(genesisControlDir(dir), "imports.json");
 const ResolutionSchema = z.object({
   status: z.enum(["prepared", "rejected", "deferred"]), target: z.string().optional(),
   write: z.object({ file: z.string(), content: z.string() }).optional(), applied: z.boolean(),
+  restoreEvidence: z.boolean().optional(),
 }).strict();
 const StateSchema = z.object({
   cards: z.array(GenesisImportsSchema.shape.cards.element),
@@ -79,6 +80,7 @@ async function reviewUnlocked(dir: string, state: State) {
   }
   const folder = join(dir, "draft", "imports");
   const names = await readdir(folder).catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return []; throw err; });
+  const proposed = new Set<string>();
   for (const name of names.filter(name => name.endsWith(".json")).slice(0, 300)) {
     try {
       const info = await lstat(join(folder, name));
@@ -91,6 +93,7 @@ async function reviewUnlocked(dir: string, state: State) {
       const offset = source.text.indexOf(proposal.quote);
       if (offset < 0) throw new Error("Use an exact quoted span from the source.");
       const id = hash([source.hash, proposal.kind, proposal.name, proposal.section ?? "", proposal.quote].join("\n"));
+      proposed.add(id);
       const existing = state.cards.find(card => card.id === id);
       if (existing && state.resolutions[id] && state.resolutions[id]!.status !== "deferred") continue;
       const evidence = GenesisSourceSchema.parse({ hash: source.hash, name: proposal.source, quote: proposal.quote,
@@ -100,13 +103,14 @@ async function reviewUnlocked(dir: string, state: State) {
       if (existing) state.cards[state.cards.indexOf(existing)] = card; else state.cards.push(card);
     } catch (err) { problems.push(`${name}: ${err instanceof Error ? err.message : "Unreadable candidate"}`); }
   }
+  state.cards = state.cards.filter(card => proposed.has(card.id) || ["prepared", "rejected"].includes(state.resolutions[card.id]?.status ?? ""));
   const rows = genesisContentRows(await foldBlueprint(dir));
   for (const card of state.cards) {
     card.matches = rows.filter(row => row.content.kind === card.proposal.kind && row.title.toLocaleLowerCase() === card.proposal.name.toLocaleLowerCase())
       .map(row => ({ key: row.key, name: row.title, text: textOf(row) }));
     card.related = state.cards.filter(other => other.id !== card.id && other.proposal.kind === card.proposal.kind &&
       other.proposal.name.toLocaleLowerCase() === card.proposal.name.toLocaleLowerCase() && state.resolutions[other.id]?.status !== "rejected")
-      .map(other => ({ source: other.source.name, name: other.proposal.name, text: other.proposal.body }));
+      .slice(0, 5).map(other => ({ source: other.source.name, name: other.proposal.name, text: other.proposal.body.length > 600 ? other.proposal.body.slice(0, 600) + "…" : other.proposal.body }));
     card.digest = conversationActionDigest({ proposal: card.proposal, source: card.source, matches: card.matches, related: card.related });
     const resolved = state.resolutions[card.id];
     if (resolved) { card.status = resolved.status; if (resolved.target) card.target = resolved.target; }
@@ -173,6 +177,11 @@ export async function resolveGenesisImport(dir: string, input: GenesisImportReso
         if (next.sheet.sections[section]!.length > 8000) throw new Error("The combined section exceeds 8,000 characters. Shorten the interpretation or replace the section.");
         GenesisBlueprintSchema.parse({ ...draft, [key]: [...entities.filter(entity => entity.slug !== slug), { ...next, slug }] });
       }
+      if (input.mode === "replace") {
+        for (const resolution of Object.values(state.resolutions)) {
+          if (resolution.target === `${kind}:${slug}`) resolution.restoreEvidence = false;
+        }
+      }
       state.resolutions[card.id] = { status: "prepared", target: `${kind}:${slug}`, write: { file, content }, applied: false };
     }
     // Persist the exact intended draft write first. Recovery can finish a lost response safely.
@@ -204,7 +213,7 @@ export async function restoreGenesisSources(dir: string, blueprint: GenesisBluep
   const result = structuredClone(blueprint);
   for (const card of state.cards) {
     const resolution = state.resolutions[card.id];
-    if (resolution?.status !== "prepared" || !resolution.target) continue;
+    if (resolution?.status !== "prepared" || !resolution.target || resolution.restoreEvidence === false) continue;
     const [kind, slug] = resolution.target.split(":");
     const entity = kind === "character" ? result.characters.find(entity => entity.slug === slug) :
       kind === "location" ? result.locations.find(entity => entity.slug === slug) :

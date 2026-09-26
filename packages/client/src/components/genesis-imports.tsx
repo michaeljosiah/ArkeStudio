@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { GenesisImportCard, GenesisImports, GenesisImportResolve } from "@arke-studio/contracts";
 import { Button, Callout } from "./ui.js";
 
@@ -6,6 +6,13 @@ function ImportCard({ card, busy, onResolve }: { card: GenesisImportCard; busy: 
   const [name, setName] = useState(card.proposal.name), [body, setBody] = useState(card.proposal.body);
   const [target, setTarget] = useState(card.matches[0]?.key ?? "");
   const [mode, setMode] = useState<"" | "distinct" | "append" | "replace">(card.matches.length ? "append" : "");
+  const prior = useRef(card.proposal);
+  useEffect(() => {
+    const previous = prior.current;
+    setName(value => value === previous.name ? card.proposal.name : value);
+    setBody(value => value === previous.body ? card.proposal.body : value);
+    prior.current = card.proposal;
+  }, [card.proposal]);
   const decide = (decision: GenesisImportResolve["decision"]) => onResolve({
     id: card.id, digest: card.digest, decision, name, body, ...(mode ? { mode } : {}), ...(mode !== "distinct" && target ? { target } : {}),
   });
@@ -16,11 +23,12 @@ function ImportCard({ card, busy, onResolve }: { card: GenesisImportCard; busy: 
     <details><summary>Source identity</summary><code>{card.source.hash}</code></details>
     <blockquote style={{ whiteSpace: "pre-wrap" }}>{card.source.quote}</blockquote>
     <p>The quote is verified. The wording below is an interpretation for you to review.</p>
-    <label>Name<input aria-label="Imported name" value={name} disabled={busy || card.status === "prepared" || card.status === "rejected"} onChange={e => setName(e.target.value)} /></label>
-    <label>Proposed interpretation<textarea aria-label="Imported interpretation" value={body} disabled={busy || card.status === "prepared" || card.status === "rejected"} onChange={e => setBody(e.target.value)} /></label>
+    <label>Name<input aria-label="Imported name" maxLength={120} value={name} disabled={busy || card.status === "prepared" || card.status === "rejected"} onChange={e => setName(e.target.value)} /></label>
+    <label>Proposed interpretation<textarea aria-label="Imported interpretation" maxLength={6000} value={body} disabled={busy || card.status === "prepared" || card.status === "rejected"} onChange={e => setBody(e.target.value)} /></label>
     {!!card.proposal.links?.length && <p>Suggested relationships, requiring approval: {card.proposal.links.join(", ")}</p>}
     {!!card.related.length && <Callout title="Other imports with the same name">
       <p>Compare these interpretations before preparing content. After preparing one, you can merge the others into its draft record or leave them undecided.</p>
+      <p>Up to five excerpts are shown here. Each import card contains its full interpretation.</p>
       {card.related.map((other, index) => <p key={index}>{other.source}: {other.text}</p>)}
     </Callout>}
     {!!card.matches.length && <Callout title="Possible duplicate or conflicting statement">
@@ -36,7 +44,7 @@ function ImportCard({ card, busy, onResolve }: { card: GenesisImportCard; busy: 
         {card.matches.map(match => <option key={match.key} value={match.key}>{match.name} ({match.key})</option>)}
       </select></label>}
     {(card.status === "pending" || card.status === "deferred") && <div style={{ display: "flex", gap: 8 }}>
-      <Button disabled={busy || !name.trim() || !body.trim()} onClick={() => decide("prepare")}>Prepare for approval</Button>
+      <Button disabled={busy || !name.trim() || !body.trim() || name.length > 120 || body.length > 6000} onClick={() => decide("prepare")}>Prepare for approval</Button>
       <Button variant="ghost" disabled={busy} onClick={() => decide("reject")}>Reject extraction</Button>
       <Button variant="ghost" disabled={busy} onClick={() => decide("defer")}>Leave undecided</Button>
     </div>}
@@ -53,6 +61,6 @@ export function GenesisImportCards({ imports, busy, onResolve, onExtract, onRefr
       {document.supported && <Button disabled={busy} onClick={() => onExtract(document.name)}>Extract proposals in chat</Button>}</div>)}
     <Button variant="ghost" disabled={busy} onClick={onRefresh}>Refresh import review</Button>
     {imports.problems.length > 0 && <Callout title="Import material needs attention">{imports.problems.map(problem => <p key={problem}>{problem}</p>)}</Callout>}
-    {imports.cards.map(card => <ImportCard key={card.id + card.digest} card={card} busy={busy} onResolve={onResolve} />)}
+    {imports.cards.map(card => <ImportCard key={card.id} card={card} busy={busy} onResolve={onResolve} />)}
   </section>;
 }

@@ -797,6 +797,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
   const harnessReady = state?.app.health.harness.status === "healthy";
   const drafts = useGenesis();
   const g = drafts[genesisId];
+  useEffect(() => { if (g?.status === "failed") setSubmittedName(null); }, [g?.status]);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   useEffect(() => {
     if (connection !== "open") return;
@@ -807,7 +808,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
   const chatRunning = g?.status === "running";
   const blueprint = g?.blueprint ?? null;
   useEffect(() => {
-    if (connection === "open" && !chatRunning && !g?.worldId && !g?.founding) reviewGenesisImports(genesisId);
+    if (g && connection === "open" && !chatRunning && !g.worldId && !g.founding) reviewGenesisImports(genesisId);
   }, [connection, chatRunning, blueprint, g?.attachments, genesisId]);
   useEffect(() => {
     if (connection === "open" && blueprint && !chatRunning && !g?.worldId) reviewGenesisDraft(genesisId);
