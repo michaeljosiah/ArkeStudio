@@ -12,6 +12,31 @@ import { FsWorldProvider } from "../src/world/provider.js";
 import { makeTempRoot, WORLD_ID } from "./world/helpers.js";
 import { FakeProvider, pngBytes } from "./queue/fake-provider.js";
 import { devCipher } from "../src/credentials/dev-cipher.js";
+import { genesisControlDir, loadGenesisConversation, recordFoundingMessage } from "../src/harness/genesis-conversation.js";
+
+it("discovery completes interrupted form handoffs in their own world", async () => {
+  const { root } = await makeTempRoot();
+  const provider = new FsWorldProvider(root);
+  const genesisId = "gen-form-recovery";
+  const sandbox = await provider.genesisDir(genesisId);
+  await recordFoundingMessage(sandbox, "user", "Remember this founding conversation.");
+  const created = await provider.createWorld({ name: "Recovered world" });
+  await writeFile(join(genesisControlDir(sandbox), "begun.json"), JSON.stringify({ worldId: created.worldId, form: true }));
+  await provider.loadWorld(WORLD_ID);
+  const coordinator = new Coordinator({ provider, adapter: null, appRoot: root,
+    changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test" });
+  const { port, token } = await coordinator.start(0);
+  const client = new TestClient(port);
+  await client.open();
+  try {
+    client.send({ kind: "hello", token, lastSeq: 0 });
+    await client.until(f => f.kind === "snapshot", "snapshot");
+    client.send({ kind: "genesis-list" });
+    await client.until(f => f.kind === "event" && f.event.type === "genesis.loaded" && f.event.genesisId === genesisId && f.event.formHandoff === "completed", "recovered handoff");
+    assert.equal(provider.openStore()?.worldId, WORLD_ID, "discovery preserves the chosen world");
+    assert.equal((await loadGenesisConversation(sandbox, genesisId)).formHandoff, "completed");
+  } finally { client.close(); await coordinator.stop(); await provider.close(); }
+});
 
 it("founding image commands authorize generation separately from exact image approval", async () => {
   const { root } = await makeTempRoot();

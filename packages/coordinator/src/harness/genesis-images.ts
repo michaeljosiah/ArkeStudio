@@ -25,6 +25,8 @@ export async function savedGenesisImages(dir: string): Promise<GenesisImages> {
   state.selections = []; state.rejected = [];
   for (const { event } of events) {
     if (event.type !== "founding.image-decision") continue;
+    // The flushed journal owns reviewed bytes even if the derived candidate cache is lost.
+    if (event.candidate && !state.candidates.some(candidate => candidate.id === event.candidate!.id)) state.candidates.push(event.candidate);
     if (event.decision === "unassign") state.selections = state.selections.filter(selection => selection.target !== event.target);
     else if (event.candidate && event.decision === "approve") {
       state.selections = [...state.selections.filter(selection => selection.target !== event.target), { target: event.target, candidate: event.candidate }];

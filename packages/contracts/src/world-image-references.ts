@@ -62,7 +62,10 @@ export function worldImageReferences(world: WorldBundle): WorldImageReference[] 
   }
   for (const artifact of pickableArtifacts(world.artifacts)) {
     if (artifact.kind !== "image" && artifact.kind !== "board") continue;
-    const source = artifact.generation?.source === "character-reference" ? rows.get(artifact.generation.sourceFile) : undefined;
+    const generation = artifact.generation;
+    const foundingTake = generation?.source === "founding" ? world.referenceTakes.find(take => take.jobId === generation.jobId) : undefined;
+    const source = generation?.source === "character-reference" ? rows.get(generation.sourceFile)
+      : foundingTake?.media && foundingTake.reference ? rows.get(`references/${foundingTake.reference.sheetId}/takes/${foundingTake.id}/${foundingTake.media}`) : undefined;
     add(`artifacts/${artifact.file}`, source?.name ?? artifact.file, source?.group ?? (artifact.generation || artifact.boundaryExtraction ? "Takes and stills" : "Uploads"), source?.role ?? "style", source?.sheetId);
   }
   return [...rows.values()];
