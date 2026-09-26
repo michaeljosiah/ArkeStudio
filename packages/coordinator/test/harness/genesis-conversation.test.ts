@@ -35,10 +35,11 @@ it("keeps the frozen founding input after creation starts and marks form handoff
   const dir = await sandboxDir("founding-frozen-");
   await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Original" }));
   const blueprint = await foldBlueprint(dir);
-  await writeFile(join(genesisControlDir(dir), "founding-input.json"), JSON.stringify({ blueprint }));
+  await writeFile(join(genesisControlDir(dir), "founding-input.json"), JSON.stringify({ blueprint, models: { image: "frozen-image-model" } }));
   await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Changed after crash" }));
   let loaded = await loadGenesisConversation(dir, "gen-frozen");
   assert.equal(loaded.founding, true);
+  assert.deepEqual(loaded.frozenModels, { image: "frozen-image-model" });
   assert.equal(loaded.blueprint.name, "Original");
   const worldId = ulid();
   await writeFile(join(genesisControlDir(dir), "begun.json"), JSON.stringify({ worldId, form: true }));
@@ -105,6 +106,19 @@ it("a reserved founding identity reuses the world after a lost Begin response", 
   const second = await new FsWorldProvider(root).createWorld(input);
   assert.deepEqual(second, first);
   assert.equal((await provider.listWorlds()).length, 1);
+});
+
+it("a discarded conversation URL can create a fresh journal without a stale writer", async () => {
+  const provider = new FsWorldProvider(await tempDir("founding-discard-"));
+  const dir = await provider.genesisDir("gen-discard");
+  await recordFoundingMessage(dir, "user", "Discard this.");
+  const before = await loadGenesisConversation(dir, "gen-discard");
+  await provider.discardGenesis("gen-discard");
+  const recreated = await provider.genesisDir("gen-discard");
+  await recordFoundingMessage(recreated, "user", "Start again.");
+  const after = await loadGenesisConversation(recreated, "gen-discard");
+  assert.notEqual(after.conversationId, before.conversationId);
+  assert.deepEqual(after.turns.map(turn => turn.text), ["Start again."]);
 });
 
 it("rebuilds unpublished reserved worlds without stale optional documents", async () => {

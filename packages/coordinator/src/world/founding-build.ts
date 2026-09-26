@@ -118,6 +118,7 @@ export interface FoundingBuildPorts {
   cancelJob(jobId: string): Promise<void>;
   queueStatuses(): QueueStatus[];
   refreshWorldSnapshot(worldId: string): Promise<void>;
+  refreshConversations?(worldId: string): Promise<void>;
   refreshWorldList(): Promise<void>;
   emit(event: DomainEvent): void;
   log(record: Record<string, unknown>): void;
@@ -463,6 +464,7 @@ export class FoundingBuildService {
 
     await store.ensureSchemaVersion(FOUNDING_CONVERSATION_SCHEMA_VERSION, "founding-chat");
     await carryGenesisConversation(sandbox, store.dir);
+    await this.ports.refreshConversations?.(worldId);
 
     const record: FoundingBuildRecord = FoundingBuildRecordSchema.parse({
       buildId: newId("fb"),

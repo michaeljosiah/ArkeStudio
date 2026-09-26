@@ -39,7 +39,7 @@ import {
   UlidSchema,
 } from "./ids.js";
 import { JobSchema, LedgerEntrySchema, QueueStatusSchema, ReconcileActionSchema } from "./job.js";
-import { ProviderIdSchema, ProviderStatusSchema, ProviderToolStatusSchema } from "./provider.js";
+import { ModelChoicesSchema, ProviderIdSchema, ProviderStatusSchema, ProviderToolStatusSchema } from "./provider.js";
 import { ProviderCallRecordSchema } from "./provider-call.js";
 import { RippleItemSchema } from "./proposal.js";
 import { ShotSelectionSchema } from "./scene.js";
@@ -1668,6 +1668,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     ...base, type: z.literal("genesis.loaded"), genesisId: z.string().min(1),
     conversationId: ConversationIdSchema, worldId: UlidSchema.optional(),
     founding: z.boolean().optional(),
+    frozenModels: ModelChoicesSchema.optional(),
     formHandoff: z.enum(["pending", "completed"]).optional(),
     turns: z.array(z.object({ id: z.string(), role: z.enum(["user", "gate"]), text: z.string(), at: IsoDateTimeSchema }).strict()),
     blueprint: GenesisBlueprintSchema,

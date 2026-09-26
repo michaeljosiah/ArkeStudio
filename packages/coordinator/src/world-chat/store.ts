@@ -1,4 +1,4 @@
-import { open, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { open, mkdir, readFile, rename, writeFile, rm } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import {
@@ -124,6 +124,15 @@ export interface ReadResult {
 }
 
 export class WorldChatStore {
+  /** Explicit deletion owns the journal queue and resets the shared tail for a future draft. */
+  static async discard(dir: string): Promise<void> {
+    const writer = writerFor(dir);
+    await writer.queue.enqueue(async () => {
+      await rm(toExtendedLength(dir), { recursive: true, force: true });
+      writer.tail = null;
+      writer.uncertain = false;
+    });
+  }
   /** Shared with every other store on this directory — see `writerFor`. */
   private readonly writer: Writer;
   /**
