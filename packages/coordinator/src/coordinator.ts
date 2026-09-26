@@ -5604,7 +5604,11 @@ export class Coordinator {
     msg: ClientMessage,
     benchTakeActionHeld = false,
     benchDispatchHeld = false,
+    genesisDecisionHeld = false,
   ): Promise<void> {
+    if (msg.kind === "genesis-decide" && !genesisDecisionHeld) {
+      return serializeFileMutation(`founding-decisions:${msg.genesisId}`, () => this.handleClientMessage(msg, false, false, true));
+    }
     if (!benchTakeActionHeld && (msg.kind === "bench-accept" || msg.kind === "bench-discard")) {
       const key = `${msg.worldId}/${msg.sessionId}/${msg.takeId}`;
       return this.serialiseBenchTakeAction(key, () => this.handleClientMessage(msg, true));
@@ -7149,7 +7153,7 @@ export class Coordinator {
           const previous: Record<string, unknown> = await readFile(join(dir, "draft.json"), "utf8").then(raw => JSON.parse(raw) as Record<string, unknown>)
             .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return {}; throw err; });
           const combine = (old: unknown, added: Array<{ name: string; line: string }>) =>
-            [...new Map([...(Array.isArray(old) ? old as Array<{ name: string; line: string }> : []), ...added].map(entity => [entity.name, entity])).values()];
+            [...new Map([...(Array.isArray(old) ? old as Array<{ name: string; line: string }> : []), ...added].map(entity => [entity.name.toLowerCase(), entity])).values()];
           await atomicWriteFile(join(dir, "draft.json"), JSON.stringify({ ...previous, ...msg.draft,
             characters: combine(previous["characters"], msg.draft.characters), locations: combine(previous["locations"], msg.draft.locations),
           }, null, 2) + "\n");
