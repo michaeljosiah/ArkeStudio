@@ -31,6 +31,9 @@ export async function reviewGenesisContent(dir: string): Promise<GenesisContentR
   });
   const approved = approvedGenesisBlueprint(selected);
   const problems = blueprint.dropped.map(file => `Cannot read ${file}; repair it before founding.`);
+  for (const name of approved.keyArt?.characters ?? []) {
+    if (!approved.characters.some(character => character.name === name)) problems.push(`Key art names ${name}, who is not an approved character. Update and approve the key-art brief before founding.`);
+  }
   const ids = new Set([...approved.characters.map(c => `character:${c.slug}`), ...approved.locations.map(c => `location:${c.slug}`), ...approved.factions.map(c => `faction:${c.slug}`)]);
   for (const [kind, entities] of [["character", approved.characters], ["location", approved.locations], ["faction", approved.factions]] as const) {
     for (const entity of entities) {

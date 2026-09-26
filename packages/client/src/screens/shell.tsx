@@ -792,6 +792,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
   const harnessReady = state?.app.health.harness.status === "healthy";
   const drafts = useGenesis();
   const g = drafts[genesisId];
+  useEffect(() => { if (g?.status === "failed") setSubmittedName(null); }, [g?.status]);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   useEffect(() => {
     if (connection !== "open") return;

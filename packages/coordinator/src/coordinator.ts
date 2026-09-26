@@ -5709,7 +5709,7 @@ export class Coordinator {
               detail: "Review the proposed content and use Begin in the conversation to save the approved world." });
             return;
           }
-          if (msg.genesisId && (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId))) return;
+          if (msg.genesisId && (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId))) throw new Error("Wait for the current founding operation to finish.");
           const creationId = sandbox ? await reserveGenesisWorld(sandbox) : undefined;
           const { worldId } = await create({
             ...(creationId ? { creationId } : {}),
@@ -5730,22 +5730,12 @@ export class Coordinator {
           if (genesisId !== undefined) {
             // Held so a discard cannot delete the sandbox out from under the copy. The screen
             // discards as soon as the world opens, which is while this is still running.
-            const carry = (async () => {
-              await this.carryGenesisAttachments(genesisId, worldId);
-              const store = this.opts.provider.openStore?.();
-              if (sandbox && store?.worldId === worldId && (await foundingMessages(sandbox)).length) {
-                await store.ensureSchemaVersion(FOUNDING_CONVERSATION_SCHEMA_VERSION, "founding-chat");
-                await carryGenesisConversation(sandbox, store.dir);
-              }
-              if (sandbox) {
-                await atomicWriteFile(join(genesisControlDir(sandbox), "completed.json"), JSON.stringify({ worldId, form: true }) + "\n");
-                this.emit(await loadGenesisConversation(sandbox, genesisId));
-              }
-            })();
+            const carry = this.completeGenesisFormHandoff(genesisId, worldId);
             this.carrying.set(genesisId, carry);
             await carry.finally(() => this.carrying.delete(genesisId));
           }
-        } catch {
+        } catch (err) {
+          if (msg.genesisId) this.emit({ type: "genesis.status", at: this.nowIso(), genesisId: msg.genesisId, status: "failed", detail: describeCoordinatorError(err) });
           this.transport.broadcastSnapshot(); // surface whatever state we do have
         }
         return;
@@ -7147,6 +7137,15 @@ export class Coordinator {
           const dir = await this.opts.provider.genesisDir(msg.genesisId);
           const loadedDraft = await loadGenesisConversation(dir, msg.genesisId);
           if (loadedDraft.worldId || loadedDraft.founding) throw new Error("This world has already begun.");
+          // Directory sheets own their content; a legacy form array cannot overwrite them.
+          for (const kind of ["characters", "locations"] as const) {
+            for (const entity of msg.draft[kind]) {
+              const existing = loadedDraft.blueprint[kind].find(one => one.name.toLowerCase() === entity.name.toLowerCase());
+              if (existing && existing.line !== entity.line && await stat(join(dir, "draft", kind, `${existing.slug}.json`)).then(() => true, () => false)) {
+                throw new Error(`${existing.name} has a drafted sheet. Ask in the conversation to change its text, then approve the updated sheet.`);
+              }
+            }
+          }
           const previous: Record<string, unknown> = await readFile(join(dir, "draft.json"), "utf8").then(raw => JSON.parse(raw) as Record<string, unknown>)
             .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return {}; throw err; });
           const combine = (old: unknown, added: Array<{ name: string; line: string }>) =>
@@ -7193,18 +7192,9 @@ export class Coordinator {
             }
             let loaded = await loadGenesisConversation(dir, id);
             if (msg.kind === "genesis-load" && loaded.worldId) await this.openWorld(loaded.worldId);
-            if (msg.kind === "genesis-load" && loaded.worldId && loaded.formHandoff === "pending") {
+            if (loaded.worldId && loaded.formHandoff === "pending") {
               const worldId = loaded.worldId;
-              const carry = (async () => {
-                await this.carryGenesisAttachments(id, worldId);
-                const store = this.opts.provider.openStore?.();
-                if (!store || store.worldId !== worldId) throw new Error("The founding world did not open.");
-                if (loaded.turns.length) {
-                  await store.ensureSchemaVersion(FOUNDING_CONVERSATION_SCHEMA_VERSION, "founding-chat");
-                  await carryGenesisConversation(dir, store.dir);
-                }
-                await atomicWriteFile(join(genesisControlDir(dir), "completed.json"), JSON.stringify({ worldId, form: true }) + "\n");
-              })();
+              const carry = this.carrying.get(id) ?? this.completeGenesisFormHandoff(id, worldId);
               this.carrying.set(id, carry);
               await carry.finally(() => this.carrying.delete(id));
               loaded = await loadGenesisConversation(dir, id);
@@ -16168,9 +16158,39 @@ export class Coordinator {
   private async carryGenesisAttachments(genesisId: string, worldId: string): Promise<void> {
     const dir = await this.opts.provider.genesisDir?.(genesisId).catch(() => null);
     if (!dir) return;
+    await this.inGenesisWorld(worldId, store => this.fileGenesisAttachments(dir, store));
+  }
+
+  private async inGenesisWorld(worldId: string, work: (store: WorldStore) => Promise<void>): Promise<void> {
+    if (this.opts.provider.withWorldStore) return this.opts.provider.withWorldStore(worldId, work);
+    const store = this.opts.provider.openStore?.();
+    if (!store || store.worldId !== worldId) throw new Error("The founding world is unavailable.");
+    await work(store);
+  }
+
+  private async fileGenesisAttachments(dir: string, store: WorldStore): Promise<void> {
     for (const sourcePath of await sandboxAttachments(dir)) {
-      await this.fileOne(worldId, sourcePath, {});
+      const outcome = await fileArtifact(store, { sourcePath,
+        ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
+        abandoned: () => this.stopping,
+      });
+      if (outcome.outcome === "refused" || outcome.outcome === "needs-consent") throw new Error(outcome.reason);
     }
+    this.refreshIfStillOpen(store);
+  }
+
+  private async completeGenesisFormHandoff(genesisId: string, worldId: string): Promise<void> {
+    const dir = await this.opts.provider.genesisDir?.(genesisId);
+    if (!dir) throw new Error("The founding conversation is unavailable.");
+    await this.inGenesisWorld(worldId, async store => {
+      await this.fileGenesisAttachments(dir, store);
+      if ((await foundingMessages(dir)).length) {
+        await store.ensureSchemaVersion(FOUNDING_CONVERSATION_SCHEMA_VERSION, "founding-chat");
+        await carryGenesisConversation(dir, store.dir);
+      }
+      await atomicWriteFile(join(genesisControlDir(dir), "completed.json"), JSON.stringify({ worldId, form: true }) + "\n");
+    });
+    this.emit(await loadGenesisConversation(dir, genesisId));
   }
 
   private nowIso(): string {
@@ -16590,7 +16610,7 @@ export class Coordinator {
     opts: { links?: string[]; allowLarge?: boolean; supersedes?: string; production?: string | null },
   ): Promise<string | null> {
     const store = this.opts.provider.openStore?.();
-    if (!store) return null;
+    if (!store || store.worldId !== worldId) return null;
     const outcome = await fileArtifact(store, {
       sourcePath,
       // Measured once, at the moment the bytes land, rather than by every reader afterwards (#283).
