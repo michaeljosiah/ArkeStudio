@@ -52,7 +52,7 @@ export const PropSchema = z
   .strict();
 export type Prop = z.infer<typeof PropSchema>;
 
-export const CONVERSATIONAL_PROPS_SCHEMA_VERSION = 32;
+export const CONVERSATIONAL_PROPS_SCHEMA_VERSION = 37;
 export const PropAuthoringChangeSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("create"), name: z.string().trim().min(1).max(80),
     states: z.array(z.string().trim().min(1).max(80)).max(100).default([]) }).strict(),
