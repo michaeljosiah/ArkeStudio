@@ -161,6 +161,7 @@ interface StoreState {
       conversationId?: string;
       worldId?: string;
       review?: import("@arke-studio/contracts").GenesisContentReview;
+      reviewRequestId?: string;
       images?: import("@arke-studio/contracts").GenesisImages;
       voices?: import("@arke-studio/contracts").GenesisVoices;
       imports?: import("@arke-studio/contracts").GenesisImports;
@@ -1512,7 +1513,9 @@ function handleFrame(json: string): void {
     } else if (event.type === "genesis.imports") {
       genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], imports: event.imports } };
     } else if (event.type === "genesis.review") {
-      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], review: event.review } };
+      if (genesis[event.genesisId]?.reviewRequestId === event.requestId) {
+        genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], review: event.review } };
+      }
     } else if (event.type === "genesis.discarded") {
       genesis = { ...genesis };
       delete genesis[event.genesisId];
@@ -1528,6 +1531,7 @@ function handleFrame(json: string): void {
         founding: event.founding,
         formHandoff: event.formHandoff,
         frozenModels: event.frozenModels,
+        review: undefined, reviewRequestId: ulid(),
         ...(event.detail ? { detail: event.detail } : {}),
         ...(event.worldId ? { worldId: event.worldId } : {}),
       } };
@@ -1543,7 +1547,7 @@ function handleFrame(json: string): void {
       };
     } else if (event.type === "genesis.blueprint") {
       const g = genesis[event.genesisId] ?? emptyGenesis();
-      genesis = { ...genesis, [event.genesisId]: { ...g, blueprint: event.blueprint } };
+      genesis = { ...genesis, [event.genesisId]: { ...g, blueprint: event.blueprint, review: undefined, reviewRequestId: ulid() } };
     } else if (event.type === "world-image.plan") {
       keyArtPlans = {
         ...keyArtPlans,
@@ -2703,7 +2707,12 @@ export function genesisChat(genesisId: string, text: string): void {
 
 export function listGenesisDrafts(): void { send({ kind: "genesis-list" }); }
 export function loadGenesisDraft(genesisId: string): void { send({ kind: "genesis-load", genesisId }); }
-export function reviewGenesisDraft(genesisId: string): void { send({ kind: "genesis-review", genesisId }); }
+function genesisReviewRequest(genesisId: string): string {
+  const requestId = ulid();
+  emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...emptyGenesis(), ...current.genesis[genesisId], reviewRequestId: requestId } } });
+  return requestId;
+}
+export function reviewGenesisDraft(genesisId: string): void { send({ kind: "genesis-review", genesisId, requestId: genesisReviewRequest(genesisId) }); }
 export function reviewGenesisImages(genesisId: string, models?: Partial<Record<import("@arke-studio/contracts").Capability, string>>): void {
   send({ kind: "genesis-images", genesisId, ...(models ? { models } : {}) });
 }
@@ -2729,7 +2738,7 @@ export function proposeGenesisWorld(genesisId: string, draft: import("@arke-stud
   send({ kind: "genesis-propose-world", genesisId, draft });
 }
 export function decideGenesisDraft(genesisId: string, choices: Array<{ key: string; digest: string }>, decision: "approve" | "reject"): void {
-  send({ kind: "genesis-decide", genesisId, choices, decision, requestId: ulid() });
+  send({ kind: "genesis-decide", genesisId, choices, decision, requestId: genesisReviewRequest(genesisId) });
 }
 
 export function genesisDiscard(genesisId: string): void {
