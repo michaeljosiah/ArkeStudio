@@ -503,7 +503,7 @@ export class WorldChatRunner {
      */
     let { events } = await store.read();
     if (this.deps.summarise && !events.some(envelope => envelope.event.type === "summary.updated") &&
-      events.filter(envelope => envelope.event.type === "founding.message").length > 50) {
+      events.some(envelope => envelope.event.type === "founding.message")) {
       await refreshConversationSummary(store, this.deps.summarise);
       events = (await store.read()).events;
     }
