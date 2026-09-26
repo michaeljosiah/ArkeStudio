@@ -74,3 +74,16 @@ it("shows failed and held work with retry controls while retaining completed res
   assert.match(retryHtml, /Stop and skip remaining work/);
   assert.doesNotMatch(retryHtml, /Keep completed work and leave the rest/);
 });
+it("keeps readiness requests behind a pending content decision", async () => {
+  const store = await import("../src/lib/store.js");
+  const sent: string[] = [];
+  __setStateForTest(FIXTURE_STATE);
+  __setBridgeForTest({ send: (message: string) => sent.push(message) } as unknown as ArkeBridge);
+  try {
+    store.decideGenesisDraft("gen-pending-content", [{ key: "world", digest: "reviewed" }], "approve");
+    reviewGenesisReadiness("gen-pending-content");
+    leaveGenesisFinding("gen-pending-content", "finding", "reviewed");
+    assert.equal(sent.length, 1);
+    assert.ok(!__stateForTest().genesis["gen-pending-content"]?.readinessPending);
+  } finally { __setBridgeForTest(null); __setStateForTest(FIXTURE_STATE); }
+});
