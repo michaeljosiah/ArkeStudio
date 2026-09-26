@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { createHash } from "node:crypto";
 import { JobSchema, genesisSheetIds, type GenesisBlueprint, type GenesisImageCandidate, type GenesisImageSelection, type LedgerEntry } from "@arke-studio/contracts";
@@ -75,7 +75,10 @@ export async function installGenesisImage(workspace: string, selection: GenesisI
   if (!take?.media) throw new Error("The approved image could not be recorded.");
   const kit = (await readKit(store, sheet.id))?.kit;
   if (sheet.type === "character") {
-    if (kit?.mainPhoto?.sourceTakeId === take.id && !sourceCandidate) return;
+    if (kit?.mainPhoto?.sourceTakeId === take.id) {
+      if (sourceCandidate) await store.ownedWrite(() => rm(join(store.dir, sourceCandidate!), { force: true }));
+      return;
+    }
     const result = await acceptMainPhoto(store, sheet, store.getBundle(), { source: "take", takeId: take.id }, sourceCandidate);
     if (result.status !== "accepted") throw new Error("The approved main photo could not be assigned.");
   } else {
