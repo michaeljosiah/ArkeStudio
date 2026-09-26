@@ -1785,6 +1785,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("genesis.images"), genesisId: z.string().min(1), images: GenesisImagesSchema }).strict(),
   z.object({ ...base, type: z.literal("genesis.voices"), genesisId: z.string().min(1), voices: GenesisVoicesSchema }).strict(),
   z.object({ ...base, type: z.literal("genesis.readiness"), genesisId: z.string().min(1), review: GenesisReadinessSchema }).strict(),
+  z.object({ ...base, type: z.literal("genesis.import-error"), genesisId: z.string().min(1), detail: z.string() }).strict(),
   z.object({ ...base, type: z.literal("genesis.imports"), genesisId: z.string().min(1), imports: GenesisImportsSchema }).strict(),
   z
     .object({
