@@ -3,7 +3,7 @@ import { BlueprintCharacterSchema, BlueprintFactionSchema, BlueprintLocationSche
 import { GenesisPropSchema } from "./prop.js";
 import { SHEET_SHAPES } from "./sheet-shapes.js";
 
-export const FOUNDING_CONTENT_SCHEMA_VERSION = 34;
+export const FOUNDING_CONTENT_SCHEMA_VERSION = 36;
 
 export const GenesisContentSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("prop"), value: GenesisPropSchema }).strict(),
