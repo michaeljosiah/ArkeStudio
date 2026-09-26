@@ -796,6 +796,13 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
   const drafts = useGenesis();
   const g = drafts[genesisId];
   useEffect(() => { if (g?.status === "failed") setSubmittedName(null); }, [g?.status]);
+  useEffect(() => {
+    if (!g?.founding) return;
+    setModels(g.frozenModels);
+    setLook(g.blueprint?.look ?? "");
+    setLookForBuild(g.blueprint?.look ?? "");
+    setGenMode("chat");
+  }, [g?.founding, g?.frozenModels, g?.blueprint?.look]);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   useEffect(() => {
     if (connection !== "open") return;
@@ -1226,7 +1233,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                     {turn.role === "user" ? turn.text : renderInlineMarkdown(turn.text)}
                   </div>
                 ))}
-                {g?.imports && <GenesisImportCards imports={g.imports} busy={chatRunning || buildPressed || !!g.worldId || !!g.founding}
+                {g?.imports && <GenesisImportCards imports={g.imports} blueprint={blueprint} busy={chatRunning || buildPressed || !!g.worldId || !!g.founding}
                   onResolve={resolution => resolveGenesisImport(genesisId, resolution)}
                   onRefresh={() => reviewGenesisImports(genesisId)}
                   onExtract={name => setMessage(`Please extract reviewable worldbuilding proposals from attachments/${name}. Cite exact source quotes; keep interpretations and suggested relationships separate from the evidence.`)} />}
@@ -1293,7 +1300,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                             <Button
                               variant="outline"
                               size="sm"
-                              disabled={previewEstimate === null}
+                              disabled={previewEstimate === null || !!g?.founding || buildPressed}
                               onClick={() => generateLookPreview(genesisId, models)}
                             >
                               See the look{previewEstimate !== null ? ` · ~${formatMicroUsd(previewEstimate)}` : ""}
@@ -1598,7 +1605,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
             capabilities={WORLD_MODEL_CAPABILITIES}
             choices={models}
             scopeWord="this world"
-            disabled={buildPressed || submittedName !== null}
+            disabled={buildPressed || submittedName !== null || !!g?.founding}
             onChange={(capability, modelId) => setModels((current) => withModelChoice(current, capability, modelId))}
           />
           <div style={{ display: "grid", gap: 8 }}>
