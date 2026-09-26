@@ -2826,11 +2826,16 @@ function genesisReviewRequest(genesisId: string): string {
   emitChange({ ...current, genesis: { ...current.genesis, [genesisId]: { ...emptyGenesis(), ...current.genesis[genesisId], reviewRequestId: requestId, reviewPending: true }, }, buildPlans: { ...current.buildPlans, [genesisId]: {} } });
   return requestId;
 }
-export function reviewGenesisDraft(genesisId: string): void { send({ kind: "genesis-review", genesisId, requestId: genesisReviewRequest(genesisId) }); }
+export function reviewGenesisDraft(genesisId: string): void {
+  if (current.genesis[genesisId]?.founding || current.genesis[genesisId]?.worldId) return;
+  send({ kind: "genesis-review", genesisId, requestId: genesisReviewRequest(genesisId) });
+}
 export function proposeGenesisWorld(genesisId: string, draft: import("@arke-studio/contracts").GenesisDraft): void {
   send({ kind: "genesis-propose-world", genesisId, draft });
 }
 export function decideGenesisDraft(genesisId: string, choices: Array<{ key: string; digest: string }>, decision: "approve" | "reject"): void {
+  const draft = current.genesis[genesisId];
+  if (draft?.reviewPending || draft?.founding || draft?.worldId) return;
   send({ kind: "genesis-decide", genesisId, choices, decision, requestId: genesisReviewRequest(genesisId) });
 }
 
