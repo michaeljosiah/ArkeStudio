@@ -1,4 +1,4 @@
-import { genesisContentChanges, type GenesisContent, type GenesisContentReview, type GenesisReviewCard } from "@arke-studio/contracts";
+import { genesisContentChanges, genesisContentRows, type GenesisBlueprint, type GenesisContent, type GenesisContentReview, type GenesisReviewCard } from "@arke-studio/contracts";
 import { renderInlineMarkdown } from "./inline-markdown.js";
 import { Button, Callout } from "./ui.js";
 function Sources({ sources }: { sources?: import("@arke-studio/contracts").GenesisSource[] }) {
@@ -41,6 +41,12 @@ function Content({ content, review }: { content: GenesisContent; review: Genesis
   </>;
 }
 
+export function ApprovedGenesisContent({ blueprint }: { blueprint: GenesisBlueprint }) {
+  const cards = genesisContentRows(blueprint).map(row => ({ ...row, digest: "", status: "approved" as const }));
+  return <details><summary>Exact approved content to save</summary>{cards.map(card => <section key={card.key}>
+    <h3>{card.title}</h3><Content content={card.content} review={{ cards, selected: blueprint, problems: [] }} />
+  </section>)}</details>;
+}
 export function GenesisContentCards({ review, busy, onDecide, onRevise }: {
   review: GenesisContentReview; busy: boolean;
   onDecide(cards: GenesisReviewCard[], decision: "approve" | "reject"): void;

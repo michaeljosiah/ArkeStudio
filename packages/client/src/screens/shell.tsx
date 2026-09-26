@@ -9,6 +9,9 @@ import { renderInlineMarkdown } from "../components/inline-markdown.js";
 import { GenesisContentCards } from "../components/genesis-review.js";
 import { GenesisImageCards } from "../components/genesis-images.js";
 import { GenesisVoiceCards } from "../components/genesis-voices.js";
+import { GenesisReadinessCard, FoundingProgressCard } from "../components/genesis-readiness.js";
+import { ApprovedGenesisContent } from "../components/genesis-review.js";
+import { reviewGenesisReadiness, leaveGenesisFinding } from "../lib/store.js";
 import { reviewGenesisVoices, generateGenesisVoice, decideGenesisVoice } from "../lib/store.js";
 import { GenesisImportCards } from "../components/genesis-imports.js";
 import { reviewGenesisImports, resolveGenesisImport } from "../lib/store.js";
@@ -62,7 +65,6 @@ import {
   cancelJob,
   proposeGenesisWorld,
   genesisDiscard,
-  stopFoundingBuild,
   hostCanAttach,
   chooseClaudeExecutable,
   clearClaudeExecutable,
@@ -708,6 +710,17 @@ function BuildCard({
         <p className="fy-actioncard__notice">{entry.reason ?? "the build could not be sized"}</p>
       ) : (
         <>
+          {plan.approvedContent && <ApprovedGenesisContent blueprint={plan.approvedContent} />}
+          {plan.approvedContent?.selectedImages?.map(selection => <details key={selection.target}>
+            <summary>Reuse {selection.candidate.label} for {selection.target}</summary>
+            <img className="fy-actioncard__media" src={genesisMediaUrl(plan.genesisId, selection.candidate.file)} alt={selection.candidate.label} />
+          </details>)}
+          {plan.approvedContent?.selectedVoices?.map(selection => <p key={selection.plan.intent.target}>
+            Assign {selection.plan.voice.label} ({selection.plan.voice.provider}) to {selection.plan.title}; no new audition.
+          </p>)}
+          {plan.work && <details><summary>Work and reused selections</summary>{plan.work.map(item => <p key={item.key}>
+            {item.name} · {item.kind.replaceAll("-", " ")} · {item.authorized ? formatMicroUsd(item.estimatedMicroUsd) : "not authorized"}
+          </p>)}</details>}
           <p className="fy-actioncard__consequence">
             {counts
               .filter(([count]) => count > 0)
@@ -774,6 +787,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
   // the thread and founded in one press there; a bare form still creates and seeds the old way.
   const [lookForBuild, setLookForBuild] = useState("");
   const [buildPressed, setBuildPressed] = useState(false);
+  const [generateImages, setGenerateImages] = useState(true);
   const [planRequestId, setPlanRequestId] = useState<string | null>(null);
   const [planStartedAt, setPlanStartedAt] = useState<string | null>(null);
   const buildCardRef = useRef<HTMLDivElement>(null);
@@ -991,8 +1005,8 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
     setPlanStartedAt(new Date().toISOString());
     // A refusal answered the blueprint that moved; the fresh plan is the review it asked for.
     setBuildRequestId(null);
-    planFoundingBuild(genesisId, requestId, lookText, models);
-  }, [buildCardOpen, buildPressed, previewJob?.status, blueprint, g?.review, g?.images, g?.voices, lookForBuild, look, lookSource, genesisId, models, imageRoute]);
+    planFoundingBuild(genesisId, requestId, lookText, models, generateImages);
+  }, [buildCardOpen, buildPressed, previewJob?.status, blueprint, g?.review, g?.images, g?.voices, lookForBuild, look, lookSource, genesisId, models, imageRoute, generateImages]);
 
   const openBuildCard = (lookText: string) => {
     setLookForBuild(lookText);
@@ -1001,7 +1015,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
     const requestId = ulid();
     setPlanRequestId(requestId);
     setPlanStartedAt(new Date().toISOString());
-    planFoundingBuild(genesisId, requestId, lookText, models);
+    planFoundingBuild(genesisId, requestId, lookText, models, generateImages);
     setStep("draft");
   };
 
@@ -1216,10 +1230,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                 setParams({ draft: `gen-${ulid().toLowerCase()}` });
               }}>{confirmDiscard ? "Discard this conversation and its uploads" : "Discard draft"}</Button>
             )}
-            {myBuild?.status === "running" && <Callout title={`Building ${myBuild.worldName}`}>
-              {myBuild.progress.terminal} of {myBuild.progress.authorized} complete. {myBuild.working.join(", ")}
-              <Button onClick={() => stopFoundingBuild(myBuild.worldId)}>Stop</Button>
-            </Callout>}
+            {myBuild && <FoundingProgressCard build={myBuild} />}
             {genMode === "chat" ? (
               <>
                 {/* 12a opens with Arke already talking. It opened here with sixty-six words of
@@ -1239,6 +1250,9 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                 {g?.review && <GenesisContentCards review={g.review} busy={chatRunning || buildPressed || myBuild?.status === "running"}
                   onDecide={(cards, decision) => decideGenesisDraft(genesisId, cards.map(card => ({ key: card.key, digest: card.digest })), decision)}
                   onRevise={title => setMessage(`Please revise ${title}: `)} />}
+                {!g?.worldId && <GenesisReadinessCard review={g?.readiness} busy={chatRunning || buildPressed}
+                  onRefresh={() => reviewGenesisReadiness(genesisId)} onFix={setMessage}
+                  onLeave={(id, digest) => leaveGenesisFinding(genesisId, id, digest)} />}
                 {g?.voices && <GenesisVoiceCards genesisId={genesisId} voices={g.voices} jobs={voiceJobs} busy={chatRunning || buildPressed}
                   onGenerate={(intentId, digest) => generateGenesisVoice(genesisId, intentId, digest)}
                   onDecide={(target, decision, candidate) => decideGenesisVoice(genesisId, target, decision, candidate)}
@@ -1320,6 +1334,8 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                 )}
                 {buildMode && buildCardOpen && (
                   <div ref={buildCardRef}>
+                    <label><input type="checkbox" checked={generateImages} disabled={buildPressed}
+                      onChange={event => { setGenerateImages(event.target.checked); plannedAgainst.current = null; }} /> Generate remaining images</label>
                     <BuildCard
                       plan={visibleBuildPlan}
                       startedAt={planStartedAt}
@@ -1330,7 +1346,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                         if (buildRequestRef.current === null) buildRequestRef.current = ulid();
                         setBuildRequestId(buildRequestRef.current);
                         setBuildPressed(true);
-                        beginFoundingBuild(genesisId, buildRequestRef.current, lookForBuild, models);
+                        beginFoundingBuild(genesisId, buildRequestRef.current, lookForBuild, models, visibleBuildPlan?.plan?.approvalDigest, generateImages);
                       }}
                     />
                   </div>

@@ -648,6 +648,9 @@ export function compileBuildItems(
 
 export const BuildReviewSchema = z
   .object({
+    approvalDigest: z.string().optional(),
+    approvedContent: GenesisBlueprintSchema.optional(),
+    work: z.array(z.object({ key: z.string(), name: z.string(), kind: BuildItemKindSchema, authorized: z.boolean(), estimatedMicroUsd: z.number() }).strict()).optional(),
     genesisId: GenesisIdSchema,
     requestId: UlidSchema,
     worldName: z.string().min(1),

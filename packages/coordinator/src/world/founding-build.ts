@@ -1,5 +1,6 @@
 import { copyFile, mkdir, open, readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { conversationActionDigest } from "../arke-actions/digest.js";
 import {
   ART_DIRECTION_PATH,
   FOUNDING_IMPORTS_SCHEMA_VERSION,
@@ -308,6 +309,7 @@ export class FoundingBuildService {
     requestId: string,
     look?: string,
     models?: Partial<Record<Capability, string>>,
+    generateImages = true,
   ): Promise<void> {
     const refuse = (reason: string) =>
       this.ports.emit({
@@ -323,7 +325,7 @@ export class FoundingBuildService {
       const sandbox = await this.ports.genesisDir(genesisId);
       const frozen = await frozenFoundingInput(sandbox);
       blueprint = frozen?.blueprint ?? (this.ports.reviewedBlueprint ? await this.ports.reviewedBlueprint(genesisId) : await foldBlueprint(sandbox));
-      if (frozen) { models = frozen.models; look = frozen.blueprint.look; }
+      if (frozen) { models = frozen.models; look = frozen.blueprint.look; generateImages = frozen.generateImages ?? true; }
     } catch (err) {
       refuse(describeCoordinatorError(err));
       return;
@@ -333,7 +335,8 @@ export class FoundingBuildService {
       return;
     }
     if (blueprint.dropped.length) { refuse("Repair the unreadable draft files before beginning."); return; }
-    const { route, notes } = await this.resolveImageRoute(models);
+    const resolved = await this.resolveImageRoute(models);
+    const route = generateImages ? resolved.route : null, notes = generateImages ? resolved.notes : ["No new image generation is authorized. Approved media will be reused."];
     if (this.ports.reviewNotes) notes.push(...await this.ports.reviewNotes(genesisId));
     for (const character of blueprint.characters) {
       if (character.neverDepicted === true) notes.push(`${character.name} — never depicted`);
@@ -359,6 +362,9 @@ export class FoundingBuildService {
     const generations = items.filter((item) => item.authorized && item.idempotencyKey !== undefined).length;
     const estimateMicroUsd = items.filter((item) => item.authorized).reduce((sum, item) => sum + item.estimatedMicroUsd, 0);
     const plan: BuildReview = BuildReviewSchema.parse({
+      approvalDigest: await this.approvalDigest(genesisId, blueprint, look, models, route, items),
+      approvedContent: { ...blueprint, look: effectiveLook(blueprint, look) },
+      work: items.map(({ key, name, kind, authorized, estimatedMicroUsd }) => ({ key, name, kind, authorized, estimatedMicroUsd })),
       genesisId,
       requestId,
       worldName: blueprint.name,
@@ -383,16 +389,28 @@ export class FoundingBuildService {
   // The press (R-13, R-16, R-17)
   // -------------------------------------------------------------------------
 
+  private async approvalDigest(genesisId: string, blueprint: GenesisBlueprint, look: string | undefined,
+    models: Partial<Record<Capability, string>> | undefined, route: ImageRoute | null, items: BuildItem[]): Promise<string> {
+    const founded = effectiveLook(blueprint, look);
+    const normalized = { ...blueprint, ...(founded !== undefined ? { look: founded } : {}) };
+    if (founded === undefined) delete normalized.look;
+    return conversationActionDigest({ blueprint: normalized, models: models ?? null, route,
+      items: items.map(({ idempotencyKey: _key, ...item }) => item),
+      look: await this.masterLookNote(genesisId, founded) });
+  }
+
   async begin(
     genesisId: string,
     requestId: string,
     look?: string,
     models?: Partial<Record<Capability, string>>,
+    approvalDigest?: string,
+    generateImages = true,
   ): Promise<void> {
     // Two presses in one tick are one run (row 8): the second joins the first's promise.
     const inFlight = this.beginning.get(genesisId);
     if (inFlight) return inFlight;
-    const work = this.beginWork(genesisId, requestId, look, models).finally(() => this.beginning.delete(genesisId));
+    const work = this.beginWork(genesisId, requestId, look, models, approvalDigest, generateImages).finally(() => this.beginning.delete(genesisId));
     this.beginning.set(genesisId, work);
     return work;
   }
@@ -402,6 +420,8 @@ export class FoundingBuildService {
     requestId: string,
     look?: string,
     models?: Partial<Record<Capability, string>>,
+    approvalDigest?: string,
+    generateImages = true,
   ): Promise<void> {
     const sandbox = await this.ports.genesisDir(genesisId);
     const markerPath = join(genesisControlDir(sandbox), BEGUN_MARKER);
@@ -427,7 +447,7 @@ export class FoundingBuildService {
     const frozen = await frozenFoundingInput(sandbox);
     const folded = frozen?.blueprint ?? (this.ports.reviewedBlueprint ? await this.ports.reviewedBlueprint(genesisId) : await foldBlueprint(sandbox));
     if (folded.dropped.length) throw new Error("Repair the unreadable draft files before beginning.");
-    if (frozen) models = frozen.models;
+    if (frozen) { models = frozen.models; generateImages = frozen.generateImages ?? true; }
     const founded = frozen ? folded.look : effectiveLook(folded, look);
     const blueprint: GenesisBlueprint = {
       ...folded,
@@ -445,13 +465,15 @@ export class FoundingBuildService {
       });
       return;
     }
-    const { route } = await this.resolveImageRoute(models);
+    const route = generateImages ? (await this.resolveImageRoute(models)).route : null;
     const items = compileBuildItems(
       blueprint,
       route === null ? null : { model: route.model, referenceImages: route.referenceImages },
     );
     const capMicroUsd = items.filter((item) => item.authorized).reduce((sum, item) => sum + item.estimatedMicroUsd, 0);
-    if (!frozen) await atomicWriteFile(join(genesisControlDir(sandbox), "founding-input.json"), JSON.stringify({ blueprint, ...(models ? { models } : {}) }) + "\n");
+    if (!frozen && approvalDigest !== undefined && approvalDigest !== await this.approvalDigest(genesisId, folded, look, models, route, items))
+      throw new Error("The approved content, media choices or generation estimate changed. Review the current build before Begin.");
+    if (!frozen) await atomicWriteFile(join(genesisControlDir(sandbox), "founding-input.json"), JSON.stringify({ blueprint, generateImages, ...(models ? { models } : {}) }) + "\n");
 
     // Wave 0 is the world itself: world.json, art direction v1 from the look the conversation
     // proposed, and the bible it wrote (R-18). The marker is written the moment the world's

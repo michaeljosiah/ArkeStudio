@@ -163,6 +163,7 @@ interface StoreState {
       review?: import("@arke-studio/contracts").GenesisContentReview;
       images?: import("@arke-studio/contracts").GenesisImages;
       voices?: import("@arke-studio/contracts").GenesisVoices;
+      readiness?: import("@arke-studio/contracts").GenesisReadiness;
       imports?: import("@arke-studio/contracts").GenesisImports;
       founding?: boolean;
       formHandoff?: "pending" | "completed";
@@ -1505,13 +1506,15 @@ function handleFrame(json: string): void {
     } else if (event.type === "setup.status") {
       setupStatus = event.setup;
     } else if (event.type === "genesis.images") {
-      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], images: event.images } };
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], images: event.images, readiness: undefined } };
     } else if (event.type === "genesis.voices") {
-      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], voices: event.voices } };
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], voices: event.voices, readiness: undefined } };
+    } else if (event.type === "genesis.readiness") {
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], readiness: event.review } };
     } else if (event.type === "genesis.imports") {
-      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], imports: event.imports } };
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], imports: event.imports, readiness: undefined } };
     } else if (event.type === "genesis.review") {
-      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], review: event.review } };
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], review: event.review, readiness: undefined } };
     } else if (event.type === "genesis.discarded") {
       genesis = { ...genesis };
       delete genesis[event.genesisId];
@@ -2706,6 +2709,10 @@ export function reviewGenesisImages(genesisId: string, models?: Partial<Record<i
   send({ kind: "genesis-images", genesisId, ...(models ? { models } : {}) });
 }
 export function reviewGenesisVoices(genesisId: string): void { send({ kind: "genesis-voices", genesisId }); }
+export function reviewGenesisReadiness(genesisId: string): void { send({ kind: "genesis-readiness", genesisId }); }
+export function leaveGenesisFinding(genesisId: string, findingId: string, digest: string): void {
+  send({ kind: "genesis-readiness-leave", genesisId, requestId: ulid(), findingId, digest });
+}
 export function generateGenesisVoice(genesisId: string, intentId: string, digest: string): void {
   send({ kind: "genesis-voice-generate", genesisId, intentId, digest, requestId: ulid() });
 }
@@ -2736,12 +2743,13 @@ export function genesisDiscard(genesisId: string): void {
 
 // ---- The founding build (SPEC-031) ----------------------------------------
 
-export function planFoundingBuild(genesisId: string, requestId: string, look?: string, models?: ModelChoices): void {
+export function planFoundingBuild(genesisId: string, requestId: string, look?: string, models?: ModelChoices, generateImages = true): void {
   // The same look the press will send: the review's master-look note is only true if it asks
   // the carry question against the words the world would actually be founded on (SPEC-031 R-54).
   // The same holds for the models: the review prices the build on the model the press will use.
   send({
     kind: "plan-founding-build",
+    generateImages,
     genesisId,
     requestId,
     ...(look !== undefined ? { look } : {}),
@@ -2749,9 +2757,11 @@ export function planFoundingBuild(genesisId: string, requestId: string, look?: s
   });
 }
 
-export function beginFoundingBuild(genesisId: string, requestId: string, look?: string, models?: ModelChoices): void {
+export function beginFoundingBuild(genesisId: string, requestId: string, look?: string, models?: ModelChoices, approvalDigest?: string, generateImages = true): void {
   send({
     kind: "begin-founding-build",
+    generateImages,
+    ...(approvalDigest ? { approvalDigest } : {}),
     genesisId,
     requestId,
     ...(look !== undefined ? { look } : {}),

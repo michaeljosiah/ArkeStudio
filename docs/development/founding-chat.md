@@ -99,6 +99,20 @@ for its audition. Decisions survive resume and character renames; unavailable ch
 removed without blocking text-only founding. Begin installs selections through ordinary sheet
 voice assignment and reuses them after recovery. Audition retries do not resubmit uncertain
 requests. Worlds carrying these decisions require schema 33.
+
+Check readiness reviews current approvals, invalid relationships, source evidence and selected
+media. Different imported interpretations are reported as possible conflicts, never established
+contradictions. Optional findings and open questions can be explicitly left unresolved; blockers
+still require repair and authored changes still require their ordinary approval.
+
+The final build review includes exact approved content, retained media, remaining work and
+current cost. Its digest binds Begin to those inputs; changed content, choices or estimates
+require a fresh review. Uncheck Generate remaining images to create a text-only world or reuse
+approved media without new image spend. This choice survives interrupted founding.
+
+Build progress and failures appear in chat. Retry delegates to the existing per-item recovery
+and cap checks; stop skips remaining work while keeping completed records. Leaving unfinished
+work dismisses its notice without claiming it succeeded.
 # Reviewing founding content
 
 Issue #1269 adds versioned content decisions to the founding conversation. The agent proposes

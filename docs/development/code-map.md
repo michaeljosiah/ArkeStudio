@@ -134,6 +134,17 @@ For persistence work read WorldStore → Committer → `world/atomic.ts` and the
 
 ## Workflow traces
 
+### Review readiness and repair a founding build
+
+Contracts `genesis-readiness.ts` separates blockers, approval work, possible conflicts and
+optional/open choices. Coordinator `harness/genesis-readiness.ts` joins approved content,
+verified import evidence and media selections; private choices are fenced by review digest.
+`world/founding-build.ts` binds Begin to the current approved blueprint, model/estimate and
+media choices. Client `components/genesis-readiness.tsx` hosts review and existing build
+retry/stop controls in founding and world chat. Checks: coordinator
+`test/harness/genesis-readiness.test.ts`, `test/world/founding-build.test.ts`;
+client `test/genesis-readiness.test.tsx`.
+
 ### Resume a founding conversation
 
 Client `screens/shell.tsx` and `lib/store.ts` send `genesis-list` / `genesis-load`.

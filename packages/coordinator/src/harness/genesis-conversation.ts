@@ -14,7 +14,7 @@ export function genesisControlDir(workspace: string): string {
   return dirname(workspace);
 }
 
-const FrozenFoundingSchema = z.object({ blueprint: GenesisBlueprintSchema, models: z.record(CapabilitySchema, z.string()).optional() }).strict();
+const FrozenFoundingSchema = z.object({ blueprint: GenesisBlueprintSchema, models: z.record(CapabilitySchema, z.string()).optional(), generateImages: z.boolean().optional() }).strict();
 export async function frozenFoundingInput(dir: string) {
   return readFile(join(genesisControlDir(dir), "founding-input.json"), "utf8")
     .then(raw => FrozenFoundingSchema.parse(JSON.parse(raw)))

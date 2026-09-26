@@ -456,10 +456,11 @@ import {
   settlePermission,
 } from "./harness/authoring.js";
 import { GenesisService } from "./harness/genesis.js";
-import { carryGenesisConversation, foundingMessages, genesisControlDir, loadGenesisConversation, reserveGenesisWorld } from "./harness/genesis-conversation.js";
+import { carryGenesisConversation, foundingMessages, frozenFoundingInput, genesisControlDir, loadGenesisConversation, reserveGenesisWorld } from "./harness/genesis-conversation.js";
 import { approvedBlueprintForFounding, decideGenesisContent, reviewGenesisContent } from "./harness/genesis-review.js";
 import { decideGenesisImage, genesisImageRequest, reviewGenesisImages, reviewedGenesisImages } from "./harness/genesis-images.js";
 import { decideGenesisVoice, genesisVoiceRequest, generateLocalGenesisVoice, reviewGenesisVoices, reviewedGenesisVoices } from "./harness/genesis-voices.js";
+import { reviewGenesisReadiness, leaveGenesisFinding } from "./harness/genesis-readiness.js";
 import { reviewGenesisImports, resolveGenesisImport, recoverGenesisImports } from "./harness/genesis-imports.js";
 import { FOUNDING_CONVERSATION_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { FoundingBuildService } from "./world/founding-build.js";
@@ -7106,6 +7107,26 @@ export class Coordinator {
         }
         return;
       }
+      case "genesis-readiness":
+      case "genesis-readiness-leave": {
+        let held = false;
+        try {
+          if (!this.opts.provider.genesisDir) throw new Error("Founding conversations are unavailable.");
+          if (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) throw new Error("Wait for the current draft operation before reviewing.");
+          this.genesisDeciding.add(msg.genesisId); held = true;
+          const dir = await this.opts.provider.genesisDir(msg.genesisId);
+          const loaded = await loadGenesisConversation(dir, msg.genesisId);
+          if (loaded.worldId || loaded.founding) throw new Error("Continue repairs in the world's conversation.");
+          const inputs = { jobs: (this.jobQueue?.listJobs() ?? []).filter(job => job.worldId === msg.genesisId),
+            catalogue: await this.voiceService?.catalogue() ?? [], models: this.opts.manifest?.models ?? [] };
+          const review = msg.kind === "genesis-readiness-leave" ? await leaveGenesisFinding(dir, inputs, msg.digest, msg.findingId) : await reviewGenesisReadiness(dir, inputs);
+          await atomicWriteFile(join(dir, "readiness-review.json"), JSON.stringify(review, null, 2));
+          this.emit({ type: "genesis.readiness", at: new Date().toISOString(), genesisId: msg.genesisId, review });
+        } catch (error) {
+          this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: msg.genesisId, status: "failed", detail: describeCoordinatorError(error) });
+        } finally { if (held) this.genesisDeciding.delete(msg.genesisId); }
+        return;
+      }
       case "genesis-voices":
       case "genesis-voice-generate":
       case "genesis-voice-decide": {
@@ -7453,14 +7474,16 @@ export class Coordinator {
           });
           return;
         }
-        await this.foundingBuild.plan(msg.genesisId, msg.requestId, msg.look, msg.models);
+        await this.foundingBuild.plan(msg.genesisId, msg.requestId, msg.look, msg.models, msg.generateImages);
         return;
       }
       case "begin-founding-build": {
         if (!this.foundingBuild) return;
         try {
           if (this.genesis?.isRunning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) throw new Error("Wait for the current reply or decision before beginning the world.");
-          await this.foundingBuild.begin(msg.genesisId, msg.requestId, msg.look, msg.models);
+          const dir = await this.opts.provider.genesisDir!(msg.genesisId);
+          if (!msg.approvalDigest && !await frozenFoundingInput(dir)) throw new Error("Review the current build before Begin.");
+          await this.foundingBuild.begin(msg.genesisId, msg.requestId, msg.look, msg.models, msg.approvalDigest, msg.generateImages);
         } catch (err) {
           this.emit({
             at: new Date().toISOString(),

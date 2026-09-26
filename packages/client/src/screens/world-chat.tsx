@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import type { WorldChatDeletionBlock, WorldChatSummary } from "@arke-studio/contracts";
 import { Composer } from "../components/composer.js";
+import { FoundingProgressCard } from "../components/genesis-readiness.js";
 import { attachmentChipLabel, ConversationTranscript } from "../components/conversation.js";
 import { EmptyState } from "../components/layout.js";
 import { Button, IconButton, cx } from "../components/ui.js";
@@ -746,6 +747,8 @@ export function WorldChatScreen() {
           </div>
 
           <div className="fy-gate__body">
+            {state?.app.builds.filter(build => build.worldId === worldId && (!build.noticeDismissed || build.status === "running"))
+              .map(build => <FoundingProgressCard key={build.worldId} build={build} />)}
             {missing ? (
               <EmptyState
                 title="That conversation is not here"

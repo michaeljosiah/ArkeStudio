@@ -372,6 +372,27 @@ describe("the founding build (SPEC-031)", () => {
     assert.equal(h.queue.jobs.size, 0);
   });
 
+  it("binds Begin to current content and estimate, and supports declining all new images", async t => {
+    const h = await makeHarness(t);
+    const dir = await makeSandbox(h.root, "gen-stale-review");
+    await h.service.plan("gen-stale-review", ulid());
+    const old = lastPlan(h);
+    assert.ok(old.approvalDigest);
+    const raw = JSON.parse(await readFile(join(dir, "draft.json"), "utf8"));
+    await writeFile(join(dir, "draft.json"), JSON.stringify({ ...raw, bible: "A changed argument." }));
+    await assert.rejects(h.service.begin("gen-stale-review", ulid(), undefined, undefined, old.approvalDigest), /estimate changed/);
+    assert.equal(h.provider.openStore(), null);
+    await h.service.plan("gen-stale-review", ulid(), undefined, undefined, false);
+    const current = lastPlan(h);
+    assert.equal(current.generations, 0);
+    assert.equal(current.estimateMicroUsd, 0);
+    assert.match(current.approvedContent!.bible!, /changed argument/);
+    await h.service.begin("gen-stale-review", ulid(), undefined, undefined, current.approvalDigest, false);
+    await until(() => h.lastState()?.status === "completed", "text-only build", BUILD_MS);
+    assert.equal(h.queue.jobs.size, 0);
+    assert.equal(h.provider.openStore()!.getBundle().sheets.length, 3);
+  });
+
   it("saves an approved founding voice through sheet assignment without another audition", async t => {
     const voice = { provider: "kokoro", model: "kokoro-82m", voiceId: "af_heart", label: "Heart", attributes: [], local: true, canClone: false };
     let h!: Harness;
