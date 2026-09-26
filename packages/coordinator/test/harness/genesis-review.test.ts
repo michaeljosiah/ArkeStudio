@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { mkdir, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ulid } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { approvedBlueprintForFounding, decideGenesisContent, reviewGenesisContent } from "../../src/harness/genesis-review.js";
-import { genesisConversation } from "../../src/harness/genesis-conversation.js";
+import { genesisConversation, genesisControlDir } from "../../src/harness/genesis-conversation.js";
 import { parseDraftFrom } from "../../src/harness/genesis.js";
 
 async function draft() {
@@ -138,4 +138,12 @@ it("renaming an entity keeps its stable identity and relationship targets", asyn
   assert.equal(selected.characters[0]?.slug, "maren");
   assert.equal(selected.characters[0]?.name, "Maren Kest");
   assert.deepEqual(selected.locations[0]?.sheet?.links, ["character:maren"]);
+});
+
+it("recovers a torn decision tail on the first review without losing durable approvals", async () => {
+  const { dir } = await draft();
+  const review = await reviewGenesisContent(dir);
+  await decideGenesisContent(dir, review.cards, "approve", ulid());
+  await appendFile(join(genesisControlDir(dir), ".conversation", "events.jsonl"), '{"partial":');
+  assert.ok((await reviewGenesisContent(dir)).cards.every(card => card.status === "approved"));
 });

@@ -49,3 +49,24 @@ it("shows the approved revision, changes and explicit decisions for the displaye
     container.remove();
   }
 });
+
+it("ignores out-of-order reviews and clears approval cards when the blueprint changes", async () => {
+  const store = await import("../src/lib/store.js");
+  const { FIXTURE_STATE } = await import("./fixture-state.js");
+  const sent: Array<{ requestId: string }> = [];
+  store.__setStateForTest(FIXTURE_STATE);
+  store.__setBridgeForTest({ send: (message: string) => sent.push(JSON.parse(message)) } as unknown as import("../src/arke-bridge.js").ArkeBridge);
+  const selected = { name: "Harbour", characters: [], locations: [], factions: [], threads: [], dropped: [], reviewed: true };
+  const review = GenesisContentReviewSchema.parse({ selected, cards: [], problems: [] });
+  const event = { type: "genesis.review" as const, at: new Date().toISOString(), genesisId: "gen-review", review };
+  try {
+    store.reviewGenesisDraft("gen-review"); store.reviewGenesisDraft("gen-review");
+    store.__applyEventForTest({ ...event, requestId: sent[1]!.requestId });
+    store.__applyEventForTest({ ...event, requestId: sent[0]!.requestId, review: { ...review, problems: ["Old response"] } });
+    assert.deepEqual(store.__stateForTest().genesis["gen-review"]?.review?.problems, []);
+    store.__applyEventForTest({ type: "genesis.blueprint", at: event.at, genesisId: event.genesisId, blueprint: selected });
+    assert.equal(store.__stateForTest().genesis["gen-review"]?.review, undefined);
+    store.__applyEventForTest({ ...event, requestId: sent[1]!.requestId });
+    assert.equal(store.__stateForTest().genesis["gen-review"]?.review, undefined);
+  } finally { store.__setBridgeForTest(null); store.__setStateForTest(FIXTURE_STATE); }
+});

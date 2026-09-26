@@ -43,6 +43,7 @@ import { atomicWriteFile } from "./atomic.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { foldBlueprint } from "../harness/blueprint.js";
 import { carryGenesisConversation, genesisConversation, frozenFoundingInput, genesisControlDir, reserveGenesisWorld } from "../harness/genesis-conversation.js";
+import { fileArtifact } from "../artifacts/filing.js";
 import { reviewGenesisContent } from "../harness/genesis-review.js";
 import { carryGenesisImageArtifacts, installGenesisImage } from "../harness/genesis-image-carry.js";
 import { openThread, entryContent } from "../canon/authoring.js";
@@ -480,17 +481,22 @@ export class FoundingBuildService {
       const review = await reviewGenesisContent(sandbox);
       const remaining = review.cards.filter(card => card.status !== "approved");
       if (remaining.length) {
-        const describe = (value: unknown): string => {
-          if (Array.isArray(value)) return value.map(describe).join("\n");
-          if (value && typeof value === "object") return Object.entries(value).map(([key, child]) => `${key}: ${describe(child)}`).join("\n");
-          return String(value ?? "");
-        };
-        const text = "Proposals carried forward from founding. These versions are not established world content. Previously approved versions, where present, remain in force. You can discuss and revise these proposals here; further changes still need approval.\n\n" +
-          remaining.map(card => `### ${card.title} — ${card.status}\n${describe(card.content.value)}`).join("\n\n");
         const log = await genesisConversation(sandbox);
-        const at = this.ports.nowIso();
-        await log.append({ type: "founding.message", message: { id: newId("msg"), turnId: newId("turn"), role: "studio", text, attachmentIds: [], createdAt: at } },
-          { at, requestId: "founding-unapproved-proposals" });
+        for (const card of remaining) {
+          // Each full proposal remains independently readable after the transcript's context
+          // window moves on. Artifact filing deduplicates an interrupted handoff by bytes.
+          const path = join(genesisControlDir(sandbox), "carried-proposals", `founding-proposal-${sha256(card.key).slice(7)}.md`);
+          await mkdir(dirname(path), { recursive: true });
+          await atomicWriteFile(path, `# ${card.title} � ${card.status}\n\nThis proposal is not established world content. Any previously approved version remains in force. Changes still need approval.\n\n${JSON.stringify(card.content, null, 2)}\n`);
+          const filed = await fileArtifact(store, { sourcePath: path });
+          if (filed.outcome !== "filed" && filed.outcome !== "deduplicated") throw new Error(filed.reason);
+          const at = this.ports.nowIso();
+          await log.append({ type: "founding.message", message: {
+            id: newId("msg"), turnId: newId("turn"), role: "studio",
+            text: `Unapproved founding proposal: ${card.title.slice(0, 160)} (${card.status}). The complete proposal is saved in artifacts/${filed.artifact.file}. It can be discussed and revised here; changes still need approval.`,
+            attachmentIds: [], createdAt: at,
+          } }, { at, requestId: `founding-unapproved-proposal:${card.key}:${card.digest}` });
+        }
       }
     }
     await carryGenesisConversation(sandbox, store.dir);
