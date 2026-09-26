@@ -1125,7 +1125,7 @@ it("recovers the authorized route, items and cap after a crash before world crea
   await assert.rejects(h.service.begin(id, ulid(), undefined, undefined, approved.approvalDigest), /simulated crash/);
   const frozen = JSON.parse(await readFile(join(h.root, ".genesis-v2", id, "founding-input.json"), "utf8"));
   assert.ok(frozen.authorization.route);
-  manifest.models.splice(0, manifest.models.length);
+  manifest.models[0]!.pricing = { kind: "perImage", microUsdPerImage: 400000 };
   failCreation = false;
   await h.service.plan(id, ulid());
   assert.deepEqual(lastPlan(h).work, approved.work);
@@ -1135,6 +1135,8 @@ it("recovers the authorized route, items and cap after a crash before world crea
   assert.deepEqual(record.items, frozen.authorization.items);
   assert.equal(record.image.model, frozen.authorization.route.model.id);
   await until(() => h.lastState()?.status === "completed", "recovered founding completes", BUILD_MS);
+  assert.equal(h.queue.jobs.size, 0, "higher current pricing cannot spend the earlier approval");
+  assert.ok(h.lastState()?.items.some(item => item.detail?.includes("exceeds the approved amount")));
 });
 
 it("refuses a different successful look receipt even when its look words are unchanged", async t => {
