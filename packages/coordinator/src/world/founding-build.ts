@@ -49,6 +49,8 @@ import { reviewGenesisContent } from "../harness/genesis-review.js";
 import { carryGenesisImageArtifacts, installGenesisImage } from "../harness/genesis-image-carry.js";
 import { carryGenesisSources, carryGenesisCanonSources } from "../harness/genesis-imports.js";
 import { installGenesisProp } from "../harness/genesis-props.js";
+import { installGenesisVoice } from "../harness/genesis-voices.js";
+import { FOUNDING_VOICES_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { openThread, entryContent } from "../canon/authoring.js";
 import { MarkdownFile, sha256 } from "./text-files.js";
 import { buildSheetContent, createSheetFromSentence } from "../sheets/authoring.js";
@@ -93,6 +95,7 @@ export interface FoundingBuildPorts {
   harnessReady(): boolean;
   genesisDir(genesisId: string): Promise<string>;
   reviewedBlueprint?(genesisId: string): Promise<GenesisBlueprint>;
+  voiceAvailable?(voice: { provider: string; model: string; voiceId: string }): Promise<boolean>;
   reviewNotes?(genesisId: string): Promise<string[]>;
   discardGenesis(genesisId: string): Promise<void>;
   releaseGenesis(genesisId: string): void;
@@ -484,7 +487,9 @@ export class FoundingBuildService {
     const hasImports = hasSources(blueprint) || foundingEvents.events.some(({ event }) => hasSources(event));
     const hasProps = (value: unknown): boolean => !!value && typeof value === "object" &&
       ("props" in value || ("kind" in value && value.kind === "prop") || Object.values(value).some(hasProps));
-    await store.ensureSchemaVersion(hasProps(blueprint) || foundingEvents.events.some(({ event }) => hasProps(event)) ? CONVERSATIONAL_PROPS_SCHEMA_VERSION :
+    const hasVoices = blueprint.selectedVoices !== undefined || foundingEvents.events.some(({ event }) => event.type === "founding.voice-decision" ||
+      (event.type === "founding.blueprint" && event.blueprint.voices !== undefined));
+    await store.ensureSchemaVersion(hasVoices ? FOUNDING_VOICES_SCHEMA_VERSION : hasProps(blueprint) || foundingEvents.events.some(({ event }) => hasProps(event)) ? CONVERSATIONAL_PROPS_SCHEMA_VERSION :
       hasImports ? FOUNDING_IMPORTS_SCHEMA_VERSION : hasImages ? FOUNDING_IMAGES_SCHEMA_VERSION : FOUNDING_CONTENT_SCHEMA_VERSION, "founding-content");
     if (blueprint.reviewed) {
       const review = await reviewGenesisContent(sandbox);
@@ -621,7 +626,7 @@ export class FoundingBuildService {
         }
         continue;
       }
-      if (item.kind === "world" || item.kind === "author-sheet" || item.kind === "thread" || item.kind === "canon" || item.kind === "prop" || item.kind === "selected-image" || item.kind === "finalize") {
+      if (item.kind === "world" || item.kind === "author-sheet" || item.kind === "thread" || item.kind === "canon" || item.kind === "prop" || item.kind === "selected-image" || item.kind === "selected-voice" || item.kind === "finalize") {
         // Local work re-runs idempotently through the driver; an intent alone is enough.
         continue;
       }
@@ -900,6 +905,14 @@ export class FoundingBuildService {
           const selection = active.record.blueprint.selectedImages?.find(selection => selection.target === (item.sheetType ? `${item.sheetType}:${item.subject}` : item.subject));
           if (!selection) throw new Error("The approved image selection is missing.");
           await installGenesisImage(await this.ports.genesisDir(active.record.genesisId), selection, active.record.blueprint, store);
+          await this.ports.refreshWorldSnapshot(active.record.worldId);
+          break;
+        }
+        case "selected-voice": {
+          const candidate = active.record.blueprint.selectedVoices?.find(one => one.plan.intent.target === `character:${item.subject}`);
+          if (!candidate) throw new Error("The approved voice selection is missing.");
+          if (this.ports.voiceAvailable && !await this.ports.voiceAvailable(candidate.plan.voice)) throw new Error("The selected voice is unavailable. Restore it and retry, or skip this voice assignment.");
+          await installGenesisVoice(store, active.record.blueprint, candidate);
           await this.ports.refreshWorldSnapshot(active.record.worldId);
           break;
         }

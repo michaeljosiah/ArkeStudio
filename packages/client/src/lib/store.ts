@@ -162,6 +162,7 @@ interface StoreState {
       worldId?: string;
       review?: import("@arke-studio/contracts").GenesisContentReview;
       images?: import("@arke-studio/contracts").GenesisImages;
+      voices?: import("@arke-studio/contracts").GenesisVoices;
       imports?: import("@arke-studio/contracts").GenesisImports;
       founding?: boolean;
       formHandoff?: "pending" | "completed";
@@ -1505,6 +1506,8 @@ function handleFrame(json: string): void {
       setupStatus = event.setup;
     } else if (event.type === "genesis.images") {
       genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], images: event.images } };
+    } else if (event.type === "genesis.voices") {
+      genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], voices: event.voices } };
     } else if (event.type === "genesis.imports") {
       genesis = { ...genesis, [event.genesisId]: { ...emptyGenesis(), ...genesis[event.genesisId], imports: event.imports } };
     } else if (event.type === "genesis.review") {
@@ -2701,6 +2704,14 @@ export function loadGenesisDraft(genesisId: string): void { send({ kind: "genesi
 export function reviewGenesisDraft(genesisId: string): void { send({ kind: "genesis-review", genesisId }); }
 export function reviewGenesisImages(genesisId: string, models?: Partial<Record<import("@arke-studio/contracts").Capability, string>>): void {
   send({ kind: "genesis-images", genesisId, ...(models ? { models } : {}) });
+}
+export function reviewGenesisVoices(genesisId: string): void { send({ kind: "genesis-voices", genesisId }); }
+export function generateGenesisVoice(genesisId: string, intentId: string, digest: string): void {
+  send({ kind: "genesis-voice-generate", genesisId, intentId, digest, requestId: ulid() });
+}
+export function decideGenesisVoice(genesisId: string, target: string, decision: "approve" | "reject" | "unassign", candidate?: import("@arke-studio/contracts").GenesisVoiceCandidate): void {
+  send({ kind: "genesis-voice-decide", genesisId, requestId: ulid(), target, decision,
+    ...(candidate ? { candidateId: candidate.id, hash: candidate.hash } : {}) });
 }
 export function reviewGenesisImports(genesisId: string): void { send({ kind: "genesis-imports", genesisId }); }
 export function resolveGenesisImport(genesisId: string, resolution: import("@arke-studio/contracts").GenesisImportResolve): void {

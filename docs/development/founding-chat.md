@@ -87,6 +87,18 @@ In an established world, `prop-authoring` offers creation, state addition and re
 an existing reference must be explicit. The state and source artifact link commit together;
 old immutable takes remain history. Uploading files continues through the host-owned picker.
 Props remain name-and-state records: unsupported prose or generic filesystem edits are refused.
+
+Voice proposals in `draft.json.voices` use exact identities from the application-supplied
+`voice-catalogue.json`. Each audition shows text, character, provider/model, estimated cost
+and text transfer before generation. Local Kokoro synthesis uses the shared serialized voice
+service; cloud catalogue voices use the queue and ledger. World-owned cloned recordings require
+their existing world and upload-consent controls, so they are unavailable before founding.
+
+Audio is frozen privately and played inline. Choosing the heard voice is separate from paying
+for its audition. Decisions survive resume and character renames; unavailable choices can be
+removed without blocking text-only founding. Begin installs selections through ordinary sheet
+voice assignment and reuses them after recovery. Audition retries do not resubmit uncertain
+requests. Worlds carrying these decisions require schema 33.
 # Reviewing founding content
 
 Issue #1269 adds versioned content decisions to the founding conversation. The agent proposes

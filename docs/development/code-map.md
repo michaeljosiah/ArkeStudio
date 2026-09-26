@@ -142,6 +142,16 @@ the transcript and `harness/blueprint.ts` for the current draft. `world/founding
 transfers the same conversation into the created world with idempotent appends.
 See [founding chat](founding-chat.md) for lifecycle and recovery checks.
 
+### Audition founding voices
+
+Contracts `genesis-voices.ts` defines voice intents and immutable audition candidates.
+Coordinator `harness/genesis-voices.ts` owns preview plans, private audio and decisions;
+`voice/service.ts` supplies the catalogue and serialized local synthesis. Cloud auditions
+use the existing queue and ledger. `world/founding-build.ts` installs approved voices through
+`sheets/authoring.ts`. Client `components/genesis-voices.tsx` renders audio and separate
+generation/assignment controls. Checks: coordinator `test/harness/genesis-voices.test.ts`,
+`test/world/founding-build.test.ts`; client `test/genesis-voices.test.tsx`.
+
 ### Generate and approve founding images
 
 Contracts `genesis-images.ts` defines intents, candidates, selections and review plans;

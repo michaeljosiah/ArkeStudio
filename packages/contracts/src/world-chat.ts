@@ -3,6 +3,7 @@ import { z } from "zod";
 import { GenesisBlueprintSchema } from "./genesis.js";
 import { GenesisDecisionSchema } from "./genesis-review.js";
 import { GenesisImageCandidateSchema, GenesisImageTargetSchema } from "./genesis-images.js";
+import { GenesisVoiceCandidateSchema } from "./genesis-voices.js";
 import { ProductionSetupStateSchema, ProductionSetupUpdateSchema } from "./production-setup.js";
 import {
   ArtifactIdSchema,
@@ -1090,6 +1091,8 @@ export const WorldChatStoredEventSchema = valueSchema(z.discriminatedUnion("type
   z.object({ type: z.literal("founding.message"), message: WorldChatMessageSchema }).strict(),
   z.object({ type: z.literal("founding.blueprint"), blueprint: GenesisBlueprintSchema }).strict(),
   z.object({ type: z.literal("founding.decision"), decision: GenesisDecisionSchema }).strict(),
+  z.object({ type: z.literal("founding.voice-decision"), target: z.string().regex(/^character:[a-z0-9][a-z0-9-]*$/),
+    candidate: GenesisVoiceCandidateSchema.optional(), decision: z.enum(["approve", "reject", "unassign"]) }).strict(),
   z.object({ type: z.literal("founding.image-decision"), target: GenesisImageTargetSchema,
     candidate: GenesisImageCandidateSchema.optional(), decision: z.enum(["approve", "reject", "unassign"]) }).strict(),
   z.object({ type: z.literal("production-setup.updated"), state: ProductionSetupStateSchema }).strict(),

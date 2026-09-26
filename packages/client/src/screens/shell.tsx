@@ -8,6 +8,8 @@ import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import { renderInlineMarkdown } from "../components/inline-markdown.js";
 import { GenesisContentCards } from "../components/genesis-review.js";
 import { GenesisImageCards } from "../components/genesis-images.js";
+import { GenesisVoiceCards } from "../components/genesis-voices.js";
+import { reviewGenesisVoices, generateGenesisVoice, decideGenesisVoice } from "../lib/store.js";
 import { GenesisImportCards } from "../components/genesis-imports.js";
 import { reviewGenesisImports, resolveGenesisImport } from "../lib/store.js";
 import { Archive, ChartLine, ChevronDown, ChevronRight, Pencil, Plus, RotateCcw, Sparkle, X } from "../components/icons.js";
@@ -962,15 +964,20 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
   })();
   const imageJobs = (state?.app.jobs ?? []).filter(job => job.worldId === genesisId && job.target.kind === "genesis-image");
   const imageJobsKey = imageJobs.map(job => `${job.id}:${job.status}`).join("|");
+  const voiceJobs = (state?.app.jobs ?? []).filter(job => job.worldId === genesisId && job.params["purpose"] === "genesis-voice");
+  const voiceJobsKey = voiceJobs.map(job => `${job.id}:${job.status}`).join("|");
+  useEffect(() => {
+    if (connection === "open" && blueprint && !chatRunning && !g?.worldId) reviewGenesisVoices(genesisId);
+  }, [connection, blueprint, chatRunning, g?.worldId, genesisId, voiceJobsKey]);
   useEffect(() => {
     if (connection === "open" && blueprint && !chatRunning && !g?.worldId) reviewGenesisImages(genesisId, models);
   }, [connection, blueprint, chatRunning, g?.worldId, g?.attachments, genesisId, models, imageJobsKey, imageRoute]);
-  const plannedAgainst = useRef<{ blueprint: typeof blueprint; review: (typeof drafts)[string]["review"]; images: (typeof drafts)[string]["images"]; preview: string | null; route: string } | null>(null);
+  const plannedAgainst = useRef<{ blueprint: typeof blueprint; review: (typeof drafts)[string]["review"]; images: (typeof drafts)[string]["images"]; voices: (typeof drafts)[string]["voices"]; preview: string | null; route: string } | null>(null);
   useEffect(() => {
     if (!buildCardOpen || buildPressed) return;
     const preview = previewJob?.status ?? null;
     const last = plannedAgainst.current;
-    if (last !== null && last.blueprint === blueprint && last.review === g?.review && last.images === g?.images && last.preview === preview && last.route === imageRoute) return;
+    if (last !== null && last.blueprint === blueprint && last.review === g?.review && last.images === g?.images && last.voices === g?.voices && last.preview === preview && last.route === imageRoute) return;
     let lookText = lookForBuild;
     if (lookSource === "conversation" && look.trim() === conversationLookRef.current) {
       lookText = blueprint?.look?.trim() ?? "";
@@ -978,19 +985,19 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
       setLook(lookText);
       setLookForBuild(lookText);
     }
-    plannedAgainst.current = { blueprint, review: g?.review, images: g?.images, preview, route: imageRoute };
+    plannedAgainst.current = { blueprint, review: g?.review, images: g?.images, voices: g?.voices, preview, route: imageRoute };
     const requestId = ulid();
     setPlanRequestId(requestId);
     setPlanStartedAt(new Date().toISOString());
     // A refusal answered the blueprint that moved; the fresh plan is the review it asked for.
     setBuildRequestId(null);
     planFoundingBuild(genesisId, requestId, lookText, models);
-  }, [buildCardOpen, buildPressed, previewJob?.status, blueprint, g?.review, g?.images, lookForBuild, look, lookSource, genesisId, models, imageRoute]);
+  }, [buildCardOpen, buildPressed, previewJob?.status, blueprint, g?.review, g?.images, g?.voices, lookForBuild, look, lookSource, genesisId, models, imageRoute]);
 
   const openBuildCard = (lookText: string) => {
     setLookForBuild(lookText);
     setBuildRequestId(null);
-    plannedAgainst.current = { blueprint, review: g?.review, images: g?.images, preview: previewJob?.status ?? null, route: imageRoute };
+    plannedAgainst.current = { blueprint, review: g?.review, images: g?.images, voices: g?.voices, preview: previewJob?.status ?? null, route: imageRoute };
     const requestId = ulid();
     setPlanRequestId(requestId);
     setPlanStartedAt(new Date().toISOString());
@@ -1232,6 +1239,10 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                 {g?.review && <GenesisContentCards review={g.review} busy={chatRunning || buildPressed || myBuild?.status === "running"}
                   onDecide={(cards, decision) => decideGenesisDraft(genesisId, cards.map(card => ({ key: card.key, digest: card.digest })), decision)}
                   onRevise={title => setMessage(`Please revise ${title}: `)} />}
+                {g?.voices && <GenesisVoiceCards genesisId={genesisId} voices={g.voices} jobs={voiceJobs} busy={chatRunning || buildPressed}
+                  onGenerate={(intentId, digest) => generateGenesisVoice(genesisId, intentId, digest)}
+                  onDecide={(target, decision, candidate) => decideGenesisVoice(genesisId, target, decision, candidate)}
+                  onRevise={setMessage} onRefresh={() => reviewGenesisVoices(genesisId)} onCancel={cancelJob} />}
                 {g?.images && blueprint && <GenesisImageCards genesisId={genesisId} blueprint={blueprint} images={g.images} jobs={imageJobs}
                   busy={chatRunning || buildPressed || myBuild?.status === "running" || !!g.worldId}
                   onGenerate={(intentId, digest) => generateGenesisImage(genesisId, intentId, digest, models)}

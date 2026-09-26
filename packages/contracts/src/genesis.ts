@@ -3,6 +3,7 @@ import { KeyArtIntentSchema } from "./art-direction.js";
 import { GenesisImageIntentSchema, GenesisImageSelectionSchema } from "./genesis-images.js";
 import { GenesisSourceSchema } from "./genesis-imports.js";
 import { GenesisPropSchema } from "./prop.js";
+import { GenesisVoiceIntentSchema, GenesisVoiceCandidateSchema } from "./genesis-voices.js";
 export const FOUNDING_CONVERSATION_SCHEMA_VERSION = 28;
 
 export const GenesisSheetContentSchema = z.object({
@@ -140,6 +141,7 @@ export function keyArtBriefProse(brief: GenesisKeyArtBrief): string {
 export const GenesisDraftSchema = z
   .object({
     props: z.array(GenesisPropSchema).max(100).optional(),
+    voices: z.array(GenesisVoiceIntentSchema).max(100).optional(),
     images: z.array(GenesisImageIntentSchema).max(100).optional(),
     canon: z.array(GenesisCanonSchema).max(100).refine(entries => new Set(entries.map(entry => entry.slug)).size === entries.length, "Canon entries need unique slugs.").optional(),
     name: z.string().min(1).max(120).optional(),
@@ -263,6 +265,8 @@ export const GenesisBlueprintSchema = z
     props: z.array(GenesisPropSchema).max(100).optional(),
     images: z.array(GenesisImageIntentSchema).optional(),
     selectedImages: z.array(GenesisImageSelectionSchema).optional(),
+    voices: z.array(GenesisVoiceIntentSchema).optional(),
+    selectedVoices: z.array(GenesisVoiceCandidateSchema).optional(),
     /** Coordinator-owned marker; never folded from an agent's draft files. */
     reviewed: z.boolean().optional(),
     canon: z.array(GenesisCanonSchema).optional(),

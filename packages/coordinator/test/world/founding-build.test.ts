@@ -29,6 +29,7 @@ import { reviewGenesisImports, resolveGenesisImport } from "../../src/harness/ge
 import { decideGenesisImage, reviewGenesisImages, reviewedGenesisImages } from "../../src/harness/genesis-images.js";
 import { installGenesisImage } from "../../src/harness/genesis-image-carry.js";
 import { genesisPropId, genesisPropStateId } from "../../src/harness/genesis-props.js";
+import { decideGenesisVoice, reviewGenesisVoices, reviewedGenesisVoices, generateLocalGenesisVoice } from "../../src/harness/genesis-voices.js";
 import { fileArtifact } from "../../src/artifacts/filing.js";
 import { sandboxAttachments } from "../../src/artifacts/genesis-attachments.js";
 
@@ -368,6 +369,39 @@ describe("the founding build (SPEC-031)", () => {
     await installGenesisImage(dir, selected.selectedImages![0]!, selected, store);
     assert.equal(store.getBundle().props.length, 1);
     assert.equal(store.getBundle().referenceTakes.length, 1);
+    assert.equal(h.queue.jobs.size, 0);
+  });
+
+  it("saves an approved founding voice through sheet assignment without another audition", async t => {
+    const voice = { provider: "kokoro", model: "kokoro-82m", voiceId: "af_heart", label: "Heart", attributes: [], local: true, canClone: false };
+    let h!: Harness;
+    h = await makeHarness(t, { manifest: null, reviewedBlueprint: async id =>
+      reviewedGenesisVoices(await h.provider.genesisDir(id), await approvedBlueprintForFounding(await h.provider.genesisDir(id)), [], [voice]) });
+    const dir = await h.provider.genesisDir("gen-voice");
+    await mkdir(join(dir, "draft", "characters"), { recursive: true });
+    await writeFile(join(dir, "draft", "characters", "maren.json"), JSON.stringify({ name: "Maren", neverDepicted: true }));
+    await writeFile(join(dir, "draft.json"), JSON.stringify({ name: "Harbour", voices: [{ id: "audition", target: "character:maren",
+      voice: { provider: voice.provider, model: voice.model, voiceId: voice.voiceId }, text: "The gate stays closed." }] }));
+    await decideGenesisContent(dir, (await reviewGenesisContent(dir)).cards, "approve", ulid());
+    const { foldBlueprint } = await import("../../src/harness/blueprint.js");
+    const draft = await foldBlueprint(dir), plan = (await reviewGenesisVoices(dir, draft, [], [voice], [])).plans[0]!;
+    const wav = Buffer.alloc(52);
+    wav.write("RIFF"); wav.writeUInt32LE(44, 4); wav.write("WAVE", 8); wav.write("fmt ", 12); wav.writeUInt32LE(16, 16);
+    wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(24000, 24); wav.writeUInt32LE(48000, 28);
+    wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write("data", 36); wav.writeUInt32LE(8, 40);
+    let syntheses = 0;
+    await generateLocalGenesisVoice(dir, plan, ulid(), async () => { syntheses++; return wav; });
+    const candidate = (await reviewGenesisVoices(dir, draft, [], [voice], [])).candidates[0]!;
+    await decideGenesisVoice(dir, draft, [voice], { target: "character:maren", decision: "approve", requestId: ulid(), candidateId: candidate.id, hash: candidate.hash });
+    await h.service.begin("gen-voice", ulid());
+    await until(() => h.lastState()?.status === "completed", "voice founding", BUILD_MS);
+    assert.ok(h.lastState()?.items.filter(item => item.authorized).every(item => item.state === "landed"), JSON.stringify(h.lastState()?.items));
+    const store = h.provider.openStore()!, sheet = store.getBundle().sheets[0]!;
+    assert.equal(sheet.voice?.voiceId, voice.voiceId);
+    assert.equal(sheet.voice?.assignedAtVersion, sheet.version);
+    await h.service.begin("gen-voice", ulid()); await h.service.runItems(store.worldId);
+    assert.equal(store.getBundle().sheets[0]!.version, sheet.version);
+    assert.equal(syntheses, 1);
     assert.equal(h.queue.jobs.size, 0);
   });
 

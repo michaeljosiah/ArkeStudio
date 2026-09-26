@@ -772,7 +772,7 @@ export class FsWorldProvider implements WorldProvider {
     const contentType = FsWorldProvider.MEDIA_TYPES[ext];
     if (contentType === undefined) return null;
     const workspace = await this.genesisDir(genesisId);
-    const privateMedia = /^media\/[a-f0-9]{64}\.(png|jpg|webp)$/.test(portable);
+    const privateMedia = /^media\/[a-f0-9]{64}\.(png|jpg|webp|wav|mp3|flac)$/.test(portable);
     const root = privateMedia ? join(dirname(workspace), "media") : workspace;
     const abs = privateMedia ? join(root, basename(portable)) : join(root, fromPortable(portable));
     try {
