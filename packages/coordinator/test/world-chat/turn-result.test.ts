@@ -767,3 +767,27 @@ describe("same-turn entity references", () => {
     if (!outcome.ok) assert.ok(outcome.problems.some((entry) => entry.code === "unknown-temporary-reference"));
   });
 });
+
+describe("a question asked for its answer (issue 1295)", () => {
+  it("names the one fault — something came back but the reply — before any action's shape", async () => {
+    const input = await baseInput({ replyOnly: true });
+    // What Gemma 4 12B returned to "What does this chapter draw on?": an action in no known shape.
+    const outcome = validateTurnResult({ ...input, raw: JSON.stringify({ reply: "It draws on the ledger.", actions: [{ op: "edit", chapterId: "untitled", changes: [] }] }) });
+    assert.equal(outcome.ok, false);
+    if (outcome.ok) return;
+    assert.deepEqual(outcome.problems.map((p) => p.code), ["reply-only"], "not the action's shape: the model was told to fix what it should drop");
+    assert.match(outcome.problems[0]!.safeMessage, /reply only.*every list empty/);
+  });
+
+  it("accepts the reply alone, and holds an open ask to the shape as before", async () => {
+    const input = await baseInput({ replyOnly: true });
+    assert.equal(validateTurnResult({ ...input, raw: turn({ reply: "It draws on the ledger and the stairwell." }) }).ok, true);
+    const open = validateTurnResult({ ...(await baseInput()), raw: JSON.stringify({ reply: "x", actions: [{ op: "edit" }] }) });
+    assert.equal(open.ok, false);
+    if (!open.ok) assert.ok(open.problems.every((p) => p.code === "schema"));
+  });
+
+  it("tells every corrective turn that a question needs no action at all", () => {
+    assert.match(correctiveMessage([{ code: "schema", safeMessage: "actions.0.change is required: expected object" }]), /If the ask needs no change to the world, leave every action and candidate list empty/);
+  });
+});

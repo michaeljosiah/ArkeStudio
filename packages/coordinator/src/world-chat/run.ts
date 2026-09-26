@@ -925,6 +925,7 @@ export class WorldChatRunner {
 
     const outcome = validateTurnResult({
       draftOnly: folded.entryContext?.kind === "production-setup",
+      replyOnly,
       raw,
       conversationId,
       messages,
