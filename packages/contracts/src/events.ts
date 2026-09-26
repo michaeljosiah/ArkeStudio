@@ -1,6 +1,5 @@
 import { valueSchema } from "./value-schema.js";
 import { StageConstructionDraftSchema } from "./stage-construction.js";
-import { valueSchema } from "./value-schema.js";
 import { AccountStateSchema } from "./account.js";
 import { MasterAudioReviewSchema, PreparedPerformanceAudioReviewSchema } from "./audio-reference.js";
 import { PromptReviewSchema } from "./prompt-review.js";
