@@ -307,6 +307,9 @@ export class FsWorldProvider implements WorldProvider {
     const at = this.clock();
     const destination = join(this.worldsDir(), slug);
     const dir = input.creationId ? join(this.appRoot, ".world-creations", worldId) : destination;
+    // A reserved but unpublished directory may contain an interrupted earlier input. Rebuild
+    // that private staging directory so omitted optional documents cannot survive a retry.
+    if (input.creationId) await rm(toExtendedLength(dir), { recursive: true, force: true });
     await mkdir(toExtendedLength(dir), { recursive: true });
     const meta = {
       worldId,
