@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { KeyArtIntentSchema } from "./art-direction.js";
-export const FOUNDING_CONVERSATION_SCHEMA_VERSION = 33;
+export const FOUNDING_CONVERSATION_SCHEMA_VERSION = 35;
 
 /**
  * The blueprint a founding conversation maintains in its sandbox (SPEC-031 §1.3).

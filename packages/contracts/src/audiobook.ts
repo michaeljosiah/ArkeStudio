@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CadencePlanSchema, type CadencePlan } from "./cadence.js";
+import { CADENCE_PHRASE_MAX, CadencePlanSchema, cueStart, normalizeSpeechText, type CadenceCue, type CadencePlan } from "./cadence.js";
 import { ArtifactIdSchema, IsoDateTimeSchema, SlugSchema } from "./ids.js";
 import { isSceneBreak } from "./manuscript.js";
 import { DeliverySchema } from "./voice.js";
@@ -177,6 +177,8 @@ export const AudiobookTakeSchema = z
       .optional(),
     /** The direction the take was made under (R-6, R-14), as `audiobookDirectionHash` names it; absent for a take made with none. */
     directionHash: z.string().min(1).optional(),
+    /** The speaker's note could not be applied (R-45): this narrator's row takes no phrase, so the line was read without it. */
+    noteHeld: z.literal(true).optional(),
     madeAt: IsoDateTimeSchema,
   })
   .strict();
@@ -193,6 +195,14 @@ export const AudiobookDirectionSchema = z
     textHash: z.string().min(1),
     plan: CadencePlanSchema,
     at: IsoDateTimeSchema,
+    /**
+     * The words the direction was written for (R-43), so a changed wording can carry each
+     * marker to its new place by its anchor rather than drop the whole direction. Absent on a
+     * direction an earlier build wrote, which is dropped on a wording change as it always was.
+     */
+    text: z.string().min(1).optional(),
+    /** Markers a wording change could not carry (R-43), counted until the block is directed again. */
+    dropped: z.number().int().positive().optional(),
   })
   .strict();
 export type AudiobookDirection = z.infer<typeof AudiobookDirectionSchema>;
@@ -214,7 +224,9 @@ export function audiobookDirectionHash(plan: CadencePlan): string {
     cues: plan.cues.map((cue) =>
       cue.kind === "emphasis"
         ? { kind: cue.kind, from: cue.span.from, to: cue.span.to, text: cue.span.text, level: cue.level }
-        : cue.kind === "pause"
+        : cue.kind === "delivery"
+          ? { kind: cue.kind, from: cue.span.from, to: cue.span.to, text: cue.span.text, ...(cue.delivery !== undefined ? { delivery: cue.delivery } : {}), ...(cue.phrase !== undefined ? { phrase: cue.phrase } : {}) }
+          : cue.kind === "pause"
           ? { kind: cue.kind, at: cue.at, length: cue.length }
           : { kind: cue.kind, at: cue.at, action: cue.action },
     ),
@@ -227,6 +239,78 @@ export function audiobookDirectionFor(record: Pick<ChapterAudiobook, "direction"
   const held = record?.direction[block.key];
   if (held === undefined || held.textHash !== audiobookTextHash(block.text)) return null;
   return held;
+}
+
+/**
+ * Cues carried from the words they were written for to changed words (R-43). A span cue — an
+ * emphasis or a marker — is anchored by its span text, a point cue by the word before it, or
+ * by the word after it when it sits at the block's start. A cue whose anchor is found exactly
+ * once in the new words moves there; every other is dropped and counted. A carried cue that
+ * would now break the plan's rules — overlapping another, an emphasis across a marker's edge,
+ * a second pause at one place — is dropped too, so what is carried always maps.
+ */
+export function rekeyCues(oldText: string, cues: readonly CadenceCue[], newText: string): { cues: CadenceCue[]; dropped: number } {
+  const before = normalizeSpeechText(oldText);
+  const after = normalizeSpeechText(newText);
+  const once = (anchor: string): number | null => {
+    const first = after.indexOf(anchor);
+    return first < 0 || after.indexOf(anchor, first + 1) >= 0 ? null : first;
+  };
+  const moved: CadenceCue[] = [];
+  let dropped = 0;
+  for (const cue of cues) {
+    if (cue.kind === "emphasis" || cue.kind === "delivery") {
+      const at = once(cue.span.text);
+      if (at === null) dropped += 1;
+      else moved.push({ ...cue, span: { ...cue.span, from: at, to: at + cue.span.text.length } });
+      continue;
+    }
+    const head = before.slice(0, cue.at).match(/(\S+)\s*$/);
+    if (head !== null) {
+      const wordEnd = cue.at - (head[0].length - head[1]!.length);
+      const found = once(head[1]!);
+      if (found === null) dropped += 1;
+      else moved.push({ ...cue, at: Math.min(after.length, found + head[1]!.length + (cue.at - wordEnd)) });
+      continue;
+    }
+    const tail = before.slice(cue.at).match(/^(\s*)(\S+)/);
+    const found = tail === null ? null : once(tail[2]!);
+    if (tail === null || found === null) dropped += 1;
+    else moved.push({ ...cue, at: Math.max(0, found - tail[1]!.length) });
+  }
+  moved.sort((a, b) => cueStart(a) - cueStart(b));
+  const kept: CadenceCue[] = [];
+  const clashes = (cue: CadenceCue): boolean =>
+    kept.some((other) => {
+      if (cue.kind === "pause" || cue.kind === "breath") return other.kind === cue.kind && other.at === cue.at;
+      if (other.kind === "pause" || other.kind === "breath") return false;
+      const overlaps = cue.span.from < other.span.to && cue.span.to > other.span.from;
+      if (!overlaps) return false;
+      if (cue.kind === other.kind) return true;
+      const [marker, emphasis] = cue.kind === "delivery" ? [cue, other] : [other, cue];
+      return emphasis.span.from < marker.span.from || emphasis.span.to > marker.span.to;
+    });
+  for (const cue of moved) {
+    if (clashes(cue)) dropped += 1;
+    else kept.push(cue);
+  }
+  return { cues: kept, dropped };
+}
+
+/**
+ * A direction written for other words, carried to the block's words now (R-43): the block's
+ * delivery, phrase and speed kept, its cues re-keyed, and the count of what could not be
+ * carried. Null when the direction stands for these words already, or was written by a build
+ * that did not keep its words, which a wording change drops whole as before.
+ */
+export function audiobookRekeyed(record: Pick<ChapterAudiobook, "direction"> | null, block: Pick<AudiobookBlock, "key" | "text">): { input: AudiobookDirectionInput; dropped: number } | null {
+  const held = record?.direction[block.key];
+  if (held === undefined || held.text === undefined || held.textHash === audiobookTextHash(block.text)) return null;
+  const { cues, dropped } = rekeyCues(held.text, held.plan.cues, block.text);
+  return {
+    input: { delivery: held.plan.delivery, speed: held.plan.speed, cues, ...(held.plan.phrase !== undefined ? { phrase: held.plan.phrase } : {}) },
+    dropped: dropped + (held.dropped ?? 0),
+  };
 }
 
 /** The deliveries, for a panel's seg and a prompt's list. */
@@ -282,8 +366,11 @@ export function summariseAudiobook(record: ChapterAudiobook): ChapterAudiobookSu
   };
 }
 
-/** The book's reading (R-11): every block the narrator's, or each line its speaker's. */
-export const AudiobookReadingSchema = z.enum(["narrator", "cast"]);
+/**
+ * The book's reading (R-11, R-44): every block the narrator's; the narrator's too, with each
+ * line played by its speaker's performance note; or each line its speaker's own voice.
+ */
+export const AudiobookReadingSchema = z.enum(["narrator", "performed", "cast"]);
 export type AudiobookReading = z.infer<typeof AudiobookReadingSchema>;
 
 /**
@@ -300,9 +387,42 @@ export const AudiobookBookSchema = z
      * carries. The book's choice, never the sheet's; their blocks are made only by a recording.
      */
     recorded: z.array(z.string().min(1).max(120)).max(200).optional(),
+    /**
+     * How the narrator plays each character under `performed` (R-44): a phrase of at most 60
+     * characters, keyed by sheet id or by a name no sheet carries. The book's, not the sheet's,
+     * since another narrator plays a character another way.
+     */
+    notes: z.record(z.string().min(1).max(120), z.string().min(1).max(CADENCE_PHRASE_MAX)).optional(),
+    /**
+     * The voice that reads this book (R-46); absent is the app's narrator, followed as it changes.
+     * Settings keeps the app's default, which every read outside the audiobook still uses.
+     */
+    narrator: AudiobookReaderSchema.optional(),
   })
   .strict();
 export type AudiobookBook = z.infer<typeof AudiobookBookSchema>;
+
+/** Whose note a line is played with (R-44): the sheet, else the name; none for narration and the title. */
+export function audiobookNoteKey(block: Pick<AudiobookBlock, "speaker" | "sheet">): string | null {
+  return block.speaker === undefined ? null : (block.sheet ?? block.speaker);
+}
+
+/** The note a block is played with under the book's reading (R-44): only under `performed`, only on a line. */
+export function audiobookNoteFor(book: Pick<AudiobookBook, "reading" | "notes"> | null, block: Pick<AudiobookBlock, "speaker" | "sheet">): string | undefined {
+  if (book?.reading !== "performed") return undefined;
+  const key = audiobookNoteKey(block);
+  return key === null ? undefined : book.notes?.[key];
+}
+
+/**
+ * The direction a take is made under, as it remembers it (R-14, R-45): the block's plan and,
+ * under `performed`, its speaker's note — so a note changed makes every line of theirs stale.
+ * The same name as before for a take with no note, so no take made before notes goes stale.
+ */
+export function audiobookTakeDirectionHash(plan: CadencePlan | null, note?: string): string | undefined {
+  if (note === undefined) return plan === null ? undefined : audiobookDirectionHash(plan);
+  return textDigest(`performed-v1:${JSON.stringify({ note, direction: plan === null ? null : audiobookDirectionHash(plan) })}`);
+}
 export const DEFAULT_AUDIOBOOK_BOOK: AudiobookBook = { schemaVersion: 1, reading: "narrator" };
 
 export type AudiobookBlockState = "not made" | "made" | "stale" | "flagged" | "awaiting";
@@ -333,6 +453,8 @@ export function audiobookBlockState(
   hasArtifact?: (artifactId: string) => boolean,
   /** The block's speaker is recorded by a person (R-37, R-38): made only by a current recording, `awaiting` until then. */
   recorded = false,
+  /** The note the line is played with under `performed` (R-45), part of the direction a take is judged by. */
+  note?: string,
 ): AudiobookBlockState {
   if (recorded) {
     const take = record?.takes[block.key];
@@ -353,7 +475,7 @@ export function audiobookBlockState(
   // The direction the take was made under against the one that stands (R-14): a direction
   // added, changed or dropped since is a different take; one authored for other words is none.
   const direction = audiobookDirectionFor(record, block);
-  if ((direction === null ? undefined : audiobookDirectionHash(direction.plan)) !== take.directionHash) return "stale";
+  if (audiobookTakeDirectionHash(direction?.plan ?? null, note) !== take.directionHash) return "stale";
   return "made";
 }
 
@@ -437,6 +559,12 @@ export const AudiobookVoiceRowSchema = z
     blocks: z.number().int().min(0),
     /** A recorded speaker's blocks still waiting on a recording (R-38). */
     awaiting: z.number().int().min(0).optional(),
+    /** The speaker's performance note under `performed` (R-44). */
+    note: z.string().min(1).optional(),
+    /** The narrator's row takes no phrase, so the note cannot be played (R-45). */
+    noteHeld: z.literal(true).optional(),
+    /** On the narrator's row: the book has a narrator of its own (R-46), not the app's. */
+    book: z.literal(true).optional(),
   })
   .strict();
 export type AudiobookVoiceRow = z.infer<typeof AudiobookVoiceRowSchema>;

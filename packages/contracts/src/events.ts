@@ -1177,6 +1177,40 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       refused: z.string().min(1).optional(),
     })
     .strict(),
+  /**
+   * What a narrator switch would do (design turn 155h, SPEC-047 R-46), answering
+   * `quote-audiobook-narrator`: blocks that go stale across the book, direction controls the
+   * new reader would hold of those directed, the price of reading the book again, the takes
+   * kept on the shelf. Flat numbers, so the event union stays within the declaration build.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.narrator-quote"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      stale: z.number().int().min(0).optional(),
+      held: z.number().int().min(0).optional(),
+      directed: z.number().int().min(0).optional(),
+      estimatedMicroUsd: z.number().int().min(0).optional(),
+      kept: z.number().int().min(0).optional(),
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
+  /** A block heard as it would be read (R-45, R-46): the file to play, world-relative, or why not. */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.heard"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      file: z.string().min(1).optional(),
+      cached: z.boolean().optional(),
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
   z
     .object({
       ...base,
@@ -1298,7 +1332,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     .strict(),
   /** Directions re-checked against changed readers (SPEC-047 R-13): how many controls were dropped, across how many chapters. */
   z
-    .object({ ...base, type: z.literal("audiobook.conformed"), worldId: UlidSchema, productionId: SlugSchema, dropped: z.number().int().min(0), chapters: z.number().int().min(0) })
+    .object({ ...base, type: z.literal("audiobook.conformed"), worldId: UlidSchema, productionId: SlugSchema, dropped: z.number().int().min(0), held: z.number().int().min(0).optional(), chapters: z.number().int().min(0) })
     .strict(),
   z
     .object({ ...base, type: z.literal("direction.started"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema })

@@ -496,6 +496,12 @@ const CLIENT_COMMAND_METADATA = {
   "stage-audiobook-take": action("production", "command", "voice", "host-file-access", ["chapters"]),
   "keep-audiobook-take": action("production", "command", "voice", "privacy-sensitive", ["chapters"]),
   "discard-audiobook-take": action("production", "command", "voice", "host-file-access", []),
+  // One narrator performs the cast, and a narrator for the book (turn 155g/h): notes and the
+  // narrator are commands on the book record; the quote reads; hearing a line may leave the machine.
+  "set-audiobook-note": action("production", "command", "voice", "authored-change", ["chapters"]),
+  "set-audiobook-narrator": action("production", "command", "voice", "external-network-action", ["chapters"]),
+  "quote-audiobook-narrator": readOnly(QUERY),
+  "hear-audiobook-line": action("production", "generation", "voice", "external-network-action", ["chapters", "sheets"]),
   "set-audiobook-block": action("production", "command", "voice", "external-network-action", ["chapters"]),
   "direct-chapter": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),
   "discard-direction": action("production", "command", "extraction", "external-network-action", ["chapters"]),
