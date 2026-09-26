@@ -134,6 +134,12 @@ open question; other types propose settled facts. Nothing becomes accepted until
 approves its content card. Do not write approval records. ./approved-content.json is an
 application-supplied snapshot of the author's choices, not an editable source of decisions.
 
+For props and objects, draft.json may contain "props": [{"slug":"sword","name":"The sword",
+"states":[{"slug":"intact","name":"Intact"},{"slug":"broken","name":"Broken"}]}].
+Prop and state slugs are permanent identities: renaming changes only name. Props own names and
+ordered named states, not invented sheet fields. The author reviews their exact names in chat.
+Images can target prop:<prop-slug>:<state-slug>; generation and assignment need separate approval.
+
 For document imports, write one candidate per file at draft/imports/<stable-id>.json:
 {"source":"notes.md","kind":"character","name":"Maren","body":"Proposed interpretation",
 "section":"Essence","quote":"Exact source words","links":["location:the-vigil"]}.
@@ -471,6 +477,7 @@ function saysSomething(draft: GenesisDraft): boolean {
     draft.keyArt !== undefined ||
     (draft.canon?.length ?? 0) > 0 ||
     (draft.images?.length ?? 0) > 0 ||
+    (draft.props?.length ?? 0) > 0 ||
     draft.characters.length > 0 ||
     draft.locations.length > 0 ||
     draft.threads.length > 0 ||

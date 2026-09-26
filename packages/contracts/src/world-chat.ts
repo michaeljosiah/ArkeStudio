@@ -2651,6 +2651,10 @@ const exampleWorldActions = {
     },
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  "prop-authoring": { kind: "prop-authoring", change: { operation: "create", name: "Tide sword", states: ["Intact", "Broken"] },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "prop-reference": { kind: "prop-reference", propId: `prop_${EXAMPLE_ULID}`, stateId: `pst_${EXAMPLE_ULID}`,
+    artifactId: `ar_${EXAMPLE_ULID}`, replace: false, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
 } satisfies Record<ModelWorldChatAction["kind"], ModelWorldChatAction>;
 
 /** Shaped exactly as the coordinator accepts it; the guide prints this object (issue 684). */

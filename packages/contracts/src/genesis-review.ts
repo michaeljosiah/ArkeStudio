@@ -1,11 +1,13 @@
 import { z } from "zod";
 import { BlueprintCharacterSchema, BlueprintFactionSchema, BlueprintLocationSchema, GenesisBlueprintSchema, GenesisCanonSchema, type GenesisBlueprint } from "./genesis.js";
+import { GenesisPropSchema } from "./prop.js";
 import { SHEET_SHAPES } from "./sheet-shapes.js";
 
 export const FOUNDING_CONTENT_SCHEMA_VERSION = 29;
 
 export const GenesisContentSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("world"), value: GenesisBlueprintSchema.omit({ characters: true, locations: true, factions: true, canon: true, threads: true, dropped: true, reviewed: true, images: true, selectedImages: true }) }).strict(),
+  z.object({ kind: z.literal("prop"), value: GenesisPropSchema }).strict(),
+  z.object({ kind: z.literal("world"), value: GenesisBlueprintSchema.omit({ characters: true, locations: true, factions: true, canon: true, threads: true, dropped: true, reviewed: true, images: true, selectedImages: true, props: true }) }).strict(),
   z.object({ kind: z.literal("character"), value: BlueprintCharacterSchema }).strict(),
   z.object({ kind: z.literal("location"), value: BlueprintLocationSchema }).strict(),
   z.object({ kind: z.literal("faction"), value: BlueprintFactionSchema }).strict(),
@@ -59,7 +61,7 @@ export function completeGenesisSheet<T extends { name: string; line?: string; de
 }
 
 export function genesisContentRows(blueprint: GenesisBlueprint): Array<{ key: string; title: string; content: GenesisContent }> {
-  const { characters, locations, factions, threads, canon, dropped, reviewed, images, selectedImages, ...world } = blueprint;
+  const { characters, locations, factions, threads, canon, dropped, reviewed, images, selectedImages, props, ...world } = blueprint;
   void dropped; void reviewed; void images; void selectedImages;
   return [
     { key: "world", title: world.name ?? "World identity and bible", content: { kind: "world", value: world } as GenesisContent },
@@ -68,6 +70,7 @@ export function genesisContentRows(blueprint: GenesisBlueprint): Array<{ key: st
         key: `${kind}:${entity.slug}`, title: entity.name,
         content: { kind, value: completeGenesisSheet(kind, entity) } as GenesisContent,
       }))),
+    ...(props ?? []).map(prop => ({ key: `prop:${prop.slug}`, title: prop.name, content: { kind: "prop", value: prop } as GenesisContent })),
     ...(canon ?? []).map(entry => ({ key: `canon:${entry.slug}`, title: entry.title, content: { kind: "canon", value: entry } as GenesisContent })),
     ...threads.map((question, index) => ({ key: `thread:${index}`, title: question, content: { kind: "thread", value: question } as GenesisContent })),
   ];
@@ -87,6 +90,7 @@ export function approvedGenesisBlueprint(selected: ReadonlyMap<string, GenesisCo
   const result: GenesisBlueprint = { characters: [], locations: [], factions: [], threads: [], canon: [], dropped: [], reviewed: true };
   for (const content of selected.values()) {
     switch (content.kind) {
+      case "prop": (result.props ??= []).push(content.value); break;
       case "world": Object.assign(result, content.value); break;
       case "character": result.characters.push(content.value); break;
       case "location": result.locations.push(content.value); break;

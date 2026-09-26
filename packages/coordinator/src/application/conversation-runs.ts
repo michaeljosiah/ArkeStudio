@@ -2,7 +2,7 @@ import { productionSetupBrief } from "../productions/setup-brief.js";
 import { createPreparedSession } from "../harness/session-files.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { type WorldChatCheckReceipt, applyBibleEdits } from "@arke-studio/contracts";
+import { type WorldChatCheckReceipt, applyBibleEdits, CONVERSATIONAL_PROPS_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { listPlans } from "../productions/plans.js";
 import { readContinuity } from "../productions/continuity.js";
 import { readVoices } from "../productions/voices.js";
@@ -152,9 +152,10 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     sceneVersion: (context) => sceneVersionFor(store, context),
     validateSceneEdits: ({ entryContext, edits, baseVersion }) =>
       applySceneEdits(store, { entryContext, edits, baseVersion, dryRun: true }),
-    prepareActions: (turn) => prepareWorldChatActions(store, actionLifecycle, turn, {
-      getExports: () => deps.actionExports(),
-    }),
+    prepareActions: async (turn) => {
+      if (turn.actions.some(action => action.kind === "prop-authoring" || action.kind === "prop-reference")) await store.ensureSchemaVersion(CONVERSATIONAL_PROPS_SCHEMA_VERSION, "world-chat");
+      return prepareWorldChatActions(store, actionLifecycle, turn, { getExports: () => deps.actionExports() });
+    },
     bindActions: async (actions) => {
       // Every binding appends to the same conversation, and proposal staging is also guarded per
       // conversation. Run them in turn; any failed intent remains durable for startup recovery.

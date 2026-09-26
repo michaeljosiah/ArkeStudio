@@ -2,6 +2,7 @@ import { z } from "zod";
 import { KeyArtIntentSchema } from "./art-direction.js";
 import { GenesisImageIntentSchema, GenesisImageSelectionSchema } from "./genesis-images.js";
 import { GenesisSourceSchema } from "./genesis-imports.js";
+import { GenesisPropSchema } from "./prop.js";
 export const FOUNDING_CONVERSATION_SCHEMA_VERSION = 28;
 
 export const GenesisSheetContentSchema = z.object({
@@ -138,6 +139,7 @@ export function keyArtBriefProse(brief: GenesisKeyArtBrief): string {
  */
 export const GenesisDraftSchema = z
   .object({
+    props: z.array(GenesisPropSchema).max(100).optional(),
     images: z.array(GenesisImageIntentSchema).max(100).optional(),
     canon: z.array(GenesisCanonSchema).max(100).refine(entries => new Set(entries.map(entry => entry.slug)).size === entries.length, "Canon entries need unique slugs.").optional(),
     name: z.string().min(1).max(120).optional(),
@@ -258,6 +260,7 @@ export type BlueprintFaction = z.infer<typeof BlueprintFactionSchema>;
  */
 export const GenesisBlueprintSchema = z
   .object({
+    props: z.array(GenesisPropSchema).max(100).optional(),
     images: z.array(GenesisImageIntentSchema).optional(),
     selectedImages: z.array(GenesisImageSelectionSchema).optional(),
     /** Coordinator-owned marker; never folded from an agent's draft files. */

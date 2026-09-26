@@ -46,6 +46,7 @@ export const BuildItemKindSchema = z.enum([
   /** One canon thread opened. */
   "thread",
   "canon",
+  "prop",
   "selected-image",
   /** One main photo, generated at count 1, landing as the identity anchor (R-21, R-26). */
   "main-photo",
@@ -268,6 +269,7 @@ export function buildWorkingLine(item: Pick<BuildItem, "kind" | "name">): string
     "author-sheet": "sheet",
     thread: "thread",
     canon: "canon",
+    prop: "prop",
     "selected-image": "approved image",
     "main-photo": "main photo",
     "establishing-view": "establishing view",
@@ -528,6 +530,16 @@ export function compileBuildItems(
     items.push({ key: `canon:${entry.slug}`, kind: "canon", stage: 1, subject: entry.slug,
       name: entry.title, estimatedMicroUsd: 0, authorized: true });
   }
+  for (const prop of blueprint.props ?? []) {
+    items.push({ key: `prop:${prop.slug}`, kind: "prop", stage: 1, subject: prop.slug,
+      name: prop.name, estimatedMicroUsd: 0, authorized: true });
+    for (const state of prop.states) {
+      const target = `prop:${prop.slug}:${state.slug}`;
+      if (blueprint.selectedImages?.some(selection => selection.target === target))
+        items.push({ key: `selected-image:${target}`, kind: "selected-image", stage: 2, subject: target,
+          name: `${prop.name} · ${state.name}`, estimatedMicroUsd: 0, authorized: true });
+    }
+  }
 
   for (const character of blueprint.characters) {
     items.push({
@@ -639,6 +651,7 @@ export const BuildReviewSchema = z
         locations: z.number().int().min(0),
         factions: z.number().int().min(0),
         canon: z.number().int().min(0).default(0),
+        props: z.number().int().min(0).default(0),
         threads: z.number().int().min(0),
       })
       .strict(),

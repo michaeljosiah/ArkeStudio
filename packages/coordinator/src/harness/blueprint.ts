@@ -142,6 +142,7 @@ export async function foldBlueprint(dir: string): Promise<GenesisBlueprint> {
   };
 
   const folded = GenesisBlueprintSchema.safeParse({
+    ...(draft.props !== undefined ? { props: draft.props } : {}),
     ...(draft.canon !== undefined ? { canon: draft.canon } : {}),
     ...(draft.images !== undefined ? { images: draft.images } : {}),
     ...(draft.name !== undefined ? { name: draft.name } : {}),
@@ -180,6 +181,7 @@ export function blueprintSaysSomething(blueprint: GenesisBlueprint): boolean {
     blueprint.keyArt !== undefined ||
     (blueprint.canon?.length ?? 0) > 0 ||
     (blueprint.images?.length ?? 0) > 0 ||
+    (blueprint.props?.length ?? 0) > 0 ||
     blueprint.threads.length > 0 ||
     blueprint.characters.length > 0 ||
     blueprint.locations.length > 0 ||

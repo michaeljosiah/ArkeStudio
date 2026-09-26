@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import {
-  CHARACTER_ROLE_MAX, GenesisContentReviewSchema, SHEET_SHAPES, approvedGenesisBlueprint, approvedGenesisContent, genesisContentRows,
+  CHARACTER_ROLE_MAX, GenesisContentReviewSchema, SHEET_SHAPES, approvedGenesisBlueprint, approvedGenesisContent, genesisContentRows, genesisSheetIds, checkPropName,
   type GenesisContentReview, type GenesisDecision, type GenesisReviewCard,
 } from "@arke-studio/contracts";
 import { conversationActionDigest } from "../arke-actions/digest.js";
@@ -34,6 +34,15 @@ export async function reviewGenesisContent(dir: string): Promise<GenesisContentR
   const approved = approvedGenesisBlueprint(selected);
   await validateGenesisSources(dir, approved);
   const problems = blueprint.dropped.map(file => `Cannot read ${file}; repair it before founding.`);
+  const propNames = new Set<string>();
+  const propSlugs = new Set<string>();
+  const sheetNames = [...genesisSheetIds(approved).values()].map(id => ({ id, name: id }));
+  for (const prop of approved.props ?? []) {
+    if (!checkPropName(prop.name, (approved.props ?? []).filter(other => other !== prop).map(other => ({ id: other.slug, name: other.name })), sheetNames).ok) problems.push(`${prop.name}: the prop name conflicts with another entity.`);
+    if (propSlugs.has(prop.slug) || propNames.has(prop.name.toLowerCase())) problems.push(`${prop.name}: prop identities and names must be unique.`);
+    propSlugs.add(prop.slug); propNames.add(prop.name.toLowerCase());
+    if (new Set(prop.states.map(state => state.name.toLowerCase())).size !== prop.states.length) problems.push(`${prop.name}: state names must be distinct.`);
+  }
   const ids = new Set([...approved.characters.map(c => `character:${c.slug}`), ...approved.locations.map(c => `location:${c.slug}`), ...approved.factions.map(c => `faction:${c.slug}`)]);
   for (const [kind, entities] of [["character", approved.characters], ["location", approved.locations], ["faction", approved.factions]] as const) {
     for (const entity of entities) {

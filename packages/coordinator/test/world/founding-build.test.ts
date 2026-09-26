@@ -28,6 +28,7 @@ import { approvedBlueprintForFounding, decideGenesisContent, reviewGenesisConten
 import { reviewGenesisImports, resolveGenesisImport } from "../../src/harness/genesis-imports.js";
 import { decideGenesisImage, reviewGenesisImages, reviewedGenesisImages } from "../../src/harness/genesis-images.js";
 import { installGenesisImage } from "../../src/harness/genesis-image-carry.js";
+import { genesisPropId, genesisPropStateId } from "../../src/harness/genesis-props.js";
 import { fileArtifact } from "../../src/artifacts/filing.js";
 import { sandboxAttachments } from "../../src/artifacts/genesis-attachments.js";
 
@@ -329,6 +330,45 @@ describe("the founding build (SPEC-031)", () => {
     await h.service.begin("gen-selected", ulid());
     assert.equal(store.getBundle().artifacts.length, 4);
     assert.equal(store.getBundle().referenceTakes.length, 3);
+  });
+
+  it("founds approved props and references with stable identities and no replay duplicates", async t => {
+    let h!: Harness;
+    h = await makeHarness(t, { manifest: null,
+      reviewedBlueprint: async id => {
+        const workspace = await h.provider.genesisDir(id);
+        return reviewedGenesisImages(workspace, await approvedBlueprintForFounding(workspace), []);
+      },
+    });
+    const id = "gen-props", dir = await h.provider.genesisDir(id);
+    const draft = { name: "Harbour", props: [{ slug: "sword", name: "Tide sword", states: [{ slug: "whole", name: "Intact" }, { slug: "broken", name: "Broken" }] }] };
+    await writeFile(join(dir, "draft.json"), JSON.stringify(draft));
+    await mkdir(join(dir, "attachments"), { recursive: true });
+    await writeFile(join(dir, "attachments", "sword.png"), PNG);
+    await decideGenesisContent(dir, (await reviewGenesisContent(dir)).cards, "approve", ulid());
+    const approved = await approvedBlueprintForFounding(dir);
+    const candidate = (await reviewGenesisImages(dir, approved, [], undefined)).candidates[0]!;
+    await decideGenesisImage(dir, approved, { target: "prop:sword:whole", candidateId: candidate.id, hash: candidate.hash, decision: "approve", requestId: ulid() });
+    draft.props[0]!.name = "The restored sword";
+    await writeFile(join(dir, "draft.json"), JSON.stringify(draft));
+    const renamed = (await reviewGenesisContent(dir)).cards.find(card => card.key === "prop:sword")!;
+    await decideGenesisContent(dir, [renamed], "approve", ulid());
+    await h.service.begin(id, ulid());
+    await until(() => h.lastState()?.status === "completed", "approved props", BUILD_MS);
+    assert.ok(h.lastState()?.items.filter(item => item.authorized).every(item => item.state === "landed"), JSON.stringify(h.lastState()?.items));
+    const store = h.provider.openStore()!, prop = store.getBundle().props[0]!;
+    assert.equal(prop.id, genesisPropId(id, "sword"));
+    assert.equal(prop.name, "The restored sword");
+    assert.equal(prop.states[0]!.id, genesisPropStateId(id, "sword", "whole"));
+    assert.ok(prop.states[0]!.reference?.sourceTakeId);
+    assert.ok(!prop.states[1]!.reference);
+    assert.ok(store.getBundle().artifacts.some(artifact => artifact.links.includes(prop.id)));
+    await h.service.begin(id, ulid());
+    const selected = await reviewedGenesisImages(dir, await approvedBlueprintForFounding(dir), []);
+    await installGenesisImage(dir, selected.selectedImages![0]!, selected, store);
+    assert.equal(store.getBundle().props.length, 1);
+    assert.equal(store.getBundle().referenceTakes.length, 1);
+    assert.equal(h.queue.jobs.size, 0);
   });
 
   it("saves approved sheets, relationships and canon verbatim without reauthoring", async (t) => {

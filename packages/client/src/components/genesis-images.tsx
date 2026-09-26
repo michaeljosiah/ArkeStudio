@@ -17,7 +17,7 @@ function Candidate({ genesisId, candidate, targets, images, busy, onDecide, onRe
     <img className="fy-actioncard__media" src={genesisMediaUrl(genesisId, candidate.file)} alt={candidate.label} style={{ width: "100%", maxHeight: 480, objectFit: "contain" }} />
     <p>{candidate.source === "generated" ? "Generated image" : "Uploaded image"}{selected ? " · selected" : rejected ? " · rejected" : " · not selected"}</p>
     <label>Use for <select aria-label={`Image target for ${candidate.label}`} value={chosen} disabled={busy} onChange={event => setChosen(event.target.value)}>
-      <option value="">Choose a character or location</option>
+      <option value="">Choose a character, location or prop state</option>
       {targets.filter(target => candidate.source === "upload" || candidate.target === target.key).map(target => <option key={target.key} value={target.key}>{target.label}</option>)}
     </select></label>
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
@@ -35,7 +35,8 @@ export function GenesisImageCards({ genesisId, blueprint, images, jobs, busy, on
   onGenerate(intentId: string, digest: string): void; onDecide: Decision; onCancel(jobId: string): void; onRevise(text: string): void;
 }) {
   const targets = [...blueprint.characters.filter(character => !character.neverDepicted).map(character => ({ key: `character:${character.slug}`, label: `${character.name} — main photo` })),
-    ...blueprint.locations.map(location => ({ key: `location:${location.slug}`, label: `${location.name} — establishing view` }))];
+    ...blueprint.locations.map(location => ({ key: `location:${location.slug}`, label: `${location.name} — establishing view` })),
+    ...(blueprint.props ?? []).flatMap(prop => prop.states.map(state => ({ key: `prop:${prop.slug}:${state.slug}`, label: `${prop.name} · ${state.name} — reference` })))];
   return <section aria-label="Images in this conversation" style={{ display: "grid", gap: 14 }}>
     <h2>Images</h2>
     {images.problems.map(problem => <Callout key={problem} title="Image needs attention">{problem}</Callout>)}

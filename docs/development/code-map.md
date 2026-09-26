@@ -157,6 +157,16 @@ authorization separately from actual-image approval. Tests: coordinator
 `test/harness/genesis-images.test.ts`, `test/dispatch-refusal.test.ts`,
 `test/world/founding-build.test.ts`; client `test/genesis-images.test.tsx`.
 
+### Author props and state references in chat
+
+Contracts `prop.ts`, `genesis-review.ts` and `world-chat-actions.ts` define founding
+props and the typed `prop-authoring` / `prop-reference` actions. Coordinator
+`harness/genesis-props.ts` derives stable founding identities; `references/props.ts`
+owns names, states and acceptance. `world-chat/actions.ts` previews exact changes and
+filed images, then uses those services after approval. Artifact links and state acceptance
+commit together. `harness/genesis-image-carry.ts` installs approved founding references.
+Checks: coordinator `test/world-chat/actions.test.ts`, `test/world/founding-build.test.ts`.
+
 ### Review founding document imports
 
 Contracts `genesis-imports.ts` defines evidence, candidate review and merge choices.

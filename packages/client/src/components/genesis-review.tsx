@@ -11,6 +11,8 @@ function Sources({ sources }: { sources?: import("@arke-studio/contracts").Genes
 function Content({ content, review }: { content: GenesisContent; review: GenesisContentReview }) {
   if (content.kind === "remove") return <p>Remove this item from the approved founding content.</p>;
   if (content.kind === "thread") return <p>Open question: {content.value}</p>;
+  if (content.kind === "prop") return <><p>Prop: {content.value.name}</p><ol>{content.value.states.map(state => <li key={state.slug}>{state.name}</li>)}</ol>
+    {!content.value.states.length && <p>No states proposed yet.</p>}</>;
   if (content.kind === "canon") return <>
     <p>{content.value.type === "thread" ? "Open question" : `Established ${content.value.type}`}</p>
     <div style={{ whiteSpace: "pre-wrap" }}>{renderInlineMarkdown(content.value.statement)}</div>

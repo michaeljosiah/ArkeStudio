@@ -535,13 +535,19 @@ export async function recordUploadedPropImage(
   stateId: string,
   media: string,
   data: Uint8Array,
+  options: { requestId?: string; precondition?: WorldStatePrecondition;
+    source?: Pick<Take, "provider" | "model" | "jobId" | "prompt" | "params" | "cost" | "dispatchedAt"> } = {},
 ): Promise<Take> {
   if (basename(media) !== media || media === "." || media === "..") throw new Error(`unsafe media name ${media}`);
-  const take = uploadedPropTake(store, propId, stateId, media, { uploadedFile: media });
+  const existing = options.requestId ? store.getBundle().referenceTakes.find(take =>
+    take.prop?.propId === propId && take.prop.stateId === stateId && take.params["requestId"] === options.requestId) : undefined;
+  if (existing) return existing;
+  const params = { ...options.source?.params, uploadedFile: media, ...(options.requestId ? { requestId: options.requestId } : {}) };
+  const take = { ...uploadedPropTake(store, propId, stateId, media, params), ...options.source, params };
   await store.gateOp(() =>
     writeTakeDirectory(store, propId, take, async (dir) => {
       await atomicWriteFile(join(dir, media), data);
-    }),
+    }), options.precondition,
   );
   return take;
 }

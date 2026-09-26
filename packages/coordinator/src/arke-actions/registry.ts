@@ -1,4 +1,4 @@
-import { WorldChatProductionStageConstructActionSchema } from "@arke-studio/contracts";
+import { WorldChatProductionStageConstructActionSchema, WorldChatPropAuthoringActionSchema, WorldChatPropReferenceActionSchema } from "@arke-studio/contracts";
 import {
   ClientMessageSchema,
   BenchGenerationModelActionSchema,
@@ -342,8 +342,8 @@ const CLIENT_COMMAND_METADATA = {
   "account-open": globalOnly(GLOBAL_OPERATION),
   "set-appearance-theme": globalOnly(GLOBAL_OPERATION),
   "set-narrator": globalOnly(GLOBAL_OPERATION),
-  "create-prop": humanOnly("Prop authoring has no registered Arke action adapter."),
-  "add-prop-state": humanOnly("Prop authoring has no registered Arke action adapter."),
+  "create-prop": action("world", "command", "reference-kit", "authored-change", ["references", "sheets"]),
+  "add-prop-state": action("world", "command", "reference-kit", "authored-change", ["references"]),
   "import-prop-state-candidate": humanOnly("Importing a prop image requires the person's host picker."),
   "accept-prop-state": humanOnly("Accepting a prop image is a human review decision."),
   "cancel-job": humanOnly("Cancelling a globally addressed job is a human recovery control until jobs have a world-confined action seam."),
@@ -761,6 +761,14 @@ const WORLD_CHAT_ACTION_REGISTRY = {
     kind: "world-chat-voice-assignment",
     schema: WorldChatVoiceAssignmentActionSchema,
     ...action("world", "setting", "voice", "authored-change", ["sheets", "voices"]),
+  },
+  "world-chat-prop-authoring": {
+    kind: "world-chat-prop-authoring", schema: WorldChatPropAuthoringActionSchema,
+    ...action("world", "command", "reference-kit", "authored-change", ["references", "sheets"]),
+  },
+  "world-chat-prop-reference": {
+    kind: "world-chat-prop-reference", schema: WorldChatPropReferenceActionSchema,
+    ...action("world", "take-review", "reference-kit", "authored-change", ["references", "artifacts"]),
   },
   "world-chat-voice-audition": {
     kind: "world-chat-voice-audition",

@@ -74,6 +74,19 @@ writes that introduce location reference provenance raise this boundary atomical
 
 This documents the implemented continuity foundation. Content, media, import and voice approvals
 are tracked separately in #1267 and #1269–#1273.
+
+Props are lightweight named records with ordered named states. Founding proposals live in
+`draft.json.props`; prop and state slugs are stable identities, independent of display names.
+Exact-content approval includes every state. Image targets use `prop:<slug>:<state-slug>`
+and share the same preview, generation authorization, result approval and artifact retention.
+Begin derives prop/state IDs from the founding identity and original slugs, so retries and
+renames reuse the same records. These conversations require schema 32.
+
+In an established world, `prop-authoring` offers creation, state addition and renames.
+`prop-reference` shows a filed image and its destination state before acceptance. Replacing
+an existing reference must be explicit. The state and source artifact link commit together;
+old immutable takes remain history. Uploading files continues through the host-owned picker.
+Props remain name-and-state records: unsupported prose or generic filesystem edits are refused.
 # Reviewing founding content
 
 Issue #1269 adds versioned content decisions to the founding conversation. The agent proposes

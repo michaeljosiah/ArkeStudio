@@ -1,13 +1,15 @@
 import { readFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { createHash } from "node:crypto";
-import { JobSchema, genesisSheetIds, type GenesisBlueprint, type GenesisImageCandidate, type GenesisImageSelection, type LedgerEntry } from "@arke-studio/contracts";
+import { JobSchema, JobIdSchema, genesisSheetIds, type GenesisBlueprint, type GenesisImageCandidate, type GenesisImageSelection, type LedgerEntry } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { fileArtifact, fileGeneratedArtifact } from "../artifacts/filing.js";
 import { genesisControlDir } from "./genesis-conversation.js";
 import { savedGenesisImages } from "./genesis-images.js";
-import { recordReferenceTake, recordUploadedMainPhotoTake, recordUploadedLocationViewTake, referenceReviewDecision } from "../references/takes.js";
+import { recordReferenceTake, recordUploadedMainPhotoTake, recordUploadedLocationViewTake, recordUploadedPropImage, referenceReviewDecision } from "../references/takes.js";
+import { acceptPropStateReference } from "../references/props.js";
+import { genesisPropId, genesisPropStateId } from "./genesis-props.js";
 import { acceptMainPhoto } from "../references/main-photo.js";
 import { acceptLocationView, readKit } from "../references/kit.js";
 
@@ -21,6 +23,9 @@ export async function carryGenesisImageArtifacts(workspace: string, genesisId: s
   ledger: (jobId: string) => Promise<LedgerEntry | undefined>): Promise<void> {
   const images = await savedGenesisImages(workspace);
   const ids = genesisSheetIds(blueprint);
+  for (const prop of blueprint.props ?? []) {
+    for (const state of prop.states) ids.set(`prop:${prop.slug}:${state.slug}`, genesisPropId(genesisId, prop.slug));
+  }
   for (const candidate of images.candidates) {
     const bytes = await candidateBytes(workspace, candidate);
     const links = [...new Set([
@@ -45,6 +50,26 @@ export async function carryGenesisImageArtifacts(workspace: string, genesisId: s
 
 /** Reuse the selected bytes through the same reference-take and kit gates as open-world imports. */
 export async function installGenesisImage(workspace: string, selection: GenesisImageSelection, blueprint: GenesisBlueprint, store: WorldStore): Promise<void> {
+  if (selection.target.startsWith("prop:")) {
+    const [, slug, stateSlug] = selection.target.split(":");
+    const genesisId = basename(genesisControlDir(workspace));
+    const propId = genesisPropId(genesisId, slug!), stateId = genesisPropStateId(genesisId, slug!, stateSlug!);
+    const state = store.getBundle().props.find(prop => prop.id === propId)?.states.find(state => state.id === stateId);
+    if (!state) throw new Error("The approved prop state did not land.");
+    const candidate = selection.candidate, requestId = `founding-image:${selection.target}:${candidate.id}`;
+    const bytes = await candidateBytes(workspace, candidate);
+    const take = await recordUploadedPropImage(store, propId, stateId, `founding-${candidate.hash.slice(7, 23)}${extname(candidate.file)}`, bytes, {
+      requestId, ...(candidate.source === "generated" ? { source: {
+        provider: candidate.provider!, model: candidate.model!, jobId: JobIdSchema.parse(candidate.jobId), prompt: candidate.prompt ?? "",
+        params: candidate.params ?? {}, cost: { estimatedMicroUsd: candidate.estimatedMicroUsd ?? 0, actualMicroUsd: null },
+        dispatchedAt: candidate.createdAt,
+      } } : {}),
+    });
+    if (state.reference?.sourceTakeId === take.id) return;
+    const accepted = await acceptPropStateReference(store, { propId, stateId, selection: { source: "take", takeId: take.id } });
+    if (accepted.status !== "accepted") throw new Error(accepted.reason);
+    return;
+  }
   const id = genesisSheetIds(blueprint).get(selection.target);
   const sheet = store.getBundle().sheets.find(sheet => sheet.id === id);
   if (!sheet) throw new Error("The approved image's sheet did not land.");

@@ -55,7 +55,13 @@ async function freezeImage(dir: string, path: string, info: Omit<GenesisImageCan
 }
 
 export function genesisImageTarget(blueprint: GenesisBlueprint, target: string) {
-  const [kind, slug] = target.split(":");
+  const [kind, slug, stateSlug] = target.split(":");
+  if (kind === "prop") {
+    const prop = blueprint.props?.find(prop => prop.slug === slug);
+    const state = prop?.states.find(state => state.slug === stateSlug);
+    if (!prop || !state) throw new Error("The proposed image no longer has a prop state.");
+    return { entity: { name: `${prop.name} · ${state.name}` }, role: "Prop state reference" as const };
+  }
   const entity = kind === "character" ? blueprint.characters.find(entity => entity.slug === slug)
     : kind === "location" ? blueprint.locations.find(entity => entity.slug === slug) : undefined;
   if (!entity) throw new Error("The proposed image no longer has a character or location.");

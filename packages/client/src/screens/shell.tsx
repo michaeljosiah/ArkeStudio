@@ -682,6 +682,7 @@ function BuildCard({
         [plan.counts.locations, plan.counts.locations === 1 ? "place" : "places"],
         [plan.counts.factions, plan.counts.factions === 1 ? "faction" : "factions"],
         [plan.counts.canon, plan.counts.canon === 1 ? "canon entry" : "canon entries"],
+        [plan.counts.props, plan.counts.props === 1 ? "prop" : "props"],
         [plan.counts.threads, plan.counts.threads === 1 ? "open thread" : "open threads"],
       ]
     : [];

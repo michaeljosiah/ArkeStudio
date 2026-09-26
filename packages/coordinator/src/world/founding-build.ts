@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import {
   ART_DIRECTION_PATH,
   FOUNDING_IMPORTS_SCHEMA_VERSION,
+  CONVERSATIONAL_PROPS_SCHEMA_VERSION,
   FOUNDING_IMAGES_SCHEMA_VERSION,
   FOUNDING_CONTENT_SCHEMA_VERSION,
   BuildJournalEntrySchema,
@@ -47,6 +48,7 @@ import { carryGenesisConversation, genesisConversation, frozenFoundingInput, gen
 import { reviewGenesisContent } from "../harness/genesis-review.js";
 import { carryGenesisImageArtifacts, installGenesisImage } from "../harness/genesis-image-carry.js";
 import { carryGenesisSources, carryGenesisCanonSources } from "../harness/genesis-imports.js";
+import { installGenesisProp } from "../harness/genesis-props.js";
 import { openThread, entryContent } from "../canon/authoring.js";
 import { MarkdownFile, sha256 } from "./text-files.js";
 import { buildSheetContent, createSheetFromSentence } from "../sheets/authoring.js";
@@ -362,6 +364,7 @@ export class FoundingBuildService {
         locations: blueprint.locations.length,
         factions: blueprint.factions.length,
         canon: (blueprint.canon ?? []).filter(entry => entry.type !== "thread").length,
+        props: blueprint.props?.length ?? 0,
         threads: blueprint.threads.length + (blueprint.canon ?? []).filter(entry => entry.type === "thread").length,
       },
       generations,
@@ -479,7 +482,10 @@ export class FoundingBuildService {
     const hasSources = (value: unknown): boolean => !!value && typeof value === "object" &&
       ("sources" in value || Object.values(value).some(hasSources));
     const hasImports = hasSources(blueprint) || foundingEvents.events.some(({ event }) => hasSources(event));
-    await store.ensureSchemaVersion(hasImports ? FOUNDING_IMPORTS_SCHEMA_VERSION : hasImages ? FOUNDING_IMAGES_SCHEMA_VERSION : FOUNDING_CONTENT_SCHEMA_VERSION, "founding-content");
+    const hasProps = (value: unknown): boolean => !!value && typeof value === "object" &&
+      ("props" in value || ("kind" in value && value.kind === "prop") || Object.values(value).some(hasProps));
+    await store.ensureSchemaVersion(hasProps(blueprint) || foundingEvents.events.some(({ event }) => hasProps(event)) ? CONVERSATIONAL_PROPS_SCHEMA_VERSION :
+      hasImports ? FOUNDING_IMPORTS_SCHEMA_VERSION : hasImages ? FOUNDING_IMAGES_SCHEMA_VERSION : FOUNDING_CONTENT_SCHEMA_VERSION, "founding-content");
     if (blueprint.reviewed) {
       const review = await reviewGenesisContent(sandbox);
       const remaining = review.cards.filter(card => card.status !== "approved");
@@ -615,7 +621,7 @@ export class FoundingBuildService {
         }
         continue;
       }
-      if (item.kind === "world" || item.kind === "author-sheet" || item.kind === "thread" || item.kind === "canon" || item.kind === "selected-image" || item.kind === "finalize") {
+      if (item.kind === "world" || item.kind === "author-sheet" || item.kind === "thread" || item.kind === "canon" || item.kind === "prop" || item.kind === "selected-image" || item.kind === "finalize") {
         // Local work re-runs idempotently through the driver; an intent alone is enough.
         continue;
       }
@@ -891,9 +897,16 @@ export class FoundingBuildService {
           await this.runCanon(active, item, store, gate);
           break;
         case "selected-image": {
-          const selection = active.record.blueprint.selectedImages?.find(selection => selection.target === `${item.sheetType}:${item.subject}`);
+          const selection = active.record.blueprint.selectedImages?.find(selection => selection.target === (item.sheetType ? `${item.sheetType}:${item.subject}` : item.subject));
           if (!selection) throw new Error("The approved image selection is missing.");
           await installGenesisImage(await this.ports.genesisDir(active.record.genesisId), selection, active.record.blueprint, store);
+          await this.ports.refreshWorldSnapshot(active.record.worldId);
+          break;
+        }
+        case "prop": {
+          const prop = active.record.blueprint.props?.find(prop => prop.slug === item.subject);
+          if (!prop) throw new Error("The approved prop is missing.");
+          await installGenesisProp(store, active.record.genesisId, prop);
           await this.ports.refreshWorldSnapshot(active.record.worldId);
           break;
         }
