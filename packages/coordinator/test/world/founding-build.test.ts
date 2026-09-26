@@ -373,7 +373,11 @@ describe("the founding build (SPEC-031)", () => {
   });
 
   it("binds Begin to current content and estimate, and supports declining all new images", async t => {
-    const h = await makeHarness(t);
+    let brokenCredential = false;
+    const h = await makeHarness(t, { credentialFor: async () => {
+      if (brokenCredential) throw new Error("Credential storage is unavailable");
+      return "key";
+    } });
     const dir = await makeSandbox(h.root, "gen-stale-review");
     await h.service.plan("gen-stale-review", ulid());
     const old = lastPlan(h);
@@ -382,6 +386,7 @@ describe("the founding build (SPEC-031)", () => {
     await writeFile(join(dir, "draft.json"), JSON.stringify({ ...raw, bible: "A changed argument." }));
     await assert.rejects(h.service.begin("gen-stale-review", ulid(), undefined, undefined, old.approvalDigest), /estimate changed/);
     assert.equal(h.provider.openStore(), null);
+    brokenCredential = true;
     await h.service.plan("gen-stale-review", ulid(), undefined, undefined, false);
     const current = lastPlan(h);
     assert.equal(current.generations, 0);
