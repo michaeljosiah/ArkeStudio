@@ -2994,7 +2994,10 @@ export class Coordinator {
             carryAttachments: (genesisId, worldId) => this.carryGenesisAttachments(genesisId, worldId),
             adoptScopedJobs: async (genesisId, worldId) => {
               for (const job of this.jobQueue?.listJobs() ?? []) {
-                if (job.worldId === genesisId) await this.jobQueue?.adoptWorld(job.id, worldId);
+                if (job.worldId === genesisId) {
+                  const artifact = this.opts.provider.openStore?.()?.getBundle().artifacts.find(artifact => artifact.generation?.source === "founding" && artifact.generation.jobId === job.id);
+                  await this.jobQueue?.adoptWorld(job.id, worldId, job.target.kind === "genesis-image" ? (artifact ? [`artifacts/${artifact.file}`] : []) : undefined);
+                }
               }
             },
             scopedJobs: (genesisId) =>
@@ -7163,7 +7166,7 @@ export class Coordinator {
           if (!reading) {
             const reason = "Another draft operation is running. Review the image and try again shortly.";
             this.emit({ type: "command.failed", at: new Date().toISOString(), command: msg.kind, requestId: msg.requestId, reason });
-            this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: msg.genesisId, status: "failed", detail: reason });
+            this.emit({ type: "genesis.image-error", at: new Date().toISOString(), genesisId: msg.genesisId, detail: reason });
           }
           return;
         }
@@ -7189,7 +7192,7 @@ export class Coordinator {
           }
           this.emit({ type: "genesis.images", at: new Date().toISOString(), genesisId: msg.genesisId, images });
         } catch (err) {
-          this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: msg.genesisId, status: "failed", detail: describeCoordinatorError(err) });
+          this.emit({ type: "genesis.image-error", at: new Date().toISOString(), genesisId: msg.genesisId, detail: describeCoordinatorError(err) });
           if (msg.kind === "genesis-image-generate") this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(err));
         } finally { if (!reading) this.genesisDeciding.delete(msg.genesisId); }
         return;

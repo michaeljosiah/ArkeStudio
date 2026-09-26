@@ -92,7 +92,7 @@ export async function reviewGenesisImages(dir: string, blueprint: GenesisBluepri
         state.candidates.push(await freezeImage(dir, join(dir, file), {
           id: job.id, label: String(job.params["label"] ?? "Generated image"), source: "generated", target: job.target.id,
           jobId: job.id, prompt: String(job.params["prompt"] ?? ""), provider: job.provider, model: job.model,
-          params: job.params, estimatedMicroUsd: job.estimatedMicroUsd, createdAt: job.createdAt,
+          ...(job.recipe ? { recipe: job.recipe } : {}), params: job.params, estimatedMicroUsd: job.estimatedMicroUsd, createdAt: job.createdAt,
         }));
       } catch { problems.push("A generated image could not be preserved. Resolve this before founding."); }
     }

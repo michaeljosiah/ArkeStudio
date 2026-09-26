@@ -210,6 +210,7 @@ export const ArtifactAudiobookGenerationSchema = z
 export type ArtifactAudiobookGeneration = z.infer<typeof ArtifactAudiobookGenerationSchema>;
 
 export const ArtifactFoundingGenerationSchema = z.object({
+  recipe: RecipeIdentitySchema.optional(),
   source: z.literal("founding"), jobId: JobIdSchema, genesisId: z.string(), target: z.string(),
   label: z.string(), prompt: z.string(), provider: z.string(), model: z.string(),
   params: z.record(z.string(), z.unknown()), links: z.array(z.string()),
