@@ -301,6 +301,7 @@ describe("the founding build (SPEC-031)", () => {
     const reference = (await reviewGenesisImages(dir, approved, [], MODEL)).candidates.find(candidate => candidate.label === "portrait.png")!;
     const now = new Date().toISOString();
     const job = JobSchema.parse({ id: newId("jb"), idempotencyKey: ulid(), worldId: "gen-selected",
+      recipe: { id: "frozen-recipe", version: 2, templateDigest: "a".repeat(64), dependencyDigest: "b".repeat(64) },
       target: { kind: "genesis-image", id: "location:vigil" }, capability: "image", provider: "fal", model: "test-image",
       params: { prompt: "The lighthouse at dusk.", label: "The Vigil", references: [reference.file] }, estimatedMicroUsd: 40000, status: "succeeded",
       providerJobId: null, attempt: 1, error: null, landedFiles: ["generated/vigil.png"], createdAt: now, updatedAt: now });
@@ -319,6 +320,10 @@ describe("the founding build (SPEC-031)", () => {
     assert.ok((await readKit(store, character.id))?.kit.mainPhoto?.sourceTakeId);
     assert.ok((await readKit(store, location.id))?.kit.establishingViewId);
     const carriedReference = bundle.referenceTakes.find(take => take.jobId === job.id)!.references[0]!;
+    assert.deepEqual(bundle.referenceTakes.find(take => take.jobId === job.id)?.provenance.recipe, job.recipe);
+    const generated = bundle.artifacts.find(artifact => artifact.generation?.source === "founding");
+    assert.ok(generated?.generation?.source === "founding");
+    assert.deepEqual(generated.generation.recipe, job.recipe);
     assert.match(carriedReference, /^artifacts\//);
     assert.deepEqual(await readFile(join(store.dir, carriedReference)), PNG);
     assert.equal(bundle.artifacts.length, 4);
