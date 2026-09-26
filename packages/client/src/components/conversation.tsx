@@ -654,6 +654,11 @@ function frameRunFailureCopy(state: { status: string; failureClass: string | nul
  * unverifiable quotation and the screen offered nothing but "try again".
  */
 export function failureLine(failure: { status: string; detail?: string }): string {
+  // Refused before anything was asked: the reason is the whole of it, in its own words.
+  if (failure.detail?.startsWith("unavailable: ")) {
+    const reason = failure.detail.slice("unavailable: ".length).trim();
+    return `${reason}${/[.!?]$/.test(reason) ? "" : "."} Your message is still here.`;
+  }
   const rejected = failure.detail?.startsWith("rejected: ") === true;
   if (rejected) {
     return `The studio answered and the answer was refused — ${failure.detail!.slice("rejected: ".length)}. Your message is still here; asking a different way usually gets past it.`;

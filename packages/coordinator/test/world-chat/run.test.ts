@@ -340,7 +340,7 @@ describe("taking a turn", () => {
     assert.match(outcome.status === "failed" ? outcome.reason : "", /retired-model/);
     assert.equal(
       (await refused.view()).lastFailedRun?.safeDetail,
-      "rejected: This production still names retired-model, which is no longer available.",
+      "unavailable: This production still names retired-model, which is no longer available.",
     );
   });
 });

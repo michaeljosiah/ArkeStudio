@@ -21,6 +21,11 @@ describe("a turn that produced nothing says which kind of nothing", () => {
     assert.match(failureLine({ status: "budget-exceeded" }), /past its budget/);
   });
 
+  it("a model that is not there to ask is said plainly, not as a refused answer (issue 1289)", () => {
+    const line = failureLine({ status: "failed", detail: "unavailable: Gemma 4 · 12B Uncensored Balanced · HauhauCS runs only where you choose it. Choose it for this agent in Settings → Harness → Advanced, or install Gemma 4 12B." });
+    assert.equal(line, "Gemma 4 · 12B Uncensored Balanced · HauhauCS runs only where you choose it. Choose it for this agent in Settings → Harness → Advanced, or install Gemma 4 12B. Your message is still here.");
+  });
+
   it("a turn too big for the model's window says what to do instead of offering the same again (issue 1265)", () => {
     const line = failureLine({ status: "budget-exceeded", detail: "too long for this model's window — start a new conversation, or ask about less" });
     assert.match(line, /^Too long for this model's window — start a new conversation, or ask about less\./);

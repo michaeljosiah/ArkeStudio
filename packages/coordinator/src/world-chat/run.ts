@@ -637,7 +637,10 @@ export class WorldChatRunner {
       return { status: "cancelled" };
     }
     if (modelChoice.reason !== undefined) {
-      const reason = `rejected: ${modelChoice.reason}`;
+      // Not "rejected": nothing was asked, so nothing answered. Read as a refused answer, the
+      // screen said "the studio answered" and that asking another way gets past it — neither
+      // true of a model that is not there to ask (issue 1289).
+      const reason = `unavailable: ${modelChoice.reason}`;
       await this.finish(store, run, "failed", reason);
       return { status: "failed", reason };
     }
