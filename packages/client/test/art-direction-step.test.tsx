@@ -194,6 +194,12 @@ async function mountGenesis(blueprint: GenesisBlueprint, plan?: BuildReview): Pr
     Date.now = now;
     Math.random = random;
   }
+  const review = messages.findLast(message => message.kind === "genesis-review");
+  assert.ok(review?.kind === "genesis-review");
+  await act(async () => __applyEventForTest({
+    type: "genesis.review", at: "2026-08-31T12:01:01Z", genesisId: GENESIS_ID, requestId: review.requestId,
+    review: { selected: blueprint, cards: [], problems: [] },
+  }));
   return { container, root, messages };
 }
 
