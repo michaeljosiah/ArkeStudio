@@ -3,8 +3,8 @@ import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
   CLONED_VOICE_PROVIDER,
-  audiobookDirectionFor,
-  audiobookDirectionHash,
+  audiobookTakeDirectionHash,
+  performanceNote,
   audiobookTextHash,
   billableCharacters,
   estimateMicroUsd,
@@ -30,7 +30,7 @@ import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { audioHash } from "../audio/qc.js";
-import { audiobookLanding, castRefusal, checkDirection, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type AudiobookPlan, type PlannedBlock } from "./audiobook.js";
+import { audiobookLanding, castRefusal, checkDirection, currentDirection, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type AudiobookPlan, type PlannedBlock, type RenderedPart } from "./audiobook.js";
 
 /**
  * A chapter read into kept takes (design turn 146, SPEC-047 R-16..R-19): every block that is
@@ -113,8 +113,28 @@ export interface Speaking extends PlannedBlock {
    * none. A direction the reader cannot express is `refusal` instead, and the block is flagged
    * with it rather than made neutral in silence (R-9).
    */
-  direction: { hash: string; delivery: string; rendered: string; voiceSettings: Record<string, number>; instructions?: string } | null;
+  direction: {
+    hash: string;
+    /** The block's delivery; none for a line directed by its speaker's note alone (R-45). */
+    delivery?: string;
+    rendered: string;
+    voiceSettings: Record<string, number>;
+    instructions?: string;
+    /**
+     * Each part's own settings and sentence, beside `parts` (R-41): a marker made in parts
+     * reads its span with its delivery's, so one block's requests need not share them.
+     */
+    perPart: Array<{ voiceSettings: Record<string, number>; instructions?: string }>;
+  } | null;
   refusal?: string;
+  /** The speaker's note could not be played on this reader (R-45): the line is read without it, and the take says so. */
+  noteHeld?: true;
+  /**
+   * The direction the take is made under, as the take names it (R-14, R-45): the plan's and the
+   * note's, even when the note is held and nothing of it is sent, so the take is judged by the
+   * same name the record's state is.
+   */
+  takeHash?: string;
   /** What the reader is sent, in parts each within its cap (R-5): the rendered text under a direction, the words otherwise. */
   parts: string[];
   format: Format;
@@ -231,27 +251,59 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
     // The direction that stands for these words, mapped for the reader that will speak — the
     // narrator's row when the narrator stands in (R-12) — so a control that reader cannot
     // express is refused here, in one clause, and never sent (R-9).
-    const held = audiobookDirectionFor(record, planned.block);
+    // A direction written for earlier words is carried to these by its anchors (R-43).
+    const held = currentDirection(record, planned.block, store.now());
     const language = readerLanguage(clonedVoices, reader);
     const cap = model.limits.maxPromptChars;
     let direction: Speaking["direction"] = null;
     let refusal: string | undefined;
     let parts: string[];
+    // The speaker's note under `performed` (R-45): the line's leading phrase through the row's
+    // phrase path, ahead of the line's own direction. A row that takes no phrase cannot play
+    // it, so the line is read without it and the take records that; the note still names the
+    // take, so changing it makes every line of the speaker's stale.
+    const note = planned.note;
+    const playing = note === undefined ? null : performanceNote(note, model, language);
+    const noteHeld = playing?.mode === "unsupported";
+    const capLeft = note !== undefined && !noteHeld && cap !== undefined ? Math.max(1, cap - note.length - 3) : cap;
+    const lead = (part: RenderedPart): RenderedPart =>
+      playing?.mode === "tag"
+        ? { ...part, text: `${playing.tag} ${part.text}` }
+        : playing?.mode === "instruction"
+          ? { ...part, instructions: part.instructions === undefined ? note! : `${note!} ${part.instructions}` }
+          : part;
     if (held !== null) {
-      const check = checkDirection(planned.block.text, held.plan, model, language);
+      // What this reader cannot express is held (R-47): left out of what it is sent, kept on
+      // the record, and never a reason to flag the block. Only a direction wrong for its words
+      // is refused.
+      const check = checkDirection(planned.block.text, held.plan, { ...model, limits: { ...model.limits, ...(capLeft !== undefined ? { maxPromptChars: capLeft } : {}) } }, language, "hold");
       if (check.ok) {
+        const rendered = check.parts.map(lead);
         direction = {
-          hash: audiobookDirectionHash(held.plan),
+          hash: audiobookTakeDirectionHash(held.plan, note)!,
           delivery: held.plan.delivery,
-          rendered: check.parts.join(" "),
-          voiceSettings: check.mapped.voiceSettings,
-          ...(check.mapped.instructions !== undefined ? { instructions: check.mapped.instructions } : {}),
+          rendered: rendered.map((part) => part.text).join(" "),
+          voiceSettings: rendered[0]?.voiceSettings ?? check.mapped.voiceSettings,
+          ...(rendered[0]?.instructions !== undefined ? { instructions: rendered[0].instructions } : {}),
+          perPart: rendered.map((part) => ({ voiceSettings: part.voiceSettings, ...(part.instructions !== undefined ? { instructions: part.instructions } : {}) })),
         };
-        parts = check.parts;
+        parts = rendered.map((part) => part.text);
       } else {
         refusal = check.reason;
         parts = [text];
       }
+    } else if (note !== undefined) {
+      // A line directed by its note alone: the words as they are, the note ahead, no settings.
+      const words = capLeft !== undefined && text.length > capLeft ? splitForSpeech(text, capLeft) : [text];
+      const rendered = words.map((words) => lead({ text: words, voiceSettings: {} }));
+      direction = {
+        hash: audiobookTakeDirectionHash(null, note)!,
+        rendered: rendered.map((part) => part.text).join(" "),
+        voiceSettings: {},
+        ...(rendered[0]?.instructions !== undefined ? { instructions: rendered[0].instructions } : {}),
+        perPart: rendered.map((part) => ({ voiceSettings: part.voiceSettings, ...(part.instructions !== undefined ? { instructions: part.instructions } : {}) })),
+      };
+      parts = rendered.map((part) => part.text);
     } else parts = cap !== undefined && text.length > cap ? splitForSpeech(text, cap) : [text];
     const local = reader.provider === "kokoro";
     const format = voiceFormatForModel(model);
@@ -263,6 +315,8 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
       ...planned,
       ...(substitutedNow !== undefined ? { substitutedNow } : {}),
       ...(refusal !== undefined ? { refusal } : {}),
+      ...(noteHeld ? { noteHeld: true as const } : {}),
+      ...(refusal === undefined && audiobookTakeDirectionHash(held?.plan ?? null, note) !== undefined ? { takeHash: audiobookTakeDirectionHash(held?.plan ?? null, note)! } : {}),
       reader,
       model,
       local,
@@ -334,7 +388,7 @@ export function chapterPriceToken(worldId: string, productionId: string, chapter
  * direction.
  */
 export function missIdentity(block: Speaking): string {
-  return `${block.block.key}:${audiobookTextHash(block.text)}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.direction?.hash ?? ""}`;
+  return `${block.block.key}:${audiobookTextHash(block.text)}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.takeHash ?? ""}`;
 }
 
 /** The price's lines (R-17): every cloud voice the words would go to, once each, with its share. */
@@ -419,8 +473,14 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
       // The direction lives on the take and never on the chapter (R-8): its name, its delivery,
       // and the digest of what the reader was actually sent.
       ...(block.direction !== null
-        ? { directionHash: block.direction.hash, delivery: block.direction.delivery, providerTextHash: audioHash(Buffer.from(block.direction.rendered)) }
-        : {}),
+        ? {
+            directionHash: block.direction.hash,
+            ...(block.direction.delivery !== undefined ? { delivery: block.direction.delivery } : {}),
+            providerTextHash: audioHash(Buffer.from(block.direction.rendered)),
+          }
+        : block.takeHash !== undefined
+          ? { directionHash: block.takeHash }
+          : {}),
       // A block whose kept take is still on the shelf, or that is made again on purpose, is
       // another take beside that one (SPEC-047 R-4, issue 1190), named for it: filed as its
       // own artifact, found again by a retry, and never the older take of the same words
@@ -452,7 +512,8 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
       estimatedMicroUsd: input.estimatedMicroUsd,
       costMicroUsd: input.costMicroUsd,
       ...(input.adopted !== undefined ? { adopted: true as const } : {}),
-      ...(block.direction !== null ? { directionHash: block.direction.hash } : {}),
+      ...(block.takeHash !== undefined ? { directionHash: block.takeHash } : {}),
+      ...(block.noteHeld === true ? { noteHeld: true as const } : {}),
       madeAt: deps.now(),
     };
     await write((current) => {
@@ -499,7 +560,25 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           // the speech cache keys on the words alone, so it can neither serve nor keep one. So
           // is a block made again unchanged (issue 1190): the cache would hand back the very
           // take being remade.
-          const made = await deps.synthesizeLocal(block.reader.voiceId, block.direction?.rendered ?? block.text, block.direction?.voiceSettings ?? {}, signal);
+          // Parts that share their settings are one synthesis, as a directed block always was;
+          // a marker made in parts changes them mid-block (R-41), so each part is its own and
+          // the parts are joined here.
+          const perPart = block.direction?.perPart ?? [];
+          const uniform = perPart.every((part) => JSON.stringify(part.voiceSettings) === JSON.stringify(perPart[0]?.voiceSettings));
+          let made: { audio: Uint8Array; parts: number };
+          if (uniform || block.format === "flac") {
+            made = await deps.synthesizeLocal(block.reader.voiceId, block.direction?.rendered ?? block.text, block.direction?.voiceSettings ?? {}, signal);
+          } else {
+            const pieces: Uint8Array[] = [];
+            let count = 0;
+            for (const [index, part] of block.parts.entries()) {
+              if (signal.aborted) break;
+              const piece = await deps.synthesizeLocal(block.reader.voiceId, part, perPart[index]?.voiceSettings ?? {}, signal);
+              pieces.push(piece.audio);
+              count += piece.parts;
+            }
+            made = { audio: joinSpeech(pieces, block.format), parts: count };
+          }
           if (signal.aborted) break;
           const sourcePath = join(store.dir, fromPortable(`${landingDir}/${block.block.key.replace(/[^a-z0-9]+/gi, "-")}-directed.${block.format}`));
           await atomicWriteFile(sourcePath, made.audio);
@@ -548,7 +627,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           model: block.model.id,
           voiceId: block.reader.voiceId,
           parts: block.parts.length,
-          directionHash: block.direction?.hash ?? null,
+          directionHash: block.takeHash ?? null,
         };
         for (const [index, part] of block.parts.entries()) {
           if (signal.aborted) break;
@@ -596,9 +675,11 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
                 // the direction's name so the job is this direction's and no other's.
                 ...(block.direction !== null
                   ? {
-                      voiceSettings: block.direction.voiceSettings,
+                      voiceSettings: block.direction.perPart[index]?.voiceSettings ?? block.direction.voiceSettings,
                       directionHash: block.direction.hash,
-                      ...(block.direction.instructions !== undefined ? { instructions: block.direction.instructions } : {}),
+                      ...((block.direction.perPart[index]?.instructions ?? block.direction.instructions) !== undefined
+                        ? { instructions: block.direction.perPart[index]?.instructions ?? block.direction.instructions }
+                        : {}),
                     }
                   : {}),
               },

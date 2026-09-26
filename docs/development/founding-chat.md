@@ -22,7 +22,7 @@ uses that input even if draft files subsequently change. Unreadable drafts block
 recovery restores only the damaged records so valid edits remain visible. Form handoffs also
 retain a pending marker until attachments and conversation history have finished copying.
 
-Worlds containing founding conversation events require schema version 33. Older readers must
+Worlds containing founding conversation events require schema version 35. Older readers must
 refuse the world rather than misread its strict conversation journal.
 
 The founding marker and sandbox remain after completion so a repeated Begin joins its original
@@ -45,7 +45,7 @@ creates a draft proposal; ordinary content approval is still required before Beg
 Source identities survive entity renames and prose edits. Reimported source bytes and replayed
 resolution requests reuse their existing candidates. Founding files the original source and
 adds artifact links to approved sheets and allocated canon IDs. Worlds whose founding journals
-contain this source metadata require schema 36; worlds without it retain their earlier boundary.
+contain this source metadata require schema 38; worlds without it retain their earlier boundary.
 
 Image proposals in `draft.json` name a stable character or location slug, prompt and optional
 uploaded references. The chat shows the prompt, model, reference images and estimated cost
@@ -58,7 +58,7 @@ main-photo and establishing-view services. Existing selections cost nothing to r
 the corresponding generation in the build plan. Alternatives remain artifacts. Generated
 artifacts retain their producing job, provider, model, parameters, cost and entity links.
 
-Founding image decisions and generated-image provenance require schema version 35. Artifact
+Founding image decisions and generated-image provenance require schema version 37. Artifact
 writes that introduce location reference provenance raise this boundary atomically as well.
 
 - Coordinator `test/harness/genesis-images.test.ts`: immutable previews, exact decisions,
@@ -80,7 +80,7 @@ Props are lightweight named records with ordered named states. Founding proposal
 Exact-content approval includes every state. Image targets use `prop:<slug>:<state-slug>`
 and share the same preview, generation authorization, result approval and artifact retention.
 Begin derives prop/state IDs from the founding identity and original slugs, so retries and
-renames reuse the same records. These conversations require schema 37.
+renames reuse the same records. These conversations require schema 39.
 
 In an established world, `prop-authoring` offers creation, state addition and renames.
 `prop-reference` shows a filed image and its destination state before acceptance. Replacing
