@@ -163,6 +163,7 @@ interface StoreState {
       review?: import("@arke-studio/contracts").GenesisContentReview;
       images?: import("@arke-studio/contracts").GenesisImages;
       founding?: boolean;
+      frozenModels?: ModelChoices;
       formHandoff?: "pending" | "completed";
       /** The plan so far, folded from the sandbox directory (SPEC-031 R-2). */
       blueprint: import("@arke-studio/contracts").GenesisBlueprint | null;
@@ -1520,6 +1521,7 @@ function handleFrame(json: string): void {
         attachments: event.attachments, status: event.status, conversationId: event.conversationId,
         founding: event.founding,
         formHandoff: event.formHandoff,
+        frozenModels: event.frozenModels,
         ...(event.detail ? { detail: event.detail } : {}),
         ...(event.worldId ? { worldId: event.worldId } : {}),
       } };
