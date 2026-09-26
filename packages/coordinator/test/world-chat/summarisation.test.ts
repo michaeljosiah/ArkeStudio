@@ -19,7 +19,7 @@ async function setup() {
   return { store, conversationId };
 }
 
-async function appendTurns(store: WorldChatStore, count: number): Promise<void> {
+async function appendTurns(store: WorldChatStore, count: number, model?: string): Promise<void> {
   for (let index = 0; index < count; index++) {
     const turnId = newId("turn");
     const run = {
@@ -31,6 +31,7 @@ async function appendTurns(store: WorldChatStore, count: number): Promise<void> 
       harnessCleanup: "not-required" as const,
       contextDigest: `sha256:${"a".repeat(64)}`,
       startedAt: AT,
+      ...(model !== undefined ? { model } : {}),
     };
     await store.append(
       {
@@ -203,5 +204,37 @@ describe("the summariser's scratch directory (issue 1247)", () => {
     const summarise = makeConversationSummariser(adapter, async () => { throw new Error("The harness's models could not be read."); }, root);
     assert.equal(await summarise({ messages: [] }), null, "a refused configuration is no summary, not an error");
     assert.deepEqual(await readdir(root), [], "and leaves no directory behind for the next retry to add to");
+  });
+});
+
+describe("the summariser's model (issue 1289)", () => {
+  it("runs on the conversation's model when its own agent has none it may use, and on its own otherwise", async () => {
+    const LOCAL = "ollama/hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M";
+    const root = await tempDir("arke-summary-model-");
+    const asked: Array<string | undefined> = [];
+    const adapter = {
+      id: "arke",
+      readiness: () => ({ ready: true }),
+      capabilities: () => new Set(),
+      createSession: async () => ({ sessionId: "s" }),
+      sendMessage: async () => { throw new Error("unused"); },
+      dispatchAsync: async () => ({ sessionId: "s", correlationId: "c" }),
+      streamEvents() { return { [Symbol.asyncIterator]: async function* () { yield { type: "message.completed", sessionId: "s", text: '{"summary":"They counted keys."}' }; } }; },
+    } as unknown as HarnessAdapter;
+    // The coordinator's refusal for an agent with nothing chosen and only a model that waits to be chosen.
+    const refusing = async (input: { model?: string }) => {
+      asked.push(input.model);
+      if (input.model === undefined) throw new Error("Gemma 4 · 12B Uncensored Balanced · HauhauCS runs only where you choose it.");
+      return input;
+    };
+    const { store } = await setup();
+    await appendTurns(store, 8, LOCAL);
+    assert.equal(await refreshConversationSummary(store, makeConversationSummariser(adapter, refusing, root)), true, "a long thread is still condensed");
+    assert.deepEqual(asked, [undefined, LOCAL], "its own agent first, then the model the conversation answered on");
+
+    asked.length = 0;
+    const own = async (input: { model?: string }) => { asked.push(input.model); return input; };
+    assert.equal(await makeConversationSummariser(adapter, own, root)({ messages: [], model: LOCAL }), "They counted keys.");
+    assert.deepEqual(asked, [undefined], "a summariser with a model of its own never borrows the conversation's");
   });
 });

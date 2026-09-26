@@ -340,7 +340,7 @@ describe("taking a turn", () => {
     assert.match(outcome.status === "failed" ? outcome.reason : "", /retired-model/);
     assert.equal(
       (await refused.view()).lastFailedRun?.safeDetail,
-      "rejected: This production still names retired-model, which is no longer available.",
+      "unavailable: This production still names retired-model, which is no longer available.",
     );
   });
 });
@@ -543,6 +543,24 @@ describe("a turn that never answers", () => {
     const { events } = await store.read();
     const run = (events.find((e) => e.event.type === "run.finished")!.event as { run: { status: string } }).run;
     assert.equal(run.status, "timeout");
+  });
+
+  it("ends as over budget, with what to do next, when the harness says the turn does not fit", async () => {
+    // Issue 1265: the local harness refused a chapter ask for its size, and the person was told
+    // "that did not go through" and offered a retry that fails the same way.
+    const adapter = {
+      ...fakeAdapter([]),
+      streamEvents: () => (async function* () {
+        yield { type: "session.ended", sessionId: "s1", reason: "budget-exceeded", detail: "This message and its tool results do not fit the model's context window." } as never;
+      })(),
+    } as unknown as HarnessAdapter;
+    const { runner, store, conversationId } = await setup(adapter);
+    const outcome = await runner.send(store, conversationId, "tighten this");
+    assert.equal(outcome.status, "budget-exceeded");
+    const { events } = await store.read();
+    const run = (events.find((e) => e.event.type === "run.finished")!.event as { run: { status: string; safeDetail?: string } }).run;
+    assert.equal(run.status, "budget-exceeded");
+    assert.match(run.safeDetail ?? "", /start a new conversation, or ask about less/);
   });
 
   it("carries no world or conversation content in what it records", async () => {

@@ -14,7 +14,8 @@ const exchange = (i: number, size: number): ChatMessage[] => [
 ];
 
 test("the budget leaves room for the reply", () => {
-  assert.equal(promptBudget(32_768), 28_672);
+  assert.equal(promptBudget(262_144), 258_048);
+  assert.equal(promptBudget(131_072), 126_976);
   assert.equal(promptBudget(4_096), 3_072);
 });
 
@@ -34,7 +35,7 @@ const exchangeWith = (i: number, question: number, result: number): ChatMessage[
 
 test("old tool results go first, and the latest round's are kept", () => {
   const messages: ChatMessage[] = [{ role: "system", content: "rules" }, ...exchangeWith(1, 50, 3_000), ...exchangeWith(2, 50, 3_000), { role: "user", content: "now" }];
-  assert.equal(fitToWindow(messages, [], 2_000, messages.length - 1), true);
+  assert.equal(fitToWindow(messages, [], 1_200, messages.length - 1), true);
   assert.equal(messages.length, 10, "trimming results was enough, so no exchange was dropped");
   assert.equal(messages[3]!.content, TRIMMED_TOOL_RESULT);
   assert.equal(messages[3]!.tool_name, "read");
@@ -46,8 +47,8 @@ test("then whole exchanges go, oldest first, and the system prompt and current t
   for (let i = 1; i <= 6; i++) messages.push(...exchangeWith(i, 1_500, 100));
   messages.push({ role: "user", content: "now" });
   const current = messages.at(-1)!;
-  assert.equal(fitToWindow(messages, [], 2_500, messages.length - 1), true);
-  assert.ok(estimateTokens(messages, []) <= 2_500 * 0.7, "cut deep, so one trim lasts several turns");
+  assert.equal(fitToWindow(messages, [], 1_500, messages.length - 1), true);
+  assert.ok(estimateTokens(messages, []) <= 1_500 * 0.7, "cut deep, so one trim lasts several turns");
   assert.equal(messages[0]!.content, "rules");
   assert.equal(messages.at(-1), current);
   assert.equal(messages[1]!.role, "user", "the history starts at the beginning of an exchange");
@@ -60,7 +61,7 @@ test("then whole exchanges go, oldest first, and the system prompt and current t
 
 test("when the current turn alone cannot fit, it says so rather than cutting what is being answered", () => {
   const messages: ChatMessage[] = [{ role: "system", content: "rules" }, ...exchange(1, 100), { role: "user", content: big(12_000) }];
-  assert.equal(fitToWindow(messages, [], 3_000, messages.length - 1), false);
+  assert.equal(fitToWindow(messages, [], 1_800, messages.length - 1), false);
   assert.equal(messages.at(-1)!.content.length, 12_000);
 });
 
@@ -69,7 +70,7 @@ test("token-dense scripts are estimated from their bytes, so they are never unde
   const emoji = estimateTokens([{ role: "user", content: "🌊".repeat(1_000) }], []);
   assert.ok(han >= 1_000, `a Han character is at least a token (${han})`);
   assert.ok(emoji >= 2_000, `an emoji is at least two (${emoji})`);
-  assert.ok(estimateTokens([{ role: "user", content: big(3_000) }], []) < 1_100, "prose keeps its three letters to a token");
+  assert.ok(estimateTokens([{ role: "user", content: big(3_000) }], []) < 700, "a common word is one token, as it is to a real tokenizer");
 });
 
 test("every tool result gathered for the current turn is kept; a turn whose evidence cannot fit says so", () => {
@@ -81,7 +82,7 @@ test("every tool result gathered for the current turn is kept; a turn whose evid
     { role: "assistant", content: "", tool_calls: [{ function: { name: "read", arguments: { path: "b.md" } } }] },
     { role: "tool", tool_name: "read", content: `b ${big(4_000)}` },
   ];
-  assert.equal(fitToWindow(messages, [], 2_000, 1), false);
+  assert.equal(fitToWindow(messages, [], 1_200, 1), false);
   assert.ok(messages[3]!.content.startsWith("a "), "the first file is still what the model compares");
 });
 
@@ -97,7 +98,7 @@ test("a re-ask the loop wrote inside a turn is dropped with that turn, never lef
     { role: "user", content: "now" },
   ];
   // Dropping only up to the correction would already be under the target, leaving it orphaned.
-  assert.equal(fitToWindow(messages, [], 1_000, 5), true);
+  assert.equal(fitToWindow(messages, [], 600, 5), true);
   assert.deepEqual(messages.map((m) => m.role), ["system", "user"], "the whole first turn went, correction and all");
   assert.equal(messages[1]!.content, "now");
 });
@@ -130,8 +131,8 @@ test("letters that are not shaped like words are charged near what random letter
 
 test("a session's learned correction shrinks the budget, so an estimate shown to be low is not trusted twice", () => {
   const messages: ChatMessage[] = [{ role: "system", content: "rules" }, ...exchange(1, 3_000), { role: "user", content: "now" }];
-  assert.equal(fitToWindow(structuredClone(messages), [], 3_000, messages.length - 1), true, "fits on the estimate alone");
+  assert.equal(fitToWindow(structuredClone(messages), [], 1_800, messages.length - 1), true, "fits on the estimate alone");
   const scaled = structuredClone(messages);
-  assert.equal(fitToWindow(scaled, [], 3_000, scaled.length - 1, 2), true);
+  assert.equal(fitToWindow(scaled, [], 1_800, scaled.length - 1, 2), true);
   assert.notDeepEqual(scaled, messages, "at twice the estimate it no longer fits untrimmed");
 });

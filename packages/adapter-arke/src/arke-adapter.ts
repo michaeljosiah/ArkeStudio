@@ -37,9 +37,9 @@ export interface ArkeAdapterOptions {
   /** Replaced in tests. */
   fetch?: typeof fetch;
   /**
-   * The context window asked for when a model does not state one, and the ceiling otherwise.
-   * The host sets it from what the GPU can hold: a window the card cannot fit is one Ollama
-   * splits onto the CPU, which is slower than a smaller window that fits.
+   * The context window, when the host fixes it: the ceiling for a model that states more, the
+   * window for one that states nothing. Unset, a session gets the model's own window, from 128k
+   * to 256k. A window the card cannot fit is one Ollama splits onto the CPU: slower, not broken.
    */
   maxContextTokens?: number;
   /** Model calls one turn may make before it is ended. Each tool round is one. */
@@ -50,15 +50,46 @@ export interface ArkeAdapterOptions {
   catalogueDeadlineMs?: number;
   /** Passed to Ollama as `keep_alive`, when set. */
   keepAlive?: string | number;
+  /**
+   * Whether a model that reasons before answering is let to. Off unless set: on a local card a
+   * Gemma 4 12B spent 419 tokens thinking before a one-sentence answer and took ten times as
+   * long as with thinking off (issue 1289), and a cast or a chapter ask timed out on it.
+   */
+  think?: boolean;
+  /**
+   * Sampling a model's publisher recommends, sent as Ollama `options` with every request. A
+   * model pulled from Hugging Face carries only its stop tokens, so without these it runs on
+   * Ollama's generic defaults rather than the settings it was tuned with.
+   */
+  modelOptions?: (model: string) => Readonly<Record<string, number>> | undefined;
+  /**
+   * A model the person must choose by name: never the default a session falls back to. A
+   * community uncensored variant is one — installing it is not choosing it for every agent.
+   */
+  explicitOnly?: (model: string) => boolean;
   onTrace?: (line: Record<string, unknown>) => void;
 }
 
-const DEFAULT_CONTEXT = 8_192;
-const CONTEXT_CEILING = 32_768;
+/**
+ * The window a session asks for: the model's own, between these two. The lane admits only models
+ * stating 256k (`meetsLocalModelMinimum`), and a session now gets that window rather than a
+ * fraction of it (issue 1265 held every session to 32k).
+ *
+ * Measured on a 10 GB RTX 3080 with Gemma 4 12B (2026-09-26, f16 cache, flash attention): 128k
+ * put 30% of the model on the CPU and generated at 11.8 tokens a second, 256k put 44% there at
+ * 7.8, and both read a fact back from the middle of a 121,000-token prompt (141 s and 179 s).
+ * The model keeps the full context in 8 of its 48 layers, about 16 KB a token, so the window is
+ * cheap in memory and Ollama spills to the CPU rather than failing. The floor is the product's
+ * own minimum: a session never runs below 128k, however little a model says about itself.
+ */
+const CONTEXT_FLOOR = 131_072;
+const CONTEXT_CEILING = 262_144;
 const DEFAULT_STEPS = 24;
 const CATALOGUE_DEADLINE_MS = 15_000;
 const DISPOSE_RELEASE_MS = 2_000;
 const REPROBE_MS = 5_000;
+/** The world-builder's seventeen tool schemas, as `estimateTokens` counts them. */
+const TOOL_ALLOWANCE = 2_700;
 const NO_USABLE_MODEL = "No pulled model has a 256k context window and calls tools. Pull one, such as Gemma 4 12B.";
 /**
  * Only models stating a 256k context are offered, the same rule as the OpenCode lane
@@ -147,6 +178,8 @@ export class ArkeAdapter implements HarnessAdapter {
   /** Aborted by dispose, so a check in flight stops rather than outliving the adapter. */
   private readonly lifetime = new AbortController();
   private lastProbe = 0;
+  /** What each role's tool schemas were estimated at when its last session opened. */
+  private readonly toolCost = new Map<string, number>();
 
   constructor(private readonly opts: ArkeAdapterOptions = {}) {
     this.fetchImpl = opts.fetch ?? fetch;
@@ -217,7 +250,9 @@ export class ArkeAdapter implements HarnessAdapter {
     }
     // A check that finishes after disposal says nothing about an adapter that no longer exists.
     if (this.disposed) throw new Error("The Arke harness is disposed.");
-    if (!models.some((model) => model.isDefault)) return unready(NO_USABLE_MODEL);
+    // Usable, not the default: a harness whose only model must be chosen by name can still run
+    // every session that names it.
+    if (!models.some((model) => model.tools === true)) return unready(NO_USABLE_MODEL);
     if (!this.ready.ready) this.revision++;
     this.ready = { ready: true };
   }
@@ -242,12 +277,14 @@ export class ArkeAdapter implements HarnessAdapter {
       throw error;
     }
     const pulled = all.filter(supported);
-    // Only a model seen to call tools: a default nobody chose must be one that can do the work.
-    const fallback = pulled.find((model) => model.tools === true)?.id;
+    // Only a model seen to call tools: a default nobody chose must be one that can do the work,
+    // and one the person has not had to choose by name.
+    const explicitOnly = this.opts.explicitOnly ?? (() => false);
+    const fallback = pulled.find((model) => model.tools === true && !explicitOnly(model.id))?.id;
     // Every read of the catalogue is also a check of readiness: the last usable model can be
     // removed while the app runs, and a harness that cannot start a writing session must not go
     // on reporting itself healthy. The recovery probe restores it when one is pulled again.
-    if (fallback === undefined && this.ready.ready) this.markUnready(NO_USABLE_MODEL);
+    if (!pulled.some((model) => model.tools === true) && this.ready.ready) this.markUnready(NO_USABLE_MODEL);
     const models = pulled.map((model): ModelInfo => ({
       id: model.id, provider: PROVIDER, displayName: model.id,
       inputModalities: model.vision ? ["text", "image"] : ["text"],
@@ -264,12 +301,30 @@ export class ArkeAdapter implements HarnessAdapter {
 
   /** The context window asked of Ollama: the model's own, held to the ceiling. */
   private contextFor(stated: number | undefined): number {
-    const ceiling = this.opts.maxContextTokens ?? CONTEXT_CEILING;
-    return Math.min(stated ?? this.opts.maxContextTokens ?? DEFAULT_CONTEXT, ceiling);
+    // A host's explicit setting is taken as given — it knows its card, and tests exercise
+    // trimming in small windows. Otherwise the model's own window, held between floor and ceiling.
+    if (this.opts.maxContextTokens !== undefined) return Math.min(stated ?? this.opts.maxContextTokens, this.opts.maxContextTokens);
+    return Math.max(CONTEXT_FLOOR, Math.min(stated ?? CONTEXT_FLOOR, CONTEXT_CEILING));
   }
 
   knownInputTokenLimit(sessionId?: string): number | null {
     return sessionId !== undefined ? this.sessions.get(sessionId)?.numCtx ?? null : null;
+  }
+
+  /**
+   * The part of a window this harness spends before the person's message, counted the way the
+   * turn's own fit check counts (issue 1265). A caller that sized its message by its own rule
+   * left no room for a 34,600-character world-builder prompt and its tools, and every chapter
+   * ask was refused at step 0. The tools are the last session's for the role, since the world's
+   * tool list is only read when a session opens; before any, an allowance measured on the
+   * world-builder's seventeen.
+   */
+  promptReserveTokens(agent: string, window: number): number | undefined {
+    const member = ROSTER.find((candidate) => candidate.name === agent);
+    if (!member) return undefined;
+    const prompt = agentPromptFor({ ...member, researchWeb: false });
+    const tools = PROMPT_ONLY_AGENTS.has(agent) ? 0 : this.toolCost.get(agent) ?? TOOL_ALLOWANCE;
+    return estimateTokens([{ role: "system", content: prompt }], []) + tools + (window - promptBudget(window));
   }
 
   async createSession(input: CreateSessionInput): Promise<SessionRef> {
@@ -290,14 +345,18 @@ export class ArkeAdapter implements HarnessAdapter {
     // A role that sends no tools needs no model that calls them: a model seen to complete will do
     // when none that calls tools is pulled. One whose capabilities Ollama did not list stays a
     // choice for a person to make — nothing says it completes, and nobody would see it fail.
+    const explicitOnly = this.opts.explicitOnly ?? (() => false);
     const selected = requested !== undefined ? findHarnessModel(requested, models)
-      : models.find((model) => model.isDefault) ?? (promptOnly ? models.find((model) => model.tools !== undefined) : undefined);
+      : models.find((model) => model.isDefault) ?? (promptOnly ? models.find((model) => model.tools !== undefined && !explicitOnly(model.id)) : undefined);
     if (requested !== undefined && !selected) {
       // Pulled but not offered says something different from not pulled: the person can act on it.
       const present = all.some((row) => findHarnessModel(requested, [{ id: row.id, provider: PROVIDER, displayName: row.id }]));
       throw new Error(present
         ? "This model's context window is under 256k tokens. Arke's local harness needs 256k or more."
         : "The selected model is not pulled in Ollama. Refresh the model list and choose an available model.");
+    }
+    if (!selected && models.some((model) => explicitOnly(model.id))) {
+      throw new Error("Choose a model for this agent. Arke does not pick a community variant on its own.");
     }
     if (!selected) throw new Error(promptOnly ? "Ollama has no 256k-context model known to answer. Pull one, or choose a model." : "Ollama has no model with a 256k context window that calls tools. Pull one, or choose a model before starting this agent.");
     const missingInput = harnessModelMissingInput(selected, member.name === "stage-designer");
@@ -334,6 +393,7 @@ export class ArkeAdapter implements HarnessAdapter {
     // Every await above can straddle a dispose, which clears the sessions it knows of; a session
     // added after that would belong to an adapter that has already been retired.
     if (this.disposed) throw new Error("The Arke harness is disposed.");
+    this.toolCost.set(member.name, estimateTokens([], tools));
     const id = randomUUID();
     this.sessions.set(id, { ...toolSession, id, model: selected.id, numCtx, tools, known, messages: [system], turn: null, usage: 0, scale: 1 });
     this.opts.onTrace?.({ at: "arke.session-created", sessionId: id, model: selected.id, agent: member.name, numCtx, tools: tools.map((tool) => tool.function.name) });
@@ -391,6 +451,9 @@ export class ArkeAdapter implements HarnessAdapter {
     try {
       for (let step = 0; step < steps; step++) {
         if (!fitToWindow(session.messages, session.tools, promptBudget(session.numCtx), session.messages.indexOf(opening), session.scale)) {
+          // Refused before the model saw it, the message is not part of the conversation: kept,
+          // a smaller ask sent next would carry it along and be refused for the same size.
+          if (step === 0) session.messages.splice(session.messages.indexOf(opening), 1);
           return { reason: "budget-exceeded", detail: "This message and its tool results do not fit the model's context window." };
         }
         // Raced with the turn's own signal: a release stalled on Ollama must not hold a stopped
@@ -404,6 +467,8 @@ export class ArkeAdapter implements HarnessAdapter {
         this.resident.add(session.model);
         const result = await streamChat(this.fetchImpl, this.baseUrl, {
           model: session.model, messages: session.messages, tools: session.tools, numCtx: session.numCtx,
+          think: this.opts.think ?? false,
+          ...(this.opts.modelOptions?.(session.model) ? { options: this.opts.modelOptions(session.model)! } : {}),
           ...(this.opts.keepAlive !== undefined ? { keepAlive: this.opts.keepAlive } : {}),
         }, signal, (text) => this.emit({ type: "message.delta", sessionId: session.id, correlationId: turn.correlationId, text }));
         session.usage += result.promptTokens + result.outputTokens;

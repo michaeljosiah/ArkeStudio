@@ -357,6 +357,27 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     } finally { await test.close(); }
   });
 
+  it("never makes a model that waits to be chosen the default, and names it when it is the only one (issue 1289)", async () => {
+    // Listed first, as Ollama lists the model pulled most recently: installing it made it every
+    // agent's writer, with Content & safety off.
+    const UNCENSORED = "hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M";
+    const beside = new CaptureAdapter();
+    beside.list = async () => [{ provider: "ollama", id: UNCENSORED, displayName: UNCENSORED }, ...MODELS];
+    const test = await fixture({ adapter: beside });
+    try {
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL, "installing it is not choosing it");
+    } finally { await test.close(); }
+    const alone = new CaptureAdapter();
+    alone.list = async () => [...CLOUD_ONLY, { provider: "ollama", id: UNCENSORED, displayName: UNCENSORED }];
+    const only = await fixture({ adapter: alone });
+    try {
+      await untilAsync(async () => {
+        assert.equal(await only.chat(), undefined, "no session goes to it unasked");
+        return /Uncensored Balanced · HauhauCS runs only where you choose it/.test(only.coordinator.getState().worldChat?.lastFailure?.detail ?? "");
+      }, "the refusal naming the model and where to choose it");
+    } finally { await only.close(); }
+  });
+
   it("takes the first local row the admission gate lets through, under the shipped manifest", async () => {
     const test = await fixture({ manifest: true });
     try {

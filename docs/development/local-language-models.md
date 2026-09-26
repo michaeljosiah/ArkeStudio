@@ -20,6 +20,14 @@ The optional setup entry `ollama-gemma4-12b-balanced` provides the manifest mode
 [HauhauCS Balanced model](https://huggingface.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced)
 with Q4_K_M weights. Select it explicitly in Settings; it is not in the automatic
 recommendation order and does not replace standard Gemma 4 12B.
+The catalogue entry enforces that (issue #1289): `explicitChoiceOnly` keeps it out of the
+local default an unchosen agent falls back to, in the coordinator and in Arke's own harness, and
+a session with nothing else installed is refused with where to choose it. The entry also carries
+the model card's sampling (temperature 0.6, top_k 64, top_p 0.9, min_p 0.05, repeat_penalty 1.1),
+which Arke's harness sends with every request: a Hugging Face pull carries only its stop tokens.
+The harness sends `think: false` too — this build reasons before answering even though Ollama
+lists no thinking capability for it, and a one-sentence answer cost 419 tokens and ten times
+the time with thinking left on.
 Settings names the Uncensored variant and displays its requirements before installation
 (issue #1252). Installation and inference remain unverified by Arke; the persistent
 catalogue caveat states that limitation and the mutable upstream weights independently
@@ -46,7 +54,7 @@ the optional vision projector and speculative decoding head are not installed.
 From `packages/coordinator`, run:
 
 ```powershell
-node --import tsx --test test/setup/catalogue-invariants.test.ts test/setup/local-setup.test.ts
+node --import tsx --test test/setup/catalogue-invariants.test.ts test/setup/local-setup.test.ts test/setup/local-model-policy.test.ts
 ```
 
 From `packages/providers`, run:
