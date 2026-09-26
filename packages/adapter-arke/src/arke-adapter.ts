@@ -71,7 +71,15 @@ export interface ArkeAdapterOptions {
 }
 
 const DEFAULT_CONTEXT = 8_192;
-const CONTEXT_CEILING = 32_768;
+/**
+ * The window a session asks for, at most, unless the host says otherwise. 32k held a chapter
+ * ask only once the prompt was measured properly (issue 1265), and left a long thread or a whole
+ * chapter's context little room. Gemma 4 12B keeps the full context in 8 of its 48 layers, one
+ * 512+512 KV head each: about 16 KB a token, so 128k is some 2 GB of cache where 32k was half a
+ * gigabyte. On a 10 GB card that moves more of the model onto the CPU, which Ollama does by
+ * itself rather than failing; a host that knows its card can still set `maxContextTokens`.
+ */
+const CONTEXT_CEILING = 131_072;
 const DEFAULT_STEPS = 24;
 const CATALOGUE_DEADLINE_MS = 15_000;
 const DISPOSE_RELEASE_MS = 2_000;

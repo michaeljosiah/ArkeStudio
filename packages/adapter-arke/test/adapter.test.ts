@@ -41,8 +41,8 @@ test("lists pulled models in the contract's terms, and names a tool-calling one 
   await f.adapter.init();
   assert.equal(f.adapter.readiness().ready, true);
   assert.deepEqual(await f.adapter.listModels(), [
-    { id: "chatty:7b", provider: "ollama", displayName: "chatty:7b", inputModalities: ["text"], inputTokenLimit: 32768, tools: false },
-    { id: "qwen3-vl:8b", provider: "ollama", displayName: "qwen3-vl:8b", inputModalities: ["text", "image"], inputTokenLimit: 32768, tools: true, isDefault: true },
+    { id: "chatty:7b", provider: "ollama", displayName: "chatty:7b", inputModalities: ["text"], inputTokenLimit: 131072, tools: false },
+    { id: "qwen3-vl:8b", provider: "ollama", displayName: "qwen3-vl:8b", inputModalities: ["text", "image"], inputTokenLimit: 131072, tools: true, isDefault: true },
   ], "only models stating 256k or more; the limit is the window a session will get; a model that cannot call tools says so");
 });
 
@@ -62,8 +62,8 @@ test("a turn streams, completes, and ends with a stated reason; every event pars
   const request = f.ollama.chats[0]!;
   assert.equal(request.model, "gemma4:12b");
   assert.equal(request.stream, true);
-  assert.deepEqual(request.options, { num_ctx: 32768 }, "the model's own context, held to the ceiling");
-  assert.equal(f.adapter.knownInputTokenLimit(id), 32768);
+  assert.deepEqual(request.options, { num_ctx: 131072 }, "the model's own context, held to the ceiling");
+  assert.equal(f.adapter.knownInputTokenLimit(id), 131072);
   const messages = request.messages as Array<{ role: string; content: string }>;
   assert.equal(messages[0]!.role, "system");
   assert.deepEqual(messages.at(-1), { role: "user", content: "Name the town." });
@@ -147,7 +147,7 @@ test("the chosen model is the one asked for; one not pulled, or under 256k, is r
   f.ollama.script.push(reply("ok"));
   await f.adapter.sendMessage({ sessionId: id, parts: [{ type: "text", text: "hi" }] });
   assert.equal(f.ollama.chats[0]!.model, "qwen3:8b");
-  assert.deepEqual(f.ollama.chats[0]!.options, { num_ctx: 32768 });
+  assert.deepEqual(f.ollama.chats[0]!.options, { num_ctx: 131072 });
   await assert.rejects(f.session("world-builder", { model: "ollama/absent:1b" }), /not pulled/);
   await assert.rejects(f.session("canon-qa", { model: "ollama/short:8b" }), /under 256k tokens/, "pulled, but not offered, and told why");
 });
@@ -255,7 +255,7 @@ test("a model whose inspection stalls is not offered, since its window cannot be
   ];
   await f.adapter.init();
   assert.deepEqual(await f.adapter.listModels(), [
-    { id: "gemma4:12b", provider: "ollama", displayName: "gemma4:12b", inputModalities: ["text", "image"], inputTokenLimit: 32768, tools: true, isDefault: true },
+    { id: "gemma4:12b", provider: "ollama", displayName: "gemma4:12b", inputModalities: ["text", "image"], inputTokenLimit: 131072, tools: true, isDefault: true },
   ]);
 });
 
@@ -350,7 +350,7 @@ test("thinking is off unless asked for, and a model's recommended sampling trave
   await f.adapter.sendMessage({ sessionId: id, ...text("Go.") });
   const body = f.ollama.chats.at(-1)!;
   assert.equal(body.think, false);
-  assert.deepEqual(body.options, { ...sampling, num_ctx: 32768 }, "the window is the session's own whatever the sampling says");
+  assert.deepEqual(body.options, { ...sampling, num_ctx: 131072 }, "the window is the session's own whatever the sampling says");
 });
 
 test("a model that must be chosen by name is never the default, but runs a session that names it", async (t) => {
@@ -468,8 +468,8 @@ test("a model that states its 256k window but no capability list is offered, as 
     { name: "gemma4:12b", capabilities: ["completion", "tools"], context: 262144 },
   ];
   assert.deepEqual(await f.adapter.listModels(), [
-    { id: "plain:12b", provider: "ollama", displayName: "plain:12b", inputModalities: ["text"], inputTokenLimit: 32768 },
-    { id: "gemma4:12b", provider: "ollama", displayName: "gemma4:12b", inputModalities: ["text"], inputTokenLimit: 32768, tools: true, isDefault: true },
+    { id: "plain:12b", provider: "ollama", displayName: "plain:12b", inputModalities: ["text"], inputTokenLimit: 131072 },
+    { id: "gemma4:12b", provider: "ollama", displayName: "gemma4:12b", inputModalities: ["text"], inputTokenLimit: 131072, tools: true, isDefault: true },
   ]);
 });
 
