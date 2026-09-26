@@ -84,3 +84,11 @@ it("a corrupted frozen image cannot be approved or founded", async () => {
   await assert.rejects(reviewedGenesisImages(dir, draft, []), /repair/);
   await assert.rejects(decideGenesisImage(dir, draft, { target: "location:vigil", requestId: ulid(), decision: "approve", candidateId: candidate.id, hash: candidate.hash }), /changed/);
 });
+
+it("unselected retained candidates are validated before any world is published", async () => {
+  const { dir } = await setup();
+  const draft = blueprint();
+  const candidate = (await reviewGenesisImages(dir, draft, [], model)).candidates[0]!;
+  await writeFile(join(genesisControlDir(dir), candidate.file), "corrupt");
+  await assert.rejects(reviewedGenesisImages(dir, draft, []), /repair/);
+});

@@ -355,6 +355,11 @@ describe("the founding build (SPEC-031)", () => {
     }));
     const review = await reviewGenesisContent(workspace);
     await decideGenesisContent(workspace, review.cards, "approve", ulid());
+    await h.service.plan("gen-reviewed", ulid());
+    const planned = h.events.findLast(event => event.type === "build.plan");
+    assert.ok(planned?.type === "build.plan" && planned.plan);
+    assert.equal(planned.plan.counts.canon, 1);
+    assert.equal(planned.plan.counts.threads, 1);
     await h.service.begin("gen-reviewed", ulid());
     await until(() => h.lastState()?.status === "completed", "the reviewed founding build", BUILD_MS);
     assert.ok(h.lastState()?.items.filter(item => item.authorized).every(item => item.state === "landed"), JSON.stringify(h.lastState()?.items));
@@ -373,6 +378,43 @@ describe("the founding build (SPEC-031)", () => {
     assert.equal(h.worldId(), id);
     assert.equal((await h.provider.listWorlds()).length, 1);
     assert.equal(h.provider.openStore()!.getBundle().canon.length, 2);
+  });
+
+  it("rejoins staged approved sheets and canon after a lost staging response", async t => {
+    let h!: Harness;
+    const failed = new Set<string>(), patched = new WeakSet<object>();
+    h = await makeHarness(t, { manifest: null,
+      reviewedBlueprint: async id => approvedBlueprintForFounding(await h.provider.genesisDir(id)),
+      gate: () => {
+        const gate = h.provider.gate();
+        if (gate && !patched.has(gate)) {
+          patched.add(gate);
+          const stage = gate.stage.bind(gate);
+          gate.stage = async (...args) => {
+            const proposal = await stage(...args);
+            if (!failed.has(proposal.kind)) { failed.add(proposal.kind); throw new Error("Lost staging response"); }
+            return proposal;
+          };
+        }
+        return gate;
+      },
+    });
+    const workspace = await h.provider.genesisDir("gen-staged");
+    await mkdir(join(workspace, "draft", "characters"), { recursive: true });
+    await writeFile(join(workspace, "draft.json"), JSON.stringify({ name: "Harbour",
+      canon: [{ slug: "gate", type: "rule", title: "Closed", statement: "The gate stays closed." }] }));
+    await writeFile(join(workspace, "draft", "characters", "maren.json"), JSON.stringify({ name: "Maren", line: "The keeper" }));
+    await decideGenesisContent(workspace, (await reviewGenesisContent(workspace)).cards, "approve", ulid());
+    await h.service.begin("gen-staged", ulid());
+    await until(() => h.lastState()?.status === "completed", "interrupted staging", BUILD_MS);
+    const store = h.provider.openStore()!;
+    assert.equal(store.getBundle().proposals.length, 2);
+    const nextCanonId = store.getBundle().meta.nextCanonId;
+    await h.service.runItems(h.worldId());
+    assert.equal(store.getBundle().proposals.length, 0);
+    assert.equal(store.getBundle().sheets.length, 1);
+    assert.equal(store.getBundle().canon.length, 1);
+    assert.equal(store.getBundle().meta.nextCanonId, nextCanonId);
   });
 
   it("one press makes the whole world: files, sheets, anchors, key art — nothing left to decide", async (t) => {
