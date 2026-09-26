@@ -4,6 +4,10 @@ import {
   AUDIOBOOK_TITLE_KEY,
   AudiobookDirectionSchema,
   audiobookBlocks,
+  audiobookSpeakerColours,
+  audiobookSpeakerKey,
+  audiobookRecordingKey,
+  retailLevel,
   audiobookBlockState,
   audiobookChapterComplete,
   audiobookCounts,
@@ -157,7 +161,7 @@ describe("a block's state (R-13, R-14)", () => {
       { [line.key]: { reason: "failed", at: AT } },
     );
     const counts = audiobookCounts(blocks, rec, (block) => (block.sheet === "maren-kest" ? ANNA : GEORGE));
-    assert.deepEqual({ ...counts, toMake: undefined }, { total: 5, made: 1, stale: 1, flagged: 1, notMade: 2, toMake: undefined });
+    assert.deepEqual({ ...counts, toMake: undefined }, { total: 5, made: 1, stale: 1, flagged: 1, notMade: 2, awaiting: 0, toMake: undefined });
     assert.deepEqual(counts.toMake, ["p0.0", "p2.0", "p2.1", "p3.0"], "everything that is not made, in reading order");
     assert.equal(audiobookChapterComplete(counts), false);
     assert.equal(audiobookChapterComplete({ total: 5, made: 5 }), true);
@@ -225,5 +229,50 @@ describe("the door's words (turn 146, R-15, R-29)", () => {
     assert.ok(AudiobookDoorSchema.safeParse(door).success);
     assert.ok(!AudiobookDoorSchema.safeParse({ ...door, export: {} }).success, "strict: the export waits for its slice");
     assert.ok(!AudiobookDoorSchema.safeParse({ ...door, voices: [{ name: "x", state: "reads", blocks: -1 }] }).success);
+  });
+});
+
+describe("speaker colours (SPEC-047 R-33)", () => {
+  const stamp = (...sheets: (string | undefined)[]) => ({ speakers: sheets.map((sheet, i) => ({ speaker: sheet ?? `name-${i}`, ...(sheet !== undefined ? { sheet } : {}) })) });
+  it("numbers the book's speakers by chapter order and keeps one colour a speaker across chapters", () => {
+    const colours = audiobookSpeakerColours([
+      { order: 2, voices: stamp("odile", "maren") },
+      { order: 1, voices: stamp("maren") },
+      { order: 3, retired: true, voices: stamp("tam") },
+      { order: 4, voices: { unreadable: true } },
+    ]);
+    assert.deepEqual([...colours], [["maren", 1], ["odile", 2]], "chapter 1 speaks first; a retired or unreadable chapter adds nobody");
+  });
+  it("leaves a name with no sheet uncoloured, wraps past six, and numbers extra speakers last", () => {
+    const colours = audiobookSpeakerColours([{ order: 1, voices: stamp("a", undefined, "b", "c", "d", "e", "f", "g") }], ["h", "a"]);
+    assert.equal(colours.size, 8);
+    assert.equal(colours.get("g"), 1, "the seventh wraps to the first colour");
+    assert.equal(colours.get("h"), 2, "a speaker the stamps do not hold yet comes after them");
+    assert.equal(audiobookSpeakerKey({}), null);
+    assert.equal(audiobookSpeakerKey({ speaker: "the harbourmaster" }), "the harbourmaster");
+    assert.equal(audiobookSpeakerKey({ speaker: "Odile", sheet: "odile-sarn" }), "odile-sarn");
+  });
+});
+
+describe("a recording's level against Retail (SPEC-047 R-23, R-35)", () => {
+  it("passes within the window, warns outside it, and says nothing of what was not measured", () => {
+    assert.deepEqual(retailLevel({ rmsDbfs: -20, samplePeakDbfs: -4 }), { loudness: "pass", peak: "pass" });
+    assert.deepEqual(retailLevel({ rmsDbfs: -35, samplePeakDbfs: -1 }), { loudness: "warning", peak: "warning" });
+    assert.deepEqual(retailLevel({ rmsDbfs: null, samplePeakDbfs: null }), { loudness: "unavailable", peak: "unavailable" });
+  });
+});
+
+describe("a speaker a person records (SPEC-047 R-37, R-38)", () => {
+  it("names who records a block, and a recorded speaker's block waits for a recording and is never run", () => {
+    const narration = { key: "p0.0", paragraph: 0, text: "The Vigil was cold." };
+    const line = { key: "p1.0", paragraph: 1, text: "“Not tonight.”", speaker: "Odile", sheet: "odile-sarn" };
+    assert.equal(audiobookRecordingKey(narration), "narrator");
+    assert.equal(audiobookRecordingKey(line), "odile-sarn");
+    assert.equal(audiobookRecordingKey({ speaker: "the harbourmaster" }), "the harbourmaster");
+    const reader = { provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george" };
+    assert.equal(audiobookBlockState(line, null, reader, undefined, true), "awaiting");
+    const counts = audiobookCounts([narration, line], null, () => reader, undefined, (block) => block.key === "p1.0");
+    assert.deepEqual({ awaiting: counts.awaiting, notMade: counts.notMade, toMake: counts.toMake }, { awaiting: 1, notMade: 1, toMake: ["p0.0"] });
+    assert.equal(audiobookRowLabel({ chapterId: "neap", file: "01-neap", order: 1, title: "Neap", version: 1, planned: false, total: 4, made: 2, stale: 0, flagged: 0, notMade: 0, awaiting: 2, seconds: null }), "2 of 4 made · 2 awaiting");
   });
 });

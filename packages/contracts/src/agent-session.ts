@@ -18,6 +18,19 @@ export interface SessionConfigInput {
    * default. Not written into any harness configuration.
    */
   agent?: string;
+  /**
+   * Where the open world's agents keep their own working notes between sessions: a folder the
+   * app owns, one file an agent, never canon and never in the world's folder. Read by a harness
+   * that keeps notes for its agents (Arke's own); hosted harnesses keep their own memory and
+   * ignore it.
+   */
+  memoryDir?: string;
+  /**
+   * The author's page: what agents learn about the person as a writer — voice, preferences, how
+   * they like to work — shared by every agent in every world. A file the app owns, beside the
+   * worlds' notes. Read and ignored the same way as `memoryDir`.
+   */
+  authorNotesFile?: string;
   /** The world-query MCP server URL (loopback), when a world is open. */
   worldQueryUrl?: string;
   /** Concrete model for authoring, e.g. "anthropic/claude-sonnet-5" or "ollama/llama3.3". */

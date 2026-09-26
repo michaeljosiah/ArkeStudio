@@ -35,6 +35,16 @@
   --danger:         var(--destructive);
   --danger-bg:      #FEF2F2;
 
+  /* ---- Speaker colours (SPEC-047 R-33) -------------------- */
+  /* One a speaker across the book, in the Audiobook view's margin, filter and Voices. Never
+     green, amber or red: the block's state dot is those. */
+  --voice-1: #4A63E0;
+  --voice-2: #A2479A;
+  --voice-3: #23857C;
+  --voice-4: #7353CF;
+  --voice-5: #2F7FA8;
+  --voice-6: #5B6B7F;
+
   /* ---- Neutral ramp (for fine control) -------------------- */
   --neutral-50:  #FAFAFA;
   --neutral-100: #F5F5F5;
@@ -132,6 +142,13 @@
   --success-bg: #0B1F12;
   --warning-bg: #241803;
   --danger-bg:  #2A0E0E;
+
+  --voice-1: #8E9CFF;
+  --voice-2: #DB8BD0;
+  --voice-3: #5FC5BA;
+  --voice-4: #A792F0;
+  --voice-5: #6DB8DE;
+  --voice-6: #93A3BA;
 
   --text-secondary: var(--neutral-300);
   --text-placeholder: var(--neutral-500);
