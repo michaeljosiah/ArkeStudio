@@ -80,7 +80,7 @@ Props are lightweight named records with ordered named states. Founding proposal
 Exact-content approval includes every state. Image targets use `prop:<slug>:<state-slug>`
 and share the same preview, generation authorization, result approval and artifact retention.
 Begin derives prop/state IDs from the founding identity and original slugs, so retries and
-renames reuse the same records. These conversations require schema 37.
+renames reuse the same records. These conversations require schema 39.
 
 In an established world, `prop-authoring` offers creation, state addition and renames.
 `prop-reference` shows a filed image and its destination state before acceptance. Replacing
