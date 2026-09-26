@@ -1065,8 +1065,12 @@ describe("the founding build (SPEC-031)", () => {
     const retry = h.service.runItems(h.worldId(), key);
     await until(() => [...h.queue.jobs.values()].some(job => job.status === "running"), "retried image running", BUILD_MS);
     const retried = [...h.queue.jobs.values()].find(job => job.status === "running")!;
+    const queued = h.service.runItems(h.worldId(), key);
+    const submissions = h.queue.jobs.size;
     await h.service.stop(h.worldId());
     await retry;
+    await queued;
+    assert.equal(h.queue.jobs.size, submissions, "Stop also cancels a retry queued behind the running retry");
     assert.ok(h.queue.cancelled.includes(retried.id), "Stop cancels a retry after the original build was already stopped");
   });
 });

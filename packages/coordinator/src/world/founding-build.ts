@@ -760,9 +760,10 @@ export class FoundingBuildService {
     }
     // Chained, not joined: a press naming a different item queues behind the one running
     // rather than being silently dropped.
+    const stopGeneration = this.builds.get(worldId)?.stopGeneration ?? 0;
     const work = (this.runningItems.get(worldId) ?? Promise.resolve())
       .catch(() => {})
-      .then(() => this.runItemsWork(worldId, itemKey));
+      .then(() => this.runItemsWork(worldId, stopGeneration, itemKey));
     this.runningItems.set(worldId, work);
     void work.finally(() => {
       if (this.runningItems.get(worldId) === work) this.runningItems.delete(worldId);
@@ -770,11 +771,11 @@ export class FoundingBuildService {
     return work;
   }
 
-  private async runItemsWork(worldId: string, itemKey?: string): Promise<void> {
+  private async runItemsWork(worldId: string, stopGeneration: number, itemKey?: string): Promise<void> {
     const store = this.ports.openStore();
     if (!store || store.worldId !== worldId) return;
     const active = await this.load(store.dir, worldId);
-    if (!active) return;
+    if (!active || (active.stopGeneration ?? 0) !== stopGeneration) return;
     let state = this.fold(active);
     if (state.status === "running" || active.driving) return;
     // Work a crash left mid-air settles first, with its journalled identity (R-34).
@@ -787,7 +788,6 @@ export class FoundingBuildService {
     if (keys.length === 0) return;
     // An unauthorized item runs only when a route resolves NOW — the reason it was refused
     // may have been fixed, which is the whole point of the press (R-11).
-    const stopGeneration = active.stopGeneration ?? 0;
     const { route } = await this.resolveImageRoute(this.worldModels(worldId));
     for (const key of keys) {
       if ((active.stopGeneration ?? 0) !== stopGeneration) break;
