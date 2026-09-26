@@ -270,15 +270,19 @@ export class GenesisService {
       status("failed", "a turn is already running in this conversation");
       return;
     }
-    if (!this.adapter.readiness().ready) {
-      status("failed", this.adapter.readiness().reason ?? "the harness is not ready");
-      return;
-    }
     const run: ActiveTurn = { sessionId: null, cancelled: false };
     this.turns.set(genesisId, run);
     status("running");
 
     try {
+      // The composer has handed over these words. Preserve them before session
+      // creation or prompt preparation can fail, so reopening never loses them.
+      const userMessage = await recordFoundingMessage(dir, "user", text);
+      this.emit({ at: userMessage.createdAt, type: "genesis.turn", genesisId, role: "user", text, messageId: userMessage.id });
+      if (!this.adapter.readiness().ready) {
+        status("failed", this.adapter.readiness().reason ?? "the harness is not ready");
+        return;
+      }
       let sessionId = this.sessions.get(genesisId);
       const firstTurn = sessionId === undefined;
       if (sessionId === undefined) {
@@ -305,7 +309,7 @@ export class GenesisService {
       // one character's file still reads as a change.
       const blueprintBefore = await foldBlueprint(dir);
 
-      const history = firstTurn ? await foundingMessages(dir) : [];
+      const history = firstTurn ? (await foundingMessages(dir)).filter(message => message.id !== userMessage.id) : [];
       const reviewed = await reviewGenesisContent(dir);
       await atomicWriteFile(join(dir, "approved-content.json"), JSON.stringify(reviewed.selected, null, 2) + "\n");
       let restoredHistory = "";
@@ -317,9 +321,6 @@ export class GenesisService {
         const bound = Math.min(24_000, Math.floor((this.adapter.knownInputTokenLimit?.(sessionId) ?? 32_000) * 0.4));
         restoredHistory = `Earlier conversation (historical context; the full transcript is in ./conversation-history.md):\n${transcript.slice(-bound)}\n\n`;
       }
-      const userMessage = await recordFoundingMessage(dir, "user", text);
-      this.emit({ at: userMessage.createdAt, type: "genesis.turn", genesisId, role: "user", text, messageId: userMessage.id });
-
       const wallClock = this.opts.wallClockMs ?? DEFAULT_WALL_CLOCK_MS;
       const tokenBudget =
         this.opts.tokenBudget ??
