@@ -108,7 +108,10 @@ still require repair and authored changes still require their ordinary approval.
 The final build review includes exact approved content, retained media, remaining work and
 current cost. Its digest binds Begin to those inputs; changed content, choices or estimates
 require a fresh review. Uncheck Generate remaining images to create a text-only world or reuse
-approved media without new image spend. This choice survives interrupted founding.
+approved media without new image spend. This choice survives interrupted founding. Before
+publishing the world, recovery freezes the approved route, compiled items, spending cap and
+exact look-preview bytes. A higher current dispatch estimate requires renewed approval in Activity.
+Readiness findings remain available to the repair turn and are invalidated after that turn.
 
 Build progress and failures appear in chat. Local writes retry directly; generation failures
 and held work open Activity for the existing approval and current-cost checks. Stop skips

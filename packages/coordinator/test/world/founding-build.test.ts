@@ -1134,7 +1134,7 @@ it("recovers the authorized route, items and cap after a crash before world crea
   assert.equal(record.capMicroUsd, frozen.authorization.capMicroUsd);
   assert.deepEqual(record.items, frozen.authorization.items);
   assert.equal(record.image.model, frozen.authorization.route.model.id);
-  await until(() => h.lastState()?.status === "completed", BUILD_MS);
+  await until(() => h.lastState()?.status === "completed", "recovered founding completes", BUILD_MS);
 });
 
 it("refuses a different successful look receipt even when its look words are unchanged", async t => {
