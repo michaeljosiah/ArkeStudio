@@ -157,10 +157,11 @@ export async function reviewedGenesisImages(dir: string, approved: GenesisBluepr
   if (jobs.some(job => job.target.kind === "genesis-image" && job.status === "succeeded" && !state.candidates.some(candidate => candidate.jobId === job.id))) {
     throw new Error("Review the finished images before founding so their results can be preserved.");
   }
-  for (const selection of state.selections) {
-    genesisImageTarget(approved, selection.target);
-    const bytes = await containedBytes(join(genesisControlDir(dir), "media"), join(genesisControlDir(dir), selection.candidate.file));
-    if (`sha256:${hash(bytes)}` !== selection.candidate.hash) throw new Error("An approved image needs repair before founding.");
+  for (const candidate of state.candidates) {
+    const bytes = await containedBytes(join(genesisControlDir(dir), "media"), join(genesisControlDir(dir), candidate.file))
+      .catch(() => { throw new Error("A retained image needs repair before founding."); });
+    if (`sha256:${hash(bytes)}` !== candidate.hash) throw new Error("A retained image needs repair before founding.");
   }
-  return { ...approved, selectedImages: state.selections };
+  for (const selection of state.selections) genesisImageTarget(approved, selection.target);
+  return state.selections.length ? { ...approved, selectedImages: state.selections } : approved;
 }

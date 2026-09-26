@@ -144,6 +144,23 @@ See [founding chat](founding-chat.md) for lifecycle and recovery checks.
 
 ### Accept a proposal
 
+### Generate and approve founding images
+
+Contracts `genesis-images.ts` defines intents, candidates, selections and review plans;
+`frames.ts` and `events.ts` carry the chat commands. Coordinator `coordinator.ts` routes
+`genesis-images`, `genesis-image-generate` and `genesis-image-decide` to
+`harness/genesis-images.ts`, which freezes media and persists exact-hash decisions outside
+the harness workspace. `harness/genesis-image-carry.ts` files artifacts and installs approved
+main photos and location views through reference services. `world/founding-build.ts` replaces
+the corresponding paid work with the selected image.
+
+Client `components/genesis-images.tsx`, `screens/shell.tsx` and `lib/store.ts` render generation
+authorization separately from actual-image approval. Tests: coordinator
+`test/harness/genesis-images.test.ts`, `test/dispatch-refusal.test.ts`,
+`test/world/founding-build.test.ts`; client `test/genesis-images.test.tsx`.
+
+### Accept an authored proposal
+
 Client `screens/proposals.tsx` and `domain/connected.tsx` use `lib/store.ts`'s `acceptProposal`. It sends `proposal-accept` from contracts `frames.ts`. Coordinator's matching handler checks active drafting and calls `ProposalManager.accept` in `gate/proposals.ts`. The gate checks whether the candidate can land; the world commit path owns file/version changes. The handler records conversation resolution for a landed result, emits `proposal.resolved` or `proposal.blocked` as appropriate and refreshes the world snapshot.
 
 Follow the refusal cases too: stale bases, pending review, unresolved choices/conflicts and active drafting do not become acceptance. Read `test/gate/proposals.test.ts`, `test/gate/settle-survives.test.ts` and `test/world/commit.test.ts` in coordinator for decision and persistence coverage.

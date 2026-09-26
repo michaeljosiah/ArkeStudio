@@ -369,6 +369,8 @@ export function explainAcceptRefusal(outcome: AcceptOutcome): string {
 }
 
 export interface StageInput {
+  /** Application-reserved identity for a recoverable staging operation. */
+  proposalId?: string;
   kind: Proposal["kind"];
   summary: string;
   source: string;
@@ -445,6 +447,24 @@ export class ProposalManager {
   /** Materialise a proposal: copies, bases, `_base/` snapshots, reservation, preview (R-1, R-2). */
   async stage(input: StageInput, precondition?: WorldStatePrecondition): Promise<Proposal> {
     return this.store.gateOp(async () => {
+      if (input.proposalId) {
+        if (!/^pr_[0-9A-HJKMNP-TV-Z]{26}$/.test(input.proposalId)) throw new Error("Invalid reserved proposal identity.");
+        const existing = await this.readManifest(input.proposalId).catch((err: NodeJS.ErrnoException) => {
+          if (err.code === "ENOENT") return null;
+          throw err;
+        });
+        if (existing) {
+          if (existing.kind !== input.kind || existing.source !== input.source ||
+            existing.targets.length !== input.targets.length ||
+            input.targets.some(target => !existing.targets.some(old => old.path === target.path)))
+            throw new Error("The reserved proposal does not match this operation.");
+          for (const target of input.targets) {
+            if (target.content !== undefined && await this.readProposalFile(existing.id, target.path) !== target.content)
+              throw new Error("The reserved proposal content changed.");
+          }
+          return existing;
+        }
+      }
       /*
        * One open look proposal, enforced where it is actually atomic.
        *
@@ -477,7 +497,7 @@ export class ProposalManager {
           );
         }
       }
-      const id = newId("pr");
+      const id = input.proposalId ?? newId("pr");
       const at = this.store.now();
 
       let reservedCanonIds: string[] = input.preReservedCanonIds ?? [];

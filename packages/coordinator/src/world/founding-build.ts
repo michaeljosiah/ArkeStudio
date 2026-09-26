@@ -3,6 +3,8 @@ import { dirname, join } from "node:path";
 import {
   ART_DIRECTION_PATH,
   FOUNDING_IMPORTS_SCHEMA_VERSION,
+  FOUNDING_IMAGES_SCHEMA_VERSION,
+  FOUNDING_CONTENT_SCHEMA_VERSION,
   BuildJournalEntrySchema,
   BuildReviewSchema,
   buildItemDispatches,
@@ -45,7 +47,7 @@ import { carryGenesisConversation, genesisConversation, frozenFoundingInput, gen
 import { reviewGenesisContent } from "../harness/genesis-review.js";
 import { carryGenesisImageArtifacts, installGenesisImage } from "../harness/genesis-image-carry.js";
 import { carryGenesisSources, carryGenesisCanonSources } from "../harness/genesis-imports.js";
-import { openThread, stageCanonEntry } from "../canon/authoring.js";
+import { openThread, entryContent } from "../canon/authoring.js";
 import { MarkdownFile, sha256 } from "./text-files.js";
 import { buildSheetContent, createSheetFromSentence } from "../sheets/authoring.js";
 import {
@@ -359,7 +361,8 @@ export class FoundingBuildService {
         characters: blueprint.characters.length,
         locations: blueprint.locations.length,
         factions: blueprint.factions.length,
-        threads: blueprint.threads.length,
+        canon: (blueprint.canon ?? []).filter(entry => entry.type !== "thread").length,
+        threads: blueprint.threads.length + (blueprint.canon ?? []).filter(entry => entry.type === "thread").length,
       },
       generations,
       estimateMicroUsd,
@@ -469,7 +472,14 @@ export class FoundingBuildService {
     const store = this.ports.openStore();
     if (!store || store.worldId !== worldId) throw new Error("the new world did not open");
 
-    await store.ensureSchemaVersion(FOUNDING_IMPORTS_SCHEMA_VERSION, "founding-content");
+    const foundingEvents = await (await genesisConversation(sandbox)).read();
+    const hasImages = blueprint.selectedImages !== undefined || foundingEvents.events.some(({ event }) =>
+      event.type === "founding.image-decision" || (event.type === "founding.blueprint" &&
+        (event.blueprint.images !== undefined || event.blueprint.selectedImages !== undefined)));
+    const hasSources = (value: unknown): boolean => !!value && typeof value === "object" &&
+      ("sources" in value || Object.values(value).some(hasSources));
+    const hasImports = hasSources(blueprint) || foundingEvents.events.some(({ event }) => hasSources(event));
+    await store.ensureSchemaVersion(hasImports ? FOUNDING_IMPORTS_SCHEMA_VERSION : hasImages ? FOUNDING_IMAGES_SCHEMA_VERSION : FOUNDING_CONTENT_SCHEMA_VERSION, "founding-content");
     if (blueprint.reviewed) {
       const review = await reviewGenesisContent(sandbox);
       const remaining = review.cards.filter(card => card.status !== "approved");
@@ -1046,11 +1056,18 @@ export class FoundingBuildService {
       });
       const { sections, role, billing, region } = entity.sheet;
       const content = buildSheetContent({ id, type: item.sheetType, name: entity.name, status: "sketch",
-        sections, links, date: store.now().slice(0, 10),
+        sections, links, date: active.record.createdAt.slice(0, 10),
         extra: { ...(role ? { role } : {}), ...(billing ? { billing } : {}), ...(region ? { region } : {}),
           ...("neverDepicted" in entity && entity.neverDepicted ? { neverDepicted: true } : {}) },
       });
-      const proposal = await gate.stage({ kind: "new-sheet", summary: `Approved founding sheet: ${entity.name}`, source: "chat:studio",
+      const receipt = join(store.dir, BUILD_DIR, `sheet-${item.sheetType}-${entity.slug}.json`);
+      let proposalId = await readFile(receipt, "utf8").then(raw => JSON.parse(raw).proposalId as string)
+        .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return null; throw err; });
+      if (!proposalId) {
+        proposalId = newId("pr");
+        await store.ownedWrite(() => atomicWriteFile(receipt, JSON.stringify({ proposalId }) + "\n"));
+      }
+      const proposal = await gate.stage({ proposalId, kind: "new-sheet", summary: `Approved founding sheet: ${entity.name}`, source: "chat:studio",
         targets: [{ path: `${sheetDir(item.sheetType)}/${id}.md`, content }] });
       const outcome = await acceptDecided(gate, proposal.id);
       if (outcome.status !== "accepted") throw new Error(`The approved sheet could not be saved (${outcome.status}).`);
@@ -1158,11 +1175,18 @@ export class FoundingBuildService {
       return;
     }
     if (!receipt) {
-      const proposal = await stageCanonEntry(store, gate, { entryType: entry.type, title: entry.title,
-        statement: entry.statement, status: entry.type === "thread" ? "open" : "settled" });
-      receipt = { proposalId: proposal.id, entryId: proposal.reservedCanonIds[0]! };
-      await atomicWriteFile(receiptPath, JSON.stringify(receipt) + "\n");
+      receipt = await store.gateOp(async () => {
+        const reserved = { proposalId: newId("pr"), entryId: `CANON-${String(store.getBundle().meta.nextCanonId).padStart(3, "0")}` };
+        // Identity allocation and its recovery receipt are one journalled world transaction.
+        await store.commitUnserialised({ kind: "canon-id-allocation", source: "founding", allocateCanonIds: 1,
+          files: [{ path: `${BUILD_DIR}/canon-${entry.slug}.json`, action: "create", baseHash: null, content: JSON.stringify(reserved) + "\n" }] });
+        return reserved;
+      });
     }
+    await gate.stage({ proposalId: receipt.proposalId, kind: "new-canon", summary: `Approved founding canon: ${entry.title}`,
+      source: "chat:studio", preReservedCanonIds: [receipt.entryId],
+      targets: [{ path: `canon/${receipt.entryId}.md`, content: entryContent({ id: receipt.entryId, type: entry.type,
+        title: entry.title, statement: entry.statement, status: entry.type === "thread" ? "open" : "settled" }) }] });
     const outcome = await acceptDecided(gate, receipt.proposalId);
     if (outcome.status !== "accepted") throw new Error(`The approved canon entry could not be saved (${outcome.status}).`);
     await carryGenesisCanonSources(await this.ports.genesisDir(active.record.genesisId), entry.sources ?? [], receipt.entryId, store);
