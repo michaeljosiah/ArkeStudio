@@ -7097,6 +7097,15 @@ export class Coordinator {
           const dir = await this.opts.provider.genesisDir(msg.genesisId);
           const loadedDraft = await loadGenesisConversation(dir, msg.genesisId);
           if (loadedDraft.worldId || loadedDraft.founding) throw new Error("This world has already begun.");
+          // Directory sheets own their content; a legacy form array cannot overwrite them.
+          for (const kind of ["characters", "locations"] as const) {
+            for (const entity of msg.draft[kind]) {
+              const existing = loadedDraft.blueprint[kind].find(one => one.name.toLowerCase() === entity.name.toLowerCase());
+              if (existing && existing.line !== entity.line && await stat(join(dir, "draft", kind, `${existing.slug}.json`)).then(() => true, () => false)) {
+                throw new Error(`${existing.name} has a drafted sheet. Ask in the conversation to change its text, then approve the updated sheet.`);
+              }
+            }
+          }
           const previous: Record<string, unknown> = await readFile(join(dir, "draft.json"), "utf8").then(raw => JSON.parse(raw) as Record<string, unknown>)
             .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return {}; throw err; });
           const combine = (old: unknown, added: Array<{ name: string; line: string }>) =>

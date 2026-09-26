@@ -1036,7 +1036,7 @@ export class FoundingBuildService {
         extra: { ...(role ? { role } : {}), ...(billing ? { billing } : {}), ...(region ? { region } : {}),
           ...("neverDepicted" in entity && entity.neverDepicted ? { neverDepicted: true } : {}) },
       });
-      const receipt = join(store.dir, BUILD_DIR, `sheet-${item.sheetType}-${entity.slug}.json`);
+      const receipt = join(store.dir, BUILD_DIR, `sheet-${id}.json`);
       let proposalId = await readFile(receipt, "utf8").then(raw => JSON.parse(raw).proposalId as string)
         .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return null; throw err; });
       if (!proposalId) {
