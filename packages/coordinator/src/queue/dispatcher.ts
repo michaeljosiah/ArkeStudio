@@ -282,6 +282,7 @@ const FORMAT_PRESERVING_IMAGE_TARGETS = new Set([
   "genesis-image",
 ]);
 const FOLLOW_ON_TARGETS = new Set([
+  "genesis-image",
   ...REFERENCE_FINALIZATION_TARGETS,
   "reference-tile",
   "shot",
