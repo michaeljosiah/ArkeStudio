@@ -487,6 +487,10 @@ const CLIENT_COMMAND_METADATA = {
   // A take a person recorded (turn 155c): chosen on this machine, prepared and checked here, and
   // kept under the rights given once; nothing leaves the machine.
   "set-audiobook-recorded": action("production", "command", "voice", "authored-change", ["chapters"]),
+  "export-audiobook-script": action("production", "command", "voice", "export", ["chapters"]),
+  "stage-audiobook-lines": action("production", "command", "voice", "host-file-access", ["chapters"]),
+  "keep-audiobook-lines": action("production", "command", "voice", "privacy-sensitive", ["chapters"]),
+  "discard-audiobook-lines": action("production", "command", "voice", "host-file-access", []),
   "stage-audiobook-take": action("production", "command", "voice", "host-file-access", ["chapters"]),
   "keep-audiobook-take": action("production", "command", "voice", "privacy-sensitive", ["chapters"]),
   "discard-audiobook-take": action("production", "command", "voice", "host-file-access", []),

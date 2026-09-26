@@ -122,6 +122,18 @@ export interface CanonRefsState {
   ripples: Array<{ kind: string; summary: string; targets: string[] }>;
 }
 
+/** A script out, or returned files matched and checked, for a recorded speaker (design turn 155d, SPEC-047 R-39). */
+export interface SpeakerLinesState {
+  kind: "script" | "files";
+  state: "working" | "done" | "keeping" | "refused";
+  output?: string;
+  lines?: number;
+  notCast?: number;
+  rows?: Extract<import("@arke-studio/contracts").DomainEvent, { type: "audiobook.lines-staged" }>["rows"];
+  kept?: number;
+  refused?: string;
+}
+
 /** A recording on its way to being a block's take (design turn 155c): what the checks said, and where it stands. */
 export interface StagedTake {
   worldId: string;
@@ -314,6 +326,8 @@ interface StoreState {
    * id: the host's picker open, the checks back, the keep on its way, or refused in one clause.
    */
   stagedTakes: Record<string, StagedTake>;
+  /** A recorded speaker's script out and files back (turn 155d), by the window's request id. */
+  speakerLines: Record<string, SpeakerLinesState>;
   /**
    * The door (turn 146, SPEC-047 R-29), by production: what every chapter stands at, who
    * reads, and the price of a press, as the coordinator last answered; and `Read the book`,
@@ -500,6 +514,7 @@ let current: StoreState = {
   direction: {},
   audiobookRecords: {},
   stagedTakes: {},
+  speakerLines: {},
   audiobookDoor: {},
   audiobookBook: {},
   audiobookNotes: {},
@@ -1314,6 +1329,7 @@ function handleFrame(json: string): void {
       direction: changedWorld ? {} : Object.fromEntries(Object.entries(current.direction).filter(([, held]) => held.state !== "directing")),
       audiobookRecords: changedWorld ? {} : current.audiobookRecords,
       stagedTakes: changedWorld ? {} : current.stagedTakes,
+      speakerLines: changedWorld ? {} : current.speakerLines,
       audiobookDoor: changedWorld ? {} : current.audiobookDoor,
       audiobookBook: changedWorld || rejoined ? {} : current.audiobookBook,
       audiobookNotes: changedWorld ? {} : current.audiobookNotes,
@@ -1346,6 +1362,7 @@ function handleFrame(json: string): void {
     let direction = current.direction;
     let audiobookRecords = current.audiobookRecords;
     let stagedTakes = current.stagedTakes;
+    let speakerLines = current.speakerLines;
     let audiobookDoor = current.audiobookDoor;
     let audiobookBook = current.audiobookBook;
     let audiobookNotes = current.audiobookNotes;
@@ -1754,6 +1771,28 @@ function handleFrame(json: string): void {
           ...(event.reason !== undefined ? { reason: event.reason } : {}),
         },
       };
+    } else if (event.type === "audiobook.script") {
+      if (speakerLines[event.requestId] !== undefined) {
+        speakerLines = {
+          ...speakerLines,
+          [event.requestId]:
+            event.refused !== undefined
+              ? { kind: "script", state: "refused", refused: event.refused }
+              : { kind: "script", state: "done", ...(event.output !== undefined ? { output: event.output } : {}), ...(event.lines !== undefined ? { lines: event.lines } : {}), ...(event.notCast !== undefined ? { notCast: event.notCast } : {}) },
+        };
+      }
+    } else if (event.type === "audiobook.lines-staged") {
+      if (speakerLines[event.requestId] !== undefined) {
+        speakerLines = {
+          ...speakerLines,
+          [event.requestId]: event.refused !== undefined ? { kind: "files", state: "refused", refused: event.refused } : { kind: "files", state: "done", rows: event.rows },
+        };
+      }
+    } else if (event.type === "audiobook.lines-kept") {
+      const held = speakerLines[event.requestId];
+      if (held !== undefined) {
+        speakerLines = { ...speakerLines, [event.requestId]: { ...held, state: "done", kept: event.kept, ...(event.refused !== undefined ? { refused: event.refused } : {}) } };
+      }
     } else if (event.type === "audiobook.take-staged") {
       const held = stagedTakes[event.requestId];
       if (held !== undefined) {
@@ -2174,6 +2213,7 @@ function handleFrame(json: string): void {
       direction,
       audiobookRecords,
       stagedTakes,
+      speakerLines,
       audiobookDoor,
       audiobookBook,
       audiobookNotes,
@@ -4685,6 +4725,43 @@ export function keepAudiobookTake(worldId: string, requestId: string, basis: "se
   return true;
 }
 
+/** A recorded speaker's script as a PDF under exports/ (SPEC-047 R-39); answered under the returned id. */
+export function exportAudiobookScript(worldId: string, productionId: string, speaker: string, label: string, scope: "awaiting" | "all"): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "export-audiobook-script", worldId, productionId, speaker, label, scope, requestId })) return null;
+  emitChange({ ...current, speakerLines: { ...current.speakerLines, [requestId]: { kind: "script", state: "working" } } });
+  return requestId;
+}
+
+/** The files a performer sent back, chosen together on this machine and matched by the id in each name (R-39). */
+export function stageAudiobookLines(worldId: string, productionId: string, speaker: string): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "stage-audiobook-lines", worldId, productionId, speaker, requestId })) return null;
+  emitChange({ ...current, speakerLines: { ...current.speakerLines, [requestId]: { kind: "files", state: "working" } } });
+  return requestId;
+}
+
+/** Keep the ticked files as takes, under the rights given once (R-36, R-39). */
+export function keepAudiobookLines(worldId: string, requestId: string, basis: "self" | "authorized" | "licensed", files: readonly string[], performer?: string): boolean {
+  const held = current.speakerLines[requestId];
+  if (held === undefined) return false;
+  const trimmed = performer?.trim();
+  if (!send({ kind: "keep-audiobook-lines", worldId, requestId, basis, files: [...files], ...(trimmed ? { performer: trimmed } : {}) })) return false;
+  emitChange({ ...current, speakerLines: { ...current.speakerLines, [requestId]: { ...held, state: "keeping" } } });
+  return true;
+}
+
+/** Let the matched files go: their staged copies are deleted, nothing was written. */
+export function discardAudiobookLines(worldId: string, requestId: string): void {
+  const { [requestId]: _gone, ...rest } = current.speakerLines;
+  emitChange({ ...current, speakerLines: rest });
+  send({ kind: "discard-audiobook-lines", worldId, requestId });
+}
+
+export function useSpeakerLines(): StoreState["speakerLines"] {
+  return useStore().speakerLines;
+}
+
 /** Let the staged recording go: its copies are deleted on the machine that made them. */
 export function discardAudiobookTake(worldId: string, requestId: string): void {
   const { [requestId]: _gone, ...rest } = current.stagedTakes;
@@ -5031,6 +5108,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     direction: {},
     audiobookRecords: {},
     stagedTakes: {},
+    speakerLines: {},
     audiobookDoor: {},
     audiobookBook: {},
     audiobookNotes: {},

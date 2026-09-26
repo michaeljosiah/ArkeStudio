@@ -585,6 +585,60 @@ describe("the Audiobook view (turn 146)", () => {
     assert.deepEqual({ speaker: sent.speaker, recorded: sent.recorded }, { speaker: "narrator", recorded: false });
   });
 
+  it("a recorded speaker's lines go out as a script and come back as files, matched, checked, and kept under one set of rights (SPEC-047 R-39)", async () => {
+    const state = inkbound();
+    const world = state.world!;
+    const m = await mount({
+      ...state,
+      world: {
+        ...world,
+        productions: world.productions.map((p) => (p.meta.id === "inkbound" ? { ...p, audiobook: { schemaVersion: 1 as const, reading: "narrator" as const, recorded: ["narrator"] } } : p)),
+      },
+    });
+    await answerOpen(m);
+    await act(async () => all(m, ".fy-ab__block")[1]!.click());
+    await act(async () => q(m, '[data-testid="audiobook-lines"]')!.click());
+    const dialog = () => dom.document.querySelector('[data-testid="speaker-lines-dialog"]') as HTMLElement | null;
+    assert.ok(dialog(), "Lines… opens the sheet");
+
+    await act(async () => (dialog()!.querySelector('[data-testid="speaker-lines-export"]') as HTMLElement).click());
+    const exported = m.sent.findLast((message) => message.kind === "export-audiobook-script") as Extract<ClientMessage, { kind: "export-audiobook-script" }>;
+    assert.deepEqual({ speaker: exported.speaker, scope: exported.scope, label: exported.label }, { speaker: "narrator", scope: "awaiting", label: "Narrator" });
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.script", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", requestId: exported.requestId, output: "exports/inkbound-narrator-lines-20260926-abcdef.pdf", lines: 4, chapters: 1, notCast: 0 }));
+    assert.match(dialog()!.textContent ?? "", /inkbound-narrator-lines-20260926-abcdef\.pdf/);
+    assert.match(dialog()!.textContent ?? "", /4 lines/);
+
+    await act(async () => (dialog()!.querySelector('[data-testid="speaker-lines-add"]') as HTMLElement).click());
+    const staged = m.sent.findLast((message) => message.kind === "stage-audiobook-lines") as Extract<ClientMessage, { kind: "stage-audiobook-lines" }>;
+    assert.equal(staged.speaker, "narrator");
+    await act(async () =>
+      __applyEventForTest({
+        at: AT,
+        type: "audiobook.lines-staged",
+        worldId: FIXTURE_WORLD_ID,
+        productionId: "inkbound",
+        requestId: staged.requestId,
+        rows: [
+          { file: "02-001-1.wav", id: "02-001-1", quote: "Maren counted the bells.", words: "match" },
+          { file: "take-final.wav", refused: "no line id" },
+        ],
+      }),
+    );
+    const rows = [...dialog()!.querySelectorAll(".fy-rectake__tr")] as HTMLElement[];
+    assert.equal(rows.length, 2);
+    assert.ok((rows[1]!.querySelector("input") as HTMLInputElement).disabled, "a refused file cannot be ticked");
+    assert.match(rows[1]!.textContent ?? "", /no line id/);
+    const keep = dialog()!.querySelector('[data-testid="speaker-lines-keep"]') as HTMLButtonElement;
+    assert.equal(keep.textContent, "Keep 1 take");
+    assert.ok(keep.disabled, "the rights come first");
+    await act(async () => ([...dialog()!.querySelectorAll('[aria-label="Rights"] button')] as HTMLElement[]).find((b) => b.textContent === "My voice")!.click());
+    await act(async () => keep.click());
+    const kept = m.sent.findLast((message) => message.kind === "keep-audiobook-lines") as Extract<ClientMessage, { kind: "keep-audiobook-lines" }>;
+    assert.deepEqual({ basis: kept.basis, files: kept.files }, { basis: "self", files: ["02-001-1.wav"] });
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.lines-kept", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", requestId: staged.requestId, kept: 1 }));
+    assert.match(dialog()!.querySelector('[data-testid="speaker-lines-kept"]')?.textContent ?? "", /kept 1/);
+  });
+
   it("a retired character keeps its name in the margin and loses its voice, so the narrator's take for it is made, not stale (codex on PR 1180)", async () => {
     const state = inkbound("cast");
     const world = state.world!;

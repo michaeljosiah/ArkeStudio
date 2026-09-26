@@ -45,7 +45,13 @@ import {
   acceptDirection,
   directChapter,
   dismissAudiobookRun,
+  discardAudiobookLines,
   discardAudiobookTake,
+  exportAudiobookScript,
+  keepAudiobookLines,
+  openExportsFolder,
+  stageAudiobookLines,
+  useSpeakerLines,
   dismissDirection,
   keepAudiobookTake,
   stageAudiobookTake,
@@ -848,7 +854,7 @@ function reportLine(plan: CadencePlan, controls: ReturnType<typeof mapCadence>["
 }
 
 /** The side in the Audiobook view: the block pressed, its direction, then its takes. */
-export function AudiobookSide({ rows, selected, record, artifacts, slug, productionId, chapterId, chapterTitle, modelOf, onSetDirection, onMakeAgain, onUpload, onRecorded, refused, blockHost }: {
+export function AudiobookSide({ rows, selected, record, artifacts, slug, productionId, chapterId, chapterTitle, modelOf, onSetDirection, onMakeAgain, onUpload, onRecorded, onLines, refused, blockHost }: {
   rows: BlockRow[];
   selected: string | null;
   record: ChapterAudiobook | null;
@@ -864,6 +870,8 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
   onUpload?: (key: string) => void;
   /** The block's speaker recorded by a person, or given back to their voice (R-37). */
   onRecorded?: (speaker: string, recorded: boolean) => void;
+  /** A recorded speaker's lines out as a script and back as files (R-39). */
+  onLines?: (speaker: string, label: string) => void;
   /** The last write's refusal (R-9), said on the panel until the next write answers. */
   refused: string | null;
   /** The element the block's words are shown in, for a cue placed at the selection. */
@@ -1130,6 +1138,13 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
             <span>{row.speakerKey === null ? "Narrator" : row.mark} · recorded by a person</span>
           </label>
         )}
+        {onLines !== undefined && row.byPerson && (
+          <div className="fy-ab__again">
+            <Button variant="ghost" onClick={() => onLines(audiobookRecordingKey(row.block), row.speakerKey === null ? "Narrator" : row.mark)} data-testid="audiobook-lines">
+              Lines…
+            </Button>
+          </div>
+        )}
       </section>
     </>
   );
@@ -1278,6 +1293,159 @@ export function RecordedTakeDialog({ staged, row, onCancel, onReplace, onKeep }:
               data-testid="recorded-take-keep"
             >
               Keep as take
+            </Button>
+          )}
+        </div>
+      </div>
+    </EditorDialog>
+  );
+}
+
+/**
+ * A recorded speaker's lines out and back (design turn 155d, SPEC-047 R-39): the script as a PDF
+ * — the lines awaiting, or all of them — and the files a performer sends back, each matched by
+ * the id in its name and checked; what passes or warns is ticked, what is refused is not and
+ * cannot be; the rights are given once for the batch.
+ */
+export function SpeakerLinesDialog({ worldId, productionId, speaker, label, tone, onClose }: {
+  worldId: string;
+  productionId: string;
+  speaker: string;
+  label: string;
+  tone: string;
+  onClose: () => void;
+}) {
+  const all = useSpeakerLines();
+  const [scope, setScope] = useState<"awaiting" | "all">("awaiting");
+  const [scriptId, setScriptId] = useState<string | null>(null);
+  const [filesId, setFilesId] = useState<string | null>(null);
+  const [untick, setUntick] = useState<ReadonlySet<string>>(new Set());
+  const [performer, setPerformer] = useState("");
+  const [basis, setBasis] = useState<"self" | "authorized" | "licensed" | null>(null);
+  const script = scriptId === null ? undefined : all[scriptId];
+  const files = filesId === null ? undefined : all[filesId];
+  const hosted = typeof window !== "undefined" && window.arke?.openDataFolder !== undefined;
+  const rows = files?.rows ?? [];
+  const keepable = rows.filter((row) => row.refused === undefined && !untick.has(row.file));
+  const refusedCount = rows.filter((row) => row.refused !== undefined).length;
+  const close = () => {
+    if (filesId !== null && files?.kept === undefined) discardAudiobookLines(worldId, filesId);
+    onClose();
+  };
+  const addFiles = () => {
+    if (filesId !== null && files?.kept === undefined) discardAudiobookLines(worldId, filesId);
+    setUntick(new Set());
+    setFilesId(stageAudiobookLines(worldId, productionId, speaker));
+  };
+  const check = (row: (typeof rows)[number]): { text: string; tone: string } => {
+    if (row.refused !== undefined) return { text: row.refused, tone: "refused" };
+    const level = retailLevel({ rmsDbfs: row.rmsDbfs ?? null, samplePeakDbfs: row.samplePeakDbfs ?? null });
+    if (row.words === "differ") return { text: `${row.differences ?? 0} words differ`, tone: "warning" };
+    if (level.loudness === "warning") return { text: "loudness outside retail", tone: "warning" };
+    if (level.peak === "warning") return { text: "peak over retail", tone: "warning" };
+    return { text: row.words === "match" ? "match" : "unchecked", tone: row.words === "match" ? "pass" : "unavailable" };
+  };
+  return (
+    <EditorDialog open title={label} onClose={close} width={680}>
+      <div className="fy-rectake" data-testid="speaker-lines-dialog">
+        <div className="fy-rectake__sect">
+          <span className="fy-rectake__sect-title">Script</span>
+          <span className="fy-rectake__push" />
+          <span className="fy-seg" role="group" aria-label="Lines">
+            {(["awaiting", "all"] as const).map((value) => (
+              <button key={value} type="button" className={`fy-seg__item${scope === value ? " fy-seg__item--active" : ""}`} aria-pressed={scope === value} onClick={() => setScope(value)}>
+                {value === "awaiting" ? "Awaiting" : "All"}
+              </button>
+            ))}
+          </span>
+          <Button variant="ghost" disabled={script?.state === "working"} onClick={() => setScriptId(exportAudiobookScript(worldId, productionId, speaker, label, scope))} data-testid="speaker-lines-export">
+            Export
+          </Button>
+        </div>
+        {script?.state === "done" && script.output !== undefined && (
+          <div className="fy-rectake__file">
+            <span className="fy-rectake__name">{script.output.split("/").pop()}</span>
+            <span className="fy-mono fy-rectake__tech">
+              {script.lines} line{script.lines === 1 ? "" : "s"}
+              {script.notCast !== undefined && script.notCast > 0 ? ` · ${script.notCast} chapter${script.notCast === 1 ? "" : "s"} not cast` : ""}
+            </span>
+            {hosted && <Button variant="ghost" onClick={() => openExportsFolder(worldId)}>Show in folder</Button>}
+          </div>
+        )}
+        {script?.state === "refused" && <p className="fy-rectake__refused">{script.refused}</p>}
+        <div className="fy-rectake__sect">
+          <span className="fy-rectake__sect-title">Recordings</span>
+          <span className="fy-rectake__push" />
+          <Button variant="ghost" disabled={files?.state === "working" || files?.state === "keeping"} onClick={addFiles} data-testid="speaker-lines-add">
+            <Mic size={11} /> Add files
+          </Button>
+        </div>
+        {files?.state === "refused" && <p className="fy-rectake__refused">{files.refused}</p>}
+        {rows.length > 0 && (
+          <div className="fy-rectake__table" data-testid="speaker-lines-rows">
+            {rows.map((row) => {
+              const verdict = check(row);
+              const on = row.refused === undefined && !untick.has(row.file);
+              return (
+                <label key={row.file} className={`fy-rectake__tr${row.refused !== undefined ? " fy-rectake__tr--off" : ""}`}>
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    disabled={row.refused !== undefined || files?.kept !== undefined}
+                    onChange={() => setUntick((held) => {
+                      const next = new Set(held);
+                      if (next.has(row.file)) next.delete(row.file);
+                      else next.add(row.file);
+                      return next;
+                    })}
+                  />
+                  <span className="fy-mono fy-rectake__cell">{row.file}</span>
+                  <span className="fy-rectake__cell">{row.quote ?? "—"}</span>
+                  <span className={`fy-mono fy-rectake__verdict fy-rectake__verdict--${verdict.tone}`}>{verdict.text}</span>
+                </label>
+              );
+            })}
+          </div>
+        )}
+        {rows.length > 0 && files?.kept === undefined && (
+          <div className={`fy-rectake__who fy-voice--${tone}`}>
+            <label className="fy-rectake__field">
+              <span>Performer</span>
+              <input className="fy-rectake__input" value={performer} maxLength={80} onChange={(event) => setPerformer(event.target.value)} />
+            </label>
+            <div className="fy-rectake__field">
+              <span>Rights</span>
+              <span className="fy-seg" role="group" aria-label="Rights">
+                {([["self", "My voice"], ["authorized", "Authorized"], ["licensed", "Licensed"]] as const).map(([value, text]) => (
+                  <button key={value} type="button" className={`fy-seg__item${basis === value ? " fy-seg__item--active" : ""}`} aria-pressed={basis === value} onClick={() => setBasis(value)}>
+                    {text}
+                  </button>
+                ))}
+              </span>
+            </div>
+          </div>
+        )}
+        {files?.kept !== undefined && (
+          <p className="fy-mono fy-rectake__tech" data-testid="speaker-lines-kept">
+            kept {files.kept}
+            {files.refused !== undefined ? ` · ${files.refused}` : ""}
+          </p>
+        )}
+        <div className="fy-rectake__foot">
+          <span className="fy-mono fy-rectake__tech">
+            {rows.length > 0 ? `${rows.length} file${rows.length === 1 ? "" : "s"} · ${keepable.length} to keep · ${refusedCount} refused` : ""}
+          </span>
+          <span className="fy-rectake__push" />
+          <Button variant="ghost" onClick={close}>{files?.kept !== undefined ? "Done" : "Cancel"}</Button>
+          {files?.kept === undefined && (
+            <Button
+              variant="primary"
+              disabled={filesId === null || keepable.length === 0 || basis === null || files?.state === "keeping"}
+              title={basis === null ? "say whose voice it is" : undefined}
+              onClick={() => filesId !== null && basis !== null && keepAudiobookLines(worldId, filesId, basis, keepable.map((row) => row.file), performer.trim() === "" ? undefined : performer.trim())}
+              data-testid="speaker-lines-keep"
+            >
+              Keep {keepable.length} take{keepable.length === 1 ? "" : "s"}
             </Button>
           )}
         </div>

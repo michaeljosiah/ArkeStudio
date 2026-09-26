@@ -3033,6 +3033,35 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   z.object({ kind: z.literal("discard-audiobook-take"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
+  /**
+   * A recorded speaker's lines out and back (design turn 155d, SPEC-047 R-39): the script as a
+   * PDF under `exports/`, answered `audiobook.script`; files the host's picker chooses, matched
+   * by the id in each name and checked, answered `audiobook.lines-staged`; the files kept under
+   * the rights given once, answered `audiobook.lines-kept`; or let go.
+   */
+  z
+    .object({
+      kind: z.literal("export-audiobook-script"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      speaker: z.string().min(1).max(120),
+      label: z.string().min(1).max(120),
+      scope: z.enum(["awaiting", "all"]),
+      requestId: UlidSchema,
+    })
+    .strict(),
+  z.object({ kind: z.literal("stage-audiobook-lines"), worldId: UlidSchema, productionId: SlugSchema, speaker: z.string().min(1).max(120), requestId: UlidSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("keep-audiobook-lines"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
+      basis: z.enum(["self", "authorized", "licensed"]),
+      performer: z.string().trim().min(1).max(80).optional(),
+      files: z.array(z.string().min(1).max(260)).max(400),
+    })
+    .strict(),
+  z.object({ kind: z.literal("discard-audiobook-lines"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
   z
     .object({
       kind: z.literal("set-audiobook-block"),

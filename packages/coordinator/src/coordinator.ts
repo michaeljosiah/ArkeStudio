@@ -272,6 +272,7 @@ import { makeAdapterExtractor } from "./artifacts/model.js";
 import { deriveContinuity, makeAdapterContinuityDeriver, type ContinuityDeriver } from "./productions/continuity.js";
 import { castLines, makeAdapterVoicesDeriver, readVoices, setVoicePin, VoicePinRefusal, type VoicesDeriver } from "./productions/voices.js";
 import { discardRecording, keepRecording, RECORDED_TAKE_EXTENSIONS, RecordedTakeRefusal, stageRecording, type StagedRecording } from "./productions/audiobook-recorded.js";
+import { exportScript, matchFiles, type MatchedFile } from "./productions/audiobook-lines.js";
 import { acceptDirections, directChapter, directableBlocks, makeAdapterDirectionDeriver, type DirectionDeriver } from "./productions/audiobook-direction.js";
 import { audiobookDoor, conformDirections, runAudiobookBook } from "./productions/audiobook-book.js";
 import { checkDirection, directionPlan, readAudiobookBook, writeAudiobookBook, writeBlockDirection } from "./productions/audiobook.js";
@@ -1127,6 +1128,8 @@ export class Coordinator {
   private readonly castingVoices = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
   /** Recordings staged for a block and not yet kept or let go (turn 155c), by the window's request id. */
   private readonly stagedRecordings = new Map<string, { worldId: string; staged: StagedRecording }>();
+  /** A speaker's returned files, matched and staged, until kept or let go (turn 155d), by request id. */
+  private readonly stagedLines = new Map<string, { worldId: string; productionId: string; matched: MatchedFile[] }>();
   /** `Direct this chapter` runs (turn 146), keyed like the cast's: one per chapter, ended with the world. */
   private readonly directingChapters = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
   /**
@@ -12779,6 +12782,121 @@ export class Coordinator {
         } catch (err) {
           this.emit({ at: new Date().toISOString(), type: "audiobook.record", ...ids, refused: err instanceof RecordedTakeRefusal ? err.message : describeCoordinatorError(err) });
         }
+        return;
+      }
+      case "export-audiobook-script": {
+        // A recorded speaker's script (design turn 155d, SPEC-047 R-39): written under exports/.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const answer = (extra: Omit<Extract<DomainEvent, { type: "audiobook.script" }>, "at" | "type" | "worldId" | "productionId" | "requestId">) =>
+          this.emit({ at: new Date().toISOString(), type: "audiobook.script", worldId: msg.worldId, productionId: msg.productionId, requestId: msg.requestId, ...extra });
+        try {
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService);
+          const made = await exportScript(store, msg.productionId, msg.speaker, { scope: msg.scope, label: msg.label, narrator, exportId: ulid(), now: () => store.now() });
+          answer({ output: made.output, lines: made.lines, chapters: made.chapters, notCast: made.notCast });
+        } catch (err) {
+          answer({ refused: err instanceof RecordedTakeRefusal ? err.message : describeCoordinatorError(err) });
+        }
+        return;
+      }
+      case "stage-audiobook-lines": {
+        // The files a performer sent back (R-39): chosen together, matched by id, each checked.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const staged = (extra: { rows?: Extract<DomainEvent, { type: "audiobook.lines-staged" }>["rows"]; refused?: string }) =>
+          this.emit({ at: new Date().toISOString(), type: "audiobook.lines-staged", worldId: msg.worldId, productionId: msg.productionId, requestId: msg.requestId, rows: extra.rows ?? [], ...(extra.refused !== undefined ? { refused: extra.refused } : {}) });
+        if (!this.opts.audioMediaTools) {
+          staged({ refused: "audio preparation is not available here" });
+          return;
+        }
+        if (!this.opts.pickFiles) {
+          staged({ refused: "choosing files needs the desktop app" });
+          return;
+        }
+        const control = new AbortController();
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        try {
+          const chosen = await this.opts.pickFiles({ accept: [...RECORDED_TAKE_EXTENSIONS] });
+          if (chosen.length === 0) return;
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService);
+          const voice = this.voiceService;
+          const matched = await matchFiles(store, msg.productionId, msg.speaker, chosen.slice(0, 400), {
+            tools: this.opts.audioMediaTools,
+            transcribe: voice === null ? null : (bytes, contentType) => voice.transcribe(bytes, contentType),
+            narrator,
+            signal: control.signal,
+          });
+          const previous = this.stagedLines.get(msg.requestId);
+          if (previous !== undefined) for (const row of previous.matched) if (row.staged !== undefined) await discardRecording(row.staged);
+          this.stagedLines.set(msg.requestId, { worldId: msg.worldId, productionId: msg.productionId, matched });
+          staged({
+            rows: matched.map((row) => {
+              const report = row.staged?.qc.status === "complete" ? row.staged.qc.report : null;
+              const words = row.staged?.words;
+              return {
+                file: row.file,
+                ...(row.id !== undefined ? { id: row.id } : {}),
+                ...(row.quote !== undefined ? { quote: row.quote } : {}),
+                ...(words !== undefined ? (words.status === "compared" ? { words: words.result === "exact" ? ("match" as const) : ("differ" as const), differences: words.differences.length } : { words: "unchecked" as const }) : {}),
+                ...(report !== null ? { rmsDbfs: report.measurements.rmsDbfs, samplePeakDbfs: report.measurements.samplePeakDbfs } : {}),
+                ...(row.refused !== undefined ? { refused: row.refused } : {}),
+              };
+            }),
+          });
+        } catch (err) {
+          staged({ refused: err instanceof RecordedTakeRefusal ? err.message : describeCoordinatorError(err) });
+        } finally {
+          store.closingSignal.removeEventListener("abort", onClose);
+        }
+        return;
+      }
+      case "keep-audiobook-lines": {
+        // The ticked files kept as takes under the rights given once (R-36, R-39); each chapter's
+        // record written through its own lane and answered as the block's record is.
+        const store = this.opts.provider.openStore?.();
+        const held = this.stagedLines.get(msg.requestId);
+        if (!store || store.worldId !== msg.worldId || held === undefined || held.worldId !== msg.worldId) return;
+        this.stagedLines.delete(msg.requestId);
+        const wanted = new Set(msg.files);
+        let kept = 0;
+        let refused: string | undefined;
+        try {
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService);
+          for (const row of held.matched) {
+            if (row.staged === undefined) continue;
+            if (!wanted.has(row.file)) {
+              await discardRecording(row.staged);
+              continue;
+            }
+            try {
+              const record = await keepRecording(store, row.staged, {
+                basis: msg.basis,
+                ...(msg.performer !== undefined ? { performer: msg.performer } : {}),
+                narrator,
+                ackId: `ack_${ulid()}`,
+                now: () => store.now(),
+                ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
+              });
+              kept += 1;
+              this.emit({ at: new Date().toISOString(), type: "audiobook.record", worldId: msg.worldId, productionId: held.productionId, chapterId: row.staged.chapterId, record });
+            } catch (err) {
+              await discardRecording(row.staged);
+              refused ??= `${row.file} · ${err instanceof RecordedTakeRefusal ? err.message : describeCoordinatorError(err)}`;
+            }
+          }
+          this.refreshIfStillOpen(store);
+        } catch (err) {
+          refused ??= describeCoordinatorError(err);
+        }
+        this.emit({ at: new Date().toISOString(), type: "audiobook.lines-kept", worldId: msg.worldId, productionId: held.productionId, requestId: msg.requestId, kept, ...(refused !== undefined ? { refused } : {}) });
+        return;
+      }
+      case "discard-audiobook-lines": {
+        const held = this.stagedLines.get(msg.requestId);
+        if (held === undefined || held.worldId !== msg.worldId) return;
+        this.stagedLines.delete(msg.requestId);
+        for (const row of held.matched) if (row.staged !== undefined) await discardRecording(row.staged);
         return;
       }
       case "discard-audiobook-take": {
