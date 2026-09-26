@@ -135,7 +135,10 @@ export async function decideGenesisVoice(dir: string, blueprint: GenesisBlueprin
   return serializeFileMutation(pathFor(dir), async () => {
     const state = await savedGenesisVoices(dir);
     const candidate = state.candidates.find(one => one.id === input.candidateId);
-    if (input.decision !== "unassign") {
+    if (input.decision === "unassign") {
+      const selected = state.selections.find(selection => selection.plan.intent.target === input.target);
+      if (!selected || selected.id !== input.candidateId || selected.hash !== input.hash) throw new Error("The selected voice changed. Review the current assignment before removing it.");
+    } else {
       if (!candidate || candidate.hash !== input.hash || candidate.plan.intent.target !== input.target) throw new Error("Review the current audition for this character.");
       if (input.decision === "approve") { target(blueprint, input.target); available(candidate.plan, catalogue); await verify(dir, candidate); }
     }
