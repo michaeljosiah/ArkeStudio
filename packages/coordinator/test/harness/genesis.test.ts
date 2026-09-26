@@ -6,6 +6,7 @@ import type { DomainEvent, HarnessAdapter, HarnessEvent } from "@arke-studio/con
 import { tempDir } from "../tmp.js";
 import { attachToSandbox } from "../../src/artifacts/genesis-attachments.js";
 import { GenesisService } from "../../src/harness/genesis.js";
+import { foundingMessages } from "../../src/harness/genesis-conversation.js";
 import { sessionTokenBudget } from "../../src/harness/token-budget.js";
 
 async function sandboxDir(prefix: string): Promise<string> {
@@ -522,6 +523,22 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
  * it read, and the turns after were interrupted with "passed the 120,000-token budget".
  */
 describe("what one agent conversation may spend", () => {
+  it("preserves a first message when session creation fails and restores it on retry", async () => {
+    const dir = await sandboxDir("genesis-preflight-failure-");
+    const adapter = talkingAdapter();
+    const create = adapter.createSession.bind(adapter);
+    adapter.createSession = async () => { throw new Error("Harness startup failed"); };
+    const events: DomainEvent[] = [];
+    const service = new GenesisService(adapter, event => events.push(event), { sessionInput: input => input });
+    await service.run(dir, "gen-preflight", "Remember the vanished island.");
+    assert.equal((await foundingMessages(dir))[0]?.text, "Remember the vanished island.");
+    assert.ok(events.some(event => event.type === "genesis.turn" && event.role === "user"));
+    assert.ok(events.some(event => event.type === "genesis.status" && event.status === "failed"));
+    adapter.createSession = create;
+    await service.run(dir, "gen-preflight", "Who remembers it?");
+    assert.match(adapter.prompts[0]!, /Remember the vanished island/);
+    assert.equal(adapter.prompts[0]!.split("Who remembers it?").length - 1, 1, "the current message is not also restored as history");
+  });
   it("a restarted harness receives the persisted conversation", async () => {
     const dir = await sandboxDir("genesis-history-");
     const first = new GenesisService(talkingAdapter(), () => {}, { sessionInput: input => input });
