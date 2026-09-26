@@ -35,7 +35,7 @@ it("shows failed and held work with retry controls while retaining completed res
       { key: "sheet", kind: "author-sheet", stage: 1, subject: "maren", name: "Maren", state: "landed", authorized: true, estimatedMicroUsd: 0 },
       { key: "photo", kind: "main-photo", stage: 2, subject: "maren", name: "Maren photo", state: "failed", detail: "Provider offline", authorized: true, estimatedMicroUsd: 40000 },
     ] };
-  const html = renderToString(<FoundingProgressCard build={build} />);
+  const html = renderToString(<FoundingProgressCard build={build} />).replaceAll("<!-- -->", "");
   assert.match(html, /Retry Maren photo/);
   assert.ok(!html.includes(">Retry Maren<"));
   assert.match(html, /Provider offline/);
