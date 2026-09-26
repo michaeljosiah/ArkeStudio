@@ -114,6 +114,11 @@ type OpenedRecord = {
   audiobookMissing: readonly string[];
 };
 
+/** A suggested question: asked for its answer, so nothing is staged from it (issue 1295). */
+function question(label: string): { label: string; replyOnly: true } {
+  return { label, replyOnly: true };
+}
+
 /**
  * A save that must follow one still in flight after the screen is gone (codex, PR 879): the
  * answer to the first names the base the second needs, so the second waits for it here, outside
@@ -2191,20 +2196,23 @@ export function ChapterWorkspace({
             // under a stale one, the press that reads again and a question the prose answers.
             // In the Audiobook view the prompts are the reading's (turn 146, SPEC-047 R-31):
             // the direction, again once one stands, and two questions the blocks answer.
+            // A question is asked for its answer and nothing else (issue 1295): sent as an open
+            // ask, a 12B model answered "What does this chapter draw on?" with an invented action,
+            // and the whole reply was rejected twice.
             prompts: view === "audiobook"
-              ? [{ label: directionStands ? "Direct again" : "Direct this chapter", press: audiobook.directPress }, "Who reads this chapter?", "Which blocks are stale?"]
+              ? [{ label: directionStands ? "Direct again" : "Direct this chapter", press: audiobook.directPress }, question("Who reads this chapter?"), question("Which blocks are stale?")]
               : passage !== null
               // Held against the style only when there is one (codex on PR 1232), as the menu does.
               ? [TIGHTEN.line, { label: (style !== null ? HOLD_TO_STYLE : passageAction("critique")!).line, replyOnly: true }]
               : voicesRecord !== null && voicesStale
-                ? [{ label: "Cast again", press: castLinesPress }, "Who speaks in this chapter?"]
+                ? [{ label: "Cast again", press: castLinesPress }, question("Who speaks in this chapter?")]
                 : voicesRecord !== null && speakers.length > 0 && !(continuityRecord !== null && continuityStale)
-                  ? ["Who speaks in this chapter?", `Which lines are ${speakers[0]!.sheet !== undefined ? sheetNameOf(speakers[0]!.sheet) : speakers[0]!.speaker}’s?`]
+                  ? [question("Who speaks in this chapter?"), question(`Which lines are ${speakers[0]!.sheet !== undefined ? sheetNameOf(speakers[0]!.sheet) : speakers[0]!.speaker}’s?`)]
               : continuityRecord !== null && continuityStale
-                ? [{ label: "Derive again", press: derive }, "Who is in this chapter?"]
+                ? [{ label: "Derive again", press: derive }, question("Who is in this chapter?")]
                 : continuityRecord !== null && placedFirst !== undefined
-                  ? [`What does ${named(placedFirst)} learn here?`, `Where is ${named(placedSecond ?? placedFirst)} now?`]
-                  : [firstPrompt(live, chapter.synopsis), style !== null ? { label: "Hold this against the style", replyOnly: true } : "What does this chapter draw on?"],
+                  ? [question(`What does ${named(placedFirst)} learn here?`), question(`Where is ${named(placedSecond ?? placedFirst)} now?`)]
+                  : [firstPrompt(live, chapter.synopsis), style !== null ? { label: "Hold this against the style", replyOnly: true } : question("What does this chapter draw on?")],
             // The thread is the production's own (no new entry context, turn 126): the chapter
             // the dock names has to be in the words themselves or the studio never hears it.
             subjectPrefix: dockPrefix,
