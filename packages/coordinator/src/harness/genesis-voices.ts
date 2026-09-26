@@ -154,7 +154,7 @@ export async function installGenesisVoice(store: WorldStore, blueprint: GenesisB
   const sheet = store.getBundle().sheets.find(sheet => sheet.id === id);
   if (!sheet) throw new Error("The approved character has not been saved.");
   const voice = candidate.plan.voice;
-  if (sheet.voice && voiceTargetKey(sheet.voice) === voiceTargetKey(voice)) return;
+  if (sheet.voice?.provider === voice.provider && sheet.voice.model === voice.model && sheet.voice.voiceId === voice.voiceId) return;
   await applyVoiceAssignment(store, { path: `characters/${id}.md`, voice },
     { source: "founding", requestId: "founding-voice:" + candidate.plan.intent.target });
 }
