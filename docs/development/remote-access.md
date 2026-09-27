@@ -220,6 +220,7 @@ not only these two.
 | **Waiting for the coordinator** | The server has stopped, or the 8443 mapping is missing. |
 | Pictures and video don't load | The 8443 mapping. Media comes from the server, not from Vite. |
 | The console shows `Refused to connect to 'wss://…'` | The page was served without the proxied settings. Restart Vite with all three. |
+| Studio works, but a source edit does not appear | Check the browser console for `[vite] connected.`. Hot reload uses the frontend's HTTPS origin (443 in this guide), separately from the coordinator on 8443. Keep both mappings, and check whether the edit needs a full page reload. |
 
 ## What the browser can't do
 
@@ -252,3 +253,46 @@ screens (issue #1311; SPEC-001 §2.5 and SPEC-016). Coordinator and desktop
 `test/remote-access.test.ts` cover proof persistence, code expiry/replay, owner approval,
 origin/host checks, media, WebSockets, revocation, mapping ownership and host restart.
 Automated checks do not replace the actual phone and second-computer acceptance journeys.
+
+### Real Serve verification — 2026-09-27
+
+The host checks below used Windows, Tailscale **1.102.3**, Vite **7.3.6**, and the Codex
+in-app browser reporting **Chrome 153.0.0.0**. TLS certificate verification stayed enabled.
+These are checks from the hosting PC through its real tailnet HTTPS address; they do not
+establish that another device can connect.
+
+| Check | Observed result |
+|---|---|
+| Frontend HTTPS on 443 | Page loaded with the declared remote coordinator in its CSP; no process capability in the served HTML. |
+| Coordinator HTTPS on 8443 | Authenticated `HEAD /session` returned 204 and `X-Arke-Session: authenticated`. |
+| Coordinator WebSocket through Serve | An authenticated WSS hello returned a Studio snapshot. |
+| Authenticated media range | Fixture PNG returned 206 and the requested 32 bytes. The request without a capability returned 401. |
+| Vite connection on the frontend origin | Browser console reported `[vite] connected.` through the existing 443 mapping. |
+| Actual hot update | A temporary Vite fixture behind an isolated 8444 mapping changed its visible label from `Before update` to `After update` after a module edit, without a manual reload. The console reported the hot update. It used the repository's development-session plugin and page CSP. |
+| Source change requiring a page reload | Editing the fixture's entry module refreshed the page automatically and displayed the new content. |
+| Removing a background mapping | `tailscale serve --https=8444 off` removed the test's `--bg` mapping. Serve's remaining configuration matched its initial configuration, preserving the existing 443 and 8443 mappings. Earlier checks also removed background mappings on 8443 and 443 individually. |
+
+The temporary fixture contained no world data or session capability. It was removed after
+the check. Desktop pairing has separate live HTTPS coverage described in [testing](testing.md#remembered-remote-access).
+
+### Complete the other-device checks
+
+[Issue #1305](https://github.com/michaeljosiah/ArkeStudio/issues/1305) remains open until both
+the phone and a second computer complete the development-session journey. At the host check,
+the Android phone was online in Tailscale; no second computer was connected. Being online
+does not establish that the browser journey passed.
+
+On **each** other device:
+
+1. Connect Tailscale. Record the device OS, browser name/version and Tailscale version.
+2. Open the private **Arke session** link from the host's Vite terminal, rather than its Local
+   link. Check that Studio loads and removes `arke-session` from the address bar. Keep the
+   capability out of screenshots and issue comments.
+3. Open a fixture world and view an image. This checks that the authenticated coordinator and
+   media paths work from that device, rather than only loading the frontend shell. Reload the
+   same tab and confirm it still connects.
+4. With that page open, make a small, reversible visible source edit on the host. Check that
+   the browser updates without a manual reload, then restore the edit and verify it updates
+   back. Record whether Vite applied a hot update or automatically reloaded the whole page.
+5. Record the result and any exact error in #1305. A phone-sized window on the host is not a
+   substitute for either device. Close the issue only when both device results are recorded.
