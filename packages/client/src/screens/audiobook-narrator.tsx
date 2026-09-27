@@ -93,7 +93,7 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
     // `target` is `picked` or null by mode; both are in the list.
   }, [mode, picked?.provider, picked?.model, picked?.voiceId, unchanged]);
   // A voice tried on the block, as it would read it (R-46): heard, never a take.
-  const [hearing, setHearing] = useState<{ id: string; voice: string } | null>(null);
+  const [hearing, setHearing] = useState<{ id: string; voice: string; reader: AudiobookReader } | null>(null);
   const heard = useHeardLines()[hearing?.id ?? ""];
   useEffect(() => {
     if (heard?.state !== "done" || slug === undefined || hearing === null) return;
@@ -102,7 +102,7 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
   const hear = (voice: ReadingVoice) => {
     if (trial === null) return;
     const id = hearAudiobookLine(worldId, productionId, trial.chapterFile, trial.block, readerOf(voice));
-    if (id !== null) setHearing({ id, voice: voice.label });
+    if (id !== null) setHearing({ id, voice: voice.label, reader: readerOf(voice) });
   };
   const price = (voice: { provider: string; model: string }) => {
     const model = rowOf(voice);
@@ -246,6 +246,14 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
         </>
       )}
       {heard?.state === "refused" && <p className="fy-rectake__refused">{heard.refused}</p>}
+      {heard?.state === "priced" && hearing !== null && trial !== null && (
+        <Button variant="ghost" onClick={() => {
+          const id = hearAudiobookLine(worldId, productionId, trial.chapterFile, trial.block, hearing.reader, heard.token);
+          if (id !== null) setHearing({ ...hearing, id });
+        }} data-testid="narrator-hear-confirm">
+          Hear {hearing.voice} · up to {formatMicroUsd(heard.authorisedMicroUsd)} · {heard.parts} part{heard.parts === 1 ? "" : "s"}
+        </Button>
+      )}
       {facts.length > 0 && (
         <dl className="fy-abnarr__facts" data-testid="narrator-quote">
           {facts.map((fact) => (

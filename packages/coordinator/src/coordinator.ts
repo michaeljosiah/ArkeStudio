@@ -13532,6 +13532,7 @@ export class Coordinator {
         try {
           const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId)), models: this.opts.manifest?.models ?? [] };
           const heard = await hearAudiobookLine(store, msg.productionId, msg.chapterFile, msg.block, msg.voice === undefined ? room : { ...room, narrator: msg.voice }, {
+            quoteToken: msg.quoteToken,
             local: (voiceId, text, settings) => voice.synthesizeDirected(voiceId, text, settings, new AbortController().signal),
             enqueue: async (input) => {
               const queued = await this.enqueueBatch(msg.requestId, "voice-preview", [input]);
@@ -13541,7 +13542,7 @@ export class Coordinator {
             waitForJob: (jobId) => this.waitForAudiobookJob(jobId),
             worldId: msg.worldId,
           });
-          this.emit({ at: new Date().toISOString(), type: "audiobook.heard", ...ids, file: heard.file, cached: heard.cached });
+          this.emit({ at: new Date().toISOString(), type: "audiobook.heard", ...ids, ...heard });
         } catch (err) {
           refuse(describeCoordinatorError(err));
         }
@@ -14136,18 +14137,25 @@ export class Coordinator {
           }
           voiceReference = true;
         }
-        const request = this.voiceService.queuedPreviewRequest({
-          worldId: msg.worldId,
-          sheet,
-          provider: msg.provider,
-          voiceId: msg.voiceId,
-          line,
-          model,
-          ...(voiceReference ? { voiceReference: true } : {}),
-          ...(msg.voiceUploadConfirmedFor !== undefined
-            ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
-            : {}),
-        });
+        let request: ReturnType<VoiceService["queuedPreviewRequest"]>;
+        try {
+          request = this.voiceService.queuedPreviewRequest({
+            quoteToken: msg.quoteToken,
+            worldId: msg.worldId,
+            sheet,
+            provider: msg.provider,
+            voiceId: msg.voiceId,
+            line,
+            model,
+            ...(voiceReference ? { voiceReference: true } : {}),
+            ...(msg.voiceUploadConfirmedFor !== undefined
+              ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
+              : {}),
+          });
+        } catch (err) {
+          this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(err));
+          return;
+        }
         request.input.params = {
           ...request.input.params,
           requestId: msg.requestId,
