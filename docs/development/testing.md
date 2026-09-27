@@ -250,6 +250,25 @@ layout: a pending look offers acceptance, an accepted look offers attachment/pro
 generation previews show actual returned candidates. No screenshot check dispatches a provider
 call or assigns a real voice.
 
+## Bible and Canon on phones and Fold7
+
+Run `node scripts/smoke-bible-canon-layout.mjs` from the repository root, with Chrome installed
+(or `ARKE_CHROME` pointing to its executable). The local fixture harness captures the five React
+screens and turn 163 at 390px and 984px, plus 360px, 375×812, 600px, 844px, 984×1092 and
+1360×850 checks. It exercises contents, Restore, heading navigation, amendment, settlement,
+new entries, answers/refusals and long text, and measures the grids, rails, touch media queries
+and overflow. It simulates a 20px bottom safe area. No coordinator or paid provider is used.
+
+The script prints its temporary artifact directory. `--viewport phone` selects the 390px pass;
+`--baseline <revision>` captures desktop using that revision's original screens. Compare
+`measurements.json` and the paired PNGs with `master-measurements.json`. Master crops omit the
+47px phone / 32px Fold OS status bar; the full-height checks use the requested browser viewport.
+Fixture counts, version dates and available transcripts remain live data, not design placeholders.
+
+The DOM suite `test/bible-canon-layout.test.tsx` covers the settlement controls in the sheet,
+draft retention through resize, Bible Restore and inline price confirmation, and CSS-owned canon
+geometry. Run it from `packages/client`; typecheck after changes.
+
 ## CI
 
 For publications, run coordinator `test/publications/`, desktop `test/publication-host.test.ts`

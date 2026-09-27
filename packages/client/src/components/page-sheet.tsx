@@ -1,0 +1,42 @@
+import { useLayoutEffect, useId, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { IconButton } from "./ui.js";
+import { X } from "./icons.js";
+
+/** Turn 163 uses the character sheet's shape with native focus containment and an inert page. */
+export function PageSheet({ open, onClose, title, children, footer }: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  children: ReactNode;
+  footer?: ReactNode;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const heading = useId();
+  useLayoutEffect(() => {
+    const dialog = ref.current;
+    if (!dialog || !open) return;
+    const opener = document.activeElement;
+    dialog.showModal?.();
+    return () => {
+      dialog.close?.();
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    };
+  }, [open]);
+  if (!open) return null;
+  return createPortal(
+    <dialog ref={ref} className="fy-page-sheet" aria-labelledby={heading}
+      onCancel={(event) => { event.preventDefault(); onClose(); }}
+      onClick={(event) => {
+        if (event.target !== event.currentTarget) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) onClose();
+      }}>
+      <div className="fy-page-sheet__grab" />
+      <header className="fy-page-sheet__head"><h2 id={heading}>{title}</h2><IconButton label="Close" onClick={onClose}><X size={20} /></IconButton></header>
+      <div className="fy-page-sheet__body">{children}</div>
+      {footer && <footer className="fy-page-sheet__foot">{footer}</footer>}
+    </dialog>, document.body,
+  );
+}
+
