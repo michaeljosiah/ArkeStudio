@@ -67,3 +67,31 @@ it("refuses a direction that cannot fit and does not drop a span cut by a byte b
   assert.ok(!split.ok);
   assert.match(split.reason, /straddles/);
 });
+
+it("honours combined character/byte caps without splitting surrogate pairs", () => {
+  const text = "😀海".repeat(12);
+  const model = geminiSpeechModel("lite");
+  model.limits.maxPromptChars = 5;
+  model.limits.maxSpeechUtf8Bytes = 52;
+  const check = checkDirection(text, directionPlan(text, { delivery: "warm", speed: 1, cues: [] }), model);
+  assert.ok(check.ok);
+  assert.equal(check.parts.map(p => p.text).join(""), text);
+  assert.ok(check.parts.every(p => speechInputFits(p.text, model.limits, p.instructions)));
+  assert.ok(check.parts.every(p => !/[\uD800-\uDBFF]$|^[\uDC00-\uDFFF]/u.test(p.text)));
+});
+
+it("renders a point cue once when recursive packing places it on a request boundary", () => {
+  const model = geminiSpeechModel("flash");
+  // Exercise the generic packer's point handling with an explicitly supported fixture tag;
+  // Gemini's qualification row itself continues to hold breath cues.
+  model.cadence!.deliveryMappings.measured = { settings: {} };
+  model.cadence!.breath = "best-effort-audio-tag";
+  model.limits.maxSpeechUtf8Bytes = 17;
+  const text = "a".repeat(17) + "b".repeat(15);
+  const check = checkDirection(text, directionPlan(text, { delivery: "measured", speed: 1, cues: [{ kind: "breath", at: 17, action: "exhale" }] }), model);
+  assert.ok(check.ok);
+  const rendered = check.parts.map(p => p.text).join("");
+  assert.equal(rendered.split("[exhales]").length - 1, 1);
+  assert.equal(rendered.replace("[exhales]", "").replaceAll(" ", ""), text);
+  assert.ok(check.parts.every(p => speechInputFits(p.text, model.limits, p.instructions)));
+});
