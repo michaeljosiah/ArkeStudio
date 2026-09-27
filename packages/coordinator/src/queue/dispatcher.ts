@@ -4,7 +4,7 @@ import {
   canDeleteJob,
   quoteSpeech,
   speechQuoteIsCurrent,
-  speechUsageCost,
+  speechSettlement,
   SpeechUsageSchema,
   type SpeechUsage,
   type ManifestModel,
@@ -348,6 +348,7 @@ export class JobQueue {
   private readonly journal: JobStateStore;
   private readonly jobs = new Map<string, Job>();
   private readonly usageWrites = new Map<string, Promise<boolean>>();
+  private readonly acceptedSubmissions = new Map<string, Job>();
   private readonly lanes = new Map<string, Lane>();
   private readonly clock: () => string;
   private readonly rng: () => number;
@@ -455,6 +456,14 @@ export class JobQueue {
     this.usageWrites.set(job.id, pending);
     try { await pending; }
     finally { if (this.usageWrites.get(job.id) === pending) this.usageWrites.delete(job.id); }
+  }
+
+  private withAcceptedSpeech(job: Job): Job {
+    const accepted = this.acceptedSubmissions.get(job.id);
+    if (accepted?.attempt !== job.attempt) return job;
+    return { ...job, providerJobId: accepted.providerJobId,
+      speechUsage: accepted.speechUsage ?? job.speechUsage,
+      providerCostMicroUsd: accepted.providerCostMicroUsd ?? job.providerCostMicroUsd };
   }
 
   /**
@@ -1136,13 +1145,20 @@ export class JobQueue {
       // A lifecycle replacement can requeue this job while submit is in flight. The accepted id
       // belongs to the retired process; never let its late response resurrect the old run over
       // the durable queued row for the replacement process.
-      if (this.cancelling.has(job.id) || !this.stillSubmitting(submitting)) return;
+      if (!this.stillSubmitting(submitting)) return;
       const usage = SpeechUsageSchema.safeParse(accepted.speechUsage);
       const reported = typeof accepted.costMicroUsd === "number" && Number.isFinite(accepted.costMicroUsd) && accepted.costMicroUsd >= 0
         && Number.isSafeInteger(Math.round(accepted.costMicroUsd)) ? Math.round(accepted.costMicroUsd) : undefined;
       const completedSubmission: Job = { ...submitting, providerJobId: accepted.remoteId,
         ...(usage.success ? { speechUsage: usage.data } : {}),
         ...(client.declarations.reportsCost && reported !== undefined ? { providerCostMicroUsd: reported } : {}) };
+      // Capture the accepted facts before cancellation can discard the response. Cancellation
+      // owns the terminal row and merges these facts without reviving the job.
+      this.acceptedSubmissions.set(job.id, completedSubmission);
+      if (this.cancelling.has(job.id)) {
+        await client.cancel(key, accepted.remoteId, { jobId: job.id, attempt: submitting.attempt, model: job.model }).catch(() => {});
+        return;
+      }
       // Usage must survive artifact landing failure and restart, just as the audio does.
       if (usage.success || completedSubmission.providerCostMicroUsd !== undefined) await this.persistUsage(completedSubmission);
       if (this.disposed || this.cancelling.has(job.id) || !this.stillSubmitting(completedSubmission)) return;
@@ -1168,6 +1184,7 @@ export class JobQueue {
       // ④ the uncertainty closes.
       const running: Job = { ...completedSubmission, status: "running", updatedAt: this.clock() };
       await this.transition(running);
+      this.acceptedSubmissions.delete(job.id);
       this.noteSuccess(job.provider);
       await this.pollToTerminal(running, client, key, true);
     } catch (err) {
@@ -1178,6 +1195,7 @@ export class JobQueue {
       if (!this.stillSubmitting(submitting)) return;
       await this.handleSubmitError(submitting, client, err);
     } finally {
+      if (!this.cancelling.has(job.id)) this.acceptedSubmissions.delete(job.id);
       if (this.submitAborts.get(job.id) === submitAbort) this.submitAborts.delete(job.id);
     }
   }
@@ -1610,8 +1628,8 @@ export class JobQueue {
     // Every failed row carries the decision the retry surfaces consume. Centralising it here
     // covers provider verdicts, local preparation, recovery, verification and exhausted retries;
     // a caller cannot add a new terminal failure path and accidentally leave the class transient.
-    const terminal: Job = {
-      ...job,
+    let terminal: Job = {
+      ...(outcome === "cancelled" ? this.withAcceptedSpeech(job) : job),
       status: outcome,
       error,
       failureClass: outcome === "failed" ? (failureClass ?? classifyError(error ?? "terminal failure")) : null,
@@ -1619,6 +1637,15 @@ export class JobQueue {
       updatedAt: this.clock(),
     };
     await this.transition(terminal);
+    if (outcome === "cancelled") {
+      // A submit can answer while the cancelled row is flushing. Make its now-known facts
+      // durable in another cancelled row before the single ledger settlement.
+      const accepted = this.withAcceptedSpeech(terminal);
+      if (accepted.providerJobId !== terminal.providerJobId || accepted.speechUsage !== terminal.speechUsage || accepted.providerCostMicroUsd !== terminal.providerCostMicroUsd) {
+        terminal = accepted;
+        await this.transition(terminal);
+      }
+    }
     this.releaseGpu(job);
     if (this.disposed) return;
     // An append that landed this pass is proof enough; asking the file again could only be
@@ -1680,20 +1707,8 @@ export class JobQueue {
       actualMicroUsd = 0;
       actualSource = "local-zero"; // unmetered (SPEC-008 R-18)
     } else if (job.speechQuote?.unit === "token") {
-      // A held attempt is archived before resubmission, but the attempt number advances only
-      // at provider I/O. Refusing that queued retry must not invent another unmeasured charge.
-      const alreadyArchived = job.speechAttempts?.some(attempt => attempt.attempt === job.attempt) === true;
       const reported = job.providerCostMicroUsd ?? (client?.declarations.reportsCost && costMicroUsd !== undefined ? Math.round(costMicroUsd) : undefined);
-      let hasReported = !alreadyArchived && reported !== undefined;
-      let hasUsage = !alreadyArchived && reported === undefined;
-      actualMicroUsd = alreadyArchived ? 0 : reported ?? (job.speechUsage ? speechUsageCost(job.speechQuote, job.speechUsage) : null);
-      for (const attempt of job.speechAttempts ?? []) {
-        const prior = attempt.providerCostMicroUsd ?? speechUsageCost(attempt.quote, attempt.usage);
-        hasReported ||= attempt.providerCostMicroUsd !== undefined;
-        hasUsage ||= attempt.providerCostMicroUsd === undefined;
-        actualMicroUsd = actualMicroUsd === null || prior === null ? null : actualMicroUsd + prior;
-      }
-      actualSource = actualMicroUsd === null ? undefined : hasReported ? hasUsage ? "mixed-measured" : "provider-reported" : "usage-derived";
+      ({ actualMicroUsd, actualSource } = speechSettlement({ ...job, providerCostMicroUsd: reported }));
     } else if (client?.declarations.reportsCost && costMicroUsd !== undefined) {
       actualMicroUsd = Math.round(costMicroUsd);
       actualSource = "provider-reported";
@@ -1731,6 +1746,7 @@ export class JobQueue {
       await this.cancelInner(jobId, job);
     } finally {
       this.cancelling.delete(jobId);
+      this.acceptedSubmissions.delete(jobId);
     }
   }
 
@@ -2039,6 +2055,14 @@ export class JobQueue {
     if (!client || key === null) {
       this.pauseLane(job.provider, "credential", "no credential stored for this provider");
       return { jobId: job.id, action: "held-for-user", detail: "no credential to reconcile with" };
+    }
+
+    // A durable accepted identity is stronger evidence than a later lookup/list absence.
+    if (job.providerJobId !== null) {
+      const running: Job = { ...job, status: "running", updatedAt: this.clock() };
+      await this.transition(running);
+      this.trackRun(this.pollToTerminal(running, client, key));
+      return { jobId: job.id, action: "adopted", detail: job.providerJobId };
     }
 
     // Strategy A — definite in both directions.

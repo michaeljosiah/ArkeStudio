@@ -1,4 +1,4 @@
-import type { FoundingBuildState, Job, ModelManifest } from "@arke-studio/contracts";
+import { speechSettlement, type FoundingBuildState, type Job, type ModelManifest } from "@arke-studio/contracts";
 import { humanNumber, shortDate, usd } from "../lib/format.js";
 import type { QueueEnqueueResult } from "../lib/store.js";
 
@@ -146,17 +146,20 @@ function modelName(job: Job, manifest: ModelManifest | null): string {
  * its total, because that is the figure the surface quoted — four shots at $1.37 dispatched from
  * a button reading $5.46 must not come back saying $1.37.
  */
+function measuredCost(job: Job): number | null {
+  return job.speechQuote?.unit === "token" ? speechSettlement(job).actualMicroUsd : job.providerCostMicroUsd ?? null;
+}
+
 function modelAndCost(jobs: readonly Job[], manifest: ModelManifest | null, spent: boolean): string {
   const estimate = jobs.reduce((sum, job) => sum + job.estimatedMicroUsd, 0);
   const name = modelName(jobs[0]!, manifest);
   // Local recipes already prefix their picker label; the receipt says it once, in the cost slot.
   if (estimate === 0) return `${name.replace(/^Local · /i, "")} · local`;
   if (!spent) return `${name} · ~${usd(estimate)}`;
-  // Spent, but measured only where the provider reported a figure (SPEC-014 R-10, codex on
-  // PR 1087): a manifest-derived actual is the estimate wearing a different name, and it keeps
-  // the tilde. The bare figure is the provider's own.
-  const measured = jobs.every((job) => job.providerCostMicroUsd !== undefined);
-  const total = jobs.reduce((sum, job) => sum + (job.providerCostMicroUsd ?? job.estimatedMicroUsd), 0);
+  // Reported charges or complete reported speech usage are measured. An unmeasured estimate
+  // keeps its tilde; the authorisation ceiling must never replace a known smaller charge.
+  const measured = jobs.every((job) => measuredCost(job) !== null);
+  const total = jobs.reduce((sum, job) => sum + (measuredCost(job) ?? job.estimatedMicroUsd), 0);
   return `${name} · ${measured ? usd(total) : `~${usd(total)}`}`;
 }
 
@@ -169,8 +172,9 @@ function modelAndCost(jobs: readonly Job[], manifest: ModelManifest | null, spen
  */
 function failureCost(job: Job): string {
   if (job.estimatedMicroUsd === 0) return "not charged";
-  const cost = job.providerCostMicroUsd;
-  if (cost !== undefined) return cost > 0 ? usd(cost) : "not charged";
+  const cost = measuredCost(job);
+  if (cost !== null) return cost > 0 ? usd(cost) : "not charged";
+  if (job.speechAttempts?.length) return "charge unknown";
   const taken = job.providerJobId !== null || (job.attempt > 0 && job.submissionRejected !== true);
   return taken ? "charge unknown" : "not charged";
 }
@@ -422,7 +426,7 @@ export function historyNote(job: Job, manifest: ModelManifest | null): QueueNote
       id: `job:${job.id}`,
       tone: remote ? "warning" : "queued",
       title: title(subjectOf(job), noun(job.target.kind, 1), "cancelled"),
-      meta: `${modelName(job, manifest)} · ${remote ? "charge unknown" : "not charged"}`,
+      meta: `${modelName(job, manifest)} · ${measuredCost(job) !== null || job.speechQuote?.unit === "token" ? failureCost(job) : remote ? "charge unknown" : "not charged"}`,
       ...(job.error ? { reason: job.error } : {}),
     };
   }
