@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { writeFile } from "node:fs/promises";
-import { ulid, deriveRehearsalLines, type Job, type ProviderStatus } from "@arke-studio/contracts";
+import { ulid, deriveRehearsalLines, legacySceneView, type Job, type ProviderStatus } from "@arke-studio/contracts";
 import { WorldStore } from "../../src/world/store.js";
 import { audioWorldPath } from "../../src/audio/storage.js";
 import { planTableRead, finalizeTableReadCache } from "../../src/audio/table-read.js";
@@ -9,6 +9,30 @@ import { cachedVoiceAudioLooksRight } from "../../src/voice/service.js";
 import { SHIPPED_MANIFEST } from "../../../providers/src/manifest-data.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { applyVoiceAssignment } from "../../src/sheets/authoring.js";
+it("validates a repeated table-read voice once per plan and checks again on confirmation", async t => {
+  const store = await WorldStore.open(await makeTempWorld()); t.after(() => store.close());
+  const bundle = structuredClone(store.getBundle());
+  const production = bundle.productions.find(p => p.scenes.some(s => deriveRehearsalLines(s, bundle.sheets).some(l => l.speakerSheetId === "maren-kest")))!;
+  const source = legacySceneView(production.scenes.find(s => deriveRehearsalLines(s, bundle.sheets).some(l => l.speakerSheetId === "maren-kest"))!);
+  const shot = source.shots.find(shot => shot.audio?.speaker === "maren-kest")!;
+  const scene = { ...source, shots: Array.from({ length: 50 }, (_, index) => ({ ...shot, id: `sh_${100 + index}`, number: index + 1,
+    audio: { ...shot.audio!, line: `A distinct line ${index}.` } })) };
+  production.scenes = production.scenes.map(row => row.id === scene.id ? scene : row);
+  bundle.sheets.find(sheet => sheet.id === "maren-kest")!.voice = { provider: "google", model: "gemini-3.8-flash-tts", voiceId: "Charon", assignedAtVersion: 4 };
+  store.getBundle = () => bundle;
+  const providers: ProviderStatus[] = [{ id: "google", configured: true, validation: "valid", fault: null, probes: [{ capability: "voice-tts", available: true }] }];
+  let calls = 0;
+  let problem: string | null = null;
+  const check = async () => { calls++; return problem; };
+  const first = await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [], providers, check);
+  assert.equal(first.cloud.length, 50);
+  assert.equal(calls, 1);
+  problem = "The current key no longer has this reader.";
+  const confirmed = await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [], providers, check);
+  assert.equal(calls, 2, "each plan gets fresh reader availability");
+  assert.equal(confirmed.cloud.length, 0);
+  assert.ok(confirmed.plan.items.every(item => item.reason === problem));
+});
 it("Gemini table reads quote bounded WAV jobs, retain cached audio and refuse unavailable readers", async t => {
   const store = await WorldStore.open(await makeTempWorld()); t.after(() => store.close());
   const bundle = store.getBundle();

@@ -16,6 +16,9 @@ export async function planTableRead(store: WorldStore, productionId: string, sce
   const production = store.getBundle().productions.find(p => p.meta.id === productionId), scene = production?.scenes.find(s => s.id === sceneId);
   if (!production || !scene) throw new Error("This rehearsal scene is unavailable.");
   const items: TableReadPlan["items"] = [], cloud: EnqueueInput[] = [], local: Array<{ file: string; spec: SpeechSpec }> = [], bindings: unknown[] = [];
+  // A plan may contain many lines for one reader. Revalidate on the next plan/confirmation,
+  // not once per line; neither successful nor refused discovery survives this invocation.
+  const readerProblems = new Map<string, string | null>();
   for (const line of deriveRehearsalLines(scene, store.getBundle().sheets)) {
     const item: TableReadPlan["items"][number] = { lineId: line.id, shotId: line.shotId, ...(line.blockId ? { blockId: line.blockId } : {}),
       ...(line.speakerSheetId ? { speakerSheetId: line.speakerSheetId } : {}), route: "unavailable", estimatedMicroUsd: 0 };
@@ -59,7 +62,9 @@ export async function planTableRead(store: WorldStore, productionId: string, sce
     if (running) { item.route = "generating"; item.reason = `Existing preparation: ${running.status}.`; bindings.push({ jobId: running.id }); continue; }
     const status = providers.find(p => p.id === model.provider);
     if (!status?.configured || status.fault !== null || status.validation !== "valid" || !status.probes.some(p => p.capability === "voice-tts" && p.available)) { item.reason = "Validate this voice provider in Settings before preparation."; continue; }
-    const problem = await readerProblem?.(model, voice.voiceId);
+    const readerKey = JSON.stringify([model.provider, model.id, voice.voiceId]);
+    if (readerProblem && !readerProblems.has(readerKey)) readerProblems.set(readerKey, await readerProblem(model, voice.voiceId));
+    const problem = readerProblems.get(readerKey);
     if (problem) { item.reason = problem; continue; }
     if (!speechInputFits(spec.text, model.limits)) { item.reason = "The line exceeds this model's speech input limit."; continue; }
     if (model.provider === "kokoro") { item.route = "local"; local.push({ file, spec }); continue; }
