@@ -3481,7 +3481,7 @@ export function CanonEntryScreen() {
           )}
         </div>
           <section aria-label="Cited by" style={{ marginTop: 30, animation: "fy-fade-up 0.7s var(--ease-out) 0.15s both" }}>
-            <div style={{ font: "600 13px var(--font-sans)", marginBottom: 4 }}>Cited by</div>
+            <div className="fy-entry-section-title fy-entry-cited-title">Cited by</div>
             {!citedBy && <div className="fy-mono">Loading citations…</div>}
             {citedBy && citedBy.sheets.length + citedBy.entries.length + citedBy.productions.length === 0 && (
               <div className="fy-mono">No citations yet.</div>
@@ -3516,7 +3516,7 @@ export function CanonEntryScreen() {
           </section>
       </div>
       <div className="fy-entry__side">
-        <div style={{ font: "600 13px var(--font-sans)" }}>History</div>
+        <div className="fy-entry-section-title">History</div>
         <div style={{ marginTop: 4 }}>
           {history?.length === 0 && (
             <div className="fy-mono" style={{ padding: "9px 0" }}>
@@ -3545,8 +3545,8 @@ export function CanonEntryScreen() {
           )}
         </div>
         {detail && detail.ripples.length > 0 && (
-          <div className="fy-draftcard">
-            <div style={{ font: "600 13px var(--font-sans)" }}>Changing this ripples</div>
+          <div className="fy-draftcard fy-entry-ripples">
+            <div className="fy-entry-section-title">Changing this ripples</div>
             <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
               {detail.ripples.map((r, i) => (
                 <div key={i} className="fy-ripplerow">
@@ -3949,7 +3949,7 @@ export function NewCanonScreen() {
         </div>
       </div>
       <div className="fy-gate__side">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+        <div className="fy-canon-proposal-title">
           <div style={{ font: "600 15px var(--font-sans)" }}>Proposed entry</div>
           <span className="fy-mono" style={{ color: "var(--warning)" }}>
             draft · enters as proposed
