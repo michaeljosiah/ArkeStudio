@@ -1,0 +1,151 @@
+import assert from "node:assert/strict";
+import { cp, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
+import { randomBytes } from "node:crypto";
+import { Coordinator } from "../../../packages/coordinator/src/coordinator.ts";
+import { FsWorldProvider } from "../../../packages/coordinator/src/world/provider.ts";
+import { RemoteDevices } from "../../../packages/coordinator/src/remote-access/devices.ts";
+import { RemoteGateway } from "../../../packages/coordinator/src/remote-access/gateway.ts";
+
+// Opt-in: actual Serve TLS and browser cookies, plus the built sandboxed desktop file page.
+// Uses an otherwise unconfigured HTTPS port, disposable copied data, and no generation.
+if (!process.argv.includes("--tailscale")) throw new Error("Pass --tailscale to run this live tailnet smoke on HTTPS port 8444.");
+const root = fileURLToPath(new URL("../../../", import.meta.url));
+const require = createRequire(import.meta.url);
+const execute = promisify(execFile);
+const ts = async args => (await execute("tailscale", args, { windowsHide: true, timeout: 15000, maxBuffer: 1024 * 1024 })).stdout;
+const initial = JSON.parse(await ts(["serve", "status", "--json"]));
+assert.ok(!initial.TCP?.["8444"] && !Object.keys(initial.Web ?? {}).some(key => key.endsWith(":8444")), "8444 must be unused");
+assert.ok(!Object.entries(initial.AllowFunnel ?? {}).some(([key, value]) => value && key.endsWith(":8444")), "Funnel must be off");
+const status = JSON.parse(await ts(["status", "--json"]));
+const name = status.Self.DNSName.replace(/\.$/, "");
+assert.ok(status.CertDomains.includes(name));
+const origin = `https://${name}:8444`;
+const dir = await mkdtemp(join(tmpdir(), "arke-remote-smoke-"));
+await cp(join(root, "fixtures/worlds"), join(dir, "worlds"), { recursive: true });
+const createCoordinator = () => new Coordinator({ provider: new FsWorldProvider(dir), adapter: null, appRoot: dir, appVersion: "smoke",
+  changeLogPath: join(dir, "logs/changes.jsonl"), transportAuth: { token: randomBytes(32).toString("hex"), allowedOrigins: ["file://", "null"] } });
+let coordinator = createCoordinator();
+let gateway;
+let mapping = false;
+let devices = new RemoteDevices(join(dir, "remote-devices.json"));
+let session;
+let gatewayPort;
+const createGateway = () => new RemoteGateway({ origin, clientDirectory: join(root, "packages/client/dist"), devices, session });
+try {
+  session = await coordinator.start(); await devices.load();
+  gateway = createGateway(); gatewayPort = await gateway.start(0);
+  await ts(["serve", "--bg", "--https=8444", `http://127.0.0.1:${gatewayPort}`]); mapping = true;
+  const probe = await fetch(origin); assert.equal(probe.status, 200);
+  await writeFile(join(dir, "main.cjs"), `(${electronMain.toString()})().catch(error => { console.error(error); require("electron").app.exit(1); });`);
+  const child = spawn(require("electron"), [join(dir, "main.cjs")], { windowsHide: true, stdio: ["ignore", "inherit", "inherit", "ipc"],
+    env: { ...process.env, ARKE_REMOTE_SMOKE: JSON.stringify({ dir, origin, ...session,
+      page: join(root, "packages/client/dist/index.html"), preload: join(root, "apps/desktop/dist/preload.cjs") }) } });
+  child.on("message", async ({ id, command }) => {
+    try {
+      let pairing;
+      if (command.kind === "pair") pairing = devices.createCode();
+      if (command.kind === "approve") await devices.approve(command.id);
+      if (command.kind === "revoke") { await devices.revoke(command.id); gateway.recheckDevices(); }
+      if (command.kind === "restart") {
+        await gateway.stop(); await devices.stop(); await coordinator.stop();
+        const previousToken = session.token;
+        coordinator = createCoordinator(); session = await coordinator.start();
+        assert.notEqual(session.token, previousToken);
+        devices = new RemoteDevices(join(dir, "remote-devices.json")); await devices.load();
+        gateway = createGateway(); await gateway.start(gatewayPort);
+      }
+      child.send({ id, result: { status: { enabled: true, running: true, startOnLogin: false, startupSupported: false,
+        url: origin, reason: null, devices: devices.list(), pending: devices.pending() }, ...(pairing ? { pairing } : {}),
+        ...(command.kind === "restart" ? { session } : {}) } });
+    } catch (error) { child.send({ id, error: String(error) }); }
+  });
+  assert.equal(await new Promise((resolve, reject) => { child.once("error", reject); child.once("exit", resolve); }), 0);
+  assert.ok(!String(await readFile(join(dir, "remote-devices.json"))).includes(session.token));
+  console.log(`Remote pairing smoke passed; disposable profile and screenshots: ${dir}`);
+} finally {
+  await gateway?.stop(); await devices.stop(); await coordinator.stop();
+  if (mapping) {
+    const current = JSON.parse(await ts(["serve", "status", "--json"]));
+    if (current.Web?.[`${name}:8444`]?.Handlers?.["/"]?.Proxy === `http://127.0.0.1:${gatewayPort}`) await ts(["serve", "--https=8444", "off"]);
+  }
+}
+
+async function electronMain() {
+  const { app, BrowserWindow, ipcMain } = require("electron");
+  const assert = require("node:assert/strict");
+  const { writeFile } = require("node:fs/promises");
+  const { join } = require("node:path");
+  const config = JSON.parse(process.env.ARKE_REMOTE_SMOKE); delete process.env.ARKE_REMOTE_SMOKE;
+  app.disableHardwareAcceleration(); app.setPath("userData", join(config.dir, "browser-profile"));
+  const timeout = setTimeout(() => { console.error("Remote smoke timed out"); app.exit(1); }, 90000);
+  let sequence = 0;
+  const rpc = command => new Promise((resolve, reject) => {
+    const id = ++sequence;
+    const listener = message => { if (message.id !== id) return; process.off("message", listener); message.error ? reject(new Error(message.error)) : resolve(message.result); };
+    process.on("message", listener); process.send({ id, command });
+  });
+  await app.whenReady();
+  ipcMain.on("arke:get-theme", event => { event.returnValue = { preference: "system", resolved: "light" }; });
+  ipcMain.on("arke:startup-state-ready", event => event.sender.send("arke:startup-state", { status: "ready", port: config.port, token: config.token }));
+  ipcMain.handle("arke:remote-access", (_event, command) => rpc(command));
+  const owner = new BrowserWindow({ show: false, width: 1200, height: 850,
+    webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, preload: config.preload } });
+  const browserOptions = { show: false, width: 420, height: 900,
+    webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, partition: "persist:remote-smoke" } };
+  let phone = new BrowserWindow(browserOptions);
+  const js = (window, source) => window.webContents.executeJavaScript(source);
+  const until = async (window, condition) => {
+    const deadline = Date.now() + 20000;
+    while (Date.now() < deadline) { if (await js(window, condition)) return; await new Promise(resolve => setTimeout(resolve, 100)); }
+    throw new Error(`Timed out: ${condition}\n${await js(window, "document.body.innerText")}`);
+  };
+  const shot = async (window, name) => {
+    await js(window, "document.fonts.ready.then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))");
+    await writeFile(join(config.dir, name + ".png"), (await window.webContents.capturePage()).toPNG());
+  };
+  await owner.loadFile(config.page, { hash: "/settings/remote-access" });
+  await until(owner, "[...document.querySelectorAll('button')].some(b => b.textContent === 'Pair a device')");
+  await phone.loadURL(config.origin + "/#/worlds");
+  await until(phone, "document.querySelector('form') !== null");
+  await shot(phone, "phone-pairing");
+  await js(owner, "[...document.querySelectorAll('button')].find(b => b.textContent === 'Pair a device').click()");
+  await until(owner, "document.querySelector('.remote-access__code') !== null");
+  const code = await js(owner, "document.querySelector('.remote-access__code').textContent");
+  await js(phone, `(() => { const input = document.querySelector('input[autocomplete="one-time-code"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(code)}); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await js(phone, "document.querySelector('form').requestSubmit()");
+  await until(owner, "[...document.querySelectorAll('button')].some(b => b.textContent.startsWith('Approve '))");
+  assert.ok(await js(owner, `(() => {
+    const button = [...document.querySelectorAll('button')].find(b => b.textContent.startsWith('Approve '));
+    button.scrollIntoView({ block: 'center' });
+    const bounds = button.getBoundingClientRect();
+    return bounds.top >= 0 && bounds.bottom <= innerHeight;
+  })()`), "desktop approval must be reachable in the scrolling settings pane");
+  await shot(owner, "desktop-approval");
+  await js(owner, "[...document.querySelectorAll('button')].find(b => b.textContent.startsWith('Approve ')).click()");
+  await until(phone, "document.querySelector('[data-screen=world-picker]') !== null");
+  assert.equal(await js(phone, "document.cookie"), "");
+  assert.ok(!(await phone.webContents.getURL()).includes("arke-session"));
+  await shot(phone, "phone-worlds");
+  const imageStatus = await js(phone, "fetch('/media/the-undersong/world-art.png', { headers: { Range: 'bytes=0-31' } }).then(r => r.status)");
+  assert.equal(imageStatus, 206);
+  await phone.webContents.session.cookies.flushStore();
+  phone.destroy(); phone = new BrowserWindow(browserOptions);
+  await phone.loadURL(config.origin + "/#/worlds");
+  await until(phone, "document.querySelector('[data-screen=world-picker]') !== null");
+  Object.assign(config, (await rpc({ kind: "restart" })).session);
+  await phone.loadURL(config.origin + "/#/worlds");
+  await until(phone, "document.querySelector('[data-screen=world-picker]') !== null");
+  await js(owner, "[...document.querySelectorAll('button')].find(b => b.textContent.startsWith('Revoke ')).click()");
+  await until(phone, "document.querySelector('form') !== null && !document.querySelector('[data-screen=world-picker]')");
+  await shot(phone, "phone-revoked");
+  await owner.loadFile(config.page, { hash: "/settings/remote-access" });
+  await until(owner, "[...document.querySelectorAll('button')].some(b => b.textContent === 'Pair a device')");
+  console.log("[smoke] real Serve TLS: pairing, owner approval, HttpOnly cookie, WSS, media, browser reopen, coordinator/registry/gateway restart with new process capability, revocation and desktop file-page reload passed");
+  clearTimeout(timeout); phone.destroy(); owner.destroy(); app.exit(0);
+}

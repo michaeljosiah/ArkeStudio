@@ -2,14 +2,67 @@
 
 You can use the browser frontend from a phone, a tablet or a second computer while Studio runs
 on your main machine. [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve) carries the
-connection. This works when you run Studio from source, with the
-[standalone server](standalone-server.md) or `dev:coordinator`; the packaged desktop app does not
-offer it.
+connection. The desktop app supports remembered device pairing. The source-run
+[standalone server](standalone-server.md) and `dev:coordinator` also retain the development
+session-link setup described below.
 
 Everything still runs on the main machine: your worlds, the Studio server, the writing assistant
 and any local generation. The other device only shows the browser frontend.
 
-## How it fits together
+## Everyday access from the desktop app
+
+1. Connect Tailscale on the PC and phone using the same tailnet. Enable MagicDNS and HTTPS
+   certificates on the Tailscale admin console's DNS page. Certificate issuance publishes the
+   machine's full DNS name in the Certificate Transparency log.
+2. In Studio on the PC, open **Settings → Remote access → Enable remote access**. Studio serves
+   the built frontend on loopback port 8793 and configures Tailscale Serve's HTTPS port 443.
+   An existing mapping on 443 is reported rather than overwritten; stop the older development
+   mapping before enabling this mode. Funnel is refused.
+3. Open the clean HTTPS address shown in Settings on the phone, then choose **Pair a device**
+   on the PC. Enter the code and a device name on the phone. Approve the matching request on
+   the PC. Codes work once, expire after five minutes and stop working after five wrong guesses.
+4. Bookmark the clean address on the phone. It contains no credential. This browser remains
+   authorized for 90 days across browser and Studio restarts. Clearing its site data, expiry,
+   or revocation requires pairing again.
+5. Optionally enable **Start Studio when I sign in to this PC** in the installed Windows or
+   macOS app. Closing the window keeps the host in the system tray; use the tray's **Quit Arke
+   Studio** action to stop it. The PC must be awake and signed in. This is not wake-on-LAN or a
+   service that starts before user login.
+
+Desktop and phone operate the same coordinator and world session. A paired device has the
+owner's ordinary Studio access; pairing management is available only on the PC. Revoke a device
+in Settings to stop its active connections and future access. The remote gateway uses a secure,
+HttpOnly, same-site cookie; the private process capability never reaches the browser.
+Native file selection, dropped host files and desktop-rendered playblasts require the desktop
+app. The gateway rejects their host-file commands, including manually supplied filesystem paths.
+
+**Disable remote access** stops hosting, removes only its matching Serve mapping and turns off
+automatic startup. Ordinary Quit removes the mapping before releasing the local hosting port;
+the next app start recreates it at the same bookmarked address. If Tailscale cannot remove the
+mapping, Studio keeps the port reserved and reports that shutdown failed; restore Tailscale
+and retry Quit. The built desktop page keeps its existing loopback
+policy; only the copy served to the phone gets the remote same-origin policy.
+On startup, an inert listener reserves the port before either settings or device records are
+read. Stale forwarding is withdrawn before loading the device registry. If settings are damaged,
+recovery discovers only the exact private Serve mapping to Studio's fixed port; other mappings
+are preserved. Failed cleanup retains the listener until Disable or Quit can remove the mapping.
+Damaged records remain untouched. A failed desktop startup also drains the previous host before
+Retry can construct a replacement. An ordinary first launch does not require Tailscale.
+Studio saves its ownership record before publishing HTTPS, so a process exit during Enable
+still leaves enough information for this recovery on the next start.
+
+If the PC or Tailscale is offline, an already open page retries. A new tab may show the browser's
+own network error because no page can be served. Resume the PC and connect Tailscale, then reload.
+If connections time out with another VPN active, test with that VPN disconnected; our Windows
+check failed with NordLynx active and succeeded after disconnecting NordVPN. This changes which
+network carries ordinary internet traffic during that test.
+
+## Development session links
+
+This mode still requires a new private link after a server restart and keeps it only for the
+current browser tab. It is useful for development; use desktop pairing for everyday phone use.
+
+### How it fits together
 
 ```mermaid
 flowchart LR
@@ -99,6 +152,9 @@ Arke session: https://studio.tail1234.ts.net/#/?arke-session=…
 **4. Open that link on the other device.** The page removes the capability from the address bar
 and keeps it only in that browser tab. A new tab needs the link again.
 
+Use the **Arke session** link, not Vite's **Local** link. `127.0.0.1` or `localhost` on a phone
+means the phone itself, not the PC, and typically reports that the connection was refused.
+
 ## Keep the link private
 
 Anyone on your tailnet who has the link has full control of the session, the same as you. Don't
@@ -151,6 +207,8 @@ not only these two.
 | `Arke session link not printed: … ARKE_DEV_ORIGIN …` | Set `ARKE_DEV_ORIGIN` to `https://` and your tailnet name. A remote origin also needs the two settings above. |
 | `Could not verify the Arke session …` | The server isn't running from this checkout; the 8443 mapping is missing (`tailscale serve status`); or the server's `--origin` doesn't exactly match `ARKE_DEV_ORIGIN`. |
 | The browser can't reach the page at all | The 443 mapping is missing, or Vite isn't on `127.0.0.1:5173`. Check `tailscale serve status` and the `--host` flag. |
+| Connection refused on the phone | Check that you opened the HTTPS **Arke session** address rather than Vite's `127.0.0.1` or `localhost` link. |
+| The HTTPS address times out while both services run | Check Tailscale on both devices and whether another VPN conflicts. Our Windows test worked after disconnecting NordVPN. Restart Vite after restoring connectivity so its session probe can print the link. |
 | Vite shows "Blocked request. This host is not allowed" | Vite was started without all three settings, or with a different name. Restart it with them. |
 | **Session link is out of date** | The server restarted. Restart the frontend and open the new link. |
 | **Waiting for the coordinator** | The server has stopped, or the 8443 mapping is missing. |
@@ -181,3 +239,10 @@ The rules above are enforced in `packages/client/dev-session-plugin.ts` and cove
 `packages/client/test/dev-session-remote.test.ts`. The operational rule is in
 [CLAUDE.md](../../CLAUDE.md#the-coordinator-session-is-authenticated-issue-825), and the change
 was made in [PR #1297](https://github.com/michaeljosiah/ArkeStudio/pull/1297).
+
+Desktop pairing is implemented by coordinator `remote-access/devices.ts` and `gateway.ts`,
+desktop `remote-access.ts` and `tailscale-serve.ts`, and the client's remote entry/settings
+screens (issue #1311; SPEC-001 §2.5 and SPEC-016). Coordinator and desktop
+`test/remote-access.test.ts` cover proof persistence, code expiry/replay, owner approval,
+origin/host checks, media, WebSockets, revocation, mapping ownership and host restart.
+Automated checks do not replace the actual phone and second-computer acceptance journeys.

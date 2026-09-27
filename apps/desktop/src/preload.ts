@@ -159,6 +159,9 @@ const bridge = {
   quit(): void {
     ipcRenderer.send("arke:quit");
   },
+  remoteAccess(input: import("@arke-studio/contracts").RemoteAccessCommand): Promise<import("@arke-studio/contracts").RemoteAccessReply> {
+    return ipcRenderer.invoke("arke:remote-access", input);
+  },
 
   /** (Re)establish the socket to the embedded coordinator. Loopback only. */
   connect(): void {

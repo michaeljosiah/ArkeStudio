@@ -1,6 +1,7 @@
 import type { AudiobookReader, PromptReview, PromptSourceSnapshot } from "@arke-studio/contracts";
 import { setMediaStateSource } from "./media.js";
 import { devSession } from "./dev-session.js";
+import { isRemoteSession, remoteSocketUrl } from "./remote-session.js";
 import { useSyncExternalStore } from "react";
 import {
   FrameSchema,
@@ -2394,6 +2395,10 @@ export function devBridge(url: string): ArkeBridge {
       socket.addEventListener("open", () => onStatus?.("open"));
       socket.addEventListener("close", (event) => {
         socket = null;
+        if (isRemoteSession() && event.code === 1008 && event.reason === "session authentication required") {
+          window.location.reload();
+          return;
+        }
         onStatus?.(event.code === 1008 && event.reason === "session authentication required" ? "auth-refused" : "closed");
       });
       socket.addEventListener("message", (e) => {
@@ -2417,7 +2422,7 @@ export function devBridge(url: string): ArkeBridge {
 export function initStore(): void {
   if (bridge) return;
   const devUrl = (import.meta.env?.VITE_ARKE_WS as string | undefined) ?? "ws://127.0.0.1:8791";
-  bridge = window.arke ?? devBridge(devUrl);
+  bridge = window.arke ?? devBridge(remoteSocketUrl() ?? devUrl);
   bridge.subscribe(handleFrame, handleStatus);
   bridge.connect();
 }
