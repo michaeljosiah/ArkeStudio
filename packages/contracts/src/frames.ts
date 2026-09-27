@@ -1816,6 +1816,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("voice-line"),
+      confirmedSpeechMicroUsd: z.number().int().nonnegative().safe().optional(),
       requestId: UlidSchema,
       worldId: UlidSchema,
       productionId: SlugSchema,

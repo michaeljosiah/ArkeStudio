@@ -13981,6 +13981,8 @@ export class Coordinator {
         let input;
         try {
           input = voiceLineRequest({
+            confirmedSpeechMicroUsd: msg.confirmedSpeechMicroUsd,
+            at: this.nowIso(),
             worldId: msg.worldId,
             productionId: msg.productionId,
             shotId: msg.shotId,

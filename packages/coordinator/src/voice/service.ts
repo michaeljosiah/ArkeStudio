@@ -1,4 +1,4 @@
-import { estimateSpeechMicroUsd, quoteSpeech } from "@arke-studio/contracts";
+import { quoteSpeech } from "@arke-studio/contracts";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -869,6 +869,8 @@ export class VoiceService {
  * notice travels with the job rather than being silently dropped.
  */
 export function voiceLineRequest(input: {
+  confirmedSpeechMicroUsd?: number;
+  at?: string;
   worldId: string;
   productionId: string;
   shotId: string;
@@ -890,6 +892,10 @@ export function voiceLineRequest(input: {
   if (voice.provider !== input.model.provider || (assignedModel !== undefined && assignedModel !== input.model.id)) {
     throw new Error("The assigned voice no longer matches its speech model — choose the voice again.");
   }
+  const quote = quoteSpeech(input.model, input.text, { delivery: input.delivery, language: input.language, at: input.at });
+  if (quote.unit === "token" && (input.confirmedSpeechMicroUsd === undefined || input.confirmedSpeechMicroUsd < quote.authorisedMicroUsd)) {
+    throw new Error("The speech price needs confirmation. Open the line again and confirm its current price.");
+  }
   return {
     worldId: input.worldId,
     productionId: input.productionId,
@@ -906,7 +912,7 @@ export function voiceLineRequest(input: {
       ...(input.deliveryParams !== null ? { voiceSettings: input.deliveryParams } : {}),
       ...(input.deliveryNotice !== null ? { deliveryNotice: input.deliveryNotice } : {}),
     },
-    estimatedMicroUsd: estimateSpeechMicroUsd(input.model, input.text, input.delivery, input.language),
+    estimatedMicroUsd: quote.authorisedMicroUsd,
     landing: { dir: `productions/${input.productionId}/audio` },
     ...(input.voiceReference === true ? { voiceReference: true } : {}),
     ...(input.voiceUploadConfirmedFor !== undefined

@@ -1100,6 +1100,7 @@ export class JobQueue {
       status: "submitting",
       attempt: job.attempt + 1,
       submissionRejected: undefined,
+      providerResultKind: undefined,
       updatedAt: this.clock(),
     };
     await this.transition(submitting);
@@ -1150,6 +1151,7 @@ export class JobQueue {
       const reported = typeof accepted.costMicroUsd === "number" && Number.isFinite(accepted.costMicroUsd) && accepted.costMicroUsd >= 0
         && Number.isSafeInteger(Math.round(accepted.costMicroUsd)) ? Math.round(accepted.costMicroUsd) : undefined;
       const completedSubmission: Job = { ...submitting, providerJobId: accepted.remoteId,
+        providerResultKind: accepted.artifacts !== undefined ? "inline" : "remote",
         ...(usage.success ? { speechUsage: usage.data } : {}),
         ...(client.declarations.reportsCost && reported !== undefined ? { providerCostMicroUsd: reported } : {}) };
       // Capture the accepted facts before cancellation can discard the response. Cancellation
@@ -1160,7 +1162,7 @@ export class JobQueue {
         return;
       }
       // Usage must survive artifact landing failure and restart, just as the audio does.
-      if (usage.success || completedSubmission.providerCostMicroUsd !== undefined) await this.persistUsage(completedSubmission);
+      if (usage.success || completedSubmission.providerCostMicroUsd !== undefined || completedSubmission.providerResultKind === "inline") await this.persistUsage(completedSubmission);
       if (this.disposed || this.cancelling.has(job.id) || !this.stillSubmitting(completedSubmission)) return;
       if (accepted.artifacts) {
         try {
@@ -2050,6 +2052,9 @@ export class JobQueue {
 
   /** The unwitnessed-submission window (§2.4 rows ②→③ and ④): observe, never guess (D2). */
   private async reconcileSubmitting(job: Job): Promise<ReconcileAction> {
+    // The durable-artifact recovery above has already tried the local response. An id from
+    // an inline-only response cannot recover audio that was never saved.
+    if (job.providerResultKind === "inline") return this.holdForUser(job);
     const client = this.opts.clients[job.provider];
     const key = client ? await this.keyFor(job) : null;
     if (!client || key === null) {
@@ -2145,7 +2150,9 @@ export class JobQueue {
       ...job,
       status: "needs-reconciliation",
       ...(failureClass !== undefined ? { failureClass } : {}),
-      error: local
+      error: job.providerResultKind === "inline"
+        ? `The provider accepted this request, but its inline result was not saved before restart. No automatic retry was made. Resubmitting ${duplicateCost}.`
+        : local
         ? `Arke did not witness the submission result — the engine kept running while Arke restarted, and cannot confirm what happened. No automatic retry was made. Resubmitting ${duplicateCost}.`
         : `Arke did not witness the submission result. ${job.provider} may have accepted and charged it, and cannot confirm what happened. No automatic retry was made. Resubmitting ${duplicateCost}; the prior actual cost is unknown.`,
       updatedAt: this.clock(),

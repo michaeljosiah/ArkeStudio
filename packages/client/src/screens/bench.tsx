@@ -698,6 +698,7 @@ function BenchWorkspace({
    */
   const [refusal, setRefusal] = useState<{ reason: string; requestId: string | null } | null>(null);
   const pendingDispatch = useRef<string | null>(null);
+  const composerRef = useRef<HTMLDivElement | null>(null);
   const pendingDispatchAction = useRef<
     { kind: "dispatch"; composer: typeof draft; confirmedSpeechMicroUsd?: number } | { kind: "rerun"; takeId: string } | null
   >(null);
@@ -771,6 +772,9 @@ function BenchWorkspace({
   // ---- selection ----
   const latest = session.takes[session.takes.length - 1] ?? null;
   const selected: BenchTake | null = session.takes.find((t) => t.id === session.selectedTakeId) ?? latest;
+  const rerunNeedsPrice = selected?.request.params.kind === "voice" && state?.app.manifest?.models.some(
+    (model) => model.provider === selected.request.provider && model.id === selected.request.model && model.pricing.kind === "perToken",
+  ) === true;
   const [pendingAccept, setPendingAccept] = useState<{ requestId: string; takeId: string } | null>(null);
   const pendingAcceptRef = useRef<{ requestId: string; takeId: string } | null>(null);
   const [acceptNote, setAcceptNote] = useState<string | null>(null);
@@ -1419,7 +1423,7 @@ function BenchWorkspace({
         </nav>
 
         {/* ---- composer -------------------------------------------------- */}
-        <div className="fy-bench__composer">
+        <div className="fy-bench__composer" ref={composerRef} tabIndex={-1}>
           <div className="fy-bench__composerbar">
             {subject !== undefined ? (
               /* The same pill of icon tabs as the world bench (design 142a), holding only the
@@ -2365,9 +2369,14 @@ function BenchWorkspace({
               <button
                 type="button"
                 className="fy-bench__rowicon"
-                title="Run it again — a new take from this snapshot"
-                aria-label="Run it again"
-                onClick={() => rerunBench(selected.id)}
+                title={rerunNeedsPrice ? "Review the current price in the composer, then Generate" : "Run it again — a new take from this snapshot"}
+                aria-label={rerunNeedsPrice ? "Review price to run again" : "Run it again"}
+                onClick={() => {
+                  if (!rerunNeedsPrice) { rerunBench(selected.id); return; }
+                  restore(selected);
+                  composerRef.current?.scrollIntoView({ block: "start" });
+                  composerRef.current?.focus({ preventScroll: true });
+                }}
               >
                 <RefreshCw size={14} />
               </button>

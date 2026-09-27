@@ -3803,6 +3803,7 @@ export function requestVoiceCatalogue(worldId?: string): void {
  * their sheet at dispatch, so a retake keeps it by construction.
  */
 export function requestVoiceLine(input: {
+  confirmedSpeechMicroUsd?: number;
   worldId: string;
   productionId: string;
   shotId: string;
@@ -3813,6 +3814,7 @@ export function requestVoiceLine(input: {
   const requestId = queueRequest("voice-line");
   send({
     kind: "voice-line",
+    ...(input.confirmedSpeechMicroUsd !== undefined ? { confirmedSpeechMicroUsd: input.confirmedSpeechMicroUsd } : {}),
     requestId,
     worldId: input.worldId,
     productionId: input.productionId,

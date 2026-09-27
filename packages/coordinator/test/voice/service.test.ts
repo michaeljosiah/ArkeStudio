@@ -1187,3 +1187,18 @@ describe("a cloned voice previews like any other queued voice", () => {
     assert.equal(input.voiceReference, undefined, "an id names a catalogue voice; a clip would be noise");
   });
 });
+
+
+it("requires the displayed speech ceiling for a line and rejects it after a rate increase", () => {
+  const model: ManifestModel = { ...ELEVEN_MODEL, pricing: { kind: "perToken", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000,
+    speech: { tier: "standard", maxInputTokens: 8192, maxOutputTokens: 16384, audioTokensPerSecond: 25, rates: [
+      { version: "intro", effectiveFrom: "2026-09-01T00:00:00.000Z", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000 },
+      { version: "standard", effectiveFrom: "2027-01-01T00:00:00.000Z", microUsdPerMillionInput: 1000000, microUsdPerMillionOutput: 18000000 },
+    ] } } };
+  const input = { worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", productionId: "book", shotId: "sh_01", sheet: SHEET,
+    text: "Hello", model, deliveryParams: null, deliveryNotice: null, at: "2026-12-31T23:59:59.000Z" };
+  assert.throws(() => voiceLineRequest(input), /price needs confirmation/);
+  assert.throws(() => voiceLineRequest({ ...input, confirmedSpeechMicroUsd: 151551 }), /price needs confirmation/);
+  assert.equal(voiceLineRequest({ ...input, confirmedSpeechMicroUsd: 151552 }).estimatedMicroUsd, 151552);
+  assert.throws(() => voiceLineRequest({ ...input, confirmedSpeechMicroUsd: 151552, at: "2027-01-01T00:00:00.000Z" }), /price needs confirmation/);
+});
