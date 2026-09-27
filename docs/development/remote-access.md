@@ -18,8 +18,9 @@ and any local generation. The other device only shows the browser frontend.
    the built frontend on loopback port 8793 and configures Tailscale Serve's HTTPS port 443.
    An existing mapping on 443 is reported rather than overwritten; stop the older development
    mapping before enabling this mode. Funnel is refused.
-3. Open the clean HTTPS address shown in Settings on the phone, then choose **Pair a device**
-   on the PC. Enter the code and a device name on the phone. Approve the matching request on
+3. Scan the QR code in Settings with your phone's camera, or use **Copy link** to transfer the
+   clean HTTPS address. The QR is generated locally and contains only that address, not a
+   credential or pairing code. Choose **Pair a device** on the PC. Enter the code and a device name on the phone. Approve the matching request on
    the PC. Codes work once, expire after five minutes and stop working after five wrong guesses.
 4. Bookmark the clean address on the phone. It contains no credential. This browser remains
    authorized across browser and Studio restarts. **Remember approved devices for** offers
@@ -35,6 +36,8 @@ Desktop and phone operate the same coordinator and world session. A paired devic
 owner's ordinary Studio access; pairing management is available only on the PC. Revoke a device
 in Settings to stop its active connections and future access. The remote gateway uses a secure,
 HttpOnly, same-site cookie; the private process capability never reaches the browser.
+Copy link uses the desktop's native clipboard. If it fails, the address remains visible for
+manual copying. Scanning opens the browser and does not bypass pairing or PC approval.
 Browsers can remove saved cookies. Never approvals use a persistent cookie renewed on visits;
 [Chromium caps cookie lifetimes at 400 days](https://developer.chrome.com/blog/cookie-max-age-expires/),
 so a browser unused beyond that period can require pairing again even though its approval has
