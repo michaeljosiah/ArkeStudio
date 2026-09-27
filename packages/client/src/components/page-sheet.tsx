@@ -4,12 +4,13 @@ import { IconButton } from "./ui.js";
 import { X } from "./icons.js";
 
 /** Turn 163 uses the character sheet's shape with native focus containment and an inert page. */
-export function PageSheet({ open, onClose, title, children, footer }: {
+export function PageSheet({ open, onClose, title, children, footer, className }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
   footer?: ReactNode;
+  className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const heading = useId();
@@ -18,6 +19,7 @@ export function PageSheet({ open, onClose, title, children, footer }: {
     if (!dialog || !open) return;
     const opener = document.activeElement;
     dialog.showModal?.();
+    dialog.querySelector("h2")?.focus({ preventScroll: true });
     return () => {
       dialog.close?.();
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
@@ -25,7 +27,7 @@ export function PageSheet({ open, onClose, title, children, footer }: {
   }, [open]);
   if (!open) return null;
   return createPortal(
-    <dialog ref={ref} className="fy-page-sheet" aria-labelledby={heading}
+    <dialog ref={ref} className={["fy-page-sheet", className].filter(Boolean).join(" ")} aria-labelledby={heading}
       onCancel={(event) => { event.preventDefault(); onClose(); }}
       onClick={(event) => {
         if (event.target !== event.currentTarget) return;
@@ -33,7 +35,7 @@ export function PageSheet({ open, onClose, title, children, footer }: {
         if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) onClose();
       }}>
       <div className="fy-page-sheet__grab" />
-      <header className="fy-page-sheet__head"><h2 id={heading}>{title}</h2><IconButton label="Close" onClick={onClose}><X size={20} /></IconButton></header>
+      <header className="fy-page-sheet__head"><h2 id={heading} tabIndex={-1}>{title}</h2><IconButton label="Close" onClick={onClose}><X size={20} /></IconButton></header>
       <div className="fy-page-sheet__body">{children}</div>
       {footer && <footer className="fy-page-sheet__foot">{footer}</footer>}
     </dialog>, document.body,

@@ -1,7 +1,7 @@
 import { type ReactNode } from "react";
 
 /** Deterministic decorative waveform — seeded by the label, no randomness. */
-export function Wave({ seed, width = 290, height = 16 }: { seed: string; width?: number; height?: number }) {
+export function Wave({ seed, width = 290, height = 16, stretch = false }: { seed: string; width?: number; height?: number; stretch?: boolean }) {
   const bars: ReactNode[] = [];
   let h = 0;
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
@@ -12,7 +12,7 @@ export function Wave({ seed, width = 290, height = 16 }: { seed: string; width?:
     bars.push(<rect key={x} x={x} y={(height - bar) / 2} width={3} height={bar} rx={1.5} />);
   }
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden>
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio={stretch ? "none" : undefined} aria-hidden>
       <g fill="currentColor">{bars}</g>
     </svg>
   );

@@ -6,6 +6,7 @@ import { CharacterHeader } from "./character-reference.js";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import {
+  artifactPosterPath,
   CHARACTER_ROLE_MAX,
   MICRODRAMA_DEFAULTS,
   newId,
@@ -36,7 +37,7 @@ import {
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, Card, IconButton, Input, Textarea, cx } from "../components/ui.js";
-import { Archive, ArrowRight, ChevronRight, Copy, Pencil, Plus, Search, Users } from "../components/icons.js";
+import { Archive, ArrowRight, ChevronRight, Copy, More, Pencil, Plus, Search, Sparkle, Upload, Users } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
 import { Loading } from "../components/loading.js";
 import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
@@ -4002,6 +4003,9 @@ export function ArtifactsScreen() {
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
+  const compact = useMediaQuery("(max-width: 1099px)");
+  const phone = useMediaQuery("(max-width: 599px)");
+  const [menuId, setMenuId] = useState<string | null>(null);
   // The world's own shelf (SPEC-020 R-13): artifacts a production owns are shown there, and
   // counting them here would make "12 files" a number no filter on this screen can reach.
   const shelfArtifacts = (world?.artifacts ?? []).filter((a) => a.production === undefined);
@@ -4068,32 +4072,54 @@ export function ArtifactsScreen() {
     video: "Video",
     document: "Documents",
   };
-  return (
-    <div data-screen="artifacts">
-      {/* The only entrance to the bench (issue 305 §2), placed as the master places it
-          (design 68a): on the pill nav's own row, right-aligned. Outside the hero — the
-          hero's entrance animation leaves a transform behind, and a transformed ancestor
-          would quietly become this pair's containing block. A production's Generate has
-          shots to answer to, so it never grows one. */}
-      <div className="fy-artifacts-door">
-        <Button variant="outline" onClick={() => upload()}>Add files</Button>
+  const menuArtifact = visible.find(item => item.id === menuId);
+  const addFilesCard = (
+    <button
+      key="add-files"
+      type="button"
+      aria-label="Add files"
+      onClick={() => upload()}
+      className={cx("fy-gridcard fy-gridcard--quiet fy-artifact-add", dropActive && "fy-artifact-add--over")}
+    >
+      <span className="fy-newprodcard__ring" style={{ width: 40, height: 40 }}>
+        {compact ? <Upload size={22} /> : <Plus size={18} />}
+      </span>
+      <div>
+        <div style={{ font: "600 14px var(--font-sans)" }}>{compact ? "Add files" : dropActive ? "Drop to add files" : "Drop files or click to add"}</div>
+        <div
+          style={{ font: "400 10.5px var(--font-mono)", color: "var(--muted-foreground)", marginTop: 4 }}
+        >
+          up to 16 files · audio · documents · images
+        </div>
+      </div>
+    </button>
+  );
+  // Turn 164 keeps the picker in the fifth slot; later artifacts continue in shelf order.
+  const cards = compact ? [...visible.slice(0, 4), null, ...visible.slice(4)] : [...visible, null];
+  const doors = (<div className="fy-artifacts-door">
+        <Button variant="outline" onClick={() => upload()}>{compact && <Upload size={16} />}Add files</Button>
         <Button
           variant="primary"
           data-testid="artifacts-generate"
           onClick={() => void navigate(`/w/${worldId}/artifacts/bench`)}
         >
-          Generate
+          {compact && <Sparkle size={16} />}Generate
         </Button>
-      </div>
+      </div>);
+  return (
+    <div data-screen="artifacts">
+      {!compact && doors}
       <div className="fy-hero">
+        <div className="fy-artifacts-head"><div>
         <div className="fy-hero__eyebrow">
           {world?.meta.name} · {visible.length} file{visible.length === 1 ? "" : "s"}
           {madeHereCount > 0 ? ` · ${madeHereCount} made here` : ""}
           {superseded.size > 0 ? ` · ${superseded.size} superseded — history keeps them` : ""}
         </div>
-        <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
+        <h1 className="fy-hero__title fy-artifacts-title">
           Artifacts
         </h1>
+        </div>{compact && doors}</div>
         <div className="fy-filterrow">
           <button
             type="button"
@@ -4129,7 +4155,7 @@ export function ArtifactsScreen() {
         </div>
 
       </div>
-      <div style={{ maxWidth: 860, margin: "0 auto", padding: "12px 24px 0", display: "grid", gap: 10 }}>
+      <div className="fy-artifact-notices">
         {uploadError && <Callout tone="warning" title="Import unavailable">{uploadError}</Callout>}
         {notices.map((n, i) => (
           <Callout
@@ -4195,7 +4221,7 @@ export function ArtifactsScreen() {
             <div className="scr-sectionlist">
               {artifact.extraction!.pending.map((candidate) => (
                 <div key={candidate.hash} className="scr-sheetsection">
-                  <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+                  <div className="fy-artifact-candidate">
                     <Badge tone="outline">{candidate.kind}</Badge>
                     <strong style={{ font: "var(--type-ui)" }}>{candidate.name}</strong>
                     {candidate.section && (
@@ -4209,7 +4235,7 @@ export function ArtifactsScreen() {
                     “{candidate.quote}”{candidate.line !== undefined ? ` — line ${candidate.line}` : ""} ·
                     verified against the source
                   </span>
-                  <div style={{ display: "flex", gap: "var(--space-2)" }}>
+                  <div className="fy-artifact-candidate__actions">
                     <Button
                       onClick={() => {
                         if (worldId) resolveExtraction(worldId, artifact.id, candidate.hash, "accept");
@@ -4233,8 +4259,7 @@ export function ArtifactsScreen() {
         ))}
       </div>
       <div
-        className="fy-cardgrid"
-        style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", paddingTop: 24 }}
+        className="fy-cardgrid fy-artifact-grid"
         onDragOver={(event) => {
           if (!Array.from(event.dataTransfer.types).includes("Files")) return;
           event.preventDefault();
@@ -4251,7 +4276,8 @@ export function ArtifactsScreen() {
           if (event.dataTransfer.files.length) upload(Array.from(event.dataTransfer.files));
         }}
       >
-        {visible.map((a) => {
+        {cards.map((a) => {
+          if (a === null) return addFilesCard;
           const filename = a.file.split("/").pop() ?? a.file;
           const name = artifactDisplayName(a, linkName);
           const isImage = a.kind === "image" || /\.(png|jpe?g|webp|gif)$/i.test(a.file);
@@ -4266,8 +4292,8 @@ export function ArtifactsScreen() {
           return (
             <div
               key={a.id}
-              className="fy-gridcard fy-gridcard--openable"
-              style={{ padding: isImage ? "10px 10px 14px" : 16, opacity: a.retiredAt ? 0.65 : 1 }}
+              className={cx("fy-gridcard fy-gridcard--openable", isImage && "fy-artifact--image")}
+              style={{ opacity: a.retiredAt ? 0.65 : 1 }}
             >
               {/*
                 * The open target: one real <button> laid over the card, so a pointer and a
@@ -4286,7 +4312,7 @@ export function ArtifactsScreen() {
                   setOpenArtifactId(a.id);
                 }}
               />
-              {a.retiredAt ? (
+              {compact ? <button type="button" className="fy-artifact-more" aria-label={`Options for ${name}`} onClick={() => setMenuId(a.id)}><More size={16} /></button> : a.retiredAt ? (
                 <button type="button" className="fy-artifact-retire" aria-label={`Restore ${name}`}
                   onClick={() => { if (worldId) restoreArtifact(worldId, a.id); }}>Restore</button>
               ) : (
@@ -4294,17 +4320,22 @@ export function ArtifactsScreen() {
                   onClick={(event) => { openTrigger.current = event.currentTarget; setRetireId(a.id); }}>Remove</button>
               )}
               {isImage ? (
-                <div className="fy-imghost" style={{ width: "100%", height: 110 }}>
+                <div className="fy-imghost fy-artifact-frame">
                   <Portrait
                     worldSlug={world?.meta.slug}
                     path={`artifacts/${a.file}`}
                     label={name}
-                    download
+                    download={!compact}
                     downloadName={filename}
                   />
                 </div>
+              ) : compact && a.kind === "video" ? (
+                <div className="fy-imghost fy-artifact-frame">
+                  <Portrait worldSlug={world?.meta.slug} path={artifactPosterPath(a.id)} label={name} radius={8} />
+                  {a.mediaInfo && <span className="fy-artifact-duration">{formatSeconds(a.mediaInfo.durationSec)}</span>}
+                </div>
               ) : a.kind === "audio" ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div className="fy-artifact-audio fy-artifact-frame">
                   <ClipPlayButton
                     small
                     clip={
@@ -4318,25 +4349,26 @@ export function ArtifactsScreen() {
                         : null
                     }
                   />
-                  <span style={{ color: "var(--neutral-400)", overflow: "hidden" }}>
-                    <Wave seed={a.file} width={120} height={18} />
+                  <span className="fy-artifact-wave">
+                    <Wave seed={a.file} width={compact ? 240 : 120} height={compact ? 26 : 18} stretch={compact} />
                   </span>
                 </div>
               ) : (
-                <div className="fy-doclines">
+                <div className="fy-doclines fy-artifact-frame">
                   <span style={{ width: "80%" }} />
                   <span style={{ width: "95%" }} />
                   <span style={{ width: "60%" }} />
+                  {compact && <><span style={{ width: "85%" }} /><span style={{ width: "95%" }} /><span style={{ width: "60%" }} /></>}
                 </div>
               )}
-              <div style={isImage ? { padding: "0 6px" } : undefined}>
-                <div style={{ font: "600 14px var(--font-sans)", margin: "12px 0 3px" }}>{name}</div>
+              <div className="fy-artifact-caption">
+                <div className="fy-artifact-name">{name}</div>
                 <div className="fy-mono">{meta}</div>
                 {a.retiredAt && <Badge tone="danger">retired</Badge>}
                 {a.supersedes !== undefined && (
                   <div className="fy-mono">supersedes {a.supersedes.slice(0, 10)}…</div>
                 )}
-                {a.kind === "document" && (
+                {!compact && a.kind === "document" && (
                   /* An offer, not a headline — card-meta quiet, or it reads as the card's title. */
                   <button
                     type="button"
@@ -4353,46 +4385,26 @@ export function ArtifactsScreen() {
           );
         })}
         {/* A cell of the same grid, filling out the last row (design 68a) — never its own band. */}
-        <button
-          type="button"
-          aria-label="Add files"
-          onClick={() => upload()}
-          className="fy-gridcard fy-gridcard--quiet"
-          style={{
-            border: `1.5px dashed ${dropActive ? "var(--foreground)" : "var(--neutral-300)"}`,
-            background: dropActive ? "var(--muted)" : "transparent",
-            color: "inherit",
-            cursor: "pointer",
-            textAlign: "left",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 14,
-            minHeight: 176,
-          }}
-        >
-          <span className="fy-newprodcard__ring" style={{ width: 40, height: 40 }}>
-            <Plus size={18} />
-          </span>
-          <div>
-            <div style={{ font: "600 14px var(--font-sans)" }}>{dropActive ? "Drop to add files" : "Drop files or click to add"}</div>
-            <div
-              style={{ font: "400 10.5px var(--font-mono)", color: "var(--muted-foreground)", marginTop: 4 }}
-            >
-              up to 16 files · audio · documents · images
-            </div>
-          </div>
-        </button>
+
         {artifacts.length === 0 && (
           <EmptyState
             title={retiredOnly ? "No retired artifacts" : "Nothing filed yet"}
-            hint="Drop recordings, documents, boards or images to file them against the world."
+            hint={phone ? "Add recordings, documents, boards or images to this world." : "Drop recordings, documents, boards or images to file them against the world."}
           />
         )}
       </div>
+      <PageSheet open={Boolean(menuArtifact)} title={menuArtifact ? artifactDisplayName(menuArtifact, linkName) : "Artifact"} onClose={() => setMenuId(null)}>
+        {menuArtifact && <>
+          {menuArtifact.retiredAt ? <Button variant="outline" onClick={() => { if (worldId) restoreArtifact(worldId, menuArtifact.id); setMenuId(null); }}>Restore</Button>
+            : <Button variant="outline" onClick={() => { setMenuId(null); setRetireId(menuArtifact.id); }}>Remove from shelf</Button>}
+          {menuArtifact.kind === "document" && <Button variant="ghost" onClick={() => { if (worldId) extractArtifact(worldId, menuArtifact.id); setMenuId(null); }}>Lift facts</Button>}
+        </>}
+      </PageSheet>
       <ArtifactViewer
         artifact={artifacts.find((a) => a.id === openArtifactId) ?? null}
-        artifacts={artifacts}
+        artifacts={shelfArtifacts}
+        visibleArtifacts={visible}
+        onNavigate={setOpenArtifactId}
         worldSlug={world?.meta.slug}
         linkName={linkName}
         onRetire={retiredOnly ? undefined : (artifactId) => { setOpenArtifactId(null); setRetireId(artifactId); }}
