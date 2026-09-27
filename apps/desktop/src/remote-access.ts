@@ -3,17 +3,18 @@ import { createServer, type Server } from "node:http";
 import { once } from "node:events";
 import { join } from "node:path";
 import { z } from "zod";
-import { RemoteAccessCommandSchema, type RemoteAccessReply, type RemoteAccessStatus } from "@arke-studio/contracts";
+import { RemoteAccessCommandSchema, RemotePairingDurationSchema, type RemoteAccessReply, type RemoteAccessStatus } from "@arke-studio/contracts";
 import { RemoteDevices, RemoteGateway, writeRemotePrivate } from "@arke-studio/coordinator";
 import { ServeCleanupRequired, TailscaleServe } from "./tailscale-serve.js";
 
-const Config = z.object({ enabled: z.boolean(), startOnLogin: z.boolean(), origin: z.string().url().nullable() });
+const Config = z.object({ enabled: z.boolean(), startOnLogin: z.boolean(), origin: z.string().url().nullable(),
+  pairingDuration: RemotePairingDurationSchema.default(90) });
 type Settings = z.infer<typeof Config>;
 const port = 8793;
 
 /** Desktop owns this gateway and the existing coordinator; no second world writer is started. */
 export class DesktopRemoteAccess {
-  private config: Settings = { enabled: false, startOnLogin: false, origin: null };
+  private config: Settings = { enabled: false, startOnLogin: false, origin: null, pairingDuration: 90 };
   private reason: string | null = null;
   private gateway: RemoteGateway | null = null;
   private gatewayOrigin: string | null = null;
@@ -159,7 +160,7 @@ export class DesktopRemoteAccess {
             await this.stopGateway();
             if (this.options.startupSupported) this.options.setStartOnLogin(false);
             await this.devices.stop();
-            if (this.settingsLoaded) await this.save({ enabled: false, startOnLogin: false, origin: null });
+            if (this.settingsLoaded) await this.save({ ...this.config, enabled: false, startOnLogin: false, origin: null });
             break;
           case "startup":
             if (!this.options.startupSupported || !this.running) throw new Error("Enable remote access in the installed desktop app first.");
@@ -170,7 +171,8 @@ export class DesktopRemoteAccess {
           case "pair":
             if (!this.running) throw new Error("Enable remote access first.");
             pairing = this.devices.createCode(); break;
-          case "approve": await this.devices.approve(command.id); break;
+          case "duration": await this.save({ ...this.config, pairingDuration: command.duration }); break;
+          case "approve": await this.devices.approve(command.id, this.config.pairingDuration); break;
           case "reject": this.devices.reject(command.id); break;
           case "revoke": await this.devices.revoke(command.id); this.gateway?.recheckDevices(); break;
         }

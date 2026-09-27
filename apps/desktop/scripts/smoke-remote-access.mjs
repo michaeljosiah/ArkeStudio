@@ -36,6 +36,7 @@ let mapping = false;
 let devices = new RemoteDevices(join(dir, "remote-devices.json"));
 let session;
 let gatewayPort;
+let pairingDuration = 90;
 const createGateway = () => new RemoteGateway({ origin, clientDirectory: join(root, "packages/client/dist"), devices, session });
 try {
   session = await coordinator.start(); await devices.load();
@@ -50,7 +51,8 @@ try {
     try {
       let pairing;
       if (command.kind === "pair") pairing = devices.createCode();
-      if (command.kind === "approve") await devices.approve(command.id);
+      if (command.kind === "duration") pairingDuration = command.duration;
+      if (command.kind === "approve") await devices.approve(command.id, pairingDuration);
       if (command.kind === "revoke") { await devices.revoke(command.id); gateway.recheckDevices(); }
       if (command.kind === "restart") {
         await gateway.stop(); await devices.stop(); await coordinator.stop();
@@ -61,7 +63,7 @@ try {
         gateway = createGateway(); await gateway.start(gatewayPort);
       }
       child.send({ id, result: { status: { enabled: true, running: true, startOnLogin: false, startupSupported: false,
-        url: origin, reason: null, devices: devices.list(), pending: devices.pending() }, ...(pairing ? { pairing } : {}),
+        pairingDuration, url: origin, reason: null, devices: devices.list(), pending: devices.pending() }, ...(pairing ? { pairing } : {}),
         ...(command.kind === "restart" ? { session } : {}) } });
     } catch (error) { child.send({ id, error: String(error) }); }
   });
@@ -111,6 +113,12 @@ async function electronMain() {
   };
   await owner.loadFile(config.page, { hash: "/settings/remote-access" });
   await until(owner, "[...document.querySelectorAll('button')].some(b => b.textContent === 'Pair a device')");
+  assert.equal(await js(owner, "document.querySelector('select[aria-label=\"Remember approved devices for\"]').value"), "90");
+  await js(owner, `(() => {
+    const select = document.querySelector('select[aria-label="Remember approved devices for"]');
+    select.value = 'never'; select.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  await until(owner, "document.querySelector('select[aria-label=\"Remember approved devices for\"]').value === 'never' && !document.querySelector('select[aria-label=\"Remember approved devices for\"]').disabled");
   await phone.loadURL(config.origin + "/#/worlds");
   await until(phone, "document.querySelector('form') !== null");
   await shot(phone, "phone-pairing");
@@ -129,6 +137,11 @@ async function electronMain() {
   await shot(owner, "desktop-approval");
   await js(owner, "[...document.querySelectorAll('button')].find(b => b.textContent.startsWith('Approve ')).click()");
   await until(phone, "document.querySelector('[data-screen=world-picker]') !== null");
+  await until(owner, "document.body.innerText.includes('Never expires')");
+  await shot(owner, "desktop-duration");
+  const cookie = (await phone.webContents.session.cookies.get({ url: config.origin, name: "__Host-arke-device" }))[0];
+  assert.ok(cookie && !cookie.session && cookie.httpOnly && cookie.secure);
+  assert.ok(cookie.expirationDate > Date.now() / 1000 + 399 * 86400, "Never uses a renewable persistent cookie");
   assert.equal(await js(phone, "document.cookie"), "");
   assert.ok(!(await phone.webContents.getURL()).includes("arke-session"));
   await shot(phone, "phone-worlds");
@@ -146,6 +159,6 @@ async function electronMain() {
   await shot(phone, "phone-revoked");
   await owner.loadFile(config.page, { hash: "/settings/remote-access" });
   await until(owner, "[...document.querySelectorAll('button')].some(b => b.textContent === 'Pair a device')");
-  console.log("[smoke] real Serve TLS: pairing, owner approval, HttpOnly cookie, WSS, media, browser reopen, coordinator/registry/gateway restart with new process capability, revocation and desktop file-page reload passed");
+  console.log("[smoke] real Serve TLS: duration selection, Never approval, persistent HttpOnly cookie, WSS, media, browser reopen, coordinator/registry/gateway restart with new process capability, revocation and desktop file-page reload passed");
   clearTimeout(timeout); phone.destroy(); owner.destroy(); app.exit(0);
 }
