@@ -1,0 +1,212 @@
+import assert from "node:assert/strict";
+import { afterEach, describe, it } from "node:test";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { parseHTML } from "linkedom";
+import { MemoryRouter } from "react-router";
+import type { ClientMessage, ClientState } from "@arke-studio/contracts";
+import { App } from "../src/App.js";
+import { __applyEventForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import type { ArkeBridge } from "../src/arke-bridge.js";
+import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
+import { FIXTURE_STATE } from "./fixture-state.js";
+
+/**
+ * A visual novel's scene page (design turn 172, 172b–172c): the storyboard reads as beats — each
+ * row's lines under their speaker, whether each is voiced, how the beat moves on, a beat that keeps
+ * the picture before — and the shot page gains a Beat card that writes `shot.beat`. A film's page
+ * is untouched. Same harness as shot-page.test.tsx.
+ */
+
+const dom = parseHTML("<!doctype html><html><body></body></html>");
+Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }), innerWidth: 1024, innerHeight: 768 });
+Object.assign(Object.getPrototypeOf(dom.document.createElement("video")), { pause() {}, play: () => Promise.resolve() });
+Object.assign(globalThis, {
+  window: dom.window,
+  document: dom.document,
+  HTMLElement: dom.HTMLElement,
+  Node: dom.Node,
+  Event: dom.Event,
+  IS_REACT_ACT_ENVIRONMENT: true,
+  requestAnimationFrame: (cb: (t: number) => void) => setTimeout(() => cb(0), 0),
+});
+
+const SCENE_PATH = `/w/${FIXTURE_WORLD_ID}/p/saltlight/scenes/sc_04`;
+const LINE_WASH = "sc_04/sh_12/blk_wash";
+const LINE_VERSE = "sc_04/sh_12/blk_verse";
+
+interface Mounted { container: HTMLElement; root: Root }
+const open: Mounted[] = [];
+
+async function mountState(state: ClientState, path: string): Promise<Mounted> {
+  const container = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(container);
+  const root = createRoot(container);
+  await act(async () => {
+    __setStateForTest(state);
+    root.render(<MemoryRouter initialEntries={[path]}><App /></MemoryRouter>);
+  });
+  const mounted = { container, root };
+  open.push(mounted);
+  return mounted;
+}
+
+afterEach(async () => {
+  for (const mounted of open.splice(0)) {
+    await act(async () => mounted.root.unmount());
+    mounted.container.remove();
+  }
+  dom.document.body.replaceChildren();
+  __setStateForTest(FIXTURE_STATE);
+  __setBridgeForTest(null);
+  __connectionStatusForTest("closed");
+});
+
+function capture(sent: ClientMessage[]): ArkeBridge {
+  return {
+    appVersion: "test", platform: "test", connect: () => {}, subscribe: () => {},
+    send: (json: string) => sent.push(JSON.parse(json) as ClientMessage),
+  } as unknown as ArkeBridge;
+}
+
+const q = (m: Mounted, selector: string): HTMLElement | null => m.container.querySelector(selector) as HTMLElement | null;
+const all = (m: Mounted, selector: string): HTMLElement[] => [...m.container.querySelectorAll(selector)] as unknown as HTMLElement[];
+const click = async (element: HTMLElement): Promise<void> => { await act(async () => element.click()); };
+const commands = (sent: ClientMessage[]) =>
+  sent.filter((message): message is Extract<ClientMessage, { kind: "scene-command" }> => message.kind === "scene-command").map((message) => message.command);
+
+/** The fixture's film, made a visual novel: sh_12 covers narration and Maren's line, sh_13 keeps its picture. */
+function visualNovel(): ClientState {
+  const state = structuredClone(FIXTURE_STATE) as ClientState;
+  const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+  production.meta = { ...production.meta, medium: "video", kind: "visual-novel" };
+  const scene = production.scenes.find((candidate) => candidate.id === "sc_04")! as unknown as {
+    script?: unknown;
+    shots: Array<{ id: string; covers?: unknown; beat?: unknown }>;
+  };
+  scene.script = {
+    blocks: [
+      { id: "blk_wash", kind: "action", text: "They hung the washing out the morning the water came." },
+      { id: "blk_verse", kind: "dialogue", speaker: "maren-kest", text: "The verse, under the water." },
+    ],
+  };
+  scene.shots[0]!.covers = [{ blockId: "blk_wash", textDigest: "sha256:12345678" }, { blockId: "blk_verse", textDigest: "sha256:12345678" }];
+  scene.shots[1]!.beat = { samePicture: true, advance: "hold", holdSec: 5 };
+  return state;
+}
+
+const plan = {
+  productionId: "saltlight", sceneId: "sc_04", sceneVersion: 2, confirmationToken: `sha256:${"c".repeat(64)}`, totalEstimatedMicroUsd: 40_000,
+  items: [
+    { lineId: LINE_WASH, shotId: "sh_12", blockId: "blk_wash", narration: true, route: "cached", file: `.cache/voice-previews/${"a".repeat(24)}.mp3`, estimatedMicroUsd: 0 },
+    { lineId: LINE_VERSE, shotId: "sh_12", blockId: "blk_verse", speakerSheetId: "maren-kest", route: "cloud", estimatedMicroUsd: 40_000 },
+  ],
+};
+
+describe("a visual novel's scene reads as beats (turn 172)", () => {
+  it("names the view Beats, drops Flow and boards, and shows each row's lines under their speaker", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(visualNovel(), SCENE_PATH);
+    const tabs = all(mounted, ".fy-sw__tab").map((tab) => tab.textContent);
+    assert.deepEqual(tabs, ["Beats", "Preview"], "a visual novel has no motion to lay out in Flow");
+    assert.equal(q(mounted, ".fy-sw__boards-toggle"), null, "boards pack clips, and there are none");
+    assert.match(q(mounted, ".fy-sw__coverage")?.textContent ?? "", /pictures ready/);
+
+    const first = q(mounted, '[data-testid="workspace-row-sh_12"]')!;
+    const lines = all(mounted, '[data-testid="workspace-row-sh_12"] .fy-swbeat__line');
+    assert.deepEqual(lines.map((line) => [line.dataset.kind, line.querySelector(".fy-swbeat__who")?.textContent, line.querySelector(".fy-swbeat__text")?.textContent]), [
+      ["narration", "Narrator", "They hung the washing out the morning the water came."],
+      ["dialogue", "Maren Kest", "The verse, under the water."],
+    ]);
+    assert.match(first.textContent ?? "", /on tap/, "a beat nobody has set moves on with a tap");
+
+    const second = q(mounted, '[data-testid="workspace-row-sh_13"]')!;
+    assert.match(second.querySelector(".fy-swrow__same")?.textContent ?? "", /Same picture/);
+    assert.match(second.textContent ?? "", /hold 5s/);
+    assert.match(second.querySelector(".fy-swbeat__none")?.textContent ?? "", /picture alone/);
+  });
+
+  it("asks the table read for narration and dialogue, says what is voiced, and voices the rest at the quoted price", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(visualNovel(), SCENE_PATH);
+    const asked = sent.find((message) => message.kind === "plan-table-read");
+    assert.ok(asked && asked.kind === "plan-table-read", "the plan is asked on arrival");
+    await act(async () => {
+      __applyEventForTest({ at: "2026-09-27T10:00:00.000Z", type: "rehearsal.result", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, status: "planned", reason: "", plan } as never);
+    });
+    const voices = all(mounted, '[data-testid="workspace-row-sh_12"] .fy-swbeat__voice').map((voice) => voice.dataset.voice);
+    assert.deepEqual(voices, ["voiced", "unvoiced"]);
+    assert.match(q(mounted, ".fy-swvoice__count")?.textContent ?? "", /1 of 2 voiced/);
+    const go = q(mounted, ".fy-swvoice__go") as HTMLButtonElement;
+    assert.equal(go.textContent, "Voice 1 line · $0.04");
+    await click(go);
+    const prepare = sent.find((message) => message.kind === "prepare-table-read");
+    assert.ok(prepare && prepare.kind === "prepare-table-read");
+    assert.equal(prepare.confirmationToken, plan.confirmationToken);
+    assert.equal(prepare.confirmedMicroUsd, 40_000, "the press confirms the price it showed");
+  });
+
+  it("a film's scene page is as it was", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(FIXTURE_STATE, SCENE_PATH);
+    assert.deepEqual(all(mounted, ".fy-sw__tab").map((tab) => tab.textContent), ["Storyboard", "Flow", "Preview"]);
+    assert.equal(q(mounted, '[data-testid="beat-lines"]'), null);
+    assert.equal(q(mounted, ".fy-swvoice"), null);
+    assert.equal(sent.some((message) => message.kind === "plan-table-read"), false, "nothing asks a film's table read on the storyboard");
+  });
+});
+
+describe("the Beat card on a visual novel's shot page (turn 172, 172c)", () => {
+  it("shows the shot's lines and writes how the beat moves on and how its picture moves", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    __connectionStatusForTest("open");
+    const mounted = await mountState(visualNovel(), `${SCENE_PATH}/shots/sh_12`);
+    const card = q(mounted, 'section[aria-label="Beat"]')!;
+    assert.ok(card, "the Beat card leads the page");
+    assert.equal(all(mounted, ".fy-shot__section")[0], card, "before the Script");
+    assert.equal(card.querySelectorAll(".fy-swbeat__line").length, 2);
+
+    const advance = [...card.querySelectorAll('[aria-label="Advance"] button')] as unknown as HTMLButtonElement[];
+    assert.deepEqual(advance.map((button) => [button.textContent, button.getAttribute("aria-pressed")]), [["After the voice", "false"], ["On tap", "true"], ["Hold", "false"]]);
+    await click(advance[0]!);
+    assert.deepEqual(commands(sent), [{ kind: "edit-shot", shotId: "sh_12", change: { beat: { advance: "voice" } } }]);
+  });
+
+  it("writes how the picture moves, keeping the beat's other fields", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = visualNovel();
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!.scenes.find((candidate) => candidate.id === "sc_04")! as unknown as { shots: Array<{ beat?: unknown }> };
+    scene.shots[0]!.beat = { advance: "voice" };
+    const mounted = await mountState(state, `${SCENE_PATH}/shots/sh_12`);
+    const movement = [...q(mounted, 'section[aria-label="Beat"]')!.querySelectorAll('[aria-label="Movement"] button')] as unknown as HTMLButtonElement[];
+    assert.equal(movement.find((button) => button.getAttribute("aria-pressed") === "true")?.textContent, "Slow push", "a slow push until told otherwise");
+    await click(movement.find((button) => button.textContent === "None")!);
+    assert.deepEqual(commands(sent), [{ kind: "edit-shot", shotId: "sh_12", change: { beat: { advance: "voice", motion: "none" } } }]);
+  });
+
+  it("unticking the last beat field clears the beat rather than writing an empty one", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = visualNovel();
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!.scenes.find((candidate) => candidate.id === "sc_04")! as unknown as { shots: Array<{ beat?: unknown }> };
+    scene.shots[1]!.beat = { samePicture: true };
+    const mounted = await mountState(state, `${SCENE_PATH}/shots/sh_13`);
+    const card = q(mounted, 'section[aria-label="Beat"]')!;
+    const box = card.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    assert.equal(box.checked, true);
+    // linkedom does not toggle a checkbox on click, so the change goes to React's own handler.
+    const key = Object.keys(box).find((candidate) => candidate.startsWith("__reactProps$"))!;
+    await act(async () => { (box as unknown as Record<string, { onChange: (event: { target: { checked: boolean } }) => void }>)[key]!.onChange({ target: { checked: false } }); });
+    assert.deepEqual(commands(sent), [{ kind: "edit-shot", shotId: "sh_13", change: {}, clear: ["beat"] }]);
+  });
+
+  it("a film's shot page has no Beat card", async () => {
+    const mounted = await mountState(FIXTURE_STATE, `${SCENE_PATH}/shots/sh_12`);
+    assert.equal(q(mounted, 'section[aria-label="Beat"]'), null);
+  });
+});

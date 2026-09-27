@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState, type FocusEvent, type ReactNode }
 import {
   DEFAULT_SHOT_SEC,
   assemblePrompt,
+  beatPlayback,
+  deriveRehearsalLines,
+  sceneBeats,
   overrideStaleAgainst,
   promptFor,
   productionShape,
@@ -23,6 +26,8 @@ import { Checkbox, Select } from "../../components/ui.js";
 import { Archive, FileText, ImageMark, LinkMark, Minus, Plus, Speaker, StickyNote, Timer, VideoMark, X } from "../../components/icons.js";
 import { characterPortraitPath, locationPortraitPath, Portrait } from "../../components/portrait.js";
 import { mentionNames, scriptWords } from "./mentions.js";
+import { BeatLines } from "./beats.js";
+import { lineVoices, useTableReadPlan } from "./table-read.js";
 
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
 type EditShot = Extract<Command, { kind: "edit-shot" }>;
@@ -221,6 +226,27 @@ export function ShotFields({
     else edit({}, ["continuity"]);
   };
 
+  // ---- Beat (turn 172) -----------------------------------------------------------------------
+  /*
+   * A visual novel reads this shot as a beat: its lines are the covered script blocks, voiced by
+   * the table read, and `beat` says how it moves on and how its picture moves. Like continuity,
+   * one place knows when the object collapses to nothing, so clearing the last field clears it.
+   */
+  const playsAsBeats = productionShape(production.meta).playsAsBeats;
+  const beatLinesToPlan = useMemo(
+    () => (playsAsBeats ? deriveRehearsalLines(scene, world.sheets, { narration: true }).filter((line) => line.reason === undefined) : []),
+    [playsAsBeats, scene, world.sheets],
+  );
+  const tableRead = useTableReadPlan({ worldId: world.meta.worldId, production, scene, lines: beatLinesToPlan });
+  const shotBeats = useMemo(() => (playsAsBeats ? sceneBeats(scene).filter((beat) => beat.shot.id === shot.id) : []), [playsAsBeats, scene, shot.id]);
+  const playback = beatPlayback(shot);
+  const beatSet = (change: Partial<NonNullable<Shot["beat"]>>) => {
+    const merged: Record<string, unknown> = { ...shot.beat, ...change };
+    for (const [key, value] of Object.entries(merged)) if (value === undefined || value === false) delete merged[key];
+    if (Object.keys(merged).length > 0) edit({ beat: merged as NonNullable<Shot["beat"]> });
+    else edit({}, ["beat"]);
+  };
+
   // ---- Sound ---------------------------------------------------------------------------------
   const audioSet = (key: "line" | "ambience" | "effects", value: string) => {
     const next = value.trim();
@@ -243,6 +269,55 @@ export function ShotFields({
   const disabled = locked;
   return (
     <div className="fy-shot__fields" data-testid="shot-fields">
+      {playsAsBeats ? (
+        <Section icon={<Speaker size={15} />} name="Beat">
+          <BeatLines beats={shotBeats} sheets={sheets} voices={lineVoices(tableRead.plan)} />
+          <p className="fy-shot__hint">From the scene’s script · narration is read by the narrator, a line by its speaker</p>
+          <div className="fy-shot__row">
+            <span className="fy-shot__rowlabel">advance</span>
+            <span className="fy-shot__choices" role="group" aria-label="Advance">
+              {([["voice", "After the voice"], ["tap", "On tap"], ["hold", "Hold"]] as const).map(([value, label]) => (
+                <button key={value} type="button" aria-pressed={playback.advance === value} disabled={disabled}
+                  onClick={() => beatSet({ advance: value })}>{label}</button>
+              ))}
+            </span>
+            {playback.advance === "hold" ? (
+              <input
+                key={playback.holdSec}
+                className="fy-shot__input fy-shot__input--short"
+                aria-label="Hold for seconds"
+                type="number"
+                min={1}
+                max={60}
+                step={0.5}
+                defaultValue={playback.holdSec}
+                disabled={disabled}
+                onBlur={(event) => {
+                  const next = Number(event.currentTarget.value);
+                  if (!Number.isFinite(next) || next <= 0 || next > 60 || next === playback.holdSec) return;
+                  beatSet({ holdSec: next });
+                }}
+              />
+            ) : null}
+          </div>
+          <div className="fy-shot__row">
+            <span className="fy-shot__rowlabel">movement</span>
+            <span className="fy-shot__choices" role="group" aria-label="Movement">
+              {([["push", "Slow push"], ["drift", "Drift"], ["none", "None"]] as const).map(([value, label]) => (
+                <button key={value} type="button" aria-pressed={playback.motion === value} disabled={disabled}
+                  onClick={() => beatSet({ motion: value })}>{label}</button>
+              ))}
+            </span>
+          </div>
+          <Checkbox
+            className="fy-shot__check"
+            label={previous === null ? "Same picture as the beat before" : `Same picture as shot ${previous.number}`}
+            disabled={disabled || previous === null}
+            checked={shot.beat?.samePicture ?? false}
+            onChange={(event) => beatSet({ samePicture: event.target.checked || undefined })}
+          />
+        </Section>
+      ) : null}
       <Section icon={<FileText size={15} />} name="Script">
         <div
           className="fy-shot__script fy-swrow__scripteditor"

@@ -11,23 +11,23 @@ import {
   stageSourceFingerprintInput,
   hasOwnFrame,
   orderedShots,
+  productionShape,
   type ArtifactSidecar,
   type PackedBoard,
   type ProductionBundle,
   type SceneRecord,
   type Sheet,
   type Shot,
-  type TableReadPlan,
 } from "@arke-studio/contracts";
 import { ImageMark, PauseSolid, PlaySolid, RotateCcw } from "../../components/icons.js";
 import { artifactsForProduction } from "../../lib/artifact-view.js";
 import { loadPlaylist, playPlaylistLine, setPlaylistRate, setPlaylistSolo, type PlaylistState } from "../../lib/audio.js";
 import { mediaUrl } from "../../lib/media.js";
-import { planTableRead, prepareTableRead, subscribeRehearsalResults, useStore } from "../../lib/store.js";
 import { posterize } from "../../lib/poster.js";
 import { onMediaReady, syncMediaElement, useTransport } from "../../lib/playback-engine.js";
 import { ShotLightbox, shotFramePath } from "./lightbox.js";
 import { useWorkspaceSelection } from "./selection.js";
+import { useTableReadPlan } from "./table-read.js";
 
 interface PreviewSpan {
   shot: Shot;
@@ -156,39 +156,24 @@ export function ScenePreview({
   // table-read cache — in shot order through the one player; the rest are counted, not played, and
   // a dashed door prepares them at the cost the plan quoted. The plan is asked for when the lines,
   // the reviews or the cache's jobs change, so the door's count and price are current before a press.
-  const { state, connection } = useStore();
-  const lines = useMemo(() => deriveRehearsalLines(scene, sheets).filter((line) => line.reason === undefined), [scene, sheets]);
-  const [plan, setPlan] = useState<TableReadPlan | null>(null);
-  const [linesNotice, setLinesNotice] = useState("");
-  const [preparing, setPreparing] = useState(false);
+  const narration = productionShape(production.meta).playsAsBeats;
+  const lines = useMemo(() => deriveRehearsalLines(scene, sheets, { narration }).filter((line) => line.reason === undefined), [scene, sheets, narration]);
+  const { plan, notice: linesNotice, preparing, prepare: prepareLines } = useTableReadPlan({ worldId, production, scene, lines });
   const [solo, setSolo] = useState<string | null>(null);
   const [rate, setRate] = useState<PlaylistState["rate"]>(1);
-  const planRequest = useRef<string | null>(null);
-  const prepareRequest = useRef<string | null>(null);
-  const requestPlan = useCallback(() => { planRequest.current = planTableRead(worldId, production.meta.id, scene.id); }, [worldId, production.meta.id, scene.id]);
-  useEffect(() => subscribeRehearsalResults((result) => {
-    if (result.requestId !== planRequest.current && result.requestId !== prepareRequest.current) return;
-    if (result.requestId === prepareRequest.current) {
-      prepareRequest.current = null; setPreparing(false);
-      // A preparation that went through whole says itself through the refreshed plan; what did
-      // not — a refusal, or lines the queue or the local engine would not take — is said in the
-      // result's own words (codex round 3). A refusal's token is spent, so the plan is asked again.
-      setLinesNotice(result.status === "refused" || /could not be prepared|not queued/.test(result.reason) ? result.reason : "");
-      if (result.status === "refused") requestPlan();
-    } else planRequest.current = null;
-    if (result.plan) setPlan(result.plan);
-    else if (result.status === "refused") setLinesNotice(result.reason);
-  }), [requestPlan]);
-  const cacheJobs = state?.app.jobs.filter((job) => job.target.kind === "table-read-cache" && job.worldId === worldId).map((job) => `${job.id}:${job.status}`).join("|") ?? "";
-  // Asked again when the connection comes back: a request that found no studio was never sent.
-  useEffect(() => { if (lines.length > 0 && connection === "open") requestPlan(); }, [lines.length, scene.version, production.performanceReview.reviewHash, production.performanceReview.selectionHash, cacheJobs, connection, requestPlan]);
   const playable = plan?.items.filter((item) => item.file !== undefined) ?? [];
   const missing = plan?.items.filter((item) => item.route === "local" || item.route === "cloud") ?? [];
   const playLines = () => {
     if (plan === null || worldSlug === undefined) return;
     const items = plan.items.flatMap((item) => {
       const line = lines.find((candidate) => candidate.id === item.lineId);
-      if (item.file === undefined || line?.speakerSheetId === undefined) return [];
+      if (item.file === undefined || line === undefined) return [];
+      // A visual novel's narration plays in the same read, under the narrator's name (turn 172).
+      if (line.speakerSheetId === undefined) {
+        if (!line.narration) return [];
+        // No sheet to solo: the empty id matches no speaker, so soloing a character skips it.
+        return [{ id: `table/${line.id}`, lineId: line.id, speakerSheetId: "", url: mediaUrl(worldSlug, item.file), title: `Narrator: ${line.text}` }];
+      }
       const name = sheets.find((sheet) => sheet.id === line.speakerSheetId)?.name ?? line.speakerSheetId;
       return [{ id: `table/${line.id}`, lineId: line.id, speakerSheetId: line.speakerSheetId, url: mediaUrl(worldSlug, item.file), title: `${name}: ${line.text}` }];
     });
@@ -197,13 +182,6 @@ export function ScenePreview({
     // Soloing a speaker other than the first line's starts the read at their line itself.
     setPlaylistSolo(solo);
     if (solo === null || items[0]?.speakerSheetId === solo) void playPlaylistLine();
-  };
-  const prepareLines = () => {
-    if (plan === null) return;
-    setLinesNotice("");
-    setPreparing(true);
-    prepareRequest.current = prepareTableRead(worldId, production.meta.id, scene.id, plan.confirmationToken, plan.totalEstimatedMicroUsd);
-    if (prepareRequest.current === null) { setPreparing(false); setLinesNotice("The studio is disconnected."); }
   };
   const speakers = [...new Set(lines.flatMap((line) => (line.speakerSheetId === undefined ? [] : [line.speakerSheetId])))];
   const [lightboxShotId, setLightboxShotId] = useState<string | null>(null);

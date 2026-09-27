@@ -2,9 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import {
   DEFAULT_SHOT_SEC,
+  beatPictureShotId,
+  deriveRehearsalLines,
+  productionShape,
+  sceneBeats,
   seasonFindings,
   orderedShots,
   legacySceneView,
+  type SceneBeat,
   type ArtifactSidecar,
   type ClientMessage,
   type FrameRunState,
@@ -30,7 +35,9 @@ import {
 import { ProductionConversation, StagedDecision } from "../../components/conversation.js";
 import { SceneReview, SceneSynopsis, SceneTitle, useBlockDigests } from "../storyboard.js";
 import { SceneFlow } from "./flow.js";
-import { StoryboardRows } from "./rows.js";
+import { StoryboardRows, type BeatsView } from "./rows.js";
+import { VoiceLinesControl } from "./beats.js";
+import { lineVoices, useTableReadPlan } from "./table-read.js";
 import { SelectionProvider, selectedShotId, subjectMatchesBoard, type WorkspaceSubject } from "./selection.js";
 import { boardsForScene, shotHasFrame } from "./boards.js";
 import { FrameRunBar, FrameRunBoardFailures, GenerateFramesDialog } from "./frame-run.js";
@@ -212,7 +219,22 @@ export function SceneWorkspace({
   const episodeIds = new Set(production.episodes.filter((episode) => episode.scenes.includes(scene.id)).map((episode) => episode.id));
   const lengthFindings = seasonFindings(production).filter((finding) => finding.kind === "cost-pattern" && episodeIds.has(finding.about));
   const totalSec = shots.reduce((sum, shot) => sum + (shot.durationSec ?? DEFAULT_SHOT_SEC), 0);
-  const framed = shots.filter((shot) => shotHasFrame(production, artifacts, shot.id)).length;
+  // A visual novel reads its shots as beats (turn 172): the rows carry their lines and whether
+  // each is voiced, the table read voices the rest, and a beat that keeps the picture before it
+  // counts as having one. The plan is asked only here, where there are lines to plan.
+  const playsAsBeats = productionShape(production.meta).playsAsBeats;
+  const beatLines = useMemo(
+    () => (playsAsBeats ? deriveRehearsalLines(scene, world.sheets, { narration: true }).filter((line) => line.reason === undefined) : []),
+    [playsAsBeats, scene, world.sheets],
+  );
+  const tableRead = useTableReadPlan({ worldId: world.meta.worldId, production, scene, lines: beatLines });
+  const beatsView = useMemo((): BeatsView | undefined => {
+    if (!playsAsBeats) return undefined;
+    const byShot = new Map<string, SceneBeat[]>();
+    for (const beat of sceneBeats(workingScene)) byShot.set(beat.shot.id, [...(byShot.get(beat.shot.id) ?? []), beat]);
+    return { byShot, voices: lineVoices(tableRead.plan), pictureShotId: (shotId) => beatPictureShotId(workingShots, shotId) };
+  }, [playsAsBeats, workingScene, workingShots, tableRead.plan]);
+  const framed = shots.filter((shot) => shotHasFrame(production, artifacts, playsAsBeats ? beatPictureShotId(shots, shot.id) : shot.id)).length;
   const focus = selectedShotId(subject);
   const focused = focus === null ? undefined : workingShots.find((shot) => shot.id === focus);
   if (focus !== null) lastShotSubject.current = focus;
@@ -521,7 +543,8 @@ export function SceneWorkspace({
           */}
           <div className="fy-sw__toolbar">
             <div className="fy-sw__tabs" role="radiogroup" aria-label="View">
-              {(["storyboard", "flow", "preview"] as const).map((candidate) => (
+              {/* A visual novel has no motion to lay out, so Flow is a film's (turn 172). */}
+              {(playsAsBeats ? (["storyboard", "preview"] as const) : (["storyboard", "flow", "preview"] as const)).map((candidate) => (
                 <button
                   key={candidate}
                   type="button"
@@ -531,7 +554,7 @@ export function SceneWorkspace({
                   data-on={view === candidate ? "true" : undefined}
                   onClick={() => setView(candidate)}
                 >
-                  {candidate === "storyboard" ? "Storyboard" : candidate === "flow" ? "Flow" : "Preview"}
+                  {candidate === "storyboard" ? (playsAsBeats ? "Beats" : "Storyboard") : candidate === "flow" ? "Flow" : "Preview"}
                 </button>
               ))}
             </div>
@@ -553,10 +576,14 @@ export function SceneWorkspace({
               />
             ) : shots.length === 0 ? null : (
               <span className="fy-sw__coverage" data-ready={framed > 0 || undefined}>
-                <span aria-hidden="true" />{framed} of {shots.length} frames ready
+                <span aria-hidden="true" />{framed} of {shots.length} {playsAsBeats ? "pictures" : "frames"} ready
               </span>
             )}
-            {frameRun === null || frameRun.status === "completed" ? (
+            {playsAsBeats ? (
+              <VoiceLinesControl plan={tableRead.plan} preparing={tableRead.preparing} notice={tableRead.notice} onPrepare={tableRead.prepare} />
+            ) : null}
+            {/* Boards pack shots into a clip's length; a visual novel renders no clips. */}
+            {!playsAsBeats && (frameRun === null || frameRun.status === "completed") ? (
               <button
                 type="button"
                 className="fy-sw__boards-toggle"
@@ -638,6 +665,7 @@ export function SceneWorkspace({
               onTalkToArke={talkToArke}
               onPlanVideo={planVideo}
               onRenderBoard={(memberShotIds) => openGenerator({ kind: "board", memberShotIds })}
+              {...(beatsView === undefined ? {} : { beats: beatsView })}
             />
           ) : view === "flow" ? (
             <SceneFlow
