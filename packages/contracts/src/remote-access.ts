@@ -9,6 +9,7 @@ export const RemoteAccessCommandSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("enable") }),
   z.object({ kind: z.literal("disable") }),
   z.object({ kind: z.literal("pair") }),
+  z.object({ kind: z.literal("copy-link") }),
   z.object({ kind: z.literal("approve"), id: z.string().uuid() }),
   z.object({ kind: z.literal("reject"), id: z.string().uuid() }),
   z.object({ kind: z.literal("revoke"), id: z.string().uuid() }),
@@ -30,4 +31,5 @@ export interface RemoteAccessStatus {
 export interface RemoteAccessReply {
   status: RemoteAccessStatus;
   pairing?: { code: string; expiresAt: number };
+  copied?: boolean;
 }

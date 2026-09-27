@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import { RemotePairingDurationSchema, type RemoteAccessCommand, type RemoteAccessReply, type RemoteAccessStatus } from "@arke-studio/contracts";
 import { Button, Select } from "../components/ui.js";
 
@@ -8,6 +9,13 @@ export function SettingsRemoteAccessScreen() {
   const [pairing, setPairing] = useState<RemoteAccessReply["pairing"]>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => { setCopied(false); }, [status?.url, status?.running]);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 3000);
+    return () => clearTimeout(timer);
+  }, [copied]);
   const apply = (reply: RemoteAccessReply) => { setStatus(reply.status); if (reply.pairing) setPairing(reply.pairing); };
   useEffect(() => {
     if (!bridge) return;
@@ -27,7 +35,12 @@ export function SettingsRemoteAccessScreen() {
   const command = async (input: RemoteAccessCommand) => {
     if (!bridge) return;
     setBusy(true); setError("");
-    try { apply(await bridge(input)); if (input.kind === "disable") setPairing(undefined); }
+    if (input.kind === "copy-link") setCopied(false);
+    try {
+      const reply = await bridge(input); apply(reply);
+      if (input.kind === "copy-link") setCopied(reply.copied === true);
+      if (input.kind === "disable") setPairing(undefined);
+    }
     catch { setError("Studio could not complete that action. Try again."); }
     finally { setBusy(false); }
   };
@@ -41,7 +54,18 @@ export function SettingsRemoteAccessScreen() {
         <div className="remote-access__row"><span>{status.running ? "Remote access is running" : status.enabled ? "Remote access needs attention" : "Remote access is off"}</span>
           <Button disabled={busy} onClick={() => void command({ kind: status.enabled ? "disable" : "enable" })}>{status.enabled ? "Disable remote access" : "Enable remote access"}</Button>
         </div>
-        {status.url && <p>Bookmark on your phone: <a href={status.url} target="_blank" rel="noreferrer">{status.url}</a></p>}
+        {status.running && status.url && <div className="remote-access__share">
+          <QRCodeSVG value={status.url} size={208} marginSize={4} level="M"
+            role="img" aria-label="Scan to open Studio on your phone" title="Open Studio on your phone" />
+          <div className="remote-access__share-details">
+            <h2>Open on your phone</h2>
+            <p>Connect Tailscale on your phone, then scan this QR code with its camera.</p>
+            <a href={status.url} target="_blank" rel="noreferrer">{status.url}</a>
+            <div className="remote-access__row"><Button disabled={busy} onClick={() => void command({ kind: "copy-link" })}>Copy link</Button>
+              <span role="status">{copied ? "Link copied" : ""}</span></div>
+            <p>Choose Pair a device below, enter the code on your phone, then approve it here. After pairing, bookmark this address.</p>
+          </div>
+        </div>}
         <label><input type="checkbox" checked={status.startOnLogin} disabled={busy || !status.running || !status.startupSupported}
           onChange={event => void command({ kind: "startup", enabled: event.target.checked })} /> Start Studio when I sign in to this PC</label>
         {!status.startupSupported && <p>Automatic startup is available in the installed Windows and macOS app.</p>}

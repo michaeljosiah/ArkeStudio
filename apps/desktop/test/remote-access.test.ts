@@ -147,6 +147,28 @@ it("failed duration persistence leaves the active setting unchanged", async () =
     assert.ok(reply.status.reason); assert.equal(reply.status.pairingDuration, 90);
   } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
 });
+it("copies only the running host's clean origin and reports clipboard failures", async () => {
+  const root = await mkdtemp(join(tmpdir(), "arke-remote-copy-"));
+  await writeFile(join(root, "index.html"), "<head></head>");
+  const copied: string[] = []; let fail = false;
+  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+    startupSupported: false, setStartOnLogin: () => {}, tailscale: tailscale().client,
+    writeClipboard: text => { if (fail) throw new Error("Clipboard busy"); copied.push(text); } });
+  try {
+    await host.initialize();
+    assert.equal((await host.command({ kind: "copy-link" })).copied, undefined);
+    assert.deepEqual(copied, []);
+    await host.command({ kind: "enable" }); await host.command({ kind: "pair" });
+    assert.equal((await host.command({ kind: "copy-link", url: "https://wrong.example/#secret" })).copied, true);
+    assert.deepEqual(copied, [origin]);
+    fail = true;
+    const rejected = await host.command({ kind: "copy-link" });
+    assert.equal(rejected.copied, undefined); assert.match(rejected.status.reason!, /Clipboard busy/);
+    await host.command({ kind: "disable" });
+    assert.equal((await host.command({ kind: "copy-link" })).copied, undefined);
+    assert.deepEqual(copied, [origin]);
+  } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
+});
 it("persists recoverable ownership before initial and subsequent Serve publication", async () => {
   const root = await mkdtemp(join(tmpdir(), "arke-remote-publication-intent-"));
   await writeFile(join(root, "index.html"), "<head></head>");
