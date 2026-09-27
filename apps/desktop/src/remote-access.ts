@@ -31,7 +31,11 @@ export class DesktopRemoteAccess {
       await this.devices.load();
       this.loaded = true;
       if (this.config.enabled) await this.start();
-    } catch { this.reason = "Remote access could not start. Check Tailscale, then disable and enable remote access to retry."; }
+    } catch (error) {
+      this.reason = this.loaded
+        ? `${error instanceof Error ? error.message : "Remote access could not start."} Disable and enable remote access to retry.`
+        : "Remote access records could not be read. Restore the remote settings and device records from a backup before changing access.";
+    }
   }
   private tailscale() { return this.options.tailscale ?? new TailscaleServe(); }
   private async save(config: Settings): Promise<void> { await writeRemotePrivate(this.path, config); this.config = config; }
