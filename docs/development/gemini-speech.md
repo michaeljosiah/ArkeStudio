@@ -18,7 +18,11 @@ models. Saved Gemini shot/performance and Bench choices are checked against the 
 catalogue before quotes or take reservation; shared speech queue admission checks again before
 journalling a job. These checks discover only Google's presets and do not synthesize speech.
 A standalone host without a local speech service needs an explicitly selected cloud narrator;
-book, chapter and audition commands refuse an unavailable local reader before synthesis.
+book, chapter, audition and ordinary/voiced prose reads refuse an unavailable local reader before synthesis.
+Table Read supports both Gemini assignments with model-specific WAV caches, bounded input and
+current-reader validation before preparation. Existing cached reads remain playable offline.
+Token-priced preview and performance controls say “up to”; aggregate audiobook and page-read
+confirmations also identify their authorization ceiling, with actual usage settled after generation.
 
 The client targets the exact `gemini-3.8-flash-tts` and `gemini-3.8-flash-lite-tts` IDs through
 `POST /v1beta/interactions`. Spoken text and `speech_metadata.style` remain separate. Requests

@@ -851,7 +851,7 @@ function ChooseVoiceDialog({
                         picked.local
                           ? " · free"
                           : price !== null && price !== undefined
-                            ? ` · ${formatMicroUsd(price)} preview`
+                            ? ` · ${pickedRow?.pricing.kind === "perToken" ? "up to " : ""}${formatMicroUsd(price)} preview`
                             : ""
                       }`}
                     </span>

@@ -1582,6 +1582,10 @@ export class Coordinator {
     ).filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined);
     const narrator = narratorFor(narratorSettings?.narrator ?? null, narrationCatalogue);
     const speaking = { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId };
+    if (speaking.provider === "kokoro" && !this.voiceService.localSpeechConfigured) {
+      fail("Local narration is unavailable on this host. Choose a configured cloud narrator in Settings.", characters);
+      return;
+    }
     if (speaking.provider === "kokoro" && speaking.model === "kokoro-82m") {
       const ready = (
         block: { heading: string; text: string },
@@ -1987,6 +1991,10 @@ export class Coordinator {
       }),
     );
     const isLocal = (voice: { provider: string; model: string }) => voice.provider === "kokoro" && voice.model === "kokoro-82m";
+    if (speaking.some(isLocal) && !this.voiceService.localSpeechConfigured) {
+      fail("Local narration is unavailable on this host. Choose a configured cloud narrator in Settings.", characters);
+      return;
+    }
     const ready = (index: number, file: string, cached: boolean, provider: string, model: string, voiceId: string, format: string, estimated = 0) =>
       this.emit({
         at: new Date().toISOString(),
@@ -15976,7 +15984,12 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         try {
           if (!store || store.worldId !== msg.worldId || !this.opts.manifest) throw new Error("Open this rehearsal world first.");
-          const prepared = await planTableRead(store, msg.productionId, msg.sceneId, this.opts.manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers);
+          const readerProblem = async (model: import("@arke-studio/contracts").ManifestModel, voiceId: string) => {
+            if (model.provider === "kokoro" && !this.voiceService?.localSpeechConfigured) return "Local narration is unavailable on this host.";
+            try { await this.requireEnabledSpeechReader(model, voiceId); return null; }
+            catch (error) { return describeCoordinatorError(error); }
+          };
+          const prepared = await planTableRead(store, msg.productionId, msg.sceneId, this.opts.manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers, readerProblem);
           if (msg.kind === "prepare-table-read") {
             if (prepared.plan.confirmationToken !== msg.confirmationToken || prepared.plan.totalEstimatedMicroUsd !== msg.confirmedMicroUsd) {
               this.emit({ type: "rehearsal.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId, status: "planned", plan: prepared.plan,
@@ -15994,7 +16007,7 @@ export class Coordinator {
                 reason: `The cloud lines were not queued: ${queued.reason ?? "the queue refused them."}` });
               return;
             }
-            const refreshed = await planTableRead(store, msg.productionId, msg.sceneId, this.opts.manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers);
+            const refreshed = await planTableRead(store, msg.productionId, msg.sceneId, this.opts.manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers, readerProblem);
             const notices = [
               failures.length ? `${failures.length} local lines could not be prepared.` : null,
               queued?.reason !== undefined ? `Some cloud lines were not queued: ${queued.reason}` : null,

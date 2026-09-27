@@ -1,4 +1,4 @@
-import { estimateSpeechMicroUsd } from "@arke-studio/contracts";
+import { estimateSpeechMicroUsd, speechInputFits, voiceFormatForModel, type ManifestModel } from "@arke-studio/contracts";
 import { readFile } from "node:fs/promises";
 import { deriveRehearsalLines, TableReadPlanSchema, normalizeSpeechText, legacyVoiceModel, providerModelId,
   type ModelManifest, type Job, type ProviderStatus, type TableReadPlan } from "@arke-studio/contracts";
@@ -12,7 +12,7 @@ import { atomicWriteFile } from "../world/atomic.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 
 export async function planTableRead(store: WorldStore, productionId: string, sceneId: string, manifest: ModelManifest,
-  jobs: readonly Job[], providers: readonly ProviderStatus[]) {
+  jobs: readonly Job[], providers: readonly ProviderStatus[], readerProblem?: (model: ManifestModel, voiceId: string) => Promise<string | null>) {
   const production = store.getBundle().productions.find(p => p.meta.id === productionId), scene = production?.scenes.find(s => s.id === sceneId);
   if (!production || !scene) throw new Error("This rehearsal scene is unavailable.");
   const items: TableReadPlan["items"] = [], cloud: EnqueueInput[] = [], local: Array<{ file: string; spec: SpeechSpec }> = [], bindings: unknown[] = [];
@@ -41,10 +41,10 @@ export async function planTableRead(store: WorldStore, productionId: string, sce
       continue;
     }
     const sheet = store.getBundle().sheets.find(s => s.id === line.speakerSheetId), voice = sheet?.voice;
-    if (!voice || !["kokoro", "elevenlabs"].includes(voice.provider)) { item.reason = "No supported TTS assignment for this character."; continue; }
+    if (!voice || !["kokoro", "elevenlabs", "google"].includes(voice.provider)) { item.reason = "No supported TTS assignment for this character."; continue; }
     const model = manifest.models.find(m => m.id === (voice.model ?? legacyVoiceModel(voice.provider, voice.voiceId)) && m.provider === voice.provider && m.capability === "voice-tts");
     if (!model) { item.reason = "The assigned TTS model is unavailable."; continue; }
-    const spec: SpeechSpec = { provider: model.provider, model: providerModelId(model), voiceId: voice.voiceId, text: normalizeSpeechText(line.text), format: model.provider === "kokoro" ? "wav" : "mp3" };
+    const spec: SpeechSpec = { provider: model.provider, model: providerModelId(model), voiceId: voice.voiceId, text: normalizeSpeechText(line.text), format: voiceFormatForModel(model) };
     const file = speechCacheFile(spec);
     const inputHash = audioHash(Buffer.from(JSON.stringify({ spec, assignment: voice })));
     Object.assign(item, { provider: model.provider, model: model.id, voiceId: voice.voiceId });
@@ -59,7 +59,9 @@ export async function planTableRead(store: WorldStore, productionId: string, sce
     if (running) { item.route = "generating"; item.reason = `Existing preparation: ${running.status}.`; bindings.push({ jobId: running.id }); continue; }
     const status = providers.find(p => p.id === model.provider);
     if (!status?.configured || status.fault !== null || status.validation !== "valid" || !status.probes.some(p => p.capability === "voice-tts" && p.available)) { item.reason = "Validate this voice provider in Settings before preparation."; continue; }
-    if (model.limits.maxPromptChars !== undefined && spec.text.length > model.limits.maxPromptChars) { item.reason = "The line exceeds this model's character limit."; continue; }
+    const problem = await readerProblem?.(model, voice.voiceId);
+    if (problem) { item.reason = problem; continue; }
+    if (!speechInputFits(spec.text, model.limits)) { item.reason = "The line exceeds this model's speech input limit."; continue; }
     if (model.provider === "kokoro") { item.route = "local"; local.push({ file, spec }); continue; }
     item.route = "cloud"; item.estimatedMicroUsd = estimateSpeechMicroUsd(model, spec.text);
     cloud.push({ worldId: store.worldId, productionId, target: { kind: "table-read-cache", id: line.id }, capability: "voice-tts", provider: model.provider, model: model.id,

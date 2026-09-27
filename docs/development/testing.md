@@ -254,7 +254,9 @@ call or assigns a real voice.
 
 For Gemini preset activation, run providers `test/gemini-activation.test.ts` and
 `test/google-tts.test.ts`, coordinator `test/audio/performance-generation.test.ts` and
-`test/voice/service.test.ts`, and client `test/gemini-voice-preference.test.tsx` from its package.
+`test/voice/service.test.ts`, `test/audio/table-read.test.ts`, `test/voice/page-read.test.ts` and
+`test/voice/voiced-read.test.ts`; run client `test/gemini-voice-preference.test.tsx`,
+`test/character-dialog.test.tsx` and `test/voice-line.test.tsx` from its package.
 These use fixtures: catalogue discovery is read-only, saved selections survive recommendation
 changes, and setup never generates audio. See [Gemini speech](gemini-speech.md) for the paid
 qualification boundary; fixture tests do not establish listening quality or account quota.

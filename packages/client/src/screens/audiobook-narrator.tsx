@@ -227,7 +227,7 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
       ? [
           { k: "Blocks", v: `${quote.stale.toLocaleString()} stale`, warn: quote.stale > 0 },
           ...(quote.directed > 0 ? [{ k: "Direction", v: quote.held === 0 ? `${quote.directed} · none held` : `${quote.held} of ${quote.directed} held`, warn: quote.held > 0 }] : []),
-          { k: "Read the book", v: quote.estimatedMicroUsd === 0 ? "no charge" : formatMicroUsd(quote.estimatedMicroUsd) },
+          { k: "Read the book", v: quote.estimatedMicroUsd === 0 ? "no charge" : `up to ${formatMicroUsd(quote.estimatedMicroUsd)}` },
           { k: "Takes", v: `kept · ${quote.kept.toLocaleString()}` },
         ]
       : quote?.state === "refused"
