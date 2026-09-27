@@ -1,0 +1,328 @@
+/* The branch map · design turn 157 (157a–157g). A canvas of the routing file beside the edge
+   turn 122 gave every production page: the Inspector above Arke. Neutral chrome throughout —
+   the scenes' own frames carry the colour, and colour otherwise only ever means a finding. */
+
+.bm { min-height: 0; }
+.bm-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+
+.bm-head {
+  flex: none;
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px 12px 24px;
+  border-bottom: 1px solid var(--border);
+}
+.bm-head__title { flex: 1; min-width: 0; }
+.bm-h1 { margin: 0; font: var(--type-h2); letter-spacing: var(--tracking-tight); }
+.bm-head__meta { margin-top: 2px; font: var(--type-meta); font-size: var(--text-xs); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.bm-note { flex: none; padding: 8px 24px; border-bottom: 1px solid var(--border); font: var(--type-meta); font-size: var(--text-xs); color: var(--muted-foreground); }
+
+/* The findings count: a selection like any other (157b). */
+.bm-count {
+  height: 32px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  color: var(--foreground);
+  font: var(--type-ui);
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+}
+.bm-count--on { background: var(--secondary); border-color: var(--foreground); }
+.bm-count .bm-dot--warns { margin-left: 4px; }
+.bm-dot { width: 7px; height: 7px; border-radius: 99px; flex: none; display: inline-block; }
+.bm-dot--blocks { background: var(--destructive); }
+.bm-dot--warns { border: 1.5px solid var(--warning); }
+
+/* The canvas: dotted ground, the stage panned and zoomed inside it. */
+.bm-viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background-color: var(--background);
+  background-image: radial-gradient(color-mix(in srgb, var(--foreground) 13%, transparent) 1px, transparent 1px);
+  background-size: 18px 18px;
+  cursor: grab;
+  touch-action: none;
+}
+.bm-viewport--panning { cursor: grabbing; }
+.bm-viewport--empty { display: flex; align-items: flex-start; justify-content: center; padding-top: 72px; cursor: default; }
+.bm-stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.bm-edges { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.bm-nodes { position: absolute; inset: 0; }
+.bm-nodes:focus-within { outline: none; }
+
+.bm-edge { fill: none; stroke: var(--foreground); stroke-width: 1.5; opacity: 0.45; }
+.bm-edge--unwalked { stroke-dasharray: 5 4; }
+.bm-edge--selected { stroke-width: 2.5; opacity: 1; }
+.bm-edge--new { stroke-width: 2.5; opacity: 1; }
+.bm-edge--ghost { stroke-width: 2; stroke-dasharray: 3 4; opacity: 0.8; }
+.bm-edge--faint { opacity: 0.12; }
+.bm-arrowhead { fill: var(--foreground); }
+
+.bm-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  max-width: 112px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--background);
+  color: var(--foreground);
+  font: var(--type-meta);
+  line-height: 1.3;
+  text-align: center;
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+}
+.bm-label--unwalked { border-style: dashed; border-color: color-mix(in srgb, var(--foreground) 45%, transparent); color: var(--muted-foreground); }
+.bm-label--selected { background: var(--foreground); color: var(--background); border-color: var(--foreground); border-style: solid; }
+
+/* A scene card: its frame at 16:9, its title, one meta line. 148 wide, as the layout pitches. */
+.bm-node {
+  position: absolute;
+  width: 148px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--card-foreground);
+  box-shadow: var(--shadow-xs);
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+}
+.bm-node:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+.bm-node--start { outline: 2px solid var(--foreground); outline-offset: 3px; }
+.bm-node--selected { border-color: var(--foreground); box-shadow: 0 0 0 1px var(--foreground), var(--shadow-md); }
+.bm-node--excluded { opacity: 0.55; border-style: dashed; box-shadow: none; }
+.bm-node--bad { border-color: var(--destructive); box-shadow: 0 0 0 1px var(--destructive); }
+.bm-node--lit { border-color: var(--destructive); box-shadow: 0 0 0 1px var(--destructive), var(--shadow-md); }
+.bm-node--target { outline: 2px dashed var(--foreground); outline-offset: 4px; }
+
+.bm-thumb { display: block; width: 100%; height: 83px; border-radius: 9px 9px 0 0; overflow: hidden; background: var(--muted); }
+.bm-thumb > img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.bm-thumb__none { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; font: var(--type-h3); color: var(--muted-foreground); }
+.bm-thumb--small { width: 96px; height: 54px; border-radius: 8px; flex: none; }
+
+.bm-node__body { display: flex; flex-direction: column; gap: 2px; height: 48px; padding: 7px 8px 0; min-width: 0; }
+.bm-node__title { font: var(--type-ui); letter-spacing: var(--tracking-tight); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bm-node__meta { display: flex; align-items: center; gap: 5px; font: var(--type-meta); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; }
+.bm-node__meta > i { overflow: hidden; text-overflow: ellipsis; }
+.bm-node__warn { display: inline-flex; color: var(--warning); }
+
+.bm-tags { position: absolute; left: 0; top: -22px; display: flex; gap: 4px; }
+.bm-tag {
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 99px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: var(--type-label);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  background: var(--secondary);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.bm-tag--solid { background: var(--foreground); color: var(--background); border-color: transparent; }
+.bm-tag--bad { background: var(--destructive); color: var(--destructive-foreground); border-color: transparent; }
+
+/* The out-port a choice is drawn from: shown on hover and on the selected card (157c, 157f). */
+.bm-port {
+  position: absolute;
+  left: 148px;
+  top: 65px;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 99px;
+  border: 1.5px solid var(--foreground);
+  background: var(--background);
+  opacity: 0;
+  cursor: crosshair;
+  transition: opacity var(--duration-fast, 120ms) ease;
+}
+.bm-node:hover .bm-port, .bm-port--on { opacity: 1; }
+
+/* The selected choice's arrowhead, as a handle that drags it to another scene (157d). */
+.bm-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 99px;
+  border: 2px solid var(--background);
+  background: var(--foreground);
+  cursor: grab;
+  z-index: 3;
+}
+.bm-handle:active { cursor: grabbing; }
+
+/* Scenes on no route. */
+.bm-tray {
+  position: absolute;
+  left: 24px;
+  height: 200px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
+}
+.bm-tray > .bm-eyebrow { position: absolute; left: 14px; top: 10px; }
+.bm-eyebrow { font: var(--type-label); font-size: var(--text-2xs); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--muted-foreground); }
+
+.bm-legend {
+  position: absolute;
+  left: 24px;
+  bottom: 22px;
+  display: flex;
+  gap: 14px;
+  font: var(--type-meta);
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+.bm-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+.bm-legend__line { display: inline-block; width: 26px; border-top: 1.5px solid color-mix(in srgb, var(--foreground) 60%, transparent); }
+.bm-legend__line--dashed { border-top-style: dashed; }
+
+.bm-zoom {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--background);
+  box-shadow: var(--shadow-sm);
+  cursor: default;
+}
+.bm-zoom > button {
+  height: 28px;
+  min-width: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font: var(--type-ui);
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.bm-zoom > button:hover { background: var(--accent); color: var(--foreground); }
+.bm-zoom__pct { min-width: 44px; text-align: center; font: var(--type-ui); font-size: var(--text-xs); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+
+/* Day one (157g): one card, the start picked from the scenes' own frames. */
+.bm-dayone {
+  width: min(700px, calc(100% - 48px));
+  padding: 28px 30px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--card);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.bm-dayone__title { font: var(--type-h3); letter-spacing: var(--tracking-tight); }
+.bm-dayone__ask { font: var(--type-ui); color: var(--muted-foreground); margin-bottom: 10px; }
+.bm-dayone__scenes { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+.bm-dayone__scene { width: 118px; padding: 0; border: 0; background: transparent; display: flex; flex-direction: column; gap: 6px; text-align: left; cursor: pointer; color: var(--muted-foreground); }
+.bm-dayone__scene .bm-thumb { height: 66px; border-radius: 8px; opacity: 0.7; }
+.bm-dayone__scene--on { color: var(--foreground); }
+.bm-dayone__scene--on .bm-thumb { opacity: 1; outline: 2px solid var(--foreground); outline-offset: 2px; }
+.bm-dayone__name { font: var(--type-meta); font-size: var(--text-xs); }
+
+/* The edge: the Inspector above Arke, one column (turn 122). */
+.bm-side { width: 360px; flex: none; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border); }
+.bm-side > .fy-arke { width: auto; flex: 1; min-height: 0; border-left: 0; }
+.bm-insp { flex: none; max-height: 50%; display: flex; flex-direction: column; min-height: 0; border-bottom: 1px solid var(--border); background: var(--background); }
+.bm-insp__head { flex: none; height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 16px; }
+.bm-insp__head > b { font: var(--type-ui); font-weight: var(--weight-semibold); }
+.bm-insp__close { width: 28px; height: 28px; border: 0; border-radius: 7px; background: transparent; color: var(--muted-foreground); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.bm-insp__close:hover { background: var(--accent); color: var(--foreground); }
+.bm-insp__body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 16px 14px; display: flex; flex-direction: column; gap: 10px; }
+
+.bm-muted { font: var(--type-meta); font-size: var(--text-xs); color: var(--muted-foreground); }
+.bm-spacer { flex: 1; }
+.bm-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.bm-actions--end { justify-content: flex-end; }
+.bm-danger { color: var(--destructive); }
+
+.bm-field { display: flex; flex-direction: column; gap: 5px; }
+.bm-field__label { font: var(--type-label); color: var(--muted-foreground); }
+.bm-kv { display: flex; align-items: center; gap: 8px; min-height: 32px; font: var(--type-ui); }
+.bm-kv__k { width: 58px; flex: none; font: var(--type-label); color: var(--muted-foreground); }
+.bm-kv__v { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bm-kv > .ui-select { flex: 1; min-width: 0; }
+
+.bm-scenehead { display: flex; gap: 12px; align-items: center; }
+.bm-scenehead > span:last-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bm-scenehead__title { font: var(--type-ui); font-size: var(--text-base); }
+
+.bm-ways { display: flex; flex-direction: column; gap: 4px; }
+.bm-way {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--background);
+  color: var(--foreground);
+  font: var(--type-ui);
+  text-align: left;
+  cursor: pointer;
+}
+.bm-way:hover { background: var(--accent); }
+
+.bm-findgroup { display: flex; flex-direction: column; gap: 8px; }
+.bm-find { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+.bm-find--on { border-color: var(--foreground); }
+.bm-find__title { display: flex; align-items: center; gap: 8px; font: var(--type-ui); }
+.bm-find__name { flex: 1; min-width: 0; }
+.bm-find__evidence { font: var(--type-meta); font-size: var(--text-xs); color: var(--muted-foreground); line-height: 1.45; }
+
+/* Removing a choice names what it breaks before anything is written (157e). */
+.bm-confirm { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--shadow-lg); }
+.bm-confirm__title { font: var(--type-ui); font-size: var(--text-base); font-weight: var(--weight-semibold); }
+.bm-confirm__line { display: flex; align-items: center; gap: 8px; font: var(--type-ui); }
+
+/* The preview (turn 156g): the shared player over the whole window, above the app's chrome. */
+.bm-player { position: fixed; inset: 0; z-index: 60; }
+
+/* The narrow map (157i): a list in the canvas's order, the Arke dock folded under it. */
+.bm[data-narrow="true"] { flex-direction: column; }
+/* The header's actions wrap under the title rather than running off a phone's edge. */
+.bm[data-narrow="true"] .bm-head { flex-wrap: wrap; row-gap: 8px; padding: 10px 16px; }
+.bm[data-narrow="true"] .bm-head__title { flex-basis: 100%; }
+.bm[data-narrow="true"] .bm-side { width: auto; max-height: 40%; border-left: 0; border-top: 1px solid var(--border); }
+.bm[data-narrow="true"] .bm-insp { max-height: 45%; }
+.bm-list { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 16px 24px; display: flex; flex-direction: column; gap: 16px; }
+.bm-list__layer { display: flex; flex-direction: column; gap: 8px; }
+.bm-list__scene { display: flex; flex-direction: column; gap: 4px; }
+.bm-row, .bm-goes { display: flex; align-items: center; gap: 8px; min-width: 0; width: 100%; text-align: left; font: var(--type-ui); color: var(--foreground); background: var(--background); border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+.bm-row { min-height: 44px; padding: 8px 12px; font-weight: var(--weight-semibold); }
+.bm-row__title, .bm-goes__label, .bm-goes__to { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bm-row__title { flex: 1; }
+.bm-goes { min-height: 40px; margin-left: 20px; width: calc(100% - 20px); padding: 6px 12px; }
+.bm-goes--unwalked { border-style: dashed; }
+.bm-row--selected, .bm-goes--selected { border-color: var(--foreground); box-shadow: 0 0 0 1px var(--foreground); }
+.bm-row:focus-visible, .bm-goes:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }

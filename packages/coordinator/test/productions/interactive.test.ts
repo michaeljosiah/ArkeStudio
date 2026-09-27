@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { migrateLegacyScene, RoutingSchema, type ProductionBundle, type Routing, type Take } from "@arke-studio/contracts";
+import { INTERACTIVE_PLAYER_SOURCE, migrateLegacyScene, RoutingSchema, type ProductionBundle, type Routing, type Take } from "@arke-studio/contracts";
 import {
   appendTraversal,
   exportInteractive,
@@ -13,7 +13,7 @@ import {
 } from "../../src/productions/interactive.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { WorldStore } from "../../src/world/store.js";
-import { makeTempWorld } from "../world/helpers.js";
+import { makeTempWorld, WORLD_ID } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
 /**
@@ -213,6 +213,85 @@ describe("interactive video through the coordinator (epic 401)", () => {
     assert.equal(await interactiveExportCompleted(store, production.meta.id, exportId), false, "a partial package is not recovered as completed");
   });
 
+  it("the package plays each scene's cut window, not its whole file: a trim's in-point, the slot's end", async () => {
+    const { dir, store, bundle } = await open();
+    const base = await interactiveProduction(dir, bundle.productions[0]!, ROUTING);
+    const production = { ...base, selections: { ...base.selections, sh_i1: { ...base.selections["sh_i1"]!, trimInSec: 1.5 } } };
+    await appendTraversal(store, production.meta.id, { ts: CLOCK(), routingVersion: 1, choiceId: "ch_on", from: "sc_i1", to: "sc_i2", route: ["sc_i1"] });
+    const result = await exportInteractive(store, production, CLOCK, { exportId: "iv_01J8F3K2QW9VZX4N7M0RTYB6HD" });
+    assert.ok(result.ok, result.ok ? "" : result.blockers.join("; "));
+    const manifest = JSON.parse(await readFile(join(dir, result.dir, "manifest.json"), "utf8")) as {
+      media: Array<{ sceneId: string; windows?: Array<{ from: number; to?: number }> }>;
+    };
+    const windows = Object.fromEntries(manifest.media.map((entry) => [entry.sceneId, entry.windows]));
+    assert.deepEqual(windows["sc_i1"], [{ from: 1.5, to: 6.5 }], "trimmed 1.5s in, and the 5s slot after it");
+    assert.deepEqual(windows["sc_i2"], [{ from: 0, to: 5 }], "untrimmed, still ended at its slot");
+    const player = await readFile(join(dir, result.dir, "player.html"), "utf8");
+    assert.match(player, /m\.windows\.map\(\(w\) => \(\{ src: m\.file, from: w\.from, to: w\.to \}\)\)/, "the page hands the windows to the player");
+  });
+
+  it("refuses a scene whose cut leaves nothing to play, rather than shipping the whole pass", async () => {
+    const { dir, store, bundle } = await open();
+    const base = await interactiveProduction(dir, bundle.productions[0]!, ROUTING);
+    // sc_i1 accepts a 2s segment of a pass, trimmed 3s in: past the segment's end, nothing plays.
+    const pass = { ...take("tk_01J8E0000000000000000000P1", "sh_i1"), media: "pass.mp4" };
+    const segment: Take = { ...take("tk_01J8E0000000000000000000S1", "sh_i1"), segment: { passTakeId: pass.id, inSec: 0, outSec: 2 } };
+    delete (segment as { media?: string }).media;
+    await mkdir(join(dir, "productions", base.meta.id, "takes", pass.id), { recursive: true });
+    await writeFile(join(dir, "productions", base.meta.id, "takes", pass.id, "pass.mp4"), Buffer.from("the-pass"));
+    const production = {
+      ...base,
+      takes: [...base.takes, pass, segment],
+      selections: { ...base.selections, sh_i1: { acceptedTakeId: segment.id, trimInSec: 3 } },
+    };
+    const result = await exportInteractive(store, production, CLOCK);
+    assert.equal(result.ok, false);
+    assert.ok(!result.ok && result.blockers.some((line) => /sc_i1's cut leaves nothing to play/.test(line)), !result.ok ? result.blockers.join("; ") : "");
+  });
+
+  it("refuses a scene where only some shots have something to play", async () => {
+    const { dir, store, bundle } = await open();
+    const base = await interactiveProduction(dir, bundle.productions[0]!, ROUTING);
+    // sc_i1 becomes two shots over one pass: the first accepts a segment of it, the second the
+    // pass itself — which the cut plays nothing of, so its shot would silently go missing.
+    const one = interactiveScene("sc_i1", 1, "sh_i1");
+    const scene = { ...one, shots: [...one.shots, { id: "sh_i1b", number: 2, title: "sh_i1b", description: "a shot", durationSec: 5 }] };
+    const pass = { ...take("tk_01J8E0000000000000000000P2", "sh_i1"), coversShots: ["sh_i1", "sh_i1b"], media: "pass.mp4" };
+    const segment: Take = { ...take("tk_01J8E0000000000000000000S2", "sh_i1"), segment: { passTakeId: pass.id, inSec: 0, outSec: 5 } };
+    delete (segment as { media?: string }).media;
+    await mkdir(join(dir, "productions", base.meta.id, "takes", pass.id), { recursive: true });
+    await writeFile(join(dir, "productions", base.meta.id, "takes", pass.id, "pass.mp4"), Buffer.from("the-pass"));
+    const production = {
+      ...base,
+      scenes: [scene, base.scenes[1]!],
+      takes: [...base.takes, pass, segment],
+      selections: { ...base.selections, sh_i1: { acceptedTakeId: segment.id, trimInSec: 0 }, sh_i1b: { acceptedTakeId: pass.id, trimInSec: 0 } },
+    };
+    const result = await exportInteractive(store, production, CLOCK);
+    assert.equal(result.ok, false);
+    assert.ok(!result.ok && result.blockers.some((line) => /sc_i1's cut has nothing to play for sh_i1b/.test(line)), !result.ok ? result.blockers.join("; ") : "");
+  });
+
+  it("refuses a take whose media names a file outside its own folder, and copies nothing", async () => {
+    const { dir, store, bundle } = await open();
+    const base = await interactiveProduction(dir, bundle.productions[0]!, ROUTING);
+    const production = { ...base, takes: base.takes.map((t, i) => (i === 0 ? { ...t, media: "../../../../outside.txt" } : t)) };
+    const result = await exportInteractive(store, production, CLOCK);
+    assert.equal(result.ok, false);
+    assert.ok(!result.ok && result.blockers.some((line) => /sc_i1's accepted take names media outside its own folder/.test(line)));
+  });
+
+  it("gives two exports in the same second folders of their own", async () => {
+    const { dir, store, bundle } = await open();
+    const production = await interactiveProduction(dir, bundle.productions[0]!, ROUTING);
+    await appendTraversal(store, production.meta.id, { ts: CLOCK(), routingVersion: 1, choiceId: "ch_on", from: "sc_i1", to: "sc_i2", route: ["sc_i1"] });
+    const first = await exportInteractive(store, production, CLOCK);
+    const second = await exportInteractive(store, production, CLOCK);
+    assert.ok(first.ok && second.ok);
+    assert.notEqual(first.dir, second.dir, "the second does not write over the first");
+    assert.equal(await interactiveExportCompleted(store, production.meta.id, first.id), true, "and the first is still whole");
+  });
+
   it("T-13: Interactive export ships equivalent media for legacy and permuted migrated scenes", async () => {
     const { dir, store, bundle } = await open();
     const legacy = await interactiveProduction(dir, bundle.productions[0]!, ROUTING);
@@ -292,11 +371,12 @@ describe("interactive video through the coordinator (epic 401)", () => {
     const keys = [...initial[1]!.matchAll(/(\w+)\s*:/g)].map((m) => m[1]);
     assert.deepEqual(keys.sort(), ["positionSec", "route", "sceneId", "updatedAt"], "exactly the four");
 
-    // Viewer-local: the key is namespaced by production and routing version, so a re-cut graph
-    // never resumes into a scene the new package does not have.
+    // Viewer-local: the key is namespaced by world, production and routing version, so a re-cut
+    // graph never resumes into a scene the new package does not have, and another world's
+    // production with the same slug, served from the same origin, never shares a viewer's place.
     assert.match(player, /localStorage\.setItem\(KEY/, "saved with the viewer");
     assert.match(player, /localStorage\.getItem\(KEY/, "and read back on load");
-    assert.match(player, /KEY = "arke-iv-" \+ manifest\.provenance\.productionId \+ "-v" \+ manifest\.provenance\.routingVersion/);
+    assert.match(player, new RegExp(`KEY = "arke-iv-" \\+ "${WORLD_ID}" \\+ "-" \\+ manifest\\.provenance\\.productionId \\+ "-v" \\+ manifest\\.provenance\\.routingVersion`));
 
     // Resume: the last scene and the last position, not the start.
     assert.match(player, /play\(state\.sceneId, state\.positionSec\)/, "the player opens where it was left");
@@ -321,6 +401,19 @@ describe("interactive video through the coordinator (epic 401)", () => {
       );
     }
     assert.ok(shipped.includes("player.html") && shipped.includes("manifest.json"));
+  });
+
+  it("the package plays the same player the branch map's preview mounts (design turn 156)", async () => {
+    const { player } = await exportedPlayer();
+    // One player, two homes: the module's own text, inlined whole — not a second player kept
+    // alike by hand, which is how the package and the preview drifted apart before.
+    assert.ok(
+      player.includes(INTERACTIVE_PLAYER_SOURCE.replace("export function mountInteractivePlayer", "function mountInteractivePlayer")),
+      "the module's text is in the page, verbatim",
+    );
+    assert.equal(player.match(/mountInteractivePlayer\(document\.getElementById\("app"\)/g)?.length, 1, "and the page mounts it once");
+    assert.match(player, /storageKey: KEY/, "the viewer's place is kept under the namespaced key");
+    assert.doesNotMatch(player, /author:/, "the package has no author strip and records no evidence");
   });
 
   it("IV-P3: choices are untimed by default — nothing counts down, nothing chooses for you", async () => {
