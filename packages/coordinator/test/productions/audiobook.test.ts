@@ -13,6 +13,7 @@ import {
   billableCharacters,
   normalizeSpeechText,
   quoteSpeech,
+  speechInputFits,
   type Job,
   type ChapterVoices,
   type ClientMessage,
@@ -21,6 +22,7 @@ import {
   type VoiceCandidate,
 } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
+import { geminiSpeechModel } from "@arke-studio/providers";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { audiobookBookPath, audiobookPath, checkDirection, directionPlan, legacyAudiobookPath, renderParts } from "../../src/productions/audiobook.js";
 import { verifyDirections, type DirectionDeriver, type DirectableBlock } from "../../src/productions/audiobook-direction.js";
@@ -1762,6 +1764,40 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
       assert.equal(second.cached, true, "the same line heard again is the cached file");
       assert.equal(second.file, first.file);
       assert.equal(existsSync(recordPath(worldDir)), false, "nothing on the record");
+    }));
+
+  it("reserves a performed note's UTF-8 bytes before directed Gemini parts are quoted", () =>
+    withHarness({}, async ({ store, send }) => {
+      await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "performed" });
+      const note = "穏やかに、低く";
+      await send({ kind: "set-audiobook-note", worldId: WORLD_ID, productionId: LEDGER, speaker: "maren-kest", note });
+      const model = geminiSpeechModel("flash");
+      model.limits.maxSpeechUtf8Bytes = 82;
+      const narrator = { provider: "google", model: model.id, voiceId: "Charon", label: "Charon" };
+      const room = { narrator, models: [model], catalogue: [{ ...narrator, attributes: [], local: false, canClone: false }] };
+      for (const directed of [false, true]) {
+        if (directed) await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p0.1", direction: { delivery: "measured", speed: 1, cues: [] } });
+        const made = await prepareChapter(store, LEDGER, "neap", room, () => "2026-09-27T12:00:00Z", ["p0.1"]);
+        assert.equal(made.kind, "ready");
+        if (made.kind !== "ready") throw new Error(made.kind);
+        const block = made.prepared.speaking[0]!;
+        assert.equal(block.refusal, undefined);
+        assert.equal(block.parts.join(" "), normalizeSpeechText(SPAN));
+        assert.ok(block.parts.every((part, index) => speechInputFits(part, model.limits, block.direction?.perPart[index]?.instructions)));
+        assert.ok(block.direction?.perPart.every(part => part.instructions?.startsWith(note)));
+        if (directed) {
+          assert.ok(block.parts.length > 1);
+          assert.ok(block.direction?.perPart.every(part => part.instructions?.includes("Read calmly")));
+        }
+        assert.equal(made.prepared.estimate, block.parts.length * 151552);
+      }
+      model.limits.maxSpeechUtf8Bytes = 8;
+      const refused = await prepareChapter(store, LEDGER, "neap", room, () => "2026-09-27T12:00:00Z", ["p0.1"]);
+      assert.equal(refused.kind, "ready");
+      if (refused.kind === "ready") {
+        assert.ok(refused.prepared.speaking[0]?.refusal);
+        assert.equal(refused.prepared.estimate, 0, "impossible direction is not offered as paid work");
+      }
     }));
 
   it("quotes every prepared token request before Hear spends, and rejects stale consent", () =>

@@ -25,8 +25,22 @@ own project bindings, separately authorised operations, consent handling and ver
 The pricing foundation uses dated standard rates and the published full service limits to
 bound each request. Duration is not treated as a guaranteed ceiling. The client additionally
 rejects compiled text plus style over a conservative 7,000-byte request budget; this is not a
-claim that bytes equal Google tokens. Token-aware packing and tighter authorisation belong to
-the long-read integration before production activation.
+claim that bytes equal Google tokens. The shared speech packer applies this byte bound before
+quoting plain reads and directed audiobook parts, including a performed character's note.
+Tighter token/output bounds and acoustic long-read qualification still precede activation.
+
+`geminiSpeechModel` exports qualification rows for both models without inserting them into the
+shipped catalogue. Their six deliveries and short phrase compile to separate instructions through
+the existing cadence compiler. A delivery span becomes its own request and the surrounding style
+resumes after it. Numeric speed, pause, breath and emphasis remain held; no exact timing or
+acoustic adherence is claimed. Vocal-event authoring and its schema migration are still pending.
+
+`splitSpeechInput` in contracts packs at sentence/word boundaries and retains source offsets,
+without cutting a surrogate pair. The byte allowance includes the separate instructions. An
+impossible style or a marked span that cannot survive a split is refused before paid admission.
+The audiobook reserves room for the performed note before rendering, then validates the final
+words and instructions together. Each prepared part retains the existing full-service output
+authorisation, job, usage and recovery paths; byte packing does not lower its reserved token cost.
 
 Credentials travel in the host's `x-goog-api-key` header and do not enter prompts or harness
 environments. Transport capture redacts the key and summarises nested audio data as its size
@@ -40,6 +54,7 @@ From the repository root:
 ```powershell
 node --import tsx --test packages/providers/test/google-tts.test.ts packages/providers/test/capture.test.ts
 node --import tsx --test packages/coordinator/test/queue/speech-pricing.test.ts
+node --import tsx --test packages/contracts/test/speech-input.test.ts packages/coordinator/test/productions/gemini-speech-parts.test.ts
 ```
 
 These checks use injected responses, not paid provider calls. They do not establish model

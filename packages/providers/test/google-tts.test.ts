@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { GoogleClient, GEMINI_TTS_MODELS, geminiSpeechUsage, geminiWav } from "../src/clients/google.js";
 import { ProviderAuthError, ProviderBusyError, ProviderRequestRejectedError, type SubmitRequest } from "../src/types.js";
+import { ManifestModelSchema, mapCadence } from "@arke-studio/contracts";
+import { geminiSpeechModel } from "../src/gemini-tts-models.js";
+import { SHIPPED_MANIFEST } from "../src/manifest-data.js";
 
 const request: SubmitRequest = { model: GEMINI_TTS_MODELS[0], capability: "voice-tts", params: { text: "Keep these exact words.", voiceId: "Kore", instructions: "Whisper urgently" } };
 function wav() {
@@ -14,6 +17,27 @@ function wav() {
 const responseBody = () => ({ id: "interaction-1", model: request.model, status: "completed",
   usage: { total_input_tokens: 8, output_tokens_by_modality: [{ modality: "audio", tokens: 50 }] },
   steps: [{ type: "model_output", content: [{ type: "audio", mime_type: "audio/wav", data: wav().toString("base64") }] }] });
+
+it("qualification rows compile all six deliveries into structured style without enabling catalogue rows", async () => {
+  for (const variant of ["flash", "lite"] as const) {
+    const row = ManifestModelSchema.parse(geminiSpeechModel(variant));
+    assert.equal(SHIPPED_MANIFEST.models.some(model => model.id === row.id), false);
+    for (const delivery of row.cadence!.deliveries) {
+      const hash = `sha256:${"a".repeat(64)}`;
+      const mapped = mapCadence("Keep these exact words.", hash, { schemaVersion: 1, sourceTextHash: hash, delivery, speed: 1, phrase: "quietly confident", cues: [] }, row);
+      const client = new GoogleClient(async (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        const content = body.input[0].content[0];
+        assert.equal(content.text, "Keep these exact words.");
+        assert.equal(content.annotations[0].style, mapped.instructions);
+        assert.ok(mapped.instructions?.endsWith("quietly confident"));
+        return Response.json({ ...responseBody(), model: row.id });
+      });
+      const result = await client.submit("test", { ...request, model: row.id, params: { text: mapped.providerText, voiceId: "Charon", voiceSettings: mapped.voiceSettings, instructions: mapped.instructions } });
+      assert.ok(result.artifacts?.length);
+    }
+  }
+});
 
 it("uses exact pinned model ids, separate style metadata, stateless unary WAV and the full output ceiling", async () => {
   for (const model of GEMINI_TTS_MODELS) {

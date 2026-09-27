@@ -1,5 +1,7 @@
 import type { CapabilityProbe, ClientDeclarations, SpeechUsage } from "@arke-studio/contracts";
 import { randomUUID } from "node:crypto";
+import { speechInputFits } from "@arke-studio/contracts";
+import { GEMINI_SPEECH_INPUT_BYTES } from "../gemini-tts-models.js";
 import { ProviderAuthError, ProviderBusyError, ProviderRequestRejectedError,
   type FetchLike, type PollResult, type SubmitRequest, type SubmitResult, type VoiceCatalogueClient } from "../types.js";
 
@@ -140,7 +142,7 @@ export class GoogleClient implements VoiceCatalogueClient {
     if (request.params.voiceSettings !== undefined && Object.keys(record(request.params.voiceSettings)).length > 0) throw new ProviderRequestRejectedError("Google: numeric voice settings are unsupported; use structured speech direction");
     // This is a byte budget, not a claim about Google's tokenizer. It deliberately leaves room
     // for metadata; a counted-token compiler can later pack requests closer to the service cap.
-    if (Buffer.byteLength(text + (instructions ?? ""), "utf8") > 7000) throw new ProviderRequestRejectedError("Google: this read needs smaller parts including its direction");
+    if (!speechInputFits(text, { maxSpeechUtf8Bytes: GEMINI_SPEECH_INPUT_BYTES }, instructions as string | undefined)) throw new ProviderRequestRejectedError("Google: this read needs smaller parts including its direction");
     const response = await this.fetchImpl(`${this.baseUrl}/v1beta/interactions`, {
       method: "POST", headers: this.headers(key), signal: request.signal, redirect: "error",
       body: JSON.stringify({ model: request.model, store: false,

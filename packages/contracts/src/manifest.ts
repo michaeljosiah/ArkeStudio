@@ -241,6 +241,8 @@ export const ModelLimitsSchema = z
      * silently cut at the end loses the shot list rather than the adjectives.
      */
     maxPromptChars: z.number().int().min(1).optional(),
+    /** Conservative request packing budget for spoken text plus separate style, not a token count. */
+    maxSpeechUtf8Bytes: z.number().int().min(1).optional(),
     /** Delivery directions this concrete speech model has a measured wire mapping for. */
     deliveries: z.array(z.enum(["measured", "whispered", "breaking", "cold", "warm", "urgent"])).optional(),
     /** Generated speech container, consumed consistently by cache, verification, media, and events. */

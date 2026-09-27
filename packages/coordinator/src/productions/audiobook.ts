@@ -17,6 +17,8 @@ import {
   mapCadence,
   markerSegments,
   normalizeSpeechText,
+  speechInputFits,
+  splitSpeechInput,
   voiceSourceFor,
   type AudiobookBlock,
   type AudiobookBlockState,
@@ -313,8 +315,10 @@ function renderSegment(whole: string, plan: CadencePlan, model: ManifestModel, l
     const mapped = mapCadence(piece, directionSourceHash(piece), { ...plan, sourceTextHash: directionSourceHash(piece), cues }, model, language);
     return { text: mapped.providerText, voiceSettings: mapped.voiceSettings, ...(mapped.instructions !== undefined ? { instructions: mapped.instructions } : {}) };
   };
-  if (cap === undefined) return [render(whole, plan.cues)];
+  const limits = { ...model.limits, maxPromptChars: cap };
+  if (cap === undefined && limits.maxSpeechUtf8Bytes === undefined) return [render(whole, plan.cues)];
   const out: RenderedPart[] = [];
+  const placed = new Set<CadencePlan["cues"][number]>();
   const place = (piece: string, from: number, max: number): void => {
     const to = from + piece.length;
     for (const cue of plan.cues) {
@@ -323,11 +327,25 @@ function renderSegment(whole: string, plan: CadencePlan, model: ManifestModel, l
       }
     }
     const cues = plan.cues
-      .filter((cue) => (cue.kind === "emphasis" || cue.kind === "delivery" ? cue.span.from >= from && cue.span.to <= to : cue.at >= from && cue.at <= to))
+      .filter((cue) => !placed.has(cue) && (cue.kind === "emphasis" || cue.kind === "delivery" ? cue.span.from >= from && cue.span.to <= to : cue.at >= from && cue.at <= to))
       .map((cue) => (cue.kind === "emphasis" || cue.kind === "delivery" ? { ...cue, span: { ...cue.span, from: cue.span.from - from, to: cue.span.to - from } } : { ...cue, at: cue.at - from }));
     const rendered = render(piece, cues);
-    if (rendered.text.length <= cap || max <= 1 || piece.length <= 1) {
+    if (speechInputFits(rendered.text, limits, rendered.instructions)) {
       out.push(rendered);
+      for (const cue of plan.cues) {
+        if (cue.kind !== "emphasis" && cue.kind !== "delivery" && cue.at >= from && cue.at <= to) placed.add(cue);
+      }
+      return;
+    }
+    if (piece.length <= 1 || max <= 1) throw new Error("The speech direction and words cannot fit this reader's request limit.");
+    if (limits.maxSpeechUtf8Bytes !== undefined) {
+      let smaller = splitSpeechInput(piece, limits, rendered.instructions);
+      // Inline tags can make the rendered text larger than the source. If source packing
+      // alone made no progress, reduce it before rendering its cues again.
+      if (smaller.length === 1 && smaller[0]!.text === piece) smaller = splitSpeechInput(piece, { ...limits, maxPromptChars: Math.max(1, Math.floor(piece.length / 2)) }, rendered.instructions);
+      for (const part of smaller) {
+        place(part.text, from + part.from, part.text.length);
+      }
       return;
     }
     let offset = 0;
@@ -337,11 +355,11 @@ function renderSegment(whole: string, plan: CadencePlan, model: ManifestModel, l
       offset = Math.max(at, 0) + smaller.length;
     }
   };
-  const pieces = whole.length > cap ? splitForSpeech(whole, cap) : [whole];
+  const pieces = limits.maxSpeechUtf8Bytes === undefined && cap !== undefined && whole.length > cap ? splitForSpeech(whole, cap) : [whole];
   let offset = 0;
   for (const piece of pieces) {
     const at = whole.indexOf(piece, offset);
-    place(piece, Math.max(at, 0), cap);
+    place(piece, Math.max(at, 0), cap ?? piece.length);
     offset = Math.max(at, 0) + piece.length;
   }
   return out;

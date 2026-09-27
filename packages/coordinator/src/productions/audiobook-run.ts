@@ -8,6 +8,8 @@ import {
   performanceNote,
   audiobookTextHash,
   normalizeSpeechText,
+  speechInputFits,
+  speechUtf8Bytes,
   voiceFormatForModel,
   voiceSourceFor,
   type ArtifactAudiobookGeneration,
@@ -24,7 +26,8 @@ import {
 import { fileGeneratedArtifact } from "../artifacts/filing.js";
 import type { MediaProbe } from "../media/probe.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
-import { cachedVoiceAudioLooksRight, joinSpeech, speechCacheFile, splitForSpeech } from "../voice/service.js";
+import { cachedVoiceAudioLooksRight, joinSpeech, speechCacheFile } from "../voice/service.js";
+import { piecesFor } from "../voice/pieces.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
@@ -268,45 +271,60 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
     const playing = note === undefined ? null : performanceNote(note, model, language);
     const noteHeld = playing?.mode === "unsupported";
     const capLeft = note !== undefined && !noteHeld && cap !== undefined ? Math.max(1, cap - note.length - 3) : cap;
+    // The performed note is prepended after cadence compilation. Reserve its bytes (and
+    // separator) before packing, just as tag readers reserve their character prefix.
+    const byteCap = model.limits.maxSpeechUtf8Bytes;
+    const byteCapLeft = byteCap === undefined ? undefined : byteCap - (playing?.mode === "instruction" ? speechUtf8Bytes(note!) + 1 : playing?.mode === "tag" ? speechUtf8Bytes(playing.tag) + 1 : 0);
+    const packingModel = { ...model, limits: { ...model.limits,
+      ...(capLeft !== undefined ? { maxPromptChars: capLeft } : {}),
+      ...(byteCapLeft !== undefined ? { maxSpeechUtf8Bytes: byteCapLeft } : {}) } };
     const lead = (part: RenderedPart): RenderedPart =>
       playing?.mode === "tag"
         ? { ...part, text: `${playing.tag} ${part.text}` }
         : playing?.mode === "instruction"
           ? { ...part, instructions: part.instructions === undefined ? note! : `${note!} ${part.instructions}` }
           : part;
-    if (held !== null) {
-      // What this reader cannot express is held (R-47): left out of what it is sent, kept on
-      // the record, and never a reason to flag the block. Only a direction wrong for its words
-      // is refused.
-      const check = checkDirection(planned.block.text, held.plan, { ...model, limits: { ...model.limits, ...(capLeft !== undefined ? { maxPromptChars: capLeft } : {}) } }, language, "hold");
-      if (check.ok) {
-        const rendered = check.parts.map(lead);
+    try {
+      if (held !== null) {
+        // What this reader cannot express is held (R-47): left out of what it is sent, kept on
+        // the record, and never a reason to flag the block. Only a direction wrong for its words
+        // is refused.
+        const check = checkDirection(planned.block.text, held.plan, packingModel, language, "hold");
+        if (check.ok) {
+          const rendered = check.parts.map(lead);
+          direction = {
+            hash: audiobookTakeDirectionHash(held.plan, note)!,
+            delivery: held.plan.delivery,
+            rendered: rendered.map((part) => part.text).join(" "),
+            voiceSettings: rendered[0]?.voiceSettings ?? check.mapped.voiceSettings,
+            ...(rendered[0]?.instructions !== undefined ? { instructions: rendered[0].instructions } : {}),
+            perPart: rendered.map((part) => ({ voiceSettings: part.voiceSettings, ...(part.instructions !== undefined ? { instructions: part.instructions } : {}) })),
+          };
+          parts = rendered.map((part) => part.text);
+        } else {
+          refusal = check.reason;
+          parts = [text];
+        }
+      } else if (note !== undefined) {
+        // A line directed by its note alone: the words as they are, the note ahead, no settings.
+        const words = piecesFor(text, packingModel, voiceFormatForModel(model));
+        const rendered = words.map((words) => lead({ text: words, voiceSettings: {} }));
         direction = {
-          hash: audiobookTakeDirectionHash(held.plan, note)!,
-          delivery: held.plan.delivery,
+          hash: audiobookTakeDirectionHash(null, note)!,
           rendered: rendered.map((part) => part.text).join(" "),
-          voiceSettings: rendered[0]?.voiceSettings ?? check.mapped.voiceSettings,
+          voiceSettings: {},
           ...(rendered[0]?.instructions !== undefined ? { instructions: rendered[0].instructions } : {}),
           perPart: rendered.map((part) => ({ voiceSettings: part.voiceSettings, ...(part.instructions !== undefined ? { instructions: part.instructions } : {}) })),
         };
         parts = rendered.map((part) => part.text);
-      } else {
-        refusal = check.reason;
-        parts = [text];
+      } else parts = piecesFor(text, model, voiceFormatForModel(model));
+      if (parts.some((part, index) => !speechInputFits(part, model.limits, direction?.perPart[index]?.instructions))) {
+        throw new Error("The words and direction exceed this reader's request limit.");
       }
-    } else if (note !== undefined) {
-      // A line directed by its note alone: the words as they are, the note ahead, no settings.
-      const words = capLeft !== undefined && text.length > capLeft ? splitForSpeech(text, capLeft) : [text];
-      const rendered = words.map((words) => lead({ text: words, voiceSettings: {} }));
-      direction = {
-        hash: audiobookTakeDirectionHash(null, note)!,
-        rendered: rendered.map((part) => part.text).join(" "),
-        voiceSettings: {},
-        ...(rendered[0]?.instructions !== undefined ? { instructions: rendered[0].instructions } : {}),
-        perPart: rendered.map((part) => ({ voiceSettings: part.voiceSettings, ...(part.instructions !== undefined ? { instructions: part.instructions } : {}) })),
-      };
-      parts = rendered.map((part) => part.text);
-    } else parts = cap !== undefined && text.length > cap ? splitForSpeech(text, cap) : [text];
+    } catch (error) {
+      refusal = error instanceof Error ? error.message : String(error);
+      parts = [text];
+    }
     const local = reader.provider === "kokoro";
     const format = voiceFormatForModel(model);
     const source = voiceSourceFor(clonedVoices, reader.provider, reader.model, reader.voiceId);
