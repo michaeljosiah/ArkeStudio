@@ -580,7 +580,13 @@ export function SceneWorkspace({
               </span>
             )}
             {playsAsBeats ? (
-              <VoiceLinesControl plan={tableRead.plan} preparing={tableRead.preparing} notice={tableRead.notice} onPrepare={tableRead.prepare} />
+              <VoiceLinesControl
+                plan={tableRead.plan}
+                preparing={tableRead.preparing}
+                notice={tableRead.notice}
+                onPrepare={tableRead.prepare}
+                ceiling={tableRead.plan?.items.some((item) => state?.app.manifest?.models.some((model) => model.id === item.model && model.pricing.kind === "perToken")) ?? false}
+              />
             ) : null}
             {/* Boards pack shots into a clip's length; a visual novel renders no clips. */}
             {!playsAsBeats && (frameRun === null || frameRun.status === "completed") ? (

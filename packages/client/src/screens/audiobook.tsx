@@ -144,7 +144,7 @@ function VoiceChip({ name, voice, state, blocks, awaiting, to, onPress, performe
 }
 
 function priceLineWords(line: AudiobookPriceLine): { who: string; how: string; cost: string; warn: boolean } {
-  const cost = `${line.characters.toLocaleString()} · ${line.estimatedMicroUsd === 0 ? "free" : formatMicroUsd(line.estimatedMicroUsd)}`;
+  const cost = `${line.characters.toLocaleString()} · ${line.estimatedMicroUsd === 0 ? "free" : `up to ${formatMicroUsd(line.estimatedMicroUsd)}`}`;
   if (line.speaker !== undefined) {
     // The narrator stands in (R-12): said as the speaker, and — when that narrator is a cloud
     // voice — the vendor the speaker's words go to, named here as on every paid line (codex on PR 1187).
@@ -282,7 +282,7 @@ export function AudiobookScreen() {
     return (
       <Button variant="primary" disabled={connection !== "open" || book?.state === "priced"} onClick={begin} data-testid="read-book">
         Read the book · {price.chapters} chapter{price.chapters === 1 ? "" : "s"}
-        {price.estimatedMicroUsd > 0 ? ` · ${formatMicroUsd(price.estimatedMicroUsd)}` : ""}
+        {price.estimatedMicroUsd > 0 ? ` · up to ${formatMicroUsd(price.estimatedMicroUsd)}` : ""}
       </Button>
     );
   })();
@@ -440,7 +440,7 @@ function BookPriceSheet({ price, onClose, onConfirm }: {
             Cancel
           </Button>
           <Button variant="primary" onClick={onConfirm} data-testid="read-book-confirm">
-            Confirm {price.characters.toLocaleString()} characters · {formatMicroUsd(price.estimatedMicroUsd)}
+            Confirm {price.characters.toLocaleString()} characters · up to {formatMicroUsd(price.estimatedMicroUsd)}
           </Button>
         </div>
       </div>

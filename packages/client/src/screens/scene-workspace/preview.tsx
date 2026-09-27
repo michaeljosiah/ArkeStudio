@@ -28,6 +28,7 @@ import { onMediaReady, syncMediaElement, useTransport } from "../../lib/playback
 import { ShotLightbox, shotFramePath } from "./lightbox.js";
 import { useWorkspaceSelection } from "./selection.js";
 import { useTableReadPlan } from "./table-read.js";
+import { useStore } from "../../lib/store.js";
 
 interface PreviewSpan {
   shot: Shot;
@@ -156,6 +157,7 @@ export function ScenePreview({
   // table-read cache — in shot order through the one player; the rest are counted, not played, and
   // a dashed door prepares them at the cost the plan quoted. The plan is asked for when the lines,
   // the reviews or the cache's jobs change, so the door's count and price are current before a press.
+  const { state } = useStore();
   const narration = productionShape(production.meta).playsAsBeats;
   const lines = useMemo(() => deriveRehearsalLines(scene, sheets, { narration }).filter((line) => line.reason === undefined), [scene, sheets, narration]);
   const { plan, notice: linesNotice, preparing, prepare: prepareLines } = useTableReadPlan({ worldId, production, scene, lines });
@@ -451,7 +453,7 @@ export function ScenePreview({
             {plan === null ? null : <span className="fy-swpreview__lines-count">{playable.length} of {lines.length} line{lines.length === 1 ? "" : "s"} {lines.length === 1 ? "has" : "have"} a read</span>}
             {plan === null || missing.length === 0 ? null : (
               <button type="button" className="fy-swpreview__lines-door" disabled={preparing} onClick={prepareLines}>
-                Prepare {missing.length} line{missing.length === 1 ? "" : "s"} · {formatMicroUsd(plan.totalEstimatedMicroUsd)}
+                Prepare {missing.length} line{missing.length === 1 ? "" : "s"} · {plan.items.some(item => state?.app.manifest?.models.some(model => model.id === item.model && model.pricing.kind === "perToken")) ? "up to " : ""}{formatMicroUsd(plan.totalEstimatedMicroUsd)}
               </button>
             )}
             {linesNotice === "" ? null : <span role="status" className="fy-swpreview__lines-notice">{linesNotice}</span>}

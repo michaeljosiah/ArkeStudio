@@ -1,6 +1,6 @@
-import { estimateSpeechMicroUsd } from "@arke-studio/contracts";
+import { estimateSpeechMicroUsd, speechInputFits, voiceFormatForModel, type ManifestModel } from "@arke-studio/contracts";
 import { readFile } from "node:fs/promises";
-import { CLONED_VOICE_PROVIDER, deriveRehearsalLines, productionShape, TableReadPlanSchema, normalizeSpeechText, legacyVoiceModel, providerModelId, voiceFormatForModel,
+import { CLONED_VOICE_PROVIDER, deriveRehearsalLines, productionShape, TableReadPlanSchema, normalizeSpeechText, legacyVoiceModel, providerModelId,
   type ModelManifest, type Job, type ProviderStatus, type TableReadPlan } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { speechCacheFile, cachedVoiceAudioLooksRight, type SpeechSpec, type VoiceService } from "../voice/service.js";
@@ -20,11 +20,15 @@ export interface TableReadNarrator { provider: string; model?: string; voiceId: 
  * A film's table read stays the characters' lines alone, whatever is passed.
  */
 export async function planTableRead(store: WorldStore, productionId: string, sceneId: string, manifest: ModelManifest,
-  jobs: readonly Job[], providers: readonly ProviderStatus[], narrator: TableReadNarrator | null = null) {
+  jobs: readonly Job[], providers: readonly ProviderStatus[], readerProblem?: (model: ManifestModel, voiceId: string) => Promise<string | null>,
+  narrator: TableReadNarrator | null = null) {
   const production = store.getBundle().productions.find(p => p.meta.id === productionId), scene = production?.scenes.find(s => s.id === sceneId);
   if (!production || !scene) throw new Error("This rehearsal scene is unavailable.");
   const narration = productionShape(production.meta).playsAsBeats;
   const items: TableReadPlan["items"] = [], cloud: EnqueueInput[] = [], local: Array<{ file: string; spec: SpeechSpec }> = [], bindings: unknown[] = [];
+  // A plan may contain many lines for one reader. Revalidate on the next plan/confirmation,
+  // not once per line; neither successful nor refused discovery survives this invocation.
+  const readerProblems = new Map<string, string | null>();
   for (const line of deriveRehearsalLines(scene, store.getBundle().sheets, { narration })) {
     const item: TableReadPlan["items"][number] = { lineId: line.id, shotId: line.shotId, ...(line.blockId ? { blockId: line.blockId } : {}),
       ...(line.speakerSheetId ? { speakerSheetId: line.speakerSheetId } : {}), ...(line.narration ? { narration: true } : {}),
@@ -55,14 +59,13 @@ export async function planTableRead(store: WorldStore, productionId: string, sce
     // and Fish Audio presets too, which take a voice and the text as the table read sends them —
     // but not a cloned reader, whose upload is confirmed elsewhere and which writes flac.
     const voice = line.narration ? narrator ?? undefined : store.getBundle().sheets.find(s => s.id === line.speakerSheetId)?.voice;
-    if (!voice || (line.narration ? voice.provider === CLONED_VOICE_PROVIDER : !["kokoro", "elevenlabs"].includes(voice.provider))) {
+    if (!voice || (line.narration ? voice.provider === CLONED_VOICE_PROVIDER : !["kokoro", "elevenlabs", "google"].includes(voice.provider))) {
       item.reason = line.narration ? "Choose a supported narrator voice in Settings." : "No supported TTS assignment for this character."; continue;
     }
     const model = manifest.models.find(m => m.id === (voice.model ?? legacyVoiceModel(voice.provider, voice.voiceId)) && m.provider === voice.provider && m.capability === "voice-tts");
     if (!model) { item.reason = "The assigned TTS model is unavailable."; continue; }
-    // The cache is named in the format the model returns: Kokoro and the hosted readers write wav,
-    // ElevenLabs mp3; a file named for another format would never be found again.
-    const format = model.provider === "kokoro" ? "wav" : voiceFormatForModel(model);
+    const format = voiceFormatForModel(model);
+    // The table-read cache is read back as wav or mp3; a reader that writes flac is not one it plays.
     if (format === "flac") { item.reason = "This voice's audio cannot be read in a table read."; continue; }
     const spec: SpeechSpec = { provider: model.provider, model: providerModelId(model), voiceId: voice.voiceId, text: normalizeSpeechText(line.text), format };
     const file = speechCacheFile(spec);
@@ -79,7 +82,11 @@ export async function planTableRead(store: WorldStore, productionId: string, sce
     if (running) { item.route = "generating"; item.reason = `Existing preparation: ${running.status}.`; bindings.push({ jobId: running.id }); continue; }
     const status = providers.find(p => p.id === model.provider);
     if (!status?.configured || status.fault !== null || status.validation !== "valid" || !status.probes.some(p => p.capability === "voice-tts" && p.available)) { item.reason = "Validate this voice provider in Settings before preparation."; continue; }
-    if (model.limits.maxPromptChars !== undefined && spec.text.length > model.limits.maxPromptChars) { item.reason = "The line exceeds this model's character limit."; continue; }
+    const readerKey = JSON.stringify([model.provider, model.id, voice.voiceId]);
+    if (readerProblem && !readerProblems.has(readerKey)) readerProblems.set(readerKey, await readerProblem(model, voice.voiceId));
+    const problem = readerProblems.get(readerKey);
+    if (problem) { item.reason = problem; continue; }
+    if (!speechInputFits(spec.text, model.limits)) { item.reason = "The line exceeds this model's speech input limit."; continue; }
     if (model.provider === "kokoro") { item.route = "local"; local.push({ file, spec }); continue; }
     item.route = "cloud"; item.estimatedMicroUsd = estimateSpeechMicroUsd(model, spec.text);
     cloud.push({ worldId: store.worldId, productionId, target: { kind: "table-read-cache", id: line.id }, capability: "voice-tts", provider: model.provider, model: model.id,

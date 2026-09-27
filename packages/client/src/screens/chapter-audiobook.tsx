@@ -574,7 +574,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
             onClick={() => send({ confirmationToken: price.confirmationToken })}
             title="the words and the voice go to the provider · the text stays in Activity"
           >
-            Confirm {price.characters.toLocaleString()} characters · {formatMicroUsd(price.estimatedMicroUsd)}
+            Confirm {price.characters.toLocaleString()} characters · up to {formatMicroUsd(price.estimatedMicroUsd)}
             {price.voices.map((voice) => ` · ${voice.label} · ${readerPlace(voice.provider)}`).join("")}
           </Button>
           <Button variant="ghost" onClick={() => dismissAudiobookRun(worldId, prodId, chapter.id)}>
@@ -1788,7 +1788,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
           {takes.length > 0 && (
             <Button variant="ghost" onClick={() => onMakeAgain(row.block.key)} data-testid="audiobook-make-again">
               Make again
-              {model !== null && row.speaker.provider !== "kokoro" ? ` · ${formatMicroUsd(estimateSpeechMicroUsd(model, row.block.text))}` : ""}
+              {model !== null && row.speaker.provider !== "kokoro" ? ` · ${model.pricing.kind === "perToken" ? "up to " : ""}${formatMicroUsd(estimateSpeechMicroUsd(model, row.block.text))}` : ""}
             </Button>
           )}
           {onUpload !== undefined && (

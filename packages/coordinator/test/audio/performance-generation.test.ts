@@ -14,6 +14,35 @@ import { SHIPPED_MANIFEST } from "../../../providers/src/manifest-data.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { wav } from "./helpers.js";
 
+it("prepares a priced Gemini performance with separate style and refuses spans the single-line path cannot render", async t => {
+  const dir = await makeTempWorld();
+  const sheetPath = join(dir, "characters", "maren-kest.md");
+  await writeFile(sheetPath, (await readFile(sheetPath, "utf8")).replace("provider: elevenlabs", "provider: google")
+    .replace(/(  voiceId: )v_8Kq2(\r?\n)/, "$1Charon$2  model: gemini-3.8-flash-tts$2"));
+  const store = await WorldStore.open(dir); t.after(() => store.close());
+  const hasLine = (scene: ReturnType<typeof store.getBundle>["productions"][number]["scenes"][number]) =>
+    orderedShots(scene).some(shot => { const line = resolvePerformanceLine(scene, shot.id); return line.ok && line.speakerSheetId === "maren-kest"; });
+  const production = store.getBundle().productions.find(p => p.scenes.some(hasLine))!;
+  const scene = production.scenes.find(hasLine)!;
+  const shot = orderedShots(scene).find(shot => { const line = resolvePerformanceLine(scene, shot.id); return line.ok && line.speakerSheetId === "maren-kest"; })!;
+  const line = resolvePerformanceLine(scene, shot.id); assert.ok(line.ok);
+  const model = SHIPPED_MANIFEST.models.find(m => m.id === "gemini-3.8-flash-tts")!;
+  const request = { kind: "prepare-performance-generation" as const, requestId: ulid(), worldId: store.worldId,
+    productionId: production.meta.id, sceneId: scene.id, shotId: shot.id, expectedSceneVersion: scene.version, expectedVoiceId: "Charon", modelId: model.id,
+    cadencePlan: { schemaVersion: 1 as const, sourceTextHash: audioHash(Buffer.from(normalizeSpeechText(line.text))), delivery: "warm" as const, speed: 1, phrase: "quietly confident", cues: [] } };
+  const quote = await preparePerformanceGeneration(store, model, request);
+  assert.equal(quote.mapping.providerText, normalizeSpeechText(line.text));
+  assert.match(quote.mapping.instructions!, /warmly.*quietly confident/);
+  assert.ok(quote.estimatedMicroUsd > 0);
+  validatePerformanceGeneration(store, model, quote, quote.estimatedMicroUsd);
+  assert.throws(() => validatePerformanceGeneration(store, model, quote, quote.estimatedMicroUsd - 1), /stale/);
+  const job = performanceGenerationJob(store, quote, ulid());
+  assert.equal(job.params.instructions, quote.mapping.instructions);
+  assert.equal(job.params.audioFormat, "wav");
+  await assert.rejects(preparePerformanceGeneration(store, model, { ...request, cadencePlan: { ...request.cadencePlan,
+    cues: [{ kind: "delivery", span: { from: 0, to: 4, text: normalizeSpeechText(line.text).slice(0, 4) }, delivery: "whispered" }] } }), /one delivery.*audiobook/);
+});
+
 it("quotes exact decorated wording and keeps paid output with unknown duration through replay and restart", async t => {
   const dir = await makeTempWorld();
   // The fixture's assignment predates model choice and resolves to the multilingual model, which

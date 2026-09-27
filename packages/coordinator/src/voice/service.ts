@@ -1,4 +1,4 @@
-import { quoteSpeech } from "@arke-studio/contracts";
+import { quoteSpeech, speechInputFits } from "@arke-studio/contracts";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -77,6 +77,8 @@ export interface VoiceServiceDeps {
   hostedReaders?: Array<{ provider: string; model: string }>;
   /** Why a keyed reader cannot read now — a rejected key, a fault — carried onto its candidates. */
   readerAvailability?: (provider: string) => { unavailableReason?: string };
+  /** Live Settings decision, rechecked after asynchronous catalogue discovery. */
+  modelEnabled?: (model: string) => boolean;
   getKey: (provider: string) => Promise<string | null>;
   emit: (event: DomainEvent) => void;
   clock?: () => string;
@@ -462,6 +464,7 @@ export function previewCacheFile(
 }
 
 export class VoiceService {
+  get localSpeechConfigured(): boolean { return this.deps.sidecar !== null; }
   constructor(private readonly deps: VoiceServiceDeps) {}
 
   private now(): string {
@@ -479,6 +482,14 @@ export class VoiceService {
   async catalogue(
     clonedVoices: readonly ClonedVoice[] = [],
     clonedAvailability: { local?: boolean; unavailableReason?: string } = {},
+  ): Promise<VoiceCandidate[]> {
+    return (await this.rawCatalogue(clonedVoices, clonedAvailability))
+      .filter(voice => this.deps.modelEnabled?.(voice.model) !== false);
+  }
+
+  private async rawCatalogue(
+    clonedVoices: readonly ClonedVoice[],
+    clonedAvailability: { local?: boolean; unavailableReason?: string },
   ): Promise<VoiceCandidate[]> {
     let local = this.deps.localPresets;
     if (this.deps.sidecar) {
@@ -533,9 +544,14 @@ export class VoiceService {
   }
 
   /** The keyed cloud catalogues, which are unaffected by whatever the local engine is doing. */
-  private async cloudVoices(): Promise<VoiceCandidate[]> {
+  async cloudCatalogue(provider: string): Promise<VoiceCandidate[]> {
+    return (await this.cloudVoices(provider)).filter(voice => this.deps.modelEnabled?.(voice.model) !== false);
+  }
+
+  private async cloudVoices(provider?: string): Promise<VoiceCandidate[]> {
     const cloud: VoiceCandidate[] = [];
     for (const source of this.deps.cloudSources) {
+      if (provider !== undefined && source.provider !== provider) continue;
       const key = await this.deps.getKey(source.provider);
       if (key === null) continue; // unkeyed providers simply contribute nothing
       cloud.push(...(await source.list(key).catch(() => [])));
@@ -564,7 +580,7 @@ export class VoiceService {
             entry.id === candidate.model &&
             entry.capability === "voice-tts",
         );
-        if (model === undefined) return [];
+        if (model === undefined || !speechInputFits(normalizeSpeechText(line.text), model.limits)) return [];
         const text = normalizeSpeechText(line.text);
         const quote = quoteSpeech(model, text, { at: this.now() });
         const target = voiceTargetKey(candidate);
@@ -794,6 +810,9 @@ export class VoiceService {
       voiceUploadConfirmedFor,
     } = input;
     const normalized = normalizeSpeechText(line.text);
+    if (!speechInputFits(normalized, model.limits)) {
+      throw new Error("The preview line exceeds this model's request limit. Shorten the line or use an audiobook read in parts.");
+    }
     const quote = quoteSpeech(model, normalized, { at: this.now() });
     if (quote.unit === "token" && input.quoteToken !== speechConsentToken(JSON.stringify([voiceTargetKey({ provider, model: model.id, voiceId }), normalized]), [quote])) {
       throw new Error("The preview price changed. Reopen the voice picker to review its current price.");
@@ -891,6 +910,10 @@ export function voiceLineRequest(input: {
   const assignedModel = voice.model;
   if (voice.provider !== input.model.provider || (assignedModel !== undefined && assignedModel !== input.model.id)) {
     throw new Error("The assigned voice no longer matches its speech model — choose the voice again.");
+  }
+  const instructions = input.delivery === undefined ? undefined : input.model.cadence?.deliveryMappings[input.delivery]?.instruction;
+  if (!speechInputFits(input.text, input.model.limits, instructions)) {
+    throw new Error("The line and its direction exceed this model's request limit. Shorten it or use an audiobook read in parts.");
   }
   const quote = quoteSpeech(input.model, input.text, { delivery: input.delivery, language: input.language, at: input.at });
   if (quote.unit === "token" && (input.confirmedSpeechMicroUsd === undefined || input.confirmedSpeechMicroUsd < quote.authorisedMicroUsd)) {

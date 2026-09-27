@@ -63,11 +63,14 @@ export function VoiceLinesControl({
   preparing,
   notice,
   onPrepare,
+  ceiling = false,
 }: {
   plan: TableReadPlan | null;
   preparing: boolean;
   notice: string;
   onPrepare: () => void;
+  /** A per-token reader's price is a ceiling, said "up to" as Preview's Play lines says it. */
+  ceiling?: boolean;
 }) {
   if (plan === null || plan.items.length === 0) return null;
   const missing = plan.items.filter((item) => item.route === "local" || item.route === "cloud");
@@ -79,7 +82,7 @@ export function VoiceLinesControl({
       {missing.length > 0 ? (
         <button type="button" className="fy-swvoice__go" disabled={preparing} onClick={onPrepare}>
           {preparing ? "Voicing…" : `Voice ${missing.length} line${missing.length === 1 ? "" : "s"}`}
-          {plan.totalEstimatedMicroUsd > 0 ? ` · ${formatMicroUsd(plan.totalEstimatedMicroUsd)}` : ""}
+          {plan.totalEstimatedMicroUsd > 0 ? ` · ${ceiling ? "up to " : ""}${formatMicroUsd(plan.totalEstimatedMicroUsd)}` : ""}
         </button>
       ) : null}
       {notice === "" ? null : <span role="status" className="fy-swvoice__notice">{notice}</span>}

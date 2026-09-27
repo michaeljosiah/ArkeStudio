@@ -142,6 +142,7 @@ async function withHarness(
     seed?: (worldDir: string, bundle: import("@arke-studio/contracts").WorldBundle) => Promise<void>;
     /** A composition without voice at all. */
     voiceless?: boolean;
+    cloudOnly?: boolean;
     /** The sidecar's synthesis, when a test needs to watch it or hold it. */
     synthesize?: (request: { voiceId: string; text: string }, options?: { signal?: AbortSignal }) => Promise<Uint8Array>;
     /** A measurement for every filed take, so a test can see a restored file measured afresh. */
@@ -202,7 +203,7 @@ async function withHarness(
       ? {}
       : {
           voice: {
-            sidecar: {
+            sidecar: input.cloudOnly ? null : {
               health: async () => ({ engineStatus: { kokoro: { ready: true } } }),
               listVoices: async () => input.localVoices ?? [{ id: "bm_george", label: "George", attributes: [] }],
               synthesize: async (request: { voiceId: string; text: string; params?: Record<string, number> }, options?: { signal?: AbortSignal }) => {
@@ -619,6 +620,19 @@ describe("the audiobook run (turn 146)", () => {
       const finished = events.find((e): e is Finished => e.type === "audiobook.finished");
       assert.equal(finished?.outcome, "unavailable");
       assert.ok(finished?.reason);
+    }));
+
+  it("a cloud-only host refuses an unavailable local narrator before chapter or book synthesis", () =>
+    withHarness({ cloudOnly: true }, async ({ events, send, spoken }) => {
+      await read(send);
+      const chapter = events.find((e): e is Finished => e.type === "audiobook.finished");
+      assert.equal(chapter?.outcome, "unavailable");
+      assert.match(chapter?.reason ?? "", /configured cloud narrator/);
+      await send({ kind: "read-audiobook-book", worldId: WORLD_ID, productionId: LEDGER });
+      const book = events.find(e => e.type === "audiobook.book-finished");
+      assert.equal(book?.outcome, "unavailable");
+      assert.equal(events.some(e => e.type === "audiobook.book-started" || e.type === "audiobook.started" || e.type === "job.updated"), false);
+      assert.deepEqual(spoken, []);
     }));
 
   it("local synthesis is one call at a time across chapters (codex on PR 1180)", async () => {

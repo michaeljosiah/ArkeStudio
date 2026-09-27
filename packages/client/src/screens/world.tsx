@@ -1564,6 +1564,7 @@ function VoiceCard({
   onChange: () => void;
 }) {
   const voice = sheet.voice;
+  const models = useStore().state?.app.manifest?.models ?? [];
   const world = useWorld();
   const sample = world?.referenceKits.find(k => k.sheetId === sheet.id)?.designatedVoiceSample;
   const sampleClip: Clip | null = sample ? { id: `${sheet.id}/${sample.file}`, url: mediaUrl(worldSlug, `references/${sheet.id}/${sample.file}`), title: `${sheet.name} · assigned voice reference` } : null;
@@ -1646,7 +1647,7 @@ function VoiceCard({
           <Button variant="ghost" disabled={busy} onClick={() => start()}>
             {busy
               ? "Preparing…"
-              : `Hear this voice${cloudPrice !== null ? ` · ${formatMicroUsd(cloudPrice)}` : ""}`}
+              : `Hear this voice${cloudPrice !== null ? ` · ${models.some(model => model.provider === voice.provider && model.id === voiceModel && model.pricing.kind === "perToken") ? "up to " : ""}${formatMicroUsd(cloudPrice)}` : ""}`}
           </Button>
         ) : (
           voice &&

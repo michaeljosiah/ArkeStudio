@@ -1,4 +1,4 @@
-import { quoteSpeech } from "@arke-studio/contracts";
+import { quoteSpeech, speechInputFits } from "@arke-studio/contracts";
 import { stageArtifactProblem } from "../productions/stage-playblast.js";
 import { planSubjectCharacterAudio, characterAudioInstructions, referencePrompt, referenceInputProblem, type FrozenPerformanceAudio } from "@arke-studio/contracts";
 import { readdir } from "node:fs/promises";
@@ -932,6 +932,12 @@ export function planBenchDispatch(
     const mapped = deliveryParams(model.provider, params.delivery as Delivery);
     if (!mapped.ok) return { ok: false, reason: mapped.reason };
     voiceSettings = mapped.params;
+  }
+  if (params.kind === "voice") {
+    const instructions = params.delivery === undefined ? undefined : model.cadence?.deliveryMappings[params.delivery as Delivery]?.instruction;
+    if (!speechInputFits(composer.brief, model.limits, instructions)) {
+      return { ok: false, reason: "The line and its direction exceed this model's request limit. Shorten it or use an audiobook read in parts." };
+    }
   }
   if (params.kind === "voice" && params.voiceId === undefined) {
     return { ok: false, reason: "No voice is chosen — pick one to read this." };

@@ -1201,7 +1201,7 @@ export class Coordinator {
     let narrator: Promise<TableReadNarrator | null> | null = null;
     return async (sceneId) => {
       narrator ??= this.tableReadNarrator(store, productionId);
-      const { plan } = await planTableRead(store, productionId, sceneId, manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers, await narrator);
+      const { plan } = await planTableRead(store, productionId, sceneId, manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers, undefined, await narrator);
       return new Map(plan.items.flatMap((item) => (item.file === undefined ? [] : [[item.lineId, item.file] as const])));
     };
   }
@@ -1218,11 +1218,52 @@ export class Coordinator {
     return narrator;
   }
 
-  /**
-   * The narrator an audiobook reads in (SPEC-047 R-11, R-46): the book's own when it has one and
-   * that voice can speak now, the app's otherwise — followed as it changes. Every read outside
-   * the audiobook keeps the app's.
-   */
+  /** Saved Gemini choices are revalidated against the current key before a quote or new job. */
+  private async requireEnabledSpeechReader(model: import("@arke-studio/contracts").ManifestModel, voiceId: string): Promise<void> {
+    if (this.readModel.getState().app.models.disabled.includes(model.id)) throw new Error(`${model.displayName} is turned off in AI models.`);
+    if (model.provider === "google") {
+      const catalogue = await this.voiceService?.cloudCatalogue("google");
+      if (!catalogue?.some(voice => voice.provider === model.provider && voice.model === model.id && voice.voiceId === voiceId)) {
+        throw new Error("That Gemini voice is not available with the current Google key. Choose an available voice or update the key.");
+      }
+    }
+  }
+
+  private readonly speechAdmissionChecks = new WeakMap<EnqueueInput, Map<string, Promise<void>>>();
+
+  private async requireSpeechInputsAvailable(inputs: readonly EnqueueInput[], checked = new Map<string, Promise<void>>()): Promise<void> {
+    for (const input of inputs) {
+      if (input.capability !== "voice-tts") continue;
+      if (this.readModel.getState().app.models.disabled.includes(input.model)) throw new Error("That voice model is turned off in AI models.");
+      if (input.provider !== "google") continue;
+      const model = this.opts.manifest?.models.find(row => row.id === input.model && row.provider === input.provider);
+      if (!model) throw new Error("That Gemini voice model is unavailable.");
+      const voiceId = typeof input.params.voiceId === "string" ? input.params.voiceId : "";
+      const key = await this.credentials?.get("google") ?? null;
+      const credential = key === null ? null : createHash("sha256").update(key).digest("hex");
+      const identity = JSON.stringify([model.id, voiceId, credential]);
+      let checking = checked.get(identity);
+      if (!checking) {
+        checking = (async () => {
+          await this.requireEnabledSpeechReader(model, voiceId);
+          if ((await this.credentials?.get("google") ?? null) !== key) throw new Error("The Google key changed during voice validation. Try the read again.");
+        })();
+        checked.set(identity, checking);
+      }
+      await checking;
+    }
+  }
+
+  /** Validation results live only for this batch, never in durable jobs or across key changes. */
+  private async enqueueWithSpeechChecks(input: EnqueueInput, checks: Map<string, Promise<void>>) {
+    if (!this.jobQueue) throw new Error("the job queue is unavailable");
+    const frozen = { ...this.freezeLocalIdentity(input) };
+    this.speechAdmissionChecks.set(frozen, checks);
+    try { return await this.jobQueue.enqueue(frozen); }
+    finally { this.speechAdmissionChecks.delete(frozen); }
+  }
+
+  /** The book's available reader, or the app's; reading still checks the host's local capability. */
   private async audiobookNarrator(store: WorldStore, voice: VoiceService | null, productionId?: string): Promise<{ narrator: AudiobookReader; catalogue: VoiceCandidate[] }> {
     const narratorSettings = this.appSettings ? await this.appSettings.load() : null;
     const clonedVoices = store.getBundle().clonedVoices ?? [];
@@ -1252,6 +1293,11 @@ export class Coordinator {
   ): Promise<{ outcome: "read" | "stopped" | "unavailable" | "failed" | "refused"; made: number; flagged: number; reason?: string }> {
     const at = () => new Date().toISOString();
     let ending: { outcome: "read" | "stopped" | "unavailable" | "failed" | "refused"; made: number; flagged: number; reason?: string } = { outcome: "failed", made: 0, flagged: 0, reason: "the run ended without a word" };
+    if (room.narrator.provider === "kokoro" && !voice.localSpeechConfigured) {
+      ending = { outcome: "unavailable", made: 0, flagged: 0, reason: "Local narration is unavailable on this host. Choose a configured cloud narrator." };
+      this.emit({ at: at(), type: "audiobook.finished", ...ids, ...ending });
+      return ending;
+    }
     await runAudiobookChapter({
       store,
       worldId: ids.worldId,
@@ -1582,6 +1628,10 @@ export class Coordinator {
     ).filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined);
     const narrator = narratorFor(narratorSettings?.narrator ?? null, narrationCatalogue);
     const speaking = { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId };
+    if (speaking.provider === "kokoro" && !this.voiceService.localSpeechConfigured) {
+      fail("Local narration is unavailable on this host. Choose a configured cloud narrator in Settings.", characters);
+      return;
+    }
     if (speaking.provider === "kokoro" && speaking.model === "kokoro-82m") {
       const ready = (
         block: { heading: string; text: string },
@@ -1987,6 +2037,10 @@ export class Coordinator {
       }),
     );
     const isLocal = (voice: { provider: string; model: string }) => voice.provider === "kokoro" && voice.model === "kokoro-82m";
+    if (speaking.some(isLocal) && !this.voiceService.localSpeechConfigured) {
+      fail("Local narration is unavailable on this host. Choose a configured cloud narrator in Settings.", characters);
+      return;
+    }
     const ready = (index: number, file: string, cached: boolean, provider: string, model: string, voiceId: string, format: string, estimated = 0) =>
       this.emit({
         at: new Date().toISOString(),
@@ -2702,6 +2756,8 @@ export class Coordinator {
             // refused with the readiness reason before anything is journalled. `unknown`
             // dispatches (D15) — the floor could not be checked, which is not a refusal.
             admit: async (input) => {
+              try { await this.requireSpeechInputsAvailable([input], this.speechAdmissionChecks.get(input)); }
+              catch (error) { return { ok: false, reason: describeCoordinatorError(error) }; }
               if (input.params.adapters !== undefined) {
                 if (input.provider !== "comfyui") return { ok: false, reason: "Adapters are supported only by local ComfyUI recipes." };
                 try { await this.guardAdapters(input.model, input.params.adapters); }
@@ -2804,6 +2860,7 @@ export class Coordinator {
           sidecar: opts.voice.sidecar,
           localPresets: opts.voice.localPresets,
           cloudSources: opts.voice.cloudSources,
+          modelEnabled: (model) => !this.readModel.getState().app.models.disabled.includes(model),
           ...(opts.voice.hostedReaders !== undefined ? { hostedReaders: opts.voice.hostedReaders } : {}),
           // A hosted reader whose key the vendor has rejected still lists its candidates, marked
           // with the probe's reason: an assignment stays visible, and nothing is queued to fail
@@ -5451,13 +5508,14 @@ export class Coordinator {
       this.emitEnqueueResult(requestId, command, 0, [], [], true);
       return { accepted: true, jobIds: [] };
     }
+    const speechChecks = new Map<string, Promise<void>>();
     const outcome = await enqueueInputs(inputs, async input => {
       if (input.params.audioReferences !== undefined) {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== input.worldId) throw new Error("The owning world is unavailable.");
         await readCharacterAudioInputs(store, input, true);
       }
-      return this.jobQueue!.enqueue(this.freezeLocalIdentity(input));
+      return this.enqueueWithSpeechChecks(input, speechChecks);
     });
     this.emitEnqueueResult(
       requestId,
@@ -8274,6 +8332,10 @@ export class Coordinator {
             msg.voice.model ??
             legacyVoiceModel(msg.voice.provider, msg.voice.voiceId, store.getBundle().clonedVoices) ??
             undefined;
+          if (requestedModel !== undefined && this.readModel.getState().app.models.disabled.includes(requestedModel)) {
+            result("refused", "That voice model is turned off in AI models.");
+            return;
+          }
           const selected =
             requestedModel === undefined
               ? undefined
@@ -11785,6 +11847,11 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, plan.reason);
           return;
         }
+        try { await this.requireSpeechInputsAvailable(plan.inputs); }
+        catch (error) {
+          this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error));
+          return;
+        }
         const hasClonedVoice = plan.inputs.some(
           (input) => input.provider === "comfyui" && input.voiceReference === true,
         );
@@ -11848,10 +11915,11 @@ export class Coordinator {
           await this.refreshBench(msg.worldId, msg.sessionId);
           return;
         }
+        const speechChecks = new Map<string, Promise<void>>();
         const outcome = await enqueueInputs(plan.inputs, async (input) => {
           if (!this.jobQueue) throw new Error("the job queue is unavailable");
           if (input.params.audioReferences !== undefined) await readCharacterAudioInputs(store, input, true);
-          return this.jobQueue.enqueue(this.freezeLocalIdentity(input));
+          return this.enqueueWithSpeechChecks(input, speechChecks);
         });
         // Jobs join their reserved takes in order: a failure keeps its number and says why.
         const failed = new Map(outcome.failures.map((f) => [f.index, f.reason]));
@@ -13598,6 +13666,7 @@ export class Coordinator {
         if (voice === null) return refuse("no voice service");
         try {
           const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId)), models: this.opts.manifest?.models ?? [] };
+          if ((msg.voice ?? room.narrator).provider === "kokoro" && !voice.localSpeechConfigured) return refuse("Local narration is unavailable on this host. Choose a configured cloud narrator.");
           const heard = await hearAudiobookLine(store, msg.productionId, msg.chapterFile, msg.block, msg.voice === undefined ? room : { ...room, narrator: msg.voice }, {
             quoteToken: msg.quoteToken,
             local: (voiceId, text, settings) => voice.synthesizeDirected(voiceId, text, settings, new AbortController().signal),
@@ -13714,6 +13783,12 @@ export class Coordinator {
         let ended = false;
         try {
           const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId)), models: this.opts.manifest?.models ?? [] };
+          if (room.narrator.provider === "kokoro" && !voice.localSpeechConfigured) {
+            this.emit({ at: at(), type: "audiobook.book-finished", ...ids, outcome: "unavailable", chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0,
+              reason: "Local narration is unavailable on this host. Choose a configured cloud narrator." });
+            ended = true;
+            return;
+          }
           await runAudiobookBook({
             store,
             worldId: msg.worldId,
@@ -13949,8 +14024,9 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, `No ${voice.provider} voice model is available.`);
           return;
         }
-        if (this.readModel.getState().app.models.disabled.includes(model.id)) {
-          this.rejectEnqueue(msg.requestId, msg.kind, `${model.displayName} is turned off in AI models.`);
+        try { await this.requireEnabledSpeechReader(model, voice.voiceId); }
+        catch (error) {
+          this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error));
           return;
         }
         const source = voiceSourceFor(bundle.clonedVoices, voice.provider, model.id, voice.voiceId);
@@ -14055,6 +14131,10 @@ export class Coordinator {
         return;
       }
       case "voice-preview": {
+        if (this.readModel.getState().app.models.disabled.includes(msg.model)) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "That voice model is turned off in AI models.");
+          return;
+        }
         const store = this.opts.provider.openStore?.();
         if (!store || !this.voiceService) {
           this.rejectEnqueue(msg.requestId, msg.kind, "Voice preview is unavailable.");
@@ -15954,7 +16034,12 @@ export class Coordinator {
         try {
           if (!store || store.worldId !== msg.worldId || !this.opts.manifest) throw new Error("Open this rehearsal world first.");
           const narrator = await this.tableReadNarrator(store, msg.productionId);
-          const prepared = await planTableRead(store, msg.productionId, msg.sceneId, this.opts.manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers, narrator);
+          const readerProblem = async (model: import("@arke-studio/contracts").ManifestModel, voiceId: string) => {
+            if (model.provider === "kokoro" && !this.voiceService?.localSpeechConfigured) return "Local narration is unavailable on this host.";
+            try { await this.requireEnabledSpeechReader(model, voiceId); return null; }
+            catch (error) { return describeCoordinatorError(error); }
+          };
+          const prepared = await planTableRead(store, msg.productionId, msg.sceneId, this.opts.manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers, readerProblem, narrator);
           if (msg.kind === "prepare-table-read") {
             if (prepared.plan.confirmationToken !== msg.confirmationToken || prepared.plan.totalEstimatedMicroUsd !== msg.confirmedMicroUsd) {
               this.emit({ type: "rehearsal.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId, status: "planned", plan: prepared.plan,
@@ -15977,7 +16062,7 @@ export class Coordinator {
                 reason: `The cloud lines were not queued: ${queued.reason ?? "the queue refused them."}` });
               return;
             }
-            const refreshed = await planTableRead(store, msg.productionId, msg.sceneId, this.opts.manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers, narrator);
+            const refreshed = await planTableRead(store, msg.productionId, msg.sceneId, this.opts.manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers, readerProblem, narrator);
             const notices = [
               failures.length ? `${failures.length} local lines could not be prepared.` : null,
               queued?.reason !== undefined ? `Some cloud lines were not queued: ${queued.reason}` : null,
@@ -16032,12 +16117,13 @@ export class Coordinator {
         try {
           const model = this.opts.manifest?.models.find(m => m.id === msg.modelId);
           if (!store || store.worldId !== msg.worldId || !model) throw new Error("Open this world and choose a TTS model.");
+          await this.requireEnabledSpeechReader(model, msg.expectedVoiceId);
           const quote = await preparePerformanceGeneration(store, model, msg);
           this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
             productionId: msg.productionId, status: "prepared", quote });
-        } catch {
+        } catch (error) {
           this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
-            productionId: msg.productionId, status: "refused", reason: "Cannot prepare this performance. Check the current line, voice, model and every cadence control." });
+            productionId: msg.productionId, status: "refused", reason: describeCoordinatorError(error) });
         }
         return;
       }
@@ -16058,6 +16144,7 @@ export class Coordinator {
           const quote = await readPerformanceGenerationQuote(store, msg.operationId);
           const model = this.opts.manifest?.models.find(m => m.id === quote.mapping.model);
           if (!model) throw new Error("The quoted model is unavailable.");
+          await this.requireEnabledSpeechReader(model, quote.voiceAssignment.voiceId);
           validatePerformanceGeneration(store, model, quote, msg.confirmedMicroUsd);
           if (quote.local) {
             if (!this.voiceService) throw new Error("Local synthesis is unavailable.");
@@ -16092,7 +16179,7 @@ export class Coordinator {
               return;
             await this.enqueueBatch(msg.requestId, msg.kind, [performanceGenerationJob(store, quote, msg.requestId, { voiceReference: source.kind === "cloned" })]);
           }
-        } catch { this.rejectEnqueue(msg.requestId, msg.kind, "Performance generation did not complete. Check the quote, current line and voice, engine readiness and cancellation. Existing and paid outputs are retained."); }
+        } catch (error) { this.rejectEnqueue(msg.requestId, msg.kind, `Performance generation did not complete: ${describeCoordinatorError(error)} Existing and paid outputs are retained.`); }
         finally { this.performanceGenerations.delete(operationKey); }
         return;
       }
@@ -17718,6 +17805,7 @@ export class Coordinator {
       adapterRecipeFor: (modelId, selections) => this.adapterRecipeIdentity(modelId, selections),
     });
     if (!plan.ok) throw new Error(plan.reason);
+    await this.requireSpeechInputsAvailable(plan.inputs);
     const estimatedMicroUsd = plan.inputs.reduce((total, input) => total + input.estimatedMicroUsd, 0);
     const snapshot = plan.reserved[0]!.request;
     const references = [...snapshot.references, ...snapshot.keyframes]
