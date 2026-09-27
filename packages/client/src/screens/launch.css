@@ -393,9 +393,9 @@
 /* Pairing on a stacked screen: the band steps down, and gives way entirely while a field has
    the keyboard up, so the field and its button stay above it. */
 .fy-launch--compact .fy-launch__art { height: 200px; }
-.fy-launch:has(.fy-launch__column input:focus) .fy-launch__art { display: none; }
-.fy-launch:has(.fy-launch__column input:focus) .fy-launch__hello p { display: none; }
-.fy-launch:has(.fy-launch__column input:focus) .fy-launch__column { padding-top: calc(env(safe-area-inset-top, 0px) + 20px); }
+.fy-launch--typing .fy-launch__art { display: none; }
+.fy-launch--typing .fy-launch__hello p { display: none; }
+.fy-launch--typing .fy-launch__column { padding-top: calc(env(safe-area-inset-top, 0px) + 20px); }
 
 /* ---- first-start setup (76b and 15a on this surface) -------------- */
 
@@ -542,13 +542,14 @@
   .fy-launch { flex-direction: row; overflow: hidden; }
   .fy-launch__art,
   .fy-launch--compact .fy-launch__art,
-  .fy-launch:has(.fy-launch__column input:focus) .fy-launch__art {
+  .fy-launch--typing .fy-launch__art {
     display: block;
     width: 49%;
     height: 100%;
     border-right: 1px solid var(--launch-seam);
   }
-  .fy-launch:has(.fy-launch__column input:focus) .fy-launch__hello p { display: block; }
+  .fy-launch--typing .fy-launch__hello p { display: block; }
+  .fy-launch--typing .fy-launch__column { padding-top: clamp(56px, 15dvh, 128px); }
   .fy-launch__art::after {
     background: linear-gradient(
       180deg,

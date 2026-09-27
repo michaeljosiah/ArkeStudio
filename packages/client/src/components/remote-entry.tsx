@@ -40,6 +40,14 @@ export function RemoteEntry({ children }: { children: ReactNode }) {
   const [error, setError] = useState<{ title: string; line: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  // The band gives way while a field has the keyboard (158i). It comes back only once focus has
+  // left the form, a beat later: collapsing on the field's own blur moved Request pairing out
+  // from under the tap that blurred it, and the tap landed on nothing.
+  const [typing, setTyping] = useState(false);
+  const form = useRef<HTMLFormElement>(null);
+  const leave = () => setTimeout(() => {
+    if (!form.current?.contains(document.activeElement)) setTyping(false);
+  }, 200);
   // Whether this browser has asked and is waiting: a pairing check that then answers anything but
   // "pending" or "approved" means the PC said no, or the request ran out.
   const asked = useRef(false);
@@ -104,7 +112,13 @@ export function RemoteEntry({ children }: { children: ReactNode }) {
   let body: ReactNode;
   if (state === "pair") {
     body = (
-      <form className="fy-launch__pair" onSubmit={event => { event.preventDefault(); void pair(); }}>
+      <form
+        ref={form}
+        className="fy-launch__pair"
+        onFocus={() => setTyping(true)}
+        onBlur={leave}
+        onSubmit={event => { event.preventDefault(); setTyping(false); void pair(); }}
+      >
         <label className="fy-launch__field">
           <span>Pairing code</span>
           <input
@@ -171,7 +185,7 @@ export function RemoteEntry({ children }: { children: ReactNode }) {
 
   const pairing = state === "pair" || state === "pending";
   return (
-    <LaunchFrame compact={state === "pair"}>
+    <LaunchFrame compact={state === "pair"} typing={state === "pair" && typing}>
       <div className="fy-launch__hello">
         {pairing ? (
           <>

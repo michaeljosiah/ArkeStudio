@@ -145,12 +145,12 @@ function LaunchArt({ version, remote }: { version: string | null; remote: boolea
  * front of a remote session (components/remote-entry.tsx) draws its states inside the same frame,
  * so a phone meets one designed first screen rather than a plain card and then this one.
  */
-export function LaunchFrame({ children, compact = false }: { children: React.ReactNode; compact?: boolean }) {
+export function LaunchFrame({ children, compact = false, typing = false }: { children: React.ReactNode; compact?: boolean; typing?: boolean }) {
   const { state } = useStore();
   const version =
     state?.app.version ?? (typeof window === "undefined" ? null : window.arke?.appVersion ?? null);
   return (
-    <div className={compact ? "fy-launch fy-launch--compact" : "fy-launch"} data-screen="startup">
+    <div className={`fy-launch${compact ? " fy-launch--compact" : ""}${typing ? " fy-launch--typing" : ""}`} data-screen="startup">
       <LaunchArt version={version} remote={remoteStudio() !== null} />
       <main className="fy-launch__column">
         <Wordmark />
