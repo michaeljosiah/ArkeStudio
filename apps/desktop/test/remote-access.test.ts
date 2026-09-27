@@ -87,6 +87,43 @@ it("desktop hosting persists opt-in, restarts on the same coordinator, and disab
     assert.ok(fake.commands.some(args => args.includes("off")));
   } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
 });
+it("persists recoverable ownership before initial and subsequent Serve publication", async () => {
+  const root = await mkdtemp(join(tmpdir(), "arke-remote-publication-intent-"));
+  await writeFile(join(root, "index.html"), "<head></head>");
+  const fake = tailscale();
+  const publish = fake.client.enable.bind(fake.client);
+  let publications = 0;
+  fake.client.enable = async (...args) => {
+    assert.deepEqual(JSON.parse(await readFile(join(root, "remote/settings.json"), "utf8")),
+      { enabled: true, startOnLogin: false, origin }, "a process exit after Serve publishes must leave durable recovery intent");
+    publications++;
+    return publish(...args);
+  };
+  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+    startupSupported: false, setStartOnLogin: () => {}, tailscale: fake.client });
+  try {
+    await host.initialize();
+    assert.equal((await host.command({ kind: "enable" })).status.running, true);
+    await host.command({ kind: "disable" });
+    assert.equal(JSON.parse(await readFile(join(root, "remote/settings.json"), "utf8")).enabled, false);
+    assert.equal((await host.command({ kind: "enable" })).status.running, true);
+    assert.equal(publications, 2);
+  } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
+});
+it("does not publish when the ownership record cannot be committed", async () => {
+  const root = await mkdtemp(join(tmpdir(), "arke-remote-intent-failure-"));
+  await writeFile(join(root, "index.html"), "<head></head>");
+  const fake = tailscale();
+  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+    startupSupported: false, setStartOnLogin: () => {}, tailscale: fake.client });
+  try {
+    await host.initialize();
+    await mkdir(join(root, "remote/settings.json"), { recursive: true });
+    const reply = await host.command({ kind: "enable" });
+    assert.equal(reply.status.running, false); assert.ok(reply.status.reason);
+    assert.equal(fake.commands.some(args => args.includes("--bg")), false);
+  } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
+});
 it("Quit keeps its port bound if mapping removal fails, then permits a safe retry", async () => {
   const root = await mkdtemp(join(tmpdir(), "arke-remote-stop-"));
   await writeFile(join(root, "index.html"), "<head></head>");

@@ -123,6 +123,8 @@ and the transport/preload regressions above. The focused suites cover code expir
 approval persistence, origin/host confinement, revocation, and preserving other Serve mappings.
 They also check host-file command rejection over live sockets, approved-cookie promotion after
 restart, stale forwarding with a damaged registry, and port retention when cleanup fails.
+Publication tests verify that ownership is committed before Serve runs, both initially and
+after Disable, and that a failed ownership write prevents publication.
 Desktop `test/startup.test.ts` covers cleanup retries without a second host and slow remote
 unpublication before the core shutdown deadline.
 After building, an opt-in real HTTPS check is:

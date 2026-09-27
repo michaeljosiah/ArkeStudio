@@ -46,6 +46,8 @@ On startup, a stale mapping is withdrawn before the device registry is loaded. I
 fails, an inert listener reserves the port until Disable or Quit can remove the mapping. Damaged
 device records remain untouched. A failed desktop startup also drains the previous host before
 Retry can construct a replacement.
+Studio saves its ownership record before publishing HTTPS, so a process exit during Enable
+still leaves enough information for this recovery on the next start.
 
 If the PC or Tailscale is offline, an already open page retries. A new tab may show the browser's
 own network error because no page can be served. Resume the PC and connect Tailscale, then reload.

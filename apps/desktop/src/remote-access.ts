@@ -84,9 +84,12 @@ export class DesktopRemoteAccess {
       // to claim its port; a failed bind must not leave HTTPS pointing at that occupant.
       if (this.config.enabled) await this.tailscale().disable(origin, port);
       await gateway.start(port);
-      await this.tailscale().enable(origin, port, this.config.enabled && this.config.origin === origin);
-      published = true;
+      const owned = this.config.enabled && this.config.origin === origin;
+      // Serve survives this process. Record ownership durably before publishing, including
+      // re-enablement, so a crash at any later point enters stale-mapping recovery on restart.
       await this.save({ ...this.config, enabled: true, origin });
+      await this.tailscale().enable(origin, port, owned);
+      published = true;
       this.gateway = gateway;
       this.gatewayOrigin = origin;
       this.running = true;
