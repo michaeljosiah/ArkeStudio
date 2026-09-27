@@ -428,6 +428,7 @@ const CLIENT_COMMAND_METADATA = {
     preparation: blocked(["typed-routing-command"], "Routing is still submitted as unknown JSON; semantic route-edit commands are required."),
     execution: blocked(["typed-routing-command"], "Routing has no semantic command seam for an action adapter."),
   }),
+  "routing-command": humanOnly("The branch map's hand edit; Arke changes routing through production-routing, which applies the same closed commands."),
   "record-traversal": action("production", "command", "routing", "authored-change", ["routing", "scenes"]),
   "list-routing-findings": readOnly(QUERY),
   "propose-branch-canon": action("production", "authored-diff", "proposal-manager", "authored-change", ["routing", "scenes", "canon"]),

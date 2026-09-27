@@ -239,6 +239,7 @@ import {
 import { recordFrameRunOutcome } from "./productions/frame-run-outcome.js";
 import {
   appendTraversal,
+  applyRoutingCommandOnDisk,
   exportInteractive,
   interactiveFindings,
   proposeBranchCanon,
@@ -9921,6 +9922,26 @@ export class Coordinator {
             kind: "routing.refused",
             reason: err instanceof Error ? err.message : String(err),
             detail: { productionId: msg.productionId },
+          });
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
+      case "routing-command": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
+        try {
+          // Applied to the routing on disk, not a copy the map held: two edits in flight each
+          // land on the other's result (design turn 157).
+          await applyRoutingCommandOnDisk(store, msg.productionId, msg.command);
+          await this.refreshWorldSnapshot(msg.worldId);
+          await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
+        } catch (err) {
+          void this.appLog?.append({
+            kind: "routing.refused",
+            reason: err instanceof Error ? err.message : String(err),
+            detail: { productionId: msg.productionId, operation: msg.command.operation },
           });
           this.transport.broadcastSnapshot();
         }

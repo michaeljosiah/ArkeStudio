@@ -1,40 +1,86 @@
-import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router";
-import { orderedShots,
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { Link, useParams } from "react-router";
+import {
+  DEFAULT_SHOT_SEC,
   layoutRouting,
+  orderedShots,
   productionShape,
   routingFindings,
-  type Routing,
+  type ArtifactSidecar,
+  type ProductionBundle,
+  type RoutingCommand,
   type RoutingFinding,
 } from "@arke-studio/contracts";
+import { ProductionConversation } from "../components/conversation.js";
+import { Expand, EyeOff, Flag, Minus, Play, Plus, Trash, TriangleAlert, X } from "../components/icons.js";
 import { EmptyState, Screen } from "../components/layout.js";
-import { Badge, Button, Callout } from "../components/ui.js";
+import { Button, Input, Select, Switch, cx } from "../components/ui.js";
+import {
+  choiceIdFor,
+  findingCounts,
+  findingRows,
+  fitScale,
+  mapGeometry,
+  NODE_W,
+  outPort,
+  inPort,
+  removalConsequences,
+  unwalkedChoices,
+  type FindingRow,
+  type PlacedNode,
+} from "../lib/branch-map.js";
+import { mediaUrl } from "../lib/media.js";
 import { mediaTakeFor, useProduction } from "../lib/selectors.js";
 import {
   exportInteractive,
   listRoutingFindings,
   recordTraversal,
-  saveRouting,
+  sendRoutingCommand,
   subscribeInteractiveExports,
   subscribeRoutingFindings,
 } from "../lib/store.js";
-import { mediaUrl } from "../lib/media.js";
+import { shotFramePath } from "./scene-workspace/boards.js";
 
 /**
- * The branch map (epic 401; brief §3; design turn 84): Interactive video's structural authority
- * and nobody else's. Deterministic layered layout — the same graph always draws the same
- * picture — with the named findings beside it (never a score), route preview that records
- * traversal evidence, and the self-hostable export behind the findings gate.
+ * The branch map (design turn 157; epic 401, brief §3–§4): Interactive video's structural
+ * authority, drawn as a canvas of the routing file. Cards sit where `layoutRouting` puts them —
+ * the same graph always draws the same picture, and nothing can be dragged somewhere it will not
+ * stay. Choices are curves between them, dashed until someone walks them in preview. The findings
+ * are counted in the header and listed only when the count is pressed (turn 122: a decision is
+ * made where it is drawn). Every edit is a closed routing command applied to the file on disk.
  */
 
-const EMPTY_ROUTING = (start: string): Routing => ({
-  version: 1,
-  start,
-  choices: [],
-  endings: [],
-  excluded: [],
-  groups: [],
-});
+type Selection =
+  | { kind: "findings" }
+  | { kind: "scene"; id: string; excluding?: boolean }
+  | { kind: "choice"; id: string; removing?: boolean }
+  | { kind: "new"; from: string | null; to: string | null }
+  | null;
+
+type View = { x: number; y: number; k: number };
+
+function safeShots(scene: ProductionBundle["scenes"][number]) {
+  try {
+    return orderedShots(scene);
+  } catch {
+    // A scene whose flow does not read is still a place on the map; it just has no picture.
+    return [];
+  }
+}
+
+function sceneLength(scene: ProductionBundle["scenes"][number]): string {
+  const total = Math.round(safeShots(scene).reduce((sum, shot) => sum + (shot.durationSec ?? DEFAULT_SHOT_SEC), 0));
+  return total > 0 ? `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}` : "";
+}
+
+/** The scene's own frame: the first shot that has one, as the rows and the Flow show it. */
+function sceneFrame(production: ProductionBundle, artifacts: readonly ArtifactSidecar[], slug: string, scene: ProductionBundle["scenes"][number]) {
+  for (const shot of safeShots(scene)) {
+    const { path } = shotFramePath(production, artifacts, shot.id);
+    if (path !== null) return mediaUrl(slug, path);
+  }
+  return null;
+}
 
 export function BranchMapScreen() {
   const { worldId, prodId } = useParams();
@@ -42,9 +88,16 @@ export function BranchMapScreen() {
   const [served, setServed] = useState<RoutingFinding[] | null>(null);
   const [exportNote, setExportNote] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ sceneId: string; route: string[] } | null>(null);
-  const [draft, setDraft] = useState({ from: "", label: "", to: "" });
+  const [selection, setSelection] = useState<Selection>(null);
+  const [highlight, setHighlight] = useState<ReadonlySet<string>>(new Set());
   /** The one option the map keeps in the tab order; the arrows move it (brief §3, IV-M2). */
   const [focused, setFocused] = useState<string | null>(null);
+  const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 });
+  const [drawing, setDrawing] = useState<{ from: string; x: number; y: number } | null>(null);
+  const [startPick, setStartPick] = useState<string | null>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const fittedRef = useRef(false);
+  const panRef = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
 
   useEffect(() => {
     if (!worldId || !prodId) return;
@@ -53,6 +106,9 @@ export function BranchMapScreen() {
     setServed(null);
     setExportNote(null);
     setPreview(null);
+    setSelection(null);
+    setHighlight(new Set());
+    fittedRef.current = false;
     const offFindings = subscribeRoutingFindings((event) => {
       if (event.productionId === prodId) setServed(event.findings);
     });
@@ -72,17 +128,58 @@ export function BranchMapScreen() {
   }, [worldId, prodId]);
 
   const routing = production?.routing ?? null;
+  const scenes = useMemo(() => production?.scenes ?? [], [production]);
   // The findings the server folded (traversal evidence included) win; until they arrive, the
-  // same pure fold runs here without evidence, so the map never renders beside a blank panel.
+  // same pure fold runs here without evidence, so the map never renders beside a blank count.
   const findings = useMemo<RoutingFinding[]>(() => {
     if (served !== null) return served;
-    if (!routing || !production) return [];
-    return routingFindings(routing, production.scenes, []);
-  }, [served, routing, production]);
-  const layout = useMemo(
-    () => (routing && production ? layoutRouting(routing, production.scenes) : null),
-    [routing, production],
-  );
+    if (!routing) return [];
+    return routingFindings(routing, scenes, []);
+  }, [served, routing, scenes]);
+  const layout = useMemo(() => (routing ? layoutRouting(routing, scenes) : null), [routing, scenes]);
+  const geometry = useMemo(() => (routing && layout ? mapGeometry(routing, scenes, layout) : null), [routing, scenes, layout]);
+
+  const fit = useCallback(() => {
+    const el = viewportRef.current;
+    if (!el || !geometry) return;
+    const k = fitScale(geometry.width, geometry.height, el.clientWidth, el.clientHeight);
+    setView({ k, x: Math.max(16, (el.clientWidth - geometry.width * k) / 2), y: Math.max(16, (el.clientHeight - geometry.height * k) / 2) });
+  }, [geometry]);
+
+  // Opens fitted to the window (turn 157), once per production; after that the view is the person's.
+  useEffect(() => {
+    if (fittedRef.current || !geometry) return;
+    fittedRef.current = true;
+    fit();
+  }, [geometry, fit]);
+
+  const zoomBy = useCallback((factor: number, about?: { x: number; y: number }) => {
+    setView((v) => {
+      const k = Math.min(2, Math.max(0.2, v.k * factor));
+      const el = viewportRef.current;
+      const cx = about?.x ?? (el ? el.clientWidth / 2 : 0);
+      const cy = about?.y ?? (el ? el.clientHeight / 2 : 0);
+      return { k, x: cx - ((cx - v.x) * k) / v.k, y: cy - ((cy - v.y) * k) / v.k };
+    });
+  }, []);
+
+  // Wheel pans; with Ctrl or Cmd it zooms about the pointer. Native and non-passive, because a
+  // passive listener cannot stop Electron zooming the whole window on Ctrl+wheel.
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      if (event.ctrlKey || event.metaKey) {
+        const rect = el.getBoundingClientRect();
+        zoomBy(event.deltaY < 0 ? 1.1 : 1 / 1.1, { x: event.clientX - rect.left, y: event.clientY - rect.top });
+      } else {
+        setView((v) => ({ ...v, x: v.x - event.deltaX, y: v.y - event.deltaY }));
+      }
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [zoomBy, geometry !== null]);
 
   if (!world || !production) {
     return (
@@ -99,49 +196,702 @@ export function BranchMapScreen() {
       </Screen>
     );
   }
-  const scenes = production.scenes;
-  if (routing === null || scenes.length === 0) {
-    return (
-      <div className="fy-prodmain" data-screen="branch-map">
-        <div className="fy-h1row">
-          <h1 className="fy-h1">Branch map</h1>
+
+  const titleOf = (id: string) => scenes.find((scene) => scene.id === id)?.title ?? id;
+  const labelOf = (id: string) => routing?.choices.find((choice) => choice.id === id)?.label ?? id;
+  const command = (next: RoutingCommand) => worldId && prodId && sendRoutingCommand(worldId, prodId, next);
+  const rows = findingRows(findings, titleOf, labelOf);
+  const counts = findingCounts(findings);
+  const blockers = findings.filter((finding) => finding.severity === "blocks");
+  const frameOf = (id: string) => {
+    const scene = scenes.find((candidate) => candidate.id === id);
+    return scene ? sceneFrame(production, world.artifacts, world.meta.slug, scene) : null;
+  };
+
+  const header = (
+    <header className="bm-head">
+      <div className="bm-head__title">
+        <h1 className="bm-h1">Branch map</h1>
+        <div className="bm-head__meta">
+          {scenes.length} scene{scenes.length === 1 ? "" : "s"}
+          {routing
+            ? ` · ${routing.choices.length} choice${routing.choices.length === 1 ? "" : "s"} · ${routing.endings.length} ending${routing.endings.length === 1 ? "" : "s"} · v${routing.version}`
+            : " · no routing yet"}
         </div>
-        {scenes.length === 0 ? (
-          <EmptyState title="No scenes yet" hint="Write the first scene; the map draws from scenes." />
-        ) : (
-          <Callout title="Draw the first choice from the start scene">
-            <Button
-              variant="primary"
-              onClick={() => worldId && prodId && saveRouting(worldId, prodId, EMPTY_ROUTING(scenes[0]!.id))}
-            >
-              Start at {scenes[0]!.title}
-            </Button>
-          </Callout>
-        )}
+      </div>
+      {routing && (
+        <button
+          type="button"
+          className={cx("bm-count", selection?.kind === "findings" && "bm-count--on")}
+          aria-pressed={selection?.kind === "findings"}
+          aria-label={`Findings: ${counts.blocks} block, ${counts.warns} warn`}
+          onClick={() => {
+            setSelection(selection?.kind === "findings" ? null : { kind: "findings" });
+            setHighlight(new Set());
+          }}
+        >
+          {rows.length === 0 ? (
+            "No findings"
+          ) : (
+            <>
+              <span className="bm-dot bm-dot--blocks" />
+              {counts.blocks} block
+              <span className="bm-dot bm-dot--warns" />
+              {counts.warns} warn
+            </>
+          )}
+        </button>
+      )}
+      <Button disabled={!routing} onClick={() => routing && setPreview({ sceneId: routing.start, route: [] })}>
+        <Play size={12} />
+        Preview
+      </Button>
+      <Button
+        variant="primary"
+        disabled={!routing || blockers.length > 0}
+        onClick={() => worldId && prodId && exportInteractive(worldId, prodId)}
+      >
+        {routing && blockers.length > 0 ? `Export blocked · ${blockers.length}` : "Export web package"}
+      </Button>
+    </header>
+  );
+
+  const arke = (
+    <ProductionConversation
+      worldId={worldId}
+      productionId={prodId}
+      dock={{ title: "Arke", subject: `${production.meta.title} · branch map` }}
+      openingNote="opening…"
+      emptyLine="Ask about a route, or have Arke draw one."
+      placeholder="Ask Arke about this map…"
+    />
+  );
+
+  if (scenes.length === 0 || routing === null || geometry === null || layout === null) {
+    const picked = scenes.find((scene) => scene.id === startPick) ?? scenes[0];
+    return (
+      <div className="fy-arkewrap bm" data-screen="branch-map">
+        <div className="bm-main">
+          {header}
+          <div className="bm-viewport bm-viewport--empty">
+            {scenes.length === 0 ? (
+              <EmptyState title="No scenes yet" hint="Write the first scene; the map draws from scenes." />
+            ) : (
+              <div className="bm-dayone">
+                <div className="bm-dayone__title">Draw the first choice from the start scene</div>
+                <div className="bm-dayone__ask">Where does it start?</div>
+                <div className="bm-dayone__scenes" role="radiogroup" aria-label="Start scene">
+                  {scenes.map((scene) => {
+                    const frame = sceneFrame(production, world.artifacts, world.meta.slug, scene);
+                    const on = scene.id === picked?.id;
+                    return (
+                      <button
+                        key={scene.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={on}
+                        className={cx("bm-dayone__scene", on && "bm-dayone__scene--on")}
+                        onClick={() => setStartPick(scene.id)}
+                      >
+                        <span className="bm-thumb">{frame ? <img src={frame} alt="" /> : <span className="bm-thumb__none">{scene.number}</span>}</span>
+                        <span className="bm-dayone__name">{scene.title}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <Button variant="primary" onClick={() => picked && command({ operation: "set-start", sceneId: picked.id })}>
+                  Start at {picked?.title}
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+        <aside className="bm-side">{arke}</aside>
       </div>
     );
   }
 
-  const endings = new Set(routing.endings.map((entry) => entry.sceneId));
+  const endings = new Map(routing.endings.map((entry) => [entry.sceneId, entry.title]));
   const excluded = new Map(routing.excluded.map((entry) => [entry.sceneId, entry.reason]));
-  const sceneTitle = (id: string) => scenes.find((scene) => scene.id === id)?.title ?? id;
-  const commit = (next: Routing) => worldId && prodId && saveRouting(worldId, prodId, next);
-  const blockers = findings.filter((finding) => finding.severity === "blocks");
+  const unwalked = unwalkedChoices(findings);
+  const twoWaysIn = new Set(findings.filter((finding) => finding.kind === "reconvergence").flatMap((finding) => finding.sceneIds));
+  const unreachable = new Set(findings.filter((finding) => finding.kind === "unreachable").flatMap((finding) => finding.sceneIds));
+
+  // The tray under the map: scenes on no route, placed in a row after the canvas's cards.
+  const trayNodes: PlacedNode[] = geometry.tray.map((id, index) => ({ id, x: 40 + index * (NODE_W + 20), y: geometry.trayY + 56 }));
+  const stageWidth = Math.max(geometry.width, 40 + trayNodes.length * (NODE_W + 20) + 24);
+  const at = new Map([...geometry.nodes, ...trayNodes].map((node) => [node.id, node]));
 
   /*
-   * The map in one flat order: layers left to right, each layer top to bottom, unplaced last —
+   * The map in one flat order: layers left to right, each layer top to bottom, the tray last —
    * exactly the order the layout draws and the DOM renders, so the keyboard walks the picture
    * rather than a second opinion about it (brief §3, IV-M2).
    */
-  const walkOrder = [...layout!.layers, layout!.unplaced].flat();
+  const walkOrder = [...layout.layers.flat(), ...geometry.tray];
   // Before anybody has moved, the tab stop is the first option — the start scene's layer. A
-  // `focused` that no longer exists (an edge was removed under it) falls back the same way.
+  // `focused` that no longer exists (a scene was removed under it) falls back the same way.
   const tabStop = focused !== null && walkOrder.includes(focused) ? focused : walkOrder[0];
 
+  const selectedChoice = selection?.kind === "choice" ? routing.choices.find((choice) => choice.id === selection.id) ?? null : null;
+  const consequences =
+    selection?.kind === "choice" && selection.removing && selectedChoice
+      ? removalConsequences(routing, scenes, selectedChoice.id, titleOf)
+      : [];
+  const breaking = new Set(
+    selection?.kind === "choice" && selection.removing && selectedChoice
+      ? routingFindings({ ...routing, choices: routing.choices.filter((choice) => choice.id !== selectedChoice.id) }, scenes)
+          .filter((finding) => finding.kind === "unreachable" || finding.kind === "cannot-reach-ending")
+          .flatMap((finding) => finding.sceneIds)
+          .filter((id) => !findings.some((finding) => (finding.kind === "unreachable" || finding.kind === "cannot-reach-ending") && finding.sceneIds.includes(id)))
+      : [],
+  );
+
+  const stagePoint = (clientX: number, clientY: number) => {
+    const rect = viewportRef.current?.getBoundingClientRect();
+    return rect ? { x: (clientX - rect.left - view.x) / view.k, y: (clientY - rect.top - view.y) / view.k } : { x: 0, y: 0 };
+  };
+
+  const startDraw = (sceneId: string) => (event: ReactPointerEvent<HTMLSpanElement>) => {
+    event.stopPropagation();
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const p = stagePoint(event.clientX, event.clientY);
+    setDrawing({ from: sceneId, ...p });
+  };
+  const moveDraw = (event: ReactPointerEvent<HTMLSpanElement>) => {
+    if (!drawing) return;
+    setDrawing({ ...drawing, ...stagePoint(event.clientX, event.clientY) });
+  };
+  const endDraw = (event: ReactPointerEvent<HTMLSpanElement>) => {
+    if (!drawing) return;
+    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-scene]")?.dataset["scene"];
+    const from = drawing.from;
+    setDrawing(null);
+    // Dropped on a card, the new edge asks for its words (157c); dropped anywhere else, it is gone.
+    if (target !== undefined && target !== from) setSelection({ kind: "new", from, to: target });
+  };
+
+  const onViewportPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("[data-scene], .bm-label, .bm-zoom, button, input, select")) return;
+    panRef.current = { x: event.clientX, y: event.clientY, vx: view.x, vy: view.y };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const onViewportPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const pan = panRef.current;
+    if (!pan) return;
+    setView((v) => ({ ...v, x: pan.vx + event.clientX - pan.x, y: pan.vy + event.clientY - pan.y }));
+  };
+  const onViewportPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const pan = panRef.current;
+    panRef.current = null;
+    // A press on the empty canvas that did not move is a click on nothing: the selection goes.
+    if (pan && Math.abs(event.clientX - pan.x) < 3 && Math.abs(event.clientY - pan.y) < 3) {
+      setSelection(null);
+      setHighlight(new Set());
+    }
+  };
+
+  const optionKeys = (sceneId: string) => (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const step =
+      event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : event.key === "ArrowUp" || event.key === "ArrowLeft" ? -1 : 0;
+    let next: string | undefined;
+    if (step !== 0) {
+      // Clamped, not wrapped: an arrow at the end of a graph should feel like the end of the graph.
+      const index = walkOrder.indexOf(sceneId);
+      next = walkOrder[Math.min(walkOrder.length - 1, Math.max(0, index + step))];
+    } else if (event.key === "Home") next = walkOrder[0];
+    else if (event.key === "End") next = walkOrder[walkOrder.length - 1];
+    else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      setSelection({ kind: "scene", id: sceneId });
+      return;
+    } else if (event.key === "p" || event.key === "P") {
+      event.preventDefault();
+      setPreview({ sceneId, route: [] });
+      return;
+    } else if (event.key === "+" || event.key === "=") {
+      event.preventDefault();
+      zoomBy(1.2);
+      return;
+    } else if (event.key === "-") {
+      event.preventDefault();
+      zoomBy(1 / 1.2);
+      return;
+    } else if (event.key === "0") {
+      event.preventDefault();
+      fit();
+      return;
+    } else if (event.key === "Escape") {
+      setSelection(null);
+      return;
+    }
+    if (next === undefined || next === sceneId) return;
+    event.preventDefault();
+    setFocused(next);
+    const el = event.currentTarget.closest('[role="listbox"]')?.querySelector(`[role="option"][data-scene="${CSS.escape(next)}"]`);
+    if (el instanceof HTMLElement) el.focus();
+  };
+
+  const card = (node: PlacedNode, inTray: boolean) => {
+    const scene = scenes.find((candidate) => candidate.id === node.id);
+    const title = scene?.title ?? node.id;
+    const frame = frameOf(node.id);
+    const out = routing.choices.filter((choice) => choice.from === node.id).length;
+    const isStart = routing.start === node.id;
+    const ending = endings.get(node.id);
+    const reason = excluded.get(node.id);
+    const isSelected = selection?.kind === "scene" && selection.id === node.id;
+    const showPort =
+      !inTray && (isSelected || drawing?.from === node.id || (selection?.kind === "new" && selection.from === node.id));
+    return (
+      <div
+        key={node.id}
+        role="option"
+        aria-selected={isSelected}
+        data-scene={node.id}
+        /*
+         * One stop for the whole map, and the arrows move within it (IV-M2). Every option carrying
+         * tabIndex={0} put a fifty-node graph fifty presses deep in the page's tab order, which is
+         * what a listbox exists to avoid: Tab reaches the map, the arrows walk it, Home and End
+         * jump to the start and the last.
+         */
+        tabIndex={node.id === tabStop ? 0 : -1}
+        onFocus={() => setFocused(node.id)}
+        onKeyDown={optionKeys(node.id)}
+        onClick={() => {
+          setSelection({ kind: "scene", id: node.id });
+          setHighlight(new Set());
+        }}
+        className={cx(
+          "bm-node",
+          isStart && "bm-node--start",
+          isSelected && "bm-node--selected",
+          reason !== undefined && "bm-node--excluded",
+          unreachable.has(node.id) && "bm-node--bad",
+          (highlight.has(node.id) || breaking.has(node.id)) && "bm-node--lit",
+          selection?.kind === "new" && selection.to === node.id && "bm-node--target",
+        )}
+        style={{ left: node.x, top: node.y }}
+      >
+        {/* Designations are words on the card, drawn as tags (turn 53; IV-M3). */}
+        <span className="bm-tags">
+          {isStart && <span className="bm-tag bm-tag--solid"><Play size={9} />start</span>}
+          {ending !== undefined && <span className="bm-tag"><Flag size={10} />ending</span>}
+          {reason !== undefined && <span className="bm-tag"><EyeOff size={10} />excluded</span>}
+          {unreachable.has(node.id) && reason === undefined && <span className="bm-tag bm-tag--bad">unreachable</span>}
+        </span>
+        <span className="bm-thumb">{frame ? <img src={frame} alt="" draggable={false} /> : <span className="bm-thumb__none">{scene?.number ?? ""}</span>}</span>
+        <span className="bm-node__body">
+          <span className="bm-node__title">{title}</span>
+          <span className="bm-node__meta">
+            {reason !== undefined ? (
+              <i>{reason}</i>
+            ) : ending !== undefined ? (
+              <>
+                <Flag size={11} />
+                {ending}
+              </>
+            ) : (
+              [scene ? sceneLength(scene) : "", out > 0 ? `${out} out` : unreachable.has(node.id) ? "no way in" : ""].filter(Boolean).join(" · ")
+            )}
+            {twoWaysIn.has(node.id) && (
+              <span className="bm-node__warn" title="Two ways in">
+                <TriangleAlert size={11} />
+              </span>
+            )}
+          </span>
+        </span>
+        {!inTray && (
+          <span
+            className={cx("bm-port", showPort && "bm-port--on")}
+            aria-hidden
+            title="Drag to another scene to draw a choice"
+            onPointerDown={startDraw(node.id)}
+            onPointerMove={moveDraw}
+            onPointerUp={endDraw}
+          />
+        )}
+      </div>
+    );
+  };
+
+  const pending =
+    selection?.kind === "new" && selection.from !== null && selection.to !== null && at.has(selection.from) && at.has(selection.to)
+      ? { from: at.get(selection.from)!, to: at.get(selection.to)! }
+      : null;
+
+  const canvas = (
+    <div
+      className={cx("bm-viewport", panRef.current && "bm-viewport--panning")}
+      ref={viewportRef}
+      onPointerDown={onViewportPointerDown}
+      onPointerMove={onViewportPointerMove}
+      onPointerUp={onViewportPointerUp}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          setSelection(null);
+          setDrawing(null);
+        }
+      }}
+    >
+      <div
+        className="bm-stage"
+        style={{ width: stageWidth, height: geometry.height, transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}
+      >
+        {geometry.tray.length > 0 && (
+          <div className="bm-tray" style={{ top: geometry.trayY, width: stageWidth - 48 }} aria-hidden>
+            <span className="bm-eyebrow">Not on a route · {geometry.tray.length}</span>
+          </div>
+        )}
+        <svg className="bm-edges" width={stageWidth} height={geometry.height} aria-hidden>
+          <defs>
+            <marker id="bm-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,1 L9,5 L0,9 z" className="bm-arrowhead" />
+            </marker>
+          </defs>
+          {geometry.edges.map((edge) => (
+            <path
+              key={edge.id}
+              d={edge.d}
+              markerEnd="url(#bm-arrow)"
+              className={cx(
+                "bm-edge",
+                unwalked.has(edge.id) && "bm-edge--unwalked",
+                selectedChoice?.id === edge.id && "bm-edge--selected",
+                selection?.kind === "choice" && selection.removing && selectedChoice?.id !== edge.id && breaking.has(edge.from) && "bm-edge--faint",
+              )}
+            />
+          ))}
+          {pending && (
+            <path
+              className="bm-edge bm-edge--new"
+              markerEnd="url(#bm-arrow)"
+              d={`M${outPort(pending.from).x},${outPort(pending.from).y} C${outPort(pending.from).x + 70},${outPort(pending.from).y} ${inPort(pending.to).x - 70},${inPort(pending.to).y} ${inPort(pending.to).x - 6},${inPort(pending.to).y}`}
+            />
+          )}
+          {drawing && at.has(drawing.from) && (
+            <path
+              className="bm-edge bm-edge--ghost"
+              d={`M${outPort(at.get(drawing.from)!).x},${outPort(at.get(drawing.from)!).y} L${drawing.x},${drawing.y}`}
+            />
+          )}
+        </svg>
+        {geometry.edges.map((edge) => (
+          <button
+            key={edge.id}
+            type="button"
+            tabIndex={-1}
+            className={cx(
+              "bm-label",
+              unwalked.has(edge.id) && "bm-label--unwalked",
+              selectedChoice?.id === edge.id && "bm-label--selected",
+            )}
+            style={{ left: edge.lx, top: edge.ly }}
+            aria-label={`${edge.label}: ${titleOf(edge.from)} to ${titleOf(edge.to)}${unwalked.has(edge.id) ? ", not walked" : ""}`}
+            onClick={() => {
+              setSelection({ kind: "choice", id: edge.id });
+              setHighlight(new Set());
+            }}
+          >
+            {edge.label}
+          </button>
+        ))}
+        <div role="listbox" aria-label="Branch map" className="bm-nodes">
+          {walkOrder.map((id) => {
+            const node = at.get(id);
+            return node ? card(node, geometry.tray.includes(id)) : null;
+          })}
+        </div>
+      </div>
+      <div className="bm-legend" aria-hidden>
+        <span><i className="bm-legend__line" />walked in preview</span>
+        <span><i className="bm-legend__line bm-legend__line--dashed" />not walked</span>
+      </div>
+      <div className="bm-zoom">
+        <button type="button" aria-label="Zoom out" onClick={() => zoomBy(1 / 1.2)}><Minus size={14} /></button>
+        <span className="bm-zoom__pct">{Math.round(view.k * 100)}%</span>
+        <button type="button" aria-label="Zoom in" onClick={() => zoomBy(1.2)}><Plus size={14} /></button>
+        <button type="button" aria-label="Fit to view" onClick={fit}><Expand size={13} />Fit</button>
+      </div>
+    </div>
+  );
+
+  const sceneOptions = scenes.map((scene) => (
+    <option key={scene.id} value={scene.id}>
+      {scene.title}
+    </option>
+  ));
+
+  const inspector = (() => {
+    if (selection === null) return null;
+    if (selection.kind === "findings") {
+      return (
+        <Inspector title="Findings" sub={String(counts.blocks + counts.warns)} onClose={() => setSelection(null)}>
+          {rows.length === 0 && <div className="bm-muted">Nothing to report — every check passed.</div>}
+          {(["blocks", "warns"] as const).map((severity) => {
+            const list = rows.filter((row) => row.severity === severity);
+            if (list.length === 0) return null;
+            return (
+              <div key={severity} className="bm-findgroup">
+                <span className="bm-eyebrow">{severity === "blocks" ? `Blocks export · ${counts.blocks}` : `Warns · ${counts.warns}`}</span>
+                {list.map((row) => (
+                  <FindingCard
+                    key={row.key}
+                    row={row}
+                    lit={row.sceneIds.length > 0 && row.sceneIds.every((id) => highlight.has(id))}
+                    onPick={() => setHighlight(new Set(row.sceneIds))}
+                    actions={findingActions(row)}
+                  />
+                ))}
+              </div>
+            );
+          })}
+        </Inspector>
+      );
+    }
+    if (selection.kind === "new") {
+      return (
+        <NewChoice
+          // One panel for the whole draw: keyed by its ends, picking the To scene remounted it and
+          // threw away the words already typed.
+          key="new-choice"
+          from={selection.from}
+          to={selection.to}
+          sceneOptions={sceneOptions}
+          onChange={(next) => setSelection({ kind: "new", ...next })}
+          onCancel={() => setSelection(null)}
+          onAdd={(from, label, to) => {
+            command({ operation: "add-choice", choice: { id: choiceIdFor(label, routing), from, label, to } });
+            setSelection(null);
+          }}
+        />
+      );
+    }
+    if (selection.kind === "choice") {
+      if (!selectedChoice) return null;
+      const walked = !unwalked.has(selectedChoice.id);
+      return (
+        <Inspector title="Choice" sub={selectedChoice.id} onClose={() => setSelection(null)}>
+          <CommitField
+            key={`${selectedChoice.id}-${selectedChoice.label}`}
+            label="Label"
+            value={selectedChoice.label}
+            onCommit={(label) => command({ operation: "edit-choice", choiceId: selectedChoice.id, changes: { label } })}
+          />
+          <div className="bm-kv">
+            <span className="bm-kv__k">From</span>
+            <Select
+              label="From scene"
+              value={selectedChoice.from}
+              onChange={(event) => command({ operation: "edit-choice", choiceId: selectedChoice.id, changes: { from: event.target.value } })}
+            >
+              {sceneOptions}
+            </Select>
+          </div>
+          <div className="bm-kv">
+            <span className="bm-kv__k">To</span>
+            <Select
+              label="To scene"
+              value={selectedChoice.to}
+              onChange={(event) => command({ operation: "edit-choice", choiceId: selectedChoice.id, changes: { to: event.target.value } })}
+            >
+              {sceneOptions}
+            </Select>
+          </div>
+          <div className="bm-kv">
+            <span className="bm-kv__k">Preview</span>
+            <span className="bm-kv__v">
+              {walked ? "walked" : <><span className="bm-dot bm-dot--blocks" />not walked</>}
+            </span>
+            <Button size="sm" onClick={() => setPreview({ sceneId: selectedChoice.from, route: [] })}>
+              <Play size={10} />
+              Walk it
+            </Button>
+          </div>
+          <div className="bm-actions">
+            <Button size="sm" variant="ghost" className="bm-danger" onClick={() => setSelection({ kind: "choice", id: selectedChoice.id, removing: true })}>
+              <Trash size={13} />
+              Remove choice
+            </Button>
+          </div>
+          {selection.removing && (
+            <div className="bm-confirm" role="alertdialog" aria-label={`Remove ${selectedChoice.label}?`}>
+              <div className="bm-confirm__title">Remove “{selectedChoice.label}”?</div>
+              {consequences.length > 0 ? (
+                <>
+                  <span className="bm-eyebrow">What breaks</span>
+                  {consequences.map((line) => (
+                    <div key={line} className="bm-confirm__line">
+                      <span className="bm-dot bm-dot--blocks" />
+                      {line}
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <div className="bm-muted">Nothing else breaks.</div>
+              )}
+              <div className="bm-actions bm-actions--end">
+                <Button size="sm" onClick={() => setSelection({ kind: "choice", id: selectedChoice.id })}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => {
+                    command({ operation: "remove-choice", choiceId: selectedChoice.id });
+                    setSelection(null);
+                  }}
+                >
+                  Remove choice
+                </Button>
+              </div>
+            </div>
+          )}
+        </Inspector>
+      );
+    }
+    const scene = scenes.find((candidate) => candidate.id === selection.id);
+    if (!scene) return null;
+    const frame = frameOf(scene.id);
+    const ins = routing.choices.filter((choice) => choice.to === scene.id).length;
+    const outs = routing.choices.filter((choice) => choice.from === scene.id);
+    const ending = endings.get(scene.id);
+    const reason = excluded.get(scene.id);
+    return (
+      <Inspector title="Scene" sub={scene.id} onClose={() => setSelection(null)}>
+        <div className="bm-scenehead">
+          <span className="bm-thumb bm-thumb--small">{frame ? <img src={frame} alt="" /> : <span className="bm-thumb__none">{scene.number}</span>}</span>
+          <span>
+            <span className="bm-scenehead__title">{scene.title}</span>
+            <span className="bm-muted">
+              {[sceneLength(scene), `${ins} way${ins === 1 ? "" : "s"} in`, `${outs.length} way${outs.length === 1 ? "" : "s"} out`].filter(Boolean).join(" · ")}
+            </span>
+          </span>
+        </div>
+        <div className="bm-kv">
+          <span className="bm-kv__k">Start</span>
+          {routing.start === scene.id ? (
+            <span className="bm-kv__v">This is the start</span>
+          ) : (
+            <>
+              <span className="bm-kv__v bm-muted">—</span>
+              <Button size="sm" onClick={() => command({ operation: "set-start", sceneId: scene.id })}>
+                Make this the start
+              </Button>
+            </>
+          )}
+        </div>
+        <div className="bm-kv">
+          <span className="bm-kv__k">Ending</span>
+          <Switch
+            label="Ending"
+            checked={ending !== undefined}
+            onChange={(on) =>
+              command(on ? { operation: "set-ending", sceneId: scene.id, title: scene.title } : { operation: "clear-ending", sceneId: scene.id })
+            }
+          />
+        </div>
+        {ending !== undefined && (
+          <CommitField
+            key={`${scene.id}-${ending}`}
+            label="Ending title"
+            value={ending}
+            onCommit={(title) => command({ operation: "set-ending", sceneId: scene.id, title })}
+          />
+        )}
+        <div className="bm-kv">
+          <span className="bm-kv__k">Route</span>
+          {reason !== undefined ? (
+            <>
+              <span className="bm-kv__v"><i>{reason}</i></span>
+              <Button size="sm" onClick={() => command({ operation: "include-scene", sceneId: scene.id })}>
+                Include
+              </Button>
+            </>
+          ) : selection.excluding ? null : (
+            <>
+              <span className="bm-kv__v bm-muted">{unreachable.has(scene.id) ? "no way in" : "on the map"}</span>
+              <Button size="sm" onClick={() => setSelection({ kind: "scene", id: scene.id, excluding: true })}>
+                <EyeOff size={11} />
+                Exclude…
+              </Button>
+            </>
+          )}
+        </div>
+        {selection.excluding && reason === undefined && (
+          <ExcludeField
+            onCancel={() => setSelection({ kind: "scene", id: scene.id })}
+            onExclude={(why) => {
+              command({ operation: "exclude-scene", sceneId: scene.id, reason: why });
+              setSelection({ kind: "scene", id: scene.id });
+            }}
+          />
+        )}
+        {outs.length > 0 && (
+          <div className="bm-ways">
+            <span className="bm-eyebrow">Ways out</span>
+            {outs.map((choice) => (
+              <button key={choice.id} type="button" className="bm-way" onClick={() => setSelection({ kind: "choice", id: choice.id })}>
+                <span>{choice.label}</span>
+                <span className="bm-muted">{titleOf(choice.to)}{unwalked.has(choice.id) ? " · not walked" : ""}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="bm-actions">
+          <Button size="sm" onClick={() => setSelection({ kind: "new", from: scene.id, to: null })}>
+            <Plus size={11} />
+            Draw a choice from here
+          </Button>
+          <Button size="sm" onClick={() => setPreview({ sceneId: scene.id, route: [] })}>
+            <Play size={10} />
+            Preview from here
+          </Button>
+          <Link className="ui-btn ui-btn--ghost ui-btn--sm" to={`/w/${worldId}/p/${prodId}/scenes/${scene.id}`}>
+            Open scene
+          </Link>
+        </div>
+      </Inspector>
+    );
+
+    function findingActions(row: FindingRow) {
+      if (row.kind === "unreachable") {
+        const id = row.sceneIds[0]!;
+        return (
+          <>
+            <Button size="sm" onClick={() => setSelection({ kind: "new", from: null, to: id })}>
+              Draw a choice to it
+            </Button>
+            <Button size="sm" onClick={() => setSelection({ kind: "scene", id, excluding: true })}>
+              Exclude…
+            </Button>
+          </>
+        );
+      }
+      if (row.kind === "untraversed-edge") {
+        return (
+          <Button size="sm" onClick={() => setPreview({ sceneId: routing!.start, route: [] })}>
+            <Play size={10} />
+            Preview from the start
+          </Button>
+        );
+      }
+      const id = row.sceneIds[0];
+      return id !== undefined && scenes.some((scene) => scene.id === id) ? (
+        <Button size="sm" onClick={() => setSelection({ kind: "scene", id })}>
+          Select {titleOf(id)}
+        </Button>
+      ) : null;
+    }
+  })();
+
+  // Route preview (brief §5): plays footage, offers choices, records evidence. Turn 156 draws
+  // the player it becomes; until then it is this panel under the canvas.
   const previewScene = preview !== null ? scenes.find((scene) => scene.id === preview.sceneId) : null;
   const previewMedia = (() => {
     if (!previewScene) return null;
-    const takeId = orderedShots(previewScene)
+    const takeId = safeShots(previewScene)
       .map((shot) => production.selections[shot.id]?.acceptedTakeId ?? null)
       .find((id) => id !== null);
     const take = takeId != null ? production.takes.find((t) => t.id === takeId) : undefined;
@@ -152,238 +902,205 @@ export function BranchMapScreen() {
   })();
 
   return (
-    <div className="fy-prodmain" data-screen="branch-map">
-      <div className="fy-h1row">
-        <h1 className="fy-h1">Branch map</h1>
-        <span className="fy-h1row__meta">
-          {routing.choices.length} choice{routing.choices.length === 1 ? "" : "s"} · {routing.endings.length} ending
-          {routing.endings.length === 1 ? "" : "s"} · v{routing.version}
-        </span>
-        <span className="fy-h1row__push" />
-        <Button
-          variant="primary"
-          disabled={blockers.length > 0}
-          onClick={() => worldId && prodId && exportInteractive(worldId, prodId)}
-        >
-          {blockers.length > 0 ? `Export blocked · ${blockers.length}` : "Export web package"}
-        </Button>
-      </div>
-      {exportNote !== null && <div className="fy-mono">{exportNote}</div>}
-
-      {/* The map: layers left to right, a listbox to the keyboard (brief §3). */}
-      <div role="listbox" aria-label="Branch map" style={{ display: "flex", gap: 18, overflowX: "auto", padding: "10px 0" }}>
-        {[...layout!.layers, layout!.unplaced].map(
-          (layer, layerIndex) =>
-            layer.length > 0 && (
-              <div key={layerIndex} style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 220 }}>
-                {layer.map((sceneId) => (
-                  <div
-                    key={sceneId}
-                    role="option"
-                    aria-selected={preview?.sceneId === sceneId}
-                    data-scene={sceneId}
-                    /*
-                     * One stop for the whole map, and the arrows move within it (IV-M2). Every
-                     * option carrying tabIndex={0} put a fifty-node graph fifty presses deep in
-                     * the page's tab order, which is what a listbox exists to avoid: Tab reaches
-                     * the map, the arrows walk it, Home and End jump to the start and the last.
-                     */
-                    tabIndex={sceneId === tabStop ? 0 : -1}
-                    onFocus={() => setFocused(sceneId)}
-                    onKeyDown={(event) => {
-                      const step =
-                        event.key === "ArrowDown" || event.key === "ArrowRight"
-                          ? 1
-                          : event.key === "ArrowUp" || event.key === "ArrowLeft"
-                            ? -1
-                            : 0;
-                      let next: string | undefined;
-                      if (step !== 0) {
-                        // Clamped, not wrapped: an arrow at the end of a graph should feel like
-                        // the end of the graph.
-                        const at = walkOrder.indexOf(sceneId);
-                        next = walkOrder[Math.min(walkOrder.length - 1, Math.max(0, at + step))];
-                      } else if (event.key === "Home") next = walkOrder[0];
-                      else if (event.key === "End") next = walkOrder[walkOrder.length - 1];
-                      else if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        setPreview({ sceneId, route: [] });
-                        return;
-                      }
-                      if (next === undefined || next === sceneId) return;
-                      event.preventDefault();
-                      setFocused(next);
-                      const el = event.currentTarget.closest('[role="listbox"]')?.querySelector(
-                        `[role="option"][data-scene="${CSS.escape(next)}"]`,
-                      );
-                      if (el instanceof HTMLElement) el.focus();
-                    }}
-                    className="fy-boardcard"
-                    style={{
-                      opacity: excluded.has(sceneId) ? 0.5 : 1,
-                      outline: routing.start === sceneId ? "2px solid var(--foreground)" : undefined,
-                    }}
-                  >
-                    <div className="fy-boardcard__head">
-                      {sceneTitle(sceneId)}
-                      {routing.start === sceneId && <Badge tone="outline">start</Badge>}
-                      {endings.has(sceneId) && <Badge tone="outline">ending</Badge>}
-                      {excluded.has(sceneId) && <Badge tone="outline">excluded</Badge>}
-                    </div>
-                    {excluded.has(sceneId) && <div className="fy-boardcard__mono">{excluded.get(sceneId)}</div>}
-                    <div className="fy-boardcard__mono">
-                      {routing.choices
-                        .filter((choice) => choice.from === sceneId)
-                        .map((choice) => (
-                          <span key={choice.id}>
-                            → {choice.label} → {sceneTitle(choice.to)}{" "}
-                            <button
-                              type="button"
-                              className="fy-linkbtn"
-                              onClick={() =>
-                                commit({ ...routing, choices: routing.choices.filter((c) => c.id !== choice.id) })
-                              }
-                            >
-                              remove
-                            </button>
-                            {"\n"}
-                          </span>
-                        ))}
-                    </div>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      <Button variant="ghost" onClick={() => setPreview({ sceneId, route: [] })}>
-                        Preview from here
-                      </Button>
-                      {!endings.has(sceneId) ? (
-                        <Button
-                          variant="ghost"
-                          onClick={() =>
-                            commit({
-                              ...routing,
-                              endings: [...routing.endings, { sceneId, title: sceneTitle(sceneId) }],
-                            })
-                          }
-                        >
-                          Mark ending
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          onClick={() =>
-                            commit({ ...routing, endings: routing.endings.filter((e) => e.sceneId !== sceneId) })
-                          }
-                        >
-                          Unmark ending
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                ))}
+    <div className="fy-arkewrap bm" data-screen="branch-map">
+      <div className="bm-main">
+        {header}
+        {exportNote !== null && <div className="bm-note">{exportNote}</div>}
+        {canvas}
+        {preview !== null && (
+          <section className="bm-preview" aria-label="Preview">
+            <div className="bm-preview__head">
+              <b>Preview · {titleOf(preview.sceneId)}</b>
+              {preview.route.length > 0 && <span className="bm-muted">route {preview.route.map(titleOf).join(" → ")}</span>}
+              <span className="bm-spacer" />
+              <Button size="sm" variant="ghost" onClick={() => setPreview(null)}>
+                Close preview
+              </Button>
+            </div>
+            <div className="bm-preview__body">
+              {previewMedia !== null ? (
+                <video key={previewMedia} src={previewMedia} controls className="bm-preview__video" />
+              ) : (
+                <div className="bm-muted">No accepted footage for this scene yet — the choices still walk.</div>
+              )}
+              <div className="bm-preview__choices">
+                {routing.choices
+                  .filter((choice) => choice.from === preview.sceneId)
+                  .map((choice) => (
+                    <Button
+                      key={choice.id}
+                      onClick={() => {
+                        // The route is SCENE ids — the evidence schema's vocabulary. Accumulating
+                        // choice ids here made the second click send a frame the wire refused.
+                        const walked = [...preview.route, preview.sceneId];
+                        if (worldId && prodId) recordTraversal(worldId, prodId, choice.id, choice.from, choice.to, walked);
+                        setPreview({ sceneId: choice.to, route: walked });
+                      }}
+                    >
+                      {choice.label}
+                    </Button>
+                  ))}
+                {routing.choices.every((choice) => choice.from !== preview.sceneId) && (
+                  <span className="bm-muted">{endings.has(preview.sceneId) ? "An ending." : "No choices from here."}</span>
+                )}
               </div>
-            ),
+            </div>
+          </section>
         )}
       </div>
+      <aside className="bm-side">
+        {inspector}
+        {arke}
+      </aside>
+    </div>
+  );
+}
 
-      {/* Draw a choice: from, the words, to — a routing.json commit through the gate. */}
-      <div className="fy-listhead">New choice</div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <select aria-label="From scene" value={draft.from} onChange={(e) => setDraft({ ...draft, from: e.target.value })}>
-          <option value="">from…</option>
-          {scenes.map((scene) => (
-            <option key={scene.id} value={scene.id}>
-              {scene.title}
-            </option>
-          ))}
-        </select>
-        <input
-          aria-label="Choice label"
-          placeholder="the words the player reads"
-          value={draft.label}
-          onChange={(e) => setDraft({ ...draft, label: e.target.value })}
-        />
-        <select aria-label="To scene" value={draft.to} onChange={(e) => setDraft({ ...draft, to: e.target.value })}>
-          <option value="">to…</option>
-          {scenes.map((scene) => (
-            <option key={scene.id} value={scene.id}>
-              {scene.title}
-            </option>
-          ))}
-        </select>
-        <Button
-          disabled={draft.from === "" || draft.to === "" || draft.label.trim() === ""}
-          onClick={() => {
-            const slug = draft.label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "choice";
-            // Unique by suffix, not by count: after a removal, length+1 repeats an id already
-            // in use, and the per-edge "remove" then deletes both edges at once.
-            const taken = new Set(routing.choices.map((choice) => choice.id));
-            let id = `ch_${slug}`;
-            for (let n = 2; taken.has(id); n++) id = `ch_${slug}-${n}`;
-            commit({
-              ...routing,
-              choices: [...routing.choices, { id, from: draft.from, label: draft.label.trim(), to: draft.to }],
-            });
-            setDraft({ from: "", label: "", to: "" });
-          }}
-        >
-          Add choice
-        </Button>
+function Inspector({ title, sub, onClose, children }: { title: string; sub?: string; onClose: () => void; children: React.ReactNode }) {
+  return (
+    <section className="bm-insp" aria-label={title}>
+      <div className="bm-insp__head">
+        <b>{title}</b>
+        {sub && <span className="bm-muted">{sub}</span>}
+        <span className="bm-spacer" />
+        <button type="button" className="bm-insp__close" aria-label="Close" onClick={onClose}>
+          <X size={14} />
+        </button>
       </div>
+      <div className="bm-insp__body">{children}</div>
+    </section>
+  );
+}
 
-      {/* Named findings (brief §4): evidence, severity, never a number. */}
-      <div className="fy-listhead">Findings</div>
-      {findings.length === 0 ? (
-        <div className="fy-mono">Nothing to report — every check passed.</div>
-      ) : (
-        findings.map((finding, index) => (
-          <div key={`${finding.kind}-${index}`} className="fy-listrow">
-            <Badge tone={finding.severity === "blocks" ? "danger" : "outline"}>
-              {finding.severity === "blocks" ? "blocks publication" : "warns"}
-            </Badge>
-            <span className="fy-listrow__text">{finding.detail}</span>
-          </div>
-        ))
-      )}
-
-      {/* Route preview (brief §5): plays footage, offers choices, records evidence. */}
-      {preview !== null && (
-        <>
-          <div className="fy-listhead">
-            Preview · {sceneTitle(preview.sceneId)}
-            {preview.route.length > 0 && <span className="fy-mono"> · route {preview.route.join(" → ")}</span>}
-          </div>
-          {previewMedia !== null ? (
-            <video key={previewMedia} src={previewMedia} controls style={{ maxWidth: 640, background: "var(--foreground)" }} />
-          ) : (
-            <div className="fy-mono">No accepted footage for this scene yet — the choices still walk.</div>
-          )}
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {routing.choices
-              .filter((choice) => choice.from === preview.sceneId)
-              .map((choice) => (
-                <Button
-                  key={choice.id}
-                  onClick={() => {
-                    // The route is SCENE ids — the evidence schema's vocabulary. Accumulating
-                    // choice ids here made the second click send a frame the wire refused.
-                    const walked = [...preview.route, preview.sceneId];
-                    if (worldId && prodId) {
-                      recordTraversal(worldId, prodId, choice.id, choice.from, choice.to, walked);
-                    }
-                    setPreview({ sceneId: choice.to, route: walked });
-                  }}
-                >
-                  {choice.label}
-                </Button>
-              ))}
-            {routing.choices.every((choice) => choice.from !== preview.sceneId) && (
-              <span className="fy-mono">{endings.has(preview.sceneId) ? "An ending." : "No choices from here."}</span>
-            )}
-            <Button variant="ghost" onClick={() => setPreview(null)}>
-              Close preview
-            </Button>
-          </div>
-        </>
+function FindingCard({ row, lit, onPick, actions }: { row: FindingRow; lit: boolean; onPick: () => void; actions: React.ReactNode }) {
+  return (
+    <div className={cx("bm-find", lit && "bm-find--on")} onClick={onPick}>
+      <div className="bm-find__title">
+        <span className={cx("bm-dot", row.severity === "blocks" ? "bm-dot--blocks" : "bm-dot--warns")} />
+        <span className="bm-find__name">{row.title}</span>
+        {row.note && <span className="bm-muted">{row.note}</span>}
+      </div>
+      {row.evidence.length > 0 && <div className="bm-find__evidence">{row.evidence.join(" · ")}</div>}
+      {actions && (
+        <div className="bm-actions" onClick={(event) => event.stopPropagation()}>
+          {actions}
+        </div>
       )}
     </div>
+  );
+}
+
+/** A text field that writes when it is left or Enter is pressed, and only if it changed. */
+function CommitField({ label, value, onCommit }: { label: string; value: string; onCommit: (next: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  const commit = () => {
+    const next = draft.trim();
+    if (next !== "" && next !== value) onCommit(next);
+    else setDraft(value);
+  };
+  return (
+    <label className="bm-field">
+      <span className="bm-field__label">{label}</span>
+      <Input
+        value={draft}
+        aria-label={label}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") commit();
+          if (event.key === "Escape") setDraft(value);
+        }}
+      />
+    </label>
+  );
+}
+
+function ExcludeField({ onCancel, onExclude }: { onCancel: () => void; onExclude: (reason: string) => void }) {
+  const [reason, setReason] = useState("");
+  return (
+    <div className="bm-field">
+      <span className="bm-field__label">Why it is off the map</span>
+      <Input
+        autoFocus
+        value={reason}
+        aria-label="Reason for excluding"
+        placeholder="held for a later season"
+        onChange={(event) => setReason(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && reason.trim() !== "") onExclude(reason.trim());
+          if (event.key === "Escape") onCancel();
+        }}
+      />
+      <div className="bm-actions">
+        <Button size="sm" variant="primary" disabled={reason.trim() === ""} onClick={() => onExclude(reason.trim())}>
+          Exclude
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function NewChoice({
+  from,
+  to,
+  sceneOptions,
+  onChange,
+  onCancel,
+  onAdd,
+}: {
+  from: string | null;
+  to: string | null;
+  sceneOptions: React.ReactNode;
+  onChange: (next: { from: string | null; to: string | null }) => void;
+  onCancel: () => void;
+  onAdd: (from: string, label: string, to: string) => void;
+}) {
+  const [label, setLabel] = useState("");
+  const ready = from !== null && to !== null && label.trim() !== "";
+  const add = () => ready && onAdd(from, label.trim(), to);
+  return (
+    <Inspector title="New choice" onClose={onCancel}>
+      <label className="bm-field">
+        <span className="bm-field__label">Label</span>
+        <Input
+          autoFocus
+          value={label}
+          aria-label="Choice label"
+          placeholder="the words the viewer reads"
+          onChange={(event) => setLabel(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") add();
+            if (event.key === "Escape") onCancel();
+          }}
+        />
+      </label>
+      <div className="bm-kv">
+        <span className="bm-kv__k">From</span>
+        <Select label="From scene" value={from ?? ""} onChange={(event) => onChange({ from: event.target.value || null, to })}>
+          <option value="">choose…</option>
+          {sceneOptions}
+        </Select>
+      </div>
+      <div className="bm-kv">
+        <span className="bm-kv__k">To</span>
+        <Select label="To scene" value={to ?? ""} onChange={(event) => onChange({ from, to: event.target.value || null })}>
+          <option value="">choose…</option>
+          {sceneOptions}
+        </Select>
+      </div>
+      <div className="bm-actions">
+        <Button size="sm" variant="primary" disabled={!ready} onClick={add}>
+          Add choice
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+        <span className="bm-spacer" />
+        <span className="bm-muted">Enter · Esc</span>
+      </div>
+    </Inspector>
   );
 }

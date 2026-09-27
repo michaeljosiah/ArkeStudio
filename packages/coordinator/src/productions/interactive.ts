@@ -154,6 +154,39 @@ export function applyRoutingCommand(current: Routing | null, command: RoutingCom
   return RoutingSchema.parse({ ...next, version: current.version + 1 });
 }
 
+/** One queue per open world: a routing command reads the file, applies, and commits before the next reads. */
+const routingEdits = new WeakMap<WorldStore, Promise<unknown>>();
+
+/**
+ * Apply one closed routing command to the routing on disk (design turn 157). The branch map used
+ * to send the whole file it had composed from the copy it last saw, so two quick edits raced: both
+ * read one version, and the second was refused as stale or wrote over the first. Here each command
+ * reads the file inside a queue, so it applies to the previous command's result.
+ */
+export function applyRoutingCommandOnDisk(
+  store: WorldStore,
+  productionId: string,
+  command: RoutingCommand,
+  options: { source?: string; precondition?: WorldStatePrecondition } = {},
+): Promise<Routing> {
+  const previous = routingEdits.get(store) ?? Promise.resolve();
+  const run = previous.catch(() => undefined).then(async () => {
+    let current: Routing | null = null;
+    try {
+      const raw = await readFile(
+        toExtendedLength(join(store.dir, fromPortable(`productions/${productionId}/routing.json`))),
+        "utf8",
+      );
+      current = RoutingSchema.parse(JSON.parse(raw));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+    return saveRouting(store, productionId, applyRoutingCommand(current, command), options);
+  });
+  routingEdits.set(store, run);
+  return run;
+}
+
 const EVIDENCE_FILE = "routing-evidence.jsonl";
 const StoredTraversalEvidenceSchema = TraversalEvidenceSchema.extend({
   requestId: ConversationActionSemanticIdSchema.optional(),
