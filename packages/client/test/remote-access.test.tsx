@@ -17,6 +17,7 @@ Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElem
 Object.defineProperty(window, "location", { configurable: true, value: { origin: "https://studio.example.ts.net" } });
 const flush = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 const status: RemoteAccessStatus = { enabled: true, running: true, startOnLogin: false, startupSupported: true,
+  pairingDuration: 90,
   url: "https://studio.example.ts.net", reason: null, devices: [], pending: [{ id: "request", name: "Phone", expiresAt: Date.now() + 10000 }] };
 
 it("hosted media and sockets use the clean page origin without exposing a process credential", () => {
@@ -48,6 +49,35 @@ it("only the desktop exposes owner pairing and revocation controls", async () =>
     assert.equal(browser.querySelectorAll("button").length, 0);
     assert.ok(browser.textContent?.includes("on your PC"));
   } finally { await act(async () => browserRoot.unmount()); browser.remove(); }
+});
+it("desktop duration offers all four choices, uses saved replies and labels Never devices", async () => {
+  const calls: RemoteAccessCommand[] = [];
+  let current: RemoteAccessStatus = { ...status, running: false, enabled: false,
+    devices: [{ id: "paired", name: "My phone", createdAt: Date.now(), expiresAt: null }] };
+  window.arke = { remoteAccess: async command => {
+    calls.push(command);
+    if (command.kind === "duration") current = { ...current, pairingDuration: command.duration };
+    return { status: current };
+  } } as typeof window.arke;
+  const element = document.createElement("div"); document.body.append(element); const root = createRoot(element);
+  try {
+    await act(async () => { root.render(<SettingsRemoteAccessScreen />); await flush(); });
+    const select = element.querySelector("select")!;
+    assert.equal(select.disabled, false, "preference can change while remote access is off");
+    assert.equal(select.value, "90");
+    assert.deepEqual([...select.options].map(option => [option.value, option.textContent]),
+      [["30", "30 days"], ["90", "90 days"], ["120", "120 days"], ["never", "Never"]]);
+    for (const value of ["30", "120", "never", "90"]) {
+      await act(async () => {
+        select.querySelector<HTMLOptionElement>(`option[value="${value}"]`)!.selected = true;
+        select.dispatchEvent(new Event("change", { bubbles: true })); await flush();
+      });
+      assert.deepEqual(calls.at(-1), { kind: "duration", duration: value === "never" ? "never" : Number(value) });
+      assert.equal(select.value, value);
+    }
+    assert.ok(element.textContent?.includes("My phone · Never expires"));
+    assert.ok(element.textContent?.includes("Existing devices keep their current expiry"));
+  } finally { await act(async () => root.unmount()); element.remove(); delete window.arke; }
 });
 it("an unpaired browser sees pairing, not Studio content; a remembered browser opens Studio", async () => {
   const previous = globalThis.fetch;

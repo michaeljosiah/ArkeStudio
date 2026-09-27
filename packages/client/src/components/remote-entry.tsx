@@ -55,7 +55,7 @@ export function RemoteEntry({ children }: { children: ReactNode }) {
       <label>Pairing code<Input value={code} autoComplete="one-time-code" autoCapitalize="characters" maxLength={12} onChange={event => setCode(event.target.value)} required /></label>
       {error && <p role="alert">{error}</p>}
       <Button type="submit" disabled={busy || !code.trim() || !name.trim()}>Request pairing</Button>
-      <p>After approval, bookmark this address. This browser will be remembered for 90 days, unless you clear its site data or revoke it on the PC.</p>
+      <p>After approval, bookmark this address. The PC sets how long this browser is remembered. Clearing its site data or revoking it on the PC requires pairing again.</p>
     </form>}
   </section></main>;
 }

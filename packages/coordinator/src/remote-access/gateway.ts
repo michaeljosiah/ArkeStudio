@@ -90,7 +90,9 @@ export class RemoteGateway {
     const proof = cookie(req, deviceCookie);
     const authenticated = this.options.devices.authenticate(proof);
     if (url.pathname === "/remote/session" && req.method === "GET") {
-      res.writeHead(authenticated ? 204 : 401).end(); return;
+      const seconds = this.options.devices.cookieMaxAge(proof);
+      if (seconds !== null) res.setHeader("Set-Cookie", setCookie(deviceCookie, proof!, seconds));
+      res.writeHead(seconds !== null ? 204 : 401).end(); return;
     }
     if (url.pathname === "/remote/pair" && req.method === "POST") {
       if (req.headers.origin !== this.origin.origin || req.headers["content-type"] !== "application/json") { res.writeHead(403).end(); return; }
@@ -110,7 +112,7 @@ export class RemoteGateway {
     if (url.pathname === "/remote/pair" && req.method === "GET") {
       const pending = cookie(req, pairingCookie) ?? "";
       const state = this.options.devices.poll(pending);
-      if (state === "approved") res.setHeader("Set-Cookie", [setCookie(deviceCookie, pending, 90 * 86400), setCookie(pairingCookie, "", 0)]);
+      if (state === "approved") res.setHeader("Set-Cookie", [setCookie(deviceCookie, pending, this.options.devices.cookieMaxAge(pending) ?? 0), setCookie(pairingCookie, "", 0)]);
       res.writeHead(state === "approved" ? 204 : state === "pending" ? 202 : 410).end(); return;
     }
     if (/^\/(media|genesis-media)\//.test(url.pathname)) {
