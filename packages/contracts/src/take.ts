@@ -41,7 +41,7 @@ export type TakeKind = z.infer<typeof TakeKindSchema>;
  * Where an actual cost figure came from (SPEC-008): the provider said so, the manifest priced
  * it, or it ran locally and is recorded at zero as unmetered.
  */
-export const ActualCostSourceSchema = z.enum(["provider-reported", "usage-derived", "manifest-derived", "local-zero"]);
+export const ActualCostSourceSchema = z.enum(["provider-reported", "usage-derived", "mixed-measured", "manifest-derived", "local-zero"]);
 export type ActualCostSource = z.infer<typeof ActualCostSourceSchema>;
 
 /** Money is integer micro-dollars, never floating point (SPEC-008 R-14). */

@@ -218,3 +218,31 @@ it("explicit resubmission preserves earlier charges and keeps any unmeasured att
     } finally { h.queue.dispose(); }
   }
 });
+
+it("aggregates archived provider charges with reported or usage-derived retry costs", async () => {
+  for (const mode of ["reported", "usage", "expired"] as const) {
+    const h = await harness({ inputTextTokens: 3, outputAudioTokens: 250 }, "succeeded", true);
+    h.client.declarations.reportsCost = true;
+    h.client.submit = async () => ({ remoteId: "first", artifacts: [], costMicroUsd: 1000 });
+    try {
+      await h.queue.enqueue(input);
+      await until(() => h.ledger.length === 1, "first reported charge", 30000);
+      h.queue.dispose();
+      const job = h.queue.listJobs()[0]!;
+      assert.equal(h.ledger[0]!.actualMicroUsd, 1000);
+      await writeFile(join(h.dir, "jobs.jsonl"), JSON.stringify({ ...job, status: "needs-reconciliation", providerJobId: null, finalization: undefined }) + "\n");
+      h.ledger.length = 0;
+      h.client.submit = async () => ({ remoteId: "second", artifacts: [], ...(mode === "reported" ? { costMicroUsd: 2000 } : { speechUsage: { inputTextTokens: 3, outputAudioTokens: 250 } }) });
+      const restored = h.create();
+      try {
+        await restored.start();
+        if (mode === "expired") h.expire();
+        await restored.resolveHeld(job.id, "resubmit");
+        await until(() => h.ledger.length === 1, "aggregate reported charge", 30000);
+        assert.equal(h.ledger[0]!.speechAttempts?.[0]?.providerCostMicroUsd, 1000);
+        assert.equal(h.ledger[0]!.actualMicroUsd, mode === "expired" ? 1000 : mode === "reported" ? 3000 : 3252);
+        assert.equal(h.ledger[0]!.actualSource, mode === "usage" ? "mixed-measured" : "provider-reported");
+      } finally { restored.dispose(); }
+    } finally { h.queue.dispose(); }
+  }
+});

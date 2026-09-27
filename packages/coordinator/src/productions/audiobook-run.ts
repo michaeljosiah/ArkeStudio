@@ -1,4 +1,4 @@
-import { estimateSpeechMicroUsd, quoteSpeech } from "@arke-studio/contracts";
+import { quoteSpeech, type SpeechQuote } from "@arke-studio/contracts";
 import { createHash } from "node:crypto";
 import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -136,6 +136,8 @@ export interface Speaking extends PlannedBlock {
   takeHash?: string;
   /** What the reader is sent, in parts each within its cap (R-5): the rendered text under a direction, the words otherwise. */
   parts: string[];
+  /** One preparation's rates: shared by its total, confirmation identity and dispatch. */
+  quotes: SpeechQuote[];
   format: Format;
   cacheFile: string | null;
   substitutedNow?: AudiobookSubstitution;
@@ -242,6 +244,7 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
 
   // Who actually speaks each block (R-12): the one rule the direction was verified against.
   const speaking: Speaking[] = [];
+  const quotedAt = now();
   for (const planned of toMake) {
     const speaks = await effectiveReader(store, planned.assigned, room);
     if (speaks === null) return { kind: "unavailable", reason: "the narrator's voice model is not in the manifest" };
@@ -323,6 +326,7 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
       text,
       direction,
       parts,
+      quotes: parts.map(part => quoteSpeech(model, part, { at: quotedAt })),
       format,
       remake,
       // A whole block already in the cache is adopted without a call (R-19); parts are never
@@ -363,7 +367,7 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
   // readers that count so — `text.length` alone understates a Fish or Breeze block by up to 3×
   // (codex on PR 1180). The counts the card and the job show stay the prose's, as the page
   // read's do; only the money is the vendor's count.
-  const prices = new Map(misses.map(block => [block, block.parts.reduce((sum, part) => sum + estimateSpeechMicroUsd(block.model, part), 0)]));
+  const prices = new Map(misses.map(block => [block, block.quotes.reduce((sum, quote) => sum + quote.authorisedMicroUsd, 0)]));
   const priceOf = (block: Speaking) => prices.get(block) ?? 0;
   const estimate = misses.reduce((sum, block) => sum + priceOf(block), 0);
   return { kind: "ready", prepared: { plan, record, toMake, speaking, misses, clones, priceOf, estimate } };
@@ -388,7 +392,7 @@ export function chapterPriceToken(worldId: string, productionId: string, chapter
  * direction.
  */
 export function missIdentity(block: Speaking): string {
-  return `${block.block.key}:${audiobookTextHash(block.text)}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.takeHash ?? ""}:${JSON.stringify(block.parts.map(part => { const q = quoteSpeech(block.model, part); return [q.rateVersion, q.authorisedMicroUsd, q.tokenLimits]; }))}`;
+  return `${block.block.key}:${audiobookTextHash(block.text)}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.takeHash ?? ""}:${JSON.stringify(block.quotes.map(q => [q.rateVersion, q.authorisedMicroUsd, q.tokenLimits]))}`;
 }
 
 /** The price's lines (R-17): every cloud voice the words would go to, once each, with its share. */
@@ -418,7 +422,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     return;
   }
   const { plan, toMake, speaking, misses, clones, priceOf, estimate } = preparation.prepared;
-  const partPrices = new Map(misses.map(block => [block, block.parts.map(part => estimateSpeechMicroUsd(block.model, part))]));
+  const partPrices = new Map(misses.map(block => [block, block.quotes.map(quote => quote.authorisedMicroUsd)]));
   let record = preparation.prepared.record;
   const chapterFile = plan.chapter.file;
   emit({ type: "started", toMake: toMake.length, blocks: plan.blocks.length });

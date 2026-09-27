@@ -60,4 +60,9 @@ it("rejects ambiguous rate schedules", () => {
   if (model.pricing.kind !== "perToken") throw new Error("fixture");
   const pricing = model.pricing.speech!;
   assert.equal(SpeechTokenPricingSchema.safeParse({ ...pricing, rates: [...pricing.rates].reverse() }).success, false);
+  const rate = pricing.rates[0]!;
+  const schedule = (first: string, second: string) => ({ ...pricing, rates: [{ ...rate, effectiveFrom: first }, { ...rate, version: "next", effectiveFrom: second }] });
+  assert.equal(SpeechTokenPricingSchema.safeParse(schedule("2027-01-01T00:00:00Z", "2027-01-01T00:00:00.001Z")).success, true);
+  assert.equal(SpeechTokenPricingSchema.safeParse(schedule("2027-01-01T00:00:00.000Z", "2027-01-01T00:00:00Z")).success, false);
+  assert.equal(SpeechTokenPricingSchema.safeParse(schedule("2027-01-01T00:00:00.001Z", "2027-01-01T00:00:00Z")).success, false);
 });

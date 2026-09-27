@@ -1,4 +1,3 @@
-import { quoteSpeech } from "@arke-studio/contracts";
 import { readFile, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { type Job } from "@arke-studio/contracts";
@@ -47,7 +46,7 @@ export async function hearAudiobookLine(store: WorldStore, productionId: string,
   });
   const cachePath = join(store.dir, fromPortable(cacheFile));
   if (await stat(toExtendedLength(cachePath)).then((s) => s.isFile(), () => false)) return { file: cacheFile, cached: true };
-  const quotes = speaking.parts.map(part => quoteSpeech(speaking.model, part, { at: store.now() }));
+  const quotes = speaking.quotes;
   const token = speechConsentToken(JSON.stringify([deps.worldId, productionId, chapter.file, block, cacheFile]), quotes);
   // Preparation owns the actual request split and direction. A displayed single-request
   // estimate cannot authorise an arbitrary number of token-priced calls.
