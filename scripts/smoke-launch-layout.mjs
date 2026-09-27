@@ -167,6 +167,17 @@ async function electronMain() {
     await writeFile(join(__dirname, "master-" + suffix + ".png"), (await window.webContents.capturePage()).toPNG());
     const bounds = await window.webContents.executeJavaScript(`Object.fromEntries(["art","pane","wm","hello","ways","way","setup","once","foot"].map(c => { const e=document.querySelector("."+c);const b=e?.getBoundingClientRect();return [c, b && {x:b.x,y:b.y,width:b.width,height:b.height,font:getComputedStyle(e).font}]; }))`);
     await writeFile(join(__dirname, "master-" + suffix + ".json"), JSON.stringify(bounds, null, 2));
+    const actual = records.find(record => record.name.startsWith("158" + suffix + "-"));
+    if (actual) {
+      // dvh gives fractional pixels where the canvas rounds the band to an integer.
+      for (const [implementation, reference] of [["art", "art"], ["mark", "wm"], ["ways", "ways"], ["setup", "setup"]]) {
+        if (!actual[implementation] || !bounds[reference]) continue;
+        for (const dimension of ["x", "y", "width", "height"]) {
+          assert.ok(Math.abs(actual[implementation][dimension] - bounds[reference][dimension]) <= 1,
+            suffix + " " + implementation + "." + dimension + ": " + actual[implementation][dimension] + " vs master " + bounds[reference][dimension]);
+        }
+      }
+    }
   }
   clearTimeout(timeout); window.destroy(); app.exit(0);
 }

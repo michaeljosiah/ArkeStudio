@@ -326,7 +326,7 @@
   font: 400 var(--text-sm)/1.4 var(--font-sans);
   color: var(--launch-ink-quiet);
 }
-.fy-launch__foot span { margin-left: 6px; font-weight: 500; color: var(--launch-ink-dim); }
+.fy-launch__foot span { margin-left: 6px; font-weight: 500; color: var(--launch-ink-link); }
 
 /* ---- pairing a phone (158i) --------------------------------------- */
 
@@ -452,7 +452,7 @@
   min-height: 44px;
   border-bottom: 1px solid var(--launch-rule);
   font: 400 var(--text-sm)/1.3 var(--font-sans);
-  color: var(--launch-ink-soft);
+  color: var(--launch-ink-active);
 }
 .fy-launch__steps li > span {
   margin-left: auto;
@@ -468,10 +468,11 @@
   display: grid;
   place-items: center;
   border-radius: 50%;
-  border: 2px solid var(--launch-step-off);
+  border: 1.5px solid var(--launch-step-off);
 }
 .fy-launch__dot--ok { border: 0; background: var(--launch-step-on); color: var(--launch-action-fg); }
 .fy-launch__dot--run {
+  border-width: 2px;
   border-color: var(--launch-track);
   border-top-color: var(--launch-ink);
   border-right-color: var(--launch-ink);

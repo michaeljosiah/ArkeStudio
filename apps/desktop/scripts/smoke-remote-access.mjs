@@ -28,6 +28,7 @@ assert.ok(status.CertDomains.includes(name));
 const origin = `https://${name}:8444`;
 const dir = await mkdtemp(join(tmpdir(), "arke-remote-smoke-"));
 await cp(join(root, "fixtures/worlds"), join(dir, "worlds"), { recursive: true });
+const worldId = JSON.parse(await readFile(join(dir, "worlds/the-undersong/world.json"), "utf8")).worldId;
 const createCoordinator = () => new Coordinator({ provider: new FsWorldProvider(dir), adapter: null, appRoot: dir, appVersion: "smoke",
   changeLogPath: join(dir, "logs/changes.jsonl"), transportAuth: { token: randomBytes(32).toString("hex"), allowedOrigins: ["file://", "null"] } });
 let coordinator = createCoordinator();
@@ -45,7 +46,7 @@ try {
   const probe = await fetch(origin); assert.equal(probe.status, 200);
   await writeFile(join(dir, "main.cjs"), `(${electronMain.toString()})().catch(error => { console.error(error); require("electron").app.exit(1); });`);
   const child = spawn(require("electron"), [join(dir, "main.cjs")], { windowsHide: true, stdio: ["ignore", "inherit", "inherit", "ipc"],
-    env: { ...process.env, ARKE_REMOTE_SMOKE: JSON.stringify({ dir, origin, ...session,
+    env: { ...process.env, ARKE_REMOTE_SMOKE: JSON.stringify({ dir, origin, worldId, ...session,
       page: join(root, "packages/client/dist/index.html"), preload: join(root, "apps/desktop/dist/preload.cjs") }) } });
   child.on("message", async ({ id, command }) => {
     try {
@@ -125,7 +126,7 @@ async function electronMain() {
   await js(owner, "[...document.querySelectorAll('button')].find(b => b.textContent === 'Pair a device').click()");
   await until(owner, "document.querySelector('.remote-access__code') !== null");
   const code = await js(owner, "document.querySelector('.remote-access__code').textContent");
-  await owner.loadFile(config.page, { hash: "/w/the-undersong" });
+  await owner.loadFile(config.page, { hash: "/w/" + config.worldId });
   await until(owner, "document.querySelector('[data-screen=world-overview]') !== null");
   await js(phone, `(() => { const input = document.querySelector('input[autocomplete="one-time-code"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(code)}); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await js(phone, "document.querySelector('form').requestSubmit()");

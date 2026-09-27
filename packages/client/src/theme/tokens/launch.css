@@ -28,6 +28,7 @@
   --launch-ink-faint: color-mix(in srgb, var(--neutral-50) 50%, transparent);
   --launch-ink-quiet: color-mix(in srgb, var(--neutral-50) 45%, transparent);
   --launch-ink-cloud: color-mix(in srgb, var(--neutral-50) 42%, transparent);
+  --launch-ink-link: color-mix(in srgb, var(--neutral-50) 60%, transparent);
   --launch-ink-off: color-mix(in srgb, var(--neutral-50) 28%, transparent);
 
   /* ---- Plate and panels ------------------------------------- */
