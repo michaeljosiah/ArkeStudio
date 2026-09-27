@@ -104,6 +104,10 @@
   --launch-flare-bright: rgba(255, 244, 225, 0.95);
   --launch-flare-glow: rgba(255, 205, 150, 0.38);
   --launch-flare-far: rgba(255, 190, 130, 0.08);
+  /* The pairing field (turn 158i): recessed into the local way, ringed in its cool edge on focus. */
+  --launch-input-bg: rgba(0, 0, 0, 0.28);
+  --launch-focus-line: rgba(168, 198, 226, 0.75);
+  --launch-focus-ring: rgba(168, 198, 226, 0.18);
 
   /*
    * The wordmark's face, and the only thing in the app that uses it: Jost is the geometric

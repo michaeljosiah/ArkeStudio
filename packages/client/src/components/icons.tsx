@@ -474,6 +474,8 @@ export const LinkOff = icon(
     <path d="m2 2 20 20" />
   </>,
 );
+/** A phone asking to pair (design turn 158j). */
+export const Smartphone = icon(<><rect width="14" height="20" x="5" y="2" rx="2" ry="2" /><path d="M12 18h.01" /></>);
 export const CircleAlert = icon(<><circle cx="12" cy="12" r="10" /><path d="M12 8v4" /><path d="M12 16h.01" /></>);
 
 /** Runs on this device — the shield is the claim, the tick is that it holds. */

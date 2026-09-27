@@ -79,6 +79,7 @@ import { ActivityPanel } from "./components/activity-panel.js";
 import { openActivityPanel, openActivityPanelOnArrival } from "./lib/activity-panel.js";
 import { ImageContextMenu } from "./components/image-context-menu.js";
 import { UpdateAnnouncement } from "./components/update-announcement.js";
+import { PairingPrompt } from "./components/pairing-prompt.js";
 import { PlayerDock } from "./components/player.js";
 import { useThemePreference } from "./lib/theme.js";
 import { dismissPlayback } from "./lib/audio.js";
@@ -262,6 +263,7 @@ export function App() {
       {/* An update the start-up check found, said once, over the first screen with chrome
           (design turn 152). The transition below takes over from it when the install begins. */}
       <UpdateAnnouncement />
+      <PairingPrompt />
       <UpdateTransition />
       {/* While the address is a Settings route, the screen tree renders the route the gear
           remembered — the world picker where nothing was — and the sheet renders over it. Each

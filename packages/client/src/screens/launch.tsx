@@ -140,6 +140,26 @@ function LaunchArt({ version, remote }: { version: string | null; remote: boolea
   );
 }
 
+/**
+ * The surface's frame: the loop, and the column with the lockup at its head. The pairing gate in
+ * front of a remote session (components/remote-entry.tsx) draws its states inside the same frame,
+ * so a phone meets one designed first screen rather than a plain card and then this one.
+ */
+export function LaunchFrame({ children, compact = false }: { children: React.ReactNode; compact?: boolean }) {
+  const { state } = useStore();
+  const version =
+    state?.app.version ?? (typeof window === "undefined" ? null : window.arke?.appVersion ?? null);
+  return (
+    <div className={compact ? "fy-launch fy-launch--compact" : "fy-launch"} data-screen="startup">
+      <LaunchArt version={version} remote={remoteStudio() !== null} />
+      <main className="fy-launch__column">
+        <Wordmark />
+        {children}
+      </main>
+    </div>
+  );
+}
+
 function Wordmark() {
   return (
     <div className="fy-launch__mark">
@@ -152,7 +172,7 @@ function Wordmark() {
 }
 
 /** Named, not offered: present at reduced strength, and nothing on it can be pressed. */
-function CloudWay() {
+export function CloudWay() {
   return (
     <section className="fy-launch__way fy-launch__way--soon">
       <span className="fy-launch__icon" aria-hidden><Cloud size={52} stroke={1.25} /></span>
@@ -250,10 +270,6 @@ export function StartupScreen() {
   );
   const setupRun = downloading || fetching;
 
-  // The snapshot's version once there is a snapshot; the host's before that.
-  const version =
-    state?.app.version ?? (typeof window === "undefined" ? null : window.arke?.appVersion ?? null);
-
   const destination = (): string | null => {
     if (!state) return null;
     // A run cut off by closing the app returns to the building screen, continuing (SPEC-031
@@ -338,10 +354,7 @@ export function StartupScreen() {
   }
 
   return (
-    <div className="fy-launch" data-screen="startup">
-      <LaunchArt version={version} remote={remote !== null} />
-      <main className="fy-launch__column">
-        <Wordmark />
+    <LaunchFrame>
         {showSetup ? (
           <>
             <section className="fy-launch__setup" aria-live="polite">
@@ -415,13 +428,18 @@ export function StartupScreen() {
               </section>
               <CloudWay />
             </div>
-            {/* Inert with Cloud: both come alive together when Arke Cloud ships. */}
-            <p className="fy-launch__foot" aria-disabled>
-              Don’t have an account?<span>Create account</span>
-            </p>
+            <LaunchFoot />
           </>
         )}
-      </main>
-    </div>
+    </LaunchFrame>
+  );
+}
+
+/** Inert with Cloud: both come alive together when Arke Cloud ships. */
+export function LaunchFoot() {
+  return (
+    <p className="fy-launch__foot" aria-disabled>
+      Don’t have an account?<span>Create account</span>
+    </p>
   );
 }

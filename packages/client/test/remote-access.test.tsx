@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
+import { MemoryRouter } from "react-router";
 import { parseHTML } from "linkedom";
 import type { RemoteAccessCommand, RemoteAccessStatus } from "@arke-studio/contracts";
 import { SettingsRemoteAccessScreen } from "../src/screens/settings-remote-access.js";
@@ -56,7 +57,7 @@ it("an unpaired browser sees pairing, not Studio content; a remembered browser o
     globalThis.fetch = async input => new Response(null, { status: String(input) === "/remote/session" ? authenticated ? 204 : 401 : 410 });
     const element = document.createElement("div"); document.body.append(element); const root = createRoot(element);
     try {
-      await act(async () => { root.render(<RemoteEntry><div>Private world</div></RemoteEntry>); await flush(); });
+      await act(async () => { root.render(<MemoryRouter><RemoteEntry><div>Private world</div></RemoteEntry></MemoryRouter>); await flush(); });
       assert.equal(element.textContent?.includes("Private world"), authenticated);
       assert.equal(!!element.querySelector("form"), !authenticated);
     } finally { await act(async () => root.unmount()); element.remove(); }
