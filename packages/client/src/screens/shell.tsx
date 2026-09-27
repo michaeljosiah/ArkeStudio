@@ -15,7 +15,8 @@ import { reviewGenesisReadiness, leaveGenesisFinding } from "../lib/store.js";
 import { reviewGenesisVoices, generateGenesisVoice, decideGenesisVoice } from "../lib/store.js";
 import { GenesisImportCards } from "../components/genesis-imports.js";
 import { reviewGenesisImports, resolveGenesisImport } from "../lib/store.js";
-import { Archive, ChartLine, ChevronDown, ChevronRight, Pencil, Plus, RotateCcw, Sparkle, X } from "../components/icons.js";
+import { Archive, Book, ChartLine, ChevronDown, ChevronRight, More, Pencil, Plus, RotateCcw, Sparkle, X } from "../components/icons.js";
+import { useMediaQuery } from "../lib/media-query.js";
 import { AgentsPanel } from "./agents.js";
 import {
   ActionButton,
@@ -180,16 +181,18 @@ export function FirstRunScreen() {
   return (
     <div className="fy-app" data-screen="first-run">
       <AppChrome divided={false} />
-      <div className="fy-content">
-        <div className="fy-hero" style={{ paddingTop: 40 }}>
+      {/* Below 1100 the page centres when it fits (design turn 159), so the classes carry the
+          sizes the three widths need rather than inline values none of them can reach. */}
+      <div className="fy-content fy-firstrun">
+        <div className="fy-hero fy-firstrun__hero">
           <div className="fy-hero__eyebrow">Welcome</div>
-          <h1 className="fy-hero__title" style={{ fontSize: 56 }}>
+          <h1 className="fy-hero__title fy-firstrun__title">
             Every world starts as a name.
           </h1>
-          <p className="fy-hero__lede" style={{ maxWidth: 460 }}>Give yours one.</p>
+          <p className="fy-hero__lede fy-firstrun__lede">Give yours one.</p>
         </div>
         {env && (!env.pathBudgetOk || !env.nativeIndexOk) && (
-          <div style={{ maxWidth: 560, margin: "18px auto 0", display: "grid", gap: 10 }}>
+          <div className="fy-firstrun__warnings">
             {!env.pathBudgetOk && (
               <Callout tone="warning" title="Your data folder sits too deep">
                 {env.pathBudgetDetail}
@@ -202,8 +205,8 @@ export function FirstRunScreen() {
             )}
           </div>
         )}
-        <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-start", gap: 40, paddingTop: 46 }}>
-          <div className="fy-firstrun__flank" style={{ transform: "rotate(-4deg)" }} />
+        <div className="fy-firstrun__doors">
+          <div className="fy-firstrun__flank fy-firstrun__flank--left" />
           <div className="fy-fan__drift">
             <div className="fy-createcard" onClick={() => navigate("/worlds/new")}>
               <div className="fy-createcard__ring">
@@ -249,23 +252,19 @@ export function FirstRunScreen() {
               </div>
             </div>
           ) : (
-            <div className="fy-firstrun__flank" style={{ transform: "rotate(4deg)" }} />
+            <div className="fy-firstrun__flank fy-firstrun__flank--right" />
           )}
         </div>
-        <div style={{ textAlign: "center", paddingTop: 30 }}>
-          <span style={{ font: "400 13px var(--font-sans)", color: "var(--muted-foreground)" }}>
-            Already have a canon in documents?{" "}
-          </span>
+        <div className="fy-firstrun__docs">
+          <span>Already have a canon in documents? </span>
           <span
-            style={{ font: "500 13px var(--font-sans)", textDecoration: "underline", textUnderlineOffset: 3, cursor: "pointer" }}
+            className="fy-firstrun__docslink"
             title="Create the world first; then use Artifacts → Add files to file documents and lift facts."
             onClick={() => navigate("/worlds/new")}
           >
             Add documents
           </span>
-          <span style={{ font: "400 13px var(--font-sans)", color: "var(--muted-foreground)" }}>
-            . It files into artifacts, ready to link.
-          </span>
+          <span className="fy-firstrun__docstail">. It files into artifacts, ready to link.</span>
         </div>
       </div>
     </div>
@@ -303,6 +302,17 @@ export function WorldPickerScreen() {
         ? "One world."
         : `${["", "", "Two", "Three", "Four", "Five"][worlds.length] ?? worlds.length} worlds.`;
   const ROT = [-2.5, 1.8, -1.2, 2.4, -2];
+  // On a phone the last world opened leads, wide, and the grid holds the rest (design turn 159).
+  // Both are rendered at every width and the stylesheet chooses, so the first paint is already
+  // right and a window crossing 600 needs no render.
+  const featured = worlds.reduce<(typeof worlds)[number] | undefined>(
+    (best, w) => (best === undefined || Date.parse(w.updated) > Date.parse(best.updated) ? w : best),
+    undefined,
+  );
+  // The confirm is the one place the width decides what renders: a phone asks in a sheet from the
+  // bottom, where a thumb is, rather than inside a card half a thumb wide.
+  const phone = useMediaQuery("(max-width: 599px)");
+  const confirmingWorld = worlds.find((w) => w.worldId === confirming);
   return (
     <div className="fy-app" data-screen="world-picker">
       {/* No back and no context: this is the top, and the wordmark already says where you are. */}
@@ -313,10 +323,15 @@ export function WorldPickerScreen() {
           <h1 className="fy-hero__title fy-hero__title--home" style={{ textAlign: "left" }}>
             Pick up where you left off.
           </h1>
-          <p className="fy-hero__lede" style={{ margin: "10px 0 0", maxWidth: 540 }}>
-            {lede}
-          </p>
-          <Button variant="ghost" onClick={() => navigate("/publications")}>Open publication</Button>
+          <div className="fy-home-count">
+            <p className="fy-hero__lede" style={{ margin: "10px 0 0", maxWidth: 540 }}>
+              {lede}
+            </p>
+            <Button variant="ghost" className="fy-home-pub" onClick={() => navigate("/publications")}>
+              <Book size={18} />
+              Open publication
+            </Button>
+          </div>
           {archiveNote && (
             <div className="fy-set__why" style={{ marginTop: 10 }}>
               <span className={cx("fy-set__dot", archiveNote.refused ? "fy-set__dot--warn" : "fy-set__dot--ok")} />
@@ -324,6 +339,45 @@ export function WorldPickerScreen() {
             </div>
           )}
         </div>
+        {featured && (
+          <div className="fy-home-feature">
+            <div className="fy-home-label">Last opened</div>
+            <div
+              className="fy-homefeature"
+              role="button"
+              tabIndex={0}
+              onClick={() => navigate(`/w/${featured.worldId}`)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") navigate(`/w/${featured.worldId}`);
+              }}
+            >
+              <div className="fy-homefeature__art">
+                {featured.keyArt ? <Portrait worldSlug={featured.slug} path={featured.keyArt} label={featured.name} radius={0} /> :
+                  <div className="fy-worldcard__empty">No key art yet.</div>}
+                {/* The featured world leaves the grid on a phone, so it carries its own ⋯. */}
+                <button
+                  type="button"
+                  className="fy-worldcard__archive"
+                  aria-label={`Archive ${featured.name}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setConfirming(featured.worldId);
+                  }}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  <span className="fy-worldcard__glyph fy-worldcard__glyph--hover"><Archive size={13} /></span>
+                  <span className="fy-worldcard__glyph fy-worldcard__glyph--touch"><More size={16} /></span>
+                </button>
+              </div>
+              <div className="fy-homefeature__body">
+                <div className="fy-homefeature__name">{featured.name}</div>
+                <div className="fy-homefeature__logline">{featured.logline ?? ""}</div>
+                <WorldMeta world={featured} />
+              </div>
+            </div>
+            <div className="fy-home-label">All worlds</div>
+          </div>
+        )}
         <div className="fy-home-cards">
           <button type="button" className="fy-worldcard fy-newworldcard" onClick={() => navigate("/worlds/new")}>
             <span className="fy-worldcard__frame fy-worldcard__empty" aria-hidden="true"><Plus size={28} /></span>
@@ -332,12 +386,14 @@ export function WorldPickerScreen() {
             {worlds.map((w, i) => (
               <div
                 key={w.worldId}
-                className="fy-fan__drift"
+                className={cx("fy-fan__drift fy-home-drift", w.worldId === featured?.worldId && "fy-home-drift--featured")}
                 style={{ animationDuration: `${7 + (i % 3) * 0.7}s`, animationDelay: `${i * 0.6}s` }}
               >
                 <div
                   className="fy-worldcard"
-                  style={{ transform: `rotate(${ROT[i % ROT.length]}deg)` }}
+                  // The lean is a variable rather than a transform, so a phone can stand the card
+                  // up straight and a touch can leave it where it is (design turn 159).
+                  style={{ "--lean": `${ROT[i % ROT.length]}deg` } as React.CSSProperties}
                   onClick={() => navigate(`/w/${w.worldId}`)}
                 >
                   <div className="fy-worldcard__frame">
@@ -346,7 +402,7 @@ export function WorldPickerScreen() {
                   </div>
                   {/* Archiving is two clicks and no dialog: the second click is the consent,
                       and the words say what actually happens to the folder. */}
-                  {confirming === w.worldId ? (
+                  {confirming === w.worldId && !phone ? (
                     <div className="fy-worldcard__confirm" onClick={(e) => e.stopPropagation()}>
                       <span>Move {w.name} to the archive folder? Nothing is deleted.</span>
                       <span className="fy-worldcard__confirmacts">
@@ -376,36 +432,100 @@ export function WorldPickerScreen() {
                         setConfirming(w.worldId);
                       }}
                     >
-                      <Archive size={13} />
+                      {/* Without hover there is nothing to reveal it, so it shows as ⋯ (design turn 159). */}
+                      <span className="fy-worldcard__glyph fy-worldcard__glyph--hover"><Archive size={13} /></span>
+                      <span className="fy-worldcard__glyph fy-worldcard__glyph--touch"><More size={16} /></span>
                     </button>
                   )}
                   <div className="fy-worldcard__name">{w.name}</div>
                   {/* Always rendered: a world with no logline yet keeps the two-line box empty
                       rather than making its card shorter than the ones beside it. */}
                   <div className="fy-worldcard__logline">{w.logline ?? ""}</div>
-                  <div className="fy-worldcard__meta">
-                    <span
-                      className={cx("fy-dot", (w.attention?.unreviewedTakes ?? 0) > 0 ? "fy-dot--warn" : "fy-dot--ok")}
-                    />
-                    <span className="fy-worldcard__counts">
-                      {w.counts.characters} character{w.counts.characters === 1 ? "" : "s"} · {w.counts.productions}{" "}
-                      production{w.counts.productions === 1 ? "" : "s"}
-                    </span>
-                    {/* An age, as 1a draws it — `4d ago`, not `Sep 7, 02:22`. The long form
-                        took the room the counts beside it needed (issue 1007). */}
-                    <span className="mono" title={shortDateTime(w.updated)}>{relativeDate(w.updated)}</span>
-                  </div>
+                  <WorldMeta world={w} />
                 </div>
               </div>
             ))}
         </div>
         {worlds.length === 0 && sample?.available === true && (
-          <div style={{ padding: "0 64px 24px" }}>
+          <div className="fy-home-sample">
             <Button variant="ghost" disabled={sample.installing} onClick={() => installSampleWorld()}>
               {sample.installing ? "Installing…" : "Install the sample world"}
             </Button>
           </div>
         )}
+      </div>
+      {phone && confirmingWorld && (
+        <ArchiveSheet
+          world={confirmingWorld}
+          onArchive={() => {
+            archiveWorld(confirmingWorld.worldId);
+            setConfirming(null);
+          }}
+          onKeep={() => setConfirming(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+type WorldCardSummary = NonNullable<ReturnType<typeof useStore>["state"]>["worlds"][number];
+
+/** The card's last band: the attention dot, the counts, and an age. */
+function WorldMeta({ world: w }: { world: WorldCardSummary }) {
+  return (
+    <div className="fy-worldcard__meta">
+      <span
+        className={cx("fy-dot", (w.attention?.unreviewedTakes ?? 0) > 0 ? "fy-dot--warn" : "fy-dot--ok")}
+      />
+      <span className="fy-worldcard__counts">
+        {/* A phone's half-width card keeps productions and the age; the characters go first. */}
+        <span className="fy-worldcard__chars">
+          {w.counts.characters} character{w.counts.characters === 1 ? "" : "s"} ·{" "}
+        </span>
+        {w.counts.productions} production{w.counts.productions === 1 ? "" : "s"}
+      </span>
+      {/* An age, as 1a draws it — `4d ago`, not `Sep 7, 02:22`. The long form
+          took the room the counts beside it needed (issue 1007). */}
+      <span className="mono" title={shortDateTime(w.updated)}>{relativeDate(w.updated)}</span>
+    </div>
+  );
+}
+
+/**
+ * Archiving on a phone (design turn 159b): the same two presses as the card's own confirm, asked
+ * in a sheet from the bottom. The scrim and Escape are Keep, since keeping is the safe answer.
+ */
+function ArchiveSheet({ world, onArchive, onKeep }: { world: WorldCardSummary; onArchive: () => void; onKeep: () => void }) {
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => { if (event.key === "Escape") onKeep(); };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [onKeep]);
+  return (
+    <div className="fy-archivesheet__scrim" onClick={onKeep}>
+      <div
+        className="fy-archivesheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="fy-archivesheet-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <span className="fy-archivesheet__grab" aria-hidden />
+        <div className="fy-archivesheet__who">
+          {world.keyArt && (
+            <span className="fy-archivesheet__art">
+              <Portrait worldSlug={world.slug} path={world.keyArt} label={world.name} radius={8} />
+            </span>
+          )}
+          <div>
+            <h2 id="fy-archivesheet-title">Archive {world.name}?</h2>
+            <p>Moves its folder to the archive. Nothing is deleted.</p>
+          </div>
+        </div>
+        <div className="fy-archivesheet__acts">
+          <Button variant="primary" size="lg" onClick={onArchive}>Archive</Button>
+          <Button size="lg" onClick={onKeep}>Keep</Button>
+        </div>
       </div>
     </div>
   );

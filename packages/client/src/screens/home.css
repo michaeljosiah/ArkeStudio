@@ -1,0 +1,221 @@
+/* ------------------------------------------------------------------
+   Home, First run and the app bar below the desktop (design turn 159).
+
+   The desktop is as shipped (1a as amended by 133, and 5a) and nothing
+   here touches it: every rule below sits under a width that no desktop
+   window reaches, or under a pointer a mouse is not. Three bands:
+     · below 600 — a phone, and a Fold7's cover screen;
+     · 600 to 1099 — a Fold7 unfolded, a tablet, a narrow window;
+     · from 1100 — as shipped.
+   ------------------------------------------------------------------ */
+
+/* Home and the feature card are drawn at every width; these are hidden until a phone asks. */
+.fy-home-feature { display: none; }
+.fy-home-pub svg { display: none; }
+/* The general rule first: at equal weight the later one wins, and the touch glyph must stay hidden. */
+.fy-worldcard__glyph { display: inline-flex; }
+.fy-worldcard__glyph--touch { display: none; }
+
+/* The lean, as a variable a phone can zero. */
+.fy-worldcard { transform: rotate(var(--lean, 0deg)); }
+.fy-home-sample { padding: 0 64px 24px; }
+
+/* First run as shipped: the fixed fan with its flanks. The page is a column so the narrower
+   widths can centre it; at the desktop it simply starts at the top as it always has. */
+.fy-firstrun { display: flex; flex-direction: column; padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 24px); }
+.fy-firstrun__hero { padding-top: 40px; }
+.fy-firstrun__title { font-size: 56px; text-wrap: balance; }
+.fy-firstrun__lede { max-width: 460px; }
+.fy-firstrun__warnings { width: 100%; max-width: 560px; margin: 18px auto 0; display: grid; gap: 10px; }
+.fy-firstrun__doors { display: flex; justify-content: center; align-items: flex-start; gap: 40px; padding-top: 46px; }
+.fy-firstrun__flank--left { transform: rotate(-4deg); }
+.fy-firstrun__flank--right { transform: rotate(4deg); }
+.fy-firstrun__docs { text-align: center; padding-top: 30px; font: var(--type-body); font-size: var(--text-sm); color: var(--muted-foreground); }
+.fy-firstrun__docslink { font-weight: 500; color: var(--foreground); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+
+/* ---- no hover: the controls show, and nothing lifts ------------------ */
+
+@media (hover: none) {
+  .fy-worldcard__archive {
+    opacity: 1;
+    top: 6px;
+    right: 6px;
+    width: 44px;
+    height: 44px;
+    background: transparent;
+  }
+  .fy-worldcard__glyph--hover { display: none; }
+  .fy-worldcard__glyph--touch {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--background) 86%, transparent);
+    color: var(--foreground);
+    box-shadow: var(--shadow-xs);
+  }
+  .fy-worldcard:hover { transform: rotate(var(--lean, 0deg)) !important; box-shadow: var(--shadow-sm); }
+  .fy-createcard:hover { transform: none; box-shadow: none; }
+}
+
+/* A finger needs 44 around a glyph that stays its size. */
+@media (pointer: coarse) {
+  .fy-titlebar .fy-iconbtn:not(.fy-iconbtn--wide) { min-width: 44px; min-height: 44px; }
+}
+
+/* ---- 600 to 1099: the desktop grid, gutters taken in ----------------- */
+
+@media (max-width: 1099px) {
+  .fy-home-hero { padding: 26px 48px 0; }
+  .fy-hero__title--home { font-size: var(--text-5xl); line-height: 1.04; text-wrap: balance; }
+  .fy-home-count { display: flex; align-items: center; flex-wrap: wrap; column-gap: 20px; }
+  .fy-home-count .fy-hero__lede { margin-top: 8px !important; }
+  .fy-home-pub { margin-top: 8px; gap: 8px; }
+  .fy-home-pub svg { display: block; }
+  /* 280 wide cards and a 28 gap need 896: a Fold7's 888 would fall to two. 256 is the width
+     the cards were drawn at, and keeps three (design turn 159). */
+  .fy-home-cards { grid-template-columns: repeat(auto-fill, minmax(256px, 1fr)); gap: 28px; padding: 36px 48px 48px; }
+  .fy-home-sample { padding: 0 48px 24px; }
+
+  /* First run: the two doors, no flanks, and the page centred when it fits. */
+  .fy-firstrun { justify-content: safe center; }
+  .fy-firstrun__hero { padding-top: 0; }
+  .fy-firstrun__title { font-size: var(--text-5xl); line-height: 1.04; }
+  .fy-firstrun__flank { display: none; }
+  .fy-firstrun__doors { gap: 36px; padding-top: 56px; padding-inline: 48px; }
+  .fy-firstrun__docs { padding-top: 40px; padding-inline: 48px; }
+}
+
+/* ---- below 600: a phone ---------------------------------------------- */
+
+@media (max-width: 599px) {
+  /* The bar: 52 under the status bar, the lockup on the left where it clears three 44 targets. */
+  .fy-titlebar {
+    height: calc(52px + env(safe-area-inset-top, 0px));
+    padding: env(safe-area-inset-top, 0px) 6px 0 20px;
+  }
+  .fy-titlebar:has(> .fy-titlebar__side:first-child:empty) > .fy-titlebar__side:first-child { display: none; }
+  .fy-titlebar:has(> .fy-titlebar__side:first-child:empty) .fy-titlebar__brand {
+    position: static;
+    transform: none;
+    padding: 0;
+  }
+  /* Somewhere with a back or a context of its own says where you are; the lockup gives way. */
+  .fy-titlebar:not(:has(> .fy-titlebar__side:first-child:empty)) .fy-titlebar__brand { display: none; }
+  .fy-titlebar .fy-iconbtn:not(.fy-iconbtn--wide) { width: 44px; height: 44px; border-radius: 10px; }
+  .fy-titlebar .fy-iconbtn:not(.fy-iconbtn--wide) > svg { width: 20px; height: 20px; }
+  .fy-titlebar .fy-iconbtn__dot { top: 11px; right: 11px; width: 7px; height: 7px; border: 2px solid var(--background); }
+  .fy-titlebar .fy-account__mark .ui-avatar { width: 22px; height: 22px; }
+  .fy-account__menu { top: 50px; max-width: calc(100vw - 24px); }
+
+  /* Home: the hero, the last world wide, the rest two abreast. */
+  .fy-home-hero { padding: 14px 20px 0; }
+  .fy-hero__title--home { font-size: var(--text-3xl); line-height: 1.1; letter-spacing: var(--tracking-tighter); margin-top: 10px; }
+  .fy-home-count { justify-content: space-between; column-gap: 12px; }
+  .fy-home-count .fy-hero__lede { font-size: var(--text-md); margin-top: 4px !important; }
+  .fy-home-pub { min-height: 44px; margin-top: 4px; padding-inline: 4px; }
+
+  .fy-home-feature { display: block; padding: 18px 20px 0; }
+  .fy-home-label {
+    font: var(--type-label);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+    padding-bottom: 10px;
+  }
+  .fy-home-feature .fy-home-label + .fy-homefeature { margin-bottom: 22px; }
+  .fy-homefeature {
+    display: block;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    background: var(--card);
+    box-shadow: var(--shadow-sm);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .fy-homefeature:focus-visible { outline: 2px solid var(--foreground); outline-offset: 3px; }
+  .fy-homefeature__art { position: relative; aspect-ratio: 16 / 10; overflow: hidden; background: var(--muted); }
+  .fy-homefeature .fy-worldcard__chars { display: inline; }
+  .fy-homefeature__art .fy-portrait { width: 100%; height: 100%; object-fit: cover; object-position: 50% 40%; display: block; }
+  .fy-homefeature__body { padding: 14px 16px 16px; }
+  .fy-homefeature__name { font: 600 var(--text-xl)/1.2 var(--font-sans); letter-spacing: var(--tracking-tight); }
+  .fy-homefeature__logline {
+    margin-top: 4px;
+    font: var(--type-body);
+    font-size: var(--text-sm);
+    line-height: 1.5;
+    color: var(--muted-foreground);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .fy-homefeature .fy-worldcard__meta { margin: 12px 0 0; }
+
+  .fy-home-cards {
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding: 0 20px calc(env(safe-area-inset-bottom, 0px) + 24px);
+  }
+  .fy-home-drift { animation: none; }
+  .fy-home-drift--featured { display: none; }
+  .fy-worldcard { --lean: 0deg; padding: 8px 8px 12px; }
+  .fy-worldcard:hover { transform: none !important; }
+  .fy-worldcard__frame .fy-portrait,
+  .fy-worldcard__frame .fy-worldcard__empty { border-radius: 8px !important; }
+  .fy-worldcard__name { margin: 10px 2px 0; font-size: var(--text-md); height: 20px; line-height: 20px; }
+  .fy-worldcard__logline { display: none; }
+  .fy-worldcard__meta { margin: 6px 2px 0; gap: 6px; font-size: var(--text-2xs); }
+  .fy-worldcard__chars { display: none; }
+  .fy-home-sample { padding: 0 20px 24px; }
+
+  /* First run: the doors stacked full width. */
+  .fy-firstrun { justify-content: flex-start; }
+  .fy-firstrun__hero { padding: 30px 24px 0; }
+  .fy-firstrun__title { font-size: var(--text-3xl); line-height: 1.1; letter-spacing: var(--tracking-tighter); }
+  .fy-firstrun__lede { font-size: var(--text-md); }
+  .fy-firstrun__warnings { padding-inline: 20px; }
+  .fy-firstrun__doors { flex-direction: column; align-items: stretch; gap: 16px; padding: 28px 20px 0; }
+  .fy-firstrun__doors > .fy-fan__drift { animation: none; }
+  .fy-firstrun .fy-createcard { width: 100%; min-height: 0; padding: 24px 20px; transform: rotate(-1deg); }
+  .fy-firstrun .fy-createcard--filled { transform: rotate(1deg); }
+  .fy-firstrun__docs { padding: 24px 28px 0; }
+  .fy-firstrun__docstail { display: none; }
+}
+
+/* ---- the archive sheet (159b) ------------------------------------------ */
+
+.fy-archivesheet__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  background: color-mix(in srgb, var(--neutral-950) 38%, transparent);
+  animation: fy-archivesheet-fade 0.2s var(--ease-out) both;
+}
+.fy-archivesheet {
+  width: 100%;
+  padding: 10px 20px calc(env(safe-area-inset-bottom, 0px) + 24px);
+  border-radius: 22px 22px 0 0;
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: var(--shadow-xl);
+  animation: fy-archivesheet-rise 0.28s var(--ease-out) both;
+}
+.fy-archivesheet__grab { display: block; width: 40px; height: 5px; margin: 0 auto 18px; border-radius: 3px; background: var(--border); }
+.fy-archivesheet__who { display: flex; gap: 14px; align-items: center; }
+.fy-archivesheet__art { width: 56px; height: 62px; flex: none; overflow: hidden; border-radius: 8px; }
+.fy-archivesheet__art .fy-portrait { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fy-archivesheet h2 { margin: 0; font: var(--type-h3); }
+.fy-archivesheet p { margin: 4px 0 0; font: var(--type-body); font-size: var(--text-sm); line-height: 1.5; color: var(--muted-foreground); }
+.fy-archivesheet__acts { display: grid; gap: 10px; margin-top: 22px; }
+.fy-archivesheet__acts .ui-btn { width: 100%; height: 48px; }
+@keyframes fy-archivesheet-fade { from { opacity: 0; } }
+@keyframes fy-archivesheet-rise { from { transform: translateY(24px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .fy-archivesheet__scrim,
+  .fy-archivesheet { animation: none; }
+}
