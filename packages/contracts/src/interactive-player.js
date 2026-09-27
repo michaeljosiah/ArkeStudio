@@ -385,7 +385,12 @@ export function mountInteractivePlayer(root, options) {
       save();
     }
     const b = beat();
-    if (b.picture) {
+    if (!b.picture) {
+      // A beat with no picture shows none: holding the last one would preview an unfinished
+      // scene as though it chose to keep it (a kept picture arrives as that picture's path).
+      el.img.removeAttribute("src");
+      el.img.className = "";
+    } else {
       const motion = still() ? "none" : b.motion || "push";
       // A new picture starts its movement; one shared with the beat before keeps moving. The
       // poster's picture was set still, so it starts moving when reading begins.

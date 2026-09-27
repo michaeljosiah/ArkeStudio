@@ -46,9 +46,12 @@ export function useTableReadPlan({
     else if (result.status === "refused") setNotice(result.reason);
   }), [requestPlan]);
   const cacheJobs = state?.app.jobs.filter((job) => job.target.kind === "table-read-cache" && job.worldId === worldId).map((job) => `${job.id}:${job.status}`).join("|") ?? "";
+  // Narration is read in the app's narrator (turn 174), so a narrator changed while the scene is
+  // open is a new plan: the old one names another voice's cache and price.
+  const narrator = lines.some((line) => line.narration) ? JSON.stringify(state?.app.narrator ?? null) : "";
   useEffect(() => {
     if (lines.length > 0 && connection === "open") requestPlan();
-  }, [lines.length, scene.version, production.performanceReview.reviewHash, production.performanceReview.selectionHash, cacheJobs, connection, requestPlan]);
+  }, [lines.length, scene.version, production.performanceReview.reviewHash, production.performanceReview.selectionHash, cacheJobs, narrator, connection, requestPlan]);
   const prepare = useCallback(() => {
     if (plan === null) return;
     setNotice("");

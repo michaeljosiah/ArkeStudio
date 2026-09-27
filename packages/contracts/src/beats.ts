@@ -20,7 +20,10 @@ export interface SceneBeat {
   /** The table read's line id; absent for a beat with no line. */
   lineId?: string;
   blockId?: string;
-  /** Narration has no speaker; dialogue names its speaker's sheet. */
+  /**
+   * Narration has no speaker; dialogue names its speaker's sheet — or, as a draft still missing
+   * one, names nobody and is not narration for it: nobody is chosen to read it.
+   */
   kind: "narration" | "dialogue" | "picture";
   speaker?: string;
   text: string;
@@ -41,11 +44,15 @@ export function beatPlayback(shot: Pick<Shot, "beat">): { advance: "voice" | "ta
   };
 }
 
-/** Whether a legacy shot's authored audio is a line the reader should see. */
-function legacyLine(shot: Shot): { text: string; speaker?: string } | null {
+/**
+ * Whether a legacy shot's authored audio is a line the reader should see, and whose. A voice-over
+ * with no speaker is the narrator's; dialogue with no speaker is still dialogue, waiting for one.
+ */
+function legacyLine(shot: Shot): { text: string; kind: "narration" | "dialogue"; speaker?: string } | null {
   const audio = shot.audio;
   if (!audio || !["vo", "dialogue"].includes(audio.kind) || !audio.line?.trim()) return null;
-  return { text: audio.line.trim(), ...(audio.speaker ? { speaker: audio.speaker } : {}) };
+  const kind = audio.speaker || audio.kind === "dialogue" ? "dialogue" : "narration";
+  return { text: audio.line.trim(), kind, ...(audio.speaker ? { speaker: audio.speaker } : {}) };
 }
 
 export function sceneBeats(scene: SceneRecord): SceneBeat[] {
@@ -60,9 +67,11 @@ export function sceneBeats(scene: SceneRecord): SceneBeat[] {
         if (seen.has(block.id)) continue;
         seen.add(block.id);
         const lineId = performanceLineKey({ sceneId: scene.id, shotId: shot.id, blockId: block.id });
+        // An action block is narration. A dialogue block is its speaker's — and a draft whose
+        // speaker is missing stays dialogue, never recast into the narrator's voice.
         beats.push(
-          block.kind === "dialogue" && block.speaker
-            ? { shot, lineId, blockId: block.id, kind: "dialogue", speaker: block.speaker, text: block.text }
+          block.kind === "dialogue"
+            ? { shot, lineId, blockId: block.id, kind: "dialogue", ...(block.speaker ? { speaker: block.speaker } : {}), text: block.text }
             : { shot, lineId, blockId: block.id, kind: "narration", text: block.text },
         );
       }
@@ -70,11 +79,7 @@ export function sceneBeats(scene: SceneRecord): SceneBeat[] {
       const line = legacyLine(shot);
       if (line) {
         const lineId = performanceLineKey({ sceneId: scene.id, shotId: shot.id });
-        beats.push(
-          line.speaker
-            ? { shot, lineId, kind: "dialogue", speaker: line.speaker, text: line.text }
-            : { shot, lineId, kind: "narration", text: line.text },
-        );
+        beats.push({ shot, lineId, kind: line.kind, ...(line.speaker ? { speaker: line.speaker } : {}), text: line.text });
       }
     }
     if (beats.length === before) beats.push({ shot, kind: "picture", text: "" });

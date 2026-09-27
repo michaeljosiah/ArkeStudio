@@ -36,7 +36,7 @@ import { ProductionConversation, StagedDecision } from "../../components/convers
 import { SceneReview, SceneSynopsis, SceneTitle, useBlockDigests } from "../storyboard.js";
 import { SceneFlow } from "./flow.js";
 import { StoryboardRows, type BeatsView } from "./rows.js";
-import { VoiceLinesControl } from "./beats.js";
+import { SceneBeatPreview, VoiceLinesControl } from "./beats.js";
 import { lineVoices, useTableReadPlan } from "./table-read.js";
 import { SelectionProvider, selectedShotId, subjectMatchesBoard, type WorkspaceSubject } from "./selection.js";
 import { boardsForScene, shotHasFrame } from "./boards.js";
@@ -698,6 +698,16 @@ export function SceneWorkspace({
               }}
               onRenderBoard={(memberShotIds) => openGenerator({ kind: "board", memberShotIds })}
               onTalkToArke={talkToArke}
+            />
+          ) : playsAsBeats ? (
+            // A visual novel previews as it will be read (174d): the beat player over the window,
+            // from this scene, back to the beats on close — never the film's timeline.
+            <SceneBeatPreview
+              key={`${production.meta.id}/${scene.id}`}
+              world={world}
+              production={production}
+              sceneId={scene.id}
+              onClose={() => setView("storyboard")}
             />
           ) : (
             <ScenePreview

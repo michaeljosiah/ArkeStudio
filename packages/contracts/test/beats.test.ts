@@ -54,6 +54,21 @@ describe("a scene read as beats", () => {
     assert.ok(lines.every((l) => l.reason === undefined), "narration is read by the narrator, not refused for having no speaker");
   });
 
+  it("dialogue still missing its speaker stays dialogue, refused as before, never the narrator's", () => {
+    const draft = SceneSchema.parse({
+      id: "sc_draft", number: 1, slug: "draft", title: "Draft", status: "draft", version: 1,
+      script: { blocks: [{ id: "blk_who", kind: "dialogue", text: "Who said this?" }] },
+      shots: [
+        { id: "sh_a", number: 1, title: "A", description: "", covers: [cover("blk_who")] },
+        { id: "sh_b", number: 2, title: "B", description: "", audio: { kind: "dialogue", line: "Nor this." } },
+      ],
+    });
+    assert.deepEqual(sceneBeats(draft).map((b) => [b.kind, b.speaker ?? null]), [["dialogue", null], ["dialogue", null]]);
+    const lines = deriveRehearsalLines(draft, [], { narration: true });
+    assert.equal(lines.some((l) => l.narration), false);
+    assert.ok(lines.every((l) => l.reason !== undefined), "each keeps its missing-speaker refusal");
+  });
+
   it("without narration the table read is the characters' alone, as before", () => {
     const lines = deriveRehearsalLines(scene, [{ id: "maren", type: "character" }, { id: "bray", type: "character" }]);
     assert.ok(lines.every((l) => l.narration === undefined));

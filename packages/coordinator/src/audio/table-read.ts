@@ -1,6 +1,6 @@
 import { estimateSpeechMicroUsd } from "@arke-studio/contracts";
 import { readFile } from "node:fs/promises";
-import { deriveRehearsalLines, productionShape, TableReadPlanSchema, normalizeSpeechText, legacyVoiceModel, providerModelId,
+import { CLONED_VOICE_PROVIDER, deriveRehearsalLines, productionShape, TableReadPlanSchema, normalizeSpeechText, legacyVoiceModel, providerModelId, voiceFormatForModel,
   type ModelManifest, type Job, type ProviderStatus, type TableReadPlan } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { speechCacheFile, cachedVoiceAudioLooksRight, type SpeechSpec, type VoiceService } from "../voice/service.js";
@@ -51,13 +51,20 @@ export async function planTableRead(store: WorldStore, productionId: string, sce
       continue;
     }
     // Narration has no sheet: it is read in the narrator's voice, and says so when there is none.
+    // The narrator is any voice the app lets narrate — the audiobook reads in Mistral, BreezeBlue
+    // and Fish Audio presets too, which take a voice and the text as the table read sends them —
+    // but not a cloned reader, whose upload is confirmed elsewhere and which writes flac.
     const voice = line.narration ? narrator ?? undefined : store.getBundle().sheets.find(s => s.id === line.speakerSheetId)?.voice;
-    if (!voice || !["kokoro", "elevenlabs"].includes(voice.provider)) {
+    if (!voice || (line.narration ? voice.provider === CLONED_VOICE_PROVIDER : !["kokoro", "elevenlabs"].includes(voice.provider))) {
       item.reason = line.narration ? "Choose a supported narrator voice in Settings." : "No supported TTS assignment for this character."; continue;
     }
     const model = manifest.models.find(m => m.id === (voice.model ?? legacyVoiceModel(voice.provider, voice.voiceId)) && m.provider === voice.provider && m.capability === "voice-tts");
     if (!model) { item.reason = "The assigned TTS model is unavailable."; continue; }
-    const spec: SpeechSpec = { provider: model.provider, model: providerModelId(model), voiceId: voice.voiceId, text: normalizeSpeechText(line.text), format: model.provider === "kokoro" ? "wav" : "mp3" };
+    // The cache is named in the format the model returns: Kokoro and the hosted readers write wav,
+    // ElevenLabs mp3; a file named for another format would never be found again.
+    const format = model.provider === "kokoro" ? "wav" : voiceFormatForModel(model);
+    if (format === "flac") { item.reason = "This voice's audio cannot be read in a table read."; continue; }
+    const spec: SpeechSpec = { provider: model.provider, model: providerModelId(model), voiceId: voice.voiceId, text: normalizeSpeechText(line.text), format };
     const file = speechCacheFile(spec);
     const inputHash = audioHash(Buffer.from(JSON.stringify({ spec, assignment: voice })));
     Object.assign(item, { provider: model.provider, model: model.id, voiceId: voice.voiceId });

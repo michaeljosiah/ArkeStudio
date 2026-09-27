@@ -68,4 +68,14 @@ it("plans a visual novel's narration in the narrator's voice, and leaves a film'
 
   const none = await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [], providers, null);
   assert.match(none.plan.items.find(i => i.narration)!.reason!, /narrator voice/, "no narrator is said, not guessed");
+
+  // Any narrator the app lets narrate reads narration, in the format its model returns — the
+  // audiobook's Mistral presets among them — but not a cloned reader, confirmed elsewhere.
+  const mistral: ProviderStatus[] = [...providers, { id: "mistral", configured: true, validation: "valid" as const, fault: null, probes: [{ capability: "voice-tts" as const, available: true }] }];
+  const voxtral = await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [], mistral, { provider: "mistral", model: "voxtral-mini-tts", voiceId: "preset-voice" });
+  const read = voxtral.plan.items.find(i => i.narration)!;
+  assert.equal(read.route, "cloud");
+  assert.equal((voxtral.cloud.find(input => input.target.id === read.lineId)!.params.tableReadSpec as { format: string }).format, "wav");
+  const cloned = await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [], providers, { provider: "comfyui", model: "x", voiceId: "clone" });
+  assert.match(cloned.plan.items.find(i => i.narration)!.reason!, /narrator voice/);
 });

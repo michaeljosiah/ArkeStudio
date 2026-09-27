@@ -1,5 +1,11 @@
-import { formatMicroUsd, type SceneBeat, type Sheet, type TableReadPlan } from "@arke-studio/contracts";
-import type { LineVoice } from "./table-read.js";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router";
+import { formatMicroUsd, routingFindings, type ProductionBundle, type RoutingFinding, type SceneBeat, type Sheet, type TableReadPlan, type WorldBundle } from "@arke-studio/contracts";
+import { InteractivePlayerView } from "../../components/interactive-player.js";
+import { unwalkedChoices } from "../../lib/branch-map.js";
+import { listRoutingFindings, recordTraversal, subscribeRoutingFindings } from "../../lib/store.js";
+import { beatPreviewOptions } from "../branch-map.js";
+import { useProductionVoiceFiles, type LineVoice } from "./table-read.js";
 
 /**
  * A visual novel's scene page reads its shots as beats (turn 174): the line each one carries,
@@ -84,4 +90,58 @@ export function VoiceLinesControl({
 /** How a beat moves on, as the row's chip says it. */
 export function advanceWord(advance: "voice" | "tap" | "hold", holdSec: number): string {
   return advance === "voice" ? "after the voice" : advance === "tap" ? "on tap" : `hold ${holdSec}s`;
+}
+
+/**
+ * A visual novel's scene previewed from its own page (174d): the one player over the window, from
+ * this scene, reading as the branch map's preview reads — the same options, the same voices, the
+ * same walk evidence. Closing it goes back to the beats. It waits for the voices, since the player
+ * is mounted once and a beat cannot gain its voice after.
+ */
+export function SceneBeatPreview({
+  world,
+  production,
+  sceneId,
+  onClose,
+}: {
+  world: WorldBundle;
+  production: ProductionBundle;
+  sceneId: string;
+  onClose: () => void;
+}) {
+  const navigate = useNavigate();
+  const worldId = world.meta.worldId;
+  const productionId = production.meta.id;
+  const [opened] = useState(() => Date.now());
+  const voices = useProductionVoiceFiles({ worldId, productionId, sceneIds: production.scenes.map((scene) => scene.id), key: opened });
+  const [served, setServed] = useState<RoutingFinding[] | null>(null);
+  useEffect(() => {
+    const off = subscribeRoutingFindings((event) => {
+      if (event.productionId === productionId) setServed(event.findings);
+    });
+    listRoutingFindings(worldId, productionId);
+    return off;
+  }, [worldId, productionId]);
+  const unwalked = useMemo(() => {
+    if (served !== null) return [...unwalkedChoices(served)].sort();
+    return production.routing ? [...unwalkedChoices(routingFindings(production.routing, production.scenes, []))].sort() : [];
+  }, [served, production.routing, production.scenes]);
+  if (!voices.ready) return <p className="fy-swbeat__none" role="status">Gathering the voices…</p>;
+  return (
+    <InteractivePlayerView
+      className="bm-player"
+      label="Preview"
+      unwalked={unwalked}
+      options={beatPreviewOptions({
+        world,
+        production,
+        voices: voices.files,
+        from: sceneId,
+        unwalked,
+        onChoice: (choice, walked) => recordTraversal(worldId, productionId, choice.id, choice.from, choice.to, walked),
+        ...(production.routing ? { onBranchMap: () => navigate(`/w/${worldId}/p/${productionId}/branch-map`) } : {}),
+        onClose,
+      })}
+    />
+  );
 }

@@ -131,6 +131,48 @@ export function scenePlayerBeats(
 }
 
 /**
+ * A visual novel's preview options (turn 174), from the branch map or from a scene's Preview tab:
+ * every scene as beats, the routing's choices and endings, and the author's strip. Built once for
+ * both, so the two previews cannot read the production differently.
+ */
+export function beatPreviewOptions({
+  world,
+  production,
+  voices,
+  from,
+  unwalked,
+  onChoice,
+  onBranchMap,
+  onClose,
+}: {
+  world: { meta: { name: string; slug: string }; artifacts: readonly ArtifactSidecar[]; sheets: readonly Pick<Sheet, "id" | "name">[] };
+  production: ProductionBundle;
+  voices: ReadonlyMap<string, string>;
+  from: string;
+  unwalked: readonly string[];
+  onChoice: NonNullable<NonNullable<InteractivePlayerOptions["author"]>["onChoice"]>;
+  onBranchMap?: () => void;
+  onClose: () => void;
+}): InteractivePlayerOptions {
+  const routing = production.routing;
+  return {
+    title: production.meta.title,
+    eyebrow: world.meta.name,
+    // A production not yet routed still previews its scene: the scene is its own start.
+    start: routing?.start ?? from,
+    from,
+    autoplay: true,
+    scenes: Object.fromEntries(
+      production.scenes.map((scene) => [scene.id, { title: scene.title, beats: scenePlayerBeats(production, world.artifacts, world.sheets, world.meta.slug, scene, voices) }]),
+    ),
+    choices: routing?.choices ?? [],
+    endings: routing?.endings ?? [],
+    storageKey: null,
+    author: { unwalked: [...unwalked], onChoice, ...(onBranchMap ? { onBranchMap } : {}), onClose },
+  };
+}
+
+/**
  * A scene's cut for the preview: each shot as the cut plays it — a pass segment's range, a trim's
  * in-point, the shot's slot — rather than the whole file its take sits in, which started a trimmed
  * take at zero and, for a pass with one shot replaced, played the replaced footage before the
@@ -1187,16 +1229,27 @@ export function BranchMapScreen() {
   const previewOptions: InteractivePlayerOptions | null =
     preview === null
       ? null
-      : {
+      : playsAsBeats
+        ? beatPreviewOptions({
+            world,
+            production,
+            voices: previewVoices.files,
+            from: preview.from,
+            unwalked: [...unwalked],
+            onChoice: (choice, walked) => {
+              if (worldId && prodId) recordTraversal(worldId, prodId, choice.id, choice.from, choice.to, walked);
+            },
+            onBranchMap: () => setPreview(null),
+            onClose: () => setPreview(null),
+          })
+        : {
           title: production.meta.title,
           eyebrow: world.meta.name,
           start: routing.start,
           from: preview.from,
           autoplay: true,
           scenes: Object.fromEntries(
-            scenes.map((scene) => [scene.id, playsAsBeats
-              ? { title: scene.title, beats: scenePlayerBeats(production, world.artifacts, world.sheets, world.meta.slug, scene, previewVoices.files) }
-              : { title: scene.title, clips: sceneClips(production, world.meta.slug, scene, previewCut) }]),
+            scenes.map((scene) => [scene.id, { title: scene.title, clips: sceneClips(production, world.meta.slug, scene, previewCut) }]),
           ),
           choices: routing.choices,
           endings: routing.endings,

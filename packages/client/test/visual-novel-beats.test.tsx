@@ -148,6 +148,45 @@ describe("a visual novel's scene reads as beats (turn 174)", () => {
     assert.equal(prepare.confirmedMicroUsd, 40_000, "the press confirms the price it showed");
   });
 
+  it("asks the plan again when the narrator changes, since narration is read in the narrator's voice", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    await mountState(visualNovel(), SCENE_PATH);
+    const before = sent.filter((message) => message.kind === "plan-table-read").length;
+    await act(async () => {
+      __applyEventForTest({ at: "2026-09-27T10:00:00.000Z", type: "narrator.changed", voice: { provider: "kokoro", model: "kokoro-82m", voiceId: "bf_emma", label: "Emma" } } as never);
+    });
+    assert.equal(sent.filter((message) => message.kind === "plan-table-read").length, before + 1);
+  });
+
+  it("Preview reads the scene in the beat player over the window, once its voices are in, and closes back to the beats", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(visualNovel(), SCENE_PATH);
+    const asked = sent.length;
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Preview")!);
+    assert.equal(q(mounted, ".swp, .fy-swpreview"), null, "never the film's timeline");
+    assert.match(q(mounted, '[role="status"]')?.textContent ?? "", /Gathering the voices/);
+    const plans = sent.slice(asked).filter((message): message is Extract<ClientMessage, { kind: "plan-table-read" }> => message.kind === "plan-table-read");
+    assert.ok(plans.length > 0, "every scene's voices are asked for");
+    await act(async () => {
+      for (const request of plans) {
+        __applyEventForTest({ at: "2026-09-27T10:00:00.000Z", type: "rehearsal.result", requestId: request.requestId, worldId: FIXTURE_WORLD_ID, status: "planned", reason: "",
+          plan: request.sceneId === "sc_04" ? plan : { ...plan, sceneId: request.sceneId, items: [] } } as never);
+      }
+    });
+    const player = q(mounted, ".bm-player")!;
+    assert.ok(player, "the player takes the window");
+    assert.equal(player.getAttribute("data-kind"), "beats");
+    assert.equal(player.querySelector(".aip-line")?.textContent, "They hung the washing out the morning the water came.", "from this scene's first beat");
+    assert.match(player.querySelector("audio")?.getAttribute("src") ?? "", /voice-previews/, "with the voice the plan has");
+    const escape = new dom.window.Event("keydown", { bubbles: true }) as unknown as KeyboardEvent;
+    Object.assign(escape, { key: "Escape" });
+    await act(async () => { player.dispatchEvent(escape); });
+    assert.equal(q(mounted, ".bm-player"), null);
+    assert.equal(all(mounted, ".fy-sw__tab").find((tab) => tab.getAttribute("aria-checked") === "true")?.textContent, "Beats");
+  });
+
   it("a film's scene page is as it was", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));

@@ -499,6 +499,18 @@ describe("the player reading beats (turn 174)", () => {
     assert.equal(p.text(".aip-scene"), "The causeway");
   });
 
+  it("a beat with no picture shows none, rather than holding the last one as if kept", () => {
+    const p = mount({
+      ...NOVEL,
+      autoplay: true,
+      scenes: { ...NOVEL.scenes, sc_quarter: { title: "Q", beats: [{ picture: "media/quarter.png", text: "One." }, { text: "Two." }] } },
+    });
+    assert.equal(p.q(".aip-pic img")?.getAttribute("src"), "media/quarter.png");
+    p.key("ArrowRight"); p.key("ArrowRight");
+    assert.equal(p.text(".aip-line"), "Two.");
+    assert.equal(p.q(".aip-pic img")?.hasAttribute("src"), false);
+  });
+
   it("back one beat with the left arrow, never across a choice", () => {
     const p = mount({ ...NOVEL, autoplay: true });
     p.key("ArrowRight"); p.key("ArrowRight");
