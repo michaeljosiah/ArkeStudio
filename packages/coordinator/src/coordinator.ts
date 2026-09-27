@@ -16049,8 +16049,13 @@ export class Coordinator {
             const scene = store.getBundle().productions.find(p => p.meta.id === msg.productionId)?.scenes.find(s => s.id === msg.sceneId);
             // Narration is checked against the narrator as it is now, a character's line against
             // its sheet: either voice changing under the synthesis means the quote is stale.
-            const narratorNow = prepared.cloud.some(input => input.params.tableReadNarration === true) ? await this.tableReadNarrator(store, msg.productionId) : null;
-            if (scene?.version !== prepared.plan.sceneVersion || prepared.cloud.some(input => JSON.stringify(input.params.tableReadNarration === true
+            // The narrator is re-read whenever the plan narrates, local lines included: one changed
+            // while Kokoro was reading makes this preparation stale, and the refreshed plan below
+            // must not be built from the voice captured before synthesis.
+            const narrates = prepared.plan.items.some(item => item.narration === true);
+            const narratorNow = narrates ? await this.tableReadNarrator(store, msg.productionId) : null;
+            const narratorMoved = narrates && JSON.stringify(narratorNow) !== JSON.stringify(narrator);
+            if (scene?.version !== prepared.plan.sceneVersion || narratorMoved || prepared.cloud.some(input => JSON.stringify(input.params.tableReadNarration === true
               ? narratorNow ?? undefined
               : store.getBundle().sheets.find(s => s.id === input.params.tableReadSpeakerSheetId)?.voice) !== JSON.stringify(input.params.tableReadVoiceAssignment))) throw new Error("Preparation changed while local lines were being synthesized.");
             // What the queue would not take is said here (codex round 3): the enqueue result goes
@@ -16062,7 +16067,7 @@ export class Coordinator {
                 reason: `The cloud lines were not queued: ${queued.reason ?? "the queue refused them."}` });
               return;
             }
-            const refreshed = await planTableRead(store, msg.productionId, msg.sceneId, this.opts.manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers, readerProblem, narrator);
+            const refreshed = await planTableRead(store, msg.productionId, msg.sceneId, this.opts.manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers, readerProblem, narrates ? narratorNow : narrator);
             const notices = [
               failures.length ? `${failures.length} local lines could not be prepared.` : null,
               queued?.reason !== undefined ? `Some cloud lines were not queued: ${queued.reason}` : null,

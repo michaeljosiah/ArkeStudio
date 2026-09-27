@@ -409,7 +409,9 @@ async function compileFrameRun(input: CompileFrameRunInput): Promise<FrameRun> {
     const packed = packBoards(
       packShotsFor({
         scene: input.scene,
-        shots,
+        // A beat keeping the picture before is no panel: packed, it stood as a fixed panel with
+        // no frame of its own and refused the board (turn 174). Asked for by name, it is one.
+        shots: shots.filter((shot) => !retained(shot.id) || shot.id === input.shotId),
         selections: input.production.selections,
         takes: input.production.takes,
         castOf: (shot) =>

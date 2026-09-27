@@ -219,20 +219,20 @@ describe("frame-run coordinator service", () => {
     const kept = shots[1]!;
     const scene = { ...f.scene, shots: shots.map((shot) => (shot.id === kept.id ? { ...shot, beat: { samePicture: true } } : shot)) } as SceneRecord;
     const production = { ...f.production, meta: { ...f.production.meta, medium: "video" as const, kind: "visual-novel" } };
-    const quoteFor = async (scope: "all" | "missing", shotId?: string) => quoteFrameRun(f.store, {
+    const quoteFor = async (scope: "all" | "missing", shotId?: string, mode: "per-shot" | "board" = "per-shot") => quoteFrameRun(f.store, {
       requestId: "01J8E0000000000000000000V5",
       quoteId: "01J8E0000000000000000000V6",
       worldId: WORLD_ID,
       productionId: production.meta.id,
       sceneId: scene.id,
-      mode: "per-shot",
+      mode,
       modelId: IMAGE.id,
       scope,
       ...(shotId !== undefined ? { shotId } : {}),
       clock: CLOCK,
       compile: () => ({
         worldId: WORLD_ID, productionId: production.meta.id, scene, production, world: f.world, model: IMAGE,
-        mode: "per-shot" as const, scope, ...(shotId !== undefined ? { shotId } : {}), boardCapSec: 30, boardPanelCap: 6, eligible: true, clock: CLOCK,
+        mode, scope, ...(shotId !== undefined ? { shotId } : {}), boardCapSec: 30, boardPanelCap: 6, eligible: true, clock: CLOCK,
       }),
     });
     const all = await quoteFor("all");
@@ -240,6 +240,9 @@ describe("frame-run coordinator service", () => {
     assert.equal(all.steps.some((step) => step.label === `Shot ${kept.number}`), false);
     const named = await quoteFor("all", kept.id);
     assert.equal(named.includedCount, 1, "asked for by name, it is made as asked");
+    const boards = await quoteFor("all", undefined, "board");
+    assert.equal(boards.blockedReason ?? null, null, "boards pack without the kept beat, not around it as a frameless fixed panel");
+    assert.equal(boards.includedCount, shots.length - 1);
   });
 
   it("quotes the exact aggregate and refuses stale authorization before persistence", async () => {

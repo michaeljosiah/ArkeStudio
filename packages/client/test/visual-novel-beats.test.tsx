@@ -199,6 +199,24 @@ describe("a visual novel's scene reads as beats (turn 174)", () => {
     assert.equal(player.querySelector("audio")?.hasAttribute("src"), false, "reading as text");
   });
 
+  it("says why lines can't be voiced when nothing can prepare them", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(visualNovel(), SCENE_PATH);
+    const asked = sent.find((message) => message.kind === "plan-table-read")!;
+    const blocked = {
+      ...plan,
+      totalEstimatedMicroUsd: 0,
+      items: plan.items.map((item) => ({ ...item, route: "unavailable" as const, file: undefined, estimatedMicroUsd: 0,
+        reason: item.narration ? "Choose a supported narrator voice in Settings." : "Validate this voice provider in Settings before preparation." })),
+    };
+    await act(async () => {
+      __applyEventForTest({ at: "2026-09-27T10:00:00.000Z", type: "rehearsal.result", requestId: (asked as { requestId: string }).requestId, worldId: FIXTURE_WORLD_ID, status: "planned", reason: "", plan: JSON.parse(JSON.stringify(blocked)) } as never);
+    });
+    assert.equal(q(mounted, ".fy-swvoice__go"), null, "nothing to press");
+    assert.match(q(mounted, '[data-testid="voice-lines-blocked"]')?.textContent ?? "", /2 can’t be voiced: Choose a supported narrator voice in Settings\. Validate this voice provider/);
+  });
+
   it("a film's scene page is as it was", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
@@ -254,6 +272,18 @@ describe("the Beat card on a visual novel's shot page (turn 174, 174c)", () => {
     const key = Object.keys(box).find((candidate) => candidate.startsWith("__reactProps$"))!;
     await act(async () => { (box as unknown as Record<string, { onChange: (event: { target: { checked: boolean } }) => void }>)[key]!.onChange({ target: { checked: false } }); });
     assert.deepEqual(commands(sent), [{ kind: "edit-shot", shotId: "sh_13", change: {}, clear: ["beat"] }]);
+  });
+
+  it("a same-picture flag left on the scene's first shot can still be cleared", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = visualNovel();
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!.scenes.find((candidate) => candidate.id === "sc_04")! as unknown as { shots: Array<{ beat?: unknown }> };
+    scene.shots[0]!.beat = { samePicture: true };
+    const mounted = await mountState(state, `${SCENE_PATH}/shots/sh_12`);
+    const box = q(mounted, 'section[aria-label="Beat"] input[type="checkbox"]') as HTMLInputElement;
+    assert.equal(box.checked, true);
+    assert.equal(box.disabled, false, "clearable, though nothing comes before it");
   });
 
   it("a film's shot page has no Beat card", async () => {

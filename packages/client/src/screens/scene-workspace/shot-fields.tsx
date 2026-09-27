@@ -312,7 +312,9 @@ export function ShotFields({
           <Checkbox
             className="fy-shot__check"
             label={previous === null ? "Same picture as the beat before" : `Same picture as shot ${previous.number}`}
-            disabled={disabled || previous === null}
+            // The first shot has nothing before it to keep, but a flag left from before a move
+            // must still be clearable, or it silently comes back when the shot moves again.
+            disabled={disabled || (previous === null && shot.beat?.samePicture !== true)}
             checked={shot.beat?.samePicture ?? false}
             onChange={(event) => beatSet({ samePicture: event.target.checked || undefined })}
           />

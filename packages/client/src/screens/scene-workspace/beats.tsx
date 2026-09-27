@@ -76,9 +76,18 @@ export function VoiceLinesControl({
   const missing = plan.items.filter((item) => item.route === "local" || item.route === "cloud");
   const voicing = plan.items.filter((item) => item.route === "generating").length;
   const voiced = plan.items.filter((item) => item.file !== undefined).length;
+  // Lines nothing can voice say why — a narrator to choose, a provider to validate — rather than
+  // leaving a count with no way forward. The coordinator's reasons are already plain words.
+  const blocked = plan.items.filter((item) => item.route === "unavailable" && item.reason !== undefined);
+  const reasons = [...new Set(blocked.map((item) => item.reason!))];
   return (
     <span className="fy-swvoice">
       <span className="fy-swvoice__count">{voiced} of {plan.items.length} voiced{voicing > 0 ? ` · ${voicing} voicing` : ""}</span>
+      {missing.length === 0 && reasons.length > 0 ? (
+        <span className="fy-swvoice__notice" data-testid="voice-lines-blocked">
+          {blocked.length} can’t be voiced: {reasons.slice(0, 2).join(" ")}{reasons.length > 2 ? " …" : ""}
+        </span>
+      ) : null}
       {missing.length > 0 ? (
         <button type="button" className="fy-swvoice__go" disabled={preparing} onClick={onPrepare}>
           {preparing ? "Voicing…" : `Voice ${missing.length} line${missing.length === 1 ? "" : "s"}`}
