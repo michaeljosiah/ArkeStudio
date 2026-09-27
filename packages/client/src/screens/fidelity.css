@@ -315,7 +315,8 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   margin-top: 36px;
   animation: fy-fade-up 0.8s var(--ease-out) 0.25s both;
 }
-.fy-fan__slot { position: absolute; left: 50%; }
+.fy-fan__slot { position: absolute; left: 50%; margin-left: var(--fan-x); top: var(--fan-y); }
+.fy-fan__slot .fy-polaroid { transform: rotate(var(--fan-r)); }
 .fy-fan__drift { animation: fy-drift 7.4s ease-in-out infinite alternate; }
 
 .fy-polaroid {
@@ -522,7 +523,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
  * Production tiles. Every band is pinned and both text lines are clipped, so a one-word title
  * with no shots sits level with a long one — the rule the cast fan and the ledger cards follow.
  */
-.fy-prodstrip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-top: 22px; }
+.fy-prodstrip { display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); gap: 20px; margin-top: 22px; }
 .fy-prodtile {
   display: block;
   width: 100%;
@@ -1034,7 +1035,6 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 
 @media (max-width: 900px) {
-  .fy-pillnav { overflow-x: auto; max-width: calc(100% - var(--space-6)); }
   .fy-content--cast .fy-corner { position: static; display: flex; justify-content: flex-end; padding: var(--space-4) var(--space-7) 0; }
   .fy-content--cast .fy-split { flex-direction: column; padding-top: var(--space-6); }
   .fy-content--cast .fy-split__side { width: min(var(--cast-feature), 100%); }

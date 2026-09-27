@@ -1,0 +1,145 @@
+/* World overview below the desktop, design turn 160 (SPEC-001 R-7).
+   The desktop keeps 63a/63b. These base rules only replace inline declarations or
+   keep the phone's extra furniture out of the desktop composition. */
+.fy-worldnav { display: contents; }
+.fy-worldnav__sentinel { position: absolute; top: 0; width: 1px; height: 1px; pointer-events: none; }
+.fy-worldcast__head { display: none; }
+.fy-worldintro { display: contents; }
+.fy-worldconditions { display: grid; gap: var(--space-3); padding: var(--space-4) var(--gutter) 0; }
+.fy-worldconditions__edit { display: flex; gap: var(--space-3); align-items: center; }
+
+@media (pointer: coarse) {
+  .fy-worldapp .fy-content { scrollbar-width: none; }
+  .fy-worldnav .fy-pillnav { gap: 4px; }
+  .fy-worldnav .fy-pillnav__item { display: flex; align-items: center; height: 40px; padding: 0 15px; font: var(--type-ui); }
+  .fy-worldapp .fy-iconbtn--wide { height: 44px; }
+  [data-screen="world-overview"] .fy-polaroid:hover { transform: rotate(var(--fold-r, var(--fan-r))) !important; box-shadow: var(--shadow-md); }
+  [data-screen="world-overview"] .fy-cta:hover,
+  [data-screen="world-overview"] .fy-prodtile:hover { transform: none; box-shadow: var(--shadow-sm); }
+}
+
+@media (max-width: 1099px) {
+  /* Turn 160b keeps the Fold's first view on the hero and the two ways in.
+     The lower sections begin after that viewport, as they do at desktop height. */
+  .fy-worldintro { display: flow-root; min-height: calc(100dvh - 96px); }
+  .fy-worldnav .fy-pillnav { max-width: calc(100% - 96px); overflow-x: auto; scrollbar-width: none; }
+  .fy-worldnav .fy-pillnav::-webkit-scrollbar { display: none; }
+  [data-screen="world-overview"] .fy-hero { padding: 40px 48px 0; }
+  [data-screen="world-overview"] .fy-hero__eyebrow { font: var(--type-label); letter-spacing: .16em; }
+  [data-screen="world-overview"] .fy-hero__title { margin-top: 14px; font-size: var(--text-5xl); letter-spacing: -.03em; text-wrap: balance; overflow-wrap: anywhere; }
+  [data-screen="world-overview"] .fy-hero__lede { max-width: 560px; margin-top: 14px; font-size: var(--text-lg); line-height: 1.55; text-wrap: pretty; }
+  [data-screen="world-overview"] .fy-fan { height: 320px; margin-top: 34px; }
+  /* The centres spread with the available guttered width; at 984 they are the
+     master's -400/-245/-80/85/240. Even at 600 the tilted edges stay inside. */
+  [data-screen="world-overview"] .fy-fan__slot { margin-left: calc(-80px + (min(888px, 100vw - 96px) - 160px) * var(--spread)); top: var(--fold-y, var(--fan-y)); }
+  [data-screen="world-overview"] .fy-fan__slot:nth-child(1) { --spread: -.43956044; --fold-y: 24px; --fold-r: -8deg; }
+  [data-screen="world-overview"] .fy-fan__slot:nth-child(2) { --spread: -.22664835; --fold-y: 6px; }
+  [data-screen="world-overview"] .fy-fan__slot:nth-child(3) { --spread: 0; }
+  [data-screen="world-overview"] .fy-fan__slot:nth-child(4) { --spread: .22664835; --fold-y: 6px; }
+  [data-screen="world-overview"] .fy-fan__slot:nth-child(5) { --spread: .43956044; --fold-y: 24px; --fold-r: 8deg; }
+  [data-screen="world-overview"] .fy-polaroid { width: 160px; border-radius: 6px; box-shadow: var(--shadow-md); transform: rotate(var(--fold-r, var(--fan-r))); }
+  [data-screen="world-overview"] .fy-polaroid__frame { height: 170px; }
+  [data-screen="world-overview"] .fy-polaroid .fy-portrait { border-radius: 3px !important; }
+  [data-screen="world-overview"] .fy-polaroid__name { margin: 10px 0 0; height: 18px; font: 600 var(--text-md)/18px var(--font-sans); }
+  [data-screen="world-overview"] .fy-polaroid__role { margin: 2px 0 0; height: 16.9px; font: 400 var(--text-sm)/16.9px var(--font-sans); }
+  .fy-ctas { gap: 24px; padding: 10px 48px 0; flex-wrap: nowrap; }
+  .fy-cta { width: auto; flex: 1 1 0; min-width: 0; gap: 14px; border-radius: 14px; }
+  .fy-cta__title { font: 600 var(--text-md)/1.25 var(--font-sans); }
+  .fy-cta__title, .fy-cta__sub { overflow-wrap: anywhere; }
+  .fy-cta__sub { font: 400 var(--text-sm)/1.4 var(--font-sans); }
+  .fy-cta .ui-btn { flex: none; height: 44px; padding: 0 16px; border-radius: 10px; box-shadow: none; }
+  .fy-cta:first-child:not(:last-child) .ui-btn { background: var(--primary); color: var(--primary-foreground); border-color: transparent; }
+  .fy-worldmore { max-width: none; padding: 40px 48px 64px; }
+  .fy-worldconditions { padding-inline: 48px; min-width: 0; overflow-wrap: anywhere; }
+  .fy-worldconditions__edit, .fy-buildnotice { flex-wrap: wrap; }
+  .fy-worldconditions__edit .mono { min-width: 0; }
+  .fy-worldconditions .ui-callout { min-width: 0; }
+}
+
+@media (min-width: 600px) and (max-width: 1099px) and (pointer: coarse) {
+  .fy-worldintro { min-height: calc(100dvh - 114px); }
+}
+
+/* Two doors still share the row at the narrow end of the tablet band. Moving
+   their button below the picture and copy keeps the words from becoming a column
+   of single letters before there is room for 160b's 110px frames. */
+@media (min-width: 600px) and (max-width: 799px) {
+  .fy-cta { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 12px; }
+  .fy-cta__frame { width: 72px; height: 56px; }
+  .fy-cta .ui-btn { grid-column: 1 / -1; }
+}
+
+@media (max-width: 599px) {
+  .fy-worldintro { display: contents; }
+  .fy-worldapp .fy-content { scrollbar-width: none; }
+  .fy-worldapp .fy-titlebar { padding-left: 4px; }
+  .fy-worldapp .fy-titlebar__context { display: none; }
+  .fy-worldapp .fy-iconbtn--wide { height: 44px; gap: 2px; padding: 0 10px 0 6px; font: var(--type-ui); }
+  .fy-worldapp .fy-iconbtn--wide svg { width: 18px; height: 18px; }
+  .fy-worldapp .fy-titlebar__side { gap: 0; }
+  .fy-worldapp .fy-titlebar__side:first-child { padding-right: 0; }
+  .fy-worldapp .fy-titlebar__side--right { flex: none; }
+  .fy-worldapp .fy-titlebar .fy-iconbtn { flex-shrink: 0; color: var(--muted-foreground); }
+  .fy-worldnav { display: block; flex: none; position: sticky; top: 0; z-index: 20; background: var(--background); border-bottom: 1px solid transparent; }
+  .fy-worldnav--stuck { border-bottom-color: var(--border); box-shadow: 0 6px 16px -12px color-mix(in srgb, var(--neutral-950) 35%, transparent); }
+  /* The fade belongs to the stationary wrapper, not the scrolling strip. */
+  .fy-worldnav::after { content: ""; position: absolute; inset: 0 0 0 auto; width: 36px; background: linear-gradient(90deg, transparent, var(--background)); pointer-events: none; }
+  .fy-worldnav .fy-pillnav { position: static; width: 100%; max-width: none; margin: 0; padding: 6px 20px 10px; gap: 4px; border: 0; border-radius: 0; box-shadow: none; animation: none; scroll-snap-type: x proximity; scroll-padding-inline: 20px; }
+  .fy-worldnav .fy-pillnav__item { flex: none; display: flex; align-items: center; height: 40px; padding: 0 16px; font: var(--type-ui); scroll-snap-align: center; }
+  [data-screen="world-overview"] .fy-hero { padding: 14px 20px 0; text-align: left; }
+  [data-screen="world-overview"] .fy-hero__title { margin-top: 10px; font-size: var(--text-4xl); line-height: 1.05; }
+  [data-screen="world-overview"] .fy-hero__lede { margin: 10px 0 0; font-size: var(--text-md); line-height: 1.5; }
+  .fy-worldcast__head { display: flex; align-items: baseline; justify-content: space-between; padding: 22px 20px 0; }
+  .fy-worldcast__head .fy-hero__eyebrow { font: var(--type-label); letter-spacing: .16em; }
+  .fy-worldcast__head a { display: flex; align-items: center; gap: 4px; height: 44px; font: var(--type-ui); color: var(--foreground); text-decoration: none; }
+  [data-screen="world-overview"] .fy-fan { display: flex; gap: 14px; height: auto; margin: 0; padding: 12px 20px 22px; overflow-x: auto; scroll-snap-type: x proximity; scroll-padding-inline: 20px; scrollbar-width: none; animation: none; }
+  [data-screen="world-overview"] .fy-fan::-webkit-scrollbar { display: none; }
+  [data-screen="world-overview"] .fy-fan__slot { position: static; flex: none; margin: 0; scroll-snap-align: start; }
+  [data-screen="world-overview"] .fy-fan__drift { animation: none; }
+  [data-screen="world-overview"] .fy-polaroid { width: 140px; transform: rotate(var(--row-r)); }
+  [data-screen="world-overview"] .fy-polaroid:hover { transform: rotate(var(--row-r)) !important; box-shadow: var(--shadow-md); }
+  [data-screen="world-overview"] .fy-fan__slot:nth-child(1) { --row-r: -1.5deg; }
+  [data-screen="world-overview"] .fy-fan__slot:nth-child(2) { --row-r: 1.2deg; }
+  [data-screen="world-overview"] .fy-fan__slot:nth-child(3) { --row-r: -1deg; }
+  [data-screen="world-overview"] .fy-fan__slot:nth-child(4) { --row-r: 1.4deg; }
+  [data-screen="world-overview"] .fy-fan__slot:nth-child(5) { --row-r: -1.2deg; }
+  [data-screen="world-overview"] .fy-polaroid__frame { height: 150px; }
+  .fy-ctas { flex-direction: column; gap: 12px; padding: 4px 20px 0; }
+  .fy-cta { padding: 12px; }
+  .fy-cta__frame { width: 72px; height: 56px; }
+  .fy-worldmore { padding: 28px 20px calc(24px + env(safe-area-inset-bottom, 0px)); }
+  .fy-wsection { margin-top: 28px; }
+  .fy-worldmore__rule + .fy-wsection { margin-top: 26px; }
+  .fy-wsection__head { flex-direction: column; align-items: stretch; gap: 8px; }
+  .fy-wsection__eyebrow { font: var(--type-label); line-height: calc(var(--text-base) * var(--leading-body)); letter-spacing: .16em; }
+  .fy-wsection__title { margin-top: 6px; font: 600 var(--text-2xl)/1.15 var(--font-sans); letter-spacing: var(--tracking-tighter); }
+  .fy-wsection__lede { flex: auto; font: 400 var(--text-sm)/1.55 var(--font-sans); }
+  .fy-glance { grid-template-columns: 1fr 1fr; margin-top: 16px; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; }
+  .fy-glance__cell { padding: 16px 0; border: 0; }
+  .fy-glance__cell:nth-child(odd) { padding-right: 16px; border-right: 1px solid var(--border); }
+  .fy-glance__cell:nth-child(even) { padding-left: 16px; }
+  .fy-glance__cell:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
+  .fy-glance__n { font: 600 var(--text-3xl)/1 var(--font-sans); letter-spacing: var(--tracking-tighter); }
+  .fy-glance__label { margin-top: 8px; font: var(--type-ui); }
+  .fy-glance__sub { margin-top: 2px; font: var(--type-meta); }
+  /* One button in the DOM, moved below the rows on a phone. */
+  .fy-wsection--productions { display: flex; flex-direction: column; }
+  .fy-wsection--productions .fy-wsection__head { display: contents; }
+  .fy-world-newproduction { order: 2; width: 100%; height: 44px; margin-top: 10px; border-radius: 10px; }
+  .fy-prodstrip { grid-template-columns: 1fr; gap: 10px; margin-top: 16px; }
+  .fy-prodtile { display: grid; grid-template-columns: 96px minmax(0, 1fr); grid-template-rows: auto auto auto; column-gap: 14px; align-content: center; padding: 12px; border-radius: 14px; }
+  .fy-prodtile__frame { grid-column: 1; grid-row: 1 / 4; width: 96px; height: 72px; }
+  .fy-prodtile__frame .fy-portrait { border-radius: 8px !important; }
+  .fy-prodtile__eyebrow { grid-column: 2; margin: 7px 0 0; height: auto; font: var(--type-meta); letter-spacing: normal; text-transform: none; }
+  .fy-prodtile__name { grid-column: 2; margin: 2px 0 0; height: 19.5px; font: 600 var(--text-md)/1.3 var(--font-sans); }
+  .fy-prodtile__foot { grid-column: 2; margin: 6px 0 7px; height: auto; font: var(--type-meta); }
+  .fy-needs { display: grid; gap: 0; margin-top: 28px; padding: 0; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+  .fy-needs__count { padding: 14px 16px; font: 600 var(--text-sm)/1 var(--font-sans); border-bottom: 1px solid var(--border); }
+  .fy-needs__item { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; column-gap: 12px; row-gap: 0; align-content: center; padding: 0 16px; min-height: 60px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; }
+  .fy-needs__item:last-child { border-bottom: 0; }
+  .fy-needs__what { font: 500 var(--text-sm)/1.3 var(--font-sans); }
+  .fy-needs__why { grid-column: 1; grid-row: 2; font: var(--type-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fy-needs__go { grid-column: 2; grid-row: 1 / 3; align-self: center; font: var(--type-ui); color: var(--foreground); }
+  .fy-worldconditions { padding-inline: 20px; }
+  .fy-worldconditions__edit .ui-btn, .fy-buildnotice__act { min-height: 44px; }
+}
