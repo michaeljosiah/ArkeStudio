@@ -63,7 +63,9 @@ describe("owned stdio child lifecycle", () => {
   });
 
   for (const mode of ["ready", "during-spawn", ...(process.platform === "win32" ? ["orphan"] : [])]) {
-    it(`kills its real child and helper when the host exits abruptly (${mode})`, { timeout: 90_000 }, async t => {
+    // The orphan host first waits on a real process query, which a loaded Windows runner can
+    // take most of a minute to answer; the other modes keep their tighter bound.
+    it(`kills its real child and helper when the host exits abruptly (${mode})`, { timeout: mode === "orphan" ? 180_000 : 90_000 }, async t => {
       const host = spawn(process.execPath, ["--import", "tsx", fileURLToPath(new URL("./fixtures/owned-host.mjs", import.meta.url)), mode],
         { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
       let out = ""; let err = "";
