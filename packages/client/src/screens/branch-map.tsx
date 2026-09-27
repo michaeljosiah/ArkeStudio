@@ -7,11 +7,13 @@ import {
   productionShape,
   routingFindings,
   type ArtifactSidecar,
+  type InteractivePlayerOptions,
   type ProductionBundle,
   type RoutingCommand,
   type RoutingFinding,
 } from "@arke-studio/contracts";
 import { ProductionConversation } from "../components/conversation.js";
+import { InteractivePlayerView } from "../components/interactive-player.js";
 import { Expand, EyeOff, Flag, Minus, Play, Plus, Trash, TriangleAlert, X } from "../components/icons.js";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Button, Input, Select, Switch, cx } from "../components/ui.js";
@@ -82,12 +84,32 @@ function sceneFrame(production: ProductionBundle, artifacts: readonly ArtifactSi
   return null;
 }
 
+/**
+ * A scene's cut for the preview: the accepted clip of each shot, in shot order, with a pass that
+ * covers several shots played once. The export ships one covering clip per scene instead, and
+ * refuses a scene without one; the preview plays what there is, and a scene with nothing is a slate.
+ */
+function sceneClips(production: ProductionBundle, slug: string, scene: ProductionBundle["scenes"][number]): string[] {
+  const clips: string[] = [];
+  let last: string | null = null;
+  for (const shot of safeShots(scene)) {
+    const takeId = production.selections[shot.id]?.acceptedTakeId ?? null;
+    const take = takeId === null ? undefined : production.takes.find((candidate) => candidate.id === takeId);
+    const media = take === undefined ? null : mediaTakeFor(production, take);
+    if (media === null || media.kind !== "clip" || media.id === last) continue;
+    last = media.id;
+    clips.push(mediaUrl(slug, `productions/${production.meta.id}/takes/${media.id}/${media.media}`));
+  }
+  return clips;
+}
+
 export function BranchMapScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const [served, setServed] = useState<RoutingFinding[] | null>(null);
   const [exportNote, setExportNote] = useState<string | null>(null);
-  const [preview, setPreview] = useState<{ sceneId: string; route: string[] } | null>(null);
+  /** The preview running over the window (turn 156g), from the scene it started at. */
+  const [preview, setPreview] = useState<{ from: string; at: number } | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
   const [highlight, setHighlight] = useState<ReadonlySet<string>>(new Set());
   /** The one option the map keeps in the tab order; the arrows move it (brief §3, IV-M2). */
@@ -242,7 +264,7 @@ export function BranchMapScreen() {
           )}
         </button>
       )}
-      <Button disabled={!routing} onClick={() => routing && setPreview({ sceneId: routing.start, route: [] })}>
+      <Button disabled={!routing} onClick={() => routing && setPreview({ from: routing.start, at: Date.now() })}>
         <Play size={12} />
         Preview
       </Button>
@@ -408,7 +430,7 @@ export function BranchMapScreen() {
       return;
     } else if (event.key === "p" || event.key === "P") {
       event.preventDefault();
-      setPreview({ sceneId, route: [] });
+      setPreview({ from: sceneId, at: Date.now() });
       return;
     } else if (event.key === "+" || event.key === "=") {
       event.preventDefault();
@@ -704,7 +726,7 @@ export function BranchMapScreen() {
             <span className="bm-kv__v">
               {walked ? "walked" : <><span className="bm-dot bm-dot--blocks" />not walked</>}
             </span>
-            <Button size="sm" onClick={() => setPreview({ sceneId: selectedChoice.from, route: [] })}>
+            <Button size="sm" onClick={() => setPreview({ from: selectedChoice.from, at: Date.now() })}>
               <Play size={10} />
               Walk it
             </Button>
@@ -844,7 +866,7 @@ export function BranchMapScreen() {
             <Plus size={11} />
             Draw a choice from here
           </Button>
-          <Button size="sm" onClick={() => setPreview({ sceneId: scene.id, route: [] })}>
+          <Button size="sm" onClick={() => setPreview({ from: scene.id, at: Date.now() })}>
             <Play size={10} />
             Preview from here
           </Button>
@@ -871,7 +893,7 @@ export function BranchMapScreen() {
       }
       if (row.kind === "untraversed-edge") {
         return (
-          <Button size="sm" onClick={() => setPreview({ sceneId: routing!.start, route: [] })}>
+          <Button size="sm" onClick={() => setPreview({ from: routing!.start, at: Date.now() })}>
             <Play size={10} />
             Preview from the start
           </Button>
@@ -886,20 +908,35 @@ export function BranchMapScreen() {
     }
   })();
 
-  // Route preview (brief §5): plays footage, offers choices, records evidence. Turn 156 draws
-  // the player it becomes; until then it is this panel under the canvas.
-  const previewScene = preview !== null ? scenes.find((scene) => scene.id === preview.sceneId) : null;
-  const previewMedia = (() => {
-    if (!previewScene) return null;
-    const takeId = safeShots(previewScene)
-      .map((shot) => production.selections[shot.id]?.acceptedTakeId ?? null)
-      .find((id) => id !== null);
-    const take = takeId != null ? production.takes.find((t) => t.id === takeId) : undefined;
-    const mediaTake = take === undefined ? null : mediaTakeFor(production, take);
-    return mediaTake !== null
-      ? mediaUrl(world.meta.slug, `productions/${production.meta.id}/takes/${mediaTake.id}/${mediaTake.media}`)
-      : null;
-  })();
+  /*
+   * The preview (turn 156g): the exported package's own player, over the whole window, with the
+   * author's strip. It plays each scene's cut — its accepted clips in shot order — records walk
+   * evidence as choices are pressed, and marks the choices nobody has walked.
+   */
+  const previewOptions: InteractivePlayerOptions | null =
+    preview === null
+      ? null
+      : {
+          title: production.meta.title,
+          eyebrow: world.meta.name,
+          start: routing.start,
+          from: preview.from,
+          autoplay: true,
+          scenes: Object.fromEntries(
+            scenes.map((scene) => [scene.id, { title: scene.title, clips: sceneClips(production, world.meta.slug, scene) }]),
+          ),
+          choices: routing.choices,
+          endings: routing.endings,
+          storageKey: null,
+          author: {
+            unwalked: [...unwalked],
+            onChoice: (choice, walked) => {
+              if (worldId && prodId) recordTraversal(worldId, prodId, choice.id, choice.from, choice.to, walked);
+            },
+            onBranchMap: () => setPreview(null),
+            onClose: () => setPreview(null),
+          },
+        };
 
   return (
     <div className="fy-arkewrap bm" data-screen="branch-map">
@@ -907,45 +944,14 @@ export function BranchMapScreen() {
         {header}
         {exportNote !== null && <div className="bm-note">{exportNote}</div>}
         {canvas}
-        {preview !== null && (
-          <section className="bm-preview" aria-label="Preview">
-            <div className="bm-preview__head">
-              <b>Preview · {titleOf(preview.sceneId)}</b>
-              {preview.route.length > 0 && <span className="bm-muted">route {preview.route.map(titleOf).join(" → ")}</span>}
-              <span className="bm-spacer" />
-              <Button size="sm" variant="ghost" onClick={() => setPreview(null)}>
-                Close preview
-              </Button>
-            </div>
-            <div className="bm-preview__body">
-              {previewMedia !== null ? (
-                <video key={previewMedia} src={previewMedia} controls className="bm-preview__video" />
-              ) : (
-                <div className="bm-muted">No accepted footage for this scene yet — the choices still walk.</div>
-              )}
-              <div className="bm-preview__choices">
-                {routing.choices
-                  .filter((choice) => choice.from === preview.sceneId)
-                  .map((choice) => (
-                    <Button
-                      key={choice.id}
-                      onClick={() => {
-                        // The route is SCENE ids — the evidence schema's vocabulary. Accumulating
-                        // choice ids here made the second click send a frame the wire refused.
-                        const walked = [...preview.route, preview.sceneId];
-                        if (worldId && prodId) recordTraversal(worldId, prodId, choice.id, choice.from, choice.to, walked);
-                        setPreview({ sceneId: choice.to, route: walked });
-                      }}
-                    >
-                      {choice.label}
-                    </Button>
-                  ))}
-                {routing.choices.every((choice) => choice.from !== preview.sceneId) && (
-                  <span className="bm-muted">{endings.has(preview.sceneId) ? "An ending." : "No choices from here."}</span>
-                )}
-              </div>
-            </div>
-          </section>
+        {previewOptions !== null && preview !== null && (
+          <InteractivePlayerView
+            key={preview.at}
+            className="bm-player"
+            label="Preview"
+            options={previewOptions}
+            unwalked={[...unwalked].sort()}
+          />
         )}
       </div>
       <aside className="bm-side">

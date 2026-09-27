@@ -291,9 +291,5 @@
 .bm-confirm__title { font: var(--type-ui); font-size: var(--text-base); font-weight: var(--weight-semibold); }
 .bm-confirm__line { display: flex; align-items: center; gap: 8px; font: var(--type-ui); }
 
-/* The route preview, until turn 156's player replaces it. */
-.bm-preview { flex: none; max-height: 45%; overflow-y: auto; border-top: 1px solid var(--border); padding: 12px 24px 16px; display: flex; flex-direction: column; gap: 10px; background: var(--background); }
-.bm-preview__head { display: flex; align-items: center; gap: 10px; font: var(--type-ui); }
-.bm-preview__body { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
-.bm-preview__video { max-width: 480px; width: 100%; border-radius: 8px; background: var(--media-overlay-bg); }
-.bm-preview__choices { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+/* The preview (turn 156g): the shared player over the whole window, above the app's chrome. */
+.bm-player { position: fixed; inset: 0; z-index: 60; }

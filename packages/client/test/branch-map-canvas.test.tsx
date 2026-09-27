@@ -245,6 +245,25 @@ describe("the branch map canvas (design turn 157)", () => {
     ]);
   });
 
+  it("previews in the shared player over the window, and a choice pressed there is walk evidence", async () => {
+    const item = await mount();
+    await click(button(item, "Preview"));
+    const player = all(item, ".bm-player.aip")[0];
+    assert.ok(player, "the package's own player, mounted by the map (turn 156g)");
+    assert.match(text(all(item, ".aip-strip")[0]!), /Preview\s*from The drowned quarter\s*6 choices not walked/);
+    await act(async () => {
+      player!.querySelector("video")!.dispatchEvent(new dom.Event("ended") as unknown as Event);
+    });
+    await click(all(item, ".aip-choice").find((el) => /Stay with the boat/.test(text(el))));
+    const walks = item.sent.filter((message) => message.kind === "record-traversal");
+    assert.deepEqual(
+      walks.map((message) => message.kind === "record-traversal" && [message.choiceId, message.from, message.to, message.route]),
+      [["ch_stay", "sc_quarter", "sc_towers", ["sc_quarter"]]],
+    );
+    await click(all(item, "button").find((el) => /Close preview/.test(text(el))));
+    assert.equal(all(item, ".bm-player").length, 0, "closed, the map is back");
+  });
+
   it("day one picks the start from the scenes and writes a start and nothing else", async () => {
     const item = await mount(null);
     assert.match(text(item.container), /Draw the first choice from the start scene/);

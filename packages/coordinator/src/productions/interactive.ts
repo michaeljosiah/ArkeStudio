@@ -14,6 +14,7 @@ import {
   RoutingSchema,
   TraversalEvidenceSchema,
   ulid,
+  INTERACTIVE_PLAYER_SOURCE,
   type ProductionBundle,
   type Routing,
   type RoutingCommand,
@@ -336,60 +337,37 @@ function fullHash(bytes: Uint8Array): string {
   return `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`;
 }
 
-/** The player, self-contained: inline CSS/JS, the manifest embedded so file:// playback works. */
-function playerHtml(manifest: object): string {
-  const json = JSON.stringify(manifest).replace(/</g, "\\u003c");
+/**
+ * The package's page (design turn 156): the same player the branch map's preview mounts, inlined
+ * as its own text, with the manifest embedded so file:// playback works offline. The page adds
+ * only what the package knows — the manifest, the key the viewer's place is kept under on this
+ * device, and the titles to show — and calls the player once.
+ */
+function playerHtml(manifest: InteractiveExportManifest, presentation: { title: string; eyebrow: string; titles: Record<string, string> }): string {
+  const json = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u003c");
+  const player = INTERACTIVE_PLAYER_SOURCE.replace("export function mountInteractivePlayer", "function mountInteractivePlayer").replace(/<\/script/gi, "<\\/script");
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Interactive video</title>
-<style>
-body{margin:0;background:#0d0f11;color:#f4f1ea;font-family:system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh}
-video{max-width:100%;max-height:70vh;background:#000}
-#choices{display:flex;flex-wrap:wrap;gap:12px;padding:20px;justify-content:center}
-#choices button{font:600 16px system-ui;padding:12px 20px;border-radius:10px;border:1px solid #4a4f55;background:#1c2126;color:#f4f1ea;cursor:pointer}
-#choices button:focus-visible{outline:3px solid #ec6a4a;outline-offset:2px}
-#ending{font:600 22px system-ui;padding:28px;text-align:center}
-</style></head><body>
-<video id="v" controls playsinline></video>
-<div id="choices" role="group" aria-label="Choices"></div>
-<div id="ending" hidden></div>
+<title>${presentation.title.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!)}</title>
+<style>html,body{margin:0;height:100%;background:#0a0a0a}#app{position:fixed;inset:0}</style>
+</head><body>
+<div id="app"></div>
 <script>
-// Playback state only (brief §1/§5): scene, position, route, updatedAt — nothing else exists.
-const manifest = ${json};
+${player}
+// Playback state only (brief §1/§5), kept with the viewer and keyed by production and routing
+// version, so a package from a re-cut graph never resumes into a scene it does not have.
+const manifest = ${json(manifest)};
+const titles = ${json(presentation.titles)};
 const KEY = "arke-iv-" + manifest.provenance.productionId + "-v" + manifest.provenance.routingVersion;
-const media = Object.fromEntries(manifest.media.map((m) => [m.sceneId, m.file]));
-const endings = Object.fromEntries(manifest.routing.endings.map((e) => [e.sceneId, e.title]));
-const v = document.getElementById("v"), choicesEl = document.getElementById("choices"), endingEl = document.getElementById("ending");
-let state = { sceneId: manifest.routing.start, positionSec: 0, route: [], updatedAt: new Date().toISOString() };
-try { const saved = JSON.parse(localStorage.getItem(KEY) || "null"); if (saved && media[saved.sceneId]) state = saved; } catch {}
-function save() { state.updatedAt = new Date().toISOString(); try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {} }
-function play(sceneId, positionSec) {
-  state.sceneId = sceneId; state.positionSec = positionSec || 0; save();
-  choicesEl.replaceChildren(); endingEl.hidden = true;
-  v.src = media[sceneId]; v.currentTime = state.positionSec; v.play().catch(() => {});
-}
-v.addEventListener("timeupdate", () => { state.positionSec = v.currentTime; save(); });
-v.addEventListener("ended", () => {
-  const options = manifest.routing.choices.filter((c) => c.from === state.sceneId);
-  if (options.length === 0) {
-    endingEl.textContent = endings[state.sceneId] ? "Ending — " + endings[state.sceneId] : "The end.";
-    endingEl.hidden = false;
-    const again = document.createElement("button");
-    again.textContent = "Start again";
-    again.onclick = () => { state.route = []; play(manifest.routing.start, 0); };
-    choicesEl.append(again);
-    return;
-  }
-  // Untimed by default (brief §5): the choices wait.
-  for (const choice of options) {
-    const button = document.createElement("button");
-    button.textContent = choice.label;
-    button.onclick = () => { state.route.push(choice.id); play(choice.to, 0); };
-    choicesEl.append(button);
-  }
-  choicesEl.querySelector("button")?.focus();
+mountInteractivePlayer(document.getElementById("app"), {
+  title: ${json(presentation.title)},
+  eyebrow: ${json(presentation.eyebrow)},
+  start: manifest.routing.start,
+  scenes: Object.fromEntries(manifest.media.map((m) => [m.sceneId, { title: titles[m.sceneId] || m.sceneId, clips: [m.file] }])),
+  choices: manifest.routing.choices,
+  endings: manifest.routing.endings,
+  storageKey: KEY,
 });
-play(state.sceneId, state.positionSec);
 </script></body></html>
 `;
 }
@@ -601,7 +579,14 @@ export async function exportInteractive(
       },
     };
     await atomicWriteFile(join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
-    await atomicWriteFile(join(outDir, "player.html"), playerHtml(manifest));
+    await atomicWriteFile(
+      join(outDir, "player.html"),
+      playerHtml(manifest, {
+        title: production.meta.title,
+        eyebrow: store.getBundle().meta.name,
+        titles: Object.fromEntries(production.scenes.map((scene) => [scene.id, scene.title])),
+      }),
+    );
 
     // Deterministic validation (brief §6): the exporter re-reads its own output and refuses,
     // naming the file, rather than shipping a package that cannot play.

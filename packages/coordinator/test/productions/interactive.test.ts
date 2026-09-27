@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { migrateLegacyScene, RoutingSchema, type ProductionBundle, type Routing, type Take } from "@arke-studio/contracts";
+import { INTERACTIVE_PLAYER_SOURCE, migrateLegacyScene, RoutingSchema, type ProductionBundle, type Routing, type Take } from "@arke-studio/contracts";
 import {
   appendTraversal,
   exportInteractive,
@@ -321,6 +321,19 @@ describe("interactive video through the coordinator (epic 401)", () => {
       );
     }
     assert.ok(shipped.includes("player.html") && shipped.includes("manifest.json"));
+  });
+
+  it("the package plays the same player the branch map's preview mounts (design turn 156)", async () => {
+    const { player } = await exportedPlayer();
+    // One player, two homes: the module's own text, inlined whole — not a second player kept
+    // alike by hand, which is how the package and the preview drifted apart before.
+    assert.ok(
+      player.includes(INTERACTIVE_PLAYER_SOURCE.replace("export function mountInteractivePlayer", "function mountInteractivePlayer")),
+      "the module's text is in the page, verbatim",
+    );
+    assert.equal(player.match(/mountInteractivePlayer\(document\.getElementById\("app"\)/g)?.length, 1, "and the page mounts it once");
+    assert.match(player, /storageKey: KEY/, "the viewer's place is kept under the namespaced key");
+    assert.doesNotMatch(player, /author:/, "the package has no author strip and records no evidence");
   });
 
   it("IV-P3: choices are untimed by default — nothing counts down, nothing chooses for you", async () => {
