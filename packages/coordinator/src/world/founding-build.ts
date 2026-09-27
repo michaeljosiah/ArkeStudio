@@ -190,6 +190,8 @@ interface ActiveBuild {
   entries: BuildJournalEntry[];
   stopped: boolean;
   driving: boolean;
+  /** The driver's run, while `driving`: what a press after Stop waits out. */
+  driven?: Promise<void>;
 }
 
 interface ImageRoute {
@@ -775,7 +777,14 @@ export class FoundingBuildService {
     const store = this.ports.openStore();
     if (!store || store.worldId !== worldId) return;
     const active = await this.load(store.dir, worldId);
-    if (!active || (active.stopGeneration ?? 0) !== stopGeneration) return;
+    if (!active) return;
+    // A stopped driver still settles what it had in flight: the fold reads a cancelled job as
+    // failed the moment the queue says so, but the driver journals it and stands down a beat
+    // later. A press made in that gap is a press after Stop, not during the run, and was
+    // refused silently — Retry did nothing, more often the busier the machine.
+    // It waits the driver out instead; two writers still never share the item.
+    if (active.stopped && active.driving) await active.driven;
+    if ((active.stopGeneration ?? 0) !== stopGeneration) return;
     let state = this.fold(active);
     if (state.status === "running" || active.driving) return;
     // Work a crash left mid-air settles first, with its journalled identity (R-34).
@@ -842,7 +851,7 @@ export class FoundingBuildService {
   private drive(active: ActiveBuild): void {
     if (active.driving) return;
     active.driving = true;
-    void this.driveWork(active)
+    active.driven = this.driveWork(active)
       .catch((err) => {
         this.ports.log({
           kind: "build.drive-failed",
