@@ -269,6 +269,26 @@ The DOM suite `test/bible-canon-layout.test.tsx` covers the settlement controls 
 draft retention through resize, Bible Restore and inline price confirmation, and CSS-owned canon
 geometry. Run it from `packages/client`; typecheck after changes.
 
+## World Chat and Artifacts on phones and Fold7
+
+Run `node scripts/smoke-chat-artifacts-layout.mjs` with Chrome installed (or `ARKE_CHROME`
+pointing to it). The full React app and client cascade run against a local fixture, without a
+coordinator or provider. The script captures all eight turn 164 frames and exercises the phone
+list/New flow, row and conversation sheets, understood/Accept all, the Fold history drawer,
+filtered viewer navigation, swipe, Details/Escape, long text, overflow and a simulated bottom
+safe area. Widths include 360, 375, 390, 600, 860, 984 and 1360; the requested Fold viewport is
+also checked at 984×1092. OS status bars are omitted from the matching master crops.
+
+The printed temporary directory contains PNGs, `measurements.json` and
+`master-measurements.json`. `--viewport phone` selects the 390px pass; `--baseline <revision>`
+captures desktop with the original screens for comparison. Fixture counts, record names and
+available commands stay truthful to app data; the master is the geometry reference.
+
+Run `test/chat-artifacts-layout.test.tsx` from the client package alongside `world-chat`,
+`artifact-viewers`, `artifacts` and `production-artifacts`. It covers command revision binding,
+phone New, menu confirmation, reply read/copy controls and filtered navigation that retains the selected artifact across
+live insertions. Typecheck after test edits.
+
 ## CI
 
 For publications, run coordinator `test/publications/`, desktop `test/publication-host.test.ts`

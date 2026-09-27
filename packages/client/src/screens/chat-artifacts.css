@@ -1,0 +1,249 @@
+/* Turn 164 / SPEC-001 R-7. Commands and desktop composition retain their existing owners. */
+.fy-chatnav__age { display: none; }
+.fy-chat__accept { display: grid; gap: 8px; }
+.fy-artifacts-head { display: contents; }
+.fy-artifacts-title { font-size: 52px; }
+.fy-artifact-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); padding-top: 24px; }
+.fy-artifact-grid .fy-gridcard--openable { padding: 16px; }
+.fy-artifact-grid .fy-artifact--image { padding: 10px 10px 14px; }
+.fy-artifact--image .fy-artifact-caption { padding: 0 6px; }
+.fy-artifact-name { font: 600 14px var(--font-sans); margin: 12px 0 3px; }
+.fy-artifact-notices { max-width: 860px; margin: 0 auto; padding: 12px 24px 0; display: grid; gap: 10px; }
+.fy-artifact-candidate { display: flex; align-items: center; gap: var(--space-3); }
+.fy-artifact-candidate__actions { display: flex; gap: var(--space-2); }
+.fy-imghost.fy-artifact-frame { width: 100%; height: 110px; }
+.fy-artifact-audio { display: flex; align-items: center; gap: 10px; }
+.fy-artifact-wave { color: var(--neutral-400); overflow: hidden; }
+.fy-artifact-add { border: 1.5px dashed var(--neutral-300); background: transparent; color: inherit; cursor: pointer; text-align: left; display: flex; align-items: center; justify-content: center; gap: 14px; min-height: 176px; }
+.fy-artifact-add--over { border-color: var(--foreground); background: var(--muted); }
+.fy-artview__detailactions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+
+@media (min-width: 600px) and (max-width: 1099px) {
+  .fy-content--fill > .fy-chat__wrap { flex: 1; height: auto; min-height: 0; margin: 14px 48px 92px; }
+  .fy-content--fill > .fy-chat__wrap > .fy-gate { position: relative; display: flex; flex-direction: row; flex: 1; height: 100%; min-height: 0; border-top: 1px solid var(--border); }
+  .fy-chat__wrap .fy-chatnav { width: 236px; position: absolute; z-index: 35; inset: 0 auto 0 0; flex-direction: column; flex-wrap: nowrap; align-items: stretch; padding: 14px 6px; border: 0; border-right: 1px solid var(--border); background: var(--background); animation: none; }
+  .fy-chat__wrap .fy-chatnav--shut { position: relative; width: 48px; padding-inline: 2px; align-items: center; }
+  .fy-chat__wrap .fy-chatnav--shut .fy-chatnav__head { flex-direction: column; gap: 4px; }
+  .fy-chat__wrap .fy-chatnav__list { flex-basis: auto; max-height: none; }
+  .fy-chat__wrap .fy-chatnav__group { flex-basis: auto; }
+  .fy-chatnav__drawer-scrim { position: absolute; inset: 0; z-index: 34; border: 0; background: color-mix(in srgb, var(--neutral-950) 15%, transparent); }
+  .fy-chat__wrap .fy-gate__main { border-right: 1px solid var(--border); border-bottom: 0; }
+  .fy-chat__wrap:has(.fy-chatnav:not(.fy-chatnav--shut)) .fy-gate__main { margin-left: 48px; }
+  .fy-chat__wrap .fy-gate__head { padding: 18px 24px 0; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; column-gap: 10px; row-gap: 6px; }
+  .fy-chat__wrap .fy-gate__head > div:first-child { display: contents; }
+  .fy-chat__wrap .fy-gate__head .fy-eyebrow-sm { grid-column: 1 / -1; font: var(--type-label); letter-spacing: .16em; }
+  .fy-chat__wrap .fy-story__h1 { margin: 0; grid-row: 2; font: 600 var(--text-2xl)/1.2 var(--font-sans); }
+  .fy-chat__wrap .fy-gate__head > :is(.fy-chat__about, .fy-pill) { grid-row: 2; }
+  .fy-chat__wrap .fy-gate__body { padding: 14px 24px; flex: 1; min-height: 0; overflow-y: auto; }
+  .fy-chat__wrap .fy-gate__side { width: 340px; padding: 18px 22px; overflow: hidden; }
+  .fy-chat__wrap .fy-panel__body { scrollbar-width: thin; flex: 1; min-height: 0; max-height: none; overflow-y: auto; }
+  .fy-chat__wrap .fy-panel__group { flex: none; }
+  .fy-chat__wrap .fy-panel__count { color: var(--muted-foreground); }
+  .fy-chat__wrap .fy-gate__head :is(.fy-chat__about, .fy-pill) { font: var(--type-ui); color: var(--foreground); gap: 4px; }
+  .fy-chat__wrap .fy-gate__head .fy-chat__about { height: 32px; padding: 0 10px; }
+  .fy-chat__wrap .fy-gate__head .fy-pill { min-height: 44px; display: flex; padding-inline: 10px; border: 0; box-shadow: none; background: linear-gradient(transparent 6px, var(--muted) 6px, var(--muted) calc(100% - 6px), transparent calc(100% - 6px)); }
+  .fy-chat__wrap .fy-chat__accept { justify-items: start; }
+  .fy-chat__wrap .fy-gate__side { gap: 12px; }
+  .fy-chat__wrap .fy-panel__head { margin: 0; flex-wrap: wrap; gap: 4px; }
+  .fy-chat__wrap .fy-panel__title { font: var(--type-label); letter-spacing: .12em; text-transform: uppercase; color: var(--muted-foreground); }
+  .fy-chat__wrap .fy-chat__composer { padding: 12px 24px calc(2px + env(safe-area-inset-bottom, 0px)); }
+  [data-screen="artifacts"] .fy-hero { padding: 22px 48px 0; text-align: left; }
+  .fy-artifacts-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; }
+  .fy-artifacts-head > div:first-child { min-width: 0; }
+  .fy-artifacts-title { font: 650 var(--text-5xl)/1.05 var(--font-sans); margin-top: 6px; }
+  [data-screen="artifacts"] .fy-filterrow { justify-content: flex-start; margin-top: 12px; }
+  [data-screen="artifacts"] .fy-hero__eyebrow { font: var(--type-label); letter-spacing: .16em; }
+  .fy-artifact-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 14px 48px 32px; gap: 18px; }
+}
+@media (max-width: 1099px) {
+  :is(.fy-chat__wrap, .fy-chat__listpage, [data-screen="artifacts"]) :is(.ui-btn, .ui-iconbtn, .fy-filterchip, .fy-chatnav__menuitem, .fy-chatnav__item) { min-height: 44px; }
+  :is(.fy-chat__wrap, .fy-chat__listpage) .ui-iconbtn { min-width: 44px; }
+  .fy-chat__wrap :is(.fy-gate__head, .fy-panel__group, .fy-chat__bubble) { overflow-wrap: anywhere; }
+  .fy-chat__wrap :is(.fy-chat__turn--user, .fy-chat__turn--studio) { max-width: 84%; }
+  :is(.fy-chat__wrap, .fy-understood-sheet) .fy-panel__group { padding: 12px 14px; margin: 0 0 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); box-shadow: none; }
+  :is(.fy-chat__wrap, .fy-understood-sheet) .fy-panel__grouphead { justify-content: flex-start; gap: 4px; }
+  :is(.fy-chat__wrap, .fy-understood-sheet) :is(.fy-panel__subject, .fy-panel__kind) { flex: none; font: var(--type-meta); color: var(--muted-foreground); }
+  :is(.fy-chat__wrap, .fy-understood-sheet) .fy-panel__kind::before { content: "· "; }
+  :is(.fy-chat__wrap, .fy-understood-sheet) .fy-panel__pointacts .ui-btn { padding: 0 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--muted); font: var(--type-ui); min-height: 44px; }
+  .fy-chat__wrap .fy-chat__about { max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  [data-screen="artifacts"] .fy-filterchip { flex: none; position: relative; isolation: isolate; font: var(--type-ui); border: 0; background: transparent; color: var(--muted-foreground); }
+  [data-screen="artifacts"] .fy-filterchip::before { content: ""; position: absolute; z-index: -1; inset: 4px 0; border: 1px solid var(--border); border-radius: 999px; background: var(--background); }
+  [data-screen="artifacts"] .fy-filterchip--active { color: var(--foreground); }
+  [data-screen="artifacts"] .fy-filterchip--active::before { border-color: var(--foreground); }
+  .fy-artifacts-door { position: static; display: flex; gap: 8px; flex: none; padding: 0; }
+  .fy-artifacts-door .ui-btn { border-radius: 10px; font: var(--type-ui); }
+  .fy-artifact-grid .fy-gridcard--openable { border-radius: 12px; padding: 8px 8px 12px; min-width: 0; box-shadow: none; }
+  .fy-artifact-grid .fy-artifact-caption { padding: 0 2px; }
+  .fy-artifact-grid .fy-artifact-frame { height: auto; aspect-ratio: 4 / 3; border-radius: 8px; overflow: hidden; background: var(--muted); }
+  .fy-artifact-grid .fy-artifact-audio { display: flex; flex-direction: column; align-items: stretch; justify-content: center; gap: 8px; padding: 10px; }
+  .fy-artifact-audio .fy-clipbtn { align-self: flex-start; min-width: 44px; min-height: 44px; }
+  .fy-artifact-wave { display: block; width: 100%; }
+  .fy-artifact-wave svg { display: block; width: 100%; height: 26px; }
+  .fy-artifact-grid .fy-doclines { padding: 12px; display: flex; flex-direction: column; justify-content: flex-start; gap: 6px; }
+  .fy-artifact-name { margin: 10px 0 0; font: 600 var(--text-sm)/1.3 var(--font-sans); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+  .fy-artifact-caption > .fy-mono { margin-top: 4px; font: var(--type-meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fy-artifact-more { position: absolute; z-index: 4; top: 3px; right: 3px; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--foreground); cursor: pointer; }
+  .fy-artifact-more::before { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: color-mix(in srgb, var(--background) 86%, transparent); box-shadow: var(--shadow-xs); }
+  .fy-artifact-more svg { position: relative; }
+  .fy-artifact-more:focus-visible { outline: 2px solid var(--ring); }
+  .fy-artifact-duration { position: absolute; left: 6px; bottom: 6px; height: 20px; padding: 0 6px; border-radius: 6px; background: color-mix(in srgb, var(--neutral-950) 60%, transparent); color: var(--neutral-50); font: var(--type-meta); display: flex; align-items: center; }
+  .fy-artifact-notices:empty { padding: 0; }
+  .fy-artifact-add { flex-direction: column; gap: 8px; border-radius: 12px; padding: 12px; text-align: center; }
+  .fy-artifact-add .fy-newprodcard__ring { border: 0; width: 44px; height: 44px; }
+  .fy-artifact-notices { max-width: none; padding-inline: 20px; overflow-wrap: anywhere; }
+  .fy-artifact-candidate { flex-wrap: wrap; }
+  .fy-artifact-candidate__actions { flex-wrap: wrap; flex-basis: 100%; }
+  .fy-artifact-candidate__actions .ui-btn { white-space: normal; }
+  .fy-chat__composer .fy-cx { display: flex; flex-wrap: wrap; align-items: center; gap: 0; padding: 3px; border-radius: 16px; }
+  .fy-chat__composer .fy-cx__editorwrap { flex: 1; min-width: 60px; }
+  .fy-chat__composer .fy-cx__editor { padding: 12px 10px; min-height: 44px; max-height: 100px; font-size: var(--text-sm); }
+  .fy-chat__composer .fy-cx__placeholder { padding: 0; left: 10px; top: 12px; right: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-sm); }
+  .fy-chat__composer .fy-cx__bar, .fy-chat__composer .fy-cx__left { display: contents; }
+  .fy-chat__composer .fy-cx__agent { display: none; }
+  .fy-chat__composer :is(.fy-cx__strip, .fy-cx__busy, .fy-cx__reason, .fy-cx__drop) { flex-basis: 100%; }
+  .fy-chat__composer .fy-cx { min-height: 54px; box-shadow: none; }
+  .fy-chat__composer .fy-cx__send { border-radius: 50%; }
+  .fy-chat__composer :is(.fy-cx__attach, .fy-cx__send, .fy-cx__mic) { min-width: 44px; min-height: 44px; }
+}
+@media (max-width: 599px) {
+  .fy-chat__listpage { padding: 14px 20px 24px; }
+  .fy-chatnav--screen { display: block; width: auto; padding: 0; border: 0; animation: none; }
+  .fy-chatnav__phonehead { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+  .fy-chatnav__phonehead .fy-hero__eyebrow { font: var(--type-label); letter-spacing: .16em; }
+  .fy-chatnav__phonehead h1 { margin: 6px 0 0; font: 650 var(--text-3xl)/1.05 var(--font-sans); letter-spacing: -.03em; }
+  .fy-chatnav__phonehead .ui-btn { border-radius: 10px; font: var(--type-ui); }
+  .fy-chatnav--screen .fy-chatnav__list { margin-top: 12px; max-height: none; gap: 0; overflow: visible; }
+  .fy-chatnav--screen .fy-chatnav__row { min-height: 64px; padding: 8px 0; border-bottom: 1px solid var(--border); border-radius: 0; gap: 10px; }
+  .fy-chatnav--screen .fy-chatnav__item { padding: 0; justify-content: center; }
+  .fy-chatnav--screen .fy-chatnav__title { font: 500 var(--text-sm)/1.3 var(--font-sans); }
+  .fy-chatnav--screen .fy-chatnav__waiting { display: flex; align-items: center; gap: 6px; font: var(--type-meta); }
+  .fy-chatnav--screen .fy-chatnav__waiting::before { content: ""; width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--warning); }
+  .fy-chatnav--screen .fy-chatnav__age { display: block; flex: none; font: var(--type-meta); color: var(--muted-foreground); }
+  .fy-chatnav--screen .fy-chatnav__more { opacity: 1; }
+  .fy-chatnav--screen .fy-chatnav__more svg { width: 18px; height: 18px; }
+  .fy-chatnav--screen .fy-chatnav__group { min-height: 64px; width: 100%; margin: 0; padding: 8px 0; border: 0; font: 500 var(--text-sm)/1.3 var(--font-sans); }
+  .fy-chatnav--screen .fy-chatnav__group svg { order: 1; margin-left: auto; }
+  .fy-page-sheet .fy-chatnav__menuitem { min-height: 44px; font: var(--type-ui); }
+  .fy-content--fill > .fy-chat__wrap, .fy-content--fill > .fy-chat__wrap > .fy-gate { height: auto; min-height: 0; flex: none; }
+  .fy-chat__wrap { padding-bottom: calc(var(--held-bar-height, 180px) + 24px); }
+  .fy-chat__wrap .fy-gate { display: block; }
+  .fy-chat__wrap .fy-gate__main { overflow: visible; border: 0; }
+  .fy-chat__phonehead { display: flex; align-items: center; gap: 4px; padding: 6px 8px 0 4px; }
+  .fy-chat__phonehead h1 { flex: 1; min-width: 0; margin: 0; font: 600 var(--text-lg)/1.25 var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fy-chat__phonesub { display: flex; align-items: center; gap: 8px; padding: 0 20px 4px; border-bottom: 1px solid var(--border); min-height: 48px; }
+  .fy-chat__phonesub .fy-chat__about { padding: 0 10px; height: 32px; font: var(--type-ui); color: var(--foreground); flex: 0 1 auto; }
+  .fy-chat__mode { position: relative; margin-left: auto; flex: none; }
+  .fy-chat__mode summary { display: flex; align-items: center; gap: 4px; min-height: 44px; padding: 6px 10px; font: var(--type-ui); border-radius: 999px; cursor: pointer; list-style: none; background: linear-gradient(transparent 6px, var(--muted) 6px, var(--muted) calc(100% - 6px), transparent calc(100% - 6px)); }
+  .fy-chat__mode summary::-webkit-details-marker { display: none; }
+  .fy-chat__mode > div { position: absolute; z-index: 35; top: 100%; right: 0; width: min(280px, calc(100vw - 40px)); padding: 8px; background: var(--popover); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-lg); }
+  .fy-chat__mode button { display: block; width: 100%; min-height: 44px; padding: 8px; border: 0; border-radius: 8px; text-align: left; background: transparent; color: var(--foreground); font: var(--type-ui); cursor: pointer; }
+  .fy-chat__mode button[aria-pressed="true"] { background: var(--accent); }
+  .fy-chat__mode button span, .fy-chat__mode p { display: block; margin: 4px 0; font: var(--type-meta); color: var(--muted-foreground); }
+  .fy-chat__wrap .fy-gate__body { padding: 14px 20px; overflow: visible; animation: none; }
+  .fy-chat__wrap :is(.fy-chat__turn--user, .fy-chat__turn--studio) { max-width: 84%; }
+  .fy-chat__wrap .fy-chat__bubble { font: 400 var(--text-sm)/1.5 var(--font-sans); border-radius: 16px; padding: 10px 14px; }
+  .fy-chat__wrap .fy-chat__transcript { gap: 12px; }
+  .fy-chat__wrap .fy-chat__turn--user .fy-chat__bubble { border-top-right-radius: 6px; }
+  .fy-chat__wrap .fy-chat__turn--studio .fy-chat__bubble { border-top-left-radius: 6px; }
+  .fy-chat__wrap .fy-chat__receipts { font: var(--type-meta); }
+  .fy-chat__wrap .fy-chat__turn:has(.fy-actioncard) { max-width: 100%; width: 100%; }
+  .fy-chat__composer.fy-held-bar { display: flex; flex-direction: column; align-items: stretch; gap: 30px; margin: 0; padding: 10px 12px calc(14px + env(safe-area-inset-bottom, 0px)); border: 0; background: transparent; box-shadow: none; }
+  .fy-chat__composer.fy-held-bar::before { content: ""; position: absolute; z-index: -1; inset: 86px 0 0; border-top: 1px solid var(--border); background: var(--background); }
+  .fy-chat__composer .fy-thread-peek b > span { margin-left: 3px; color: inherit; font: inherit; }
+  .fy-chat__composer .fy-thread-peek > span > span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fy-page-sheet .fy-panel__body { gap: 16px; }
+  .fy-page-sheet .fy-panel__group { padding: 12px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); margin: 0; }
+  .fy-page-sheet .fy-panel__subject { font: var(--type-label); color: var(--muted-foreground); }
+  .fy-page-sheet .fy-panel__point { font: 400 var(--text-sm)/1.5 var(--font-sans); margin-top: 10px; }
+  .fy-page-sheet .fy-panel__pointacts { margin-top: 8px; flex-wrap: wrap; }
+  .fy-chat__acceptrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .fy-understood-sheet .fy-page-sheet__head { border: 0; padding-bottom: 0; }
+  .fy-understood-sheet .fy-page-sheet__body { padding-top: 10px; }
+  .fy-understood-sheet .fy-panel__count { color: var(--muted-foreground); }
+  .fy-understood-sheet .fy-panel__group { margin: 0; }
+  .fy-understood-sheet .fy-panel__grouphead { flex-wrap: wrap; }
+  [data-screen="artifacts"] .fy-hero { padding: 14px 20px 0; text-align: left; }
+  .fy-artifacts-head { display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
+  .fy-artifacts-title { margin: 6px 0 0; font: 650 var(--text-3xl)/1.05 var(--font-sans); letter-spacing: -.03em; }
+  [data-screen="artifacts"] .fy-hero__eyebrow { font: var(--type-label); letter-spacing: .16em; }
+  .fy-artifacts-door .ui-btn { flex: 1; }
+  [data-screen="artifacts"] .fy-filterrow { margin: 8px -20px 0; padding-inline: 20px; display: flex; flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; scrollbar-width: none; }
+  .fy-artifact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 8px 20px 24px; }
+  .fy-artifact-add .fy-mono { white-space: normal; }
+}
+@media (hover: none) {
+  :is(.fy-chat__wrap, .fy-chat__listpage) .fy-tip::after { display: none; }
+}
+
+@media (max-width: 859px) {
+  .fy-artview { inset: 0; width: 100%; max-width: none; height: 100dvh; max-height: 100dvh; margin: 0; padding: 0; border: 0; border-radius: 0; background: var(--neutral-950); color: var(--neutral-50); }
+  .fy-artview__panel { height: 100%; max-height: 100dvh; }
+  .fy-artview__head { padding: env(safe-area-inset-top, 0px) 6px 6px; gap: 4px; border: 0; }
+  .fy-artview__head h2 { font: 600 var(--text-sm)/1.3 var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fy-artview__sub { font: var(--type-meta); color: var(--neutral-400); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fy-artview__close, .fy-artview__save { width: 44px; height: 44px; color: var(--neutral-50); }
+  .fy-artview__close { order: -1; }
+  .fy-artview__close svg, .fy-artview__save svg { width: 20px; height: 20px; }
+  .fy-artview__menu { position: relative; flex: none; }
+  .fy-artview__menu summary { width: 44px; height: 44px; display: grid; place-items: center; list-style: none; cursor: pointer; }
+  .fy-artview__menu summary::-webkit-details-marker { display: none; }
+  .fy-artview__menu > div { position: absolute; z-index: 2; top: 100%; right: 0; padding: 8px; border-radius: 10px; background: var(--popover); color: var(--foreground); box-shadow: var(--shadow-lg); }
+  .fy-artview__menu .ui-btn { min-height: 44px; }
+  .fy-artview__body { display: flex; flex: 1; min-height: 0; }
+  .fy-artview__stage { flex: 1; padding: 0; touch-action: pan-y; }
+  .fy-artview__image { width: 100%; max-height: min(520px, calc(100dvh - 140px - env(safe-area-inset-bottom, 0px))); border-radius: 0; }
+  .fy-artview__media, .fy-artview__pdf { max-height: calc(100dvh - 140px - env(safe-area-inset-bottom, 0px)); }
+  .fy-artview__pdf { height: 100%; }
+  .fy-artview__doc { padding: 20px; background: var(--background); color: var(--foreground); }
+  .fy-artview__foot { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 8px calc(14px + env(safe-area-inset-bottom, 0px)); }
+  .fy-artview__foot > span { flex: 1; text-align: center; font: var(--type-meta); color: var(--neutral-300); }
+  .fy-artview__foot > button { display: flex; align-items: center; justify-content: center; gap: 6px; width: 44px; height: 44px; border: 0; background: transparent; color: inherit; cursor: pointer; }
+  .fy-artview__foot > button:disabled { opacity: .35; cursor: default; }
+  .fy-artview__foot > .fy-artview__details { width: auto; padding: 0 14px; border-radius: 999px; background: var(--neutral-800); font: var(--type-ui); }
+  .fy-artview__sheet { top: min(84px, 15dvh); }
+  .fy-artview__sheet .fy-page-sheet__head { border: 0; padding-bottom: 0; }
+  .fy-artview__sheet .fy-page-sheet__body { padding-top: 10px; }
+  .fy-page-sheet .fy-artview__meta { padding: 0; border: 0; max-height: none; display: block; overflow: visible; }
+  .fy-page-sheet .fy-artview__row { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 0; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .fy-page-sheet .fy-artview__key { font: var(--type-meta); text-transform: capitalize; letter-spacing: normal; }
+  .fy-page-sheet .fy-artview__val { font: 400 var(--text-sm)/1.35 var(--font-sans); }
+}
+
+.fy-page-sheet__head h2:focus, .fy-artview__titles h2:focus { outline: none; box-shadow: none; }
+
+@media (min-width: 600px) and (max-width: 899px) {
+  .fy-content--fill > .fy-chat__wrap { margin-inline: 20px; margin-bottom: 32px; }
+  .fy-chat__wrap .fy-gate__head { display: flex; align-items: center; flex-wrap: wrap; }
+  .fy-chat__wrap .fy-gate__head > div:first-child { display: block; flex-basis: 100% !important; }
+  .fy-chat__wrap .fy-gate__side { padding-inline: 14px; }
+  .fy-chat__wrap :is(.fy-gate__head, .fy-gate__body, .fy-chat__composer) { padding-inline: 12px; }
+  .fy-chat__composer .fy-cx__editorwrap { flex-basis: 100%; }
+}
+
+@media (max-width: 1099px) {
+  .fy-chat__reply-actions summary { min-height: 44px; padding: 12px 0; font: var(--type-ui); cursor: pointer; }
+  .fy-chat__reply-actions > div { padding-block: 10px; border-top: 1px solid var(--border); }
+  .fy-chat__reply-actions p { margin: 0; font: 400 var(--text-sm)/1.5 var(--font-sans); overflow-wrap: anywhere; }
+  .fy-chat__reply-actions .fy-textactions { opacity: 1; pointer-events: auto; margin: 4px 0 0; }
+  .fy-chat__reply-actions .fy-textactions__btn { width: 44px; height: 44px; }
+  .fy-chat__wrap .fy-chat__transcript { gap: 12px; }
+  .fy-chat__wrap .fy-chat__bubble { font: 400 var(--text-sm)/1.5 var(--font-sans); border-radius: 16px; padding: 10px 14px; }
+  .fy-chat__wrap .fy-chat__turn--user .fy-chat__bubble { border-top-right-radius: 6px; }
+  .fy-chat__wrap .fy-chat__turn--studio .fy-chat__bubble { border-top-left-radius: 6px; }
+  .fy-chat__wrap .fy-chat__receipts { font: var(--type-meta); }
+}
+
+.fy-understood-sheet, .fy-artview__sheet { border: 0; }
+:is(.fy-understood-sheet, .fy-artview__sheet) .fy-page-sheet__body { scrollbar-width: none; }
+@media (max-width: 1099px) {
+  :is(.fy-chat__wrap, .fy-understood-sheet) .fy-panel__point { font: 400 var(--text-sm)/1.5 var(--font-sans); margin-top: 10px; }
+  :is(.fy-chat__wrap, .fy-understood-sheet) .fy-panel__pointacts { margin-top: 8px; gap: 8px; }
+  :is(.fy-chat__wrap, .fy-understood-sheet) .fy-panel__grouphead { flex-wrap: wrap; }
+  :is(.fy-chat__wrap, .fy-understood-sheet) .fy-panel__group--open { background: var(--muted); }
+  .fy-artifacts-door .ui-btn--outline { background: var(--muted); box-shadow: none; }
+  .fy-artifact-grid .fy-doclines { border: 0; }
+  .fy-artifact-grid .fy-doclines > span { height: 6px; border-radius: 3px; }
+  .fy-chat__composer .fy-cx__attach svg, .fy-chat__composer .fy-cx__mic svg { width: 20px; height: 20px; }
+  .fy-chat__composer .fy-cx__attachplus { display: none; }
+  .fy-chat__composer .fy-cx__attachclip { display: block; }
+}
