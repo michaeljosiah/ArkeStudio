@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { DEFAULT_NARRATOR, audiobookDoorLine, audiobookRowLabel, formatMicroUsd, type AudiobookPriceLine, type AudiobookRow } from "@arke-studio/contracts";
+import { DEFAULT_NARRATOR, audiobookDoorLine, audiobookRowLabel, formatMicroUsd, providerName, readerPlace, type AudiobookPriceLine, type AudiobookRow } from "@arke-studio/contracts";
 import { NarratorDialog } from "./audiobook-narrator.js";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { ChevronRight } from "../components/icons.js";
@@ -113,9 +113,9 @@ function VoiceChip({ name, voice, state, blocks, awaiting, to, onPress, performe
     : state === "recorded"
       ? `recorded${awaiting !== undefined && awaiting > 0 ? ` · ${awaiting} awaiting` : ""}`
       : state === "narrator"
-      ? `${book ? "this book" : "narrator"} · ${voice?.provider ?? ""}${voice?.local ? " · local" : ""}`
+      ? `${book ? "this book" : "narrator"}${voice === undefined ? "" : ` · ${readerPlace(voice.provider, voice.local)}`}`
       : state === "reads" && voice !== undefined
-        ? `${voice.label} · ${voice.provider}`
+        ? `${voice.label} · ${readerPlace(voice.provider, voice.local)}`
         : `${state} · narrator`;
   const inside = (
     <>
@@ -148,9 +148,10 @@ function priceLineWords(line: AudiobookPriceLine): { who: string; how: string; c
   if (line.speaker !== undefined) {
     // The narrator stands in (R-12): said as the speaker, and — when that narrator is a cloud
     // voice — the vendor the speaker's words go to, named here as on every paid line (codex on PR 1187).
-    return { who: line.speaker, how: `${line.substituted ?? "no voice"} · narrator${line.local ? "" : ` · ${line.provider}`}`, cost, warn: true };
+    return { who: line.speaker, how: `${line.substituted ?? "no voice"} · narrator${line.local ? "" : ` · ${readerPlace(line.provider, false)}`}`, cost, warn: true };
   }
-  return { who: line.label, how: `${line.narrator === true ? "narrator · " : ""}${line.provider}${line.local ? " · local" : ""}`, cost, warn: false };
+  // The provider as a name and a place, never its id (turn 165): `Kokoro · this machine`.
+  return { who: line.label, how: `${line.narrator === true ? "narrator · " : ""}${readerPlace(line.provider, line.local)}`, cost, warn: false };
 }
 
 export function AudiobookScreen() {
@@ -417,7 +418,7 @@ function BookPriceSheet({ price, onClose, onConfirm }: {
   onClose: () => void;
   onConfirm: () => void;
 }) {
-  const vendors = [...new Set(price.voices.filter((line) => !line.local).map((line) => line.provider))];
+  const vendors = [...new Set(price.voices.filter((line) => !line.local).map((line) => providerName(line.provider)))];
   return (
     <EditorDialog open title="Read the book" subtitle={`${price.chapters} chapter${price.chapters === 1 ? "" : "s"} · ${price.characters.toLocaleString()} characters · ${price.cloudBlocks} cloud line${price.cloudBlocks === 1 ? "" : "s"}`} onClose={onClose} width={460} labelledBy="read-book-title">
       <div className="fy-exsheet" data-testid="read-book-sheet">

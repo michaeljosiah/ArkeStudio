@@ -2,6 +2,7 @@ import { z } from "zod";
 import { orderedShots } from "./scene-flow.js";
 import type { ProductionBundle } from "./client-state.js";
 import type { ManifestModel } from "./manifest.js";
+import { PROVIDERS, type ProviderInfo } from "./provider.js";
 import type { Sheet } from "./world.js";
 
 /**
@@ -322,6 +323,27 @@ export function readerName(
 ): string {
   const named = target.model !== undefined && target.model !== null ? READER_NAMES[target.model] : undefined;
   return named ?? row?.displayName ?? target.provider;
+}
+
+/** A provider by its display name (`Mistral`, `Fish Audio`); one the table does not know keeps its id. */
+export function providerName(provider: string): string {
+  return (PROVIDERS as Readonly<Record<string, ProviderInfo | undefined>>)[provider]?.displayName ?? HOSTED_READER_LABELS[provider] ?? provider;
+}
+
+/**
+ * Where a reader runs, as the audiobook names it (design turn 165): the provider's name and its
+ * place — `Kokoro · this machine`, `Mistral · cloud`. The build printed `mistral · voxtral-mini-tts`
+ * in the narrator's list and on every take (issue 1324 §3); an id is not something a person
+ * chose. `local` is the catalogue's word for this voice where there is one, since ComfyUI can be
+ * another machine — which is not the cloud, so a local provider served elsewhere says so, as
+ * Settings does. A provider the table does not know keeps its id.
+ */
+export function readerPlace(provider: string, local?: boolean): string {
+  const info = (PROVIDERS as Readonly<Record<string, ProviderInfo | undefined>>)[provider];
+  const name = providerName(provider);
+  const here = local ?? info?.local;
+  if (here === undefined) return name;
+  return `${name} · ${here ? "this machine" : info?.local === true ? "another machine" : "cloud"}`;
 }
 
 /**
