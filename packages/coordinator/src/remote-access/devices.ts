@@ -2,17 +2,18 @@ import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 
 import { mkdir, open, readFile, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
+import { RemotePairingDurationSchema, type RemotePairingDuration } from "@arke-studio/contracts";
 import { lockDownAcl } from "../credentials/store.js";
 import { renameWithRetry } from "../world/atomic.js";
 
-const lifetime = 90 * 24 * 60 * 60 * 1000;
 const DeviceSchema = z.object({ id: z.string().uuid(), name: z.string().min(1).max(60),
-  hash: z.string().regex(/^[a-f0-9]{64}$/), createdAt: z.number(), expiresAt: z.number() });
+  hash: z.string().regex(/^[a-f0-9]{64}$/), createdAt: z.number(), expiresAt: z.number().nullable() });
 const RegistrySchema = z.object({ version: z.literal(1), devices: z.array(DeviceSchema).max(100) });
 type Device = z.infer<typeof DeviceSchema>;
 type Request = { id: string; name: string; proof: string; expiresAt: number; approved: boolean };
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const equal = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+const active = (device: Device, now: number) => device.expiresAt === null || device.expiresAt > now;
 
 /** Permissions are applied before publication, including on Windows; failed writes grant nothing. */
 export async function writeRemotePrivate(path: string, value: unknown): Promise<void> {
@@ -53,7 +54,7 @@ export class RemoteDevices {
   private expire(): void {
     for (const [proof, request] of this.requests) if (request.expiresAt <= this.now()) this.requests.delete(proof);
   }
-  list() { return this.devices.filter(row => row.expiresAt > this.now()).map(({ hash: _hash, ...row }) => row); }
+  list() { return this.devices.filter(row => active(row, this.now())).map(({ hash: _hash, ...row }) => row); }
   pending() { this.expire(); return [...this.requests.values()].filter(row => !row.approved)
     .map(({ id, name, expiresAt }) => ({ id, name, expiresAt })); }
   createCode(): { code: string; expiresAt: number } {
@@ -79,14 +80,17 @@ export class RemoteDevices {
     const request = this.requests.get(proof);
     return request && !request.approved ? "pending" : "expired";
   }
-  approve(id: string): Promise<void> {
+  approve(id: string, duration: RemotePairingDuration = 90): Promise<void> {
     return this.serial(async () => {
+      RemotePairingDurationSchema.parse(duration);
       this.expire();
       const request = [...this.requests.values()].find(row => row.id === id);
       if (!request || request.approved) throw new Error("This pairing request has expired.");
-      const devices = this.devices.filter(row => row.expiresAt > this.now());
+      const devices = this.devices.filter(row => active(row, this.now()));
       if (devices.length >= 100) throw new Error("Remove an old device before pairing another.");
-      devices.push({ id, name: request.name, hash: digest(request.proof), createdAt: this.now(), expiresAt: this.now() + lifetime });
+      const createdAt = this.now();
+      devices.push({ id, name: request.name, hash: digest(request.proof), createdAt,
+        expiresAt: duration === "never" ? null : createdAt + duration * 86400_000 });
       await this.persist(this.path, { version: 1, devices });
       this.devices = devices;
       request.approved = true;
@@ -102,9 +106,19 @@ export class RemoteDevices {
     });
   }
   authenticate(proof: string | undefined): string | null {
+    return this.authorized(proof)?.id ?? null;
+  }
+  cookieMaxAge(proof: string | undefined): number | null {
+    const device = this.authorized(proof);
+    if (!device) return null;
+    // Browsers cap persistent cookies at 400 days. Renew Never on visits, while timed
+    // approvals retain their original deadline rather than sliding with each session.
+    return device.expiresAt === null ? 400 * 86400 : Math.max(0, Math.ceil((device.expiresAt - this.now()) / 1000));
+  }
+  private authorized(proof: string | undefined): Device | null {
     if (!proof || !/^[a-f0-9]{64}$/.test(proof)) return null;
     const hash = digest(proof);
-    return this.devices.find(row => row.expiresAt > this.now() && equal(row.hash, hash))?.id ?? null;
+    return this.devices.find(row => active(row, this.now()) && equal(row.hash, hash)) ?? null;
   }
   stop(): Promise<unknown> { this.pairing = null; this.requests.clear(); return this.tail; }
 }

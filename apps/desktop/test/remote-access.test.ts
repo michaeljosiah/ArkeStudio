@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
+import { request } from "node:http";
 import { it } from "node:test";
 import { DesktopRemoteAccess } from "../src/remote-access.js";
 import { ServeCleanupRequired, TailscaleServe, type TailscaleRun } from "../src/tailscale-serve.js";
@@ -88,6 +89,64 @@ it("desktop hosting persists opt-in, restarts on the same coordinator, and disab
     assert.ok(fake.commands.some(args => args.includes("off")));
   } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
 });
+it("duration migrates to 90, persists while off and across restart, and affects only subsequent approvals", async () => {
+  const root = await mkdtemp(join(tmpdir(), "arke-remote-duration-"));
+  await mkdir(join(root, "remote")); await writeFile(join(root, "index.html"), "<head></head>");
+  const path = join(root, "remote/settings.json");
+  await writeFile(path, JSON.stringify({ enabled: false, startOnLogin: false, origin: null }));
+  const options = { root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+    startupSupported: false, setStartOnLogin: () => {}, tailscale: tailscale().client };
+  let host = new DesktopRemoteAccess(options);
+  try {
+    await host.initialize(); assert.equal(host.status().pairingDuration, 90);
+    assert.equal((await host.command({ kind: "duration", duration: 30 })).status.pairingDuration, 30);
+    assert.equal(JSON.parse(await readFile(path, "utf8")).pairingDuration, 30);
+    assert.equal((await host.command({ kind: "enable" })).status.running, true);
+    for (const duration of [30, 90, 120, "never"] as const) {
+      const previous = host.status().devices;
+      const { pairing } = await host.command({ kind: "pair" });
+      await new Promise<void>((resolve, reject) => {
+        const req = request({ hostname: "127.0.0.1", port: 8793, path: "/remote/pair", method: "POST",
+          headers: { Host: new URL(origin).host, Origin: origin, "Content-Type": "application/json" } }, res => {
+          res.resume(); res.once("end", () => {
+            try { assert.equal(res.statusCode, 202); resolve(); } catch (error) { reject(error); }
+          });
+        });
+        req.on("error", reject); req.end(JSON.stringify({ code: pairing!.code, name: String(duration) }));
+      });
+      await host.command({ kind: "duration", duration });
+      assert.deepEqual(host.status().devices, previous, "changing the setting leaves existing approvals untouched");
+      const id = host.status().pending[0]!.id;
+      await host.command({ kind: "approve", id });
+      const device = host.status().devices.find(row => row.id === id)!;
+      assert.equal(device.expiresAt, duration === "never" ? null : device.createdAt + duration * 86400_000,
+        "use the setting at approval, even when the request predates the change");
+      assert.deepEqual(host.status().devices.filter(row => row.id !== id), previous);
+    }
+    const approved = host.status().devices;
+    for (const duration of [0, -1, 60, 365, null, "90", "forever"]) {
+      await assert.rejects(host.command({ kind: "duration", duration }));
+      assert.equal(host.status().pairingDuration, "never");
+    }
+    await host.command({ kind: "disable" });
+    assert.equal(host.status().pairingDuration, "never");
+    await host.stop(); host = new DesktopRemoteAccess(options); await host.initialize();
+    assert.equal(host.status().pairingDuration, "never"); assert.equal(host.status().enabled, false);
+    assert.deepEqual(host.status().devices, approved);
+    assert.equal((await host.command({ kind: "enable" })).status.pairingDuration, "never");
+  } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
+});
+it("failed duration persistence leaves the active setting unchanged", async () => {
+  const root = await mkdtemp(join(tmpdir(), "arke-remote-duration-failure-"));
+  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+    startupSupported: false, setStartOnLogin: () => {}, tailscale: tailscale().client });
+  try {
+    await host.initialize();
+    await mkdir(join(root, "remote/settings.json"), { recursive: true });
+    const reply = await host.command({ kind: "duration", duration: "never" });
+    assert.ok(reply.status.reason); assert.equal(reply.status.pairingDuration, 90);
+  } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
+});
 it("persists recoverable ownership before initial and subsequent Serve publication", async () => {
   const root = await mkdtemp(join(tmpdir(), "arke-remote-publication-intent-"));
   await writeFile(join(root, "index.html"), "<head></head>");
@@ -96,7 +155,7 @@ it("persists recoverable ownership before initial and subsequent Serve publicati
   let publications = 0;
   fake.client.enable = async (...args) => {
     assert.deepEqual(JSON.parse(await readFile(join(root, "remote/settings.json"), "utf8")),
-      { enabled: true, startOnLogin: false, origin }, "a process exit after Serve publishes must leave durable recovery intent");
+      { enabled: true, startOnLogin: false, origin, pairingDuration: 90 }, "a process exit after Serve publishes must leave durable recovery intent");
     publications++;
     return publish(...args);
   };

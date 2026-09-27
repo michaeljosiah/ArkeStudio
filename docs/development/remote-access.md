@@ -22,8 +22,10 @@ and any local generation. The other device only shows the browser frontend.
    on the PC. Enter the code and a device name on the phone. Approve the matching request on
    the PC. Codes work once, expire after five minutes and stop working after five wrong guesses.
 4. Bookmark the clean address on the phone. It contains no credential. This browser remains
-   authorized for 90 days across browser and Studio restarts. Clearing its site data, expiry,
-   or revocation requires pairing again.
+   authorized across browser and Studio restarts. **Remember approved devices for** offers
+   **30 days**, **90 days** (default), **120 days** or **Never**. The setting at approval applies
+   to that new device; existing devices keep their expiry. Never approvals remain valid until
+   revoked. Clearing browser site data, expiry or revocation requires pairing again.
 5. Optionally enable **Start Studio when I sign in to this PC** in the installed Windows or
    macOS app. Closing the window keeps the host in the system tray; use the tray's **Quit Arke
    Studio** action to stop it. The PC must be awake and signed in. This is not wake-on-LAN or a
@@ -33,6 +35,10 @@ Desktop and phone operate the same coordinator and world session. A paired devic
 owner's ordinary Studio access; pairing management is available only on the PC. Revoke a device
 in Settings to stop its active connections and future access. The remote gateway uses a secure,
 HttpOnly, same-site cookie; the private process capability never reaches the browser.
+Browsers can remove saved cookies. Never approvals use a persistent cookie renewed on visits;
+[Chromium caps cookie lifetimes at 400 days](https://developer.chrome.com/blog/cookie-max-age-expires/),
+so a browser unused beyond that period can require pairing again even though its approval has
+no scheduled expiry. Timed approvals always keep their original deadline.
 Native file selection, dropped host files and desktop-rendered playblasts require the desktop
 app. The gateway rejects their host-file commands, including manually supplied filesystem paths.
 

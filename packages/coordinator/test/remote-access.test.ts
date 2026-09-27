@@ -6,17 +6,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import WebSocket, { WebSocketServer } from "ws";
-import { ClientMessageSchema } from "@arke-studio/contracts";
+import { ClientMessageSchema, type RemotePairingDuration } from "@arke-studio/contracts";
 import { RemoteDevices } from "../src/remote-access/devices.js";
 import { RemoteGateway, remotePage } from "../src/remote-access/gateway.js";
 
 const origin = "https://studio.example.ts.net";
 const temporary = () => mkdtemp(join(tmpdir(), "arke-remote-"));
-async function paired(devices: RemoteDevices, name = "Phone") {
+async function paired(devices: RemoteDevices, name = "Phone", duration: RemotePairingDuration = 90) {
   const { code } = devices.createCode();
   const proof = devices.request(code, name)!;
   const id = devices.pending().find(row => row.name === name)!.id;
-  await devices.approve(id);
+  await devices.approve(id, duration);
   return { proof, id };
 }
 it("remembered devices persist only hashes, survive restart, and expire or revoke individually", async () => {
@@ -40,6 +40,43 @@ it("remembered devices persist only hashes, survive restart, and expire or revok
     assert.equal(restored.authenticate(laptop.proof), laptop.id);
     now += 91 * 86400_000;
     assert.equal(restored.authenticate(laptop.proof), null);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+it("each approval retains its selected lifetime; Never survives restart and remains revocable", async () => {
+  const root = await temporary(); let now = Date.now();
+  const approvedAt = now;
+  try {
+    const path = join(root, "devices.json");
+    const devices = new RemoteDevices(path, () => now); await devices.load();
+    const approvals = [];
+    for (const duration of [30, 90, 120, "never"] as const) {
+      const device = await paired(devices, String(duration), duration);
+      approvals.push({ ...device, duration });
+      assert.equal(devices.list().find(row => row.id === device.id)!.expiresAt,
+        duration === "never" ? null : approvedAt + duration * 86400_000);
+    }
+    const restored = new RemoteDevices(path, () => now); await restored.load();
+    for (const { proof, id, duration } of approvals) {
+      if (duration === "never") continue;
+      now = approvedAt + duration * 86400_000 - 1;
+      assert.equal(restored.authenticate(proof), id);
+      now++;
+      assert.equal(restored.authenticate(proof), null);
+      assert.equal(restored.cookieMaxAge(proof), null);
+    }
+    now = approvedAt + 1000 * 86400_000;
+    const forever = approvals.at(-1)!;
+    assert.equal(restored.authenticate(forever.proof), forever.id);
+    assert.deepEqual(restored.list().map(row => row.id), [forever.id]);
+    await paired(restored, "Later", 30);
+    assert.equal(restored.authenticate(forever.proof), forever.id, "new approvals retain existing Never devices");
+    await restored.revoke(forever.id);
+    const revoked = new RemoteDevices(path, () => now); await revoked.load();
+    assert.equal(revoked.authenticate(forever.proof), null);
+    const registry = JSON.parse(await readFile(path, "utf8"));
+    delete registry.devices[0].expiresAt;
+    await writeFile(path, JSON.stringify(registry));
+    await assert.rejects(new RemoteDevices(path).load(), "missing expiry is not Never");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 it("pairing needs owner approval, codes work once, expire and have a guess limit", async () => {
@@ -94,6 +131,37 @@ function connect(port: number, proof?: string, pageOrigin = origin) {
     headers: { Host: new URL(origin).host, ...(proof ? { Cookie: "__Host-arke-device=" + proof } : {}) } });
 }
 async function closeServer(server: Server) { await new Promise<void>(resolve => server.close(() => resolve())); }
+it("gateway cookies respect fixed approval deadlines and renew Never without restoring revoked access", async () => {
+  const root = await temporary(); let now = Date.now();
+  const devices = new RemoteDevices(join(root, "devices.json"), () => now);
+  await writeFile(join(root, "index.html"), "<head></head>");
+  const gateway = new RemoteGateway({ origin, clientDirectory: root, devices, session: { port: 9999, token: "a".repeat(64) } });
+  const port = await gateway.start(0);
+  try {
+    for (const duration of [30, 90, 120, "never"] as const) {
+      const { proof, id } = await paired(devices, String(duration), duration);
+      const approved = await get(port, "/remote/pair", { headers: { Cookie: "__Host-arke-pair=" + proof } });
+      assert.equal(approved.status, 204);
+      const lifetime = (duration === "never" ? 400 : duration) * 86400;
+      assert.match(approved.headers["set-cookie"]![0]!, new RegExp(`Max-Age=${lifetime}$`));
+      now += 86400_000;
+      const headers = { Cookie: "__Host-arke-device=" + proof };
+      const resumed = await get(port, "/remote/session", { headers });
+      assert.equal(resumed.status, 204);
+      assert.match(resumed.headers["set-cookie"]![0]!, /Secure; HttpOnly; SameSite=Strict/);
+      assert.match(resumed.headers["set-cookie"]![0]!, new RegExp(`Max-Age=${duration === "never" ? lifetime : lifetime - 86400}$`));
+      if (duration !== "never") {
+        now += (duration - 1) * 86400_000;
+        const expired = await get(port, "/remote/session", { headers });
+        assert.equal(expired.status, 401); assert.equal(expired.headers["set-cookie"], undefined);
+      } else {
+        await devices.revoke(id);
+        const revoked = await get(port, "/remote/session", { headers });
+        assert.equal(revoked.status, 401); assert.equal(revoked.headers["set-cookie"], undefined);
+      }
+    }
+  } finally { await gateway.stop(); await devices.stop(); await rm(root, { recursive: true, force: true }); }
+});
 it("real gateway pairs a browser, protects media and closes only revoked device sockets", async () => {
   const root = await temporary();
   const token = "a".repeat(64);

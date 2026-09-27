@@ -76,7 +76,11 @@ export function PairingPrompt() {
         <div className="fy-upd__version">
           {asked} · {Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")} left
         </div>
-        <p className="fy-pairask__what">Full access to this studio for 90 days.</p>
+        <p className="fy-pairask__what">
+          {status?.pairingDuration === "never"
+            ? "Full access to this studio until you revoke it."
+            : `Full access to this studio for ${status?.pairingDuration ?? 90} days.`}
+        </p>
       </div>
       <div className="fy-upd__foot">
         <Button variant="primary" size="lg" className="fy-upd__btn" disabled={busy} onClick={() => void decide("approve")}>

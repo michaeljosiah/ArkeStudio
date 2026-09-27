@@ -121,6 +121,9 @@ catalog refreshes temporarily disable those controls.
 Run coordinator and desktop `test/remote-access.test.ts`, client `test/remote-access.test.tsx`
 and the transport/preload regressions above. The focused suites cover code expiry/replay,
 approval persistence, origin/host confinement, revocation, and preserving other Serve mappings.
+Duration coverage includes all four choices, legacy 90-day defaults, settings persistence while
+off and across restart, approval-time selection without rewriting existing devices, fixed cookie
+deadlines, renewable Never cookies, revocation, and failed writes without preference changes.
 They also check host-file command rejection over live sockets, approved-cookie promotion after
 restart, stale forwarding with damaged or missing settings and a damaged registry, port retention
 when cleanup fails, preservation of damaged records, and first launch without Tailscale.
@@ -137,7 +140,7 @@ node --import tsx apps/desktop/scripts/smoke-remote-access.mjs --tailscale
 This requires a desktop display, connected Tailscale with HTTPS certificates enabled, and an
 unused HTTPS port 8444. It temporarily maps only that port and removes its own mapping on exit.
 It uses copied fixtures and a disposable profile, with no generation. It exercises the built
-sandboxed Electron file page, phone-sized browser pairing and desktop approval, HttpOnly cookies,
+sandboxed Electron file page, duration selection, phone-sized browser pairing and Never approval, persistent HttpOnly cookies,
 authenticated WSS and media, browser reopen, coordinator/gateway/registry restart with a fresh
 process capability, and revocation. Inspect the
 screenshots in its printed temporary directory. This host-local check does not replace actual

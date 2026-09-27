@@ -108,8 +108,10 @@ it("says a refusal on the way, and the phone can try again", async () => {
   } finally { await offline.unmount(); }
 });
 
+let duration: RemoteAccessStatus["pairingDuration"] = 90;
 const status = (pending: RemoteAccessStatus["pending"]): RemoteAccessStatus => ({ enabled: true, running: true,
-  startOnLogin: false, startupSupported: true, url: "https://michael-desktop.tail1234.ts.net", reason: null, devices: [], pending });
+  startOnLogin: false, startupSupported: true, pairingDuration: duration, url: "https://michael-desktop.tail1234.ts.net",
+  reason: null, devices: [], pending });
 
 it("asks the PC over whatever it shows, and the close means later", async () => {
   const calls: RemoteAccessCommand[] = [];
@@ -135,8 +137,10 @@ it("asks the PC over whatever it shows, and the close means later", async () => 
   } finally { await unmount(); }
 
   pending = [{ id: "7a1c6a2e-8b1d-4c5e-9f0a-1b2c3d4e5f60", name: "Galaxy Z Fold7", expiresAt: Date.now() + 250_000 }];
+  duration = "never";
   const later = await mount(<PairingPrompt />, "/worlds");
   try {
+    assert.ok(document.body.textContent?.includes("Full access to this studio until you revoke it."), "the PC's own setting, not a fixed period");
     const close = document.body.querySelector<HTMLButtonElement>('[aria-label="Decide later"]')!;
     await act(async () => { close.click(); await flush(); });
     assert.ok(!document.body.textContent?.includes("Pair Galaxy Z Fold7?"), "later means this dialog does not return for it");

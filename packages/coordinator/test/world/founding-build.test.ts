@@ -1063,10 +1063,17 @@ describe("the founding build (SPEC-031)", () => {
       "what was never dispatched is not dispatched",
     );
     await h.service.dismissNotice(h.worldId());
-    const key = state.items.find(item => item.kind === "main-photo")!.key;
+    const photo = state.items.find(item => item.kind === "main-photo")!;
+    const key = photo.key;
     const retry = h.service.runItems(h.worldId(), key);
-    await until(() => [...h.queue.jobs.values()].some(job => job.status === "running"), "retried image running", BUILD_MS);
-    const retried = [...h.queue.jobs.values()].find(job => job.status === "running")!;
+    // This item's own new job, not any running one: the stopped driver can still be buying and
+    // cancelling another photo it had mid-dispatch, which reads as running for a moment.
+    const retriedJob = () => {
+      const item = h.lastState()?.items.find(candidate => candidate.key === key);
+      return item?.jobId !== undefined && item.jobId !== photo.jobId ? h.queue.jobs.get(item.jobId) : undefined;
+    };
+    await until(() => retriedJob()?.status === "running", "retried image running", BUILD_MS);
+    const retried = retriedJob()!;
     // The retry is the author's press after the Stop, not part of the stopped run (issue 1308):
     // its own job must not be cancelled by the Stop that came before it. It was, every time,
     // and this test passed only when the queue showed it running before the cancel landed.
@@ -1080,6 +1087,41 @@ describe("the founding build (SPEC-031)", () => {
     await queued;
     assert.equal(h.queue.jobs.size, submissions, "Stop also cancels a retry queued behind the running retry");
     assert.ok(h.queue.cancelled.includes(retried.id), "Stop cancels a retry after the original build was already stopped");
+  });
+
+  it("a retry pressed while the stopped driver is still standing down runs once it has", async (t) => {
+    // The build reads "stopped" as soon as the queue shows the cancel, but the driver journals
+    // it and refreshes the world list before it lets go. A press in that gap was dropped, and
+    // the test above caught it only when the machine was busy enough to widen the gap.
+    let standingDown: () => void = () => {};
+    const inGap = new Promise<void>((resolve) => (standingDown = resolve));
+    let release: () => void = () => {};
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let holding = false;
+    const h = await makeHarness(t, {
+      refreshWorldList: async () => {
+        if (!holding) return;
+        standingDown();
+        await released;
+      },
+    });
+    await makeSandbox(h.root, "gen-stop-gap");
+    h.queue.holdWhen = (input) => input.target.kind === "main-photo-candidate";
+    await h.service.begin("gen-stop-gap", ulid());
+    await until(() => [...h.queue.jobs.values()].some((job) => job.status === "running"), "a build job to be running", BUILD_MS);
+    holding = true;
+    await h.service.stop(h.worldId());
+    await inGap;
+    const photo = h.lastState()!.items.find((item) => item.kind === "main-photo")!;
+    const retry = h.service.runItems(h.worldId(), photo.key);
+    release();
+    const retriedJob = () => {
+      const item = h.lastState()?.items.find((candidate) => candidate.key === photo.key);
+      return item?.jobId !== undefined && item.jobId !== photo.jobId ? h.queue.jobs.get(item.jobId) : undefined;
+    };
+    await until(() => retriedJob()?.status === "running", "the retry pressed in the gap to run", BUILD_MS);
+    await h.service.stop(h.worldId());
+    await retry;
   });
 });
 
