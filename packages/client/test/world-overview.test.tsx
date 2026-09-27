@@ -6,6 +6,7 @@ import { CHARACTER_ROLE_MAX, type Sheet } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __applyEventForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
+import { parseHTML } from "linkedom";
 
 /**
  * The world hub's cast fan (SPEC-007 R-18, R-19).
@@ -60,6 +61,13 @@ const BASE: Sheet = {
 };
 
 describe("the world hub cast fan (R-18, R-19)", () => {
+  it("names the whole cast and links to it while showing only five portraits (design 160)", () => {
+    const cast = Array.from({ length: 7 }, (_, i) => ({ ...BASE, id: `character-${i}`, name: `Character ${i}` }));
+    const { document } = parseHTML(renderHubWithCast(cast).replace(/<!-- -->/g, ""));
+    assert.equal(document.querySelector(".fy-worldcast__head .fy-hero__eyebrow")?.textContent, "Cast · 7");
+    assert.equal(document.querySelector(".fy-worldcast__head a")?.getAttribute("href"), `/w/${WORLD_ID}/cast`);
+    assert.equal(document.querySelectorAll(".fy-fan .fy-polaroid").length, 5);
+  });
   it("shows the role on the card", () => {
     const html = renderHubWithCast([{ ...BASE, role: "Cartographer" }]);
     assert.ok(html.includes('class="fy-polaroid__role">Cartographer<'), "the role is the card's second line");
