@@ -132,19 +132,24 @@ export function RemoteEntry({ children }: { children: ReactNode }) {
       >
         <label className="fy-launch__field">
           <span>Pairing code</span>
-          <input
-            className="fy-launch__code"
-            value={code}
-            placeholder="XXXX-XXXX"
-            inputMode="text"
-            autoComplete="one-time-code"
-            autoCapitalize="characters"
-            autoCorrect="off"
-            spellCheck={false}
-            maxLength={9}
-            onChange={event => setCode(formatPairingCode(event.target.value))}
-            required
-          />
+          <span className="fy-launch__code-field">
+            <span className="fy-launch__code-entered">
+              <span className="fy-launch__code-size" aria-hidden>{code}</span>
+              <input
+                className="fy-launch__code"
+                value={code}
+                inputMode="text"
+                autoComplete="one-time-code"
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
+                maxLength={9}
+                onChange={event => setCode(formatPairingCode(event.target.value))}
+                required
+              />
+            </span>
+            <span className="fy-launch__code-rest" aria-hidden>{"XXXX-XXXX".slice(code.length)}</span>
+          </span>
         </label>
         {error && (
           <div className="fy-launch__note" role="alert">

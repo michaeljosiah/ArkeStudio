@@ -61,16 +61,27 @@ it("pairs on the launch surface, waits for the PC, and goes straight in once app
     assert.equal(input.getAttribute("autocomplete") ?? input.getAttribute("autoComplete"), "one-time-code");
     const submit = [...element.querySelectorAll("button")].find(b => b.textContent === "Request pairing")!;
     assert.ok(submit.disabled, "nothing to send until the code is whole");
+    assert.equal(element.querySelector(".fy-launch__code-rest")?.textContent, "XXXX-XXXX");
 
     const form = element.querySelector("form")!;
     // As the other screens' tests type: set the value, then hand React's own onChange the event,
     // since linkedom's input events do not reach React's value tracker.
+    await act(async () => {
+      input.value = "7kq4m2";
+      const key = Object.keys(input).find((candidate) => candidate.startsWith("__reactProps$"))!;
+      (input as unknown as Record<string, { onChange(event: { target: HTMLInputElement }): void }>)[key]!.onChange({ target: input });
+      await flush();
+    });
+    assert.equal(input.value, "7KQ4-M2");
+    assert.equal(element.querySelector(".fy-launch__code-rest")?.textContent, "XX", "unfinished slots remain visible as in 158i");
+    assert.ok(submit.disabled);
     await act(async () => {
       input.value = "7kq4m2xp";
       const key = Object.keys(input).find((candidate) => candidate.startsWith("__reactProps$"))!;
       (input as unknown as Record<string, { onChange(event: { target: HTMLInputElement }): void }>)[key]!.onChange({ target: input });
       await flush();
     });
+    assert.equal(element.querySelector(".fy-launch__code-rest")?.textContent, "");
     await act(async () => { form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true })); await flush(); });
     assert.deepEqual(posted, { code: "7KQ4-M2XP", name: "My phone" });
     assert.ok(element.textContent?.includes("Waiting for your PC"));

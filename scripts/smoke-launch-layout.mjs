@@ -70,8 +70,7 @@ window.mountLaunch = async (mode, desktop) => {
   </MemoryRouter>));
   await settle(); await document.fonts.ready; await settle();
   if (mode === "typing") {
-    const input = document.querySelector("input");
-    input.focus(); input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    document.querySelector(".fy-launch__code-field").click();
     await settle();
   }
   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -142,6 +141,18 @@ async function electronMain() {
       document.documentElement.style.setProperty("--smoke-safe-bottom", "${stacked ? 20 : 0}px");`);
     window.webContents.focus();
     await window.webContents.executeJavaScript(`window.mountLaunch(${JSON.stringify(mode)}, ${desktop})`, true);
+    if (mode === "typing") {
+      for (const keyCode of "7KQ4M2") {
+        window.webContents.sendInputEvent({ type: "char", keyCode });
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      assert.equal(await window.webContents.executeJavaScript('document.querySelector("input").value'), "7KQ4-M2");
+      assert.equal(await window.webContents.executeJavaScript('document.querySelector(".fy-launch__code-rest").textContent'), "XX");
+      await window.webContents.executeJavaScript("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+      // A hidden window may retain the pre-keystroke compositor frame until it is captured once.
+      await window.webContents.capturePage();
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
     const measured = await window.webContents.executeJavaScript("window.measureLaunch()");
     assert.equal(measured.overflow, false, name + " sideways overflow");
     if (mode === "typing") assert.ok(measured.className.includes("fy-launch--typing"), JSON.stringify(measured));
