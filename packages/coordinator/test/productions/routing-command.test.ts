@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it, type TestContext } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { RoutingSchema, type ClientMessage, type DomainEvent, type RoutingCommand } from "@arke-studio/contracts";
@@ -15,7 +15,7 @@ import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
 const PRODUCTION = "saltlight";
 
-async function harness() {
+async function harness(t: TestContext) {
   const { root, worldDir } = await makeTempRoot();
   const provider = new FsWorldProvider(root, { clock: () => "2026-09-27T12:00:00.000Z" });
   await provider.loadWorld(WORLD_ID);
@@ -26,6 +26,12 @@ async function harness() {
     changeLogPath: join(root, "logs", "changes.jsonl"),
     appVersion: "test",
     observeEvent: (event) => events.push(event),
+  });
+  // The open world holds a lock heartbeat and file watchers; left open, they kept a Windows
+  // test process alive until CI's silence guard killed the shard.
+  t.after(async () => {
+    await coordinator.stop();
+    await provider.close();
   });
   const send = (command: RoutingCommand, worldId = WORLD_ID) =>
     (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage({
@@ -40,8 +46,8 @@ async function harness() {
 }
 
 describe("the branch map's routing commands", () => {
-  it("starts the routing from nothing with a start, then edits it one command at a time", async () => {
-    const { send, routing, events } = await harness();
+  it("starts the routing from nothing with a start, then edits it one command at a time", async (t) => {
+    const { send, routing, events } = await harness(t);
     await send({ operation: "set-start", sceneId: "sc_02" });
     const first = await routing();
     assert.equal(first.start, "sc_02");
@@ -60,8 +66,8 @@ describe("the branch map's routing commands", () => {
     );
   });
 
-  it("applies each command to what is on disk, so two edits in flight both land", async () => {
-    const { send, routing } = await harness();
+  it("applies each command to what is on disk, so two edits in flight both land", async (t) => {
+    const { send, routing } = await harness(t);
     await send({ operation: "set-start", sceneId: "sc_02" });
     // Two edits composed against the same starting file: a whole-file save would let the second
     // write over the first; a command applies to the other's result.
@@ -73,8 +79,8 @@ describe("the branch map's routing commands", () => {
     assert.deepEqual(after.choices.map((choice) => choice.id).sort(), ["ch_a", "ch_b"]);
   });
 
-  it("two quick adds with one label both land, the second under a suffixed id", async () => {
-    const { send, routing } = await harness();
+  it("two quick adds with one label both land, the second under a suffixed id", async (t) => {
+    const { send, routing } = await harness(t);
     await send({ operation: "set-start", sceneId: "sc_02" });
     // The map derives the id from the label against the routing it last saw, so both carry one id.
     await Promise.all([
@@ -88,8 +94,8 @@ describe("the branch map's routing commands", () => {
     );
   });
 
-  it("refuses to put an excluded scene on a route, whichever command would", async () => {
-    const { send, routing } = await harness();
+  it("refuses to put an excluded scene on a route, whichever command would", async (t) => {
+    const { send, routing } = await harness(t);
     await send({ operation: "set-start", sceneId: "sc_02" });
     await send({ operation: "add-choice", choice: { id: "ch_on", from: "sc_02", label: "Go on", to: "sc_04" } });
     const before = await routing();
@@ -108,8 +114,8 @@ describe("the branch map's routing commands", () => {
     assert.deepEqual(await routing(), excluded, "no command routes into an excluded scene");
   });
 
-  it("refuses a command that does not apply, and writes nothing", async () => {
-    const { send, routing } = await harness();
+  it("refuses a command that does not apply, and writes nothing", async (t) => {
+    const { send, routing } = await harness(t);
     await send({ operation: "set-start", sceneId: "sc_02" });
     const before = await routing();
     await send({ operation: "remove-choice", choiceId: "ch_missing" });
@@ -117,8 +123,8 @@ describe("the branch map's routing commands", () => {
     assert.deepEqual(await routing(), before, "a refused edit leaves the file as it was");
   });
 
-  it("refuses a command that names a scene the production no longer has, but still lets a removal through", async () => {
-    const { send, routing, worldDir } = await harness();
+  it("refuses a command that names a scene the production no longer has, but still lets a removal through", async (t) => {
+    const { send, routing, worldDir } = await harness(t);
     await send({ operation: "set-start", sceneId: "sc_02" });
     await send({ operation: "add-choice", choice: { id: "ch_on", from: "sc_02", label: "Go on", to: "sc_04" } });
     const before = await routing();
@@ -138,15 +144,15 @@ describe("the branch map's routing commands", () => {
     assert.deepEqual((await routing()).choices.map((choice) => choice.id), ["ch_on"]);
   });
 
-  it("never lands in a world other than the one the frame names", async () => {
-    const { send, worldDir } = await harness();
+  it("never lands in a world other than the one the frame names", async (t) => {
+    const { send, worldDir } = await harness(t);
     // Sent for another world while this one is open — it holds a production with the same slug.
     await send({ operation: "set-start", sceneId: "sc_02" }, "01J8F3K2QW9VZX4N7M0RTYB6ZZ");
     await assert.rejects(readFile(join(worldDir, "productions", PRODUCTION, "routing.json"), "utf8"), /ENOENT/);
   });
 
-  it("a first edit that is not a start is refused, and no routing file appears", async () => {
-    const { send, worldDir } = await harness();
+  it("a first edit that is not a start is refused, and no routing file appears", async (t) => {
+    const { send, worldDir } = await harness(t);
     await send({ operation: "add-choice", choice: { id: "ch_on", from: "sc_02", label: "Go on", to: "sc_04" } });
     await assert.rejects(readFile(join(worldDir, "productions", PRODUCTION, "routing.json"), "utf8"), /ENOENT/);
   });
