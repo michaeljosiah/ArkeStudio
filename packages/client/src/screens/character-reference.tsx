@@ -1176,7 +1176,7 @@ export function CharacterLooksScreen() {
             </div>
             <div className="fy-looks-footer__actions">
             {selectedTake && (
-              <Button onClick={() => acceptCharacterLook(world.meta.worldId, sheetId, selectedTake.id)}>
+              <Button className="fy-looks-accept" onClick={() => acceptCharacterLook(world.meta.worldId, sheetId, selectedTake.id)}>
                 Accept look
               </Button>
             )}
