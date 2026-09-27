@@ -69,6 +69,19 @@ describe("a scene read as beats", () => {
     assert.ok(lines.every((l) => l.reason !== undefined), "each keeps its missing-speaker refusal");
   });
 
+  it("a named line survives a sibling cover whose block is gone, planned as the line the beat reads", () => {
+    const stale = SceneSchema.parse({
+      id: "sc_stale", number: 1, slug: "stale", title: "Stale", status: "draft", version: 1,
+      script: { blocks: [{ id: "blk_here", kind: "dialogue", speaker: "maren", text: "Still here." }] },
+      shots: [{ id: "sh_a", number: 1, title: "A", description: "", covers: [cover("blk_here"), cover("blk_gone")] }],
+    });
+    const lines = deriveRehearsalLines(stale, [{ id: "maren", type: "character" }], { narration: true });
+    const line = lines.find((l) => l.blockId === "blk_here")!;
+    assert.equal(line.reason, undefined, "the surviving line is voiceable");
+    assert.equal(line.speakerSheetId, "maren");
+    assert.equal(line.text, "Still here.");
+  });
+
   it("without narration the table read is the characters' alone, as before", () => {
     const lines = deriveRehearsalLines(scene, [{ id: "maren", type: "character" }, { id: "bray", type: "character" }]);
     assert.ok(lines.every((l) => l.narration === undefined));

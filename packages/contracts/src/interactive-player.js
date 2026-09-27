@@ -84,6 +84,12 @@ export function mountInteractivePlayer(root, options) {
   // A voice that would not play is not a voice heard: the beat reads as text and waits for the
   // reader, rather than moving on after a breath as if the line had been spoken.
   let voiceFailed = false;
+  // Which play the failure belongs to: a start refused after the reader has moved on belongs to a
+  // beat already gone, and must not mark the next beat's voice as lost.
+  let voiceToken = 0;
+  // Whether the running hold is Auto's, which turning Auto off takes back; an authored hold, or the
+  // breath after a voice on an after-the-voice beat, stays.
+  let holdByAuto = false;
   let auto = false;
   let logOpen = false;
   const still = () => Boolean(win.matchMedia && win.matchMedia("(prefers-reduced-motion: reduce)").matches);
@@ -416,12 +422,13 @@ export function mountInteractivePlayer(root, options) {
     else el.box.removeAttribute("data-typed");
     voice.pause && voice.pause();
     voiceFailed = false;
+    const token = ++voiceToken;
     if (b.audio && !quiet) {
       voiceDone = false;
       voice.setAttribute("src", b.audio);
       const p = voice.play && voice.play();
       // A voice the browser will not start (no gesture yet, a missing file) is read as text.
-      if (p && p.catch) p.catch(() => voiceLost());
+      if (p && p.catch) p.catch(() => { if (token === voiceToken) voiceLost(); });
     } else {
       voiceDone = true;
       voice.removeAttribute("src");
@@ -441,21 +448,24 @@ export function mountInteractivePlayer(root, options) {
     const b = beat();
     const advance = b.advance || "tap";
     if (advance === "hold") {
-      if (shown) startHold(b.holdSec || 4);
+      if (shown) startHold(b.holdSec || 4, false);
       return;
     }
     if (!voiceDone) return;
     const heard = Boolean(b.audio) && !voiceFailed;
-    if (heard && (advance === "voice" || auto)) startHold(1.2);
-    else if (auto) startHold(Math.min(12, 1.5 + String(b.text || "").split(/\s+/).filter(Boolean).length * 0.3));
+    if (heard && advance === "voice") startHold(1.2, false);
+    else if (heard && auto) startHold(1.2, true);
+    else if (auto) startHold(Math.min(12, 1.5 + String(b.text || "").split(/\s+/).filter(Boolean).length * 0.3), true);
   }
-  function startHold(sec) {
+  function startHold(sec, byAuto) {
+    holdByAuto = byAuto;
     el.hold.style.animation = "none";
     void el.hold.offsetWidth;
     el.hold.setAttribute("data-beat", state.sceneId + "#" + beatIndex);
     el.hold.style.animation = "aip-hold " + sec + "s linear forwards";
   }
   function stopHold() {
+    holdByAuto = false;
     el.hold.style.animation = "none";
     el.hold.removeAttribute("data-beat");
   }
@@ -468,6 +478,14 @@ export function mountInteractivePlayer(root, options) {
     if (voiceDone) return;
     voiceFailed = true;
     voiceEnded();
+  }
+
+  /** Auto on moves beats on by themselves; off takes back only the holds Auto started. */
+  function toggleAuto() {
+    auto = !auto;
+    renderBeat();
+    if (auto && mode === "playing") schedule(false);
+    else if (!auto && holdByAuto) stopHold();
   }
 
   /** A tap, a key: the rest of the line if it is still typing on, else the next beat. */
@@ -911,7 +929,7 @@ export function mountInteractivePlayer(root, options) {
       case "mute": video.muted = !video.muted; voice.muted = video.muted; logVoice.muted = video.muted; renderBar(); renderBeat(); break;
       case "route": routeOpen = !routeOpen; if (routeOpen) logOpen = false; renderPanel(); renderBeat(); break;
       case "log": logOpen = !logOpen; if (logOpen) routeOpen = false; renderPanel(); renderBeat(); break;
-      case "auto": auto = !auto; renderBeat(); if (auto && mode === "playing") schedule(false); else if (!auto && (beat().advance || "tap") === "tap") stopHold(); break;
+      case "auto": toggleAuto(); break;
       case "full": full(); break;
       case "replay": play(state.sceneId, 0); break;
       case "continue": saved = null; play(state.sceneId, state.positionSec); break;
@@ -958,10 +976,7 @@ export function mountInteractivePlayer(root, options) {
         return;
       }
       if (key === "a" || key === "A") {
-        auto = !auto;
-        renderBeat();
-        if (auto) schedule(false);
-        else if ((beat().advance || "tap") === "tap") stopHold();
+        toggleAuto();
         return;
       }
       if (key === "l" || key === "L") {

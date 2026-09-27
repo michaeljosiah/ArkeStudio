@@ -18,6 +18,8 @@ import {
   type SceneRecord,
   type WorldBundle,
   resolvePropStates,
+  beatPictureShotId,
+  productionShape,
 } from "@arke-studio/contracts";
 import { productionModel, resolveModel, strandReason, usableModels } from "../../components/dispatch-bar.js";
 import { X } from "../../components/icons.js";
@@ -154,7 +156,12 @@ function GenerateFramesDialogOpen({
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const sceneShots = orderedShots(scene);
-  const shots = shotId === undefined ? sceneShots : sceneShots.filter((shot) => shot.id === shotId);
+  // A visual novel's beat that keeps the picture before has none of its own to make (turn 174):
+  // a scene-wide run leaves it out, as the coordinator does; asked for by name, it is made.
+  const playsAsBeats = productionShape(production.meta).playsAsBeats;
+  const shots = shotId === undefined
+    ? sceneShots.filter((shot) => !playsAsBeats || beatPictureShotId(sceneShots, shot.id) === shot.id)
+    : sceneShots.filter((shot) => shot.id === shotId);
   const missing = shots.filter((shot) => !shotHasFrame(production, world.artifacts, shot.id));
   const [mode, setMode] = useState<"per-shot" | "board">(shotId === undefined ? "board" : "per-shot");
   const [scope, setScope] = useState<"missing" | "all">(shotId === undefined && missing.length > 0 ? "missing" : "all");

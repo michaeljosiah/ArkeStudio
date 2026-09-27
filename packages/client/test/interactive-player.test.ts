@@ -535,6 +535,41 @@ describe("the player reading beats (turn 174)", () => {
     assert.equal(own.q(".aip-pic img")?.className, "m-none", "not kept: its own movement");
   });
 
+  it("Auto off takes back the hold Auto started on a beat whose voice failed", () => {
+    const p = mount({ ...NOVEL, autoplay: true });
+    p.key("a");
+    p.q("audio")!.dispatchEvent(new dom.Event("error") as unknown as Event);
+    assert.match(p.q(".aip-hold")!.style.animation, /aip-hold/, "Auto reads the unvoiced line on after a reading time");
+    p.key("a");
+    assert.equal(p.q(".aip-hold")!.style.animation, "none", "off again, it waits for the reader");
+  });
+
+  it("a start refused after the reader moved on does not mark the next beat's voice lost", async () => {
+    const audioProto = Object.getPrototypeOf(dom.document.createElement("audio")) as { play?: () => Promise<void> };
+    const had = Object.prototype.hasOwnProperty.call(audioProto, "play");
+    const before = audioProto.play;
+    const rejects: Array<() => void> = [];
+    audioProto.play = () => new Promise<void>((_, reject) => { rejects.push(() => reject(new Error("aborted"))); });
+    try {
+      const p = mount({
+        ...NOVEL,
+        autoplay: true,
+        scenes: { ...NOVEL.scenes, sc_quarter: { title: "Q", beats: [
+          { picture: "media/a.png", text: "One.", audio: "media/one.mp3", advance: "voice" as const },
+          { picture: "media/a.png", text: "Two.", audio: "media/two.mp3", advance: "voice" as const },
+        ] } },
+      });
+      p.key("ArrowRight"); p.key("ArrowRight");
+      assert.equal(p.text(".aip-line"), "Two.");
+      rejects[0]!();
+      await new Promise((resolve) => setImmediate(resolve));
+      p.q("audio")!.dispatchEvent(new dom.Event("ended") as unknown as Event);
+      assert.match(p.q(".aip-hold")!.style.animation, /aip-hold 1\.2s/, "beat two's voice was heard, so it moves on after its breath");
+    } finally {
+      if (had) audioProto.play = before; else delete audioProto.play;
+    }
+  });
+
   it("back one beat with the left arrow, never across a choice", () => {
     const p = mount({ ...NOVEL, autoplay: true });
     p.key("ArrowRight"); p.key("ArrowRight");

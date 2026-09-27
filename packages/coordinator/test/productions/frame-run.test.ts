@@ -213,6 +213,35 @@ describe("frame-run coordinator service", () => {
     assert.deepEqual(await listFrameRuns(f.store, production.meta.id), []);
   });
 
+  it("a visual novel's scene-wide run leaves out a beat that keeps the picture before (turn 174)", async () => {
+    const f = await fixture();
+    const shots = orderedShots(f.scene);
+    const kept = shots[1]!;
+    const scene = { ...f.scene, shots: shots.map((shot) => (shot.id === kept.id ? { ...shot, beat: { samePicture: true } } : shot)) } as SceneRecord;
+    const production = { ...f.production, meta: { ...f.production.meta, medium: "video" as const, kind: "visual-novel" } };
+    const quoteFor = async (scope: "all" | "missing", shotId?: string) => quoteFrameRun(f.store, {
+      requestId: "01J8E0000000000000000000V5",
+      quoteId: "01J8E0000000000000000000V6",
+      worldId: WORLD_ID,
+      productionId: production.meta.id,
+      sceneId: scene.id,
+      mode: "per-shot",
+      modelId: IMAGE.id,
+      scope,
+      ...(shotId !== undefined ? { shotId } : {}),
+      clock: CLOCK,
+      compile: () => ({
+        worldId: WORLD_ID, productionId: production.meta.id, scene, production, world: f.world, model: IMAGE,
+        mode: "per-shot" as const, scope, ...(shotId !== undefined ? { shotId } : {}), boardCapSec: 30, boardPanelCap: 6, eligible: true, clock: CLOCK,
+      }),
+    });
+    const all = await quoteFor("all");
+    assert.equal(all.includedCount, shots.length - 1, "no image is bought for a picture nobody sees");
+    assert.equal(all.steps.some((step) => step.label === `Shot ${kept.number}`), false);
+    const named = await quoteFor("all", kept.id);
+    assert.equal(named.includedCount, 1, "asked for by name, it is made as asked");
+  });
+
   it("quotes the exact aggregate and refuses stale authorization before persistence", async () => {
     const f = await fixture();
     const compile = {

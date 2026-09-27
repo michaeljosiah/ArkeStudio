@@ -187,6 +187,18 @@ describe("a visual novel's scene reads as beats (turn 174)", () => {
     assert.equal(all(mounted, ".fy-sw__tab").find((tab) => tab.getAttribute("aria-checked") === "true")?.textContent, "Beats");
   });
 
+  it("a studio lost while the voices are asked for opens the preview as text, rather than waiting forever", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(visualNovel(), SCENE_PATH);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Preview")!);
+    assert.match(q(mounted, '[role="status"]')?.textContent ?? "", /Gathering the voices/);
+    await act(async () => { __connectionStatusForTest("closed"); });
+    const player = q(mounted, ".bm-player")!;
+    assert.ok(player, "the player opens");
+    assert.equal(player.querySelector("audio")?.hasAttribute("src"), false, "reading as text");
+  });
+
   it("a film's scene page is as it was", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));

@@ -52,6 +52,12 @@ export function deriveRehearsalLines(scene: SceneRecord, sheets: readonly Pick<S
     byId.delete(beat.lineId);
     if (beat.kind === "narration") {
       ordered.push({ id: beat.lineId, shotId: beat.shot.id, ...(beat.blockId ? { blockId: beat.blockId } : {}), text: beat.text, narration: true });
+    } else if (existing?.reason !== undefined && beat.speaker && beat.blockId) {
+      // The character walk refuses every line of a shot one of whose covers is gone; a beat reads
+      // each surviving line on its own, so a named line it shows is planned as that line.
+      const speaker = sheets.find(s => s.id === beat.speaker && s.type === "character" && !s.retired);
+      ordered.push({ id: beat.lineId, shotId: beat.shot.id, blockId: beat.blockId, speakerSheetId: beat.speaker, text: beat.text,
+        ...(!speaker ? { reason: "This line has no available character speaker." } : {}) });
     } else if (existing) ordered.push(existing);
   }
   return [...ordered, ...byId.values()];

@@ -90,19 +90,31 @@ export function useProductionVoiceFiles({
   /** Null asks nothing; each new value asks again. */
   key: number | null;
 }): { files: ReadonlyMap<string, string>; ready: boolean } {
+  const { connection } = useStore();
   const [files, setFiles] = useState<ReadonlyMap<string, string>>(new Map());
   const [ready, setReady] = useState(false);
+  /** The key whose answers are all in: the preview it opened has mounted, and is not asked again. */
+  const settled = useRef<number | null>(null);
   const scenes = sceneIds.join("|");
   useEffect(() => {
+    if (key !== null && settled.current === key) return;
     setFiles(new Map());
     setReady(false);
     if (key === null || worldId === undefined || productionId === undefined) return;
+    // No studio to answer, or it went away mid-batch: the preview reads as text rather than
+    // waiting on answers that will never come. Back before the preview opened, it asks again.
+    if (connection !== "open") {
+      settled.current = key;
+      setReady(true);
+      return;
+    }
     const pending = new Set<string>();
     const found = new Map<string, string>();
     const off = subscribeRehearsalResults((result) => {
       if (!pending.delete(result.requestId)) return;
       for (const item of result.plan?.items ?? []) if (item.file !== undefined) found.set(item.lineId, item.file);
       if (pending.size === 0) {
+        settled.current = key;
         setFiles(new Map(found));
         setReady(true);
       }
@@ -111,8 +123,11 @@ export function useProductionVoiceFiles({
       const requestId = planTableRead(worldId, productionId, sceneId);
       if (requestId !== null) pending.add(requestId);
     }
-    if (pending.size === 0) setReady(true);
+    if (pending.size === 0) {
+      settled.current = key;
+      setReady(true);
+    }
     return off;
-  }, [key, worldId, productionId, scenes]);
+  }, [key, worldId, productionId, scenes, connection]);
   return { files, ready };
 }
