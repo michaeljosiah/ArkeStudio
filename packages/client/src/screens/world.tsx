@@ -4549,7 +4549,7 @@ export const VIDEO_KIND_CHOICES = [
 ] as const;
 
 /**
- * What `CHOOSE` asks (turn 172): which of the two interactive kinds. Each is named for what the
+ * What `CHOOSE` asks (turn 174): which of the two interactive kinds. Each is named for what the
  * viewer does — watch, or read — because the first names drawn for them ("Moving pictures",
  * "Illustrated") said neither, and "Illustrated" already names an art direction an interactive
  * movie can wear. Both write the video medium and route by choice; a visual novel reads its
@@ -4609,7 +4609,7 @@ export function parseEpisodeLength(value: string): { min: number; max: number } 
  * What each card has left to ask. Step two always renders now (turn 113): it is the screen that
  * holds the name, so a card with nothing else to ask shows the name alone rather than sending
  * the person through a dialog the other cards do not get. `choose` has had kinds of its own since
- * turn 172 — an interactive movie or a visual novel — and `write` is empty until a story does.
+ * turn 174 — an interactive movie or a visual novel — and `write` is empty until a story does.
  */
 export const KINDS_BY_DOOR: Record<DoorId, readonly KindChoice[]> = {
   write: [],
@@ -4684,7 +4684,7 @@ export function NewProductionScreen() {
         medium: chosen.medium,
         /*
          * The kind row answers where the card has one — `CHOOSE` has offered an interactive movie
-         * or a visual novel since turn 172 — and a card's own kind stands in where it has no row,
+         * or a visual novel since turn 174 — and a card's own kind stands in where it has no row,
          * which is how `CHOOSE` wrote `interactive` from turn 113a until then.
          */
         ...(kinds.length > 0 && chosen.medium === "video" && STORED_KINDS.has(videoKind)

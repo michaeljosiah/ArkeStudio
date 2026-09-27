@@ -12,7 +12,7 @@ import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
- * A visual novel's scene page (design turn 172, 172b–172c): the storyboard reads as beats — each
+ * A visual novel's scene page (design turn 174, 174b–174c): the storyboard reads as beats — each
  * row's lines under their speaker, whether each is voiced, how the beat moves on, a beat that keeps
  * the picture before — and the shot page gains a Beat card that writes `shot.beat`. A film's page
  * is untouched. Same harness as shot-page.test.tsx.
@@ -103,7 +103,7 @@ const plan = {
   ],
 };
 
-describe("a visual novel's scene reads as beats (turn 172)", () => {
+describe("a visual novel's scene reads as beats (turn 174)", () => {
   it("names the view Beats, drops Flow and boards, and shows each row's lines under their speaker", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
@@ -159,7 +159,7 @@ describe("a visual novel's scene reads as beats (turn 172)", () => {
   });
 });
 
-describe("the Beat card on a visual novel's shot page (turn 172, 172c)", () => {
+describe("the Beat card on a visual novel's shot page (turn 174, 174c)", () => {
   it("shows the shot's lines and writes how the beat moves on and how its picture moves", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));

@@ -3,7 +3,7 @@ import { performanceLineKey } from "./performance.js";
 import type { Shot } from "./scene.js";
 
 /**
- * A visual novel's scene as beats (turn 172): one picture and one line each, read in order.
+ * A visual novel's scene as beats (turn 174): one picture and one line each, read in order.
  *
  * A beat is a shot — no store of its own — and its line is the script block the shot covers.
  * An action block is narration, read by the narrator; a dialogue block is its speaker's line,

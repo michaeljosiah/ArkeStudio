@@ -2,7 +2,7 @@ import { formatMicroUsd, type SceneBeat, type Sheet, type TableReadPlan } from "
 import type { LineVoice } from "./table-read.js";
 
 /**
- * A visual novel's scene page reads its shots as beats (turn 172): the line each one carries,
+ * A visual novel's scene page reads its shots as beats (turn 174): the line each one carries,
  * whose it is, whether it is voiced, and how it moves on. Nothing here is a store of its own —
  * the line is the covered script block, the voice is the table read's, the rest is `shot.beat`.
  */
@@ -48,7 +48,7 @@ export function BeatLines({
 }
 
 /**
- * "Voice lines" (172b): prepare every line the plan has no read for, at the price it quoted. A
+ * "Voice lines" (174b): prepare every line the plan has no read for, at the price it quoted. A
  * visual novel plays an unvoiced line as text, so this is an offer, never a block — and when
  * every line has a read it says so rather than offering nothing.
  */

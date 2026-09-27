@@ -36,7 +36,7 @@ it("plans exact cache preparation, sees running work, and reuses verified cache 
 });
 
 /**
- * A visual novel voices every line the reader hears (turn 172): its narration is read in the
+ * A visual novel voices every line the reader hears (turn 174): its narration is read in the
  * narrator's voice and planned with the characters' lines, in beat order, and a film's table read
  * stays the characters' alone even when a narrator is passed.
  */

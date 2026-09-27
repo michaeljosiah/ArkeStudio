@@ -349,7 +349,7 @@ export const ShotSchema = z
       .array(z.object({ blockId: z.string().min(1), textDigest: Sha256Schema }).strict())
       .optional(),
     /**
-     * How the shot plays as a visual novel's beat (turn 172): how it moves on, how its picture
+     * How the shot plays as a visual novel's beat (turn 174): how it moves on, how its picture
      * moves, and whether it keeps the picture before it instead of showing its own. Read only
      * where the production plays as beats; a film ignores it. Every field is optional, so a
      * beat nobody has touched plays on the defaults (`BEAT_DEFAULTS`).

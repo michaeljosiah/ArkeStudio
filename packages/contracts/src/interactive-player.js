@@ -10,7 +10,7 @@
  * what the brief binds: no timer anywhere (a choice is never made on the viewer's behalf), and
  * playback state that is the viewer's place and nothing more.
  *
- * A scene is clips (an interactive movie) or beats (a visual novel, turn 172): a picture and a
+ * A scene is clips (an interactive movie) or beats (a visual novel, turn 174): a picture and a
  * line each, read at the viewer's pace. The same rule holds for beats — what moves a beat on by
  * itself is a voice ending or a CSS animation ending, never a timer — and a beat scene's place is
  * the beat's index, kept in the same four fields.
@@ -38,7 +38,7 @@ export function mountInteractivePlayer(root, options) {
       (scenes[id].clips || []).map((c) => (typeof c === "string" ? { src: c, from: 0, to: null } : { src: c.src, from: c.from || 0, to: c.to == null ? null : c.to })),
     ]),
   );
-  /** A visual novel's scenes read as beats (turn 172); a scene with beats plays no clips. */
+  /** A visual novel's scenes read as beats (turn 174); a scene with beats plays no clips. */
   const beatsOf = (id) => (scenes[id] && Array.isArray(scenes[id].beats) ? scenes[id].beats : []);
   const isBeats = (id) => beatsOf(id).length > 0;
   /** The loaded clip's window in its file: where it starts, and how long it runs once that is known. */

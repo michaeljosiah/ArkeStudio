@@ -488,7 +488,7 @@ interface InteractiveExportManifest {
   /** `windows`: the parts of `file` the scene plays, in order; absent, the whole file plays. */
   readonly media: ReadonlyArray<{ sceneId: string; file: string; hash: string; windows?: PlaybackWindow[] }>;
   /**
-   * A visual novel's scenes (turn 172), read as beats instead of played; their pictures and voices
+   * A visual novel's scenes (turn 174), read as beats instead of played; their pictures and voices
    * are listed once in `files` with their hashes, since beats share pictures.
    */
   readonly beats?: ReadonlyArray<{ sceneId: string; beats: ReadonlyArray<ManifestBeat> }>;
@@ -842,7 +842,7 @@ function safeWorldFile(path: string): boolean {
 }
 
 /**
- * A visual novel's package (turn 172): the same player, reading each routed scene as beats. Each
+ * A visual novel's package (turn 174): the same player, reading each routed scene as beats. Each
  * picture is copied once, however many beats show it; each prepared voice once; the text travels
  * as text. A beat with no picture is refused by name, as a scene with no footage is; a line with
  * no voice is not — the package reads it as text.

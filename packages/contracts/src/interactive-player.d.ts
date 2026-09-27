@@ -8,7 +8,7 @@ export interface InteractivePlayerScene {
   title: string;
   /** Played in order; none plays the scene as a slate (preview only — an export refuses it). */
   clips?: Array<string | InteractivePlayerClip>;
-  /** A visual novel's scene (turn 172): read beat by beat instead of played; wins over `clips`. */
+  /** A visual novel's scene (turn 174): read beat by beat instead of played; wins over `clips`. */
   beats?: InteractivePlayerBeat[];
 }
 

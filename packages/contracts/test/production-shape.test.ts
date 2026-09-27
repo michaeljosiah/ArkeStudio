@@ -55,7 +55,7 @@ describe("productionShape resolves the legacy discriminator", () => {
       label: "Interactive video",
     },
     {
-      // Turn 172: the second interactive kind. It branches, and its pictures are image takes.
+      // Turn 174: the second interactive kind. It branches, and its pictures are image takes.
       meta: { format: "video", medium: "video", kind: "visual-novel" },
       medium: "video",
       kind: "visual-novel",

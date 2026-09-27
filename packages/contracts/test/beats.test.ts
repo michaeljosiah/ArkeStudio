@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { SceneSchema, ShotSchema, beatPictureShotId, beatPlayback, deriveRehearsalLines, playerBeats, sceneBeats } from "../src/index.js";
 
 /**
- * A visual novel's scene as beats (turn 172): the walk that the scene page, the player and the
+ * A visual novel's scene as beats (turn 174): the walk that the scene page, the player and the
  * table read all read, so a beat's line id and the audio prepared for it cannot disagree.
  */
 const cover = (id: string) => ({ blockId: id, textDigest: "sha256:12345678" });

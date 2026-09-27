@@ -168,7 +168,7 @@ export function ScenePreview({
     const items = plan.items.flatMap((item) => {
       const line = lines.find((candidate) => candidate.id === item.lineId);
       if (item.file === undefined || line === undefined) return [];
-      // A visual novel's narration plays in the same read, under the narrator's name (turn 172).
+      // A visual novel's narration plays in the same read, under the narrator's name (turn 174).
       if (line.speakerSheetId === undefined) {
         if (!line.narration) return [];
         // No sheet to solo: the empty id matches no speaker, so soloing a character skips it.

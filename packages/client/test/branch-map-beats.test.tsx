@@ -6,7 +6,7 @@ import { shotFramePath } from "../src/screens/scene-workspace/boards.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
- * A visual novel's preview reads its scenes as beats (turn 172): the picture a shot shows in the
+ * A visual novel's preview reads its scenes as beats (turn 174): the picture a shot shows in the
  * rows, its covered lines under their speakers' names, and the table read's voice where there is
  * one — through the same `playerBeats` the export builds its package from.
  */

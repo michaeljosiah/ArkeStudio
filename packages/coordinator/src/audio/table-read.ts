@@ -10,7 +10,7 @@ import { readAudioBytes } from "./media-tools.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 
-/** The voice a visual novel's narration is read in: the narrator the audiobook resolves (turn 172). */
+/** The voice a visual novel's narration is read in: the narrator the audiobook resolves (turn 174). */
 export interface TableReadNarrator { provider: string; model?: string; voiceId: string; label?: string }
 
 /**

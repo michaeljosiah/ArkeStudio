@@ -427,11 +427,11 @@ describe("the player, as a viewer meets the package (156a–156f)", () => {
 });
 
 /**
- * A visual novel's scenes (design turn 172, 172d–172g): the same player reads a scene of beats —
+ * A visual novel's scenes (design turn 174, 174d–174g): the same player reads a scene of beats —
  * a picture and a line each — at the viewer's pace. What moves a beat on by itself is a voice
  * ending or a CSS animation ending, so the tests tell the player those the way a browser would.
  */
-describe("the player reading beats (turn 172)", () => {
+describe("the player reading beats (turn 174)", () => {
   const NOVEL: Partial<InteractivePlayerOptions> = {
     title: "The Lantern Road",
     start: "sc_quarter",

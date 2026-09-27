@@ -226,7 +226,7 @@ export function ShotFields({
     else edit({}, ["continuity"]);
   };
 
-  // ---- Beat (turn 172) -----------------------------------------------------------------------
+  // ---- Beat (turn 174) -----------------------------------------------------------------------
   /*
    * A visual novel reads this shot as a beat: its lines are the covered script blocks, voiced by
    * the table read, and `beat` says how it moves on and how its picture moves. Like continuity,

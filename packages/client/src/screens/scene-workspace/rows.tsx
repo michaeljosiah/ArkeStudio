@@ -144,7 +144,7 @@ export function StoryboardRows({
   onTalkToArke: () => void;
   onPlanVideo: () => void;
   onRenderBoard: (memberShotIds: string[]) => void;
-  /** Present when the production plays as beats (turn 172): each row reads as a beat. */
+  /** Present when the production plays as beats (turn 174): each row reads as a beat. */
   beats?: BeatsView;
 }) {
   const shots = orderedShots(scene);
@@ -407,7 +407,7 @@ export function StoryboardRows({
 }
 
 /** 9:16 stands up; 16:9, 1:1 and anything wider lies down. An aspect that does not parse lies down too. */
-/** What the rows read when the production plays as beats (turn 172). */
+/** What the rows read when the production plays as beats (turn 174). */
 export interface BeatsView {
   byShot: ReadonlyMap<string, SceneBeat[]>;
   voices: ReadonlyMap<string, LineVoice>;
@@ -842,7 +842,7 @@ function Row({
   const takes = takesForShot(production, shot.id);
   const acceptedTake = accepted === null ? undefined : takes.find((take) => take.id === accepted);
   const coverage = shotCoverage(shot, digests);
-  // A beat that keeps the picture before shows that picture (turn 172); its own is not played.
+  // A beat that keeps the picture before shows that picture (turn 174); its own is not played.
   const samePicture = beat !== undefined && beat.pictureShotId !== shot.id;
   const frame = shotFramePath(production, artifacts, samePicture ? beat.pictureShotId : shot.id, newShot);
   const hasFrame = frame.hasFrame;

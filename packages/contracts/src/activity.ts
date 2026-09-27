@@ -40,7 +40,7 @@ export function activityJobLabels(
     ?? (production && !shot && typeof job.params.sectionHeading === "string" ? job.params.sectionHeading : undefined) : undefined;
   const bible = job.target.kind === "voice-preview" && job.params.purpose === "bible-section";
   const chapterName = prose && targetParts[1] === "chapters" ? production?.chapters.find((chapter) => chapter.id === targetParts[2]?.split("#")[0])?.title : undefined;
-  // A visual novel's narration has no sheet; its table read job is the narrator's (turn 172).
+  // A visual novel's narration has no sheet; its table read job is the narrator's (turn 174).
   const narrator = tableRead && job.params.tableReadNarration === true ? "Narrator" : undefined;
   const subject = [speaker?.name ?? narrator, chapterName ?? proseName ?? (bible ? `Bible${typeof job.params.sectionHeading === "string" ? ` · ${job.params.sectionHeading}` : ""}` : undefined)
     ?? sheet?.name ?? bench?.title ?? (sceneWide ? scene?.title : shot ? `Shot ${shot.number} · ${shot.title}` : scene?.title)].filter(Boolean).join(" · ");

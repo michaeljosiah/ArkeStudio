@@ -219,7 +219,7 @@ export function SceneWorkspace({
   const episodeIds = new Set(production.episodes.filter((episode) => episode.scenes.includes(scene.id)).map((episode) => episode.id));
   const lengthFindings = seasonFindings(production).filter((finding) => finding.kind === "cost-pattern" && episodeIds.has(finding.about));
   const totalSec = shots.reduce((sum, shot) => sum + (shot.durationSec ?? DEFAULT_SHOT_SEC), 0);
-  // A visual novel reads its shots as beats (turn 172): the rows carry their lines and whether
+  // A visual novel reads its shots as beats (turn 174): the rows carry their lines and whether
   // each is voiced, the table read voices the rest, and a beat that keeps the picture before it
   // counts as having one. The plan is asked only here, where there are lines to plan.
   const playsAsBeats = productionShape(production.meta).playsAsBeats;
@@ -543,7 +543,7 @@ export function SceneWorkspace({
           */}
           <div className="fy-sw__toolbar">
             <div className="fy-sw__tabs" role="radiogroup" aria-label="View">
-              {/* A visual novel has no motion to lay out, so Flow is a film's (turn 172). */}
+              {/* A visual novel has no motion to lay out, so Flow is a film's (turn 174). */}
               {(playsAsBeats ? (["storyboard", "preview"] as const) : (["storyboard", "flow", "preview"] as const)).map((candidate) => (
                 <button
                   key={candidate}

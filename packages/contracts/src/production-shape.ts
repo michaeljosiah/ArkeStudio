@@ -17,7 +17,7 @@ export interface ProductionShape {
   isBranching: boolean;
   /**
    * A visual novel's scenes are read as beats — a picture and one line each — rather than played
-   * as clips (turn 172). Everything else about it is an interactive production's.
+   * as clips (turn 174). Everything else about it is an interactive production's.
    */
   playsAsBeats: boolean;
   /** What the dispatch dialog resolves models against (legacy stills → image). */
@@ -56,7 +56,7 @@ const EPISODIC_KINDS = new Set(["microdrama", "series"]);
 const BRANCHING_KIND = "interactive";
 
 /**
- * The second interactive kind (turn 172): the same scenes, routing and branch map, told in
+ * The second interactive kind (turn 174): the same scenes, routing and branch map, told in
  * pictures, text and voices instead of video. Its pictures are the accepted image takes, so it
  * dispatches images the way legacy stills did, and nothing about routing needs to know which of
  * the two it is looking at.

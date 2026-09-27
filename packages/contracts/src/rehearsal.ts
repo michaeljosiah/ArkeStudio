@@ -13,13 +13,13 @@ export const RehearsalSessionSchema = z.object({ id: RehearsalIdSchema, sceneId:
   }).strict()).default({}), createdAt: IsoDateTimeSchema, updatedAt: IsoDateTimeSchema }).strict();
 export type RehearsalSession = z.infer<typeof RehearsalSessionSchema>;
 export interface RehearsalLine { id: string; shotId: string; blockId?: string; speakerSheetId?: string; text: string; reason?: string;
-  /** Read by the narrator rather than a character (turn 172); only when asked for with `narration`. */
+  /** Read by the narrator rather than a character (turn 174); only when asked for with `narration`. */
   narration?: true }
 /**
  * Authored shot order, then covered script order. A block covered by multiple shots is read once.
  *
  * `narration` adds what the narrator reads — action blocks, and an authored voice-over with no
- * speaker — in the same order, which is what a visual novel voices (turn 172). Without it the
+ * speaker — in the same order, which is what a visual novel voices (turn 174). Without it the
  * lines are the characters' alone, as a film's table read has always been.
  */
 export function deriveRehearsalLines(scene: SceneRecord, sheets: readonly Pick<Sheet, "id" | "type" | "retired">[],
@@ -63,7 +63,7 @@ export const TableReadPlanSchema = z.object({ productionId: z.string().min(1), s
     route: z.enum(["existing", "cached", "local", "cloud", "generating", "unavailable"]), file: z.string().optional(),
     textHash: FullSha256Schema.optional(), performanceId: z.string().optional(), sourceHash: FullSha256Schema.optional(), provider: z.string().optional(), model: z.string().optional(),
     voiceId: z.string().optional(), estimatedMicroUsd: z.number().int().nonnegative(), reason: z.string().optional(),
-    /** Read by the narrator (turn 172). */
+    /** Read by the narrator (turn 174). */
     narration: z.boolean().optional() }).strict()),
 }).strict();
 export type TableReadPlan = z.infer<typeof TableReadPlanSchema>;

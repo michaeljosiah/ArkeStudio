@@ -427,11 +427,11 @@ describe("interactive video through the coordinator (epic 401)", () => {
 });
 
 /**
- * A visual novel's package (turn 172): the same player, reading each scene as beats. Pictures are
+ * A visual novel's package (turn 174): the same player, reading each scene as beats. Pictures are
  * the accepted stills, copied once however many beats show them; voices are the table read's,
  * where there are any; the text travels as text. A missing picture blocks; a missing voice does not.
  */
-describe("a visual novel's package (turn 172)", () => {
+describe("a visual novel's package (turn 174)", () => {
   const cover = (blockId: string) => ({ blockId, textDigest: "sha256:12345678" });
   function still(id: string, shotId: string): Take {
     return { ...take(id, shotId), kind: "frame", model: "flux-pro-1.1", media: "frame.png" };

@@ -293,7 +293,7 @@
 /* Issue 1094: enter and leave use the Stage's approved 32px surface. */
 .fy-sw .fy-sw__full, .fy-sw .fy-sw__fullexit { width: 32px; height: 32px; box-sizing: border-box; padding: 0; display: inline-grid; place-items: center; border: 1px solid var(--border); border-radius: 8px; background: var(--secondary); color: var(--foreground); }
 
-/* A visual novel's beats (turn 172): the lines a row carries, and the toolbar's Voice lines. */
+/* A visual novel's beats (turn 174): the lines a row carries, and the toolbar's Voice lines. */
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swbeat { display: grid; gap: 6px; margin: 2px 0 0; padding: 0; list-style: none; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swbeat__line { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 14px; row-gap: 2px; align-items: baseline; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swbeat__who { grid-column: 1; font: 600 11px/1.2 var(--font-sans); letter-spacing: .12em; text-transform: uppercase; color: var(--foreground); }

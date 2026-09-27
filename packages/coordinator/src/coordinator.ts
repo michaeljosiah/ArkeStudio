@@ -1192,7 +1192,7 @@ export class Coordinator {
    * writes and the derivation, so a fallback is the same voice wherever it is judged.
    */
   /**
-   * The narrator a visual novel's table read voices narration in (turn 172): the app's narrator,
+   * The narrator a visual novel's table read voices narration in (turn 174): the app's narrator,
    * resolved as the audiobook resolves it. Null for any production that does not play as beats,
    * so a film's table read never pays for a voice catalogue it will not read.
    */
@@ -10018,7 +10018,7 @@ export class Coordinator {
         if (!store) return;
         const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
         if (!production) return;
-        // A visual novel's package carries the voices its table read has prepared (turn 172); the
+        // A visual novel's package carries the voices its table read has prepared (turn 174); the
         // narrator is resolved once for the whole export, as each scene's plan reads it.
         const manifest = this.opts.manifest;
         let narrator: Promise<TableReadNarrator | null> | null = null;

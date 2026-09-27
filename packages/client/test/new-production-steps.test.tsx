@@ -148,7 +148,7 @@ describe("what the door writes (turn 113a)", () => {
   });
 });
 
-describe("CHOOSE asks which interactive (design turn 172)", () => {
+describe("CHOOSE asks which interactive (design turn 174)", () => {
   it("offers an interactive movie and a visual novel, named for what the viewer does", () => {
     assert.deepEqual(
       INTERACTIVE_KIND_CHOICES.map((k) => [k.id, k.label]),

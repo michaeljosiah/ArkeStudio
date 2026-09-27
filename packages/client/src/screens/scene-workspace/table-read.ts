@@ -6,7 +6,7 @@ import { planTableRead, prepareTableRead, subscribeRehearsalResults, useStore } 
  * The scene's table-read plan, asked for and kept current (SPEC-044 R-33): which lines have a
  * read — a selected performance, or the table-read cache — and what preparing the rest costs.
  * Preview's Play lines reads it, and a visual novel's beats read it for whether each line is
- * voiced and to voice the rest (turn 172); both ask the same plan the same way.
+ * voiced and to voice the rest (turn 174); both ask the same plan the same way.
  *
  * The plan is asked for when the lines, the reviews or the cache's jobs change, so a count and a
  * price are current before a press, and again when the connection returns: a request that found
@@ -70,7 +70,7 @@ export function lineVoices(plan: TableReadPlan | null): ReadonlyMap<string, Line
 }
 
 /**
- * Every prepared voice across a production's scenes, for a visual novel's preview (turn 172): the
+ * Every prepared voice across a production's scenes, for a visual novel's preview (turn 174): the
  * player is mounted once, so its beats must carry their voices from the start. Each scene's plan
  * is asked for when `key` changes (a preview opening), and `ready` says every answer is in — or
  * that no studio is there to answer, when the preview reads as text rather than waiting forever.

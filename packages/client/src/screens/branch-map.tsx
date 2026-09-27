@@ -80,7 +80,7 @@ function safeShots(scene: ProductionBundle["scenes"][number]) {
 }
 
 function sceneLength(scene: ProductionBundle["scenes"][number], beats = false): string {
-  // A visual novel's scene has no running time — it is read — so it counts its beats (turn 172).
+  // A visual novel's scene has no running time — it is read — so it counts its beats (turn 174).
   if (beats) {
     let count = 0;
     try { count = sceneBeats(scene).length; } catch { count = 0; }
@@ -100,7 +100,7 @@ function sceneFrame(production: ProductionBundle, artifacts: readonly ArtifactSi
 }
 
 /**
- * A visual novel's scene for the preview (turn 172): its beats, each with its picture (kept from
+ * A visual novel's scene for the preview (turn 174): its beats, each with its picture (kept from
  * the shot before where the beat asks), its line under its speaker's name, and its voice where the
  * table read has one. The export builds the same beats through the same `playerBeats`.
  */
@@ -296,7 +296,7 @@ export function BranchMapScreen() {
     // viewport that was, or never added to one that was not there yet, made the wheel do nothing.
   }, [zoomBy, geometry !== null, narrow]);
 
-  // A visual novel's preview reads its lines in their voices (turn 172): every scene's prepared
+  // A visual novel's preview reads its lines in their voices (turn 174): every scene's prepared
   // voices are asked for as the preview opens, and it mounts once they are in.
   const playsAsBeats = production ? productionShape(production.meta).playsAsBeats : false;
   const previewVoices = useProductionVoiceFiles({
