@@ -221,6 +221,13 @@ export function mountInteractivePlayer(root, options) {
     clipIndex = 0;
     durations.length = 0;
     const clips = media[sceneId] || [];
+    if (state.positionSec < 0 && clips.length > 0) {
+      // A place saved at a choice or an ending: the scene was watched to its end, so the viewer
+      // returns to that moment — its last frame held, its choices or its ending — not its start.
+      loadClip(clips.length - 1, 0, 1, false);
+      finishScene();
+      return;
+    }
     if (clips.length === 0) {
       // No footage (preview only; an export refuses such a scene): the title card, and the
       // choices at once, so the route still walks.
@@ -233,16 +240,17 @@ export function mountInteractivePlayer(root, options) {
   }
 
   /** Load one of the scene's clips and seek into it: to `at` seconds, or to `ratio` of its length once known. */
-  function loadClip(index, at, ratio) {
+  function loadClip(index, at, ratio, autoplay) {
     const clips = media[state.sceneId] || [];
     clipIndex = Math.max(0, Math.min(index, clips.length - 1));
     video.setAttribute("src", clips[clipIndex]);
     const seek = () => {
-      const target = ratio !== undefined && video.duration ? ratio * video.duration : at;
+      const target = ratio !== undefined && video.duration ? Math.max(0, Math.min(video.duration - 0.05, ratio * video.duration)) : at;
       if (target > 0 && target < (video.duration || Infinity)) video.currentTime = target;
       video.removeEventListener("loadedmetadata", seek);
     };
     video.addEventListener("loadedmetadata", seek);
+    if (autoplay === false) return;
     const started = video.play && video.play();
     if (started && started.catch) started.catch(() => render());
   }
@@ -251,7 +259,9 @@ export function mountInteractivePlayer(root, options) {
   function finishScene() {
     const options = outOf(state.sceneId);
     mode = options.length > 0 ? "choice" : "ending";
-    state.positionSec = 0;
+    // Saved as "over" (-1), so a return visit reopens this choice or ending rather than replaying
+    // the scene from its start.
+    state.positionSec = -1;
     save();
     render();
     if (mode === "choice") choicesEl.querySelector("button")?.focus();
@@ -297,7 +307,8 @@ export function mountInteractivePlayer(root, options) {
   function renderHero() {
     if (mode === "poster") {
       const resume = saved !== null;
-      const pct = resume && durations[0] ? Math.min(100, (100 * saved.positionSec) / durations[0]) : 0;
+      const over = resume && saved.positionSec < 0;
+      const pct = over ? 100 : resume && durations[0] ? Math.min(100, (100 * saved.positionSec) / durations[0]) : 0;
       el.hero.innerHTML =
         '<div class="aip-poster-back"></div><div class="aip-hero">' +
         (options.eyebrow ? '<div class="aip-eyebrow">' + esc(options.eyebrow) + "</div>" : "") +
@@ -306,7 +317,7 @@ export function mountInteractivePlayer(root, options) {
           ? '<button type="button" class="aip-btn primary" data-act="continue">' + icon(I.play, 16) + 'Continue</button><button type="button" class="aip-btn" data-act="restart">' + icon(I.back, 16) + "Start over</button>"
           : '<button type="button" class="aip-btn primary" data-act="restart">' + icon(I.play, 16) + "Play</button>") +
         "</div>" +
-        (resume ? '<div class="aip-place"><i><b style="width:' + pct + '%"></b></i>' + esc(titleOf(saved.sceneId)) + " · " + time(saved.positionSec) + "</div>" : "") +
+        (resume ? '<div class="aip-place"><i><b style="width:' + pct + '%"></b></i>' + esc(titleOf(saved.sceneId)) + " · " + (over ? (endings[saved.sceneId] !== undefined ? "the ending" : "the choice") : time(saved.positionSec)) + "</div>" : "") +
         "</div>";
       return;
     }
@@ -391,6 +402,8 @@ export function mountInteractivePlayer(root, options) {
   }
 
   const onTime = () => {
+    // Only playing moves the place: a seek to a held last frame must not overwrite "over".
+    if (mode !== "playing") return;
     state.positionSec = video.currentTime || 0;
     save();
     renderBar();

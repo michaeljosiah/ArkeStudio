@@ -167,6 +167,21 @@ describe("the player, as a viewer meets the package (156a–156f)", () => {
     assert.deepEqual(Object.keys(kept).sort(), ["positionSec", "route", "sceneId", "updatedAt"], "the viewer's place and nothing else");
   });
 
+  it("returns to the choice it was left at, not the start of the scene before it", () => {
+    const p = mount({ storageKey: "arke-iv-low-water-v12", autoplay: true });
+    p.ended();
+    const kept = JSON.parse(store.get("arke-iv-low-water-v12")!) as { sceneId: string; positionSec: number };
+    assert.deepEqual([kept.sceneId, kept.positionSec], ["sc_quarter", -1], "saved as over, at its choice");
+    p.handle.destroy();
+    mounted.splice(mounted.indexOf(p.handle), 1);
+
+    const again = mount({ storageKey: "arke-iv-low-water-v12" });
+    assert.match(again.text("[data-ref=hero]"), /The drowned quarter · the choice/);
+    again.click(again.button("Continue"));
+    assert.equal(again.root.getAttribute("data-mode"), "choice", "the choice, not a replay of the scene");
+    assert.equal(again.all(".aip-choice").length, 2);
+  });
+
   it("ignores a saved scene this package does not have", () => {
     store.set("arke-iv-low-water-v12", JSON.stringify({ sceneId: "sc_gone", positionSec: 4, route: [], updatedAt: "x" }));
     const p = mount({ storageKey: "arke-iv-low-water-v12" });

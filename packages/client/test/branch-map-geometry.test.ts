@@ -80,6 +80,30 @@ describe("where the map puts things", () => {
     assert.deepEqual(g.tray, ["sc_f"], "layoutRouting leaves excluded scenes out; the map still shows them");
   });
 
+  it("bounds the map by its curves too, so a loop back is never clipped", () => {
+    const looped: Routing = { ...ROUTING, choices: [...ROUTING.choices, { id: "ch_back", from: "sc_e", label: "Go back", to: "sc_a" }] };
+    const g = mapGeometry(looped, scenes, layoutRouting(looped, scenes));
+    const back = g.edges.find((edge) => edge.id === "ch_back")!;
+    assert.ok(g.trayY > back.ly + 12, "the tray starts under the loop's label, not across it");
+    assert.ok(g.width >= back.lx + 64, "and the width holds it");
+
+    // One row and no tray: the loop bows under the only cards there are, and the height holds it.
+    const pair = [{ id: "sc_a" }, { id: "sc_b" }];
+    const twoWay: Routing = {
+      ...ROUTING,
+      choices: [
+        { id: "ch_there", from: "sc_a", label: "There", to: "sc_b" },
+        { id: "ch_back", from: "sc_b", label: "Back", to: "sc_a" },
+      ],
+      endings: [],
+    };
+    const small = mapGeometry(twoWay, pair, layoutRouting(twoWay, pair));
+    const loop = small.edges.find((edge) => edge.id === "ch_back")!;
+    assert.equal(small.tray.length, 0);
+    assert.ok(loop.ly > Math.max(...small.nodes.map((node) => node.y + NODE_H)), "the loop bows under the cards");
+    assert.ok(small.height >= loop.ly + 12, "and the map's height holds its label");
+  });
+
   it("fits the map to the window and never enlarges it past actual size", () => {
     assert.equal(fitScale(800, 600, 4000, 3000), 1);
     assert.ok(fitScale(2000, 600, 1000, 800) < 0.5);

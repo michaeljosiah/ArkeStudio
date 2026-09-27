@@ -27,10 +27,10 @@ async function harness() {
     appVersion: "test",
     observeEvent: (event) => events.push(event),
   });
-  const send = (command: RoutingCommand) =>
+  const send = (command: RoutingCommand, worldId = WORLD_ID) =>
     (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage({
       kind: "routing-command",
-      worldId: WORLD_ID,
+      worldId,
       productionId: PRODUCTION,
       command,
     });
@@ -115,6 +115,13 @@ describe("the branch map's routing commands", () => {
     await send({ operation: "remove-choice", choiceId: "ch_missing" });
     await send({ operation: "clear-ending", sceneId: "sc_04" });
     assert.deepEqual(await routing(), before, "a refused edit leaves the file as it was");
+  });
+
+  it("never lands in a world other than the one the frame names", async () => {
+    const { send, worldDir } = await harness();
+    // Sent for another world while this one is open — it holds a production with the same slug.
+    await send({ operation: "set-start", sceneId: "sc_02" }, "01J8F3K2QW9VZX4N7M0RTYB6ZZ");
+    await assert.rejects(readFile(join(worldDir, "productions", PRODUCTION, "routing.json"), "utf8"), /ENOENT/);
   });
 
   it("a first edit that is not a start is refused, and no routing file appears", async () => {

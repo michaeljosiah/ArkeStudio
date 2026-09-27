@@ -233,6 +233,23 @@ describe("the branch map canvas (design turn 157)", () => {
     assert.deepEqual(commands(item), [], "Delete asks; it does not remove");
   });
 
+  it("names each scene to a screen reader with its designations and its choices in and out", async () => {
+    const item = await mount();
+    assert.equal(card(item, "sc_towers")!.getAttribute("aria-label"), "The bell towers, 2 choices in, 1 out");
+    assert.equal(card(item, "sc_pier")!.getAttribute("aria-label"), "The pier at dusk, ending, The harbour, level, 2 choices in, 0 out");
+    assert.equal(card(item, "sc_quarter")!.getAttribute("aria-label"), "The drowned quarter, start, 0 choices in, 2 out");
+  });
+
+  it("asks for the findings again when the routing changes by another way in", async () => {
+    const item = await mount();
+    const asked = () => item.sent.filter((message) => message.kind === "list-routing-findings").length;
+    const before = asked();
+    await act(async () => {
+      __setStateForTest(state({ ...ROUTING, version: 13 }));
+    });
+    assert.equal(asked(), before + 1, "a new routing version is a new fold");
+  });
+
   it("offers no exclusion for a scene a route reaches", async () => {
     const item = await mount();
     await click(card(item, "sc_vigil"));

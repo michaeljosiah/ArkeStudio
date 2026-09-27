@@ -29,6 +29,24 @@ export function InteractivePlayerView({
   useEffect(() => {
     const element = host.current;
     if (!element) return;
+    // A modal: focus returns to what opened it, and Tab and Shift+Tab stay inside while it is up —
+    // past the player's last control is the covered map, whose presses must not fire behind it.
+    const opener = element.ownerDocument.activeElement as HTMLElement | null;
+    const trap = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const focusable = [element, ...element.querySelectorAll<HTMLElement>("button:not([disabled]), [tabindex]:not([tabindex='-1'])")];
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      const at = element.ownerDocument.activeElement;
+      if (event.shiftKey && (at === first || !element.contains(at))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (at === last || !element.contains(at))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    element.addEventListener("keydown", trap);
     const { author, ...rest } = latest.current;
     handle.current = mountInteractivePlayer(element, {
       ...rest,
@@ -44,8 +62,10 @@ export function InteractivePlayerView({
         : {}),
     });
     return () => {
+      element.removeEventListener("keydown", trap);
       handle.current?.destroy();
       handle.current = null;
+      if (opener && opener.isConnected && typeof opener.focus === "function") opener.focus();
     };
   }, []);
 

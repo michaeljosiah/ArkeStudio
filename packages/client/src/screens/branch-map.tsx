@@ -151,6 +151,22 @@ export function BranchMapScreen() {
 
   const routing = production?.routing ?? null;
   const scenes = useMemo(() => production?.scenes ?? [], [production]);
+  /*
+   * Served findings describe the routing they were folded from. A routing changed by another way
+   * in (world chat's production-routing action refreshes the world, not the findings) would leave
+   * the header counting the old graph, so a new version drops them back to the local fold and asks
+   * the coordinator again.
+   */
+  const routingVersion = routing?.version ?? null;
+  const seenVersion = useRef<number | null>(null);
+  useEffect(() => {
+    if (routingVersion === null || !worldId || !prodId) return;
+    if (seenVersion.current !== null && seenVersion.current !== routingVersion) {
+      setServed(null);
+      listRoutingFindings(worldId, prodId);
+    }
+    seenVersion.current = routingVersion;
+  }, [routingVersion, worldId, prodId]);
   // The findings the server folded (traversal evidence included) win; until they arrive, the
   // same pure fold runs here without evidence, so the map never renders beside a blank count.
   const findings = useMemo<RoutingFinding[]>(() => {
@@ -478,12 +494,24 @@ export function BranchMapScreen() {
     const ending = endings.get(node.id);
     const reason = excluded.get(node.id);
     const isSelected = selection?.kind === "scene" && selection.id === node.id;
+    const into = routing.choices.filter((choice) => choice.to === node.id).length;
+    // Said as the brief asks: the title, its designations, and the choices in and out (§3).
+    const spoken = [
+      title,
+      isStart ? "start" : null,
+      ending !== undefined ? `ending, ${ending}` : null,
+      reason !== undefined ? `excluded, ${reason}` : null,
+      unreachable.has(node.id) && reason === undefined ? "unreachable" : null,
+      `${into} choice${into === 1 ? "" : "s"} in`,
+      `${out} out`,
+    ].filter(Boolean).join(", ");
     const showPort =
       !inTray && (isSelected || drawing?.from === node.id || (selection?.kind === "new" && selection.from === node.id));
     return (
       <div
         key={node.id}
         role="option"
+        aria-label={spoken}
         aria-selected={isSelected}
         data-scene={node.id}
         /*

@@ -117,8 +117,13 @@ export function mapGeometry(routing: Routing, scenes: ReadonlyArray<{ id: string
   const excludedOff = routing.excluded.map((entry) => entry.sceneId).filter((id) => known.has(id) && !placed.has(id));
   const tray = [...layout.unplaced, ...excludedOff.filter((id) => !layout.unplaced.includes(id))];
   const layers = Math.max(1, layout.layers.length);
-  const trayY = PAD_TOP + Math.max(1, rows) * (NODE_H + ROW_GAP) - ROW_GAP + TRAY_GAP;
-  const width = PAD_X * 2 + layers * NODE_W + (layers - 1) * LAYER_GAP;
+  // The bounds hold the curves as well as the cards: a loop back to an earlier layer bows about
+  // 150px under its cards and past the rightmost one, and a fit to the cards alone clipped it.
+  const cardsBottom = PAD_TOP + Math.max(1, rows) * (NODE_H + ROW_GAP) - ROW_GAP;
+  const edgesBottom = Math.max(0, ...edges.map((edge) => edge.ly + 24));
+  const edgesRight = Math.max(0, ...edges.map((edge) => Math.max(edge.lx + 64, ...[...edge.d.matchAll(/(-?[\d.]+),/g)].map((m) => Number(m[1]) + PAD_X))));
+  const trayY = Math.max(cardsBottom, edgesBottom) + TRAY_GAP;
+  const width = Math.max(PAD_X * 2 + layers * NODE_W + (layers - 1) * LAYER_GAP, edgesRight);
   const height = tray.length > 0 ? trayY + NODE_H + 84 : trayY;
   return { nodes, edges, tray, trayY, width: Math.max(width, PAD_X * 2 + 2 * NODE_W + LAYER_GAP), height };
 }

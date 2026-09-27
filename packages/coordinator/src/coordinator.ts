@@ -9929,7 +9929,9 @@ export class Coordinator {
       }
       case "routing-command": {
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
+        // The frame names its world: handled after a switch to another world that happens to hold
+        // a production with the same slug, it must not land there.
+        if (!store || store.worldId !== msg.worldId) return;
         if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
         try {
           // Applied to the routing on disk, not a copy the map held: two edits in flight each
