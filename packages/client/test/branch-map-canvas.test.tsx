@@ -19,7 +19,17 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(dom.window, { matchMedia: (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }) });
-Object.assign(dom.HTMLElement.prototype, { focus() {}, setPointerCapture() {}, scrollIntoView() {} });
+// linkedom keeps no focus; this does, so a test can ask where it went.
+const focusLog: unknown[] = [];
+Object.assign(dom.HTMLElement.prototype, {
+  focus(this: unknown) {
+    focusLog.push(this);
+  },
+  setPointerCapture() {},
+  scrollIntoView() {},
+});
+const focused = () => focusLog[focusLog.length - 1] ?? null;
+Object.defineProperty(dom.document, "activeElement", { get: focused, configurable: true });
 Object.assign(globalThis, {
   window: dom.window,
   document: dom.document,
@@ -243,6 +253,17 @@ describe("the branch map canvas (design turn 157)", () => {
     await key(wait, "Delete");
     assert.match(text(all(item, '[role="alertdialog"]')[0] ?? null), /The Vigil — no way in/);
     assert.deepEqual(commands(item), [], "Delete asks; it does not remove");
+    const cancel = all(item, '[role="alertdialog"] button').find((el) => text(el) === "Cancel");
+    assert.equal(focused(), cancel, "the question takes focus, so Enter on the label cannot close it unanswered");
+    await click(cancel);
+    assert.equal(all(item, '[role="alertdialog"]').length, 0);
+    assert.equal(focused(), all(item, ".bm-label").find((el) => text(el) === "Wait for low water"), "and focus goes back to the choice");
+  });
+
+  it("keeps the scene unselected when a drag from its port ends in a click", async () => {
+    const item = await mount();
+    await click(all(item, '[data-scene="sc_vigil"] .bm-port')[0]);
+    assert.equal(all(item, ".bm-insp").length, 0, "the click after a drag does not select the scene under the port");
   });
 
   it("names each scene to a screen reader with its designations and its choices in and out", async () => {
@@ -309,6 +330,26 @@ describe("the branch map canvas (design turn 157)", () => {
     );
     await click(all(item, "button").find((el) => /Close preview/.test(text(el))));
     assert.equal(all(item, ".bm-player").length, 0, "closed, the map is back");
+  });
+
+  it("keeps Tab inside the preview, past a Route panel that was opened and closed", async () => {
+    const item = await mount();
+    await click(button(item, "Preview"));
+    const player = all(item, ".bm-player")[0]!;
+    const press = async (name: string, shift = false) =>
+      act(async () => {
+        const event = new dom.Event("keydown", { bubbles: true, cancelable: true }) as unknown as KeyboardEvent;
+        Object.assign(event, { key: name, shiftKey: shift });
+        (focused() as HTMLElement | null ?? player).dispatchEvent(event);
+      });
+    await press("r");
+    await press("r");
+    const panel = player.querySelector("[data-ref=panel]")!;
+    assert.ok(panel.hasAttribute("hidden") && panel.querySelectorAll("button").length > 0, "closed, its buttons still in the page");
+    const visible = [...player.querySelectorAll<HTMLElement>("button")].filter((el) => el.closest("[hidden]") === null);
+    visible[visible.length - 1]!.focus();
+    await press("Tab");
+    assert.equal(focused(), player, "Tab from the last control that shows wraps to the player, not the map behind it");
   });
 
   it("day one picks the start from the scenes and writes a start and nothing else", async () => {

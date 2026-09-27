@@ -484,6 +484,13 @@ export function BranchMapScreen() {
     if (el instanceof HTMLElement) el.focus();
   };
 
+  /** Back from the removal question to the choice it was about, focus included. */
+  const cancelRemoval = (id: string) => {
+    setSelection({ kind: "choice", id });
+    const label = [...(viewportRef.current?.querySelectorAll<HTMLElement>("[data-walk]") ?? [])].find((el) => el.getAttribute("data-walk") === `c:${id}`);
+    label?.focus();
+  };
+
   const card = (node: PlacedNode, inTray: boolean) => {
     const scene = scenes.find((candidate) => candidate.id === node.id);
     const title = scene?.title ?? node.id;
@@ -574,6 +581,9 @@ export function BranchMapScreen() {
             onPointerDown={startDraw(node.id)}
             onPointerMove={moveDraw}
             onPointerUp={endDraw}
+            // The click that follows a drag from the port would reach the card and select the
+            // scene, closing the New choice panel the drop had just opened.
+            onClick={(event) => event.stopPropagation()}
           />
         )}
       </div>
@@ -783,7 +793,16 @@ export function BranchMapScreen() {
             </Button>
           </div>
           {selection.removing && (
-            <div className="bm-confirm" role="alertdialog" aria-label={`Remove ${selectedChoice.label}?`}>
+            <div
+              className="bm-confirm"
+              role="alertdialog"
+              aria-label={`Remove ${selectedChoice.label}?`}
+              onKeyDown={(event) => {
+                if (event.key !== "Escape") return;
+                event.stopPropagation();
+                cancelRemoval(selectedChoice.id);
+              }}
+            >
               <div className="bm-confirm__title">Remove “{selectedChoice.label}”?</div>
               {consequences.length > 0 ? (
                 <>
@@ -799,7 +818,9 @@ export function BranchMapScreen() {
                 <div className="bm-muted">Nothing else breaks.</div>
               )}
               <div className="bm-actions bm-actions--end">
-                <Button size="sm" onClick={() => setSelection({ kind: "choice", id: selectedChoice.id })}>
+                {/* Delete on a focused label opens this; focus comes here, not left on the label,
+                    where Enter selected the choice again and closed the question unanswered. */}
+                <Button size="sm" autoFocus onClick={() => cancelRemoval(selectedChoice.id)}>
                   Cancel
                 </Button>
                 <Button

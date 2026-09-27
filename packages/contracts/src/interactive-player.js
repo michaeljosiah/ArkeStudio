@@ -125,7 +125,7 @@ export function mountInteractivePlayer(root, options) {
 .aip-btn{height:44px;padding:0 20px!important;border-radius:999px;display:inline-flex!important;align-items:center;justify-content:center;gap:8px;font-weight:500!important;font-size:15px!important;white-space:nowrap;border:1px solid color-mix(in srgb,var(--aip-fg) 18%,transparent)!important;background:color-mix(in srgb,var(--aip-bg) 42%,transparent)!important;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
 .aip-btn.primary{background:var(--aip-fg)!important;color:var(--aip-bg)!important;border-color:transparent!important}
 .aip-btn.small{height:32px;padding:0 13px!important;font-size:13px!important}
-.aip-hero{position:absolute;left:72px;right:72px;bottom:80px;background:none}
+.aip-hero{position:absolute;left:72px;right:72px;bottom:80px;background:none;max-height:calc(100% - 128px);overflow-y:auto;overscroll-behavior:contain;padding-top:6px}
 .aip-hero-title{margin-top:10px;font-size:48px;font-weight:600;letter-spacing:-.02em;line-height:1.1}
 .aip-hero-actions{margin-top:28px;display:flex;flex-wrap:wrap;gap:10px}
 .aip-poster-back{position:absolute;inset:0;background:linear-gradient(to right,color-mix(in srgb,var(--aip-bg) 90%,transparent) 18%,color-mix(in srgb,var(--aip-bg) 40%,transparent) 62%,transparent)}
@@ -154,7 +154,7 @@ export function mountInteractivePlayer(root, options) {
 .aip-bar{left:16px;right:16px}
 .aip-choices{flex-direction:column;flex-wrap:nowrap;align-items:stretch;bottom:74px;padding:14px 16px 8px;gap:10px;max-height:calc(100% - 136px)}
 .aip-choice{width:100%;height:58px;border-radius:14px}
-.aip-hero{left:24px;right:24px;bottom:48px}
+.aip-hero{left:24px;right:24px;bottom:48px;max-height:calc(100% - 88px)}
 .aip-hero-title{font-size:32px}
 .aip-strip .aip-muted{display:none}
 }
@@ -400,8 +400,10 @@ export function mountInteractivePlayer(root, options) {
     el.scrub.innerHTML =
       clips.map((_, i) => '<span class="aip-seg"><i style="width:' + (i < clipIndex ? 100 : i === clipIndex ? ratio * 100 : 0) + '%"></i></span>').join("") +
       (outOf(state.sceneId).length > 0 ? '<span class="aip-fork" title="Choices at the end">' + icon(I.route, 16) + "</span>" : "");
-    el.scrub.setAttribute("aria-valuenow", String(Math.round(ratio * 100)));
-    el.scrub.setAttribute("aria-valuetext", time(video.currentTime) + " of " + time(d));
+    // The slider is the whole scene, its shots in turn — not the one shot loaded, which read as
+    // the scene starting over at every cut.
+    el.scrub.setAttribute("aria-valuenow", String(Math.round((100 * (clipIndex + ratio)) / Math.max(1, clips.length))));
+    el.scrub.setAttribute("aria-valuetext", (clips.length > 1 ? "Shot " + (clipIndex + 1) + " of " + clips.length + ", " : "") + time(video.currentTime) + " of " + time(d));
     el.time.textContent = (clips.length > 1 ? "Shot " + (clipIndex + 1) + " of " + clips.length + " · " : "") + time(video.currentTime) + " / " + time(d);
     if (paused) root.setAttribute("data-paused", "");
     else root.removeAttribute("data-paused");
@@ -453,9 +455,29 @@ export function mountInteractivePlayer(root, options) {
       if (p && p.catch) p.catch(() => undefined);
     } else video.pause();
   }
+  /** Move by `sec` through the scene, across a cut into the shot before or after where it runs out. */
   function nudge(sec) {
     if (mode !== "playing" || !video.duration) return;
-    video.currentTime = Math.max(0, Math.min(video.duration - 0.05, (video.currentTime || 0) + sec));
+    const last = (media[state.sceneId] || []).length - 1;
+    const to = (video.currentTime || 0) + sec;
+    if (to < 0 && clipIndex > 0) {
+      const before = durations[clipIndex - 1];
+      if (before) loadClip(clipIndex - 1, Math.max(0, before + to));
+      else loadClip(clipIndex - 1, 0, 1);
+      return;
+    }
+    if (to >= video.duration && clipIndex < last) {
+      loadClip(clipIndex + 1, to - video.duration);
+      return;
+    }
+    video.currentTime = Math.max(0, Math.min(video.duration - 0.05, to));
+  }
+  /** The scene's first frame, or its last: its first shot or its last, not the loaded one's. */
+  function seekScene(toEnd) {
+    if (mode !== "playing") return;
+    const last = (media[state.sceneId] || []).length - 1;
+    if (toEnd ? clipIndex < last : clipIndex > 0) loadClip(toEnd ? last : 0, 0, toEnd ? 1 : 0);
+    else if (video.duration) video.currentTime = toEnd ? Math.max(0, video.duration - 0.05) : 0;
   }
   function full() {
     if (doc.fullscreenElement) doc.exitFullscreen && doc.exitFullscreen();
@@ -538,7 +560,7 @@ export function mountInteractivePlayer(root, options) {
       }
       if (key === "Home" || key === "End") {
         event.preventDefault();
-        video.currentTime = key === "Home" ? 0 : Math.max(0, video.duration - 0.05);
+        seekScene(key === "End");
         return;
       }
     }

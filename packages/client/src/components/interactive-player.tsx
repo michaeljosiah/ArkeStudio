@@ -34,7 +34,15 @@ export function InteractivePlayerView({
     const opener = element.ownerDocument.activeElement as HTMLElement | null;
     const trap = (event: KeyboardEvent) => {
       if (event.key !== "Tab") return;
-      const focusable = [element, ...element.querySelectorAll<HTMLElement>("button:not([disabled]), [tabindex]:not([tabindex='-1'])")];
+      // Only what can take focus now: the closed Route panel keeps its buttons under `hidden`,
+      // and the bar's are display:none at a choice. Counted, one of them was the "last" control,
+      // and Tab from the real last one left the player for the map behind it.
+      const shown = (el: HTMLElement) =>
+        el.closest("[hidden]") === null && (typeof el.checkVisibility !== "function" || el.checkVisibility());
+      const focusable = [
+        element,
+        ...[...element.querySelectorAll<HTMLElement>("button:not([disabled]), [tabindex]:not([tabindex='-1'])")].filter(shown),
+      ];
       const first = focusable[0]!;
       const last = focusable[focusable.length - 1]!;
       const at = element.ownerDocument.activeElement;

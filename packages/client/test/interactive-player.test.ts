@@ -276,10 +276,37 @@ describe("the player, as a viewer meets the package (156a–156f)", () => {
     assert.equal(p.video().currentTime, 5);
   });
 
-  it("keeps a long list of choices inside the player, scrolling rather than clipped", () => {
+  it("keeps a long list of choices, and a long route to an ending, inside the player", () => {
     const p = mount();
     const css = p.q("style")?.textContent ?? "";
     assert.match(css, /\.aip-choices\{[^}]*max-height:[^}]*overflow-y:auto/);
+    assert.match(css, /\.aip-hero\{[^}]*max-height:[^}]*overflow-y:auto/, "the ending's route scrolls rather than pushing its title off screen");
+  });
+
+  it("makes the scrubber the whole scene: its value and its keys cross the cuts", () => {
+    const p = mount({ from: "sc_towers", author: { unwalked: [] } });
+    const scrub = p.q("[data-ref=scrub]")!;
+    const length = (sec: number) => {
+      Object.defineProperty(p.video(), "duration", { value: sec, configurable: true });
+      p.video().dispatchEvent(new dom.Event("loadedmetadata") as unknown as Event);
+    };
+    const press = (name: string) => {
+      const event = new dom.Event("keydown", { bubbles: true }) as unknown as KeyboardEvent;
+      Object.assign(event, { key: name });
+      scrub.dispatchEvent(event);
+    };
+    length(40);
+    p.video().currentTime = 38;
+    press("ArrowRight");
+    assert.equal(p.video().getAttribute("src"), "media/sh_2.mp4", "past the end of the first shot, into the second");
+    length(20);
+    assert.equal(p.video().currentTime, 3, "the seconds left over carry across the cut");
+    p.video().dispatchEvent(new dom.Event("timeupdate") as unknown as Event);
+    assert.equal(scrub.getAttribute("aria-valuenow"), "57", "the second of two shots, 3s of 20s in: past halfway through the scene");
+    press("Home");
+    assert.equal(p.video().getAttribute("src"), "media/sh_1.mp4", "Home is the scene's start, not this shot's");
+    press("End");
+    assert.equal(p.video().getAttribute("src"), "media/sh_2.mp4", "End is the scene's last shot");
   });
 
   it("carries no author strip, and records nothing, without an author", () => {

@@ -19,6 +19,8 @@ const PORT_DY = 65;
 const TRAY_GAP = 36;
 /** How far each further choice between the same two scenes sits from the one before it. */
 const FAN = 34;
+/** The highest a skip-layer arc's label may sit: its pill, centred there, stays inside the map. */
+const ARC_LABEL_MIN = 32;
 
 export interface PlacedNode {
   id: string;
@@ -82,7 +84,9 @@ export function edgePath(
     };
   }
   if (span > 1) {
-    const top = Math.min(o.y, i.y) - 150 + fan;
+    // Over the cards between, but never above the map: from the first row the full 150px put
+    // the curve's top and its label above y=0, where a fitted view clipped them.
+    const top = Math.max(Math.min(o.y, i.y) - 150, (ARC_LABEL_MIN - 0.125 * (o.y + i.y)) / 0.75) + fan;
     return {
       d: `M${o.x},${o.y} C${o.x + 110},${top} ${i.x - 110},${top} ${i.x - 6},${i.y}`,
       lx: (o.x + i.x) / 2,

@@ -68,6 +68,12 @@ describe("where the map puts things", () => {
     assert.ok(controlYs.every((y) => y < over.y), "both control points bow above the card it skips");
   });
 
+  it("keeps a skip-layer arc from the first row inside the map, above the cards it skips", () => {
+    const arc = geometry.edges.find((edge) => edge.id === "ch_stay")!;
+    assert.ok(arc.ly >= 28, "its label sits inside the top of the map, not above y=0");
+    assert.ok(arc.ly < at.get("sc_b")!.y, "and still over the causeway's card");
+  });
+
   it("puts a scene no route reaches in the tray, and draws no choice to or from it", () => {
     assert.deepEqual(geometry.tray, ["sc_f"]);
     assert.ok(!at.has("sc_f"), "it is not placed on the canvas");
