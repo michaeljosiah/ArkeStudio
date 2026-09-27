@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
 import { join } from "node:path";
@@ -18,6 +18,7 @@ export class DesktopRemoteAccess {
   private gateway: RemoteGateway | null = null;
   private gatewayOrigin: string | null = null;
   private reservation: Server | null = null;
+  private inspectMapping = false;
   private running = false;
   private devices: RemoteDevices;
   private tail: Promise<unknown> = Promise.resolve();
@@ -35,13 +36,29 @@ export class DesktopRemoteAccess {
     // the same drain as owner commands so Disable/Quit cannot be overtaken by a late start.
     const work = this.tail.then(async () => {
       if (this.closing) return;
+      const bindError = await this.reservePort();
       let readingRecords = true;
       try {
+        let missingSettings = false;
         try { this.config = Config.parse(JSON.parse(await readFile(this.path, "utf8"))); }
-        catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          missingSettings = true;
+        }
         this.settingsLoaded = true;
+        if (missingSettings) {
+          // Missing settings alongside device records are recovery, not a first launch.
+          this.inspectMapping = true;
+          try { await stat(join(this.options.root, "remote", "devices.json")); }
+          catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") this.inspectMapping = false; else throw error; }
+        }
         readingRecords = false;
-        if (this.config.enabled && this.config.origin) await this.withdrawStaleMapping(this.config.origin);
+        if (this.config.enabled || this.inspectMapping) {
+          this.inspectMapping = true;
+          this.gatewayOrigin = this.config.origin;
+          await this.stopGateway();
+          if (bindError) throw bindError;
+        } else await this.releaseReservation();
         readingRecords = true;
         await this.devices.load();
         readingRecords = false;
@@ -51,25 +68,33 @@ export class DesktopRemoteAccess {
         this.reason = readingRecords
           ? "Remote access records could not be read. Restore the remote settings and device records from a backup before changing access."
           : `${error instanceof Error ? error.message : "Remote access could not start."} Disable and enable remote access to retry.`;
+        if (!this.settingsLoaded) {
+          this.inspectMapping = true;
+          try { await this.stopGateway(); }
+          catch { this.reason += " Forwarding could not be cleared. Restore Tailscale and use Disable to retry cleanup."; }
+        }
       }
     });
     this.tail = work;
     return work;
   }
   private tailscale() { return this.options.tailscale ?? new TailscaleServe(); }
-  private async withdrawStaleMapping(origin: string): Promise<void> {
-    // An interrupted host may have left HTTPS forwarding. Claim an inert listener before
-    // reading the device registry, so damaged records or failed Serve cleanup cannot leave
-    // the cookie-bearing origin pointing at a port another process is free to claim.
-    this.gatewayOrigin = origin;
+  private async reservePort(): Promise<unknown> {
+    // Claim an inert listener before reading either record. Even damaged ownership settings
+    // must not leave a cookie-bearing origin pointing at a port another process can claim.
     this.reservation = createServer((_req, res) => res.writeHead(503).end("Remote access needs attention on the host."));
     this.reservation.on("upgrade", (_req, socket) => socket.destroy());
-    this.reservation.listen(port, "127.0.0.1");
-    let bindError: unknown;
-    try { await once(this.reservation, "listening"); } catch (error) { bindError = error; }
-    // Even an occupied port must not prevent withdrawing our recorded mapping.
-    await this.stopGateway();
-    if (bindError) throw bindError;
+    try { this.reservation.listen(port, "127.0.0.1"); await once(this.reservation, "listening"); }
+    catch (error) { return error; } // Still attempt mapping withdrawal if another listener got there first.
+  }
+  private async releaseReservation(): Promise<void> {
+    if (this.reservation?.listening) {
+      const reservation = this.reservation;
+      const closed = new Promise<void>((resolve, reject) => reservation.close(error => error ? reject(error) : resolve()));
+      reservation.closeAllConnections();
+      await closed;
+    }
+    this.reservation = null;
   }
   private async save(config: Settings): Promise<void> { await writeRemotePrivate(this.path, config); this.config = config; }
   private async start(): Promise<void> {
@@ -107,19 +132,14 @@ export class DesktopRemoteAccess {
     // Withdraw HTTPS before releasing the port: a replacement local listener must never
     // receive a paired browser's cookie. On cleanup failure retain the bound gateway and
     // fail shutdown, so the owner can retry without creating that impersonation window.
-    if (origin) await this.tailscale().disable(origin, port);
+    if (origin || this.inspectMapping) await this.tailscale().disable(origin, port);
     await this.gateway?.stop();
-    if (this.reservation?.listening) {
-      const reservation = this.reservation;
-      const closed = new Promise<void>((resolve, reject) => reservation.close(error => error ? reject(error) : resolve()));
-      reservation.closeAllConnections();
-      await closed;
-    }
-    this.reservation = null;
+    await this.releaseReservation();
+    this.inspectMapping = false;
     this.gateway = null; this.gatewayOrigin = null; this.running = false;
   }
   status(): RemoteAccessStatus {
-    return { ...this.config, enabled: this.config.enabled || this.gatewayOrigin !== null,
+    return { ...this.config, enabled: this.config.enabled || this.gatewayOrigin !== null || this.inspectMapping,
       running: this.running, startupSupported: this.options.startupSupported,
       url: this.config.origin, reason: this.reason, devices: this.devices.list(), pending: this.devices.pending() };
   }
@@ -127,7 +147,7 @@ export class DesktopRemoteAccess {
     const work = this.tail.then(async () => {
       if (this.closing) throw new Error("Studio is shutting down.");
       const command = RemoteAccessCommandSchema.parse(input);
-      if (!this.loaded && command.kind !== "status" && !(command.kind === "disable" && this.settingsLoaded)) {
+      if (!this.loaded && command.kind !== "status" && !(command.kind === "disable" && (this.settingsLoaded || this.inspectMapping))) {
         throw new Error("Remote access records could not be read. Restore them before changing access.");
       }
       let pairing: RemoteAccessReply["pairing"];
@@ -139,7 +159,8 @@ export class DesktopRemoteAccess {
             await this.stopGateway();
             if (this.options.startupSupported) this.options.setStartOnLogin(false);
             await this.devices.stop();
-            await this.save({ enabled: false, startOnLogin: false, origin: null }); break;
+            if (this.settingsLoaded) await this.save({ enabled: false, startOnLogin: false, origin: null });
+            break;
           case "startup":
             if (!this.options.startupSupported || !this.running) throw new Error("Enable remote access in the installed desktop app first.");
             this.options.setStartOnLogin(command.enabled);

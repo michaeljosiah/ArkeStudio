@@ -56,9 +56,14 @@ export class TailscaleServe {
     }
     return true;
   }
-  async disable(origin: string, port: number): Promise<void> {
+  async disable(origin: string | null, port: number): Promise<void> {
     let config = await this.configuration();
-    if (this.ours(config, origin, port)) {
+    // Damaged ownership records still need recovery. Discover only the exact private
+    // Studio mapping to its fixed port; other targets, extra handlers and Funnel stay owned
+    // by their operator and continue to prevent releasing the protected port.
+    const candidate = origin ?? Object.keys(config.Web ?? {}).filter(host => /^[a-z0-9-]+\.[a-z0-9-]+\.ts\.net:443$/.test(host))
+      .map(host => new URL("https://" + host).origin).find(value => this.ours(config, value, port));
+    if (candidate && this.ours(config, candidate, port)) {
       await this.execute(["serve", "--https=443", "off"]);
       config = await this.configuration();
     }

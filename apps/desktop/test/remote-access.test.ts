@@ -28,6 +28,7 @@ it("Serve refuses occupied ports and Funnel, and removes only Studio's exact map
   fake.set({ TCP: { "443": { HTTPS: true } }, Web: { "studio.example.ts.net:443": { Handlers: { "/": { Proxy: "http://127.0.0.1:5173" } } } } });
   await assert.rejects(fake.client.enable(origin, 8793, false), /already in use/);
   await fake.client.disable(origin, 8793);
+  await fake.client.disable(null, 8793);
   assert.ok(!fake.commands.some(args => args.includes("off")));
   fake.set({ AllowFunnel: { "studio.example.ts.net:443": true } });
   await assert.rejects(fake.client.enable(origin, 8793, false), /Funnel/);
@@ -188,6 +189,68 @@ it("a damaged device registry cannot be overwritten by enabling or pairing", asy
     await assert.rejects(host.command({ kind: "enable" }), /records could not be read/);
     assert.equal(await readFile(join(root, "remote/devices.json"), "utf8"), "broken");
   } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
+});
+it("first launch does not require Tailscale and releases its temporary reservation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "arke-remote-first-launch-"));
+  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+    startupSupported: false, setStartOnLogin: () => {}, tailscale: new TailscaleServe(async () => { throw new Error("Tailscale must not be needed"); }) });
+  const probe = createServer();
+  try {
+    await host.initialize();
+    assert.equal(host.status().reason, null); assert.equal(host.status().enabled, false);
+    await new Promise<void>((resolve, reject) => {
+      probe.once("error", reject); probe.listen(8793, "127.0.0.1", () => probe.close(() => resolve()));
+    });
+  } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
+});
+it("unreadable or missing ownership records discover and withdraw exact stale forwarding", async () => {
+  for (const damage of ["malformed", "unreadable", "missing"] as const) {
+    const root = await mkdtemp(join(tmpdir(), "arke-remote-damaged-settings-"));
+    await mkdir(join(root, "remote"));
+    const path = join(root, "remote/settings.json");
+    if (damage === "malformed") await writeFile(path, "broken");
+    if (damage === "unreadable") await mkdir(path);
+    await writeFile(join(root, "remote/devices.json"), '{"version":1,"devices":[]}');
+    const fake = tailscale(); await fake.client.enable(origin, 8793, false);
+    const disable = fake.client.disable.bind(fake.client);
+    fake.client.disable = async (...args) => {
+      const probe = createServer();
+      await assert.rejects(new Promise<void>((resolve, reject) => {
+        probe.once("error", reject); probe.listen(8793, "127.0.0.1", () => probe.close(() => resolve()));
+      }), { code: "EADDRINUSE" }, "the port is already reserved while unreadable settings are being recovered");
+      await disable(...args);
+    };
+    const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+      startupSupported: false, setStartOnLogin: () => {}, tailscale: fake.client });
+    try {
+      await host.initialize();
+      assert.ok(fake.commands.some(args => args.includes("off")), damage);
+      assert.equal(host.status().running, false);
+      if (damage === "malformed") assert.equal(await readFile(path, "utf8"), "broken");
+    } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
+  }
+});
+it("damaged settings keep the port protected through failed cleanup without being overwritten by Disable", async () => {
+  const root = await mkdtemp(join(tmpdir(), "arke-remote-settings-cleanup-"));
+  await mkdir(join(root, "remote"));
+  await writeFile(join(root, "remote/settings.json"), "broken");
+  const fake = tailscale(); await fake.client.enable(origin, 8793, false);
+  const disable = fake.client.disable.bind(fake.client);
+  let failRemoval = true;
+  fake.client.disable = async (...args) => { if (failRemoval) throw new Error("Tailscale unavailable"); await disable(...args); };
+  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+    startupSupported: false, setStartOnLogin: () => {}, tailscale: fake.client });
+  try {
+    await host.initialize();
+    assert.equal(host.status().enabled, true);
+    const response = await fetch("http://127.0.0.1:8793/");
+    assert.equal(response.status, 503); await response.text();
+    assert.match((await host.command({ kind: "disable" })).status.reason!, /Tailscale unavailable/);
+    failRemoval = false;
+    assert.equal((await host.command({ kind: "disable" })).status.enabled, false);
+    assert.equal(await readFile(join(root, "remote/settings.json"), "utf8"), "broken");
+    assert.ok(fake.commands.some(args => args.includes("off")));
+  } finally { failRemoval = false; await host.stop(); await rm(root, { recursive: true, force: true }); }
 });
 it("a damaged registry withdraws stale HTTPS before reporting recovery, and Disable preserves its records", async () => {
   const root = await mkdtemp(join(tmpdir(), "arke-remote-stale-registry-"));

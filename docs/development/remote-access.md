@@ -42,10 +42,12 @@ the next app start recreates it at the same bookmarked address. If Tailscale can
 mapping, Studio keeps the port reserved and reports that shutdown failed; restore Tailscale
 and retry Quit. The built desktop page keeps its existing loopback
 policy; only the copy served to the phone gets the remote same-origin policy.
-On startup, a stale mapping is withdrawn before the device registry is loaded. If that cleanup
-fails, an inert listener reserves the port until Disable or Quit can remove the mapping. Damaged
-device records remain untouched. A failed desktop startup also drains the previous host before
-Retry can construct a replacement.
+On startup, an inert listener reserves the port before either settings or device records are
+read. Stale forwarding is withdrawn before loading the device registry. If settings are damaged,
+recovery discovers only the exact private Serve mapping to Studio's fixed port; other mappings
+are preserved. Failed cleanup retains the listener until Disable or Quit can remove the mapping.
+Damaged records remain untouched. A failed desktop startup also drains the previous host before
+Retry can construct a replacement. An ordinary first launch does not require Tailscale.
 Studio saves its ownership record before publishing HTTPS, so a process exit during Enable
 still leaves enough information for this recovery on the next start.
 

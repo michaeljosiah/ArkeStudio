@@ -122,7 +122,8 @@ Run coordinator and desktop `test/remote-access.test.ts`, client `test/remote-ac
 and the transport/preload regressions above. The focused suites cover code expiry/replay,
 approval persistence, origin/host confinement, revocation, and preserving other Serve mappings.
 They also check host-file command rejection over live sockets, approved-cookie promotion after
-restart, stale forwarding with a damaged registry, and port retention when cleanup fails.
+restart, stale forwarding with damaged or missing settings and a damaged registry, port retention
+when cleanup fails, preservation of damaged records, and first launch without Tailscale.
 Publication tests verify that ownership is committed before Serve runs, both initially and
 after Disable, and that a failed ownership write prevents publication.
 Desktop `test/startup.test.ts` covers cleanup retries without a second host and slow remote
