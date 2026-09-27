@@ -4,6 +4,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { RoutingSchema, type ClientMessage, type DomainEvent, type RoutingCommand } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
+import { applyRoutingCommand, saveRouting } from "../../src/productions/interactive.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
@@ -42,7 +43,7 @@ async function harness(t: TestContext) {
     });
   const routing = async () =>
     RoutingSchema.parse(JSON.parse(await readFile(join(worldDir, "productions", PRODUCTION, "routing.json"), "utf8")));
-  return { events, send, routing, worldDir };
+  return { events, send, routing, worldDir, store: () => provider.openStore()! };
 }
 
 describe("the branch map's routing commands", () => {
@@ -77,6 +78,27 @@ describe("the branch map's routing commands", () => {
     ]);
     const after = await routing();
     assert.deepEqual(after.choices.map((choice) => choice.id).sort(), ["ch_a", "ch_b"]);
+  });
+
+  it("waits for another routing writer rather than writing over its edit", async (t) => {
+    const { send, routing, store } = await harness(t);
+    await send({ operation: "set-start", sceneId: "sc_02" });
+    const before = await routing();
+    // An accepted production-routing action saves while a map edit is in flight. The map's
+    // command used to read the file before that save committed and write its result over it.
+    const chat = applyRoutingCommand(before, { operation: "add-choice", choice: { id: "ch_chat", from: "sc_02", label: "Chat", to: "sc_04" } });
+    const [saved] = await Promise.allSettled([
+      saveRouting(store(), PRODUCTION, chat, { source: "world-chat" }),
+      send({ operation: "add-choice", choice: { id: "ch_map", from: "sc_02", label: "Map", to: "sc_06" } }),
+    ]);
+    const ids = (await routing()).choices.map((choice) => choice.id).sort();
+    // Whichever reaches the store first, nothing is silently lost: the map's command applies to
+    // what the save wrote, or the save — composed before the map's edit — is refused as stale.
+    if (saved.status === "fulfilled") assert.deepEqual(ids, ["ch_chat", "ch_map"], "the command applied to the saved file");
+    else {
+      assert.match(String(saved.reason), /base moved/);
+      assert.deepEqual(ids, ["ch_map"], "the stale save was refused, not merged over the map's edit");
+    }
   });
 
   it("two quick adds with one label both land, the second under a suffixed id", async (t) => {

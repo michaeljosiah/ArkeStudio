@@ -26,6 +26,7 @@ import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { JsonFile, sha256 } from "../world/text-files.js";
 import type { ProposalManager } from "../gate/proposals.js";
+import type { CommitInput } from "../world/commit.js";
 import type { WorldStatePrecondition, WorldStore } from "../world/store.js";
 
 /**
@@ -40,13 +41,32 @@ export async function saveRouting(
   options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
 ): Promise<Routing> {
   const routing = RoutingSchema.parse(proposed);
-  const path = `productions/${productionId}/routing.json`;
-  let raw: string | null = null;
+  const raw = await readRoutingRaw(store, productionId);
+  await store.commit(routingCommit(productionId, routing, raw, options), undefined, options.precondition);
+  return routing;
+}
+
+function routingPath(productionId: string): string {
+  return `productions/${productionId}/routing.json`;
+}
+
+async function readRoutingRaw(store: WorldStore, productionId: string): Promise<string | null> {
   try {
-    raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
-  } catch {
-    raw = null;
+    return await readFile(toExtendedLength(join(store.dir, fromPortable(routingPath(productionId)))), "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
   }
+}
+
+/** The routing file as a commit against `raw`, the file it was computed from — so a move since is stale. */
+function routingCommit(
+  productionId: string,
+  routing: Routing,
+  raw: string | null,
+  options: { source?: string; requestId?: string },
+): CommitInput {
+  const path = routingPath(productionId);
   let content: string;
   if (raw !== null) {
     const doc = JsonFile.parse(raw);
@@ -55,7 +75,7 @@ export async function saveRouting(
   } else {
     content = JSON.stringify(routing, null, 2) + "\n";
   }
-  await store.commit({
+  return {
     kind: "routing-save",
     source: options.source ?? "form",
     files: [
@@ -64,8 +84,7 @@ export async function saveRouting(
         : { path, action: "create", content, baseHash: null },
     ],
     ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
-  }, undefined, options.precondition);
-  return routing;
+  };
 }
 
 /** Scenes a route reaches: the start and everything its choices lead to. */
@@ -220,14 +239,13 @@ function scenesNamedBy(command: RoutingCommand): string[] {
   }
 }
 
-/** One queue per open world: a routing command reads the file, applies, and commits before the next reads. */
-const routingEdits = new WeakMap<WorldStore, Promise<unknown>>();
-
 /**
  * Apply one closed routing command to the routing on disk (design turn 157). The branch map used
  * to send the whole file it had composed from the copy it last saw, so two quick edits raced: both
- * read one version, and the second was refused as stale or wrote over the first. Here each command
- * reads the file inside a queue, so it applies to the previous command's result.
+ * read one version, and the second was refused as stale or wrote over the first. Here the read,
+ * the command and the write are one store operation, serialised with every other writer in the
+ * world — another map edit, an accepted production-routing action, a whole-file save — so a
+ * command always applies to the file as the last of them left it, and none is written over.
  */
 export function applyRoutingCommandOnDisk(
   store: WorldStore,
@@ -235,29 +253,20 @@ export function applyRoutingCommandOnDisk(
   command: RoutingCommand,
   options: { source?: string; precondition?: WorldStatePrecondition } = {},
 ): Promise<Routing> {
-  const previous = routingEdits.get(store) ?? Promise.resolve();
-  const run = previous.catch(() => undefined).then(async () => {
-    let current: Routing | null = null;
-    try {
-      const raw = await readFile(
-        toExtendedLength(join(store.dir, fromPortable(`productions/${productionId}/routing.json`))),
-        "utf8",
-      );
-      current = RoutingSchema.parse(JSON.parse(raw));
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-    }
-    // The map derives a new choice's id from its label against the routing it last saw; two quick
-    // adds with one label derive the same id, and the second would be refused as a duplicate. The
-    // id is the map's own coinage, so it is made unique here, against the file it applies to.
+  return store.gateOp(async () => {
+    const raw = await readRoutingRaw(store, productionId);
+    const current = raw === null ? null : RoutingSchema.parse(JSON.parse(raw));
     // The map sends what it last saw; a scene deleted since then must not be written into the
     // routing, where it would stand as a route to nothing. Checked against the production as it
-    // is now, inside the queue.
+    // is now, inside the operation.
     const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
     if (!production) throw new Error("That production is no longer in this world.");
     const known = new Set(production.scenes.map((scene) => scene.id));
     const missing = scenesNamedBy(command).find((sceneId) => !known.has(sceneId));
     if (missing !== undefined) throw new Error(`Scene ${missing} is no longer in this production.`);
+    // The map derives a new choice's id from its label against the routing it last saw; two quick
+    // adds with one label derive the same id, and the second would be refused as a duplicate. The
+    // id is the map's own coinage, so it is made unique here, against the file it applies to.
     let applied = command;
     if (command.operation === "add-choice" && current !== null) {
       const taken = new Set(current.choices.map((choice) => choice.id));
@@ -265,10 +274,10 @@ export function applyRoutingCommandOnDisk(
       for (let n = 2; taken.has(id); n++) id = `${command.choice.id}-${n}`;
       applied = { ...command, choice: { ...command.choice, id } };
     }
-    return saveRouting(store, productionId, applyRoutingCommand(current, applied), options);
-  });
-  routingEdits.set(store, run);
-  return run;
+    const routing = applyRoutingCommand(current, applied);
+    await store.commitUnserialised(routingCommit(productionId, routing, raw, options));
+    return routing;
+  }, options.precondition);
 }
 
 const EVIDENCE_FILE = "routing-evidence.jsonl";

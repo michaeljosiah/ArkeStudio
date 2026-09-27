@@ -97,7 +97,8 @@ export function mountInteractivePlayer(root, options) {
 .aip-eyebrow{font-size:11px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;color:color-mix(in srgb,var(--aip-fg) 68%,transparent)}
 .aip-scene{margin-top:5px;font-size:18px;font-weight:600;letter-spacing:-.01em}
 .aip-bar{position:absolute;left:32px;right:32px;bottom:20px}
-.aip-scrub{position:relative;display:flex;gap:4px;height:14px;align-items:center;margin:0 26px 8px 0;cursor:pointer}
+.aip-scrub{position:relative;display:flex;gap:4px;height:14px;align-items:center;margin:0 26px 8px 0;cursor:pointer;border-radius:4px}
+.aip-scrub:focus-visible{outline:2px solid color-mix(in srgb,var(--aip-fg) 55%,transparent);outline-offset:4px}
 .aip-seg{position:relative;flex:1;height:4px;border-radius:99px;background:color-mix(in srgb,var(--aip-fg) 24%,transparent);overflow:hidden}
 .aip-seg>i{position:absolute;left:0;top:0;bottom:0;background:var(--aip-fg);border-radius:99px}
 .aip-fork{position:absolute;right:-26px;top:50%;transform:translateY(-50%);display:flex}
@@ -111,7 +112,7 @@ export function mountInteractivePlayer(root, options) {
 .aip.aip-wake[data-mode="playing"]:not([data-paused]) .aip-chrome{animation:aip-rest .35s ease 2.5s forwards}
 .aip[data-mode="playing"]:not([data-paused]):not(.aip-wake) .aip-chrome{opacity:0}
 .aip[data-mode="choice"] .aip-bar,.aip[data-mode="ending"] .aip-bar,.aip[data-mode="poster"] .aip-bar,.aip[data-mode="ending"] .aip-top,.aip[data-mode="poster"] .aip-top{display:none}
-.aip-choices{position:absolute;left:0;right:0;bottom:96px;display:flex;justify-content:center;flex-wrap:wrap;gap:16px;padding:0 32px}
+.aip-choices{position:absolute;left:0;right:0;bottom:96px;display:flex;justify-content:center;flex-wrap:wrap;gap:16px;padding:14px 32px 8px;max-height:calc(100% - 176px);overflow-y:auto;overscroll-behavior:contain}
 .aip-choice{position:relative;width:344px;max-width:100%;height:72px;display:flex!important;align-items:center;gap:14px;padding:0 20px!important;border-radius:16px;background:color-mix(in srgb,var(--aip-bg) 46%,transparent)!important;backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%);border:1px solid color-mix(in srgb,var(--aip-fg) 22%,transparent)!important;box-shadow:0 10px 30px color-mix(in srgb,var(--aip-bg) 40%,transparent);font-size:18px!important;font-weight:600!important;letter-spacing:-.01em;text-align:left;animation:aip-rise .4s ease both}
 .aip-choice:focus-visible,.aip-choice:hover{background:var(--aip-fg)!important;color:var(--aip-bg)!important;border-color:transparent!important;outline:2px solid color-mix(in srgb,var(--aip-fg) 55%,transparent);outline-offset:4px}
 .aip-choice>.k{width:26px;height:26px;flex:none;border-radius:7px;border:1px solid currentColor;opacity:.6;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:500}
@@ -151,7 +152,7 @@ export function mountInteractivePlayer(root, options) {
 @media (max-width:640px){
 .aip-top{left:20px;right:14px;top:20px}
 .aip-bar{left:16px;right:16px}
-.aip-choices{flex-direction:column;align-items:stretch;bottom:74px;padding:0 16px;gap:10px}
+.aip-choices{flex-direction:column;flex-wrap:nowrap;align-items:stretch;bottom:74px;padding:14px 16px 8px;gap:10px;max-height:calc(100% - 136px)}
 .aip-choice{width:100%;height:58px;border-radius:14px}
 .aip-hero{left:24px;right:24px;bottom:48px}
 .aip-hero-title{font-size:32px}
@@ -172,7 +173,7 @@ export function mountInteractivePlayer(root, options) {
     '<div class="aip-top aip-chrome"><div style="flex:1;min-width:0"><div class="aip-eyebrow" data-ref="eyebrow"></div><div class="aip-scene" data-ref="scene"></div></div></div>' +
     '<div class="aip-scrim-bot aip-chrome"></div>' +
     '<div class="aip-bar aip-chrome" data-ref="bar">' +
-    '<div class="aip-scrub" data-ref="scrub" role="slider" aria-label="Position in this scene" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>' +
+    '<div class="aip-scrub" data-ref="scrub" role="slider" tabindex="0" aria-label="Position in this scene" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>' +
     '<div class="aip-row">' +
     '<button type="button" class="aip-ib" data-act="toggle" data-ref="toggle" aria-label="Play"></button>' +
     '<button type="button" class="aip-ib" data-act="back" aria-label="Back 10 seconds">' + icon(I.back) + "</button>" +
@@ -298,6 +299,10 @@ export function mountInteractivePlayer(root, options) {
     state.sceneId = choice.from;
     routeOpen = false;
     video.pause && video.pause();
+    // The choice point is shown over its own scene's last frame, not the later scene's.
+    const clips = media[choice.from] || [];
+    if (clips.length > 0) loadClip(clips.length - 1, 0, 1, false);
+    else video.removeAttribute("src");
     finishScene();
   }
 
@@ -396,6 +401,7 @@ export function mountInteractivePlayer(root, options) {
       clips.map((_, i) => '<span class="aip-seg"><i style="width:' + (i < clipIndex ? 100 : i === clipIndex ? ratio * 100 : 0) + '%"></i></span>').join("") +
       (outOf(state.sceneId).length > 0 ? '<span class="aip-fork" title="Choices at the end">' + icon(I.route, 16) + "</span>" : "");
     el.scrub.setAttribute("aria-valuenow", String(Math.round(ratio * 100)));
+    el.scrub.setAttribute("aria-valuetext", time(video.currentTime) + " of " + time(d));
     el.time.textContent = (clips.length > 1 ? "Shot " + (clipIndex + 1) + " of " + clips.length + " · " : "") + time(video.currentTime) + " / " + time(d);
     if (paused) root.setAttribute("data-paused", "");
     else root.removeAttribute("data-paused");
@@ -521,6 +527,20 @@ export function mountInteractivePlayer(root, options) {
         choose(c);
       }
       return;
+    }
+    if (event.target === el.scrub && mode === "playing" && video.duration) {
+      // The scene's scrubber is a slider in the tab order, so it takes a slider's keys.
+      const step = { ArrowUp: 5, ArrowRight: 5, ArrowDown: -5, ArrowLeft: -5, PageUp: 30, PageDown: -30 }[key];
+      if (step !== undefined) {
+        event.preventDefault();
+        nudge(step);
+        return;
+      }
+      if (key === "Home" || key === "End") {
+        event.preventDefault();
+        video.currentTime = key === "Home" ? 0 : Math.max(0, video.duration - 0.05);
+        return;
+      }
     }
     if ((key === " " && !onButton) || key === "k" || key === "K") {
       event.preventDefault();

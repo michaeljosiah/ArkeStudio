@@ -251,9 +251,35 @@ describe("the player, as a viewer meets the package (156a–156f)", () => {
     const panel = p.q("[data-ref=panel]")!;
     assert.equal(panel.hasAttribute("hidden"), false);
     assert.match(p.text("[data-ref=panel]"), /1\s*The drowned quarter\s*Stay with the boat\s*Choose again\s*2\s*The bell towers\s*Playing/);
+    assert.equal(p.video().getAttribute("src"), "media/sh_1.mp4", "the bell towers playing");
     p.click(p.button("Choose again"));
     assert.equal(p.root.getAttribute("data-mode"), "choice");
     assert.match(p.text(".aip-top"), /The drowned quarter/);
+    assert.equal(p.video().getAttribute("src"), "media/sc_quarter.mp4", "its choices over its own last frame, not the later scene's");
+  });
+
+  it("puts the scene's scrubber in the tab order and gives it a slider's keys", () => {
+    const p = mount({ from: "sc_pier", author: { unwalked: [] } });
+    const scrub = p.q("[data-ref=scrub]")!;
+    assert.equal(scrub.getAttribute("tabindex"), "0");
+    Object.defineProperty(p.video(), "duration", { value: 40, configurable: true });
+    const press = (name: string) => {
+      const event = new dom.Event("keydown", { bubbles: true }) as unknown as KeyboardEvent;
+      Object.assign(event, { key: name });
+      scrub.dispatchEvent(event);
+    };
+    press("End");
+    assert.ok(p.video().currentTime > 39, "End goes to the end of the scene");
+    press("Home");
+    assert.equal(p.video().currentTime, 0);
+    press("ArrowUp");
+    assert.equal(p.video().currentTime, 5);
+  });
+
+  it("keeps a long list of choices inside the player, scrolling rather than clipped", () => {
+    const p = mount();
+    const css = p.q("style")?.textContent ?? "";
+    assert.match(css, /\.aip-choices\{[^}]*max-height:[^}]*overflow-y:auto/);
   });
 
   it("carries no author strip, and records nothing, without an author", () => {
