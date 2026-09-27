@@ -1016,3 +1016,18 @@ describe("the bench in music mode (design turn 73)", () => {
     assert.ok(!html.includes('aria-label="Lyrics"'), "and a picture is never asked for words");
   });
 });
+
+
+it("offers the priced composer instead of an unpriced token-speech rerun", () => {
+  const state = stateWithBench();
+  const model: ManifestModel = { ...IMAGE_MODEL, id: "token-reader", provider: "elevenlabs", capability: "voice-tts",
+    pricing: { kind: "perToken", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000,
+      speech: { tier: "standard", maxInputTokens: 8192, maxOutputTokens: 16384, audioTokensPerSecond: 25,
+        rates: [{ version: "test", effectiveFrom: "2020-01-01T00:00:00.000Z", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000 }] } } };
+  state.app.manifest!.models.push(model);
+  const take = state.bench!.session.takes[0]!;
+  take.request = { ...take.request, mode: "voice", provider: model.provider, model: model.id, params: { kind: "voice", count: 1 }, brief: "Hello" };
+  const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, state);
+  assert.match(html, /aria-label="Review price to run again"/);
+  assert.doesNotMatch(html, /aria-label="Run it again"/);
+});

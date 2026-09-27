@@ -1816,6 +1816,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("voice-line"),
+      confirmedSpeechMicroUsd: z.number().int().nonnegative().safe().optional(),
       requestId: UlidSchema,
       worldId: UlidSchema,
       productionId: SlugSchema,
@@ -1835,6 +1836,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("voice-preview"),
+      quoteToken: z.string().min(1).max(256).optional(),
       requestId: UlidSchema,
       worldId: UlidSchema,
       sheetId: SlugSchema,
@@ -3076,6 +3078,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("hear-audiobook-line"),
+      quoteToken: z.string().min(1).max(256).optional(),
       worldId: UlidSchema,
       productionId: SlugSchema,
       requestId: UlidSchema,
@@ -3465,6 +3468,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("bench-dispatch"),
+      confirmedSpeechMicroUsd: z.number().int().nonnegative().safe().optional(),
       worldId: UlidSchema,
       sessionId: SessionIdSchema,
       requestId: UlidSchema,

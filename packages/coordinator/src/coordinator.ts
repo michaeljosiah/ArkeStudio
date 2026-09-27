@@ -1,3 +1,4 @@
+import { estimateSpeechMicroUsd } from "@arke-studio/contracts";
 import { ProductionCreationService } from "./application/production-creation.js";
 import { AdapterLibrary, adapterSetupEntries, type AdapterComplianceClient } from "./local-ai/adapter-library.js";
 import { adapterMediaVisible } from "./local-ai/adapter-media.js";
@@ -89,8 +90,6 @@ import {
   productionFrameRate,
   designatedCompilation,
   comfyUiRecoveryDecision,
-  billableCharacters,
-  estimateMicroUsd,
   modelEligible,
   modelForCapability,
   harnessModelReference,
@@ -1709,10 +1708,11 @@ export class Coordinator {
     const toMake = (index: number) => pieces[index]!.map((piece, at) => ({ piece, at })).filter(({ at }) => !have.get(index)?.has(at));
     // Priced by the piece, as each request will be billed (SPEC-046 R-8), and summed: the read
     // is quoted once, whole, never per piece or again part-way through.
-    const priceOf = (piece: string) => estimateMicroUsd(model, { characters: billableCharacters(model, piece) });
+    const piecePrices = new Map(misses.flatMap(index => toMake(index).map(({ piece }) => [piece, estimateSpeechMicroUsd(model, piece)] as const)));
+    const priceOf = (piece: string) => piecePrices.get(piece)!;
     const estimate = misses.reduce((sum, index) => sum + toMake(index).reduce((total, { piece }) => total + priceOf(piece), 0), 0);
     const token = createHash("sha256")
-      .update([subject.id, String(subject.version), ...misses.flatMap((index) => toMake(index).map(({ piece }) => pieceFile(piece)))].join("\n"))
+      .update([subject.id, String(subject.version), String(estimate), ...misses.flatMap((index) => toMake(index).map(({ piece }) => pieceFile(piece)))].join("\n"))
       .digest("hex");
     const enqueued: EnqueueInput[] = misses.flatMap((index) =>
       toMake(index).map(({ piece, at }) => ({
@@ -2035,10 +2035,11 @@ export class Coordinator {
           return;
       }
       // Priced by the piece, as each request will be billed (SPEC-046 R-8), and summed once.
-      const priceOf = (index: number, text: string) => estimateMicroUsd(cloud[index]!.model, { characters: billableCharacters(cloud[index]!.model, text) });
+      const piecePrices = new Map(misses.map(index => [index, new Map(toMake(index).map(piece => [piece.text, estimateSpeechMicroUsd(cloud[index]!.model, piece.text)] as const))]));
+      const priceOf = (index: number, text: string) => piecePrices.get(index)!.get(text)!;
       const estimate = misses.reduce((sum, index) => sum + toMake(index).reduce((total, piece) => total + priceOf(index, piece.text), 0), 0);
       const token = createHash("sha256")
-        .update(["voiced", subject.id, String(subject.version), ...misses.flatMap((index) => toMake(index).map((piece) => piece.file))].join("\n"))
+        .update(["voiced", subject.id, String(subject.version), String(estimate), ...misses.flatMap((index) => toMake(index).map((piece) => piece.file))].join("\n"))
         .digest("hex");
       queuedInputs = misses.flatMap((index) => {
         const entry = cloud[index]!;
@@ -2503,6 +2504,7 @@ export class Coordinator {
         ? new JobQueue({
             journalPath: join(opts.appRoot, "queue", "jobs.jsonl"),
             clients: opts.dispatchClients,
+            speechModel: (provider, id) => this.opts.manifest?.models.find(model => model.provider === provider && model.id === id),
             getKey: async (provider) =>
               this.credentials ? this.credentials.get(provider as ProviderId) : null,
             emit: (event) => {
@@ -11739,6 +11741,7 @@ export class Coordinator {
           return;
         }
         const plan = planBenchDispatch(bench.session, store.getBundle(), this.opts.manifest ?? null, {
+          speechAuthorisation: { maximumMicroUsd: msg.kind === "bench-dispatch" ? msg.confirmedSpeechMicroUsd : undefined },
           worldId: msg.worldId,
           requestId: msg.requestId,
           performanceReferences: castVoices.references,
@@ -13567,6 +13570,7 @@ export class Coordinator {
         try {
           const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId)), models: this.opts.manifest?.models ?? [] };
           const heard = await hearAudiobookLine(store, msg.productionId, msg.chapterFile, msg.block, msg.voice === undefined ? room : { ...room, narrator: msg.voice }, {
+            quoteToken: msg.quoteToken,
             local: (voiceId, text, settings) => voice.synthesizeDirected(voiceId, text, settings, new AbortController().signal),
             enqueue: async (input) => {
               const queued = await this.enqueueBatch(msg.requestId, "voice-preview", [input]);
@@ -13576,7 +13580,7 @@ export class Coordinator {
             waitForJob: (jobId) => this.waitForAudiobookJob(jobId),
             worldId: msg.worldId,
           });
-          this.emit({ at: new Date().toISOString(), type: "audiobook.heard", ...ids, file: heard.file, cached: heard.cached });
+          this.emit({ at: new Date().toISOString(), type: "audiobook.heard", ...ids, ...heard });
         } catch (err) {
           refuse(describeCoordinatorError(err));
         }
@@ -13977,6 +13981,8 @@ export class Coordinator {
         let input;
         try {
           input = voiceLineRequest({
+            confirmedSpeechMicroUsd: msg.confirmedSpeechMicroUsd,
+            at: this.nowIso(),
             worldId: msg.worldId,
             productionId: msg.productionId,
             shotId: msg.shotId,
@@ -14171,18 +14177,25 @@ export class Coordinator {
           }
           voiceReference = true;
         }
-        const request = this.voiceService.queuedPreviewRequest({
-          worldId: msg.worldId,
-          sheet,
-          provider: msg.provider,
-          voiceId: msg.voiceId,
-          line,
-          model,
-          ...(voiceReference ? { voiceReference: true } : {}),
-          ...(msg.voiceUploadConfirmedFor !== undefined
-            ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
-            : {}),
-        });
+        let request: ReturnType<VoiceService["queuedPreviewRequest"]>;
+        try {
+          request = this.voiceService.queuedPreviewRequest({
+            quoteToken: msg.quoteToken,
+            worldId: msg.worldId,
+            sheet,
+            provider: msg.provider,
+            voiceId: msg.voiceId,
+            line,
+            model,
+            ...(voiceReference ? { voiceReference: true } : {}),
+            ...(msg.voiceUploadConfirmedFor !== undefined
+              ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
+              : {}),
+          });
+        } catch (err) {
+          this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(err));
+          return;
+        }
         request.input.params = {
           ...request.input.params,
           requestId: msg.requestId,

@@ -611,6 +611,29 @@ describe("candidates and the stated preview cost (R-7, R-10)", () => {
     assert.equal(event.previewMicroUsdByVoice[JSON.stringify(["elevenlabs", ELEVEN_MODEL.id, "same"])], length * 300);
   });
 
+  it("binds token preview consent to the displayed line, voice and dated rate", async () => {
+    let at = "2026-12-31T23:59:59.000Z";
+    const model: ManifestModel = { ...ELEVEN_MODEL, pricing: { kind: "perToken", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000,
+      speech: { tier: "standard", maxInputTokens: 8192, maxOutputTokens: 16384, audioTokensPerSecond: 25, rates: [
+        { version: "intro", effectiveFrom: "2026-09-01T00:00:00.000Z", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000 },
+        { version: "standard", effectiveFrom: "2027-01-01T00:00:00.000Z", microUsdPerMillionInput: 1000000, microUsdPerMillionOutput: 18000000 },
+      ] } } };
+    const events: DomainEvent[] = [];
+    const service = new VoiceService({ sidecar: null, localPresets: [], clock: () => at, getKey: async () => "key", emit: event => events.push(event),
+      cloudSources: [{ provider: model.provider, list: async () => [{ provider: model.provider, model: model.id, voiceId: "same", label: "Same", attributes: [], local: false, canClone: false }] }] });
+    await service.candidates("01J8F3K2QW9VZX4N7M0RTYB6HC", { productions: [] } as unknown as WorldBundle, SHEET, { manifestVersion: 1, generated: "2026-09-27", models: [model] });
+    const event = events.find(e => e.type === "voice.candidates");
+    assert.ok(event?.type === "voice.candidates");
+    const quoteToken = Object.values(event.previewQuoteByVoice!)[0]!;
+    const request = { worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", sheet: SHEET, provider: model.provider, voiceId: "same", model, line: event.previewLine, quoteToken };
+    assert.equal(service.queuedPreviewRequest(request).input.estimatedMicroUsd, Object.values(event.previewMicroUsdByVoice)[0]);
+    assert.throws(() => service.queuedPreviewRequest({ ...request, quoteToken: undefined }), /price changed/);
+    assert.throws(() => service.queuedPreviewRequest({ ...request, voiceId: "another" }), /price changed/);
+    assert.throws(() => service.queuedPreviewRequest({ ...request, line: { ...request.line, text: "Different words" } }), /price changed/);
+    at = "2027-01-01T00:00:00.000Z";
+    assert.throws(() => service.queuedPreviewRequest(request), /price changed/);
+  });
+
   it("an unkeyed cloud source contributes nothing; the catalogue stays uniform", async () => {
     const service = new VoiceService({
       sidecar: null,
@@ -1163,4 +1186,19 @@ describe("a cloned voice previews like any other queued voice", () => {
     });
     assert.equal(input.voiceReference, undefined, "an id names a catalogue voice; a clip would be noise");
   });
+});
+
+
+it("requires the displayed speech ceiling for a line and rejects it after a rate increase", () => {
+  const model: ManifestModel = { ...ELEVEN_MODEL, pricing: { kind: "perToken", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000,
+    speech: { tier: "standard", maxInputTokens: 8192, maxOutputTokens: 16384, audioTokensPerSecond: 25, rates: [
+      { version: "intro", effectiveFrom: "2026-09-01T00:00:00.000Z", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000 },
+      { version: "standard", effectiveFrom: "2027-01-01T00:00:00.000Z", microUsdPerMillionInput: 1000000, microUsdPerMillionOutput: 18000000 },
+    ] } } };
+  const input = { worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", productionId: "book", shotId: "sh_01", sheet: SHEET,
+    text: "Hello", model, deliveryParams: null, deliveryNotice: null, at: "2026-12-31T23:59:59.000Z" };
+  assert.throws(() => voiceLineRequest(input), /price needs confirmation/);
+  assert.throws(() => voiceLineRequest({ ...input, confirmedSpeechMicroUsd: 151551 }), /price needs confirmation/);
+  assert.equal(voiceLineRequest({ ...input, confirmedSpeechMicroUsd: 151552 }).estimatedMicroUsd, 151552);
+  assert.throws(() => voiceLineRequest({ ...input, confirmedSpeechMicroUsd: 151552, at: "2027-01-01T00:00:00.000Z" }), /price needs confirmation/);
 });

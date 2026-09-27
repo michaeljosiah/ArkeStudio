@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { QueueEnqueueResult } from "../src/lib/store.js";
 import { enqueueNote, failedNote, historyNote, readyNote, subjectOf } from "../src/components/queue-note.js";
-import type { Job, ModelManifest } from "@arke-studio/contracts";
+import type { Job, ModelManifest, SpeechQuote } from "@arke-studio/contracts";
 
 const result = (overrides: Partial<QueueEnqueueResult> = {}): QueueEnqueueResult => ({
   at: "2026-08-04T09:00:00Z",
@@ -390,4 +390,24 @@ describe("the row a finished job gets in Activity's Earlier (design turn 136)", 
     const submitting = historyNote(job({ status: "cancelled", providerJobId: null, error: warning }), manifest);
     assert.match(submitting.meta, /charge unknown$/, "a request in flight at the cancel is as unknown as one acknowledged");
   });
+});
+
+it("speech receipts use settled usage across attempts and preserve unknown charges", () => {
+  const quote: SpeechQuote = {
+    model: "token-reader", provider: "google", quotedAt: "2026-09-27T00:00:00.000Z",
+    tier: "standard", rateVersion: "intro", unit: "token", quantities: { inputTextTokens: 8192, outputAudioTokens: 16384 },
+    tokenRates: { input: 500000, output: 9000000 }, tokenLimits: { input: 8192, output: 16384 },
+    assumptions: [], validUntil: null, expectedMicroUsd: 151552, authorisedMicroUsd: 151552,
+  };
+  const speech = job({ status: "succeeded", attempt: 1, estimatedMicroUsd: 151552,
+    providerJobId: "accepted", speechQuote: quote, speechUsage: { inputTextTokens: 3, outputAudioTokens: 250 } });
+  assert.equal(readyNote(speech, manifest, undefined).meta, "GPT Image 2 · <$0.01");
+  assert.equal(historyNote(speech, manifest).meta, "GPT Image 2 · <$0.01");
+  assert.equal(failedNote({ ...speech, status: "failed" }, manifest, undefined).meta, "GPT Image 2 · <$0.01");
+  assert.equal(historyNote({ ...speech, status: "cancelled" }, manifest).meta, "GPT Image 2 · <$0.01");
+  const retried = { ...speech, attempt: 2, speechAttempts: [{ attempt: 1, quote, usage: {}, providerCostMicroUsd: 20000 }] };
+  assert.equal(readyNote(retried, manifest, undefined).meta, "GPT Image 2 · $0.02");
+  const unknown = { ...retried, speechAttempts: [{ attempt: 1, quote, usage: {} }] };
+  assert.equal(readyNote(unknown, manifest, undefined).meta, "GPT Image 2 · ~$0.15");
+  assert.equal(failedNote({ ...unknown, status: "failed" }, manifest, undefined).meta, "GPT Image 2 · charge unknown");
 });

@@ -3,6 +3,7 @@ import {
   firstReadNotice,
   legacyVoiceModel,
   orderedShots,
+  quoteSpeech,
   supportedDeliveries,
   voiceSourceFor,
   type Delivery,
@@ -14,6 +15,7 @@ import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
 import { Button } from "../components/ui.js";
 import { useProduction } from "../lib/selectors.js";
+import { usdPrecise } from "../lib/format.js";
 import {
   requestVoiceLine,
   setProductionModel,
@@ -62,6 +64,13 @@ export function VoiceLineDialogScreen() {
         : null;
   const [sending, setSending] = useState(false);
   const [delivery, setDelivery] = useState<Delivery | "">("");
+  const linePrice = (() => {
+    if (voiceModel?.pricing.kind !== "perToken") return { amount: undefined, error: null };
+    try {
+      return { amount: quoteSpeech(voiceModel, shot?.audio?.line ?? "", { delivery: delivery || undefined }).authorisedMicroUsd, error: null };
+    } catch (error) { return { amount: undefined, error: error instanceof Error ? error.message : "Speech pricing is unavailable." }; }
+  })();
+  const pendingPrice = useRef<number | undefined>(undefined);
   const [voiceModelOverride, setVoiceModelOverride] = useState<string | undefined>();
   const [refusal, setRefusal] = useState<string | null>(null);
   const pending = useRef<string | null>(null);
@@ -108,11 +117,13 @@ export function VoiceLineDialogScreen() {
       }),
     [],
   );
-  const generateLine = (voiceUploadConfirmedFor?: string) => {
+  const generateLine = (voiceUploadConfirmedFor?: string, confirmedSpeechMicroUsd = linePrice.amount) => {
     if (!worldId || !prodId || !shot) return;
     setRefusal(null);
     setSending(true);
+    pendingPrice.current = confirmedSpeechMicroUsd;
     pending.current = requestVoiceLine({
+      confirmedSpeechMicroUsd,
       worldId,
       productionId: prodId,
       shotId: shot.id,
@@ -165,6 +176,7 @@ export function VoiceLineDialogScreen() {
           <EmptyState title="No spoken lines in this production yet" />
         )}
         {refusal !== null && <p className="fy-refusal">{refusal}</p>}
+        {linePrice.error !== null && <p className="fy-refusal">{linePrice.error}</p>}
         {voiceUnavailableReason !== null && (
           <p className="fy-refusal">
             {voiceModelConflict ?? `Assigned voice unavailable · ${assignedVoiceUnavailableReason}`}
@@ -223,6 +235,7 @@ export function VoiceLineDialogScreen() {
               speaker === undefined ||
               speaker.voice === undefined ||
               voiceUnavailableReason !== null ||
+              linePrice.error !== null ||
               sending
             }
             title={
@@ -232,7 +245,7 @@ export function VoiceLineDialogScreen() {
             }
             onClick={() => generateLine()}
           >
-            {sending ? "Generating…" : "Generate line"}
+            {sending ? "Generating…" : linePrice.amount === undefined ? "Generate line" : `Generate line · up to ${usdPrecise(Math.ceil(linePrice.amount / 100) * 100)}`}
           </Button>
           {firstRead !== null && (
             <span className="fy-mono" data-testid="voice-line-first-read" style={{ marginLeft: 12 }}>
@@ -252,7 +265,7 @@ export function VoiceLineDialogScreen() {
             onConfirm={() => {
               const token = uploadConfirmation.confirmationToken;
               setUploadConfirmation(null);
-              generateLine(token);
+              generateLine(token, pendingPrice.current);
             }}
           />
         )}
