@@ -212,6 +212,21 @@ describe("the player, as the author previews it (156g)", () => {
     assert.ok(paused, "the 14s after the window do not play on behind the choices");
   });
 
+  it("keeps focus on the strip's button when new walk evidence redraws the strip", () => {
+    const p = mount({ author: { unwalked: ["ch_stay"], onClose() {}, onBranchMap() {} } });
+    p.q("[data-act=close]")!.focus();
+    p.handle.setUnwalked([]);
+    assert.equal(focused(), p.q("[data-act=close]"), "the redrawn Close preview, not the page behind the player");
+  });
+
+  it("fills the resume bar over the whole scene, not its first shot", () => {
+    store.set("arke-iv-bar", JSON.stringify({ sceneId: "sc_towers", positionSec: 9, route: ["ch_stay"], updatedAt: "2026-09-27T10:00:00Z" }));
+    const scenes = { ...OPTIONS.scenes, sc_towers: { title: "The bell towers", clips: [{ src: "media/sh_1.mp4", to: 8 }, { src: "media/sh_2.mp4", to: 10 }] } };
+    const p = mount({ storageKey: "arke-iv-bar", scenes });
+    const width = p.q(".aip-place b")!.getAttribute("style") ?? "";
+    assert.match(width, /width:50%/, "9s of 18s, not 9s of the first shot's 8");
+  });
+
   it("keeps focus in the player when the Route panel is closed from its own button", () => {
     const p = mount({ author: { unwalked: [] } });
     p.key("r");

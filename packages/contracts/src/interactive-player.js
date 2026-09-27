@@ -361,7 +361,15 @@ export function mountInteractivePlayer(root, options) {
     if (mode === "poster") {
       const resume = saved !== null;
       const over = resume && saved.positionSec < 0;
-      const pct = over ? 100 : resume && durations[0] ? Math.min(100, (100 * saved.positionSec) / durations[0]) : 0;
+      // The place is across the whole scene, so the bar is too: over every shot's length, once
+      // they are all known, not the first shot's alone, which read as done midway through.
+      const count = (media[state.sceneId] || []).length;
+      let total = 0;
+      for (let i = 0; i < count && total !== null; i++) {
+        const length = lengthOf(i);
+        total = length === undefined ? null : total + length;
+      }
+      const pct = over ? 100 : resume && total ? Math.min(100, (100 * saved.positionSec) / total) : 0;
       el.hero.innerHTML =
         '<div class="aip-poster-back"></div><div class="aip-hero">' +
         (options.eyebrow ? '<div class="aip-eyebrow">' + esc(options.eyebrow) + "</div>" : "") +
@@ -689,12 +697,18 @@ export function mountInteractivePlayer(root, options) {
   return {
     setUnwalked(ids) {
       unwalked = new Set(ids);
-      // The choices are redrawn with their chips; the one that had focus keeps it.
-      const focused = doc.activeElement && root.contains(doc.activeElement) ? doc.activeElement.getAttribute("data-choice") : null;
+      // The strip and the choices are redrawn; whichever of their controls had focus keeps it —
+      // a choice by its id, the strip's buttons by what they do. Replaced and not refocused, focus
+      // fell out of the player, where the preview's Tab trap cannot reach it.
+      const at = doc.activeElement && root.contains(doc.activeElement) ? doc.activeElement : null;
+      const choice = at ? at.getAttribute("data-choice") : null;
+      const act = at ? at.getAttribute("data-act") : null;
       renderStrip();
       renderChoices();
-      if (focused !== null) {
-        const again = [...choicesEl.querySelectorAll("[data-choice]")].find((b) => b.getAttribute("data-choice") === focused);
+      if (at !== null && !root.contains(at)) {
+        const again = [...root.querySelectorAll(choice !== null ? "[data-choice]" : "[data-act]")].find((b) =>
+          choice !== null ? b.getAttribute("data-choice") === choice : b.getAttribute("data-act") === act,
+        );
         if (again) again.focus();
         else holdFocus();
       }

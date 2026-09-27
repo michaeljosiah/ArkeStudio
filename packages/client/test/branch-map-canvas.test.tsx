@@ -465,6 +465,20 @@ describe("the branch map canvas (design turn 157)", () => {
     assert.deepEqual(commands(item), [{ operation: "remove-choice", choiceId: "ch_ghost" }], "drawn nowhere else, the finding is where it is removed");
   });
 
+  it("returns focus to the choice's row when a removal is cancelled in the narrow list", async () => {
+    narrowWindow = true;
+    try {
+      const item = await mount();
+      const row = all(item, ".bm-goes").find((el) => /Wait for low water/.test(text(el)));
+      await click(row);
+      await click(button(item, "Remove choice"));
+      await click(all(item, '[role="alertdialog"] button').find((el) => text(el) === "Cancel"));
+      assert.equal(focused(), all(item, ".bm-goes").find((el) => /Wait for low water/.test(text(el))), "back on its row, not lost");
+    } finally {
+      narrowWindow = false;
+    }
+  });
+
   it("lays day one out narrow too, below 900 wide", async () => {
     narrowWindow = true;
     try {

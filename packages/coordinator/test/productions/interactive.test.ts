@@ -249,6 +249,29 @@ describe("interactive video through the coordinator (epic 401)", () => {
     assert.ok(!result.ok && result.blockers.some((line) => /sc_i1's cut leaves nothing to play/.test(line)), !result.ok ? result.blockers.join("; ") : "");
   });
 
+  it("refuses a scene where only some shots have something to play", async () => {
+    const { dir, store, bundle } = await open();
+    const base = await interactiveProduction(dir, bundle.productions[0]!, ROUTING);
+    // sc_i1 becomes two shots over one pass: the first accepts a segment of it, the second the
+    // pass itself — which the cut plays nothing of, so its shot would silently go missing.
+    const one = interactiveScene("sc_i1", 1, "sh_i1");
+    const scene = { ...one, shots: [...one.shots, { id: "sh_i1b", number: 2, title: "sh_i1b", description: "a shot", durationSec: 5 }] };
+    const pass = { ...take("tk_01J8E0000000000000000000P2", "sh_i1"), coversShots: ["sh_i1", "sh_i1b"], media: "pass.mp4" };
+    const segment: Take = { ...take("tk_01J8E0000000000000000000S2", "sh_i1"), segment: { passTakeId: pass.id, inSec: 0, outSec: 5 } };
+    delete (segment as { media?: string }).media;
+    await mkdir(join(dir, "productions", base.meta.id, "takes", pass.id), { recursive: true });
+    await writeFile(join(dir, "productions", base.meta.id, "takes", pass.id, "pass.mp4"), Buffer.from("the-pass"));
+    const production = {
+      ...base,
+      scenes: [scene, base.scenes[1]!],
+      takes: [...base.takes, pass, segment],
+      selections: { ...base.selections, sh_i1: { acceptedTakeId: segment.id, trimInSec: 0 }, sh_i1b: { acceptedTakeId: pass.id, trimInSec: 0 } },
+    };
+    const result = await exportInteractive(store, production, CLOCK);
+    assert.equal(result.ok, false);
+    assert.ok(!result.ok && result.blockers.some((line) => /sc_i1's cut has nothing to play for sh_i1b/.test(line)), !result.ok ? result.blockers.join("; ") : "");
+  });
+
   it("refuses a take whose media names a file outside its own folder, and copies nothing", async () => {
     const { dir, store, bundle } = await open();
     const base = await interactiveProduction(dir, bundle.productions[0]!, ROUTING);

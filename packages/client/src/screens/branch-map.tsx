@@ -148,6 +148,7 @@ export function BranchMapScreen() {
   const viewportRef = useRef<HTMLDivElement>(null);
   const fittedRef = useRef(false);
   const panRef = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   /** The grab cursor, as state: read off the ref, it stayed after a drag until something else rendered. */
   const [panning, setPanning] = useState(false);
 
@@ -547,7 +548,10 @@ export function BranchMapScreen() {
   /** Back from the removal question to the choice it was about, focus included. */
   const cancelRemoval = (id: string) => {
     setSelection({ kind: "choice", id });
-    const label = [...(viewportRef.current?.querySelectorAll<HTMLElement>("[data-walk]") ?? [])].find((el) => el.getAttribute("data-walk") === `c:${id}`);
+    // The choice's label on the canvas, or its row in the narrow list — whichever is showing.
+    const label =
+      [...(viewportRef.current?.querySelectorAll<HTMLElement>("[data-walk]") ?? [])].find((el) => el.getAttribute("data-walk") === `c:${id}`) ??
+      [...(listRef.current?.querySelectorAll<HTMLElement>("[data-choice-row]") ?? [])].find((el) => el.getAttribute("data-choice-row") === id);
     label?.focus();
   };
 
@@ -662,7 +666,7 @@ export function BranchMapScreen() {
    * the list edits it, the same as on the canvas.
    */
   const list = (
-    <div className="bm-list" aria-label="Branch map">
+    <div className="bm-list" aria-label="Branch map" ref={listRef}>
       {[...layout.layers, geometry.tray].map((ids, index) =>
         ids.length === 0 ? null : (
           <section key={index} className="bm-list__layer">
@@ -686,6 +690,7 @@ export function BranchMapScreen() {
                     <button
                       key={choice.id}
                       type="button"
+                      data-choice-row={choice.id}
                       className={cx(
                         "bm-goes",
                         unwalked.has(choice.id) && "bm-goes--unwalked",

@@ -674,11 +674,14 @@ export async function exportInteractive(
     // its discarded head and tail. An unsegmented pass covering several shots has no cut entries
     // of its own and plays whole, which is what it is.
     const path = `productions/${production.meta.id}/takes/${covering.id}/${covering.media}`;
-    const windows = shots.flatMap((shot) => {
+    const windows: PlaybackWindow[] = [];
+    const unplayed: string[] = [];
+    for (const shot of shots) {
       const entry = cut.get(shot.id);
       const played = entry?.media?.path === path ? playbackWindow(entry) : null;
-      return played ? [played] : [];
-    });
+      if (played) windows.push(played);
+      else unplayed.push(shot.id);
+    }
     // No window at all is either a whole pass the scene accepted as itself — no cut entries of
     // its own, so it plays whole — or a cut that leaves nothing, every shot trimmed past its end.
     // Read as the first, the second shipped the whole file, the footage the trims discarded too.
@@ -686,8 +689,15 @@ export async function exportInteractive(
       covering.segment === undefined &&
       covering.coversShots.length > 1 &&
       shots.every((shot) => production.selections[shot.id]?.acceptedTakeId === covering.id);
-    if (windows.length === 0 && !wholePass) {
+    // Every shot plays its window, or the scene is the whole pass: some windows and not others
+    // (a shot still on the unsegmented pass beside its neighbours' segments, one trimmed past its
+    // end) shipped the scene with those shots silently missing.
+    if (!wholePass && windows.length === 0) {
       blockers.push(`${scene.id}'s cut leaves nothing to play — its trims run past the end of every shot`);
+      continue;
+    }
+    if (!wholePass && unplayed.length > 0) {
+      blockers.push(`${scene.id}'s cut has nothing to play for ${unplayed.join(", ")} — accept a segment for each shot, or trim less`);
       continue;
     }
     media.push({
