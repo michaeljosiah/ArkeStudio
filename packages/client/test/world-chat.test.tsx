@@ -121,7 +121,7 @@ describe("arriving at World Chat", () => {
   it("says nothing has been understood, because nothing has been said", () => {
     const html = render(withConversations([]));
     assert.match(html, /Nothing understood yet/);
-    assert.match(html, /Nothing is ready to write yet/);
+    assert.doesNotMatch(html, /fy-panel__caption/, "turn 164 removes captions below controls");
   });
 
   it("offers another way in beside the conversations already had", () => {

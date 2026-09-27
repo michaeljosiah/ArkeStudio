@@ -32,6 +32,8 @@ import "./screens/launch.css";
 import "./screens/home.css";
 import "./screens/world.css";
 import "./screens/character-pages.css";
+import "./screens/bible-canon.css";
+import "./screens/chat-artifacts.css";
 import "./screens/settings-adapters.css";
 import "./screens/scene-workspace/workspace.css";
 import "./screens/scene-workspace/shot-page.css";

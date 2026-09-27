@@ -76,6 +76,7 @@ export function ConversationTranscript({
   onSelectShot,
   shotLabel,
   empty,
+  inlineTextActions = true,
 }: {
   workspace: WorldChatWorkspace | null;
   running: boolean;
@@ -92,6 +93,8 @@ export function ConversationTranscript({
   shotLabel?: (shotId: string) => string;
   /** What stands in for the transcript before anything has been said. */
   empty?: React.ReactNode;
+  /** Compact World Chat keeps reply read/copy controls in its conversation options sheet. */
+  inlineTextActions?: boolean;
 }) {
   const navigate = useNavigate();
   const worldId = useStore().state?.world?.meta.worldId;
@@ -149,7 +152,7 @@ export function ConversationTranscript({
             )}
           </div>
           {/* Only Arke's replies: nobody needs their own sentence spoken back to them. */}
-          {m.role === "studio" && workspace !== null && (
+          {inlineTextActions && m.role === "studio" && workspace !== null && (
             <ReadAloud
               source={{ of: "reply", conversationId: workspace.conversationId, messageId: m.id }}
               title="Arke"

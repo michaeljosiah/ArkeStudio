@@ -473,6 +473,8 @@ export function ProductionArtifactsScreen() {
         )}
       </div>
       <ArtifactViewer
+        visibleArtifacts={visible}
+        onNavigate={setOpenArtifactId}
         artifact={visible.find((a) => a.id === openArtifactId) ?? null}
         artifacts={scoped}
         worldSlug={world.meta.slug}

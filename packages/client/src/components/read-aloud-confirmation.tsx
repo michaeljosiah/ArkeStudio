@@ -8,8 +8,10 @@ import { Button } from "./ui.js";
 type ReadResult = Extract<DomainEvent, { type: "voice.audio" }>;
 
 /** The destination and price belong to the coordinator's quote, not the current voice picker. */
-export function ReadAloudConfirmation({ title, result, onConfirm, onCancel }: {
+export function ReadAloudConfirmation({ title, result, onConfirm, onCancel, inline = false }: {
   title: string;
+  /** A contents sheet keeps its quote in the same native modal layer. */
+  inline?: boolean;
   result: ReadResult;
   onConfirm: (confirmationToken: string) => void;
   onCancel: () => void;
@@ -27,20 +29,23 @@ export function ReadAloudConfirmation({ title, result, onConfirm, onCancel }: {
   const pieces = result.parts !== undefined && result.parts > 1 ? ` · ${result.parts} parts` : "";
   if (result.status !== "confirmation-required" || settled === quote) return null;
   const cancel = () => { setSettled(quote); onCancel(); };
+  const content = <div className="fy-exsheet">
+    {inline && <div id={heading}>{title} · {reader}{pieces}</div>}
+    <p>{local ? `Read locally with ${reader}.` : `This text will be sent to ${reader}.`} Text is retained in Activity.</p>
+    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+      <Button variant="ghost" onClick={cancel}>Cancel</Button>
+      <Button variant="primary" disabled={!result.confirmationToken} onClick={() => {
+        if (!result.confirmationToken || submitted.current === quote) return;
+        submitted.current = quote;
+        setSettled(quote);
+        onConfirm(result.confirmationToken);
+      }}>Confirm {result.characterCount} characters · {formatMicroUsd(result.estimatedMicroUsd)}</Button>
+    </div>
+  </div>;
+  if (inline) return <section className="fy-read-confirmation" aria-labelledby={heading}>{content}</section>;
   return createPortal(
     <EditorDialog open title="Read aloud" subtitle={`${title} · ${reader}${pieces}`} labelledBy={heading} onClose={cancel}>
-      <div className="fy-exsheet">
-        <p>{local ? `Read locally with ${reader}.` : `This text will be sent to ${reader}.`} Text is retained in Activity.</p>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <Button variant="ghost" onClick={cancel}>Cancel</Button>
-          <Button variant="primary" disabled={!result.confirmationToken} onClick={() => {
-            if (!result.confirmationToken || submitted.current === quote) return;
-            submitted.current = quote;
-            setSettled(quote);
-            onConfirm(result.confirmationToken);
-          }}>Confirm {result.characterCount} characters · {formatMicroUsd(result.estimatedMicroUsd)}</Button>
-        </div>
-      </div>
+      {content}
     </EditorDialog>, document.body,
   );
 }
