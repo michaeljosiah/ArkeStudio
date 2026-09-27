@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { Fragment, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Link, useParams, useNavigate, useSearchParams } from "react-router";
 import {
@@ -29,11 +30,13 @@ import {
   overviewMoved,
   PASSAGE_KEPT_MAX,
   PASSAGE_SPAN_MAX,
+  readerPlace,
 } from "@arke-studio/contracts";
 import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
-import { Pin, RotateCcw } from "../components/icons.js";
+import { Pin, RotateCcw, X } from "../components/icons.js";
+import { useMediaQuery } from "../lib/media-query.js";
 import { PageReadControl, useProsePageRead, type PageReadBlock } from "../components/page-read.js";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Button, cx } from "../components/ui.js";
@@ -41,12 +44,13 @@ import { continuityStamp } from "../lib/continuity.js";
 import { passageAction, passageActions, type PassageAction } from "../lib/passage-actions.js";
 import { useProduction } from "../lib/selectors.js";
 import { EditableText, SceneTitle } from "./storyboard.js";
-import { AudiobookBlocks, AudiobookFilterRow, AudiobookSide, DirectionCard, PerformedSpeaker, SpeakerLinesDialog, useChapterAudiobook, type AudiobookIntent, type BlockRow, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
+import { AudiobookBlocks, AudiobookFilterRow, AudiobookSide, DirectionCard, PerformedSpeaker, ReadingMenu, SpeakerLinesDialog, useChapterAudiobook, type AudiobookIntent, type BlockRow, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
 import { playClip } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
 import {
   openChapter,
+  setAudiobookReading,
   restoreChapter,
   saveChapter,
   subscribeChapterOpenResults,
@@ -1099,6 +1103,8 @@ export function ChapterWorkspace({
     if (opened === null || opened === "unreadable" || finishedAudiobook.updatedAt >= opened.updatedAt) return { record: finishedAudiobook, missing: [] };
     return { record: opened, missing };
   }, [record?.audiobook, record?.audiobookMissing, finishedAudiobook]);
+  // Below 700 the Audiobook view is one column and a block's panel is a sheet (turn 162l).
+  const phone = useMediaQuery("(max-width: 699px)");
   const audiobook = useChapterAudiobook({
     worldId,
     prodId,
@@ -1544,6 +1550,26 @@ export function ChapterWorkspace({
         ? "Saving…"
         : `Saved · v${record?.version ?? chapter.version} · ${words.toLocaleString()} words`;
 
+  // The block's panel, beside the blocks or, on a phone, in a sheet (turn 162): one set of props.
+  const blockPanel: Parameters<typeof AudiobookSide>[0] = {
+    rows: audiobook.rows,
+    selected: audiobook.selected,
+    record: audiobookRecord.record === "unreadable" ? null : audiobookRecord.record,
+    artifacts: world.artifacts,
+    slug: worldSlug,
+    productionId: prodId,
+    chapterId: chapter.id,
+    chapterTitle: chapter.title,
+    modelOf: audiobook.modelOf,
+    onSetDirection: audiobook.setDirection,
+    onMarker: audiobook.setMarker,
+    onMakeAgain: audiobook.makeAgain,
+    refused: audiobook.lastRecord?.refused ?? null,
+    onUpload: audiobook.uploadTake,
+    onRecorded: (speaker, on) => setAudiobookRecorded(worldId, prodId, speaker, on),
+    onLines: (speaker, label) => setLinesFor({ speaker, label }),
+    blockHost: (key) => audiobookColumn.current?.querySelector<HTMLElement>(`[data-block="${key}"] .fy-ab__text`) ?? null,
+  };
   return (
     <div className="fy-sw" data-screen="chapter" data-testid="chapter-workspace" data-dock={dock ? "true" : "false"}>
       <main className="fy-sw__centre">
@@ -1558,9 +1584,8 @@ export function ChapterWorkspace({
             <div className="fy-sw__actions">
               {/* Not while a draft stands in the prose's place: the read speaks the saved chapter,
                   and the words on screen are the draft's (codex, PR 879). */}
-              {view === "audiobook" ? (
-                stagedDraft === undefined && audiobook.head
-              ) : (
+              {/* In Audiobook the head's presses sit on the view row with the reading (turn 162a). */}
+              {view === "audiobook" ? null : (
                 <>
                   {paragraphs.length > 0 && stagedDraft === undefined && !voicedRead.reading && <PageReadControl read={read} label="Read the chapter" />}
                   {paragraphs.length > 0 && stagedDraft === undefined && voicesRecord !== null && !pageRead.reading && (
@@ -1623,18 +1648,34 @@ export function ChapterWorkspace({
               </span>
             )}
           </div>
-          {/* The view row (turn 146): the Chapters door's seg, Manuscript or Audiobook. */}
-          <nav className="fy-seg fy-ch__viewrow" aria-label="Chapter view">
-            <button type="button" className={cx("fy-seg__item", view === "manuscript" && "fy-seg__item--active")} onClick={() => chooseView("manuscript")}>
-              Manuscript
-            </button>
-            <button type="button" className={cx("fy-seg__item", view === "audiobook" && "fy-seg__item--active")} onClick={() => chooseView("audiobook")}>
-              Audiobook
-            </button>
-          </nav>
+          {/* The view row (turn 146): the Chapters door's seg, Manuscript or Audiobook; in Audiobook
+              the reading and its narrator beside it, then Play and the priced read (turn 162a). */}
+          <div className="fy-ch__viewline">
+            <nav className="fy-seg fy-ch__viewrow" aria-label="Chapter view">
+              <button type="button" className={cx("fy-seg__item", view === "manuscript" && "fy-seg__item--active")} onClick={() => chooseView("manuscript")}>
+                Manuscript
+              </button>
+              <button type="button" className={cx("fy-seg__item", view === "audiobook" && "fy-seg__item--active")} onClick={() => chooseView("audiobook")}>
+                Audiobook
+              </button>
+            </nav>
+            {view === "audiobook" && (
+              <>
+                <ReadingMenu
+                  reading={production.audiobook?.reading ?? "narrator"}
+                  narrator={audiobook.narrator.label ?? narratorName}
+                  disabled={audiobook.run?.state === "reading" || connection !== "open"}
+                  onReading={(reading) => setAudiobookReading(worldId, prodId, reading)}
+                  onNarrator={() => setNarratorOpen(true)}
+                />
+                <span className="fy-ch__viewpush" />
+                {stagedDraft === undefined && audiobook.head}
+              </>
+            )}
+          </div>
         </header>
 
-        <div className="fy-ch__body">
+        <div className={cx("fy-ch__body", view === "audiobook" && "fy-ch__body--audiobook")}>
           {view === "audiobook" && (
             <div className="fy-ch__manuscript" data-testid="audiobook-column" ref={audiobookColumn}>
               {audiobook.sounding !== null && (
@@ -1878,27 +1919,22 @@ export function ChapterWorkspace({
           </div>
 
           <aside className="fy-ch__side">
-            {view === "audiobook" && (
-              <AudiobookSide
-                rows={audiobook.rows}
-                selected={audiobook.selected}
-                record={audiobookRecord.record === "unreadable" ? null : audiobookRecord.record}
-                artifacts={world.artifacts}
-                slug={worldSlug}
-                productionId={prodId}
-                chapterId={chapter.id}
-                chapterTitle={chapter.title}
-                modelOf={audiobook.modelOf}
-                onSetDirection={audiobook.setDirection}
-                onMarker={audiobook.setMarker}
-                onMakeAgain={audiobook.makeAgain}
-                refused={audiobook.lastRecord?.refused ?? null}
-                onUpload={audiobook.uploadTake}
-                onRecorded={(speaker, on) => setAudiobookRecorded(worldId, prodId, speaker, on)}
-                onLines={(speaker, label) => setLinesFor({ speaker, label })}
-                blockHost={(key) => audiobookColumn.current?.querySelector<HTMLElement>(`[data-block="${key}"] .fy-ab__text`) ?? null}
-              />
-            )}
+            {view === "audiobook" && !phone && <AudiobookSide {...blockPanel} />}
+            {/* On a phone the block's panel is a sheet raised by a press on a block (turn 162l): the
+                side would sit under every block, out of reach of the one pressed. A portal, because
+                the centre is a size container and a fixed sheet inside it would be pinned to it. */}
+            {view === "audiobook" &&
+              phone &&
+              audiobook.selected !== null &&
+              createPortal(
+                <div className="fy-ab__sheet" role="dialog" aria-modal="false" aria-label="Block">
+                  <button type="button" className="fy-ab__sheet-close" aria-label="Close" onClick={() => audiobook.setSelected(null)}>
+                    <X size={16} aria-hidden="true" />
+                  </button>
+                  <AudiobookSide {...blockPanel} />
+                </div>,
+                document.body,
+              )}
             <section className="fy-bible__panel">
               <h2 className="fy-bible__paneltitle">The book</h2>
               <p className="fy-bible__empty fy-mono">
@@ -2061,7 +2097,7 @@ export function ChapterWorkspace({
                           {voice !== undefined && voiceUnavailable(voice) ? (
                             <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">voice unavailable · narrator</span>
                           ) : voice !== undefined ? (
-                            <span className="fy-ch__who-where fy-mono">{voice.label ?? voice.voiceId} · {voice.provider}</span>
+                            <span className="fy-ch__who-where fy-mono">{voice.label ?? voice.voiceId} · {readerPlace(voice.provider)}</span>
                           ) : who.sheet === undefined ? (
                             <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">no sheet · narrator</span>
                           ) : (

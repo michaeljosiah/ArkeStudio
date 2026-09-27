@@ -17,6 +17,7 @@ import {
   type ClientState,
 } from "@arke-studio/contracts";
 import { ChapterScreen } from "../src/screens/chapter-workspace.js";
+import { cueLabel } from "../src/screens/chapter-audiobook.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __connectionStatusForTest, __handleFrameForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -94,7 +95,7 @@ function takeArtifact(id: string, chapterId: string, block = "title"): ArtifactS
 /** The one artifact every take in `record()` names, so a made block has its file on the shelf. */
 const KEPT = "ar_01J8F3K2QW9VZX4N7M0RTYB6H1";
 
-function inkbound(reading: "narrator" | "cast" = "narrator"): ClientState {
+function inkbound(reading: "narrator" | "performed" | "cast" = "narrator"): ClientState {
   const world = FIXTURE_STATE.world!;
   const salt = world.productions.find((p) => p.meta.id === "saltlight")!;
   return {
@@ -109,7 +110,7 @@ function inkbound(reading: "narrator" | "cast" = "narrator"): ClientState {
           meta: { ...salt.meta, id: "inkbound", format: "story" as const, title: "Inkbound" },
           story: { ...(salt.story ?? { version: 1 }), version: 3 },
           chapters: CHAPTERS,
-          ...(reading === "cast" ? { audiobook: { schemaVersion: 1 as const, reading } } : {}),
+          ...(reading !== "narrator" ? { audiobook: { schemaVersion: 1 as const, reading } } : {}),
         },
       ],
     },
@@ -356,7 +357,7 @@ describe("the Audiobook view (turn 146)", () => {
     );
     const confirm = all(m, "button").find((button) => button.textContent?.startsWith("Confirm 120 characters"));
     assert.ok(confirm, "the price is one press, naming the voice");
-    assert.match(confirm.textContent ?? "", /Low tide · elevenlabs/);
+    assert.match(confirm.textContent ?? "", /Low tide · ElevenLabs · cloud/, "the provider by its name and place, never its id (turn 162)");
     await act(async () => confirm.click());
     const answered = m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>;
     assert.equal(answered.confirmationToken, "tok", "the answer carries the token");
@@ -664,8 +665,11 @@ describe("the Audiobook view (turn 146)", () => {
     assert.ok(panel, "the block's direction sits between the block and its takes");
     const deliveries = [...panel.querySelectorAll('[aria-label="Delivery"] button')] as HTMLButtonElement[];
     assert.deepEqual(deliveries.map((b) => b.textContent), ["measured", "whispered", "breaking", "cold", "warm", "urgent"]);
+    // Pill chips in a radiogroup, not a seg that wrapped to two rows (turn 162, issue 1324 §3).
+    assert.equal(panel.querySelector('[aria-label="Delivery"]')?.getAttribute("role"), "radiogroup");
+    assert.ok(deliveries.every((b) => b.getAttribute("role") === "radio" && b.className.includes("fy-ab__chip")));
     const whispered = deliveries.find((b) => b.textContent === "whispered")!;
-    assert.ok(whispered.disabled && whispered.className.includes("fy-ab__seg-item--off"), "Kokoro cannot whisper: struck");
+    assert.ok(whispered.disabled && whispered.className.includes("fy-ab__chip--off"), "Kokoro cannot whisper: struck");
     assert.equal(whispered.getAttribute("title"), "reads measured · urgent", "the reason, one clause, on the control");
     assert.ok(!deliveries.find((b) => b.textContent === "urgent")!.disabled);
     assert.equal(panel.querySelector(".fy-ab__off")?.textContent, "no phrase", "no phrase on this reader");
@@ -686,7 +690,8 @@ describe("the Audiobook view (turn 146)", () => {
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, record: { ...held, updatedAt: "2026-09-14T10:00:00.000Z" } }));
     assert.equal(all(m, ".fy-ab__block")[1]!.getAttribute("data-state"), "stale", "a direction changed since the take");
     assert.equal(q(m, '[data-testid="audiobook-report"]')?.textContent, "urgent · mapped");
-    assert.ok(all(m, '[aria-label="Delivery"] button').find((b) => b.textContent === "urgent")!.className.includes("fy-seg__item--active"));
+    const urgent = all(m, '[aria-label="Delivery"] button').find((b) => b.textContent === "urgent")!;
+    assert.ok(urgent.className.includes("fy-ab__chip--on") && urgent.getAttribute("aria-checked") === "true", "the chosen chip is filled");
 
     // A refusal is said on the panel, in the coordinator's clause.
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, refused: "whispered · Kokoro 82M reads measured · urgent" }));
@@ -855,7 +860,7 @@ describe("the Audiobook view (turn 146)", () => {
     const whispered = panel.querySelector('[aria-label="Delivery"] button:nth-child(2)') as HTMLButtonElement;
     assert.equal(whispered.textContent, "whispered");
     assert.ok(whispered.disabled, "Kokoro will speak this line, and Kokoro cannot whisper");
-    assert.match(q(m, '[data-testid="audiobook-block"]')?.textContent ?? "", /George · kokoro · stands in/);
+    assert.match(q(m, '[data-testid="audiobook-block"]')?.textContent ?? "", /read by George · narrator · stands in/);
     assert.equal(all(m, ".fy-ab__block")[2]!.getAttribute("data-state"), "stale", "the state is judged against the voice the line is meant for, not the one that stands in");
   });
 
@@ -932,5 +937,56 @@ describe("the Audiobook view (turn 146)", () => {
     const marks = rows.map((row) => row.querySelector(".fy-ab__mark")!.textContent);
     assert.equal(marks[0], "title");
     assert.ok(marks[2] === "Maren Kest" || marks[2] === FIXTURE_STATE.world!.sheets.find((s) => s.id === "maren-kest")?.name, `the speaker, not the narrator: ${marks[2]}`);
+  });
+
+  it("the head names the reading and its narrator, and its menu writes the book's reading or opens the narrator (design turn 162a, issue 1324 §3)", async () => {
+    const m = await mount(voiced(inkbound("performed")));
+    await answerOpen(m, { audiobook: record(NARRATION_KEYS, { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." }) });
+    const press = q(m, '[data-testid="audiobook-reading"]')!;
+    assert.ok(press, "the reading is in the head, on the view row");
+    assert.equal(press.closest(".fy-ch__viewline")?.querySelector('[aria-label="Chapter view"]') !== null, true, "beside the Manuscript · Audiobook seg");
+    assert.match(press.textContent ?? "", /^Performed · George/);
+    assert.equal(press.getAttribute("aria-haspopup"), "menu");
+    assert.equal(press.getAttribute("aria-expanded"), "false");
+    const control = press.closest(".fy-ch__viewline")?.querySelector(".fy-ab__control");
+    assert.ok(control, "Play and the priced read sit on the same row");
+    assert.ok([...control.querySelectorAll("button")].some((b) => b.textContent === "Play"), "Play while a block has a made take");
+    await act(async () => press.click());
+    assert.equal(press.getAttribute("aria-expanded"), "true");
+    const items = all(m, '[role="menu"][aria-label="Reading"] [role="menuitemradio"]');
+    assert.deepEqual(items.map((item) => item.querySelector(".fy-ab__menu-label")?.textContent), ["Narrator", "Performed", "Cast"]);
+    assert.deepEqual(items.map((item) => item.getAttribute("aria-checked")), ["false", "true", "false"]);
+    await act(async () => items[2]!.click());
+    const set = m.sent.findLast((message) => message.kind === "set-audiobook-reading") as Extract<ClientMessage, { kind: "set-audiobook-reading" }>;
+    assert.equal(set.reading, "cast", "the book's reading, written as the door's seg writes it");
+    assert.equal(q(m, '[role="menu"][aria-label="Reading"]'), null, "the menu closes on a choice");
+    await act(async () => press.click());
+    await act(async () => all(m, '[role="menu"][aria-label="Reading"] [role="menuitem"]').find((item) => /Narrator…/.test(item.textContent ?? ""))!.click());
+    assert.ok(dom.document.querySelector('[data-testid="narrator-dialog"]'), "Narrator… opens the book's narrator");
+  });
+
+  it("the block panel names the block and its reader in words, and its add buttons are one word each (design turn 162a, issue 1324 §3)", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m, { audiobook: record(NARRATION_KEYS, { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." }) });
+    await act(async () => all(m, ".fy-ab__block")[1]!.click());
+    const title = q(m, '[data-testid="audiobook-block-title"]')!;
+    assert.equal(title.textContent, "Block 2 · Narration");
+    assert.ok(!title.className.includes("fy-bible__paneltitle"), "not letter-spaced capitals");
+    assert.equal(q(m, ".fy-ab__readby")?.textContent, "read by George · narrator");
+    const adds = all(m, '[data-testid="audiobook-direction"] .fy-ab__add');
+    assert.deepEqual(adds.map((b) => b.textContent), ["Marker", "Pause", "Breath", "Emphasis"]);
+    assert.deepEqual(adds.map((b) => b.getAttribute("aria-label")), ["Add marker", "Add pause", "Add breath", "Add emphasis"]);
+    assert.ok(adds.every((b) => b.querySelector("svg") !== null), "the plus is an icon inside the button, never a line of its own");
+  });
+});
+
+describe("the marker list's words (design turn 162, issue 1324 §3)", () => {
+  it("names a marker's words verbatim, never quoted a second time", () => {
+    const text = "“Whoever cut the tenth key,” she said.";
+    const span = { from: 0, to: 28, text: "“Whoever cut the tenth key,”" };
+    assert.equal(cueLabel(text, { kind: "delivery", span, delivery: "whispered" } as never), "“Whoever cut the tenth key,”");
+    assert.equal(cueLabel(text, { kind: "emphasis", span, level: "moderate" }), "emphasis · moderate · “Whoever cut the tenth key,”");
+    assert.equal(cueLabel(text, { kind: "pause", at: 28, length: "short" }), "pause · short · after tenth key,”");
+    assert.equal(cueLabel(text, { kind: "breath", at: 29, action: "inhale" }), "inhale · before she");
   });
 });

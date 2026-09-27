@@ -123,6 +123,18 @@ const text = (m: Mounted): string => m.container.textContent ?? "";
 const q = (m: Mounted, selector: string): HTMLElement | null => m.container.querySelector(selector) as HTMLElement | null;
 const all = (m: Mounted, selector: string): HTMLElement[] => [...m.container.querySelectorAll(selector)] as HTMLElement[];
 
+/** A change as React hears it: linkedom raises no input event React listens for. */
+async function typeInto(input: HTMLInputElement, value: string): Promise<void> {
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value")?.set;
+    if (setter) setter.call(input, value);
+    else input.value = value;
+    const key = Object.keys(input).find((candidate) => candidate.startsWith("__reactProps$"));
+    const props = key === undefined ? undefined : (input as unknown as Record<string, { onChange?: (event: { target: HTMLInputElement; currentTarget: HTMLInputElement }) => void }>)[key];
+    props?.onChange?.({ target: input, currentTarget: input });
+  });
+}
+
 async function answerDoor(m: Mounted, answer: AudiobookDoor): Promise<void> {
   const ask = m.sent.findLast((message) => message.kind === "open-audiobook") as Extract<ClientMessage, { kind: "open-audiobook" }>;
   assert.ok(ask, "the door is asked for");
@@ -209,7 +221,7 @@ describe("the Audiobook door (turn 146)", () => {
     );
     const chips = all(m, '[data-testid="audiobook-voice"]');
     assert.deepEqual(chips.map((chip) => chip.getAttribute("data-state")), ["narrator", "reads", "no voice", "no voice"]);
-    assert.match(chips[1]!.textContent ?? "", /Maren KestAnna · elevenlabs · 4 blocks/);
+    assert.match(chips[1]!.textContent ?? "", /Maren KestAnna · ElevenLabs · cloud · 4 blocks/);
     assert.match(chips[2]!.textContent ?? "", /Odile Sarnno voice · narrator · 3 blocks/);
     assert.ok(chips[2]!.className.includes("fy-abdoor__voice--warn"), "in warning");
     assert.match(chips[3]!.textContent ?? "", /unattributedno voice · narrator · 2 blocks/);
@@ -235,6 +247,58 @@ describe("the Audiobook door (turn 146)", () => {
     await act(async () => seg[1]!.click());
     assert.ok(dialog.querySelector('[role="listbox"][aria-label="Voices"]'), "the voices to choose from");
     assert.ok((dialog.querySelector('[data-testid="narrator-use"]') as HTMLButtonElement).disabled, "no voice chosen yet");
+  });
+
+  it("the narrator is found by search: the voices on this machine first, providers named, and the press waits for what the switch costs (design turn 162c)", async () => {
+    const m = await mount(inkbound());
+    await answerDoor(m, door("narrator"));
+    await act(async () => all(m, '[data-testid="audiobook-voice"]')[0]!.click());
+    const dialog = dom.document.querySelector('[data-testid="narrator-dialog"]') as HTMLElement;
+    const voice = (provider: string, model: string, voiceId: string, label: string, local: boolean, attributes: string[] = []) => ({ provider, model, voiceId, label, attributes, local, canClone: false, usedBy: [] });
+    // The catalogue's own order puts the paid voices first, as the build listed them (issue 1324 §3).
+    await act(async () =>
+      __applyEventForTest({
+        at: AT,
+        type: "voice.catalogue",
+        worldId: FIXTURE_WORLD_ID,
+        voices: [
+          voice("mistral", "voxtral-mini-tts", "paul", "Paul", false, ["male", "calm"]),
+          voice("elevenlabs", "eleven-v3", "anna", "Anna", false, ["female", "warm"]),
+          voice("kokoro", "kokoro-82m", "bm_george", "George", true, ["male", "British"]),
+          voice("kokoro", "kokoro-82m", "af_bella", "Bella", true, ["female", "American"]),
+        ],
+      }),
+    );
+    await act(async () => ([...dialog.querySelectorAll('[aria-label="Narrator"] button')] as HTMLElement[])[1]!.click());
+    const names = () => ([...dialog.querySelectorAll('[role="option"] .fy-abnarr__name')] as HTMLElement[]).map((n) => n.textContent);
+    assert.deepEqual(names(), ["Bella", "George", "Anna", "Paul"], "this machine first, then the cloud, each by provider and name");
+    assert.deepEqual(([...dialog.querySelectorAll(".fy-abnarr__group")] as HTMLElement[]).map((g) => g.firstElementChild?.textContent), ["On this machine", "Cloud"], "no Saved group while the world has no saved voice to offer");
+    assert.deepEqual(([...dialog.querySelectorAll('[aria-label="Where it reads"] [role="radio"]')] as HTMLElement[]).map((chip) => chip.textContent), ["All4", "This machine2", "Cloud2"]);
+    const readers = ([...dialog.querySelectorAll('[role="option"] .fy-abnarr__reader')] as HTMLElement[]).map((r) => r.textContent);
+    assert.ok(readers.every((r) => !/voxtral-mini-tts|\bmistral\b|\bkokoro\b/.test(r ?? "")), `providers by name, never by id: ${readers.join(" | ")}`);
+    assert.match(readers[0] ?? "", /^Kokoro · this machine/);
+    assert.ok(readers.some((r) => (r ?? "").startsWith("Mistral · cloud · Voxtral")));
+
+    const search = dialog.querySelector('input[aria-label="Search voices"]') as HTMLInputElement;
+    assert.equal(search.placeholder, "Search 4 voices");
+    await typeInto(search, "british male");
+    assert.deepEqual(names(), ["George"], "every word of the search matches something of the voice");
+    await typeInto(search, "");
+    await act(async () => ([...dialog.querySelectorAll('[aria-label="Where it reads"] [role="radio"]')] as HTMLElement[])[2]!.click());
+    assert.deepEqual(names(), ["Anna", "Paul"], "the Cloud chip keeps the cloud");
+
+    await act(async () => ([...dialog.querySelectorAll('[role="option"]')] as HTMLElement[])[0]!.click());
+    const use = () => dialog.querySelector('[data-testid="narrator-use"]') as HTMLButtonElement;
+    const ask = m.sent.findLast((message) => message.kind === "quote-audiobook-narrator") as Extract<ClientMessage, { kind: "quote-audiobook-narrator" }>;
+    assert.equal(ask.voice?.voiceId, "anna");
+    assert.ok(use().disabled, "the press waits for what the switch costs");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.narrator-quote", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", requestId: ask.requestId, stale: 40, held: 2, directed: 9, estimatedMicroUsd: 1_200_000, kept: 40 }));
+    const facts = ([...dialog.querySelectorAll('[data-testid="narrator-quote"] > div')] as HTMLElement[]).map((f) => f.textContent);
+    assert.deepEqual(facts, ["Blocks40 stale", "Direction2 of 9 held", "Read the book$1.20", "Takeskept · 40"]);
+    assert.ok(!use().disabled);
+    await act(async () => use().click());
+    const set = m.sent.findLast((message) => message.kind === "set-audiobook-narrator") as Extract<ClientMessage, { kind: "set-audiobook-narrator" }>;
+    assert.equal(set.voice?.voiceId, "anna");
   });
 
   // A cloud narrator (Charlotte), a cast voice (Anna), a local cast voice on the machine's
@@ -277,12 +341,12 @@ describe("the Audiobook door (turn 146)", () => {
     assert.match(text(m), /9 chapters · 108,700 characters · 41 cloud lines/);
     const lines = all(m, '[data-testid="read-book-line"]').map((line) => line.textContent);
     assert.deepEqual(lines, [
-      "Charlottenarrator · elevenlabs99,000 · $9.90",
-      "Annaelevenlabs9,400 · $0.94",
-      "Tidekokoro · local1,200 · free",
-      "Odile Sarnno voice · narrator · elevenlabs300 · $0.03",
+      "Charlottenarrator · ElevenLabs · cloud99,000 · $9.90",
+      "AnnaElevenLabs · cloud9,400 · $0.94",
+      "TideKokoro · this machine1,200 · free",
+      "Odile Sarnno voice · narrator · ElevenLabs · cloud300 · $0.03",
     ]);
-    assert.match(text(m), /words and the voice to elevenlabs · text in Activity/);
+    assert.match(text(m), /words and the voice to ElevenLabs · text in Activity/);
     const confirm = q(m, '[data-testid="read-book-confirm"]')!;
     assert.equal(confirm.textContent, "Confirm 108,700 characters · $10.87");
     await act(async () => confirm.click());

@@ -25,6 +25,8 @@ import {
   PERFORMANCE_GENERATION_PROVIDERS,
   rankVoices,
   readerName,
+  readerPlace,
+  providerName,
   readerPriceLabel,
   supportsPerformanceGeneration,
   supportsVoiceUse,
@@ -682,6 +684,18 @@ describe("how the Voice page names a reader and its price (SPEC-046 R-30)", () =
     assert.equal(readerName({ provider: "kokoro", model: "kokoro-82m" }), "Kokoro");
     assert.equal(readerName({ provider: "acme", model: "acme-tts" }, { displayName: "Acme Reader" }), "Acme Reader");
     assert.equal(readerName({ provider: "acme", model: null }), "acme");
+  });
+  it("names where a reader runs by the provider's name, never its id (design turn 162)", () => {
+    assert.equal(readerPlace("kokoro"), "Kokoro · this machine");
+    assert.equal(readerPlace("mistral"), "Mistral · cloud");
+    assert.equal(readerPlace("elevenlabs"), "ElevenLabs · cloud");
+    // The catalogue's word wins: ComfyUI may be another machine, which is not the cloud.
+    assert.equal(readerPlace("comfyui", true), "ComfyUI · this machine");
+    assert.equal(readerPlace("comfyui", false), "ComfyUI · another machine");
+    assert.equal(readerPlace("acme"), "acme");
+    assert.equal(readerPlace("acme", true), "acme · this machine");
+    assert.equal(providerName("fishaudio"), "Fish Audio");
+    assert.equal(providerName("acme"), "acme");
   });
 });
 

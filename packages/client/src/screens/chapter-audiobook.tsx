@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import {
   AUDIOBOOK_DELIVERIES,
   AUDIOBOOK_TITLE_KEY,
@@ -27,6 +27,8 @@ import {
   formatMicroUsd,
   legacyVoiceModel,
   narratorFor,
+  readerName,
+  readerPlace,
   supportsVoiceUse,
   voiceSourceFor,
   type ArtifactSidecar,
@@ -46,7 +48,7 @@ import {
   type ManifestModel,
 } from "@arke-studio/contracts";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
-import { Mic, Pin, Waveform } from "../components/icons.js";
+import { ChevronDown, Mic, Pin, Plus, Waveform } from "../components/icons.js";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { Button } from "../components/ui.js";
 import { clearQueue, dismissPlayback, enqueueClip, jumpQueue, playClip, playbackSnapshot, usePlayback, useQueueAt } from "../lib/audio.js";
@@ -154,6 +156,8 @@ export interface BlockRow {
   sentAs: string[] | null;
   /** The speaker's note the line is played with under `performed` (R-44). */
   note?: string;
+  /** The narrator reads it (turn 162's `read by … · narrator`): narration, a line under `narrator` or `performed`, or a stand-in. */
+  byNarrator: boolean;
 }
 
 /** A plan for the view alone: the window holds no digest of the words, and none is checked here. */
@@ -323,6 +327,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         direction,
         held: view?.held ?? [],
         sentAs: view?.sentAs ?? null,
+        byNarrator: speaker === narrator,
       };
     });
   }, [derived.blocks, narrator, reading, world, recordOrNull, hasArtifact, catalogue, modelOf, colours, recordedKeys, notes]);
@@ -571,7 +576,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
             title="the words and the voice go to the provider · the text stays in Activity"
           >
             Confirm {price.characters.toLocaleString()} characters · {formatMicroUsd(price.estimatedMicroUsd)}
-            {price.voices.map((voice) => ` · ${voice.label} · ${voice.provider}`).join("")}
+            {price.voices.map((voice) => ` · ${voice.label} · ${readerPlace(voice.provider)}`).join("")}
           </Button>
           <Button variant="ghost" onClick={() => dismissAudiobookRun(worldId, prodId, chapter.id)}>
             Cancel
@@ -660,6 +665,116 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     uploadTake,
     uploadDialog,
   };
+}
+
+/** The three readings as the head's menu offers them, each with its data (turn 162a). */
+const READINGS: ReadonlyArray<{ reading: AudiobookReading; label: string; data: string }> = [
+  { reading: "narrator", label: "Narrator", data: "one voice" },
+  { reading: "performed", label: "Performed", data: "notes" },
+  { reading: "cast", label: "Cast", data: "cast voices" },
+];
+
+/**
+ * The reading in the chapter's head (design turn 162a): `Performed · Charon`, a menu of the three
+ * readings — the book's, written as the door's seg writes it — and `Narrator…`. The build had no
+ * reading on the chapter and no way into `Performed` from it (issue 1324 §3).
+ */
+export function ReadingMenu({ reading, narrator, disabled, onReading, onNarrator }: {
+  reading: AudiobookReading;
+  /** The narrator the book reads in, by name. */
+  narrator: string;
+  /** A run is going: the door's seg refuses a change then, and so does this. */
+  disabled: boolean;
+  onReading: (reading: AudiobookReading) => void;
+  onNarrator: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const button = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const label = READINGS.find((r) => r.reading === reading)?.label ?? reading;
+  const close = (refocus: boolean) => {
+    setOpen(false);
+    if (refocus) button.current?.focus();
+  };
+  useEffect(() => {
+    if (!open) return;
+    menu.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
+    const away = (event: MouseEvent) => {
+      if (menu.current?.contains(event.target as Node) || button.current?.contains(event.target as Node)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", away);
+    return () => document.removeEventListener("mousedown", away);
+  }, [open]);
+  const onKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const items = [...(menu.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]') ?? [])];
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      close(true);
+    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      items[(at + (event.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
+    } else if (event.key === "Tab") {
+      setOpen(false);
+    }
+  };
+  return (
+    <span className="fy-ab__reading">
+      <button
+        ref={button}
+        type="button"
+        className={`fy-ab__reading-press fy-mono${open ? " fy-ab__reading-press--open" : ""}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Reading · the whole book"
+        onClick={() => setOpen((was) => !was)}
+        data-testid="audiobook-reading"
+      >
+        <span className="fy-ab__reading-k">{label}</span> · {narrator}
+        <ChevronDown size={10} aria-hidden="true" />
+      </button>
+      {open && (
+        <div ref={menu} className="fy-ab__menu fy-ab__reading-menu" role="menu" aria-label="Reading" onKeyDown={onKey}>
+          <p className="fy-ab__menu-eb">Reading · whole book</p>
+          {READINGS.map((r) => (
+            <button
+              key={r.reading}
+              type="button"
+              role="menuitemradio"
+              aria-checked={r.reading === reading}
+              aria-disabled={disabled && r.reading !== reading}
+              className={`fy-ab__menu-opt${r.reading === reading ? " fy-ab__menu-opt--on" : ""}`}
+              onClick={() => {
+                if (disabled || r.reading === reading) return close(true);
+                onReading(r.reading);
+                close(true);
+              }}
+            >
+              <span className="fy-ab__menu-tick" aria-hidden="true">{r.reading === reading ? "✓" : ""}</span>
+              <span className="fy-ab__menu-label">{r.label}</span>
+              <span className="fy-ab__menu-meta">{r.data}</span>
+            </button>
+          ))}
+          <div className="fy-ab__menu-sep" role="separator" />
+          <button
+            type="button"
+            role="menuitem"
+            className="fy-ab__menu-opt"
+            onClick={() => {
+              setOpen(false);
+              onNarrator();
+            }}
+          >
+            <span className="fy-ab__menu-tick" aria-hidden="true" />
+            <span className="fy-ab__menu-label">Narrator…</span>
+            <span className="fy-ab__menu-meta">{narrator}</span>
+          </button>
+        </div>
+      )}
+    </span>
+  );
 }
 
 /** The manuscript column in the Audiobook view: a row a block, the reader in the margin, the state as a dot. */
@@ -1170,13 +1285,17 @@ function supportWord(support: { status: string; method?: string; reason?: string
 /** The seg's three speeds, the plan's own range narrowed to what a hand would choose. */
 const SPEEDS = [0.9, 1, 1.1] as const;
 
-/** A cue in the panel's words: `pause · long · after “works,”`. */
-function cueLabel(text: string, cue: CadencePlan["cues"][number]): string {
-  const around = (at: number) => `after “${text.slice(Math.max(0, at - 12), at).replace(/^\S*\s/, "")}”`;
-  if (cue.kind === "pause") return `pause · ${cue.length} · ${around(cue.at)}`;
-  if (cue.kind === "breath") return `${cue.action} · before “${text.slice(cue.at, cue.at + 12).replace(/\s\S*$/, "")}”`;
-  if (cue.kind === "delivery") return `“${cue.span.text}”`;
-  return `emphasis · ${cue.level} · “${cue.span.text}”`;
+/**
+ * A cue in the panel's words: `pause · long · after works,`. The words are the block's, verbatim
+ * (turn 162): a line's own quotation marks are already in them, so wrapping them in ours printed
+ * `““Whoever cut the tenth key,””` (issue 1324 §3). The plate beside it says what the marker is.
+ */
+export function cueLabel(text: string, cue: CadencePlan["cues"][number]): string {
+  const after = (at: number) => `after ${text.slice(Math.max(0, at - 12), at).replace(/^\S*\s/, "").trim()}`;
+  if (cue.kind === "pause") return `pause · ${cue.length} · ${after(cue.at)}`;
+  if (cue.kind === "breath") return `${cue.action} · before ${text.slice(cue.at, cue.at + 12).replace(/\s\S*$/, "").trim()}`;
+  if (cue.kind === "delivery") return cue.span.text;
+  return `emphasis · ${cue.level} · ${cue.span.text}`;
 }
 
 /**
@@ -1375,7 +1494,13 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
         artifact.retiredAt === undefined,
     )
     .sort((a, b) => (a.created < b.created ? 1 : -1));
-  const readerLabel = `${row.speaker.label ?? row.speaker.voiceId} · ${row.speaker.provider}${row.speaker !== row.assigned ? " · stands in" : ""}`;
+  // Who reads it, in words (turn 162): the voice and its role, never the provider's id — the
+  // reader's provider and model are the Voices panel's to say, and the takes'.
+  const readBy = [
+    `read by ${row.speaker.label ?? row.speaker.voiceId}`,
+    row.byNarrator || row.speakerKey === null ? "narrator" : row.mark,
+    ...(row.speaker !== row.assigned ? ["stands in"] : row.byNarrator && row.note !== undefined ? ["performed"] : []),
+  ].join(" · ");
   // The direction that stands for these words, and what the reader that will speak does with
   // each control (R-9): read off that reader's row and the line's language, so a delivery the
   // row lacks is struck with the reason before it is pressed, and the plan's own report says
@@ -1424,6 +1549,27 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
       send(rest);
     } else write({ phrase: trimmed.slice(0, 60) });
   };
+  // Delivery is six chips, the chosen one filled (turn 162, 155e): a grey seg of six words wrapped
+  // to two rows in the side's 250 (issue 1324 §3). One or none is chosen, so a radiogroup whose
+  // chosen chip, pressed again, returns the block to no direction.
+  const chips = (name: string, items: readonly { key: string; label: string; active: boolean; off: boolean; title: string; press: () => void }[]) => (
+    <span className="fy-ab__chips" role="radiogroup" aria-label={name}>
+      {items.map((item) => (
+        <button
+          key={item.key}
+          type="button"
+          role="radio"
+          className={`fy-ab__chip${item.active ? " fy-ab__chip--on" : ""}${item.off ? " fy-ab__chip--off" : ""}`}
+          disabled={item.off}
+          aria-checked={item.active}
+          title={item.title}
+          onClick={item.press}
+        >
+          {item.label}
+        </button>
+      ))}
+    </span>
+  );
   const seg = (name: string, items: readonly { key: string; label: string; active: boolean; off: boolean; title: string; press: () => void }[]) => (
     <span className="fy-seg fy-ab__seg" role="group" aria-label={name}>
       {items.map((item) => (
@@ -1444,11 +1590,12 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
   return (
     <>
       <section className="fy-bible__panel" data-testid="audiobook-block">
-        <h2 className="fy-bible__paneltitle fy-ch__paneltitle--row">
-          {row.block.key === AUDIOBOOK_TITLE_KEY ? "Title" : `Block ${rows.indexOf(row) + 1}`} · {row.mark}
-          <span className="fy-ch__panelpush" />
-          <span className="fy-ch__who-where fy-mono">{readerLabel}</span>
+        {/* Turn 162: the block and who speaks it in sentence case, the reader under it in words —
+            not two columns of letter-spaced capitals (issue 1324 §3). */}
+        <h2 className="fy-ab__blocktitle" data-testid="audiobook-block-title">
+          {row.block.key === AUDIOBOOK_TITLE_KEY ? "Title" : `Block ${rows.indexOf(row) + 1}`} · {row.speakerKey === null ? (row.block.key === AUDIOBOOK_TITLE_KEY ? chapterTitle : "Narration") : row.mark}
         </h2>
+        <p className="fy-ab__readby fy-mono">{readBy}</p>
         <p className="fy-ch__stamp fy-mono">
           {[
             STATE_LABEL[row.state],
@@ -1461,9 +1608,9 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
         {row.state === "flagged" && flag !== undefined && <div className="fy-ch__moved fy-ch__moved--line">{flag.reason}</div>}
       </section>
       <section className="fy-bible__panel fy-ab__direction" data-testid="audiobook-direction">
-        <div className="fy-ab__row">
+        <div className="fy-ab__row fy-ab__row--stack">
           <span className="fy-ab__label">Delivery</span>
-          {seg(
+          {chips(
             "Delivery",
             AUDIOBOOK_DELIVERIES.map((delivery) => {
               const word = support?.deliveries[delivery];
@@ -1514,7 +1661,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
             }),
           )}
         </div>
-        <div className="fy-ab__row">
+        <div className="fy-ab__row fy-ab__row--stack">
           <span className="fy-ab__label">Markers</span>
           <span className="fy-ab__cues" data-testid="audiobook-markers">
             {base.cues.length === 0 && <span className="fy-ab__off fy-mono">none</span>}
@@ -1539,7 +1686,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
               {onMarker !== undefined && (
                 <button
                   type="button"
-                  className="fy-ch__derive"
+                  className="fy-ab__add"
                   title="[ at the words selected"
                   onClick={(event) => {
                     event.stopPropagation();
@@ -1547,16 +1694,27 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
                     onMarker({ key: row.block.key, span: span ?? { from: 0, to: text.length } });
                   }}
                   data-testid="audiobook-marker-open"
+                  aria-label="Add marker"
                 >
-                  + marker
+                  <Plus size={10} aria-hidden="true" />
+                  Marker
                 </button>
               )}
               {(["pause", "breath", "emphasis"] as const).map((kind) => {
                 const word = support?.[kind];
                 const off = word === undefined || word.status === "unsupported";
                 return (
-                  <button key={kind} type="button" className="fy-ch__derive" disabled={off} title={word === undefined ? "no reader" : off ? supportWord(word) : `${kind} at the words selected`} onClick={() => addCue(kind)}>
-                    + {kind}
+                  <button
+                    key={kind}
+                    type="button"
+                    className="fy-ab__add"
+                    disabled={off}
+                    aria-label={`Add ${kind}`}
+                    title={word === undefined ? "no reader" : off ? supportWord(word) : `${kind} at the words selected`}
+                    onClick={() => addCue(kind)}
+                  >
+                    <Plus size={10} aria-hidden="true" />
+                    {kind[0]!.toUpperCase() + kind.slice(1)}
                   </button>
                 );
               })}
@@ -1613,7 +1771,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
                         ? `recorded${generation.voiceLabel !== undefined ? ` · ${generation.voiceLabel}` : ""}`
                         : (
                           <>
-                            {generation !== null ? `${generation.voiceLabel ?? generation.voiceId} · ${generation.provider}` : ""}
+                            {generation !== null ? `${generation.voiceLabel ?? generation.voiceId} · ${readerName(generation, modelOf(generation))}` : ""}
                             {generation?.delivery !== undefined ? ` · ${generation.delivery}` : ""}
                             {generation !== null ? ` · ${generation.costMicroUsd === null ? formatMicroUsd(generation.estimatedMicroUsd) : formatMicroUsd(generation.costMicroUsd)}` : ""}
                           </>

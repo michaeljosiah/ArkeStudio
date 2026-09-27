@@ -6533,6 +6533,17 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ab__mks { text-decoration: underline dotted var(--neutral-400); text-decoration-thickness: 1.5px; text-underline-offset: 6px; }
 .fy-ab__emph { font-weight: 600; }
 .fy-ab__menu--marker { width: 268px; }
+/* The reading in the chapter's head (turn 162a): the reading muted, the narrator in the foreground. */
+.fy-ab__reading { position: relative; display: inline-flex; }
+.fy-ab__reading-press { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--foreground); font-size: 11px; white-space: nowrap; cursor: pointer; }
+.fy-ab__reading-press:hover, .fy-ab__reading-press--open { background: var(--secondary); }
+.fy-ab__reading-press:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.fy-ab__reading-k { color: var(--muted-foreground); }
+.fy-ab__reading-menu { top: 34px; width: 248px; }
+/* The head fades in with a transform, which makes it a stacking context of its own, so a menu
+   opened in it paints under the blocks that follow unless the head is lifted while it is open. */
+.fy-sw__head:has(.fy-ab__reading-press[aria-expanded="true"]) { position: relative; z-index: 6; }
+p.fy-ab__menu-eb { margin: 0; }
 .fy-ab__mgrid { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 6px 6px; }
 .fy-ab__mchip { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--foreground); font: 400 11px/1.4 var(--font-mono); cursor: pointer; }
 .fy-ab__mchip:hover:not(:disabled) { background: var(--secondary); }
@@ -6554,19 +6565,50 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ab__narrator-press:hover { color: var(--foreground); text-decoration: underline; }
 /* The book's narrator (design turn 155h, SPEC-047 R-46): 48 rows, a play, the name over the
    reader, the price as data, a tick; what the switch does as data rows before the press. */
-.fy-abnarr { display: flex; flex-direction: column; gap: 12px; }
-.fy-abnarr__list { display: flex; flex-direction: column; max-height: 300px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
-.fy-abnarr__row { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 12px; box-sizing: border-box; border-bottom: 1px solid var(--border); cursor: pointer; }
+.fy-abnarr { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px 0; min-height: 0; }
+/* Turn 162c: the list and the chosen voice side by side, 400 and the rest. */
+.fy-abnarr__cols { display: flex; gap: 24px; min-height: 0; }
+.fy-abnarr__pick { width: 400px; flex: none; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.fy-abnarr__search { height: 30px; box-sizing: border-box; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--background); color: var(--foreground); font: 400 12px/1 var(--font-sans); }
+.fy-abnarr__search:focus-visible { outline: none; border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 22%, transparent); }
+.fy-abnarr__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.fy-abnarr__list { display: flex; flex-direction: column; height: 380px; max-height: 50vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; }
+.fy-abnarr__group { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; height: 28px; flex: none; padding: 0 12px; box-sizing: border-box; background: var(--muted); border-bottom: 1px solid var(--border); font: 500 10px/1 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--muted-foreground); }
+.fy-abnarr__groupcount { margin-left: auto; letter-spacing: 0; text-transform: none; }
+.fy-abnarr__row { display: flex; align-items: center; gap: 10px; height: 48px; flex: none; padding: 0 12px; box-sizing: border-box; border-bottom: 1px solid var(--border); cursor: pointer; }
 .fy-abnarr__row:last-child { border-bottom: 0; }
 .fy-abnarr__row:hover { background: var(--secondary); }
-.fy-abnarr__row--on { background: var(--secondary); }
+.fy-abnarr__row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.fy-abnarr__row--on { background: color-mix(in srgb, var(--foreground) 5%, transparent); box-shadow: inset 2px 0 0 var(--foreground); }
+.fy-abnarr__row--current { box-shadow: inset 2px 0 0 var(--neutral-300); }
+.fy-abnarr__none { padding: 12px; }
 .fy-abnarr__who { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .fy-abnarr__name { font: 500 13px/1.3 var(--font-sans); color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fy-abnarr__reader { font-size: 11px; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fy-abnarr__price { flex: none; font-size: 11px; color: var(--muted-foreground); }
 .fy-abnarr__tick { flex: none; width: 14px; color: var(--foreground); }
-.fy-abnarr__facts { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--foreground); }
+.fy-abnarr__detail { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.fy-abnarr__chosen { display: flex; align-items: baseline; gap: 8px; margin: 0; }
+.fy-abnarr__chosen .fy-mono { font-size: 11px; color: var(--muted-foreground); }
+.fy-abnarr__facts { align-self: stretch; margin: 0; border-top: 1px solid var(--border); }
+.fy-abnarr__fact { display: flex; align-items: center; gap: 8px; min-height: 30px; border-bottom: 1px solid var(--border); }
+.fy-abnarr__fact dt { flex: 1; font: 400 13px/1.3 var(--font-sans); color: var(--muted-foreground); }
+.fy-abnarr__fact dd { margin: 0; font-size: 11px; color: var(--foreground); text-align: right; }
 .fy-abnarr__now { font-size: 11px; color: var(--muted-foreground); }
+.fy-abnarr > .fy-rectake__foot { padding-bottom: 16px; }
+/* Turn 162m: on a phone the dialog is the screen, one column. */
+@media (max-width: 699px) {
+  .fy-abnarr__panel { width: 100vw !important; height: 100vh; max-width: 100vw; max-height: 100vh; border-radius: 0; }
+  .fy-abnarr { flex: 1; padding: 12px 20px 0; }
+  .fy-abnarr__cols { flex-direction: column; flex: 1; }
+  .fy-abnarr__pick { width: auto; flex: 1; }
+  .fy-abnarr__search { height: 44px; }
+  .fy-abnarr__chips { flex-wrap: nowrap; overflow-x: auto; }
+  .fy-abnarr__chips .fy-ab__fchip { height: 32px; flex: none; }
+  .fy-abnarr__list { flex: 1; height: auto; max-height: none; }
+  .fy-abnarr__row { height: 56px; }
+  .fy-abnarr__row .fy-ab__play { width: 36px; height: 36px; }
+}
 .fy-ab__source--recorded { color: var(--foreground); }
 .fy-ab__recorded { display: flex; align-items: center; gap: 7px; margin-top: 10px; font: 400 12px/1.4 var(--font-sans); color: var(--muted-foreground); cursor: pointer; }
 /* Upload a take (design turn 155c, SPEC-047 R-35): 540 wide; the checks are data, a warning never refuses. */
@@ -6637,14 +6679,45 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ab__cues { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .fy-ab__cue { display: inline-flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--foreground); }
 .fy-ab__cue-x { border: 0; background: transparent; padding: 0 2px; color: var(--muted-foreground); cursor: pointer; font-size: 12px; line-height: 1; }
-.fy-ab__cue-add { display: flex; gap: 10px; padding-top: 2px; }
+/* Turn 162: the add buttons are a row that wraps between buttons and never inside one — the build
+   set `+` on a line of its own above each word (issue 1324 §3). */
+.fy-ab__cue-add { display: flex; flex-wrap: wrap; gap: 4px; padding-top: 4px; }
+.fy-ab__add { display: inline-flex; align-items: center; gap: 3px; flex: none; height: 24px; padding: 0 8px 0 6px; box-sizing: border-box; border: 1px dashed var(--border); border-radius: 999px; background: transparent; color: var(--muted-foreground); font: 400 12px/1 var(--font-sans); white-space: nowrap; cursor: pointer; }
+.fy-ab__add:hover:not(:disabled) { color: var(--foreground); border-color: var(--neutral-400); }
+.fy-ab__add:disabled { text-decoration: line-through; color: var(--neutral-400); cursor: default; }
+.fy-ab__add:focus-visible, .fy-ab__chip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* Delivery as pill chips, the chosen one filled (turn 162, 155e). */
+.fy-ab__chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.fy-ab__chip { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--foreground); font: 400 12px/1 var(--font-sans); white-space: nowrap; cursor: pointer; }
+.fy-ab__chip:hover:not(:disabled) { border-color: var(--neutral-400); }
+.fy-ab__chip--on { background: var(--foreground); color: var(--background); border-color: transparent; }
+.fy-ab__chip--off { text-decoration: line-through; color: var(--neutral-400); cursor: default; }
+/* The block panel's head (turn 162): sentence case, no tracking, the reader in words under it. */
+/* On a phone (turn 162l): the speaker named over a line, not in a margin, and the block's panel
+   as a sheet from the foot of the screen with 44 targets. */
+@media (max-width: 699px) {
+  .fy-ab__block { grid-template-columns: minmax(0, 1fr) 20px; }
+  .fy-ab__block > :first-child { grid-column: 1 / -1; }
+  .fy-ab__blocks { max-width: none; }
+  .fy-ab__filter { flex-wrap: nowrap; overflow-x: auto; }
+  .fy-ab__filter .fy-ab__fchip { flex: none; height: 32px; }
+}
+.fy-ab__sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 55; max-height: 72vh; overflow-y: auto; padding: 14px 20px calc(20px + env(safe-area-inset-bottom)); box-sizing: border-box; display: flex; flex-direction: column; gap: 16px; background: var(--background); border-top: 1px solid var(--border); border-radius: 16px 16px 0 0; box-shadow: var(--shadow-xl); }
+.fy-ab__sheet-close { position: absolute; top: 6px; right: 8px; width: 44px; height: 44px; display: inline-grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
+.fy-ab__sheet .fy-ab__chip, .fy-ab__sheet .fy-ab__add { height: 32px; }
+.fy-ab__sheet .fy-ab__blocktitle { padding-right: 44px; }
+.fy-ab__blocktitle { margin: 0; font: 600 12px/1.4 var(--font-sans); color: var(--foreground); overflow-wrap: anywhere; }
+.fy-ab__readby { margin: 1px 0 4px; font-size: 11px; color: var(--muted-foreground); }
 .fy-ab__again { padding-top: 8px; }
 /* The card `Direct this chapter` leaves in the dock (R-10): the model's sentence, the counts as data. */
 .fy-ab__card { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
 .fy-ab__card-title { margin: 0; font: 500 12.5px var(--font-sans); color: var(--foreground); }
 .fy-ab__card-text { margin: 0; font: 400 12.5px/1.6 var(--font-sans); color: var(--foreground); }
 .fy-ab__card-line { margin: 0; font-size: 10.5px; color: var(--muted-foreground); }
-.fy-ch__viewrow { margin-top: 10px; align-self: flex-start; }
+.fy-ch__viewrow { align-self: flex-start; }
+/* The view row with, in Audiobook, the reading and the head's presses (turn 162a). */
+.fy-ch__viewline { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; margin-top: 10px; }
+.fy-ch__viewpush { flex: 1; }
 .fy-ch__target { height: 4px; border-radius: 99px; background: var(--secondary); margin-top: 7px; overflow: hidden; }
 .fy-ch__target > span { display: block; height: 100%; background: var(--foreground); }
 .fy-ch__target--page { margin: 18px 0 14px; flex: none; }
@@ -6752,9 +6825,19 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-cont__stamp--warn { color: var(--warning); }
 @container (max-width: 900px) {
   /* The side cards must follow the manuscript, not consume its height in the fixed frame. */
-  .fy-ch__body { flex-direction: column; overflow: auto; }
-  .fy-ch__manuscript { flex: none; height: max(360px, 60vh); }
-  .fy-ch__side { width: auto; overflow: visible; }
+  .fy-ch__body:not(.fy-ch__body--audiobook) { flex-direction: column; overflow: auto; }
+  .fy-ch__body:not(.fy-ch__body--audiobook) .fy-ch__manuscript { flex: none; height: max(360px, 60vh); }
+  .fy-ch__body:not(.fy-ch__body--audiobook) .fy-ch__side { width: auto; overflow: visible; }
+  /* The Audiobook view keeps the block's panel beside its blocks (turn 162k): at 1200 x 790 with
+     the dock this rule put delivery, markers and takes under the blocks, below the fold (issue
+     1324 §3). The blocks give up width instead, and the gap closes to 20. */
+  .fy-ch__body--audiobook { gap: 20px; }
+}
+@container (max-width: 699px) {
+  .fy-ch__body--audiobook { flex-direction: column; overflow: visible; }
+  .fy-ch__body--audiobook .fy-ch__manuscript { flex: none; min-height: 360px; }
+  .fy-ch__body--audiobook .fy-ch__side { width: auto; overflow: visible; }
+  .fy-ch__viewline { gap: 8px; }
 }
 
 .fy-sw { display: grid; grid-template-columns: minmax(0, 1fr) 331px; width: 100%; height: 100%; min-height: 0; }
