@@ -8,7 +8,7 @@ import { User, Waveform, X } from "./icons.js";
  * Choosing a voice to read with (design 70).
  *
  * Deliberately not the character-voice picker. That one ranks the catalogue against a sheet's
- * written voice and ends in an assignment; this one ranks nothing and assigns nothing. A row
+ * written voice and ends in an assignment; this one orders enabled readers by use. A row
  * whose voice a character already uses says so — as data on the row, not as a warning — and
  * picking it still only reads, which is why the action is worded the way it is.
  */
@@ -32,7 +32,8 @@ export function VoicePickerDialog({
   onClose: () => void;
   onPick: (voice: ReadingVoice) => void;
 }) {
-  const catalogue = useStore().voiceCatalogue;
+  const { voiceCatalogue: catalogue, state } = useStore();
+  const disabledModels = state?.app.models.disabled;
   const [where, setWhere] = useState<"all" | "cloud" | "local">("all");
   const fallbackChosen = chosenId === undefined
     ? undefined
@@ -63,13 +64,14 @@ export function VoicePickerDialog({
     () =>
       (catalogue ?? [])
         .filter((v: ReadingVoice) => supportsVoiceUse(v, use))
+        .filter((v: ReadingVoice) => !disabledModels?.includes(v.model))
         .filter((v: ReadingVoice) => (where === "all" ? true : where === "local" ? v.local : !v.local))
         .sort((a, b) => Number(b.local) - Number(a.local) || cloudSpeechPreference(a, use === "narration" ? "routine" : "creative") - cloudSpeechPreference(b, use === "narration" ? "routine" : "creative")),
-    [catalogue, where, use],
+    [catalogue, where, use, disabledModels],
   );
   const visibleCatalogue = useMemo(
-    () => (catalogue ?? []).filter((v: ReadingVoice) => supportsVoiceUse(v, use)),
-    [catalogue, use],
+    () => (catalogue ?? []).filter((v: ReadingVoice) => supportsVoiceUse(v, use) && !disabledModels?.includes(v.model)),
+    [catalogue, use, disabledModels],
   );
   const counts = useMemo(
     () => ({

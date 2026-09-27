@@ -26,7 +26,7 @@ import { makeTempWorld } from "../world/helpers.js";
 import { FakeProvider } from "../queue/fake-provider.js";
 import { AppSettingsFile } from "../../src/app-settings.js";
 import { verifyArtifact } from "../../src/queue/verify.js";
-import { cloudVoiceSources, createProviderClients } from "@arke-studio/providers";
+import { cloudVoiceSources, createProviderClients, SHIPPED_MANIFEST } from "@arke-studio/providers";
 
 it("Google catalogue activation uses only the current configured key and never synthesizes", async () => {
   let key: string | null = null;
@@ -1229,4 +1229,16 @@ it("requires the displayed speech ceiling for a line and rejects it after a rate
   assert.throws(() => voiceLineRequest({ ...input, confirmedSpeechMicroUsd: 151551 }), /price needs confirmation/);
   assert.equal(voiceLineRequest({ ...input, confirmedSpeechMicroUsd: 151552 }).estimatedMicroUsd, 151552);
   assert.throws(() => voiceLineRequest({ ...input, confirmedSpeechMicroUsd: 151552, at: "2027-01-01T00:00:00.000Z" }), /price needs confirmation/);
+});
+
+it("refuses oversized Gemini shot lines including separate delivery bytes before making a queue input", () => {
+  for (const model of SHIPPED_MANIFEST.models.filter(m => m.provider === "google" && m.capability === "voice-tts")) {
+    const sheet = { ...SHEET, voice: { ...SHEET.voice!, provider: "google", model: model.id, voiceId: "Charon" } };
+    const input = { worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", productionId: "book", shotId: "sh_01", sheet, model,
+      delivery: "warm" as const, deliveryParams: {}, deliveryNotice: null, confirmedSpeechMicroUsd: 1000000, at: "2026-09-27T12:00:00.000Z" };
+    assert.throws(() => voiceLineRequest({ ...input, text: "字".repeat(2400) }), /request limit/);
+    const allowance = model.limits.maxSpeechUtf8Bytes! - Buffer.byteLength(model.cadence!.deliveryMappings.warm!.instruction!);
+    assert.equal(voiceLineRequest({ ...input, text: "a".repeat(allowance) }).params.text, "a".repeat(allowance));
+    assert.throws(() => voiceLineRequest({ ...input, text: "a".repeat(allowance + 1) }), /request limit/);
+  }
 });

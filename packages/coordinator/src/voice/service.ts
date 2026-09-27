@@ -1,4 +1,4 @@
-import { quoteSpeech } from "@arke-studio/contracts";
+import { quoteSpeech, speechInputFits } from "@arke-studio/contracts";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -891,6 +891,10 @@ export function voiceLineRequest(input: {
   const assignedModel = voice.model;
   if (voice.provider !== input.model.provider || (assignedModel !== undefined && assignedModel !== input.model.id)) {
     throw new Error("The assigned voice no longer matches its speech model — choose the voice again.");
+  }
+  const instructions = input.delivery === undefined ? undefined : input.model.cadence?.deliveryMappings[input.delivery]?.instruction;
+  if (!speechInputFits(input.text, input.model.limits, instructions)) {
+    throw new Error("The line and its direction exceed this model's request limit. Shorten it or use an audiobook read in parts.");
   }
   const quote = quoteSpeech(input.model, input.text, { delivery: input.delivery, language: input.language, at: input.at });
   if (quote.unit === "token" && (input.confirmedSpeechMicroUsd === undefined || input.confirmedSpeechMicroUsd < quote.authorisedMicroUsd)) {

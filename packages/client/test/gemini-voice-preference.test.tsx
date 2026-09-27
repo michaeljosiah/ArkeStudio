@@ -31,10 +31,10 @@ const voices = [
   { provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george", label: "George", local: true },
 ].map(v => ({ ...v, attributes: [], canClone: false, usedBy: [] }));
 
-async function setup(view: React.ReactNode) {
+async function setup(view: React.ReactNode, disabled: string[] = []) {
   const sent: ClientMessage[] = [];
   __setBridgeForTest({ send(json: string) { sent.push(JSON.parse(json)); } } as unknown as ArkeBridge);
-  __setStateForTest({ ...FIXTURE_STATE, app: { ...FIXTURE_STATE.app, manifest: SHIPPED_MANIFEST } });
+  __setStateForTest({ ...FIXTURE_STATE, app: { ...FIXTURE_STATE.app, manifest: SHIPPED_MANIFEST, models: { ...FIXTURE_STATE.app.models, disabled } } });
   const element = dom.document.createElement("div") as unknown as HTMLElement;
   dom.document.body.append(element);
   const root = createRoot(element);
@@ -52,6 +52,16 @@ it("routine reads recommend Lite while the selected ElevenLabs voice stays selec
   assert.match(rows[2]!.textContent!, /Gemini Flash/);
   assert.match(element.querySelector('.fy-voices__row--on')!.textContent!, /Existing voice/);
   assert.ok(sent.every(m => m.kind === "voice-catalogue"), "opening does not set a narrator or generate audio");
+});
+
+for (const book of [false, true]) it(`excludes disabled Gemini rows from ${book ? "book" : "routine"} recommendations without switching the narrator`, async () => {
+  const view = book ? <NarratorDialog worldId={FIXTURE_STATE.world!.meta.worldId} productionId="saltlight" narratorLabel="Existing voice"
+    appLabel="George" bookNarrator={voices[0]!} trial={null} slug={undefined} data="" onClose={() => {}} />
+    : <VoicePickerDialog open use="narration" chosenId="old" chosenProvider="elevenlabs" chosenModel="eleven-v3" onClose={() => {}} onPick={() => {}} />;
+  const { sent } = await setup(view, ["gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"]);
+  assert.doesNotMatch(dom.document.body.textContent!, /Gemini|Recommended/);
+  assert.match(dom.document.querySelector('[aria-selected="true"], .fy-voices__row--on')!.textContent!, /Existing voice/);
+  assert.ok(sent.every(m => m.kind === "voice-catalogue"));
 });
 
 it("the audiobook picker recommends Flash, shows token-priced rows and preserves a book narrator", async () => {

@@ -57,16 +57,18 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
 }) {
   const { state, voiceCatalogue } = useStore();
   const models = state?.app.manifest?.models ?? [];
+  const disabledModels = state?.app.models.disabled;
   const rowOf = (voice: { provider: string; model: string }) => models.find((m) => m.provider === voice.provider && m.id === voice.model && m.capability === "voice-tts");
   const voices = useMemo(
     () =>
       (voiceCatalogue ?? [])
         .filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined)
+        .filter((voice) => !disabledModels?.includes(voice.model))
         .sort((a, b) => {
           const rank = GROUPS.findIndex((g) => g.where === whereOf(a)) - GROUPS.findIndex((g) => g.where === whereOf(b));
           return rank !== 0 ? rank : cloudSpeechPreference(a) - cloudSpeechPreference(b) || readerPlace(a.provider).localeCompare(readerPlace(b.provider)) || a.label.localeCompare(b.label);
         }),
-    [voiceCatalogue],
+    [voiceCatalogue, disabledModels],
   );
   const [mode, setMode] = useState<"app" | "book">(bookNarrator !== undefined ? "book" : "app");
   const [picked, setPicked] = useState<AudiobookReader | null>(bookNarrator ?? null);

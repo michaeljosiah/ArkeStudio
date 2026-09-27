@@ -11,6 +11,7 @@ Flash-Lite leads routine read-aloud. Character matching still respects the writt
 attributes before using the provider preference to break ties. Existing casting, routing and
 book narrators are unchanged. Kokoro remains the app's default narrator, and local choices stay
 first in narrator pickers. Setup and browsing do not synthesize speech or switch a narrator.
+Models disabled in Settings are omitted from both narrator pickers before recommendation.
 
 The client targets the exact `gemini-3.8-flash-tts` and `gemini-3.8-flash-lite-tts` IDs through
 `POST /v1beta/interactions`. Spoken text and `speech_metadata.style` remain separate. Requests
@@ -42,6 +43,8 @@ resumes after it. Numeric speed, pause, breath and emphasis remain held; no exac
 acoustic adherence is claimed. Vocal-event authoring and its schema migration are still pending.
 Bench and shot lines also carry their named delivery as separate style. The single-line
 performance path refuses delivery spans; those use the audiobook's directed-part compiler.
+Bench and shot lines validate words plus delivery bytes before reserving a take or creating
+a queue request; oversized lines need shortening or the audiobook's read-in-parts path.
 
 `splitSpeechInput` in contracts packs at sentence/word boundaries and retains source offsets,
 without cutting a surrogate pair. The byte allowance includes the separate instructions. An
