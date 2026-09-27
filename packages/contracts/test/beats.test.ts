@@ -107,6 +107,8 @@ describe("a scene's beats as the player reads them", () => {
     assert.equal(beats[1]!.speaker, "Maren");
     assert.equal(beats[1]!.audio, undefined, "an unvoiced line reads as text");
     assert.equal(beats[3]!.picture, "pic/sh_2.png", "sh_3 keeps sh_2's picture");
+    assert.deepEqual(beats.map((beat) => beat.keep ?? false), [false, false, true, true, false, false],
+      "kept: sh_2's second line and sh_3's asked-for picture; never a beat that merely shows another file");
     assert.equal(beats[3]!.advance, "hold");
     assert.equal(beats[3]!.text, undefined, "the picture alone");
     assert.equal(beats[4]!.picture, undefined, "no picture is said by its absence, not invented");

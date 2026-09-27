@@ -569,7 +569,8 @@ function parseInteractiveManifest(value: unknown): InteractiveExportManifest | n
         (b["speaker"] === undefined || typeof b["speaker"] === "string") &&
         ["voice", "tap", "hold"].includes(b["advance"] as string) &&
         typeof b["holdSec"] === "number" && b["holdSec"] > 0 &&
-        ["push", "drift", "none"].includes(b["motion"] as string);
+        ["push", "drift", "none"].includes(b["motion"] as string) &&
+        (b["keep"] === undefined || b["keep"] === true);
     });
   }))) return null;
   const beats = beatsValue as Array<{ sceneId: string; beats: ManifestBeat[] }> | undefined;

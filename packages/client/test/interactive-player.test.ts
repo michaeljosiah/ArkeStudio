@@ -511,6 +511,30 @@ describe("the player reading beats (turn 174)", () => {
     assert.equal(p.q(".aip-pic img")?.hasAttribute("src"), false);
   });
 
+  it("a voice that will not play reads as text and waits, rather than moving on as if heard", () => {
+    const p = mount({ ...NOVEL, autoplay: true });
+    p.q("audio")!.dispatchEvent(new dom.Event("error") as unknown as Event);
+    assert.equal(p.q(".aip-hold")!.style.animation, "none", "an after-the-voice beat whose voice failed waits for the reader");
+    assert.equal(p.q(".aip-box")?.getAttribute("data-kind"), "narration", "still on the first beat");
+  });
+
+  it("a kept picture goes on moving; the same file shown by another shot moves as its own", () => {
+    const beats = (keep: boolean) => ({
+      ...NOVEL,
+      autoplay: true,
+      scenes: { ...NOVEL.scenes, sc_quarter: { title: "Q", beats: [
+        { picture: "media/rail.png", text: "One.", motion: "push" as const },
+        { picture: "media/rail.png", text: "Two.", motion: "none" as const, ...(keep ? { keep: true } : {}) },
+      ] } },
+    });
+    const kept = mount(beats(true));
+    kept.key("ArrowRight"); kept.key("ArrowRight");
+    assert.equal(kept.q(".aip-pic img")?.className, "m-push", "kept: the first beat's movement goes on");
+    const own = mount(beats(false));
+    own.key("ArrowRight"); own.key("ArrowRight");
+    assert.equal(own.q(".aip-pic img")?.className, "m-none", "not kept: its own movement");
+  });
+
   it("back one beat with the left arrow, never across a choice", () => {
     const p = mount({ ...NOVEL, autoplay: true });
     p.key("ArrowRight"); p.key("ArrowRight");

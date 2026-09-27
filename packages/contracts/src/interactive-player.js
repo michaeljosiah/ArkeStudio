@@ -81,6 +81,9 @@ export function mountInteractivePlayer(root, options) {
   let beatIndex = 0;
   let typed = false;
   let voiceDone = true;
+  // A voice that would not play is not a voice heard: the beat reads as text and waits for the
+  // reader, rather than moving on after a breath as if the line had been spoken.
+  let voiceFailed = false;
   let auto = false;
   let logOpen = false;
   const still = () => Boolean(win.matchMedia && win.matchMedia("(prefers-reduced-motion: reduce)").matches);
@@ -392,9 +395,11 @@ export function mountInteractivePlayer(root, options) {
       el.img.className = "";
     } else {
       const motion = still() ? "none" : b.motion || "push";
-      // A new picture starts its movement; one shared with the beat before keeps moving. The
-      // poster's picture was set still, so it starts moving when reading begins.
-      if (el.img.getAttribute("src") !== b.picture || el.img.className === "") {
+      // A new picture starts its movement; one the beat keeps from the beat before (`keep`: a
+      // shot's second line, or a shot asking for the same picture) goes on moving. Two shots that
+      // merely show the same file each move as their own. The poster's picture was set still, so
+      // it starts moving when reading begins.
+      if (el.img.getAttribute("src") !== b.picture || !b.keep || el.img.className === "") {
         el.img.setAttribute("src", b.picture);
         el.img.className = "";
         void el.img.offsetWidth;
@@ -410,12 +415,13 @@ export function mountInteractivePlayer(root, options) {
     if (typed) el.box.setAttribute("data-typed", "");
     else el.box.removeAttribute("data-typed");
     voice.pause && voice.pause();
+    voiceFailed = false;
     if (b.audio && !quiet) {
       voiceDone = false;
       voice.setAttribute("src", b.audio);
       const p = voice.play && voice.play();
       // A voice the browser will not start (no gesture yet, a missing file) is read as text.
-      if (p && p.catch) p.catch(() => voiceEnded());
+      if (p && p.catch) p.catch(() => voiceLost());
     } else {
       voiceDone = true;
       voice.removeAttribute("src");
@@ -439,7 +445,8 @@ export function mountInteractivePlayer(root, options) {
       return;
     }
     if (!voiceDone) return;
-    if (b.audio && (advance === "voice" || auto)) startHold(1.2);
+    const heard = Boolean(b.audio) && !voiceFailed;
+    if (heard && (advance === "voice" || auto)) startHold(1.2);
     else if (auto) startHold(Math.min(12, 1.5 + String(b.text || "").split(/\s+/).filter(Boolean).length * 0.3));
   }
   function startHold(sec) {
@@ -456,6 +463,11 @@ export function mountInteractivePlayer(root, options) {
     if (voiceDone) return;
     voiceDone = true;
     schedule(false);
+  }
+  function voiceLost() {
+    if (voiceDone) return;
+    voiceFailed = true;
+    voiceEnded();
   }
 
   /** A tap, a key: the rest of the line if it is still typing on, else the next beat. */
@@ -1003,6 +1015,7 @@ export function mountInteractivePlayer(root, options) {
   // A beat's voice ending, and the two CSS animations whose ends are signals: the hold element's,
   // which moves the beat on, and the last word's, which is the line finished typing on.
   const onVoiceEnded = () => voiceEnded();
+  const onVoiceError = () => voiceLost();
   const onAnimationEnd = (event) => {
     if (event.target === el.hold) {
       if (mode === "playing" && el.hold.getAttribute("data-beat") === state.sceneId + "#" + beatIndex) {
@@ -1018,7 +1031,7 @@ export function mountInteractivePlayer(root, options) {
     }
   };
   voice.addEventListener("ended", onVoiceEnded);
-  voice.addEventListener("error", onVoiceEnded);
+  voice.addEventListener("error", onVoiceError);
   root.addEventListener("animationend", onAnimationEnd);
 
   if (mode === "poster") {
@@ -1059,7 +1072,7 @@ export function mountInteractivePlayer(root, options) {
       root.removeEventListener("keydown", onKey);
       root.removeEventListener("pointermove", wake);
       voice.removeEventListener("ended", onVoiceEnded);
-      voice.removeEventListener("error", onVoiceEnded);
+      voice.removeEventListener("error", onVoiceError);
       root.removeEventListener("animationend", onAnimationEnd);
       voice.pause && voice.pause();
       logVoice.pause && logVoice.pause();

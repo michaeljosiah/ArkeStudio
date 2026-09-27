@@ -1191,6 +1191,22 @@ export class Coordinator {
    * writes and the derivation, so a fallback is the same voice wherever it is judged.
    */
   /**
+   * A visual novel's package carries the voices its table read has prepared (turn 174): each
+   * scene's plan, read as the scene page reads it, with the narrator resolved once per export.
+   * Both ways to export — the branch map's and World Chat's — ship through this one resolver.
+   */
+  private interactiveExportVoices(store: WorldStore, productionId: string): ((sceneId: string) => Promise<ReadonlyMap<string, string>>) | undefined {
+    const manifest = this.opts.manifest;
+    if (manifest === undefined) return undefined;
+    let narrator: Promise<TableReadNarrator | null> | null = null;
+    return async (sceneId) => {
+      narrator ??= this.tableReadNarrator(store, productionId);
+      const { plan } = await planTableRead(store, productionId, sceneId, manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers, await narrator);
+      return new Map(plan.items.flatMap((item) => (item.file === undefined ? [] : [[item.lineId, item.file] as const])));
+    };
+  }
+
+  /**
    * The narrator a visual novel's table read voices narration in (turn 174): the app's narrator,
    * resolved as the audiobook resolves it. Null for any production that does not play as beats,
    * so a film's table read never pays for a voice catalogue it will not read.
@@ -10020,15 +10036,7 @@ export class Coordinator {
         if (!store) return;
         const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
         if (!production) return;
-        // A visual novel's package carries the voices its table read has prepared (turn 174); the
-        // narrator is resolved once for the whole export, as each scene's plan reads it.
-        const manifest = this.opts.manifest;
-        let narrator: Promise<TableReadNarrator | null> | null = null;
-        const voices = manifest === undefined ? undefined : async (sceneId: string): Promise<ReadonlyMap<string, string>> => {
-          narrator ??= this.tableReadNarrator(store, production.meta.id);
-          const { plan } = await planTableRead(store, production.meta.id, sceneId, manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers, await narrator);
-          return new Map(plan.items.flatMap((item) => (item.file === undefined ? [] : [[item.lineId, item.file] as const])));
-        };
+        const voices = this.interactiveExportVoices(store, production.meta.id);
         const result = await exportInteractive(store, production, () => new Date().toISOString(), voices === undefined ? {} : { voices }).catch(
           (err): InteractiveExportResult => ({
             ok: false,
@@ -17928,6 +17936,7 @@ export class Coordinator {
         this.reconcileBenchGenerationForConversationAction(store, action),
       startProductionExport: (action, card) =>
         this.startProductionExportForConversationAction(store, action, card),
+      interactiveExportVoices: (productionId) => this.interactiveExportVoices(store, productionId),
       cancelExport: (exportId) => {
         const handle = this.exports.get(exportId);
         if (!handle) return false;

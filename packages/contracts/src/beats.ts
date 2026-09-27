@@ -108,6 +108,8 @@ export interface PlayerBeat {
   advance: "voice" | "tap" | "hold";
   holdSec: number;
   motion: "push" | "drift" | "none";
+  /** It keeps the beat before's picture (the same shot's, or one it asked to keep), still moving. */
+  keep?: true;
 }
 
 /**
@@ -127,11 +129,18 @@ export function playerBeats(
   },
 ): PlayerBeat[] {
   const shots = orderedShots(scene);
+  let previous: string | null = null;
   return sceneBeats(scene).map((beat) => {
-    const picture = resolve.picture(beatPictureShotId(shots, beat.shot.id));
+    // Kept is a fact of the story, not of the file: two shots that each chose the same still move
+    // as their own, while a shot's second line, or a beat asking for the picture before, keeps it.
+    const pictureShot = beatPictureShotId(shots, beat.shot.id);
+    const keep = previous === pictureShot;
+    previous = pictureShot;
+    const picture = resolve.picture(pictureShot);
     const audio = beat.lineId === undefined ? undefined : resolve.audio(beat.lineId);
     return {
       ...(picture !== undefined ? { picture } : {}),
+      ...(keep && picture !== undefined ? { keep: true as const } : {}),
       ...(beat.text ? { text: beat.text } : {}),
       ...(beat.kind === "dialogue" && beat.speaker ? { speaker: resolve.speakerName(beat.speaker) } : {}),
       ...(audio !== undefined ? { audio } : {}),

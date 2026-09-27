@@ -369,6 +369,11 @@ export interface WorldChatActionAdapterDeps {
     card: ConversationActionCard,
   ) => Promise<ConversationActionExecutionOutcome>;
   readonly cancelExport?: (exportId: string) => boolean;
+  /**
+   * A visual novel's prepared voices for its package (turn 174), scene by scene — the same resolver
+   * the branch map's export uses, so the two exports cannot ship different packages.
+   */
+  readonly interactiveExportVoices?: (productionId: string) => ((sceneId: string) => Promise<ReadonlyMap<string, string>>) | undefined;
 }
 
 function completeObservation(
@@ -3799,9 +3804,11 @@ async function executeSharedResource(
     case "world-chat-production-interactive-export": {
       const production = store.getBundle().productions.find((candidate) => candidate.meta.id === payload.action.productionId);
       if (!production) throw new Error("That production is no longer in this world.");
+      const voices = deps.interactiveExportVoices?.(production.meta.id);
       const result = await exportInteractive(store, production, now, {
         exportId: action.authority.id,
         precondition,
+        ...(voices === undefined ? {} : { voices }),
       });
       return result.ok
         ? {

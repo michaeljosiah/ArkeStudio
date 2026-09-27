@@ -25,6 +25,8 @@ export interface InteractivePlayerBeat {
   advance?: "voice" | "tap" | "hold";
   holdSec?: number;
   motion?: "push" | "drift" | "none";
+  /** Keeps the beat before's picture, still moving: a shot's next line, or a same-picture beat. */
+  keep?: boolean;
 }
 
 /** A window into a file: from `from` seconds (default 0) to `to` (default the file's end). */
