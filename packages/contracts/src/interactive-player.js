@@ -471,6 +471,9 @@ export function mountInteractivePlayer(root, options) {
     // several, would otherwise run on into footage the cut replaced.
     const c = (media[state.sceneId] || [])[clipIndex];
     if (c && c.to !== null && (video.currentTime || 0) >= c.to - 0.02) {
+      // Held at the window's end: on the last shot the choices open here, and the file's tail
+      // must not go on playing behind them.
+      if (video.pause) video.pause();
       onEnded();
       return;
     }

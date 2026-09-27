@@ -201,6 +201,17 @@ describe("the player, as the author previews it (156g)", () => {
     assert.equal(p.video().currentTime, 12);
   });
 
+  it("holds the last shot at its window's end while the choices open", () => {
+    const p = mount({ author: { unwalked: [] }, scenes: { ...OPTIONS.scenes, sc_quarter: { title: "The drowned quarter", clips: [{ src: "media/q.mp4", to: 6 }] } } });
+    let paused = false;
+    Object.assign(p.video(), { pause: () => { paused = true; } });
+    Object.defineProperty(p.video(), "duration", { value: 20, configurable: true });
+    p.video().currentTime = 6;
+    p.video().dispatchEvent(new dom.Event("timeupdate") as unknown as Event);
+    assert.equal(p.root.getAttribute("data-mode"), "choice");
+    assert.ok(paused, "the 14s after the window do not play on behind the choices");
+  });
+
   it("keeps focus in the player when the Route panel is closed from its own button", () => {
     const p = mount({ author: { unwalked: [] } });
     p.key("r");

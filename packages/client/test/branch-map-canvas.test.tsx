@@ -182,6 +182,19 @@ async function blur(el: HTMLElement | undefined) {
     props?.onBlur?.({ currentTarget: el, target: el });
   });
 }
+/** linkedom lays nothing out; a test that needs the viewport's size gives it one, then takes it back. */
+async function sized<T>(run: () => Promise<T>): Promise<T> {
+  const proto = dom.HTMLElement.prototype as unknown as object;
+  Object.defineProperty(proto, "clientWidth", { get: () => 1200, configurable: true });
+  Object.defineProperty(proto, "clientHeight", { get: () => 800, configurable: true });
+  try {
+    return await run();
+  } finally {
+    delete (proto as Record<string, unknown>)["clientWidth"];
+    delete (proto as Record<string, unknown>)["clientHeight"];
+  }
+}
+
 /** React's own pointer handler on `el`, called as a browser would at the end of a gesture. */
 async function pointer(el: Element | undefined, handler: "onPointerDown" | "onPointerMove" | "onPointerUp") {
   assert.ok(el);
@@ -427,17 +440,20 @@ describe("the branch map canvas (design turn 157)", () => {
     assert.equal(focused(), player, "Tab from the last control that shows wraps to the player, not the map behind it");
   });
 
-  it("fits the canvas when a window opened narrow is widened", async () => {
-    narrowWindow = true;
-    const item = await mount();
-    narrowWindow = false;
-    await act(async () => {
-      __setStateForTest(state(ROUTING));
-    });
-    const stage = all(item, ".bm-stage")[0];
-    assert.ok(stage, "the canvas is back");
-    assert.doesNotMatch(stage.getAttribute("style") ?? "", /translate\(0px, 0px\) scale\(1\)/, "fitted, not left at actual size from the corner");
-  });
+  it("fits the canvas when a window opened narrow is widened", () =>
+    sized(async () => {
+      narrowWindow = true;
+      const item = await mount();
+      narrowWindow = false;
+      await act(async () => {
+        __setStateForTest(state(ROUTING));
+      });
+      const stage = all(item, ".bm-stage")[0];
+      assert.ok(stage, "the canvas is back");
+      const style = stage.getAttribute("style") ?? "";
+      assert.match(style, /translate\([\d.]+px, [\d.]+px\)/, "a real fit");
+      assert.doesNotMatch(style, /translate\(0px, 0px\) scale\(1\)/, "fitted, not left at actual size from the corner");
+    }));
 
   it("offers to remove a choice whose scene is gone, from its finding", async () => {
     const broken: Routing = { ...ROUTING, choices: [...ROUTING.choices, { id: "ch_ghost", from: "sc_gone", label: "Into the dark", to: "sc_pier" }] };
@@ -467,6 +483,36 @@ describe("the branch map canvas (design turn 157)", () => {
     await pointer(viewport, "onPointerUp");
     assert.ok(!viewport.classList.contains("bm-viewport--panning"), "cleared at once, not at the next unrelated render");
   });
+
+  it("plays a take the cut trimmed away as a slate, not as its whole file", () => {
+    const shot = (id: string) => ({ id, number: 1, title: id }) as never;
+    const scn = { ...scene("sc_x", 9, "X"), shots: [shot("sh_1")] } as never;
+    const production = {
+      meta: { id: "saltlight" },
+      selections: { sh_1: { acceptedTakeId: "tk_a", trimInSec: 9 } },
+      takes: [{ id: "tk_a", kind: "clip", media: "a.mp4", coversShots: ["sh_1"] }],
+    } as never;
+    // The cut's entry for sh_1 has no media: its 9s trim runs past the take's end.
+    const clips = sceneClips(production, "the-undersong", scn, new Map([["sh_1", { media: null, durationSec: 4 } as never]]));
+    assert.deepEqual(clips, [], "nothing to play is a slate, as the export refuses it");
+  });
+
+  it("pans with the wheel after a narrow window is widened", () => sized(async () => {
+    narrowWindow = true;
+    const item = await mount();
+    narrowWindow = false;
+    await act(async () => {
+      __setStateForTest(state(ROUTING));
+    });
+    const stage = () => all(item, ".bm-stage")[0]!.getAttribute("style") ?? "";
+    const before = stage();
+    await act(async () => {
+      const wheel = new dom.Event("wheel", { bubbles: true, cancelable: true }) as unknown as WheelEvent;
+      Object.assign(wheel, { deltaX: 40, deltaY: 0, ctrlKey: false, metaKey: false });
+      all(item, ".bm-viewport")[0]!.dispatchEvent(wheel);
+    });
+    assert.notEqual(stage(), before, "the wheel reaches the canvas that mounted after the list");
+  }));
 
   it("plays a covering pass once, even with a replacement between shots it covers", () => {
     const shot = (id: string) => ({ id, number: 1, title: id }) as never;

@@ -113,9 +113,13 @@ export function sceneClips(
       clips.push({ src: mediaUrl(slug, entry.media.path), ...played });
       continue;
     }
+    // Only a pass accepted whole, over several shots, is outside the cut and plays as it is.
+    // Anything else the cut leaves without media — trimmed past its end — plays as a slate, as
+    // the export refuses it: resolved back to its file, it played the footage the trim cut.
     const takeId = production.selections[shot.id]?.acceptedTakeId ?? null;
     const take = takeId === null ? undefined : production.takes.find((candidate) => candidate.id === takeId);
-    const media = take === undefined ? null : mediaTakeFor(production, take);
+    if (take === undefined || take.segment !== undefined || take.coversShots.length < 2) continue;
+    const media = mediaTakeFor(production, take);
     if (media === null || media.kind !== "clip" || whole.has(media.id)) continue;
     whole.add(media.id);
     clips.push({ src: mediaUrl(slug, `productions/${production.meta.id}/takes/${media.id}/${media.media}`) });
@@ -245,7 +249,9 @@ export function BranchMapScreen() {
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, [zoomBy, geometry !== null]);
+    // `narrow`: the canvas unmounts for the list and remounts after, and a listener left on the
+    // viewport that was, or never added to one that was not there yet, made the wheel do nothing.
+  }, [zoomBy, geometry !== null, narrow]);
 
   if (!world || !production) {
     return (
