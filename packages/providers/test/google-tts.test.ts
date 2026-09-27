@@ -20,6 +20,7 @@ it("uses exact pinned model ids, separate style metadata, stateless unary WAV an
     const client = new GoogleClient(async (url, init) => {
       assert.equal(url, "https://generativelanguage.googleapis.com/v1beta/interactions");
       assert.equal(new Headers(init?.headers).get("x-goog-api-key"), "secret-test-key");
+      assert.equal(init?.redirect, "error", "the custom key header must not follow redirects");
       const body = JSON.parse(String(init?.body));
       assert.deepEqual(body, { model, store: false, input: [{ type: "user_input", content: [{ type: "text", text: request.params.text,
         annotations: [{ type: "speech_metadata", style: request.params.instructions }] }] }],
@@ -68,6 +69,7 @@ it("models and presets are read-only, paginate, and offer only models the accoun
   const client = new GoogleClient(async (url, init) => {
     urls.push(url);
     assert.equal(init?.method, undefined);
+    assert.equal(init?.redirect, "error");
     return Response.json(url.includes("pageToken=") ? { models: [{ name: `models/${GEMINI_TTS_MODELS[1]}` }] }
       : { models: [{ name: "models/another-model" }], nextPageToken: "next page" });
   });

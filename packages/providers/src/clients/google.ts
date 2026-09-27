@@ -79,7 +79,7 @@ export class GoogleClient implements VoiceCatalogueClient {
     const seen = new Set<string>();
     let page = "";
     for (let i = 0; i < 20; i++) {
-      const response = await this.fetchImpl(`${this.baseUrl}/v1beta/models?pageSize=1000${page ? `&pageToken=${encodeURIComponent(page)}` : ""}`, { headers: this.headers(key) });
+      const response = await this.fetchImpl(`${this.baseUrl}/v1beta/models?pageSize=1000${page ? `&pageToken=${encodeURIComponent(page)}` : ""}`, { headers: this.headers(key), redirect: "error" });
       await this.checkStatus(response);
       const body = record(await response.json());
       if (!Array.isArray(body.models)) throw new Error("Google returned no model catalogue");
@@ -141,7 +141,7 @@ export class GoogleClient implements VoiceCatalogueClient {
     // for metadata; a counted-token compiler can later pack requests closer to the service cap.
     if (Buffer.byteLength(text + (instructions ?? ""), "utf8") > 7000) throw new ProviderRequestRejectedError("Google: this read needs smaller parts including its direction");
     const response = await this.fetchImpl(`${this.baseUrl}/v1beta/interactions`, {
-      method: "POST", headers: this.headers(key), signal: request.signal,
+      method: "POST", headers: this.headers(key), signal: request.signal, redirect: "error",
       body: JSON.stringify({ model: request.model, store: false,
         input: [{ type: "user_input", content: [{ type: "text", text,
           ...(instructions ? { annotations: [{ type: "speech_metadata", style: instructions }] } : {}) }] }],
