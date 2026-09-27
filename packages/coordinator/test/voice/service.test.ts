@@ -26,6 +26,34 @@ import { makeTempWorld } from "../world/helpers.js";
 import { FakeProvider } from "../queue/fake-provider.js";
 import { AppSettingsFile } from "../../src/app-settings.js";
 import { verifyArtifact } from "../../src/queue/verify.js";
+import { cloudVoiceSources, createProviderClients } from "@arke-studio/providers";
+
+it("Google catalogue activation uses only the current configured key and never synthesizes", async () => {
+  let key: string | null = null;
+  const requestedKeys: string[] = [];
+  const clients = createProviderClients({ fetch: async (_url, init) => {
+    assert.equal(init?.method ?? "GET", "GET");
+    const active = new Headers(init?.headers).get("x-goog-api-key")!;
+    requestedKeys.push(active);
+    if (active === "revoked") return new Response("Forbidden", { status: 403 });
+    return Response.json({ models: [{ name: `models/${active === "flash-project" ? "gemini-3.8-flash-tts" : "gemini-3.8-flash-lite-tts"}` }] });
+  } });
+  const service = new VoiceService({ sidecar: null, localPresets: [], cloudSources: cloudVoiceSources(clients),
+    getKey: async provider => provider === "google" ? key : null, emit: () => {} });
+  assert.deepEqual(await service.catalogue(), []);
+  assert.deepEqual(requestedKeys, []);
+  key = "flash-project";
+  const flash = await service.catalogue();
+  assert.equal(flash.length, 30);
+  assert.ok(flash.every(v => v.model === "gemini-3.8-flash-tts"));
+  key = "lite-project";
+  assert.ok((await service.catalogue()).every(v => v.model === "gemini-3.8-flash-lite-tts"));
+  key = "revoked";
+  assert.deepEqual(await service.catalogue(), []);
+  key = null;
+  assert.deepEqual(await service.catalogue(), []);
+  assert.deepEqual(requestedKeys, ["flash-project", "lite-project", "revoked"]);
+});
 
 const CLOCK = () => "2026-08-01T12:00:00.000Z";
 

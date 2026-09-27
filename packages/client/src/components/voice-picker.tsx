@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { supportsVoiceUse, voiceTargetKey } from "@arke-studio/contracts";
+import { cloudSpeechPreference, readerName, supportsVoiceUse, voiceTargetKey } from "@arke-studio/contracts";
 import { requestVoiceCatalogue, useStore, type ReadingVoice } from "../lib/store.js";
 import { cx } from "./ui.js";
 import { User, Waveform, X } from "./icons.js";
@@ -63,7 +63,8 @@ export function VoicePickerDialog({
     () =>
       (catalogue ?? [])
         .filter((v: ReadingVoice) => supportsVoiceUse(v, use))
-        .filter((v: ReadingVoice) => (where === "all" ? true : where === "local" ? v.local : !v.local)),
+        .filter((v: ReadingVoice) => (where === "all" ? true : where === "local" ? v.local : !v.local))
+        .sort((a, b) => Number(b.local) - Number(a.local) || cloudSpeechPreference(a, use === "narration" ? "routine" : "creative") - cloudSpeechPreference(b, use === "narration" ? "routine" : "creative")),
     [catalogue, where, use],
   );
   const visibleCatalogue = useMemo(
@@ -133,7 +134,7 @@ export function VoicePickerDialog({
                 </span>
               )}
               <span className="fy-voices__where">
-                {voice.unavailableReason ?? (voice.local ? "on this machine" : voice.provider)}
+                {voice.unavailableReason ?? (voice.local ? "on this machine" : voice.provider === "google" ? `${readerName(voice)}${cloudSpeechPreference(voice, use === "narration" ? "routine" : "creative") === 0 ? " · Recommended" : ""}` : voice.provider)}
               </span>
             </button>
           ))}

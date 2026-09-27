@@ -3,14 +3,15 @@ import { geminiSpeechPricing } from "./gemini-tts-pricing.js";
 
 export const GEMINI_SPEECH_INPUT_BYTES = 7000;
 
-/** Qualification rows, not entries in the shipped catalogue (SPEC-049 R-21, R-25, R-34). */
+/** Preset speech rows; custom voices and unqualified controls remain unavailable (SPEC-049). */
 export function geminiSpeechModel(variant: "flash" | "lite"): ManifestModel {
   return {
     id: variant === "flash" ? "gemini-3.8-flash-tts" : "gemini-3.8-flash-lite-tts",
     provider: "google", capability: "voice-tts",
     displayName: variant === "flash" ? "Gemini 3.8 Flash TTS" : "Gemini 3.8 Flash-Lite TTS",
     accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-    limits: { audioFormat: "wav", maxSpeechUtf8Bytes: GEMINI_SPEECH_INPUT_BYTES },
+    limits: { audioFormat: "wav", maxSpeechUtf8Bytes: GEMINI_SPEECH_INPUT_BYTES,
+      deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"] },
     pricing: geminiSpeechPricing(variant),
     // Direction is best-effort language in speech_metadata.style, never a spoken prefix.
     // Native speed, point tags and exact pauses remain held until their own qualification.
