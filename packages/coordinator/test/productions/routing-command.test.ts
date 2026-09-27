@@ -73,6 +73,41 @@ describe("the branch map's routing commands", () => {
     assert.deepEqual(after.choices.map((choice) => choice.id).sort(), ["ch_a", "ch_b"]);
   });
 
+  it("two quick adds with one label both land, the second under a suffixed id", async () => {
+    const { send, routing } = await harness();
+    await send({ operation: "set-start", sceneId: "sc_02" });
+    // The map derives the id from the label against the routing it last saw, so both carry one id.
+    await Promise.all([
+      send({ operation: "add-choice", choice: { id: "ch_go-on", from: "sc_02", label: "Go on", to: "sc_04" } }),
+      send({ operation: "add-choice", choice: { id: "ch_go-on", from: "sc_04", label: "Go on", to: "sc_06" } }),
+    ]);
+    const after = await routing();
+    assert.deepEqual(
+      after.choices.map((choice) => [choice.id, choice.from]),
+      [["ch_go-on", "sc_02"], ["ch_go-on-2", "sc_04"]],
+    );
+  });
+
+  it("refuses to put an excluded scene on a route, whichever command would", async () => {
+    const { send, routing } = await harness();
+    await send({ operation: "set-start", sceneId: "sc_02" });
+    await send({ operation: "add-choice", choice: { id: "ch_on", from: "sc_02", label: "Go on", to: "sc_04" } });
+    const before = await routing();
+    // Excluding a scene the route reaches would ship its choice with nothing to play.
+    await send({ operation: "exclude-scene", sceneId: "sc_04", reason: "held back" });
+    await send({ operation: "exclude-scene", sceneId: "sc_02", reason: "the start" });
+    assert.deepEqual(await routing(), before, "a scene on a route stays on it");
+
+    // A scene no route reaches can be excluded; then nothing may route into it or start there.
+    await send({ operation: "exclude-scene", sceneId: "sc_06", reason: "kept for the audio" });
+    const excluded = await routing();
+    assert.deepEqual(excluded.excluded, [{ sceneId: "sc_06", reason: "kept for the audio" }]);
+    await send({ operation: "add-choice", choice: { id: "ch_down", from: "sc_04", label: "Go down", to: "sc_06" } });
+    await send({ operation: "edit-choice", choiceId: "ch_on", changes: { to: "sc_06" } });
+    await send({ operation: "set-start", sceneId: "sc_06" });
+    assert.deepEqual(await routing(), excluded, "no command routes into an excluded scene");
+  });
+
   it("refuses a command that does not apply, and writes nothing", async () => {
     const { send, routing } = await harness();
     await send({ operation: "set-start", sceneId: "sc_02" });

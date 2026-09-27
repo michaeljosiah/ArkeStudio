@@ -68,6 +68,37 @@ export async function saveRouting(
   return routing;
 }
 
+/** Scenes a route reaches: the start and everything its choices lead to. */
+function reachable(routing: Routing): Set<string> {
+  const seen = new Set([routing.start]);
+  const queue = [routing.start];
+  while (queue.length > 0) {
+    const at = queue.shift()!;
+    for (const choice of routing.choices) {
+      if (choice.from === at && !seen.has(choice.to)) {
+        seen.add(choice.to);
+        queue.push(choice.to);
+      }
+    }
+  }
+  return seen;
+}
+
+/**
+ * An excluded scene is off every route (brief §2: exclusion is what makes "unreachable" an
+ * author's decision). A scene a route reaches could be excluded, and a choice routed into an
+ * excluded one; the findings did not object, so the export was offered, and then refused after
+ * copying media, because the excluded scene ships none. The commands refuse the shape instead.
+ */
+function refuseExcludedOnRoute(next: Routing): void {
+  const excluded = new Set(next.excluded.map((entry) => entry.sceneId));
+  for (const id of reachable(next)) {
+    if (excluded.has(id)) {
+      throw new Error(`${id} is excluded but a route reaches it — remove or retarget the choices into it first.`);
+    }
+  }
+}
+
 /** Apply one closed routing command; the full record remains the existing routing authority. */
 export function applyRoutingCommand(current: Routing | null, command: RoutingCommand): Routing {
   if (current === null) {
@@ -152,6 +183,16 @@ export function applyRoutingCommand(current: Routing | null, command: RoutingCom
       next = { ...current, groups: current.groups.filter((group) => group.id !== command.groupId) };
       break;
   }
+  // Only the commands that can put an excluded scene on a route are held to it, so a routing file
+  // written before this rule can still be edited everywhere else, and repaired.
+  if (
+    command.operation === "set-start" ||
+    command.operation === "add-choice" ||
+    command.operation === "edit-choice" ||
+    command.operation === "exclude-scene"
+  ) {
+    refuseExcludedOnRoute(next);
+  }
   return RoutingSchema.parse({ ...next, version: current.version + 1 });
 }
 
@@ -182,7 +223,17 @@ export function applyRoutingCommandOnDisk(
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     }
-    return saveRouting(store, productionId, applyRoutingCommand(current, command), options);
+    // The map derives a new choice's id from its label against the routing it last saw; two quick
+    // adds with one label derive the same id, and the second would be refused as a duplicate. The
+    // id is the map's own coinage, so it is made unique here, against the file it applies to.
+    let applied = command;
+    if (command.operation === "add-choice" && current !== null) {
+      const taken = new Set(current.choices.map((choice) => choice.id));
+      let id = command.choice.id;
+      for (let n = 2; taken.has(id); n++) id = `${command.choice.id}-${n}`;
+      applied = { ...command, choice: { ...command.choice, id } };
+    }
+    return saveRouting(store, productionId, applyRoutingCommand(current, applied), options);
   });
   routingEdits.set(store, run);
   return run;

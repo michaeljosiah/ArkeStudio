@@ -222,6 +222,24 @@ describe("the branch map canvas (design turn 157)", () => {
     ]);
   });
 
+  it("walks the choices after the cards at the keyboard, and Delete on a choice asks first", async () => {
+    const item = await mount();
+    const labels = all(item, ".bm-label");
+    assert.ok(labels.every((el) => el.getAttribute("tabindex") === "-1"), "one tab stop: the start card, not the choices");
+    assert.ok(labels.every((el) => el.getAttribute("data-walk")?.startsWith("c:")), "every choice is in the walk");
+    const wait = labels.find((el) => text(el) === "Wait for low water");
+    await key(wait, "Delete");
+    assert.match(text(all(item, '[role="alertdialog"]')[0] ?? null), /The Vigil — no way in/);
+    assert.deepEqual(commands(item), [], "Delete asks; it does not remove");
+  });
+
+  it("offers no exclusion for a scene a route reaches", async () => {
+    const item = await mount();
+    await click(card(item, "sc_vigil"));
+    assert.match(text(all(item, ".bm-insp")[0]!), /on a route/);
+    assert.equal(button(item, "Exclude…"), undefined, "the export would ship its choices with nothing to play");
+  });
+
   it("excludes a scene only with a reason", async () => {
     const item = await mount();
     await click(card(item, "sc_undertow"));

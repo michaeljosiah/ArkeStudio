@@ -350,9 +350,15 @@ export function BranchMapScreen() {
    * rather than a second opinion about it (brief §3, IV-M2).
    */
   const walkOrder = [...layout.layers.flat(), ...geometry.tray];
+  /*
+   * The keyboard's walk: the cards in that order, then the choices in the order they are drawn
+   * (turn 157 — every node and edge reachable in layout order). One tab stop for all of it; a
+   * choice's key is `c:` and a scene's `s:`, so the two can share one roving stop.
+   */
+  const walk = [...walkOrder.map((id) => `s:${id}`), ...geometry.edges.map((edge) => `c:${edge.id}`)];
   // Before anybody has moved, the tab stop is the first option — the start scene's layer. A
-  // `focused` that no longer exists (a scene was removed under it) falls back the same way.
-  const tabStop = focused !== null && walkOrder.includes(focused) ? focused : walkOrder[0];
+  // `focused` that no longer exists (a scene or choice was removed under it) falls back the same way.
+  const tabStop = focused !== null && walk.includes(focused) ? focused : walk[0];
 
   const selectedChoice = selection?.kind === "choice" ? routing.choices.find((choice) => choice.id === selection.id) ?? null : null;
   const consequences =
@@ -414,23 +420,31 @@ export function BranchMapScreen() {
     }
   };
 
-  const optionKeys = (sceneId: string) => (event: ReactKeyboardEvent<HTMLDivElement>) => {
+  const walkKeys = (key: string) => (event: ReactKeyboardEvent<HTMLElement>) => {
+    const isChoice = key.startsWith("c:");
+    const id = key.slice(2);
+    const choice = isChoice ? routing.choices.find((candidate) => candidate.id === id) : undefined;
     const step =
       event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : event.key === "ArrowUp" || event.key === "ArrowLeft" ? -1 : 0;
     let next: string | undefined;
     if (step !== 0) {
       // Clamped, not wrapped: an arrow at the end of a graph should feel like the end of the graph.
-      const index = walkOrder.indexOf(sceneId);
-      next = walkOrder[Math.min(walkOrder.length - 1, Math.max(0, index + step))];
-    } else if (event.key === "Home") next = walkOrder[0];
-    else if (event.key === "End") next = walkOrder[walkOrder.length - 1];
+      const index = walk.indexOf(key);
+      next = walk[Math.min(walk.length - 1, Math.max(0, index + step))];
+    } else if (event.key === "Home") next = walk[0];
+    else if (event.key === "End") next = walk[walk.length - 1];
     else if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      setSelection({ kind: "scene", id: sceneId });
+      setSelection(isChoice ? { kind: "choice", id } : { kind: "scene", id });
+      return;
+    } else if ((event.key === "Delete" || event.key === "Backspace") && isChoice) {
+      // Delete on a focused choice asks first, naming what breaks (157e).
+      event.preventDefault();
+      setSelection({ kind: "choice", id, removing: true });
       return;
     } else if (event.key === "p" || event.key === "P") {
       event.preventDefault();
-      setPreview({ from: sceneId, at: Date.now() });
+      setPreview({ from: choice ? choice.from : id, at: Date.now() });
       return;
     } else if (event.key === "+" || event.key === "=") {
       event.preventDefault();
@@ -448,10 +462,10 @@ export function BranchMapScreen() {
       setSelection(null);
       return;
     }
-    if (next === undefined || next === sceneId) return;
+    if (next === undefined || next === key) return;
     event.preventDefault();
     setFocused(next);
-    const el = event.currentTarget.closest('[role="listbox"]')?.querySelector(`[role="option"][data-scene="${CSS.escape(next)}"]`);
+    const el = viewportRef.current?.querySelector(`[data-walk="${CSS.escape(next)}"]`);
     if (el instanceof HTMLElement) el.focus();
   };
 
@@ -478,9 +492,10 @@ export function BranchMapScreen() {
          * what a listbox exists to avoid: Tab reaches the map, the arrows walk it, Home and End
          * jump to the start and the last.
          */
-        tabIndex={node.id === tabStop ? 0 : -1}
-        onFocus={() => setFocused(node.id)}
-        onKeyDown={optionKeys(node.id)}
+        data-walk={`s:${node.id}`}
+        tabIndex={`s:${node.id}` === tabStop ? 0 : -1}
+        onFocus={() => setFocused(`s:${node.id}`)}
+        onKeyDown={walkKeys(`s:${node.id}`)}
         onClick={() => {
           setSelection({ kind: "scene", id: node.id });
           setHighlight(new Set());
@@ -603,7 +618,10 @@ export function BranchMapScreen() {
           <button
             key={edge.id}
             type="button"
-            tabIndex={-1}
+            data-walk={`c:${edge.id}`}
+            tabIndex={`c:${edge.id}` === tabStop ? 0 : -1}
+            onFocus={() => setFocused(`c:${edge.id}`)}
+            onKeyDown={walkKeys(`c:${edge.id}`)}
             className={cx(
               "bm-label",
               unwalked.has(edge.id) && "bm-label--unwalked",
@@ -780,6 +798,7 @@ export function BranchMapScreen() {
     const outs = routing.choices.filter((choice) => choice.from === scene.id);
     const ending = endings.get(scene.id);
     const reason = excluded.get(scene.id);
+    const onRoute = geometry.nodes.some((node) => node.id === scene.id);
     return (
       <Inspector title="Scene" sub={scene.id} onClose={() => setSelection(null)}>
         <div className="bm-scenehead">
@@ -831,9 +850,14 @@ export function BranchMapScreen() {
                 Include
               </Button>
             </>
+          ) : onRoute ? (
+            // A scene a route reaches cannot be excluded: the export would ship its choices with
+            // nothing to play. Remove or retarget the choices into it first (the coordinator
+            // refuses the command too).
+            <span className="bm-kv__v bm-muted">on a route</span>
           ) : selection.excluding ? null : (
             <>
-              <span className="bm-kv__v bm-muted">{unreachable.has(scene.id) ? "no way in" : "on the map"}</span>
+              <span className="bm-kv__v bm-muted">no way in</span>
               <Button size="sm" onClick={() => setSelection({ kind: "scene", id: scene.id, excluding: true })}>
                 <EyeOff size={11} />
                 Exclude…
@@ -841,7 +865,7 @@ export function BranchMapScreen() {
             </>
           )}
         </div>
-        {selection.excluding && reason === undefined && (
+        {selection.excluding && reason === undefined && !onRoute && (
           <ExcludeField
             onCancel={() => setSelection({ kind: "scene", id: scene.id })}
             onExclude={(why) => {

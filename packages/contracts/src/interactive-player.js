@@ -232,12 +232,14 @@ export function mountInteractivePlayer(root, options) {
     render();
   }
 
-  function loadClip(index, at) {
+  /** Load one of the scene's clips and seek into it: to `at` seconds, or to `ratio` of its length once known. */
+  function loadClip(index, at, ratio) {
     const clips = media[state.sceneId] || [];
     clipIndex = Math.max(0, Math.min(index, clips.length - 1));
     video.setAttribute("src", clips[clipIndex]);
     const seek = () => {
-      if (at > 0 && at < (video.duration || Infinity)) video.currentTime = at;
+      const target = ratio !== undefined && video.duration ? ratio * video.duration : at;
+      if (target > 0 && target < (video.duration || Infinity)) video.currentTime = target;
       video.removeEventListener("loadedmetadata", seek);
     };
     video.addEventListener("loadedmetadata", seek);
@@ -444,9 +446,10 @@ export function mountInteractivePlayer(root, options) {
       const box = seg || scrub;
       const rect = box.getBoundingClientRect ? box.getBoundingClientRect() : { left: 0, width: 0 };
       const ratio = rect.width > 0 ? Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) : 0;
+      // A click in another shot's segment seeks to that point in that shot, not its start.
       if (index === clipIndex) {
         if (video.duration) video.currentTime = ratio * video.duration;
-      } else if (index >= 0) loadClip(index, 0);
+      } else if (index >= 0) loadClip(index, 0, ratio);
       return;
     }
     const act = target.closest("[data-act]");

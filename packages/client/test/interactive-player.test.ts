@@ -119,6 +119,19 @@ describe("the player, as the author previews it (156g)", () => {
     assert.equal(p.root.getAttribute("data-mode"), "choice");
   });
 
+  it("seeks into another shot where its segment was clicked, not at its start", () => {
+    const p = mount({ from: "sc_towers", author: { unwalked: [] } });
+    const second = p.all(".aip-seg")[1]!;
+    Object.assign(second, { getBoundingClientRect: () => ({ left: 0, width: 100 }) });
+    const event = new dom.Event("click", { bubbles: true }) as unknown as MouseEvent;
+    Object.assign(event, { clientX: 75 });
+    second.dispatchEvent(event);
+    assert.equal(p.video().getAttribute("src"), "media/sh_2.mp4", "the shot whose segment was clicked");
+    Object.defineProperty(p.video(), "duration", { value: 40, configurable: true });
+    p.video().dispatchEvent(new dom.Event("loadedmetadata") as unknown as Event);
+    assert.equal(p.video().currentTime, 30, "three quarters of the way in, where the click was");
+  });
+
   it("takes new walk evidence while it runs", () => {
     const p = mount({ author: { unwalked: ["ch_stay", "ch_cross"] } });
     p.handle.setUnwalked(["ch_cross"]);
