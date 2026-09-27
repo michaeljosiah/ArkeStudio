@@ -167,6 +167,20 @@ export interface CutEntry {
   label: string;
 }
 
+/**
+ * The part of an entry's file that plays, in seconds of that file: from the trim or the segment's
+ * in-point to its out-point or the end of the shot's slot, whichever comes first — the window the
+ * export conforms each clip to. The branch map's preview and the interactive package both play
+ * it, so neither runs a take's discarded head or tail. `to` is absent when nothing bounds it.
+ */
+export function playbackWindow(entry: Pick<CutEntry, "media" | "durationSec">): { from: number; to?: number } | null {
+  if (!entry.media) return null;
+  const from = entry.media.inSec ?? 0;
+  const slot = entry.durationSec > 0 ? from + entry.durationSec : Infinity;
+  const to = Math.min(entry.media.outSec ?? Infinity, slot);
+  return Number.isFinite(to) ? { from, to } : { from };
+}
+
 export interface DerivedCut {
   entries: CutEntry[];
   covered: number;

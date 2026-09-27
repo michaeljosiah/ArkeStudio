@@ -1,5 +1,5 @@
 import { ReadAloudConfirmation } from "../components/read-aloud-confirmation.js";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import {
   CHARACTER_ROLE_MAX,
@@ -32,7 +32,7 @@ import {
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, Card, IconButton, Input, Textarea, cx } from "../components/ui.js";
-import { Archive, ChevronRight, Copy, Pencil, Plus, Search, Users } from "../components/icons.js";
+import { Archive, ArrowRight, ChevronRight, Copy, Pencil, Plus, Search, Users } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
 import { Loading } from "../components/loading.js";
 import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
@@ -210,7 +210,7 @@ export function WorldLayout() {
     /\/(chat|edit)(\/[^/]+)?$/.test(path) ||
     /\/canon\/(new|[^/]+\/thread)$/.test(path);
   return (
-    <div className="fy-app">
+    <div className="fy-app fy-worldapp">
       <AppChrome
         back={{ label: "Worlds", to: "/worlds" }}
         context={
@@ -225,7 +225,7 @@ export function WorldLayout() {
           column measures it instead of subtracting a guessed constant from the viewport: the
           nav above it is sticky and therefore in flow, and any condition banner is too. */}
       <div className={cx("fy-content", fixedFrame && "fy-content--fill", onCast && "fy-content--cast", path.includes("/productions/setup/") && "fy-content--setup")}>
-        <nav className="fy-pillnav">
+        <WorldNavigation path={path}>
           {nav.map(([slug, label]) => (
             slug === "cast" && onSheets ? (
               <Link key={slug} to={`/w/${worldId}/cast`} aria-current="page"
@@ -248,13 +248,40 @@ export function WorldLayout() {
               </NavLink>
             )
           ))}
-        </nav>
+        </WorldNavigation>
         <WorldConditionBanners />
         {refusal ? <WorldOpenRefusal worldId={worldId!} reason={refusal.reason} /> :
           world ? <Outlet /> : <Loading label="opening the world" />}
       </div>
     </div>
   );
+}
+
+/** The capsule stays put on desktop; a phone scrolls its pills independently of the page. */
+function WorldNavigation({ path, children }: { path: string; children: ReactNode }) {
+  const sentinel = useRef<HTMLSpanElement>(null);
+  const nav = useRef<HTMLElement>(null);
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined") return;
+    const marker = sentinel.current!;
+    const observer = new IntersectionObserver(([entry]) => setStuck(!entry!.isIntersecting), {
+      root: marker.closest(".fy-content"),
+    });
+    observer.observe(marker);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    if (window.matchMedia?.("(max-width: 599px)").matches) {
+      nav.current?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: "nearest", inline: "center" });
+    }
+  }, [path]);
+  return <>
+    <span ref={sentinel} className="fy-worldnav__sentinel" aria-hidden="true" />
+    <div className={cx("fy-worldnav", stuck && "fy-worldnav--stuck")}>
+      <nav ref={nav} className="fy-pillnav" aria-label="World">{children}</nav>
+    </div>
+  </>;
 }
 
 /** Staleness, closed-world edits and parse failures — stated, never silent. */
@@ -286,7 +313,7 @@ function WorldConditionBanners() {
   const hasConditions = world.externalEdits.length > 0 || world.problems.length > 0 || notice !== null;
   if (!hasConditions) return null;
   return (
-    <div className="fy-worldconditions" style={{ display: "grid", gap: "var(--space-3)", padding: "var(--space-4) var(--gutter) 0" }}>
+    <div className="fy-worldconditions">
       {notice && (
         <div className="fy-buildnotice" role="status">
           <span className="fy-buildnotice__dot" aria-hidden="true" />
@@ -311,7 +338,7 @@ function WorldConditionBanners() {
           their version, so the history still explains itself.
           <div style={{ display: "grid", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
             {world.externalEdits.map((e) => (
-              <div key={e.path} style={{ display: "flex", gap: "var(--space-3)", alignItems: "center" }}>
+              <div key={e.path} className="fy-worldconditions__edit">
                 <span className="mono" style={{ fontSize: "var(--text-xs)" }}>
                   {e.path} · {e.kind}
                 </span>
@@ -399,9 +426,8 @@ export function WorldOverviewScreen() {
   // The world's own cast, not every sheet on disk: a production's guests live in the same
   // directories and would otherwise crowd the fan with people the world has never met
   // (SPEC-020 R-8).
-  const characters = worldSheets(world.sheets)
-    .filter((s) => s.type === "character" && s.retired !== true)
-    .slice(0, 5);
+  const cast = worldSheets(world.sheets).filter((s) => s.type === "character" && s.retired !== true);
+  const characters = cast.slice(0, 5);
   // The fan is where "1 awaiting you" and "No one lives here yet" used to sit on screen at the
   // same time, saying opposite things about the same world (issue 228). The one awaiting is a
   // character being drafted, so it takes a card in the fan like any other.
@@ -423,6 +449,7 @@ export function WorldOverviewScreen() {
   ];
   return (
     <div data-screen="world-overview">
+      <div className="fy-worldintro">
       <div className="fy-hero">
         <div className="fy-hero__eyebrow">
           A world of yours · canon v{world.meta.canonRevision}
@@ -478,6 +505,10 @@ export function WorldOverviewScreen() {
           four controls over an image the hero does not even show, under the world's own title.
         */}
       </div>
+      <div className="fy-worldcast__head">
+        <span className="fy-hero__eyebrow">Cast · {cast.length}</span>
+        <Link to={`/w/${worldId}/cast`}>All <ArrowRight size={14} /></Link>
+      </div>
       <div className="fy-fan">
         {characters.map((sheet, i) => {
           const slot = FAN[i] ?? FAN[2]!;
@@ -485,7 +516,7 @@ export function WorldOverviewScreen() {
             <div
               key={sheet.id}
               className="fy-fan__slot"
-              style={{ marginLeft: slot.left, top: slot.top, zIndex: slot.z }}
+              style={{ "--fan-x": `${slot.left}px`, "--fan-y": `${slot.top}px`, "--fan-r": `${slot.rotate}deg`, zIndex: slot.z } as CSSProperties}
             >
               <div
                 className="fy-fan__drift"
@@ -493,7 +524,6 @@ export function WorldOverviewScreen() {
               >
                 <div
                   className="fy-polaroid"
-                  style={{ transform: `rotate(${slot.rotate}deg)` }}
                   onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}`)}
                 >
                   <div className="fy-polaroid__frame">
@@ -524,7 +554,7 @@ export function WorldOverviewScreen() {
             <div
               key={sheet.proposalId}
               className="fy-fan__slot"
-              style={{ marginLeft: slot.left, top: slot.top, zIndex: slot.z }}
+              style={{ "--fan-x": `${slot.left}px`, "--fan-y": `${slot.top}px`, "--fan-r": `${slot.rotate}deg`, zIndex: slot.z } as CSSProperties}
             >
               <div
                 className="fy-fan__drift"
@@ -532,7 +562,6 @@ export function WorldOverviewScreen() {
               >
                 <div
                   className="fy-polaroid fy-polaroid--pending"
-                  style={{ transform: `rotate(${slot.rotate}deg)` }}
                   onClick={() => navigate(pendingSheetRoute(worldId, sheet) ?? `/w/${worldId}/cast`)}
                 >
                   <div className="fy-polaroid__frame fy-polaroid__frame--pending">
@@ -591,6 +620,7 @@ export function WorldOverviewScreen() {
           </div>
           <Button variant="secondary">Write</Button>
         </div>
+      </div>
       </div>
       {/*
        * Below the fold (design 63b). Needs you, Open threads and Recent changes used to stack
@@ -717,12 +747,12 @@ function WorldProductions({ worldId, world }: { worldId: string; world: WorldBun
   const navigate = useNavigate();
   const productions = world.productions;
   return (
-    <section className="fy-wsection">
+    <section className="fy-wsection fy-wsection--productions">
       <SectionHead
         eyebrow="Productions"
         title="One world, many forms."
         aside={
-          <Button variant="secondary" onClick={() => navigate(`/w/${worldId}/productions/new`)}>
+          <Button className="fy-world-newproduction" variant="secondary" onClick={() => navigate(`/w/${worldId}/productions/new`)}>
             <Plus size={13} /> New production
           </Button>
         }
@@ -737,8 +767,8 @@ function WorldProductions({ worldId, world }: { worldId: string; world: WorldBun
           // Never a hole where a card is missing: two productions are two halves, not two thirds
           // of a row — the rule the location and faction grids already follow.
           style={{
-            gridTemplateColumns: `repeat(${Math.min(Math.max(productions.length, 2), 3)}, minmax(0, 1fr))`,
-          }}
+            "--cols": Math.min(Math.max(productions.length, 2), 3),
+          } as CSSProperties}
         >
           {productions.map((p) => {
             const shots = p.scenes.flatMap((s) => orderedShots(s));

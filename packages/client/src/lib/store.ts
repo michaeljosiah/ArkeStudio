@@ -1,4 +1,4 @@
-import type { AudiobookReader, PromptReview, PromptSourceSnapshot } from "@arke-studio/contracts";
+import type { AudiobookReader, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
 import { setMediaStateSource } from "./media.js";
 import { devSession } from "./dev-session.js";
 import { isRemoteSession, remoteSocketUrl } from "./remote-session.js";
@@ -4433,6 +4433,14 @@ export function prepareTableRead(worldId: string, productionId: string, sceneId:
 /** Save the routing record (epic 401): the strict parse server-side is the no-state gate. */
 export function saveRouting(worldId: string, productionId: string, routing: unknown): void {
   send({ kind: "save-routing", worldId, productionId, routing });
+}
+
+/**
+ * One edit to the routing, as a closed command (design turn 157): applied to the file on disk,
+ * so two quick edits from the branch map both land rather than the second overwriting the first.
+ */
+export function sendRoutingCommand(worldId: string, productionId: string, command: RoutingCommand): void {
+  send({ kind: "routing-command", worldId, productionId, command });
 }
 
 /** One preview traversal, appended durably (epic 401, brief §4). */

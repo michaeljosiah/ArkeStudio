@@ -126,3 +126,7 @@ export * from "./publication-video.js";
 export * from "./publication-host.js";
 export * from "./adapters.js";
 export * from "./speech-pricing.js";
+
+// The interactive player (design turn 156): the module the app mounts, and its text for the exporter.
+export * from "./interactive-player.js";
+export * from "./interactive-player-source.js";

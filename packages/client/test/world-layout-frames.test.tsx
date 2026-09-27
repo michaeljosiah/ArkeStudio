@@ -6,6 +6,7 @@ import { App } from "../src/App.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
+import { parseHTML } from "linkedom";
 
 /**
  * Which world screens are a fixed frame (issue 1007).
@@ -34,6 +35,27 @@ function at(path: string): string {
 }
 
 const W = `/w/${FIXTURE_WORLD_ID}`;
+
+describe("world navigation (design 160)", () => {
+  it("keeps all eight destinations in order inside the scrollable strip", () => {
+    const { document } = parseHTML(at(W));
+    const nav = document.querySelector('nav[aria-label="World"]')!;
+    assert.ok(nav.parentElement?.classList.contains("fy-worldnav"));
+    assert.deepEqual([...nav.querySelectorAll("a")].map(a => a.textContent), [
+      "Overview", "Art direction", "Cast", "Bible", "Canon", "World Chat", "Artifacts", "Productions",
+    ]);
+    assert.equal(nav.querySelector('[aria-current="page"]')?.textContent, "Overview");
+  });
+
+  it("marks exactly the current destination, including the shared Cast link", () => {
+    for (const [path, label] of [["canon", "Canon"], ["bible", "Bible"], ["locations", "Cast"], ["factions", "Cast"], ["props", "Cast"], ["cast/maren-kest", "Cast"]]) {
+      const { document } = parseHTML(at(`${W}/${path}`));
+      const active = document.querySelectorAll('nav[aria-label="World"] [aria-current="page"]');
+      assert.equal(active.length, 1, path);
+      assert.equal(active[0]?.textContent, label, path);
+    }
+  });
+});
 
 describe("the world's fixed-frame screens (issue 1007)", () => {
   it("fills the column on art direction, the gate screens and World Chat", () => {

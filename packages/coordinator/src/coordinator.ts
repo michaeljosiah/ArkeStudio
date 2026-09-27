@@ -238,6 +238,7 @@ import {
 import { recordFrameRunOutcome } from "./productions/frame-run-outcome.js";
 import {
   appendTraversal,
+  applyRoutingCommandOnDisk,
   exportInteractive,
   interactiveFindings,
   proposeBranchCanon,
@@ -9928,9 +9929,42 @@ export class Coordinator {
         }
         return;
       }
+      case "routing-command": {
+        const store = this.opts.provider.openStore?.();
+        // The frame names its world: handled after a switch to another world that happens to hold
+        // a production with the same slug, it must not land there.
+        if (!store || store.worldId !== msg.worldId) return;
+        if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
+        try {
+          // Applied to the routing on disk, not a copy the map held: two edits in flight each
+          // land on the other's result (design turn 157).
+          await applyRoutingCommandOnDisk(store, msg.productionId, msg.command);
+          // Only the world the edit landed in, and only while it is still the open one: a world
+          // opened while the edit was in flight must not be closed to reload the edited one.
+          if (!this.stillOpen(store)) return;
+          this.refreshIfStillOpen(store);
+          await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          void this.appLog?.append({
+            kind: "routing.refused",
+            reason,
+            detail: { productionId: msg.productionId, operation: msg.command.operation },
+          });
+          // The map closes its editor as it sends; a refusal logged and nothing else read as the
+          // edit silently vanishing. The author is told why, in the toast every refusal uses.
+          if (this.stillOpen(store)) {
+            this.emit({ type: "command.failed", at: new Date().toISOString(), command: msg.kind, requestId: null, reason });
+            this.transport.broadcastSnapshot();
+          }
+        }
+        return;
+      }
       case "record-traversal": {
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
+        // Evidence is durable and clears export blockers: a walk from a world that has since been
+        // switched away from must not land in another world that happens to share the ids.
+        if (!store || store.worldId !== msg.worldId) return;
         const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
         if (!production || production.routing === null) return;
         await appendTraversal(store, msg.productionId, {
@@ -9941,12 +9975,13 @@ export class Coordinator {
           to: msg.to,
           route: msg.route,
         }).catch(() => {});
+        if (!this.stillOpen(store)) return;
         await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
         return;
       }
       case "list-routing-findings": {
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
+        if (!store || store.worldId !== msg.worldId) return;
         await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
         return;
       }
@@ -16937,6 +16972,9 @@ export class Coordinator {
     const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
     if (!production) return;
     const findings = await interactiveFindings(store, production).catch(() => []);
+    // The fold reads the evidence file, and another world can open meanwhile: its map, listening
+    // by production id, would take this world's blockers as its own.
+    if (!this.stillOpen(store)) return;
     this.emit({
       at: new Date().toISOString(),
       type: "production.routing-findings",

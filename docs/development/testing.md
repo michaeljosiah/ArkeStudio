@@ -189,6 +189,24 @@ The focused domain suites are contracts `test/production-setup.test.ts`, coordin
 `test/production-setup.test.tsx`. The lifecycle suite injects actual commit journal failures;
 its recovery assertions must pass without dismissing external-edit warnings.
 
+## World overview on phone and Fold7
+
+`node scripts/smoke-world-layout.mjs` bundles the real world layout and overview with the
+complete client stylesheet stack, then opens disposable fixtures in headless Chrome. Set
+`ARKE_CHROME` if Chrome is not at the platform's default installation path. It checks 360,
+375 and 390px phones, a 600px window, Fold7 and desktop, including sticky tabs, active Canon
+and Cast visibility, long file-warning paths, pending portraits and keyboard renaming.
+
+The reported temporary directory contains implementation screenshots, the four turn 160
+master frames and geometry measurements. Main composition bounds must agree within one CSS
+pixel. Status bars and home indicators are excluded; the phone's bottom safe area is simulated
+as 20px. Cast drift is frozen in both captures, and actual hover/pointer media queries are
+asserted. Counts and progress remain derived from the fixture, so copy differs from the
+master's illustrative data. Inspect the pictures alongside the measurements.
+
+`node scripts/smoke-world-layout.mjs --baseline <pre-change-commit>` also renders the old
+world component and fidelity stylesheet against the same desktop fixture for comparison.
+
 ## Launch surface and remote pairing
 
 `node scripts/smoke-launch-layout.mjs` renders the real launch components in sandboxed
