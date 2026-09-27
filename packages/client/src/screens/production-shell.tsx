@@ -120,7 +120,7 @@ function ProductionSwitcher({
       window.removeEventListener("resize", reposition);
     };
   }, [at, phone]);
-  useEffect(() => { if (compact) menu.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus(); }, [at === null, phone, compact]);
+  useEffect(() => { menu.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus(); }, [at === null, phone]);
 
   const open = () => {
     const rect = button.current?.getBoundingClientRect();

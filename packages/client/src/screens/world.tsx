@@ -4490,9 +4490,9 @@ export function ProductionsScreen() {
             >
               <div
                 className={cx("fy-prodcard", active && "fy-prodcard--active")}
-                role="link"
-                tabIndex={0}
-                aria-label={`Open ${p.meta.title}`}
+                role={phone ? "link" : undefined}
+                tabIndex={phone ? 0 : undefined}
+                aria-label={phone ? `Open ${p.meta.title}` : undefined}
                 onKeyDown={event => { if (event.target === event.currentTarget && event.key === "Enter") navigate(`/w/${worldId}/p/${p.meta.id}`); }}
                 onClick={() => navigate(`/w/${worldId}/p/${p.meta.id}`)}
               >
@@ -4516,7 +4516,7 @@ export function ProductionsScreen() {
                   <div className="fy-prodcard__sub">{p.meta.logline ?? p.meta.status}</div>
                   {!phone && progress}
                   {!phone && <div style={{ marginTop: 14 }}>
-                    <Button variant={active ? "primary" : "secondary"}>Open the workspace</Button>
+                    <Button variant={active ? "primary" : "secondary"} onClick={event => { event.stopPropagation(); navigate(`/w/${worldId}/p/${p.meta.id}`); }}>Open the workspace</Button>
                   </div>}
                 </div>
                 {phone && progress}

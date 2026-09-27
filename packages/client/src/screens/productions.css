@@ -134,8 +134,8 @@
   [data-screen="production-dashboard"] .fy-mono, [data-screen="production-dashboard"] .fy-h1row__meta { font: var(--type-meta); color: var(--muted-foreground); }
   .fy-season-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .fy-season-summary > :last-child { grid-column: 1 / -1; }
-  [data-screen="development"] { padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
-  .fy-arkewrap:has(> [data-screen="development"]) { position: relative; }
+  :is([data-screen="development"], [data-screen="episode-detail"]) { padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
+  .fy-arkewrap:has(> .fy-season-arke) { position: relative; }
   [data-screen="development"] .fy-seasonrack { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   [data-screen="development"] .fy-seasontile__move button { min-width: 44px; min-height: 44px; }
 }
@@ -151,6 +151,7 @@
   .fy-production-resumes .ui-btn { display: flex; width: 100%; justify-content: flex-start; height: auto; text-align: left; }
   .fy-prodcards { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 12px 20px 24px; animation: none; }
   .fy-prodcard { width: 100%; display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; padding: 10px; box-shadow: none; }
+  .fy-prodcard:hover, .fy-prodcard--active:hover { box-shadow: none; }
   .fy-prodcard__frame { width: 96px; height: 96px; border-radius: 10px; overflow: hidden; }
   .fy-prodcard__body { padding: 0; min-width: 0; }
   .fy-prodcard__meta { gap: 6px; font: var(--type-meta); flex-wrap: wrap; }
@@ -223,7 +224,7 @@
   .fy-dayone-composer { max-width: none; }
   .fy-dayone-composer .fy-composer__box { min-width: 0; }
   .fy-dayone-composer .fy-composer button { min-width: 44px; min-height: 44px; }
-  [data-screen="development"] { padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
+  :is([data-screen="development"], [data-screen="episode-detail"]) { padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
   .fy-season-summary { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .fy-season-summary > :last-child { grid-column: auto; }
   [data-screen="development"] .fy-seasonrack { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }

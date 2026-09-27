@@ -26,7 +26,7 @@ Object.assign(dom.window, {
   getComputedStyle: () => ({ direction: "ltr" }),
 });
 Object.assign(dom.HTMLElement.prototype, {
-  focus() {}, scrollIntoView() {},
+  focus() { Object.defineProperty(dom.document, "activeElement", { value: this, configurable: true }); }, scrollIntoView() {},
   showModal(this: HTMLElement) { this.setAttribute("open", ""); },
   close(this: HTMLElement) { this.removeAttribute("open"); },
 });
@@ -117,4 +117,30 @@ it("holds step two's creation actions on a phone and preserves WATCH's setup con
   await click(".fy-door--1");
   assert.ok(dom.document.querySelector('[data-screen="production-setup"]'));
   assert.ok(!sent.some(command => command.kind === "create-production"), "no production is created by choosing a door");
+});
+
+
+it("keeps the episode assistant in a compact sheet after opening an episode", async () => {
+  await mount("p/saltlight/episodes/ep_watch-1", episodicLayoutFixture());
+  assert.ok(dom.document.querySelector('[data-screen="episode-detail"]'));
+  assert.equal(dom.document.querySelector(".fy-arkewrap > .fy-arke"), null);
+  await click(".fy-season-arke");
+  assert.ok(dom.document.querySelector(".fy-season-arke-sheet[open] .fy-arke"));
+  assert.match(dom.document.querySelector(".fy-season-arke-sheet")!.textContent!, /Episode 01/);
+});
+
+it("gives desktop cards one keyboard destination and focuses the opened switch menu", async () => {
+  width = 1360; coarse = false;
+  await mount("productions");
+  assert.equal(dom.document.querySelector('.fy-prodcard[role="link"]'), null);
+  assert.equal(dom.document.querySelector('.fy-prodcard[tabindex]'), null);
+  await click(".fy-prodcard .ui-btn");
+  assert.ok(dom.document.querySelector('[data-screen="production-dashboard"]'));
+  await click(".fy-prodrail__switch");
+  const items = [...dom.document.querySelectorAll('[role="menuitem"]')];
+  assert.equal(dom.document.activeElement, items[0]);
+  const down = new dom.window.Event("keydown", { bubbles: true });
+  Object.assign(down, { key: "ArrowDown" });
+  await act(async () => items[0]!.dispatchEvent(down));
+  assert.equal(dom.document.activeElement, items[1]);
 });

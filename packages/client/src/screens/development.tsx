@@ -59,11 +59,11 @@ const pad = (n: number) => String(n).padStart(2, "0");
  * `.fy-sw__rail`, lifted unchanged, because somebody who learned the affordance on a scene must
  * meet the same one here.
  */
-function ArkeEdge({ children, responsive = false }: { children: (putAway: () => void) => ReactNode; responsive?: boolean }) {
+function ArkeEdge({ children }: { children: (putAway: () => void) => ReactNode }) {
   const [docked, setDocked] = useState(true);
   const compact = useMediaQuery("(max-width: 1099px)");
   const [open, setOpen] = useState(false);
-  if (responsive && compact) return <>
+  if (compact) return <>
     <button type="button" className="fy-season-arke" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}><Pin size={18} />Ask Arke</button>
     <PageSheet open={open} title="Arke" className="fy-season-arke-sheet" onClose={() => setOpen(false)}>{children(() => setOpen(false))}</PageSheet>
   </>;
@@ -347,7 +347,7 @@ export function DevelopmentWorkspace() {
         />
       ))}
     </div>
-      <ArkeEdge responsive>{(putAway) => <SeasonDock onPutAway={putAway} />}</ArkeEdge>
+      <ArkeEdge>{(putAway) => <SeasonDock onPutAway={putAway} />}</ArkeEdge>
     </div>
   );
 }
