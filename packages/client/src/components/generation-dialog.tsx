@@ -78,6 +78,7 @@ export function GenerationDialog({
   worldReferences,
   onClearReference,
   workflow,
+  characterDialog = false,
   capability = "image",
   size = true,
   aspect = true,
@@ -168,6 +169,8 @@ export function GenerationDialog({
   onClearReference?: () => void;
   /** Which kind of work this is, for the estimate the bar shows. */
   workflow: CharacterImageWorkflow;
+  /** Character routes opt into turn 162's phone sheet; pricing workflows are shared by other pages. */
+  characterDialog?: boolean;
   capability?: "image" | "video";
   /**
    * Whether size and shape are the author's to choose. Both default on, because this dialog is
@@ -311,6 +314,7 @@ export function GenerationDialog({
     <dialog
       ref={dialog}
       className={previews === undefined ? "fy-gendialog" : "fy-gendialog fy-gendialog--wide"}
+      data-character-dialog={characterDialog ? workflow : undefined}
       aria-labelledby={titleId}
       onClose={() => {
         returnFocus?.current?.focus();
@@ -331,7 +335,7 @@ export function GenerationDialog({
       }}
     >
       {panel !== undefined ? (
-        <div className="fy-gendialog__panel">{panel}</div>
+        <div className="fy-gendialog__panel fy-gendialog__panel--picker">{panel}</div>
       ) : (
       <div className="fy-gendialog__panel">
         <div className="fy-gendialog__head">
@@ -517,7 +521,8 @@ export function GenerationDialog({
                         label={preview.label ?? `Preview ${index + 1}`}
                         radius={10}
                       />
-                      <span>{selected === preview.key ? "SELECTED" : `0${index + 1}`}</span>
+                      <span className="fy-gendialog__preview-index">{selected === preview.key ? "SELECTED" : `0${index + 1}`}</span>
+                      <span className="fy-gendialog__preview-name">{preview.label ?? `Preview ${index + 1}`}</span>
                     </button>
                     <ImageDownload
                       worldSlug={worldSlug}

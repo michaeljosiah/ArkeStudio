@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
+import { parseHTML } from "linkedom";
 import { App } from "../src/App.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID, SCREENS } from "../src/screens/registry.js";
@@ -28,6 +29,14 @@ function renderAt(path: string): string {
 
 function count(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
+}
+
+function desktopChromeAt(path: string): string {
+  const { document } = parseHTML(renderAt(path));
+  // Turn 162 adds chrome behind character sheets on phones. CSS hides this backdrop on
+  // desktop, where these routes remain full-frame gates; the browser smoke checks that rule.
+  document.querySelector(".fy-character-generation__backdrop")?.remove();
+  return document.toString();
 }
 
 function proposalControl(html: string): string {
@@ -57,6 +66,17 @@ const WITHOUT_CHROME = new Set([
 ]);
 
 describe("app chrome", () => {
+  it("keeps the character context behind phone generation sheets", () => {
+    for (const id of ["replace-main-photo", "model-sheet-generate"]) {
+      const screen = SCREENS.find((entry) => entry.id === id)!;
+      const { document } = parseHTML(renderAt(screen.samplePath));
+      const backdrop = document.querySelector(".fy-character-generation__backdrop");
+      assert.ok(backdrop, id);
+      assert.equal(backdrop.querySelectorAll(".fy-titlebar__brand").length, 1);
+      assert.equal(backdrop.querySelector('.fy-character-tabs [aria-current="page"]')?.textContent, "Reference");
+    }
+  });
+
   it("mounts one app-level queue toaster, on every screen", () => {
     // Sonner portals on the client, but its root is mounted once, at the app; a screen that lost
     // it would lose every notification. The region it renders is the surface that proves it.
@@ -67,7 +87,7 @@ describe("app chrome", () => {
 
   for (const screen of SCREENS) {
     it(`${screen.id} carries exactly one wordmark, centred`, () => {
-      const html = renderAt(screen.samplePath);
+      const html = desktopChromeAt(screen.samplePath);
       if (WITHOUT_CHROME.has(screen.id)) {
         assert.equal(count(html, 'class="fy-titlebar__brand"'), 0, `${screen.id} is a full-frame gate`);
         return;
@@ -84,7 +104,7 @@ describe("app chrome", () => {
     });
 
     it(`${screen.id} puts activity, settings and the account on the right, in that order`, () => {
-      const html = renderAt(screen.samplePath);
+      const html = desktopChromeAt(screen.samplePath);
       if (WITHOUT_CHROME.has(screen.id)) {
         assert.ok(!html.includes("fy-titlebar__side--right"), `${screen.id} is a full-frame gate`);
         return;

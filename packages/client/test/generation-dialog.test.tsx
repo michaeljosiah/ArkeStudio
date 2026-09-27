@@ -59,6 +59,14 @@ async function mount(props: Partial<Parameters<typeof GenerationDialog>[0]> = {}
 const submit = (host: HTMLElement) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "Generate")!;
 
 describe("generation dialog", () => {
+  it("uses the character phone presentation only when the caller asks for it", async () => {
+    const { host, render } = await mount({ workflow: "main-photo" });
+    assert.equal(host.querySelector("dialog")?.hasAttribute("data-character-dialog"), false,
+      "Art Direction also uses main-photo pricing without being a character dialog");
+    await render({ characterDialog: true });
+    assert.equal(host.querySelector("dialog")?.hasAttribute("data-character-dialog"), true);
+  });
+
   it("asks for the words, a reference and the model, in that order", async () => {
     const { host } = await mount();
     const all = [...host.querySelectorAll("*")];

@@ -6,7 +6,7 @@ import { generateCharacterVoiceSample, send, sendAttachFilesCorrelated, subscrib
 import { mediaUrl } from "../lib/media.js";
 import { playClip } from "../lib/audio.js";
 import { Button, cx } from "./ui.js";
-import { Check } from "./icons.js";
+import { Check, X } from "./icons.js";
 import { PosterVideo } from "./player.js";
 import { Portrait, sheetPortraitPath } from "./portrait.js";
 
@@ -118,6 +118,7 @@ export function VoiceSampleFlow({ world, sheet, onClose }: { world: WorldBundle;
       <strong>{review ? "Review the sample" : "The voice on screen"}</strong>
       <span className="fy-mono">{review ? "one speaker, no music — your review, not a finding" : `${sheet.name} speaking, for routes that carry a voice`}</span>
     </div>
+    <button className="fy-character-sheet-close" type="button" aria-label="Close voice sample" onClick={onClose}><X size={18} /></button>
   </header>;
   if (review) return <>
     <div className="fy-voicescrim" onClick={onClose} />
