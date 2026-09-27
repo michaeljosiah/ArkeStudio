@@ -2320,7 +2320,7 @@ describe("the voiced read (turn 130)", () => {
     assert.match(text(m), /Narration/);
     assert.match(text(m), /Maren Kest/);
     assert.match(text(m), /George · narrator/, "the narration in the narrator's voice");
-    assert.match(text(m), /Low tide · elevenlabs/, "a sheet's assigned voice, by its label and provider");
+    assert.match(text(m), /Low tide · ElevenLabs · cloud/, "a sheet's assigned voice, by its label and where it reads (turn 165)");
     assert.match(text(m), /no sheet · narrator/, "a name the cast does not know reads in the narrator's");
     assert.match(text(m), /1 line/);
     assert.match(text(m), /cast · v4 · 2 lines · 2 speakers · every line is the chapter’s own words/);
@@ -2341,7 +2341,7 @@ describe("the voiced read (turn 130)", () => {
     const m = await mount(withBodyHash(inkbound(), HASH));
     await answerOpenCast(m, { voices: CAST });
     assert.ok(m.sent.some((message) => message.kind === "voice-catalogue"), "the catalogue is asked for once a cast is shown");
-    assert.match(text(m), /Low tide · elevenlabs/, "the assignment stands until the catalogue answers");
+    assert.match(text(m), /Low tide · ElevenLabs · cloud/, "the assignment stands until the catalogue answers");
     await act(async () => {
       __applyEventForTest({
         at: "2026-09-06T12:00:05Z",
@@ -2353,7 +2353,7 @@ describe("the voiced read (turn 130)", () => {
       });
     });
     assert.match(text(m), /voice unavailable · narrator/);
-    assert.doesNotMatch(text(m), /Low tide · elevenlabs/);
+    assert.doesNotMatch(text(m), /Low tide · ElevenLabs · cloud/);
   });
 
   it("stale: the cast was read against an earlier body, the rows stay, and Cast again is a press under the dock", async () => {
