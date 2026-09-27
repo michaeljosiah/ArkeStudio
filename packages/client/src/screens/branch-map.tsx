@@ -6,15 +6,19 @@ import {
   layoutRouting,
   orderedShots,
   playbackWindow,
+  playerBeats,
   productionShape,
   routingFindings,
+  sceneBeats,
   type ArtifactSidecar,
   type CutEntry,
+  type InteractivePlayerBeat,
   type InteractivePlayerClip,
   type InteractivePlayerOptions,
   type ProductionBundle,
   type RoutingCommand,
   type RoutingFinding,
+  type Sheet,
 } from "@arke-studio/contracts";
 import { ProductionConversation } from "../components/conversation.js";
 import { InteractivePlayerView } from "../components/interactive-player.js";
@@ -46,6 +50,7 @@ import {
   subscribeRoutingFindings,
 } from "../lib/store.js";
 import { shotFramePath } from "./scene-workspace/boards.js";
+import { useProductionVoiceFiles } from "./scene-workspace/table-read.js";
 
 /**
  * The branch map (design turn 157; epic 401, brief §3–§4): Interactive video's structural
@@ -74,7 +79,13 @@ function safeShots(scene: ProductionBundle["scenes"][number]) {
   }
 }
 
-function sceneLength(scene: ProductionBundle["scenes"][number]): string {
+function sceneLength(scene: ProductionBundle["scenes"][number], beats = false): string {
+  // A visual novel's scene has no running time — it is read — so it counts its beats (turn 172).
+  if (beats) {
+    let count = 0;
+    try { count = sceneBeats(scene).length; } catch { count = 0; }
+    return count > 0 ? `${count} beat${count === 1 ? "" : "s"}` : "";
+  }
   const total = Math.round(safeShots(scene).reduce((sum, shot) => sum + (shot.durationSec ?? DEFAULT_SHOT_SEC), 0));
   return total > 0 ? `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}` : "";
 }
@@ -86,6 +97,37 @@ function sceneFrame(production: ProductionBundle, artifacts: readonly ArtifactSi
     if (path !== null) return mediaUrl(slug, path);
   }
   return null;
+}
+
+/**
+ * A visual novel's scene for the preview (turn 172): its beats, each with its picture (kept from
+ * the shot before where the beat asks), its line under its speaker's name, and its voice where the
+ * table read has one. The export builds the same beats through the same `playerBeats`.
+ */
+export function scenePlayerBeats(
+  production: ProductionBundle,
+  artifacts: readonly ArtifactSidecar[],
+  sheets: readonly Pick<Sheet, "id" | "name">[],
+  slug: string,
+  scene: ProductionBundle["scenes"][number],
+  voices: ReadonlyMap<string, string>,
+): InteractivePlayerBeat[] {
+  try {
+    return playerBeats(scene, {
+      picture: (shotId) => {
+        const { path } = shotFramePath(production, artifacts, shotId);
+        return path === null ? undefined : mediaUrl(slug, path);
+      },
+      audio: (lineId) => {
+        const file = voices.get(lineId);
+        return file === undefined ? undefined : mediaUrl(slug, file);
+      },
+      speakerName: (id) => sheets.find((sheet) => sheet.id === id)?.name ?? id,
+    });
+  } catch {
+    // A scene whose flow does not read has no beats; the player shows it as a slate.
+    return [];
+  }
 }
 
 /**
@@ -253,6 +295,16 @@ export function BranchMapScreen() {
     // `narrow`: the canvas unmounts for the list and remounts after, and a listener left on the
     // viewport that was, or never added to one that was not there yet, made the wheel do nothing.
   }, [zoomBy, geometry !== null, narrow]);
+
+  // A visual novel's preview reads its lines in their voices (turn 172): every scene's prepared
+  // voices are asked for as the preview opens, and it mounts once they are in.
+  const playsAsBeats = production ? productionShape(production.meta).playsAsBeats : false;
+  const previewVoices = useProductionVoiceFiles({
+    worldId,
+    productionId: prodId,
+    sceneIds: playsAsBeats ? scenes.map((scene) => scene.id) : [],
+    key: playsAsBeats && preview !== null ? preview.at : null,
+  });
 
   if (!world || !production) {
     return (
@@ -628,7 +680,7 @@ export function BranchMapScreen() {
                 {ending}
               </>
             ) : (
-              [scene ? sceneLength(scene) : "", out > 0 ? `${out} out` : unreachable.has(node.id) ? "no way in" : ""].filter(Boolean).join(" · ")
+              [scene ? sceneLength(scene, playsAsBeats) : "", out > 0 ? `${out} out` : unreachable.has(node.id) ? "no way in" : ""].filter(Boolean).join(" · ")
             )}
             {twoWaysIn.has(node.id) && (
               <span className="bm-node__warn" title="Two ways in">
@@ -989,7 +1041,7 @@ export function BranchMapScreen() {
           <span>
             <span className="bm-scenehead__title">{scene.title}</span>
             <span className="bm-muted">
-              {[sceneLength(scene), `${ins} way${ins === 1 ? "" : "s"} in`, `${outs.length} way${outs.length === 1 ? "" : "s"} out`].filter(Boolean).join(" · ")}
+              {[sceneLength(scene, playsAsBeats), `${ins} way${ins === 1 ? "" : "s"} in`, `${outs.length} way${outs.length === 1 ? "" : "s"} out`].filter(Boolean).join(" · ")}
             </span>
           </span>
         </div>
@@ -1142,7 +1194,9 @@ export function BranchMapScreen() {
           from: preview.from,
           autoplay: true,
           scenes: Object.fromEntries(
-            scenes.map((scene) => [scene.id, { title: scene.title, clips: sceneClips(production, world.meta.slug, scene, previewCut) }]),
+            scenes.map((scene) => [scene.id, playsAsBeats
+              ? { title: scene.title, beats: scenePlayerBeats(production, world.artifacts, world.sheets, world.meta.slug, scene, previewVoices.files) }
+              : { title: scene.title, clips: sceneClips(production, world.meta.slug, scene, previewCut) }]),
           ),
           choices: routing.choices,
           endings: routing.endings,
@@ -1164,7 +1218,7 @@ export function BranchMapScreen() {
         {exportNote !== null && <div className="bm-note">{exportNote}</div>}
         {narrow && inspector}
         {narrow ? list : canvas}
-        {previewOptions !== null && preview !== null && (
+        {previewOptions !== null && preview !== null && (!playsAsBeats || previewVoices.ready) && (
           <InteractivePlayerView
             key={preview.at}
             className="bm-player"

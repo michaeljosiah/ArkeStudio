@@ -425,3 +425,128 @@ describe("the player, as a viewer meets the package (156a–156f)", () => {
     assert.equal(p.all(".aip-chip").length, 0, "no walk marks in a package");
   });
 });
+
+/**
+ * A visual novel's scenes (design turn 172, 172d–172g): the same player reads a scene of beats —
+ * a picture and a line each — at the viewer's pace. What moves a beat on by itself is a voice
+ * ending or a CSS animation ending, so the tests tell the player those the way a browser would.
+ */
+describe("the player reading beats (turn 172)", () => {
+  const NOVEL: Partial<InteractivePlayerOptions> = {
+    title: "The Lantern Road",
+    start: "sc_quarter",
+    scenes: {
+      sc_quarter: {
+        title: "The drowned quarter",
+        beats: [
+          { picture: "media/quarter.png", text: "They hung the washing out the morning the water came.", audio: "media/wash.mp3", advance: "voice" },
+          { picture: "media/rail.png", text: "Somebody lit a window down there.", speaker: "Maren", motion: "drift" },
+          { picture: "media/rail.png", text: "Then it isn't somebody.", speaker: "Bray", advance: "hold", holdSec: 3 },
+        ],
+      },
+      sc_causeway: { title: "The causeway", beats: [{ picture: "media/causeway.png", text: "The tide came in." }] },
+      sc_towers: { title: "The bell towers", beats: [{ picture: "media/towers.png" }] },
+      sc_pier: { title: "The pier at dusk", beats: [{ picture: "media/pier.png", text: "Level." }] },
+    },
+  };
+  const animationEnd = (target: HTMLElement | null) => {
+    assert.ok(target);
+    target.dispatchEvent(new dom.Event("animationend", { bubbles: true }) as unknown as Event);
+  };
+  const tap = (p: ReturnType<typeof mount>) => p.click(p.q(".aip-stage"));
+
+  it("shows a beat's picture and its line, narration without a name, a line under its speaker", () => {
+    const p = mount({ ...NOVEL, autoplay: true });
+    assert.equal(p.root.getAttribute("data-kind"), "beats");
+    assert.equal(p.q(".aip-pic img")?.getAttribute("src"), "media/quarter.png");
+    assert.equal(p.q(".aip-box")?.getAttribute("data-kind"), "narration");
+    assert.equal(p.q(".aip-who")?.hidden, true, "narration has no name tab");
+    assert.equal(p.text(".aip-line"), "They hung the washing out the morning the water came.");
+    assert.equal(p.all(".aip-ticks > i").length, 3, "a tick a beat");
+    assert.equal(p.q("audio")?.getAttribute("src"), "media/wash.mp3", "its voice");
+    assert.ok(p.button("Auto") && p.button("Log") && p.button("Route"), "the reader's chrome replaces the transport");
+  });
+
+  it("a tap shows the rest of the line first, then reads on; a voice's end moves an after-the-voice beat on", () => {
+    const p = mount({ ...NOVEL, autoplay: true });
+    tap(p);
+    assert.equal(p.q(".aip-box")?.hasAttribute("data-typed"), true, "the first tap completes the line");
+    assert.equal(p.q(".aip-pic img")?.getAttribute("src"), "media/quarter.png", "and does not move on");
+    p.q("audio")!.dispatchEvent(new dom.Event("ended") as unknown as Event);
+    const hold = p.q(".aip-hold")!;
+    assert.match(hold.style.animation, /aip-hold 1\.2s/, "a breath after the voice, as an animation, not a timer");
+    animationEnd(hold);
+    assert.equal(p.text(".aip-line"), "Somebody lit a window down there.");
+    assert.equal(p.text(".aip-who"), "Maren");
+    assert.equal(p.q(".aip-pic img")?.className, "m-drift");
+    assert.equal(JSON.parse(store.get("k") ?? "null"), null, "no key, nothing kept");
+  });
+
+  it("a tap beat waits for the reader; a hold beat moves on after its hold; the last beat opens the choices over its line", () => {
+    const p = mount({ ...NOVEL, autoplay: true, from: "sc_quarter" });
+    animationEnd(p.q(".aip-hold"));
+    assert.equal(p.text(".aip-line"), "They hung the washing out the morning the water came.", "no hold was set, so nothing moves it on");
+    p.key("ArrowRight"); p.key("ArrowRight");
+    assert.equal(p.text(".aip-who"), "Maren");
+    p.key("ArrowRight"); p.key(" ");
+    assert.equal(p.text(".aip-who"), "Bray");
+    assert.match(p.q(".aip-hold")!.style.animation, /aip-hold 3s/, "the hold starts when the beat shows");
+    animationEnd(p.q(".aip-hold"));
+    assert.equal(p.root.getAttribute("data-mode"), "choice");
+    assert.equal(p.q(".aip-box")?.hidden, false, "the last line stays under the choices");
+    assert.deepEqual(p.all(".aip-choice .l").map((el) => el.textContent), ["Follow the lantern", "Stay with the boat"]);
+    p.key("1");
+    assert.equal(p.text(".aip-scene"), "The causeway");
+  });
+
+  it("back one beat with the left arrow, never across a choice", () => {
+    const p = mount({ ...NOVEL, autoplay: true });
+    p.key("ArrowRight"); p.key("ArrowRight");
+    assert.equal(p.text(".aip-who"), "Maren");
+    p.key("ArrowLeft");
+    assert.equal(p.q(".aip-box")?.getAttribute("data-kind"), "narration");
+    p.key("ArrowLeft");
+    assert.equal(p.q(".aip-box")?.getAttribute("data-kind"), "narration", "the scene's first beat is as far back as it goes");
+  });
+
+  it("Auto moves a tap beat on after a reading time, and off again waits", () => {
+    const p = mount({ ...NOVEL, autoplay: true });
+    p.key("ArrowRight"); p.key("ArrowRight");
+    assert.equal(p.q(".aip-hold")!.style.animation, "none", "a tap beat waits");
+    p.click(p.button("Auto"));
+    assert.equal(p.button("Auto")?.getAttribute("aria-pressed"), "true");
+    assert.match(p.q(".aip-hold")!.style.animation, /aip-hold 3\.3s/, "1.5s and 0.3s a word");
+    p.key("a");
+    assert.equal(p.q(".aip-hold")!.style.animation, "none", "Auto off, it waits again");
+  });
+
+  it("the log lists the scene's lines so far and plays one again without moving the story", () => {
+    const p = mount({ ...NOVEL, autoplay: true });
+    p.key("ArrowRight"); p.key("ArrowRight");
+    p.key("l");
+    const log = p.q('[aria-label="Log"]')!;
+    assert.equal(log.hidden, false);
+    assert.deepEqual(p.all(".aip-log-line .t").map((el) => el.textContent), ["They hung the washing out the morning the water came.", "Somebody lit a window down there."]);
+    p.click(log.querySelector('[aria-label="Play line"]') as unknown as HTMLElement);
+    assert.equal(p.all("audio")[1]?.getAttribute("src"), "media/wash.mp3", "heard on its own player");
+    assert.equal(p.text(".aip-who"), "Maren", "the story has not moved");
+    p.key("Escape");
+    assert.equal(log.hidden, true, "Escape closes the log first");
+  });
+
+  it("keeps the place as a beat, in the same four fields, and reopens on it", () => {
+    const KEY = "arke-iv-test-beats";
+    const p = mount({ ...NOVEL, autoplay: true, storageKey: KEY });
+    p.key("ArrowRight"); p.key("ArrowRight");
+    const saved = JSON.parse(store.get(KEY)!);
+    assert.deepEqual(Object.keys(saved).sort(), ["positionSec", "route", "sceneId", "updatedAt"]);
+    assert.equal(saved.positionSec, 1, "the second beat");
+    p.handle.destroy();
+    const again = mount({ ...NOVEL, storageKey: KEY });
+    assert.equal(again.root.getAttribute("data-mode"), "poster");
+    assert.match(again.text(".aip-place"), /beat 2 of 3/);
+    assert.equal(again.q(".aip-pic img")?.getAttribute("src"), "media/rail.png", "the poster is the saved beat's picture");
+    again.click(again.button("Continue"));
+    assert.equal(again.text(".aip-who"), "Maren");
+  });
+});

@@ -10,13 +10,18 @@ import { join } from "node:path";
 import {
   ConversationActionSemanticIdSchema,
   deriveCut,
+  hasOwnFrame,
   playbackWindow,
+  playerBeats,
+  productionShape,
   publicationBlockers,
   routingFindings,
   RoutingSchema,
   TraversalEvidenceSchema,
   ulid,
   INTERACTIVE_PLAYER_SOURCE,
+  type ArtifactSidecar,
+  type PlayerBeat,
   type ProductionBundle,
   type Routing,
   type RoutingCommand,
@@ -464,7 +469,7 @@ mountInteractivePlayer(document.getElementById("app"), {
   scenes: Object.fromEntries(manifest.media.map((m) => [m.sceneId, {
     title: titles[m.sceneId] || m.sceneId,
     clips: m.windows && m.windows.length > 0 ? m.windows.map((w) => ({ src: m.file, from: w.from, to: w.to })) : [m.file],
-  }])),
+  }]).concat((manifest.beats || []).map((s) => [s.sceneId, { title: titles[s.sceneId] || s.sceneId, beats: s.beats }]))),
   choices: manifest.routing.choices,
   endings: manifest.routing.endings,
   storageKey: KEY,
@@ -475,10 +480,19 @@ mountInteractivePlayer(document.getElementById("app"), {
 
 type PlaybackWindow = { from: number; to?: number };
 
+/** A visual novel's beat as the package carries it: its picture and voice are files in `files`. */
+type ManifestBeat = PlayerBeat;
+
 interface InteractiveExportManifest {
   readonly routing: Routing;
   /** `windows`: the parts of `file` the scene plays, in order; absent, the whole file plays. */
   readonly media: ReadonlyArray<{ sceneId: string; file: string; hash: string; windows?: PlaybackWindow[] }>;
+  /**
+   * A visual novel's scenes (turn 172), read as beats instead of played; their pictures and voices
+   * are listed once in `files` with their hashes, since beats share pictures.
+   */
+  readonly beats?: ReadonlyArray<{ sceneId: string; beats: ReadonlyArray<ManifestBeat> }>;
+  readonly files?: ReadonlyArray<{ file: string; hash: string }>;
   readonly provenance: {
     readonly productionId: string;
     readonly routingVersion: number;
@@ -532,9 +546,38 @@ function parseInteractiveManifest(value: unknown): InteractiveExportManifest | n
       : [];
   });
   if (parsedMedia.length !== media.length) return null;
+  const packaged = (file: unknown) => typeof file === "string" && /^media\/[^/\\]+$/.test(file);
+  const filesValue = record["files"];
+  if (filesValue !== undefined && !(Array.isArray(filesValue) && filesValue.every((entry: unknown) => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return false;
+    const { file, hash } = entry as Record<string, unknown>;
+    return packaged(file) && typeof hash === "string" && /^sha256:[0-9a-f]{16}$/.test(hash);
+  }))) return null;
+  const files = filesValue as Array<{ file: string; hash: string }> | undefined;
+  const listed = new Set((files ?? []).map((entry) => entry.file));
+  const beatsValue = record["beats"];
+  if (beatsValue !== undefined && !(Array.isArray(beatsValue) && beatsValue.every((entry: unknown) => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return false;
+    const { sceneId, beats } = entry as Record<string, unknown>;
+    return typeof sceneId === "string" && Array.isArray(beats) && beats.length > 0 && beats.every((beat: unknown) => {
+      if (typeof beat !== "object" || beat === null || Array.isArray(beat)) return false;
+      const b = beat as Record<string, unknown>;
+      // A beat names only files the package lists, so every one of them is re-hashed below.
+      return (b["picture"] === undefined || (packaged(b["picture"]) && listed.has(b["picture"] as string))) &&
+        (b["audio"] === undefined || (packaged(b["audio"]) && listed.has(b["audio"] as string))) &&
+        (b["text"] === undefined || typeof b["text"] === "string") &&
+        (b["speaker"] === undefined || typeof b["speaker"] === "string") &&
+        ["voice", "tap", "hold"].includes(b["advance"] as string) &&
+        typeof b["holdSec"] === "number" && b["holdSec"] > 0 &&
+        ["push", "drift", "none"].includes(b["motion"] as string);
+    });
+  }))) return null;
+  const beats = beatsValue as Array<{ sceneId: string; beats: ManifestBeat[] }> | undefined;
   return {
     routing: routing.data,
     media: parsedMedia,
+    ...(beats !== undefined ? { beats } : {}),
+    ...(files !== undefined ? { files } : {}),
     provenance: {
       productionId: provenanceRecord["productionId"],
       routingVersion: provenanceRecord["routingVersion"],
@@ -572,7 +615,16 @@ async function interactiveExportProblems(
       problems.push(`${entry.file} is missing from the package`);
     }
   }
-  const shippedIds = new Set(written.media.map((entry) => entry.sceneId));
+  for (const entry of written.files ?? []) {
+    try {
+      const bytes = await readFile(toExtendedLength(join(outDir, entry.file)));
+      if (fullHash(bytes) !== entry.hash) problems.push(`${entry.file} does not match its manifest hash`);
+    } catch {
+      problems.push(`${entry.file} is missing from the package`);
+    }
+  }
+  // A scene ships as footage or as beats; either is something to play.
+  const shippedIds = new Set([...written.media.map((entry) => entry.sceneId), ...(written.beats ?? []).map((entry) => entry.sceneId)]);
   if (!shippedIds.has(written.routing.start)) {
     problems.push(`the start scene ${written.routing.start} shipped no media`);
   }
@@ -605,12 +657,21 @@ export async function exportInteractive(
   store: WorldStore,
   production: ProductionBundle,
   clock: () => string,
-  options: { exportId?: string; precondition?: WorldStatePrecondition } = {},
+  options: {
+    exportId?: string;
+    precondition?: WorldStatePrecondition;
+    /**
+     * A visual novel's prepared voices, scene by scene: line id → world-relative file (the table
+     * read's answer). Absent, every line reads as text — an unvoiced line never blocks.
+     */
+    voices?: (sceneId: string) => Promise<ReadonlyMap<string, string>>;
+  } = {},
 ): Promise<InteractiveExportResult> {
   const routing = production.routing;
   if (routing === null) return { ok: false, blockers: ["this production has no routing yet"] };
   const findings = await interactiveFindings(store, production);
   const blockers = publicationBlockers(findings).map((finding) => finding.detail);
+  if (productionShape(production.meta).playsAsBeats) return exportBeats(store, production, routing, blockers, clock, options);
 
   // Every routed, unexcluded scene ships ONE file that covers the whole scene: a pass take, or
   // the single shot's accepted clip. A multi-shot scene with only per-shot takes is refused by
@@ -751,6 +812,123 @@ export async function exportInteractive(
 
     // Deterministic validation (brief §6): the exporter re-reads its own output and refuses,
     // naming the file, rather than shipping a package that cannot play.
+    const problems = await interactiveExportProblems(outDir, { productionId: production.meta.id, exportId });
+    if (problems.length > 0) return { ok: false, blockers: problems };
+    return { ok: true, id: exportId, dir: `exports/${outName}`, file: `exports/${outName}/player.html` };
+  }, options.precondition);
+}
+
+/**
+ * The world-relative file a visual novel's beat shows for a shot — its own frame, else its
+ * accepted still — as the scene page shows it (`shotFramePath`). Null when it has none, and when
+ * a hand-edited record names a file outside its own folder, which must never reach a package.
+ */
+function beatPicturePath(production: ProductionBundle, artifacts: readonly ArtifactSidecar[], shotId: string): string | null {
+  const plain = (name: string) => /^[^/\\]+$/.test(name) && name !== "." && name !== "..";
+  const selection = production.selections[shotId];
+  if (hasOwnFrame(selection, artifacts)) {
+    const artifact = artifacts.find((candidate) => candidate.id === selection?.startFrameArtifactId);
+    return artifact !== undefined && plain(artifact.file) ? `artifacts/${artifact.file}` : null;
+  }
+  const takeId = selection?.acceptedTakeId ?? null;
+  const take = takeId === null ? undefined : production.takes.find((candidate) => candidate.id === takeId);
+  if (take === undefined || (take.kind !== "frame" && take.kind !== "still") || take.media === undefined || !plain(take.media)) return null;
+  return `productions/${production.meta.id}/takes/${take.id}/${take.media}`;
+}
+
+/** A voice the table read names, if it is a file inside the world rather than a way out of it. */
+function safeWorldFile(path: string): boolean {
+  return path.split("/").every((part) => part !== "" && part !== "." && part !== "..") && !path.includes("\\");
+}
+
+/**
+ * A visual novel's package (turn 172): the same player, reading each routed scene as beats. Each
+ * picture is copied once, however many beats show it; each prepared voice once; the text travels
+ * as text. A beat with no picture is refused by name, as a scene with no footage is; a line with
+ * no voice is not — the package reads it as text.
+ */
+async function exportBeats(
+  store: WorldStore,
+  production: ProductionBundle,
+  routing: Routing,
+  blockers: string[],
+  clock: () => string,
+  options: { exportId?: string; precondition?: WorldStatePrecondition; voices?: (sceneId: string) => Promise<ReadonlyMap<string, string>> },
+): Promise<InteractiveExportResult> {
+  const artifacts = store.getBundle().artifacts;
+  const sheets = store.getBundle().sheets;
+  const excluded = new Set(routing.excluded.map((entry) => entry.sceneId));
+  /** Package file → world-relative source, so a picture two beats share is copied once. */
+  const copies = new Map<string, string>();
+  const packaged = (source: string, name: string) => {
+    const file = `media/${name}${source.slice(source.lastIndexOf("."))}`;
+    copies.set(file, source);
+    return file;
+  };
+  const scenes: Array<{ sceneId: string; beats: PlayerBeat[] }> = [];
+  for (const scene of production.scenes.filter((candidate) => !excluded.has(candidate.id))) {
+    const voices = options.voices ? await options.voices(scene.id).catch(() => new Map<string, string>()) : new Map<string, string>();
+    let beats: PlayerBeat[];
+    try {
+      beats = playerBeats(scene, {
+        picture: (shotId) => {
+          const source = beatPicturePath(production, artifacts, shotId);
+          return source === null ? undefined : packaged(source, `picture-${shotId}`);
+        },
+        audio: (lineId) => {
+          const source = voices.get(lineId);
+          return source === undefined || !safeWorldFile(source) ? undefined : packaged(source, `voice-${lineId.replace(/[^A-Za-z0-9_-]/g, "_")}`);
+        },
+        speakerName: (id) => sheets.find((sheet) => sheet.id === id)?.name ?? id,
+      });
+    } catch {
+      blockers.push(`${scene.id}'s shots do not read in order — repair its flow before export`);
+      continue;
+    }
+    if (beats.length === 0) {
+      blockers.push(`${scene.id} has no beats to read`);
+      continue;
+    }
+    beats.forEach((beat, index) => {
+      if (beat.picture === undefined) blockers.push(`${scene.id}, beat ${index + 1} needs a picture`);
+    });
+    scenes.push({ sceneId: scene.id, beats });
+  }
+  if (blockers.length > 0) return { ok: false, blockers };
+
+  return store.gateOp(async () => {
+    const exportId = options.exportId ?? `iv_${ulid()}`;
+    if (!/^iv_[0-9A-HJKMNP-TV-Z]{26}$/.test(exportId)) throw new Error("invalid interactive export id");
+    const outName = `interactive-${production.meta.id}-${exportId}`;
+    const outDir = join(store.dir, "exports", outName);
+    await mkdir(toExtendedLength(join(outDir, "media")), { recursive: true });
+    const files: Array<{ file: string; hash: string }> = [];
+    for (const [file, source] of [...copies].sort(([a], [b]) => a.localeCompare(b))) {
+      await copyFile(toExtendedLength(join(store.dir, fromPortable(source))), toExtendedLength(join(outDir, file)));
+      files.push({ file, hash: fullHash(await readFile(toExtendedLength(join(outDir, file)))) });
+    }
+    const manifest = {
+      routing,
+      media: [],
+      beats: scenes,
+      files,
+      provenance: {
+        productionId: production.meta.id,
+        routingVersion: routing.version,
+        exportedAt: clock(),
+        exportId,
+      },
+    };
+    await atomicWriteFile(join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+    await atomicWriteFile(
+      join(outDir, "player.html"),
+      playerHtml(manifest, {
+        worldId: store.worldId,
+        title: production.meta.title,
+        eyebrow: store.getBundle().meta.name,
+        titles: Object.fromEntries(production.scenes.map((scene) => [scene.id, scene.title])),
+      }),
+    );
     const problems = await interactiveExportProblems(outDir, { productionId: production.meta.id, exportId });
     if (problems.length > 0) return { ok: false, blockers: problems };
     return { ok: true, id: exportId, dir: `exports/${outName}`, file: `exports/${outName}/player.html` };

@@ -68,3 +68,48 @@ export function lineVoices(plan: TableReadPlan | null): ReadonlyMap<string, Line
     item.file !== undefined ? "voiced" : item.route === "generating" ? "voicing" : "unvoiced",
   ]));
 }
+
+/**
+ * Every prepared voice across a production's scenes, for a visual novel's preview (turn 172): the
+ * player is mounted once, so its beats must carry their voices from the start. Each scene's plan
+ * is asked for when `key` changes (a preview opening), and `ready` says every answer is in — or
+ * that no studio is there to answer, when the preview reads as text rather than waiting forever.
+ */
+export function useProductionVoiceFiles({
+  worldId,
+  productionId,
+  sceneIds,
+  key,
+}: {
+  worldId: string | undefined;
+  productionId: string | undefined;
+  sceneIds: readonly string[];
+  /** Null asks nothing; each new value asks again. */
+  key: number | null;
+}): { files: ReadonlyMap<string, string>; ready: boolean } {
+  const [files, setFiles] = useState<ReadonlyMap<string, string>>(new Map());
+  const [ready, setReady] = useState(false);
+  const scenes = sceneIds.join("|");
+  useEffect(() => {
+    setFiles(new Map());
+    setReady(false);
+    if (key === null || worldId === undefined || productionId === undefined) return;
+    const pending = new Set<string>();
+    const found = new Map<string, string>();
+    const off = subscribeRehearsalResults((result) => {
+      if (!pending.delete(result.requestId)) return;
+      for (const item of result.plan?.items ?? []) if (item.file !== undefined) found.set(item.lineId, item.file);
+      if (pending.size === 0) {
+        setFiles(new Map(found));
+        setReady(true);
+      }
+    });
+    for (const sceneId of scenes === "" ? [] : scenes.split("|")) {
+      const requestId = planTableRead(worldId, productionId, sceneId);
+      if (requestId !== null) pending.add(requestId);
+    }
+    if (pending.size === 0) setReady(true);
+    return off;
+  }, [key, worldId, productionId, scenes]);
+  return { files, ready };
+}

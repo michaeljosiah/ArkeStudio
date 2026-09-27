@@ -425,3 +425,102 @@ describe("interactive video through the coordinator (epic 401)", () => {
     assert.match(player, /choicesEl\.querySelector\("button"\)\?\.focus\(\)/, "the keyboard lands on the first choice");
   });
 });
+
+/**
+ * A visual novel's package (turn 172): the same player, reading each scene as beats. Pictures are
+ * the accepted stills, copied once however many beats show them; voices are the table read's,
+ * where there are any; the text travels as text. A missing picture blocks; a missing voice does not.
+ */
+describe("a visual novel's package (turn 172)", () => {
+  const cover = (blockId: string) => ({ blockId, textDigest: "sha256:12345678" });
+  function still(id: string, shotId: string): Take {
+    return { ...take(id, shotId), kind: "frame", model: "flux-pro-1.1", media: "frame.png" };
+  }
+  async function novel(dir: string, base: ProductionBundle, options: { withoutPicture?: boolean } = {}): Promise<ProductionBundle> {
+    const takes = [still("tk_01J8E0000000000000000000V1", "sh_v1"), still("tk_01J8E0000000000000000000V2", "sh_v3")];
+    for (const t of takes) {
+      const takeDir = join(dir, "productions", base.meta.id, "takes", t.id);
+      await mkdir(takeDir, { recursive: true });
+      await writeFile(join(takeDir, "frame.png"), Buffer.from(`picture-of-${t.id}`));
+    }
+    const first = {
+      id: "sc_i1", number: 1, slug: "i1", title: "The drowned quarter", status: "accepted" as const, version: 1,
+      script: { blocks: [
+        { id: "blk_wash", kind: "action" as const, text: "They hung the washing out the morning the water came." },
+        { id: "blk_window", kind: "dialogue" as const, speaker: "maren-kest", text: "Somebody lit a window down there." },
+      ] },
+      shots: [
+        { id: "sh_v1", number: 1, title: "Quarter", description: "The quarter", covers: [cover("blk_wash"), cover("blk_window")], beat: { advance: "voice" as const } },
+        { id: "sh_v2", number: 2, title: "Held", description: "", beat: { samePicture: true } },
+      ],
+    };
+    const second = {
+      id: "sc_i2", number: 2, slug: "i2", title: "The pier", status: "accepted" as const, version: 1,
+      script: { blocks: [{ id: "blk_level", kind: "action" as const, text: "Level." }] },
+      shots: [{ id: "sh_v3", number: 1, title: "Pier", description: "The pier", covers: [cover("blk_level")] }],
+    };
+    return {
+      ...base,
+      meta: { ...base.meta, medium: "video", kind: "visual-novel" },
+      scenes: [first, second],
+      routing: ROUTING,
+      takes,
+      selections: {
+        sh_v1: { acceptedTakeId: takes[0]!.id, trimInSec: 0 },
+        ...(options.withoutPicture ? {} : { sh_v3: { acceptedTakeId: takes[1]!.id, trimInSec: 0 } }),
+      },
+    } as ProductionBundle;
+  }
+  const walked = { ts: CLOCK(), routingVersion: 1, choiceId: "ch_on", from: "sc_i1", to: "sc_i2", route: ["sc_i1"] };
+
+  it("ships each scene as beats: pictures once, the prepared voice, the text as text, and verifies itself", async () => {
+    const { dir, store, bundle } = await open();
+    const production = await novel(dir, bundle.productions[0]!);
+    await appendTraversal(store, production.meta.id, walked);
+    await mkdir(join(dir, ".cache", "voice-previews"), { recursive: true });
+    await writeFile(join(dir, ".cache", "voice-previews", "wash.mp3"), Buffer.from("the narrator reads"));
+    const voices = async (sceneId: string) => new Map(sceneId === "sc_i1" ? [["sc_i1/sh_v1/blk_wash", ".cache/voice-previews/wash.mp3"]] : []);
+    const exportId = "iv_01J8F3K2QW9VZX4N7M0RTYB6HD";
+    const result = await exportInteractive(store, production, CLOCK, { exportId, voices });
+    assert.ok(result.ok, `expected export, got ${result.ok ? "" : result.blockers.join("; ")}`);
+    const manifest = JSON.parse(await readFile(join(dir, result.dir, "manifest.json"), "utf8")) as {
+      media: unknown[];
+      beats: Array<{ sceneId: string; beats: Array<Record<string, unknown>> }>;
+      files: Array<{ file: string; hash: string }>;
+    };
+    assert.deepEqual(manifest.media, [], "no footage");
+    const first = manifest.beats.find((scene) => scene.sceneId === "sc_i1")!.beats;
+    assert.deepEqual(first.map((beat) => [beat.text ?? null, beat.speaker ?? null, beat.audio ?? null, beat.picture]), [
+      ["They hung the washing out the morning the water came.", null, "media/voice-sc_i1_sh_v1_blk_wash.mp3", "media/picture-sh_v1.png"],
+      ["Somebody lit a window down there.", "Maren Kest", null, "media/picture-sh_v1.png"],
+      [null, null, null, "media/picture-sh_v1.png"],
+    ], "narration voiced, Maren's line as text, and the held beat keeps sh_v1's picture");
+    assert.equal(first[0]!.advance, "voice");
+    assert.deepEqual(manifest.files.map((entry) => entry.file).sort(), ["media/picture-sh_v1.png", "media/picture-sh_v3.png", "media/voice-sc_i1_sh_v1_blk_wash.mp3"], "each file once");
+    assert.equal(await readFile(join(dir, result.dir, "media", "voice-sc_i1_sh_v1_blk_wash.mp3"), "utf8"), "the narrator reads");
+    const player = await readFile(join(dir, result.file), "utf8");
+    assert.match(player, /manifest\.beats/, "the page reads the beats");
+    assert.ok(player.includes(INTERACTIVE_PLAYER_SOURCE.replace("export function mountInteractivePlayer", "function mountInteractivePlayer").slice(0, 200)), "the one player");
+    assert.equal(await interactiveExportCompleted(store, production.meta.id, exportId), true, "it verifies as complete");
+  });
+
+  it("refuses a beat with no picture by name, and never a line with no voice", async () => {
+    const { dir, store, bundle } = await open();
+    const production = await novel(dir, bundle.productions[0]!, { withoutPicture: true });
+    await appendTraversal(store, production.meta.id, walked);
+    const result = await exportInteractive(store, production, CLOCK);
+    assert.ok(!result.ok);
+    assert.deepEqual(result.blockers, ["sc_i2, beat 1 needs a picture"], "only the picture; no voices were given and none is asked for");
+  });
+
+  it("a voice path the plan names outside the world never reaches the package", async () => {
+    const { dir, store, bundle } = await open();
+    const production = await novel(dir, bundle.productions[0]!);
+    await appendTraversal(store, production.meta.id, walked);
+    const voices = async () => new Map([["sc_i1/sh_v1/blk_wash", "../outside.mp3"]]);
+    const result = await exportInteractive(store, production, CLOCK, { voices });
+    assert.ok(result.ok, `expected export, got ${result.ok ? "" : result.blockers.join("; ")}`);
+    const manifest = JSON.parse(await readFile(join(dir, result.dir, "manifest.json"), "utf8")) as { files: Array<{ file: string }> };
+    assert.equal(manifest.files.some((entry) => entry.file.startsWith("media/voice-")), false, "read as text instead");
+  });
+});

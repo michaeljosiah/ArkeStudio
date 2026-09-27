@@ -93,3 +93,44 @@ export function beatPictureShotId(shots: readonly Pick<Shot, "id" | "beat">[], s
   while (index > 0 && shots[index]!.beat?.samePicture === true) index -= 1;
   return shots[index]!.id;
 }
+
+/** One beat as the player reads it (`InteractivePlayerBeat`), before its media are addressed. */
+export interface PlayerBeat {
+  picture?: string;
+  text?: string;
+  speaker?: string;
+  audio?: string;
+  advance: "voice" | "tap" | "hold";
+  holdSec: number;
+  motion: "push" | "drift" | "none";
+}
+
+/**
+ * A scene's beats for the player — the preview and the exported package both build them here, so
+ * the two cannot read a scene differently. Where a picture or a voice lives is the caller's: the
+ * app addresses media through the studio, the package through its own folder.
+ */
+export function playerBeats(
+  scene: SceneRecord,
+  resolve: {
+    /** The shot's picture, or none. */
+    picture: (shotId: string) => string | undefined;
+    /** The line's voice, or none (it reads as text). */
+    audio: (lineId: string) => string | undefined;
+    /** The name a speaker's tab shows. */
+    speakerName: (sheetId: string) => string;
+  },
+): PlayerBeat[] {
+  const shots = orderedShots(scene);
+  return sceneBeats(scene).map((beat) => {
+    const picture = resolve.picture(beatPictureShotId(shots, beat.shot.id));
+    const audio = beat.lineId === undefined ? undefined : resolve.audio(beat.lineId);
+    return {
+      ...(picture !== undefined ? { picture } : {}),
+      ...(beat.text ? { text: beat.text } : {}),
+      ...(beat.kind === "dialogue" && beat.speaker ? { speaker: resolve.speakerName(beat.speaker) } : {}),
+      ...(audio !== undefined ? { audio } : {}),
+      ...beatPlayback(beat.shot),
+    };
+  });
+}

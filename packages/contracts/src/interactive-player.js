@@ -9,6 +9,11 @@
  * identical by `node scripts/interactive-player-source.mjs`, and the tests read the package for
  * what the brief binds: no timer anywhere (a choice is never made on the viewer's behalf), and
  * playback state that is the viewer's place and nothing more.
+ *
+ * A scene is clips (an interactive movie) or beats (a visual novel, turn 172): a picture and a
+ * line each, read at the viewer's pace. The same rule holds for beats — what moves a beat on by
+ * itself is a voice ending or a CSS animation ending, never a timer — and a beat scene's place is
+ * the beat's index, kept in the same four fields.
  */
 
 /**
@@ -30,9 +35,12 @@ export function mountInteractivePlayer(root, options) {
   const media = Object.fromEntries(
     Object.keys(scenes).map((id) => [
       id,
-      scenes[id].clips.map((c) => (typeof c === "string" ? { src: c, from: 0, to: null } : { src: c.src, from: c.from || 0, to: c.to == null ? null : c.to })),
+      (scenes[id].clips || []).map((c) => (typeof c === "string" ? { src: c, from: 0, to: null } : { src: c.src, from: c.from || 0, to: c.to == null ? null : c.to })),
     ]),
   );
+  /** A visual novel's scenes read as beats (turn 172); a scene with beats plays no clips. */
+  const beatsOf = (id) => (scenes[id] && Array.isArray(scenes[id].beats) ? scenes[id].beats : []);
+  const isBeats = (id) => beatsOf(id).length > 0;
   /** The loaded clip's window in its file: where it starts, and how long it runs once that is known. */
   function span() {
     const c = (media[state.sceneId] || [])[clipIndex];
@@ -67,6 +75,15 @@ export function mountInteractivePlayer(root, options) {
   let routeOpen = false;
   let clipIndex = 0;
   const durations = [];
+  // A beat scene's reading: which beat, whether its line has finished typing on, whether its
+  // voice has finished, and whether the viewer asked the beats to move on by themselves (Auto).
+  // None of it is kept: the place is the beat's index in `state.positionSec`.
+  let beatIndex = 0;
+  let typed = false;
+  let voiceDone = true;
+  let auto = false;
+  let logOpen = false;
+  const still = () => Boolean(win.matchMedia && win.matchMedia("(prefers-reduced-motion: reduce)").matches);
 
   const esc = (text) => String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   const time = (sec) => {
@@ -92,6 +109,9 @@ export function mountInteractivePlayer(root, options) {
     x: '<path d="M18 6 6 18"></path><path d="m6 6 12 12"></path>',
     undo: '<path d="M9 14 4 9l5-5"></path><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"></path>',
     map: '<rect width="7" height="7" x="3" y="3" rx="1"></rect><rect width="7" height="7" x="14" y="14" rx="1"></rect><path d="M10 6.5h4a3 3 0 0 1 3 3V14"></path>',
+    auto: '<path d="m6 17 5-5-5-5"></path><path d="m13 17 5-5-5-5"></path>',
+    log: '<path d="M3 12h.01"></path><path d="M3 18h.01"></path><path d="M3 6h.01"></path><path d="M8 12h13"></path><path d="M8 18h13"></path><path d="M8 6h13"></path>',
+    next: '<path d="m9 18 6-6-6-6"></path>',
   };
 
   // The picture is the page (turn 156): always dark, whatever the app's theme; the media tokens
@@ -167,6 +187,41 @@ export function mountInteractivePlayer(root, options) {
 .aip-way>span{flex:1;min-width:0;font-weight:500}
 .aip-panel-foot{display:flex;gap:8px;padding:14px 6px 0 12px;border-top:1px solid color-mix(in srgb,var(--aip-fg) 14%,transparent)}
 .aip-kbd{min-width:22px;height:20px;padding:0 5px;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;border:1px solid color-mix(in srgb,var(--aip-fg) 30%,transparent)}
+.aip-pic{position:absolute;inset:0;overflow:hidden;background:var(--aip-bg)}
+.aip-pic>img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;transform-origin:50% 45%}
+.aip-pic>img.m-push{animation:aip-push 14s ease-out both}
+.aip-pic>img.m-drift{animation:aip-drift 16s ease-in-out both}
+@keyframes aip-push{from{transform:scale(1)}to{transform:scale(1.08)}}
+@keyframes aip-drift{from{transform:scale(1.06) translateX(-2%)}to{transform:scale(1.06) translateX(2%)}}
+.aip-beatbar{display:none;align-items:center;gap:2px}
+.aip[data-kind="beats"] .aip-beatbar{display:flex}
+.aip[data-kind="beats"] .aip-bar{display:none}
+.aip-pill{height:40px;padding:0 14px 0 12px!important;border-radius:999px;display:inline-flex!important;align-items:center;gap:7px;font-weight:500}
+.aip-pill:hover,.aip-pill:focus-visible,.aip-pill[aria-pressed="true"]{background:color-mix(in srgb,var(--aip-fg) 14%,transparent)!important}
+.aip-box{position:absolute;left:50%;transform:translateX(-50%);bottom:40px;width:880px;max-width:calc(100% - 48px);min-height:128px;padding:26px 34px;border-radius:18px;background:color-mix(in srgb,var(--aip-bg) 52%,transparent);backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%);border:1px solid color-mix(in srgb,var(--aip-fg) 20%,transparent);box-shadow:0 20px 50px color-mix(in srgb,var(--aip-bg) 40%,transparent)}
+.aip[data-mode="ending"] .aip-box,.aip[data-mode="poster"] .aip-box{display:none}
+.aip-who{position:absolute;left:28px;top:-15px;height:30px;padding:0 14px;border-radius:999px;display:inline-flex;align-items:center;font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;background:var(--aip-fg);color:var(--aip-bg)}
+.aip-line{font-size:24px;line-height:1.45;letter-spacing:-.01em;text-wrap:pretty}
+.aip-box[data-kind="narration"] .aip-line{font-style:italic;color:color-mix(in srgb,var(--aip-fg) 90%,transparent)}
+.aip-line>span{animation:aip-word .2s ease both}
+.aip-box[data-typed] .aip-line>span{animation:none}
+@keyframes aip-word{from{opacity:0}}
+.aip-more{position:absolute;right:22px;bottom:14px;display:inline-flex;align-items:center;gap:6px;font-size:12px;color:color-mix(in srgb,var(--aip-fg) 70%,transparent)}
+.aip-ticks{position:absolute;left:50%;transform:translateX(-50%);bottom:14px;display:flex;gap:5px}
+.aip-ticks>i{width:18px;height:3px;border-radius:99px;background:color-mix(in srgb,var(--aip-fg) 24%,transparent)}
+.aip-ticks>i.done{background:var(--aip-fg)}
+.aip[data-mode="ending"] .aip-ticks,.aip[data-mode="poster"] .aip-ticks{display:none}
+.aip-hold{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+@keyframes aip-hold{from{opacity:0}to{opacity:.01}}
+.aip[data-kind="beats"] .aip-choices{bottom:250px;max-height:calc(100% - 330px)}
+.aip[data-kind="beats"] .aip-under{bottom:198px}
+.aip-log-line{position:relative;padding:10px 44px 10px 12px;border-radius:12px}
+.aip-log-line.now{background:color-mix(in srgb,var(--aip-fg) 12%,transparent)}
+.aip-log-line>.w{font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--aip-fg) 64%,transparent)}
+.aip-log-line>.t{margin-top:3px;font-size:14px;line-height:1.5}
+.aip-log-line.narration>.t{font-style:italic;margin-top:0}
+.aip-log-line>button{position:absolute;right:8px;top:50%;transform:translateY(-50%);width:28px;height:28px;border-radius:99px;display:inline-flex!important;align-items:center;justify-content:center;border:1px solid color-mix(in srgb,var(--aip-fg) 30%,transparent)!important}
+@media (prefers-reduced-motion:reduce){.aip-pic>img{animation:none!important}.aip-line>span{animation:none}}
 @media (max-width:640px){
 .aip-top{left:20px;right:14px;top:20px}
 .aip-bar{left:16px;right:16px}
@@ -178,6 +233,15 @@ export function mountInteractivePlayer(root, options) {
 .aip-strip{gap:8px;padding:0 10px 0 14px}
 .aip-strip>span:not(.aip-spacer){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .aip-strip .aip-btn{flex:none}
+.aip-box{left:12px;right:12px;transform:none;width:auto;max-width:none;bottom:42px;min-height:0;padding:22px 20px 30px}
+.aip-who{left:18px}
+.aip-line{font-size:18px}
+.aip-ticks{bottom:24px}
+.aip-top{flex-wrap:wrap;row-gap:6px}
+.aip[data-kind="beats"] .aip-top>div:first-child{flex:1 1 100%!important}
+.aip-beatbar .t{display:none}
+.aip[data-kind="beats"] .aip-choices{bottom:210px;max-height:calc(100% - 290px)}
+.aip[data-kind="beats"] .aip-under{bottom:160px}
 }
 `;
 
@@ -188,10 +252,19 @@ export function mountInteractivePlayer(root, options) {
     (author ? '<div class="aip-strip" data-ref="strip"></div>' : "") +
     '<div class="aip-stage">' +
     '<video class="aip-video" data-ref="video" playsinline preload="auto"></video>' +
+    '<div class="aip-pic" data-ref="pic" hidden><img data-ref="img" alt=""></div>' +
+    '<audio data-ref="voice" preload="auto"></audio><audio data-ref="logVoice" preload="auto"></audio>' +
     '<div class="aip-slate" data-ref="slate" hidden></div>' +
     '<div class="aip-dim"></div>' +
     '<div class="aip-scrim-top aip-chrome"></div>' +
-    '<div class="aip-top aip-chrome"><div style="flex:1;min-width:0"><div class="aip-eyebrow" data-ref="eyebrow"></div><div class="aip-scene" data-ref="scene"></div></div></div>' +
+    '<div class="aip-top aip-chrome"><div style="flex:1;min-width:0"><div class="aip-eyebrow" data-ref="eyebrow"></div><div class="aip-scene" data-ref="scene"></div></div>' +
+    '<div class="aip-beatbar">' +
+    '<button type="button" class="aip-pill" data-act="auto" data-ref="autoBtn" aria-pressed="false">' + icon(I.auto, 16) + '<span class="t">Auto</span></button>' +
+    '<button type="button" class="aip-pill" data-act="log" data-ref="logBtn" aria-pressed="false">' + icon(I.log, 16) + '<span class="t">Log</span></button>' +
+    '<button type="button" class="aip-pill" data-act="route" aria-label="Route">' + icon(I.route, 16) + '<span class="t">Route</span></button>' +
+    '<button type="button" class="aip-ib" data-act="mute" data-ref="beatMute" aria-label="Mute"></button>' +
+    '<button type="button" class="aip-ib" data-act="full" aria-label="Full screen">' + icon(I.full) + "</button>" +
+    "</div></div>" +
     '<div class="aip-scrim-bot aip-chrome"></div>' +
     '<div class="aip-bar aip-chrome" data-ref="bar">' +
     '<div class="aip-scrub" data-ref="scrub" role="slider" tabindex="0" aria-label="Position in this scene" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>' +
@@ -203,10 +276,13 @@ export function mountInteractivePlayer(root, options) {
     '<button type="button" class="aip-ib" data-act="route" data-ref="routeBtn" aria-label="Route"></button>' +
     '<button type="button" class="aip-ib" data-act="full" aria-label="Full screen">' + icon(I.full) + "</button>" +
     "</div></div>" +
+    '<div class="aip-box" data-ref="box" hidden><span class="aip-who" data-ref="who" hidden></span><div class="aip-line" data-ref="line" aria-live="polite"></div><span class="aip-more" data-ref="more"></span></div>' +
+    '<div class="aip-ticks" data-ref="ticks"></div><div class="aip-hold" data-ref="hold"></div>' +
     '<div class="aip-choices" data-ref="choices" role="group" aria-label="Choices"></div>' +
     '<div class="aip-under" data-ref="under"></div>' +
     '<div data-ref="hero"></div>' +
     '<div class="aip-panel" data-ref="panel" role="dialog" aria-label="Route" hidden></div>' +
+    '<div class="aip-panel" data-ref="log" role="dialog" aria-label="Log" hidden></div>' +
     "</div>";
 
   const ref = (name) => root.querySelector('[data-ref="' + name + '"]');
@@ -216,7 +292,11 @@ export function mountInteractivePlayer(root, options) {
     strip: ref("strip"), slate: ref("slate"), eyebrow: ref("eyebrow"), scene: ref("scene"), scrub: ref("scrub"),
     toggle: ref("toggle"), mute: ref("mute"), time: ref("time"), routeBtn: ref("routeBtn"), under: ref("under"),
     hero: ref("hero"), panel: ref("panel"),
+    pic: ref("pic"), img: ref("img"), box: ref("box"), who: ref("who"), line: ref("line"), more: ref("more"),
+    ticks: ref("ticks"), hold: ref("hold"), log: ref("log"), autoBtn: ref("autoBtn"), logBtn: ref("logBtn"), beatMute: ref("beatMute"),
   };
+  const voice = ref("voice");
+  const logVoice = ref("logVoice");
 
   function save() {
     state.updatedAt = new Date().toISOString();
@@ -242,6 +322,21 @@ export function mountInteractivePlayer(root, options) {
     mode = "playing";
     clipIndex = 0;
     durations.length = 0;
+    if (isBeats(sceneId)) {
+      // A beat scene plays no footage: the video is let go, and the place is a beat's index.
+      video.pause && video.pause();
+      video.removeAttribute("src");
+      if (state.positionSec < 0) {
+        // Saved at its choice or ending: the last beat's picture and line, without its voice.
+        showBeat(beatsOf(sceneId).length - 1, true);
+        finishScene();
+        return;
+      }
+      showBeat(Math.min(Math.floor(state.positionSec), beatsOf(sceneId).length - 1));
+      render();
+      holdFocus();
+      return;
+    }
     const clips = media[sceneId] || [];
     if (state.positionSec < 0 && clips.length > 0) {
       // A place saved at a choice or an ending: the scene was watched to its end, so the viewer
@@ -270,6 +365,154 @@ export function mountInteractivePlayer(root, options) {
   function holdFocus() {
     const at = doc.activeElement;
     if (!at || at === doc.body || !root.contains(at)) root.focus();
+  }
+
+  /** The beat being read. */
+  const beat = () => beatsOf(state.sceneId)[beatIndex] || {};
+
+  /**
+   * Show one beat: its picture (kept, not restarted, when the next beat shares it), its line typing
+   * on word by word, and its voice. `quiet` shows it without its voice — a place reopened at the
+   * scene's choice, or a choice point returned to.
+   */
+  function showBeat(index, quiet) {
+    stopHold();
+    logVoice.pause && logVoice.pause();
+    const beats = beatsOf(state.sceneId);
+    beatIndex = Math.max(0, Math.min(index, beats.length - 1));
+    if (!quiet) {
+      state.positionSec = beatIndex;
+      save();
+    }
+    const b = beat();
+    if (b.picture) {
+      const motion = still() ? "none" : b.motion || "push";
+      // A new picture starts its movement; one shared with the beat before keeps moving. The
+      // poster's picture was set still, so it starts moving when reading begins.
+      if (el.img.getAttribute("src") !== b.picture || el.img.className === "") {
+        el.img.setAttribute("src", b.picture);
+        el.img.className = "";
+        void el.img.offsetWidth;
+        el.img.className = "m-" + motion;
+      }
+    }
+    // One span a word, each a little after the last, so the line types on by CSS alone; the
+    // last one's animation ending is when it has finished.
+    const words = String(b.text || "").split(/(\s+)/);
+    let n = 0;
+    el.line.innerHTML = words.map((w) => (/^\s+$/.test(w) || w === "" ? esc(w) : '<span style="animation-delay:' + (n++ * 0.05).toFixed(2) + 's">' + esc(w) + "</span>")).join("");
+    typed = n === 0 || still();
+    if (typed) el.box.setAttribute("data-typed", "");
+    else el.box.removeAttribute("data-typed");
+    voice.pause && voice.pause();
+    if (b.audio && !quiet) {
+      voiceDone = false;
+      voice.setAttribute("src", b.audio);
+      const p = voice.play && voice.play();
+      // A voice the browser will not start (no gesture yet, a missing file) is read as text.
+      if (p && p.catch) p.catch(() => voiceEnded());
+    } else {
+      voiceDone = true;
+      voice.removeAttribute("src");
+    }
+    renderBeat();
+    schedule(true);
+  }
+
+  /**
+   * What moves this beat on by itself, if anything: a hold, from when it shows; after its voice, a
+   * beat's breath once the voice ends; and with Auto on, the same breath, or a reading time for a
+   * line with no voice. Otherwise it waits for the reader. Each is a CSS animation on one hidden
+   * element whose end is the signal — the player keeps no timer.
+   */
+  function schedule(shown) {
+    if (mode !== "playing" || !isBeats(state.sceneId)) return;
+    const b = beat();
+    const advance = b.advance || "tap";
+    if (advance === "hold") {
+      if (shown) startHold(b.holdSec || 4);
+      return;
+    }
+    if (!voiceDone) return;
+    if (b.audio && (advance === "voice" || auto)) startHold(1.2);
+    else if (auto) startHold(Math.min(12, 1.5 + String(b.text || "").split(/\s+/).filter(Boolean).length * 0.3));
+  }
+  function startHold(sec) {
+    el.hold.style.animation = "none";
+    void el.hold.offsetWidth;
+    el.hold.setAttribute("data-beat", state.sceneId + "#" + beatIndex);
+    el.hold.style.animation = "aip-hold " + sec + "s linear forwards";
+  }
+  function stopHold() {
+    el.hold.style.animation = "none";
+    el.hold.removeAttribute("data-beat");
+  }
+  function voiceEnded() {
+    if (voiceDone) return;
+    voiceDone = true;
+    schedule(false);
+  }
+
+  /** A tap, a key: the rest of the line if it is still typing on, else the next beat. */
+  function advanceBeat() {
+    if (!typed) {
+      typed = true;
+      el.box.setAttribute("data-typed", "");
+      renderBeat();
+      return;
+    }
+    nextBeat();
+  }
+  function nextBeat() {
+    const beats = beatsOf(state.sceneId);
+    if (beatIndex < beats.length - 1) {
+      showBeat(beatIndex + 1);
+      return;
+    }
+    stopHold();
+    voice.pause && voice.pause();
+    finishScene();
+  }
+  /** Back one beat, within the scene: a choice already made is changed from the route, not here. */
+  function previousBeat() {
+    if (beatIndex > 0) showBeat(beatIndex - 1);
+  }
+
+  function renderBeat() {
+    const beats = beatsOf(state.sceneId);
+    const b = beat();
+    const who = b.speaker ? String(b.speaker) : "";
+    el.who.hidden = who === "";
+    el.who.textContent = who;
+    el.box.setAttribute("data-kind", b.text ? (who ? "dialogue" : "narration") : "picture");
+    // A beat with no line is the picture alone: the box steps aside for it.
+    el.box.hidden = !isBeats(state.sceneId) || !b.text;
+    el.more.innerHTML = mode === "playing" && typed ? "tap " + icon(I.next, 14) : "";
+    el.ticks.innerHTML = beats.length > 1 ? beats.map((_, i) => '<i class="' + (i <= beatIndex ? "done" : "") + '"></i>').join("") : "";
+    el.autoBtn.setAttribute("aria-pressed", auto ? "true" : "false");
+    el.logBtn.setAttribute("aria-pressed", logOpen ? "true" : "false");
+    el.beatMute.innerHTML = icon(voice.muted ? I.muted : I.volume);
+    el.beatMute.setAttribute("aria-label", voice.muted ? "Unmute" : "Mute");
+    renderLog();
+  }
+
+  /** The scene's lines so far, each with its voice to hear again; it is a view, and moves nothing on. */
+  function renderLog() {
+    el.log.hidden = !logOpen || !isBeats(state.sceneId);
+    if (el.log.hidden) {
+      const at = doc.activeElement;
+      if (at && el.log.contains(at)) root.focus();
+      return;
+    }
+    const lines = beatsOf(state.sceneId).slice(0, beatIndex + 1).map((b, i) => ({ b, i })).filter((x) => x.b.text);
+    el.log.innerHTML =
+      '<div class="aip-panel-head"><span style="flex:1">Log</span><span class="aip-kbd">L</span><button type="button" class="aip-ib" data-act="log" aria-label="Close">' + icon(I.x) + "</button></div>" +
+      '<div class="aip-panel-list">' +
+      lines.map((x) =>
+        '<div class="aip-log-line' + (x.b.speaker ? "" : " narration") + (x.i === beatIndex ? " now" : "") + '">' +
+        (x.b.speaker ? '<div class="w">' + esc(x.b.speaker) + "</div>" : "") + '<div class="t">' + esc(x.b.text) + "</div>" +
+        (x.b.audio ? '<button type="button" data-line="' + x.i + '" aria-label="Play line">' + icon(I.play, 11) + "</button>" : "") + "</div>").join("") +
+      "</div>";
   }
 
   /** Load one of the scene's clips and seek into it: to `at` seconds, or to `ratio` of its length once known. */
@@ -334,7 +577,10 @@ export function mountInteractivePlayer(root, options) {
     video.pause && video.pause();
     // The choice point is shown over its own scene's last frame, not the later scene's.
     const clips = media[choice.from] || [];
-    if (clips.length > 0) loadClip(clips.length - 1, 0, 1, false);
+    if (isBeats(choice.from)) {
+      voice.pause && voice.pause();
+      showBeat(beatsOf(choice.from).length - 1, true);
+    } else if (clips.length > 0) loadClip(clips.length - 1, 0, 1, false);
     else video.removeAttribute("src");
     finishScene();
   }
@@ -352,7 +598,7 @@ export function mountInteractivePlayer(root, options) {
         '<button type="button" class="aip-choice" data-choice="' + esc(c.id) + '"><span class="k">' + (i + 1) + '</span><span class="l">' + esc(c.label) + "</span>" +
         (author && unwalked.has(c.id) ? '<span class="aip-chip">not walked</span>' : "") + "</button>")
       .join("");
-    el.under.innerHTML = mode === "choice" && (media[state.sceneId] || []).length > 0
+    el.under.innerHTML = mode === "choice" && ((media[state.sceneId] || []).length > 0 || isBeats(state.sceneId))
       ? '<button type="button" class="aip-ghost" data-act="replay">' + icon(I.back, 15) + "Replay scene</button>"
       : "";
   }
@@ -369,7 +615,9 @@ export function mountInteractivePlayer(root, options) {
         const length = lengthOf(i);
         total = length === undefined ? null : total + length;
       }
-      const pct = over ? 100 : resume && total ? Math.min(100, (100 * saved.positionSec) / total) : 0;
+      // A beat scene's place is a beat, so its bar is beats read of the scene's beats.
+      const beatCount = resume ? beatsOf(saved.sceneId).length : 0;
+      const pct = over ? 100 : resume && beatCount > 0 ? Math.min(100, (100 * (saved.positionSec + 1)) / beatCount) : resume && total ? Math.min(100, (100 * saved.positionSec) / total) : 0;
       el.hero.innerHTML =
         '<div class="aip-poster-back"></div><div class="aip-hero">' +
         (options.eyebrow ? '<div class="aip-eyebrow">' + esc(options.eyebrow) + "</div>" : "") +
@@ -378,7 +626,7 @@ export function mountInteractivePlayer(root, options) {
           ? '<button type="button" class="aip-btn primary" data-act="continue">' + icon(I.play, 16) + 'Continue</button><button type="button" class="aip-btn" data-act="restart">' + icon(I.back, 16) + "Start over</button>"
           : '<button type="button" class="aip-btn primary" data-act="restart">' + icon(I.play, 16) + "Play</button>") +
         "</div>" +
-        (resume ? '<div class="aip-place"><i><b style="width:' + pct + '%"></b></i>' + esc(titleOf(saved.sceneId)) + " · " + (over ? (endings[saved.sceneId] !== undefined ? "the ending" : "the choice") : time(saved.positionSec)) + "</div>" : "") +
+        (resume ? '<div class="aip-place"><i><b style="width:' + pct + '%"></b></i>' + esc(titleOf(saved.sceneId)) + " · " + (over ? (endings[saved.sceneId] !== undefined ? "the ending" : "the choice") : beatCount > 0 ? "beat " + (Math.floor(saved.positionSec) + 1) + " of " + beatCount : time(saved.positionSec)) + "</div>" : "") +
         "</div>";
       return;
     }
@@ -461,10 +709,21 @@ export function mountInteractivePlayer(root, options) {
     root.setAttribute("data-mode", mode);
     el.eyebrow.textContent = options.title;
     el.scene.textContent = titleOf(state.sceneId);
-    const slate = (media[state.sceneId] || []).length === 0 && mode !== "poster" && mode !== "ending";
+    const beats = isBeats(state.sceneId);
+    root.setAttribute("data-kind", beats ? "beats" : "clips");
+    const slate = !beats && (media[state.sceneId] || []).length === 0 && mode !== "poster" && mode !== "ending";
     el.slate.hidden = !slate;
     el.slate.innerHTML = slate ? '<div class="aip-eyebrow">' + esc(options.title) + '</div><div class="aip-slate-title">' + esc(titleOf(state.sceneId)) + '</div><div class="aip-muted" style="margin-top:12px">No accepted take</div>' : "";
-    video.hidden = slate;
+    video.hidden = slate || beats;
+    el.pic.hidden = !beats;
+    if (beats && mode === "poster" && !el.img.getAttribute("src")) {
+      // The poster is the saved beat's picture, or the scene's first, held still.
+      const at = saved && saved.positionSec >= 0 ? Math.floor(saved.positionSec) : saved ? beatsOf(state.sceneId).length - 1 : 0;
+      const b = beatsOf(state.sceneId)[at] || beatsOf(state.sceneId)[0];
+      if (b && b.picture) el.img.setAttribute("src", b.picture);
+    }
+    if (beats) renderBeat();
+    else el.box.hidden = true;
     renderBar();
     renderChoices();
     renderHero();
@@ -596,6 +855,22 @@ export function mountInteractivePlayer(root, options) {
       chooseAgain(Number(again.getAttribute("data-again")));
       return;
     }
+    const heard = target.closest("[data-line]");
+    if (heard) {
+      // Heard again from the log, on its own player: the beat being read is not disturbed.
+      const b = beatsOf(state.sceneId)[Number(heard.getAttribute("data-line"))];
+      if (b && b.audio) {
+        logVoice.setAttribute("src", b.audio);
+        const p = logVoice.play && logVoice.play();
+        if (p && p.catch) p.catch(() => undefined);
+      }
+      return;
+    }
+    // A tap anywhere on the picture reads on; the chrome, the panels and the choices keep theirs.
+    if (mode === "playing" && isBeats(state.sceneId) && !target.closest("button, .aip-panel, .aip-strip, .aip-top")) {
+      advanceBeat();
+      return;
+    }
     const scrub = target.closest('[data-ref="scrub"]');
     if (scrub && mode === "playing") {
       const segs = [...scrub.querySelectorAll(".aip-seg")];
@@ -616,8 +891,10 @@ export function mountInteractivePlayer(root, options) {
     switch (act.getAttribute("data-act")) {
       case "toggle": toggle(); break;
       case "back": nudge(-10); break;
-      case "mute": video.muted = !video.muted; renderBar(); break;
-      case "route": routeOpen = !routeOpen; renderPanel(); break;
+      case "mute": video.muted = !video.muted; voice.muted = video.muted; logVoice.muted = video.muted; renderBar(); renderBeat(); break;
+      case "route": routeOpen = !routeOpen; if (routeOpen) logOpen = false; renderPanel(); renderBeat(); break;
+      case "log": logOpen = !logOpen; if (logOpen) routeOpen = false; renderPanel(); renderBeat(); break;
+      case "auto": auto = !auto; renderBeat(); if (auto && mode === "playing") schedule(false); else if (!auto && (beat().advance || "tap") === "tap") stopHold(); break;
       case "full": full(); break;
       case "replay": play(state.sceneId, 0); break;
       case "continue": saved = null; play(state.sceneId, state.positionSec); break;
@@ -633,7 +910,10 @@ export function mountInteractivePlayer(root, options) {
     const onButton = event.target && event.target.tagName === "BUTTON";
     const key = event.key;
     if (key === "Escape") {
-      if (routeOpen) {
+      if (logOpen) {
+        logOpen = false;
+        renderBeat();
+      } else if (routeOpen) {
         routeOpen = false;
         renderPanel();
       } else if (author && author.onClose) author.onClose();
@@ -647,6 +927,33 @@ export function mountInteractivePlayer(root, options) {
         choose(c);
       }
       return;
+    }
+    if (mode === "playing" && isBeats(state.sceneId)) {
+      // A beat scene reads on with the keys a reader expects; a focused button keeps its own.
+      if (((key === " " || key === "Enter") && !onButton) || key === "ArrowRight") {
+        event.preventDefault();
+        advanceBeat();
+        return;
+      }
+      if (key === "ArrowLeft") {
+        event.preventDefault();
+        previousBeat();
+        return;
+      }
+      if (key === "a" || key === "A") {
+        auto = !auto;
+        renderBeat();
+        if (auto) schedule(false);
+        else if ((beat().advance || "tap") === "tap") stopHold();
+        return;
+      }
+      if (key === "l" || key === "L") {
+        logOpen = !logOpen;
+        if (logOpen) routeOpen = false;
+        renderPanel();
+        renderBeat();
+        return;
+      }
     }
     if (event.target === el.scrub && mode === "playing" && video.duration) {
       // The scene's scrubber is a slider in the tab order, so it takes a slider's keys.
@@ -669,7 +976,10 @@ export function mountInteractivePlayer(root, options) {
     else if (key === "ArrowRight") nudge(5);
     else if (key === "m" || key === "M") {
       video.muted = !video.muted;
+      voice.muted = video.muted;
+      logVoice.muted = video.muted;
       renderBar();
+      renderBeat();
     } else if (key === "r" || key === "R") {
       routeOpen = !routeOpen;
       renderPanel();
@@ -685,6 +995,26 @@ export function mountInteractivePlayer(root, options) {
   root.addEventListener("click", onClick);
   root.addEventListener("keydown", onKey);
   root.addEventListener("pointermove", wake);
+  // A beat's voice ending, and the two CSS animations whose ends are signals: the hold element's,
+  // which moves the beat on, and the last word's, which is the line finished typing on.
+  const onVoiceEnded = () => voiceEnded();
+  const onAnimationEnd = (event) => {
+    if (event.target === el.hold) {
+      if (mode === "playing" && el.hold.getAttribute("data-beat") === state.sceneId + "#" + beatIndex) {
+        stopHold();
+        nextBeat();
+      }
+      return;
+    }
+    if (!typed && event.target && event.target.parentNode === el.line && event.target === el.line.lastElementChild) {
+      typed = true;
+      el.box.setAttribute("data-typed", "");
+      renderBeat();
+    }
+  };
+  voice.addEventListener("ended", onVoiceEnded);
+  voice.addEventListener("error", onVoiceEnded);
+  root.addEventListener("animationend", onAnimationEnd);
 
   if (mode === "poster") {
     render();
@@ -723,6 +1053,11 @@ export function mountInteractivePlayer(root, options) {
       root.removeEventListener("click", onClick);
       root.removeEventListener("keydown", onKey);
       root.removeEventListener("pointermove", wake);
+      voice.removeEventListener("ended", onVoiceEnded);
+      voice.removeEventListener("error", onVoiceEnded);
+      root.removeEventListener("animationend", onAnimationEnd);
+      voice.pause && voice.pause();
+      logVoice.pause && logVoice.pause();
       video.pause && video.pause();
       root.innerHTML = "";
       root.classList.remove("aip", "aip-wake");

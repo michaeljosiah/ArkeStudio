@@ -7,7 +7,24 @@
 export interface InteractivePlayerScene {
   title: string;
   /** Played in order; none plays the scene as a slate (preview only — an export refuses it). */
-  clips: Array<string | InteractivePlayerClip>;
+  clips?: Array<string | InteractivePlayerClip>;
+  /** A visual novel's scene (turn 172): read beat by beat instead of played; wins over `clips`. */
+  beats?: InteractivePlayerBeat[];
+}
+
+/** One beat: a picture and a line, read at the viewer's pace. */
+export interface InteractivePlayerBeat {
+  picture?: string;
+  /** The line; none is the picture alone. */
+  text?: string;
+  /** Who says it, as shown on the tab; none is narration. */
+  speaker?: string;
+  /** Its voice; none reads as text. */
+  audio?: string;
+  /** "voice": on after the voice; "tap": when the reader moves on (the default); "hold": after `holdSec`. */
+  advance?: "voice" | "tap" | "hold";
+  holdSec?: number;
+  motion?: "push" | "drift" | "none";
 }
 
 /** A window into a file: from `from` seconds (default 0) to `to` (default the file's end). */

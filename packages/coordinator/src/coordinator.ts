@@ -10018,7 +10018,16 @@ export class Coordinator {
         if (!store) return;
         const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
         if (!production) return;
-        const result = await exportInteractive(store, production, () => new Date().toISOString()).catch(
+        // A visual novel's package carries the voices its table read has prepared (turn 172); the
+        // narrator is resolved once for the whole export, as each scene's plan reads it.
+        const manifest = this.opts.manifest;
+        let narrator: Promise<TableReadNarrator | null> | null = null;
+        const voices = manifest === undefined ? undefined : async (sceneId: string): Promise<ReadonlyMap<string, string>> => {
+          narrator ??= this.tableReadNarrator(store, production.meta.id);
+          const { plan } = await planTableRead(store, production.meta.id, sceneId, manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers, await narrator);
+          return new Map(plan.items.flatMap((item) => (item.file === undefined ? [] : [[item.lineId, item.file] as const])));
+        };
+        const result = await exportInteractive(store, production, () => new Date().toISOString(), voices === undefined ? {} : { voices }).catch(
           (err): InteractiveExportResult => ({
             ok: false,
             blockers: [describeCoordinatorError(err)],

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { SceneSchema, ShotSchema, beatPictureShotId, beatPlayback, deriveRehearsalLines, sceneBeats } from "../src/index.js";
+import { SceneSchema, ShotSchema, beatPictureShotId, beatPlayback, deriveRehearsalLines, playerBeats, sceneBeats } from "../src/index.js";
 
 /**
  * A visual novel's scene as beats (turn 172): the walk that the scene page, the player and the
@@ -78,5 +78,22 @@ describe("a scene read as beats", () => {
     assert.ok(ShotSchema.safeParse({ ...base, beat: { advance: "voice", motion: "drift" } }).success);
     assert.ok(!ShotSchema.safeParse({ ...base, beat: { advance: "later" } }).success);
     assert.ok(!ShotSchema.safeParse({ ...base, beat: { speed: 2 } }).success);
+  });
+});
+
+describe("a scene's beats as the player reads them", () => {
+  it("addresses each beat's picture (kept from the shot before where asked), voice and speaker's name", () => {
+    const beats = playerBeats(scene, {
+      picture: (shotId) => (shotId === "sh_4" ? undefined : `pic/${shotId}.png`),
+      audio: (lineId) => (lineId.endsWith("blk_wash") ? "voice/wash.mp3" : undefined),
+      speakerName: (id) => ({ maren: "Maren", bray: "Bray" })[id] ?? id,
+    });
+    assert.deepEqual(beats[0], { picture: "pic/sh_1.png", text: "They hung the washing out the morning the water came.", audio: "voice/wash.mp3", advance: "tap", holdSec: 4, motion: "push" });
+    assert.equal(beats[1]!.speaker, "Maren");
+    assert.equal(beats[1]!.audio, undefined, "an unvoiced line reads as text");
+    assert.equal(beats[3]!.picture, "pic/sh_2.png", "sh_3 keeps sh_2's picture");
+    assert.equal(beats[3]!.advance, "hold");
+    assert.equal(beats[3]!.text, undefined, "the picture alone");
+    assert.equal(beats[4]!.picture, undefined, "no picture is said by its absence, not invented");
   });
 });
