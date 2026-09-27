@@ -120,6 +120,21 @@ it("merges separately reported input and output counts across polls", async () =
   } finally { h.queue.dispose(); }
 });
 
+it("settles a witnessed unary failure with reported usage without polling or retrying", async () => {
+  const h = await harness();
+  h.client.submit = async () => ({ remoteId: "incomplete-read", error: "The model reached its output limit",
+    speechUsage: { inputTextTokens: 3, outputAudioTokens: 250 } });
+  h.client.poll = async () => { throw new Error("A witnessed unary failure must not be polled"); };
+  try {
+    await h.queue.enqueue(input);
+    await until(() => h.ledger.length === 1, "incomplete unary speech", 30000);
+    assert.equal(h.queue.listJobs()[0]!.status, "failed");
+    assert.equal(h.queue.listJobs()[0]!.attempt, 1);
+    assert.equal(h.ledger[0]!.actualMicroUsd, 2252);
+    assert.equal(h.ledger[0]!.actualSource, "usage-derived");
+  } finally { h.queue.dispose(); }
+});
+
 it("a poll returning usage during cancellation cannot resurrect the job", async () => {
   const h = await harness();
   let answer: ((result: Awaited<ReturnType<DispatchClient["poll"]>>) => void) | undefined;
