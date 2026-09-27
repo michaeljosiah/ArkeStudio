@@ -1,4 +1,5 @@
 import { pathToFileURL } from "node:url";
+import { DesktopRemoteAccess } from "./remote-access.js";
 import { createPerformanceSpool } from "./performance-spool.js";
 import { microphoneAllowed } from "./microphone-permission.js";
 import { audioMediaOptions, createMediaProcessRunner } from "./media-tools.js";
@@ -16,8 +17,8 @@ import { appendFileSync, existsSync } from "node:fs";
 import { copyFile, readdir, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { freemem } from "node:os";
-import { join, resolve } from "node:path";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, nativeTheme, Notification, safeStorage, shell } from "electron";
+import { dirname, join, resolve } from "node:path";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, safeStorage, shell, Tray } from "electron";
 import electronUpdater from "electron-updater";
 import {
   assembleHarness,
@@ -198,6 +199,8 @@ function fetchedHiggsfieldPath(appRoot: string): string | null {
 
 let coordinator: Coordinator | null = null;
 let studioServer: StudioServer | null = null;
+let remoteAccess: DesktopRemoteAccess | null = null;
+let remoteTray: Tray | null = null;
 let window: BrowserWindow | null = null;
 let shuttingDown = false;
 let allowQuit = false;
@@ -322,6 +325,14 @@ function publishStartup(state: StartupState): void {
 }
 
 function registerHostIpc(): void {
+  ipcMain.handle("arke:remote-access", async (event, input: unknown) => {
+    if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || shuttingDown || !remoteAccess) {
+      throw new Error("Remote access settings are available only in the ready desktop app.");
+    }
+    const result = await remoteAccess.command(input);
+    updateRemoteTray();
+    return result;
+  });
   const media = () => {
     const ffmpeg = ffmpegPath(); const ffprobe = ffprobeResolution().path;
     if (!ffprobe) throw new Error("ffprobe is unavailable.");
@@ -595,6 +606,9 @@ async function createWindow(): Promise<void> {
     traceDesktop("window.render-process-gone", { reason: details.reason, exitCode: details.exitCode });
   });
   window.on("close", (event) => {
+    if (!allowQuit && !shuttingDown && remoteAccess?.status().running && !updateController?.shouldKeepWindowVisible()) {
+      event.preventDefault(); window?.hide(); return;
+    }
     if (allowQuit || !updateController?.shouldKeepWindowVisible()) return;
     event.preventDefault();
     if (!updateController.isInstallOnCloseArmed() || closeForUpdate) return;
@@ -1503,6 +1517,13 @@ async function initialize(): Promise<{ port: number }> {
 
   const { port } = await studioServer.start(0);
   transportSession = { port, token: transportToken };
+  remoteAccess = new DesktopRemoteAccess({ root: appRoot, clientDirectory: dirname(clientIndex), session: transportSession,
+    startupSupported: app.isPackaged && (process.platform === "win32" || process.platform === "darwin"),
+    setStartOnLogin: enabled => app.setLoginItemSettings({ openAtLogin: enabled, args: ["--remote-background"] }),
+  });
+  await remoteAccess.initialize();
+  updateRemoteTray();
+  if (process.argv.includes("--remote-background") && remoteAccess.status().running) window?.hide();
   void updateController.initialize();
   backgroundNotifications.arm(coordinator.getState());
   applyHostTheme(coordinator.getState().app.appearance.theme, false);
@@ -1522,6 +1543,7 @@ async function shutdownConfirmed(): Promise<void> {
   backgroundNotifications.stop();
   const stop = (async () => {
     try {
+      await remoteAccess?.stop();
       await publicationHost?.stop();
       await (studioServer?.stop() ?? startupProvider?.close() ?? Promise.resolve());
     } finally {
@@ -1542,6 +1564,20 @@ async function shutdownConfirmed(): Promise<void> {
   }
 }
 
+function updateRemoteTray(): void {
+  if (!remoteAccess?.status().enabled) { remoteTray?.destroy(); remoteTray = null; return; }
+  if (!remoteTray) {
+    remoteTray = new Tray(appIcon);
+    remoteTray.setToolTip("Arke Studio — remote access");
+    remoteTray.on("double-click", () => { window?.show(); window?.focus(); });
+  }
+  remoteTray.setContextMenu(Menu.buildFromTemplate([
+    { label: "Open Arke Studio", click: () => { window?.show(); window?.focus(); } },
+    { label: remoteAccess.status().running ? "Remote access is running" : "Remote access needs attention", enabled: false },
+    { label: "Quit Arke Studio", click: () => app.quit() },
+  ]));
+}
+
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
@@ -1549,6 +1585,7 @@ if (!gotLock) {
   app.on("second-instance", () => {
     if (window) {
       if (window.isMinimized()) window.restore();
+      window.show();
       window.focus();
     }
   });
@@ -1559,6 +1596,9 @@ if (!gotLock) {
     startupController = new StartupController({
       initialize,
       cleanup: async () => {
+        await remoteAccess?.stop();
+        remoteAccess = null;
+        updateRemoteTray();
         const started = studioServer;
         const provider = startupProvider;
         coordinator = null;

@@ -1703,6 +1703,7 @@ export function SettingsLayout() {
               ["models", "AI models"],
               ["adapters", "Content & safety"],
               ["general", "General"],
+              ["remote-access", "Remote access"],
               ["harness", "Harness"],
               ["appearance", "Appearance"],
               ["notifications", "Notifications"],

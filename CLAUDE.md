@@ -207,6 +207,13 @@ options: `start()` returns its generated token alongside the port for trusted ho
   accepted proxied session widens Vite's allowed hosts and the page policy, for that one origin
   and server, and narrows `/@fs` to the client, contracts and `node_modules`. The built page
   keeps its loopback-only policy.
+- **Remembered remote devices (#1311):** desktop owns a separate loopback gateway over its
+  existing coordinator. Owner controls stay on trusted desktop IPC. Paired browsers use
+  individual Secure/HttpOnly cookies; only proof hashes persist, with expiry and revocation.
+  The gateway supplies the process capability privately and rechecks device authorization.
+  Only the served copy of the built client gets the remote CSP; the Electron file page is
+  unchanged. Never publish a shared capability, add pairing controls to network commands,
+  or start a competing coordinator. See SPEC-001 §2.5 and the remote-access guide.
 - **The dev handoff is private:** `.dev/transport-<port>.json` must remain gitignored and denied
   by Vite's filesystem-serving rules, including `/@fs` and raw/import requests. Never put the
   token in public HTML, a bootstrap endpoint or a build-time `VITE_*` variable. A public token

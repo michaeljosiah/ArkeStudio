@@ -37,6 +37,9 @@ import "./components/activity-panel.css";
 import "./components/account-menu.css";
 import { App } from "./App.js";
 import { initStore } from "./lib/store.js";
+import { isRemoteSession } from "./lib/remote-session.js";
+import { RemoteEntry } from "./components/remote-entry.js";
+import "./screens/remote-access.css";
 import { initializeTheme } from "./lib/theme.js";
 
 /*
@@ -57,7 +60,7 @@ const onLaunchRoute = (): boolean => {
 window.arke?.chromeOverPlate?.(onLaunchRoute());
 
 initializeTheme();
-initStore();
+if (!isRemoteSession()) initStore();
 
 // Under the desktop shell the native frame is hidden and overlay window controls sit
 // in the top-right — in-app titlebars shift their own right-side content clear of them.
@@ -78,7 +81,7 @@ for (const type of ["dragover", "drop"] as const) {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <HashRouter>
-      <App />
+      {isRemoteSession() ? <RemoteEntry><App /></RemoteEntry> : <App />}
     </HashRouter>
   </StrictMode>,
 );

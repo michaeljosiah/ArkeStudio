@@ -116,6 +116,26 @@ retains screenshots in its printed disposable directory for visual inspection.
 Set `ARKE_SMOKE_CATALOG_DELAY_MS=1500` to also exercise model selection and saving while
 catalog refreshes temporarily disable those controls.
 
+## Remembered remote access
+
+Run coordinator and desktop `test/remote-access.test.ts`, client `test/remote-access.test.tsx`
+and the transport/preload regressions above. The focused suites cover code expiry/replay,
+approval persistence, origin/host confinement, revocation, and preserving other Serve mappings.
+After building, an opt-in real HTTPS check is:
+
+```powershell
+node --import tsx apps/desktop/scripts/smoke-remote-access.mjs --tailscale
+```
+
+This requires a desktop display, connected Tailscale with HTTPS certificates enabled, and an
+unused HTTPS port 8444. It temporarily maps only that port and removes its own mapping on exit.
+It uses copied fixtures and a disposable profile, with no generation. It exercises the built
+sandboxed Electron file page, phone-sized browser pairing and desktop approval, HttpOnly cookies,
+authenticated WSS and media, browser reopen, coordinator/gateway/registry restart with a fresh
+process capability, and revocation. Inspect the
+screenshots in its printed temporary directory. This host-local check does not replace actual
+phone/second-computer testing or an installed-app sign-in/reboot check; record those separately.
+
 ## Desktop appearance
 
 For appearance bootstrap or reload changes, run `node apps/desktop/scripts/smoke-theme.mjs`.

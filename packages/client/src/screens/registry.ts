@@ -31,6 +31,7 @@ export const SCREENS: ScreenEntry[] = [
   { id: "settings-downloads", samplePath: "/settings/downloads" },
   { id: "settings-harness", samplePath: "/settings/harness" },
   { id: "settings-general", samplePath: "/settings/general" },
+  { id: "settings-remote-access", samplePath: "/settings/remote-access" },
   { id: "settings-sample-world", samplePath: "/settings/sample-world" },
   { id: "settings-diagnostics", samplePath: "/settings/diagnostics" },
   { id: "settings-about", samplePath: "/settings/about" },

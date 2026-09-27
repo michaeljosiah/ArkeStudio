@@ -6,6 +6,7 @@ import { PublicationsScreen } from "./screens/publications.js";
 import { ProductionNarrativeScreen } from "./screens/production-narrative.js";
 import { ProductionArtifactsScreen } from "./screens/production-artifacts.js";
 import { SettingsDownloadsScreen } from "./screens/settings-downloads.js";
+import { SettingsRemoteAccessScreen } from "./screens/settings-remote-access.js";
 import { SettingsDiagnosticsScreen } from "./screens/settings-diagnostics.js";
 import { SettingsModelsScreen } from "./screens/settings-models.js";
 import { SettingsProvidersScreen } from "./screens/settings-providers.js";
@@ -201,6 +202,7 @@ function SettingsRoutes() {
         <Route path="harness" element={<SettingsHarnessScreen />} />
         {/* Settings › Agents folded into Who does what (design 54b); the old address keeps working. */}
         <Route path="general" element={<SettingsGeneralScreen />} />
+        <Route path="remote-access" element={<SettingsRemoteAccessScreen />} />
         {/* Cloud AI became General when a default stopped having to be a cloud model
             (SPEC-034 R-14). The old address answers. */}
         <Route path="cloud-ai" element={<Navigate to="/settings/general" replace />} />
