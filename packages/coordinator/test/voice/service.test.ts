@@ -30,6 +30,7 @@ import { cloudVoiceSources, createProviderClients, SHIPPED_MANIFEST } from "@ark
 
 it("Google catalogue activation uses only the current configured key and never synthesizes", async () => {
   let key: string | null = null;
+  let enabled = true;
   const requestedKeys: string[] = [];
   const clients = createProviderClients({ fetch: async (_url, init) => {
     assert.equal(init?.method ?? "GET", "GET");
@@ -39,20 +40,23 @@ it("Google catalogue activation uses only the current configured key and never s
     return Response.json({ models: [{ name: `models/${active === "flash-project" ? "gemini-3.8-flash-tts" : "gemini-3.8-flash-lite-tts"}` }] });
   } });
   const service = new VoiceService({ sidecar: null, localPresets: [], cloudSources: cloudVoiceSources(clients),
-    getKey: async provider => provider === "google" ? key : null, emit: () => {} });
+    modelEnabled: () => enabled, getKey: async provider => provider === "google" ? key : null, emit: () => {} });
   assert.deepEqual(await service.catalogue(), []);
   assert.deepEqual(requestedKeys, []);
   key = "flash-project";
   const flash = await service.catalogue();
   assert.equal(flash.length, 30);
   assert.ok(flash.every(v => v.model === "gemini-3.8-flash-tts"));
+  enabled = false;
+  assert.deepEqual(await service.catalogue(), []);
+  enabled = true;
   key = "lite-project";
   assert.ok((await service.catalogue()).every(v => v.model === "gemini-3.8-flash-lite-tts"));
   key = "revoked";
   assert.deepEqual(await service.catalogue(), []);
   key = null;
   assert.deepEqual(await service.catalogue(), []);
-  assert.deepEqual(requestedKeys, ["flash-project", "lite-project", "revoked"]);
+  assert.deepEqual(requestedKeys, ["flash-project", "flash-project", "lite-project", "revoked"]);
 });
 
 const CLOCK = () => "2026-08-01T12:00:00.000Z";
@@ -1240,5 +1244,16 @@ it("refuses oversized Gemini shot lines including separate delivery bytes before
     const allowance = model.limits.maxSpeechUtf8Bytes! - Buffer.byteLength(model.cadence!.deliveryMappings.warm!.instruction!);
     assert.equal(voiceLineRequest({ ...input, text: "a".repeat(allowance) }).params.text, "a".repeat(allowance));
     assert.throws(() => voiceLineRequest({ ...input, text: "a".repeat(allowance + 1) }), /request limit/);
+  }
+});
+
+it("refuses oversized normalized Gemini character previews before quoting or constructing queue inputs", () => {
+  const service = new VoiceService({ sidecar: null, localPresets: [], cloudSources: [], getKey: async () => null, emit: () => {}, clock: () => "2026-09-27T12:00:00.000Z" });
+  for (const model of SHIPPED_MANIFEST.models.filter(m => m.provider === "google" && m.capability === "voice-tts")) {
+    const request = { worldId: "world", sheet: SHEET, provider: "google", voiceId: "Charon", model,
+      line: { text: "字".repeat(2400), source: "own-line" as const } };
+    assert.throws(() => service.queuedPreviewRequest(request), /preview line exceeds/);
+    assert.throws(() => service.queuedPreviewRequest({ ...request, line: { ...request.line, text: "a".repeat(7001) } }), /preview line exceeds/);
+    assert.throws(() => service.queuedPreviewRequest({ ...request, line: { ...request.line, text: "a".repeat(7000) } }), /price changed/, "a fitting line reaches the consent check");
   }
 });

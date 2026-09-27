@@ -18,8 +18,44 @@ import { FsWorldProvider } from "../../src/world/provider.js";
 import { FakeProvider } from "../queue/fake-provider.js";
 import { until } from "../wait.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
+import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 
 const REQUEST = "01J8F3K2QW9VZX4N7M0RTYB6HD";
+
+it("disabled Gemini models cannot be recommended, assigned or previewed through coordinator commands", async () => {
+  const { root, worldDir } = await makeTempRoot();
+  const provider = new FsWorldProvider(root);
+  await provider.loadWorld(WORLD_ID);
+  const events: DomainEvent[] = [];
+  const model = "gemini-3.8-flash-tts";
+  const coordinator = new Coordinator({ provider, adapter: null, appRoot: root, cipher: devCipher(),
+    credentialsFileName: "credentials.dev.dat", changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test", manifest: SHIPPED_MANIFEST,
+    voice: { sidecar: null, localPresets: [], cloudSources: [{ provider: "google", list: async () =>
+      [{ provider: "google", model, voiceId: "Charon", label: "Charon", attributes: [], local: false, canClone: false }] }] },
+    observeEvent: event => events.push(event) });
+  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+  await coordinator.start(0);
+  try {
+    await send({ kind: "set-credential", provider: "google", key: "fixture-key" });
+    await send({ kind: "set-model-enabled", modelId: model, enabled: false });
+    const before = await readFile(join(worldDir, "characters", "maren-kest.md"), "utf8");
+    await send({ kind: "voice-candidates", worldId: WORLD_ID, sheetId: "maren-kest" });
+    const hidden = events.filter(e => e.type === "voice.candidates").at(-1)!;
+    assert.deepEqual(hidden.ranked, []);
+    await send({ kind: "assign-voice", requestId: REQUEST, worldId: WORLD_ID, path: "characters/maren-kest.md", voice: { provider: "google", model, voiceId: "Charon" } });
+    const assignment = events.find(e => e.type === "voice.assignment-result")!;
+    assert.equal(assignment.status, "refused");
+    assert.match(assignment.reason!, /turned off/);
+    assert.equal(await readFile(join(worldDir, "characters", "maren-kest.md"), "utf8"), before);
+    await send({ kind: "voice-preview", requestId: REQUEST, worldId: WORLD_ID, sheetId: "maren-kest", provider: "google", model, voiceId: "Charon" });
+    const preview = events.filter(e => e.type === "queue.enqueue-result").at(-1)!;
+    assert.equal(preview.disposition, "rejected");
+    assert.equal(events.some(e => e.type === "job.updated"), false);
+    await send({ kind: "set-model-enabled", modelId: model, enabled: true });
+    await send({ kind: "voice-candidates", worldId: WORLD_ID, sheetId: "maren-kest" });
+    assert.equal(events.filter(e => e.type === "voice.candidates").at(-1)!.ranked[0]!.candidate.model, model);
+  } finally { await coordinator.stop(); await provider.close(); }
+});
 const MODEL: ManifestModel = {
   id: "comfyui-cloned-voice",
   provider: "comfyui",

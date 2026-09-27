@@ -77,6 +77,8 @@ export interface VoiceServiceDeps {
   hostedReaders?: Array<{ provider: string; model: string }>;
   /** Why a keyed reader cannot read now — a rejected key, a fault — carried onto its candidates. */
   readerAvailability?: (provider: string) => { unavailableReason?: string };
+  /** Live Settings decision, rechecked after asynchronous catalogue discovery. */
+  modelEnabled?: (model: string) => boolean;
   getKey: (provider: string) => Promise<string | null>;
   emit: (event: DomainEvent) => void;
   clock?: () => string;
@@ -480,6 +482,14 @@ export class VoiceService {
     clonedVoices: readonly ClonedVoice[] = [],
     clonedAvailability: { local?: boolean; unavailableReason?: string } = {},
   ): Promise<VoiceCandidate[]> {
+    return (await this.rawCatalogue(clonedVoices, clonedAvailability))
+      .filter(voice => this.deps.modelEnabled?.(voice.model) !== false);
+  }
+
+  private async rawCatalogue(
+    clonedVoices: readonly ClonedVoice[],
+    clonedAvailability: { local?: boolean; unavailableReason?: string },
+  ): Promise<VoiceCandidate[]> {
     let local = this.deps.localPresets;
     if (this.deps.sidecar) {
       /*
@@ -564,7 +574,7 @@ export class VoiceService {
             entry.id === candidate.model &&
             entry.capability === "voice-tts",
         );
-        if (model === undefined) return [];
+        if (model === undefined || !speechInputFits(normalizeSpeechText(line.text), model.limits)) return [];
         const text = normalizeSpeechText(line.text);
         const quote = quoteSpeech(model, text, { at: this.now() });
         const target = voiceTargetKey(candidate);
@@ -794,6 +804,9 @@ export class VoiceService {
       voiceUploadConfirmedFor,
     } = input;
     const normalized = normalizeSpeechText(line.text);
+    if (!speechInputFits(normalized, model.limits)) {
+      throw new Error("The preview line exceeds this model's request limit. Shorten the line or use an audiobook read in parts.");
+    }
     const quote = quoteSpeech(model, normalized, { at: this.now() });
     if (quote.unit === "token" && input.quoteToken !== speechConsentToken(JSON.stringify([voiceTargetKey({ provider, model: model.id, voiceId }), normalized]), [quote])) {
       throw new Error("The preview price changed. Reopen the voice picker to review its current price.");

@@ -2776,6 +2776,7 @@ export class Coordinator {
           sidecar: opts.voice.sidecar,
           localPresets: opts.voice.localPresets,
           cloudSources: opts.voice.cloudSources,
+          modelEnabled: (model) => !this.readModel.getState().app.models.disabled.includes(model),
           ...(opts.voice.hostedReaders !== undefined ? { hostedReaders: opts.voice.hostedReaders } : {}),
           // A hosted reader whose key the vendor has rejected still lists its candidates, marked
           // with the probe's reason: an assignment stays visible, and nothing is queued to fail
@@ -8246,6 +8247,10 @@ export class Coordinator {
             msg.voice.model ??
             legacyVoiceModel(msg.voice.provider, msg.voice.voiceId, store.getBundle().clonedVoices) ??
             undefined;
+          if (requestedModel !== undefined && this.readModel.getState().app.models.disabled.includes(requestedModel)) {
+            result("refused", "That voice model is turned off in AI models.");
+            return;
+          }
           const selected =
             requestedModel === undefined
               ? undefined
@@ -14026,6 +14031,10 @@ export class Coordinator {
         return;
       }
       case "voice-preview": {
+        if (this.readModel.getState().app.models.disabled.includes(msg.model)) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "That voice model is turned off in AI models.");
+          return;
+        }
         const store = this.opts.provider.openStore?.();
         if (!store || !this.voiceService) {
           this.rejectEnqueue(msg.requestId, msg.kind, "Voice preview is unavailable.");
