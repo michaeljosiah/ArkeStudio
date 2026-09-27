@@ -28,7 +28,8 @@ export class DesktopRemoteAccess {
   private settingsLoaded = false;
   private path: string;
   constructor(private readonly options: { root: string; clientDirectory: string; session: { port: number; token: string };
-    startupSupported: boolean; setStartOnLogin: (enabled: boolean) => void; tailscale?: TailscaleServe }) {
+    startupSupported: boolean; setStartOnLogin: (enabled: boolean) => void; tailscale?: TailscaleServe;
+    writeClipboard?: (text: string) => void }) {
     this.path = join(options.root, "remote", "settings.json");
     this.devices = new RemoteDevices(join(options.root, "remote", "devices.json"));
   }
@@ -152,9 +153,15 @@ export class DesktopRemoteAccess {
         throw new Error("Remote access records could not be read. Restore them before changing access.");
       }
       let pairing: RemoteAccessReply["pairing"];
+      let copied = false;
       if (command.kind !== "status" && this.loaded) this.reason = null;
       try {
         switch (command.kind) {
+          case "copy-link":
+            if (!this.running || !this.config.origin) throw new Error("Enable remote access first.");
+            if (!this.options.writeClipboard) throw new Error("Clipboard is unavailable. Copy the address shown in Settings.");
+            // Copy the host's clean address, never renderer-supplied text or a session proof.
+            this.options.writeClipboard(this.config.origin); copied = true; break;
           case "enable": await this.start(); break;
           case "disable":
             await this.stopGateway();
@@ -177,7 +184,7 @@ export class DesktopRemoteAccess {
           case "revoke": await this.devices.revoke(command.id); this.gateway?.recheckDevices(); break;
         }
       } catch (error) { this.reason = error instanceof Error ? error.message : "Remote access could not complete that action."; }
-      return { status: this.status(), ...(pairing ? { pairing } : {}) };
+      return { status: this.status(), ...(pairing ? { pairing } : {}), ...(copied ? { copied } : {}) };
     });
     this.tail = work.catch(() => {});
     return work;

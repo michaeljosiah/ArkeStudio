@@ -80,6 +80,34 @@ it("desktop duration offers all four choices, uses saved replies and labels Neve
     assert.ok(element.textContent?.includes("Existing devices keep their current expiry"));
   } finally { await act(async () => root.unmount()); element.remove(); delete window.arke; }
 });
+it("desktop shares a local QR and copies through its bridge, showing success only after a successful write", async () => {
+  const calls: RemoteAccessCommand[] = []; let fail = false;
+  let current = { ...status };
+  window.arke = { remoteAccess: async command => {
+    calls.push(command);
+    if (command.kind === "disable") current = { ...current, running: false, enabled: false, url: null };
+    if (command.kind === "copy-link" && fail) return { status: { ...current, reason: "Clipboard busy" } };
+    return { status: current, ...(command.kind === "copy-link" ? { copied: true } : {}) };
+  } } as typeof window.arke;
+  const element = document.createElement("div"); document.body.append(element); const root = createRoot(element);
+  try {
+    await act(async () => { root.render(<SettingsRemoteAccessScreen />); await flush(); });
+    assert.ok(element.querySelector('svg[aria-label="Scan to open Studio on your phone"] path'));
+    assert.equal(element.querySelectorAll("img").length, 0, "QR rendering uses no external image service");
+    const buttons = () => [...element.querySelectorAll("button")];
+    const copy = () => buttons().find(button => button.textContent === "Copy link")!.click();
+    await act(async () => { copy(); await flush(); });
+    assert.deepEqual(calls.at(-1), { kind: "copy-link" });
+    assert.ok(element.textContent?.includes("Link copied"));
+    fail = true;
+    await act(async () => { copy(); await flush(); });
+    assert.equal(element.textContent?.includes("Link copied"), false);
+    assert.equal(element.querySelector('[role="alert"]')?.textContent, "Clipboard busy");
+    await act(async () => { buttons().find(button => button.textContent === "Disable remote access")!.click(); await flush(); });
+    assert.equal(element.querySelector('svg[role="img"]'), null);
+    assert.equal(buttons().some(button => button.textContent === "Copy link"), false);
+  } finally { await act(async () => root.unmount()); element.remove(); delete window.arke; }
+});
 it("an unpaired browser sees pairing, not Studio content; a remembered browser opens Studio", async () => {
   const previous = globalThis.fetch;
   __setBridgeForTest({ appVersion: "test", platform: "win32", connect() {}, send() {}, subscribe() {} });

@@ -46,6 +46,7 @@ try {
   await writeFile(join(dir, "main.cjs"), `(${electronMain.toString()})().catch(error => { console.error(error); require("electron").app.exit(1); });`);
   const child = spawn(require("electron"), [join(dir, "main.cjs")], { windowsHide: true, stdio: ["ignore", "inherit", "inherit", "ipc"],
     env: { ...process.env, ARKE_REMOTE_SMOKE: JSON.stringify({ dir, origin, ...session,
+      qrDecoder: require.resolve("jsqr"),
       page: join(root, "packages/client/dist/index.html"), preload: join(root, "apps/desktop/dist/preload.cjs") }) } });
   child.on("message", async ({ id, command }) => {
     try {
@@ -79,7 +80,7 @@ try {
 }
 
 async function electronMain() {
-  const { app, BrowserWindow, ipcMain } = require("electron");
+  const { app, BrowserWindow, ipcMain, clipboard } = require("electron");
   const assert = require("node:assert/strict");
   const { writeFile } = require("node:fs/promises");
   const { join } = require("node:path");
@@ -95,7 +96,11 @@ async function electronMain() {
   await app.whenReady();
   ipcMain.on("arke:get-theme", event => { event.returnValue = { preference: "system", resolved: "light" }; });
   ipcMain.on("arke:startup-state-ready", event => event.sender.send("arke:startup-state", { status: "ready", port: config.port, token: config.token }));
-  ipcMain.handle("arke:remote-access", (_event, command) => rpc(command));
+  ipcMain.handle("arke:remote-access", async (_event, command) => {
+    const reply = await rpc(command);
+    if (command.kind === "copy-link") { clipboard.writeText(reply.status.url); reply.copied = true; }
+    return reply;
+  });
   const owner = new BrowserWindow({ show: false, width: 1200, height: 850,
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, preload: config.preload } });
   const browserOptions = { show: false, width: 420, height: 900,
@@ -113,6 +118,27 @@ async function electronMain() {
   };
   await owner.loadFile(config.page, { hash: "/settings/remote-access" });
   await until(owner, "[...document.querySelectorAll('button')].some(b => b.textContent === 'Pair a device')");
+  const qrRect = await js(owner, `(() => {
+    const qr = document.querySelector('.remote-access__share > svg'); qr.scrollIntoView({ block: 'center' });
+    const r = qr.getBoundingClientRect(); return { x: Math.floor(r.x), y: Math.floor(r.y), width: Math.ceil(r.width), height: Math.ceil(r.height) };
+  })()`);
+  const qrImage = await owner.webContents.capturePage(qrRect);
+  const bitmap = qrImage.toBitmap(), dimensions = qrImage.getSize();
+  const rgba = new Uint8ClampedArray(bitmap.length);
+  for (let pixel = 0; pixel < bitmap.length; pixel += 4) {
+    rgba[pixel] = bitmap[pixel + 2]; rgba[pixel + 1] = bitmap[pixel + 1]; rgba[pixel + 2] = bitmap[pixel]; rgba[pixel + 3] = bitmap[pixel + 3];
+  }
+  assert.equal(require(config.qrDecoder)(rgba, dimensions.width, dimensions.height)?.data, config.origin,
+    'the rendered QR decodes to only the stable HTTPS address');
+  const previousClipboard = { text: clipboard.readText(), html: clipboard.readHTML(), rtf: clipboard.readRTF() };
+  const previousImage = clipboard.readImage();
+  if (!previousImage.isEmpty()) previousClipboard.image = previousImage;
+  try {
+    await js(owner, "[...document.querySelectorAll('button')].find(b => b.textContent === 'Copy link').click()");
+    await until(owner, "document.body.innerText.includes('Link copied')");
+    assert.equal(clipboard.readText(), config.origin);
+  } finally { if (clipboard.readText() === config.origin) clipboard.write(previousClipboard); }
+  await shot(owner, "desktop-link-sharing");
   assert.equal(await js(owner, "document.querySelector('select[aria-label=\"Remember approved devices for\"]').value"), "90");
   await js(owner, `(() => {
     const select = document.querySelector('select[aria-label="Remember approved devices for"]');
@@ -159,6 +185,6 @@ async function electronMain() {
   await shot(phone, "phone-revoked");
   await owner.loadFile(config.page, { hash: "/settings/remote-access" });
   await until(owner, "[...document.querySelectorAll('button')].some(b => b.textContent === 'Pair a device')");
-  console.log("[smoke] real Serve TLS: duration selection, Never approval, persistent HttpOnly cookie, WSS, media, browser reopen, coordinator/registry/gateway restart with new process capability, revocation and desktop file-page reload passed");
+  console.log("[smoke] real Serve TLS: decoded QR, native Copy link, duration selection, Never approval, persistent HttpOnly cookie, WSS, media, browser reopen, host restart, revocation and desktop file-page reload passed");
   clearTimeout(timeout); phone.destroy(); owner.destroy(); app.exit(0);
 }

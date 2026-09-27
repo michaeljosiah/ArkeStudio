@@ -7,6 +7,10 @@
 .remote-access__row { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; }
 .remote-access__row > span { flex: 1; }
 .remote-access__code { font-size: var(--text-xl); letter-spacing: 0.15em; }
+.remote-access__share { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); }
+/* The SVG paints its own white quiet zone and dark modules in either application theme. */
+.remote-access__share > svg { flex: 0 0 auto; max-width: 100%; height: auto; }
+.remote-access__share-details { flex: 1 1 260px; min-width: 0; display: grid; gap: var(--space-3); }
 /* A phone asking to pair, asked on the PC over whatever it shows (design turn 158j). */
 .fy-pairask__phone { width: 56px; height: 56px; border-radius: 14px; display: grid; place-items: center; background: var(--muted); color: var(--foreground); }
 .fy-pairask .fy-upd__title { margin-top: 18px; }
