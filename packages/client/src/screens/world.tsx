@@ -1,3 +1,6 @@
+import { HeldBar } from "../components/held-bar.js";
+import { PageSheet } from "../components/page-sheet.js";
+import { useMediaQuery } from "../lib/media-query.js";
 import { ReadAloudConfirmation } from "../components/read-aloud-confirmation.js";
 import { CharacterHeader } from "./character-reference.js";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
@@ -2999,10 +3002,16 @@ function useCanonCandidateCheck(
 function CanonCandidates({
   checked,
   candidates,
+  compact = false,
 }: {
   checked: boolean;
+  compact?: boolean;
   candidates: Array<{ entryId: string; title: string; statement: string }>;
 }) {
+  if (compact) return <div className="fy-canon-candidates" aria-live="polite">
+    <div>Contradiction candidates · {checked ? candidates.length === 0 ? "none" : candidates.length : "not yet checked"}</div>
+    {candidates.map(candidate => <div key={candidate.entryId}>{candidate.entryId} · {candidate.title}</div>)}
+  </div>;
   return (
     <div className="fy-draftcard">
       <div style={{ font: "600 13px var(--font-sans)" }}>Contradiction candidates · advisory</div>
@@ -3070,6 +3079,10 @@ function AskOutcome({
             </button>
           </div>
         ))}
+        <div className="fy-canon-answer-actions fy-phone-only">
+          {[...new Set(result.claims.map((claim) => claim.entryId))].map((id) => <Button key={id} onClick={() => navigate(`/w/${worldId}/canon/${id}`)}>Open {id}</Button>)}
+          <Button variant="primary" onClick={() => navigate(`/w/${worldId}/canon/new`, { state: { seed: result.claims.map((claim) => claim.text).join("\n\n"), title: question, entryType: "lore" } })}>Save as lore note</Button>
+        </div>
         <div className="scr-answer__foot">
           Every quoted span was verified against its entry. Searched {result.searched} entries.
         </div>
@@ -3099,7 +3112,7 @@ function AskOutcome({
           <ClosestList worldId={worldId} closest={result.closest} />
         </div>
       )}
-      <div style={{ display: "flex", gap: "var(--space-2)" }}>
+      <div className="fy-canon-answer-actions">
         <Button variant="primary" onClick={openAsThread}>
           Open as a thread
         </Button>
@@ -3215,18 +3228,21 @@ export function CanonScreen() {
 
   return (
     <div data-screen="canon">
-      <div className="fy-corner">
+      <div className="fy-corner fy-canon-corner">
         <Button variant="primary" onClick={() => navigate(`/w/${worldId}/canon/new`)}>
           New entry
         </Button>
       </div>
       <div className="fy-hero">
-        <div className="fy-hero__eyebrow">
-          {world?.meta.name} · {world?.canon.length ?? 0} entries · v{world?.meta.canonRevision}
+        <div className="fy-document-head">
+          <div className="fy-document-head__text">
+            <div className="fy-hero__eyebrow">
+              {world?.meta.name} · {world?.canon.length ?? 0} entries · v{world?.meta.canonRevision}
+            </div>
+            <h1 className="fy-hero__title fy-document-title">Canon</h1>
+          </div>
+          <Button className="fy-phone-only" variant="primary" onClick={() => navigate(`/w/${worldId}/canon/new`)}><Plus size={16} /> New</Button>
         </div>
-        <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
-          Canon
-        </h1>
         <div className="fy-askbar">
           <Search size={15} />
           <input
@@ -3267,7 +3283,7 @@ export function CanonScreen() {
         </div>
       </div>
       {(result || (askId && !result) || serverSearch) && (
-        <div style={{ maxWidth: 720, margin: "20px auto 0", padding: "0 24px", display: "grid", gap: 10 }}>
+        <div className="fy-canon-result">
           {askId && !result && <Callout title="Asking canon…">{null}</Callout>}
           {result && worldId && <AskOutcome worldId={worldId} question={askedQuestion} result={result} />}
           {serverSearch && (
@@ -3278,7 +3294,7 @@ export function CanonScreen() {
           )}
         </div>
       )}
-      <div className="fy-cardgrid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+      <div className="fy-cardgrid fy-canon-grid">
         {shown.map((entry) => {
           const question = threadQuestion(entry);
           const body = question?.context ?? entry.body;
@@ -3340,9 +3356,12 @@ export function CanonEntryScreen() {
   const navigate = useNavigate();
   const world = useWorld();
   const refs = useCanonRefs();
+  const phone = useMediaQuery("(max-width: 599px)");
+  const amendmentRef = useRef<HTMLDivElement>(null);
   const [amending, setAmending] = useState(false);
   const [statement, setStatement] = useState("");
   const amendment = useSingleAct();
+  useEffect(() => { if (phone && amending) amendmentRef.current?.scrollIntoView({ block: "start" }); }, [phone, amending]);
   const candidates = useCanonCandidateCheck(worldId, entry?.title ?? "", statement, entry?.id, amending);
   const { talk: talkAbout, starting: talkStarting } = useTalkItThrough(worldId);
   /**
@@ -3390,6 +3409,13 @@ export function CanonEntryScreen() {
     const label = canon ? `${id} · ${canon.title}` : sheet?.name ?? production?.meta.title ?? id;
     return to ? <Link key={id} to={`/w/${worldId}/${to}`}>{label}</Link> : <span key={id}>{label}</span>;
   };
+  const retireButton = (
+    <Button variant="ghost" disabled={entry.retired === true}
+      onClick={() => { if (worldId) retireEntity(worldId, `canon/${entry.id}.md`); }}
+      title="Stays resolvable for existing citations; drops out of retrieval">
+      Retire
+    </Button>
+  );
   return (
     <div className="fy-entry" data-screen="canon-entry">
       <div className="fy-entry__main">
@@ -3455,7 +3481,7 @@ export function CanonEntryScreen() {
           )}
         </div>
           <section aria-label="Cited by" style={{ marginTop: 30, animation: "fy-fade-up 0.7s var(--ease-out) 0.15s both" }}>
-            <div style={{ font: "600 13px var(--font-sans)", marginBottom: 4 }}>Cited by</div>
+            <div className="fy-entry-section-title fy-entry-cited-title">Cited by</div>
             {!citedBy && <div className="fy-mono">Loading citations…</div>}
             {citedBy && citedBy.sheets.length + citedBy.entries.length + citedBy.productions.length === 0 && (
               <div className="fy-mono">No citations yet.</div>
@@ -3490,7 +3516,7 @@ export function CanonEntryScreen() {
           </section>
       </div>
       <div className="fy-entry__side">
-        <div style={{ font: "600 13px var(--font-sans)" }}>History</div>
+        <div className="fy-entry-section-title">History</div>
         <div style={{ marginTop: 4 }}>
           {history?.length === 0 && (
             <div className="fy-mono" style={{ padding: "9px 0" }}>
@@ -3519,8 +3545,8 @@ export function CanonEntryScreen() {
           )}
         </div>
         {detail && detail.ripples.length > 0 && (
-          <div className="fy-draftcard">
-            <div style={{ font: "600 13px var(--font-sans)" }}>Changing this ripples</div>
+          <div className="fy-draftcard fy-entry-ripples">
+            <div className="fy-entry-section-title">Changing this ripples</div>
             <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
               {detail.ripples.map((r, i) => (
                 <div key={i} className="fy-ripplerow">
@@ -3543,7 +3569,7 @@ export function CanonEntryScreen() {
           </div>
         )}
         {amending && worldId && (
-          <div className="fy-draftcard">
+          <div className="fy-draftcard fy-entry-amendment" ref={amendmentRef}>
             <div className="fy-fieldlabel">Amended statement</div>
             <Textarea value={statement} onChange={(e) => setStatement(e.target.value)} />
             <CanonCandidates checked={candidates.checked} candidates={candidates.candidates} />
@@ -3565,7 +3591,7 @@ export function CanonEntryScreen() {
           </div>
         )}
         <div style={{ flex: 1, minHeight: 16 }} />
-        <div style={{ display: "grid", gap: 8 }}>
+        <HeldBar className="fy-entry-actions">
           {entry.status === "open" ? (
             <Button variant="primary" onClick={() => navigate(`/w/${worldId}/canon/${entry.id}/thread`)}>
               Open thread
@@ -3583,24 +3609,20 @@ export function CanonEntryScreen() {
                   setAmending(true);
                 }}
               >
-                Amend this entry
+                {phone ? "Amend" : "Amend this entry"}
               </Button>
               <Button variant="ghost" onClick={talkThroughEntry} disabled={talkStarting}>
                 {talkStarting ? "Starting…" : "Talk it through"}
               </Button>
-              <Button
-                variant="ghost"
-                disabled={entry.retired === true}
-                onClick={() => {
-                  if (worldId) retireEntity(worldId, `canon/${entry.id}.md`);
-                }}
-                title="Stays resolvable for existing citations; drops out of retrieval"
-              >
-                Retire
-              </Button>
+              {phone ? (
+                <details className="fy-bar-menu">
+                  <summary aria-label="Entry options">⋯</summary>
+                  <div>{retireButton}</div>
+                </details>
+              ) : retireButton}
             </>
           )}
-        </div>
+        </HeldBar>
       </div>
     </div>
   );
@@ -3614,10 +3636,15 @@ export function CanonThreadScreen() {
   const context = question?.context ?? entry?.body;
   const world = useWorld();
   const navigate = useNavigate();
+  const phone = useMediaQuery("(max-width: 599px)");
+  const fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
+  const [settleOpen, setSettleOpen] = useState(false);
+  useEffect(() => { if (!phone) setSettleOpen(false); }, [phone]);
   const { state } = useStore();
   const [resolvedType, setResolvedType] = useState<(typeof SETTLE_TYPES)[number]>("lore");
   const [statement, setStatement] = useState("");
   const settlement = useSingleAct();
+  const candidates = useCanonCandidateCheck(worldId, entry?.title ?? "", statement, entry?.id, phone && settleOpen);
   const [message, setMessage] = useState("");
   const harnessReady = state?.app.health.harness.status === "healthy";
   // What has been attached here this session. Dismissing a chip stops the conversation
@@ -3677,6 +3704,85 @@ export function CanonThreadScreen() {
     setMessage("");
   };
 
+  const settlementFields = (
+    <div className="fy-thread-fields">
+      <div className="fy-fieldlabel">What it turned out to be</div>
+      <div className="fy-choicerow">
+        {SETTLE_TYPES.map((t) => (
+          <button
+            key={t}
+            type="button"
+            className={cx("fy-filterchip", t === resolvedType && "fy-filterchip--active")}
+            style={{ border: t === resolvedType ? "none" : "1px solid var(--border)" }}
+            onClick={() => setResolvedType(t)}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+      <div className="fy-fieldlabel" style={{ marginTop: 15 }}>
+        The settled statement
+      </div>
+      <Textarea
+        placeholder="What is now established as true in this world?"
+        value={statement}
+        onChange={(e) => setStatement(e.target.value)}
+      />
+    </div>
+  );
+  const proposalPreview = (
+    <div className="fy-thread-preview">
+      {!phone && <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+        <div style={{ font: "600 15px var(--font-sans)" }}>Proposed entry</div>
+        <span className="fy-mono" style={{ color: "var(--warning)" }}>
+          settles the thread
+        </span>
+      </div>}
+      <div className="fy-draftcard">
+        <div className="fy-gridcard__id">
+          {entry?.id ?? "CANON-…"} · {resolvedType}
+        </div>
+        {entry && !question && <div style={{ font: "600 16px var(--font-sans)", letterSpacing: "-0.01em", marginTop: 7 }}>
+          {entry.title}
+        </div>}
+        <div
+          style={{
+            font: "400 12.5px/1.65 var(--font-sans)",
+            color: "var(--muted-foreground)",
+            marginTop: 8,
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {statement.trim() || "The settled statement appears here as you write it."}
+        </div>
+      </div>
+
+    </div>
+  );
+  const settlementActions = (
+    <div className="fy-settlement-actions">
+      <Button
+        variant="primary"
+        disabled={!entry || !worldId || statement.trim().length === 0}
+        onClick={() => {
+          if (!entry || !worldId) return;
+          settlement.track(settleThread(worldId, entry.id, resolvedType, statement.trim()));
+        }}
+      >
+        Settle thread
+      </Button>
+      <div
+        style={{
+          font: "400 11px/1.5 var(--font-sans)",
+          color: "var(--muted-foreground)",
+          textAlign: "center",
+        }}
+      >
+        {phone ? `The canon moves to v${(world?.meta.canonRevision ?? 0) + 1}.` : "This press accepts the settlement. The canon revision moves once."}
+      </div>
+      <SingleActFeedback result={settlement.result} undoLabel="Reopen thread" onUndo={settlement.undo} />
+    </div>
+  );
   return (
     <div className="fy-gate" data-screen="canon-thread">
       <div className="fy-gate__main">
@@ -3685,7 +3791,7 @@ export function CanonThreadScreen() {
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span className="fy-dot fy-dot--warn" style={{ width: 7, height: 7 }} />
               <span className="fy-eyebrow-sm">
-                OPEN THREAD{entry ? ` · ${entry.id} · since v${entry.introducedAt}` : ""}
+                {phone ? "Open thread" : "OPEN THREAD"}{entry ? ` · ${entry.id} · since v${entry.introducedAt}` : ""}
               </span>
             </div>
             <h1 className="fy-story__h1">{question?.text ?? entry?.title ?? "Thread"}</h1>
@@ -3720,7 +3826,10 @@ export function CanonThreadScreen() {
             </div>
           )}
           {chatProposal && <ConnectedProposalPanel key={chatProposal.proposal.id} staged={chatProposal} />}
-          <div style={{ marginTop: 2 }}>
+          <HeldBar className="fy-thread-composer">
+            {phone && <button type="button" className="fy-thread-peek" onClick={() => setSettleOpen(true)} aria-haspopup="dialog">
+              <span><b>Proposed entry{entry ? ` · ${entry.id}` : ""}</b><span>{resolvedType} · draft · {candidates.checked ? `${candidates.candidates.length} contradiction candidates` : "not yet checked"}</span></span><ChevronRight size={18} />
+            </button>}
             <Composer
               value={message}
               onChange={setMessage}
@@ -3762,82 +3871,20 @@ export function CanonThreadScreen() {
                 onDismiss={() => setOfferDone((prev) => [...prev, offer.id])}
               />
             )}
-          </div>
-          <div style={{ marginTop: "auto" }}>
-            <div className="fy-fieldlabel">What it turned out to be</div>
-            <div className="fy-choicerow">
-              {SETTLE_TYPES.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  className={cx("fy-filterchip", t === resolvedType && "fy-filterchip--active")}
-                  style={{ border: t === resolvedType ? "none" : "1px solid var(--border)" }}
-                  onClick={() => setResolvedType(t)}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-            <div className="fy-fieldlabel" style={{ marginTop: 15 }}>
-              The settled statement
-            </div>
-            <Textarea
-              placeholder="What is now established as true in this world?"
-              value={statement}
-              onChange={(e) => setStatement(e.target.value)}
-            />
-          </div>
+          </HeldBar>
+          {!phone && !fold && settlementFields}
         </div>
       </div>
-      <div className="fy-gate__side">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-          <div style={{ font: "600 15px var(--font-sans)" }}>Proposed entry</div>
-          <span className="fy-mono" style={{ color: "var(--warning)" }}>
-            settles the thread
-          </span>
-        </div>
-        <div className="fy-draftcard">
-          <div className="fy-gridcard__id">
-            {entry?.id ?? "CANON-…"} · {resolvedType}
-          </div>
-          {entry && !question && <div style={{ font: "600 16px var(--font-sans)", letterSpacing: "-0.01em", marginTop: 7 }}>
-            {entry.title}
-          </div>}
-          <div
-            style={{
-              font: "400 12.5px/1.65 var(--font-sans)",
-              color: "var(--muted-foreground)",
-              marginTop: 8,
-              whiteSpace: "pre-wrap",
-            }}
-          >
-            {statement.trim() || "The settled statement appears here as you write it."}
-          </div>
-        </div>
+      {!phone && <div className="fy-gate__side">
+        {proposalPreview}
+        {fold && <details className="fy-thread-edit"><summary>Edit proposed entry</summary>{settlementFields}</details>}
         <div style={{ flex: 1, minHeight: 16 }} />
-        <div style={{ display: "grid", gap: 8 }}>
-          <Button
-            variant="primary"
-            disabled={!entry || !worldId || statement.trim().length === 0}
-            onClick={() => {
-              if (!entry || !worldId) return;
-              settlement.track(settleThread(worldId, entry.id, resolvedType, statement.trim()));
-            }}
-          >
-            Settle thread
-          </Button>
-          <div
-            style={{
-              font: "400 11px/1.5 var(--font-sans)",
-              color: "var(--muted-foreground)",
-              textAlign: "center",
-            }}
-          >
-            This press accepts the settlement. The canon revision moves once.
-          </div>
-          <SingleActFeedback result={settlement.result} undoLabel="Reopen thread" onUndo={settlement.undo} />
-        </div>
-      </div>
+        {settlementActions}
+      </div>}
+      <PageSheet open={phone && settleOpen} title="Proposed entry" onClose={() => setSettleOpen(false)} footer={settlementActions}>
+        {settlementFields}{proposalPreview}
+        <CanonCandidates compact checked={candidates.checked} candidates={candidates.candidates} />
+      </PageSheet>
     </div>
   );
 }
@@ -3847,9 +3894,11 @@ export function NewCanonScreen() {
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
   const location = useLocation();
-  const seed = (location.state as { seed?: string } | null)?.seed;
-  const [entryType, setEntryType] = useState<(typeof SETTLE_TYPES)[number]>("rule");
-  const [title, setTitle] = useState("");
+  const phone = useMediaQuery("(max-width: 599px)");
+  const initial = location.state as { seed?: string; title?: string; entryType?: "lore" } | null;
+  const seed = initial?.seed;
+  const [entryType, setEntryType] = useState<(typeof SETTLE_TYPES)[number]>(initial?.entryType === "lore" ? "lore" : "rule");
+  const [title, setTitle] = useState(initial?.title ?? "");
   const [statement, setStatement] = useState(seed ?? "");
   const creation = useSingleAct();
   const candidates = useCanonCandidateCheck(worldId, title, statement);
@@ -3859,7 +3908,7 @@ export function NewCanonScreen() {
       <div className="fy-gate__main">
         <div className="fy-gate__head">
           <div style={{ flex: 1 }}>
-            <div className="fy-eyebrow-sm">NEW CANON ENTRY · WILL BE {nextId}</div>
+            <div className="fy-eyebrow-sm">{phone ? "New canon entry · will be" : "NEW CANON ENTRY · WILL BE"} {nextId}</div>
             <h1 className="fy-story__h1">The entry, field by field.</h1>
           </div>
         </div>
@@ -3892,14 +3941,15 @@ export function NewCanonScreen() {
               onChange={(e) => setStatement(e.target.value)}
             />
           </div>
-          <div className="fy-mono">
+          {phone && <CanonCandidates compact checked={candidates.checked} candidates={candidates.candidates} />}
+          <div className="fy-mono fy-canon-id-note">
             ids are permanent — the entry reserves {nextId} at staging and keeps it forever · retired ids are
             never reused, so citations never drift
           </div>
         </div>
       </div>
       <div className="fy-gate__side">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+        <div className="fy-canon-proposal-title">
           <div style={{ font: "600 15px var(--font-sans)" }}>Proposed entry</div>
           <span className="fy-mono" style={{ color: "var(--warning)" }}>
             draft · enters as proposed
@@ -3923,9 +3973,9 @@ export function NewCanonScreen() {
             {statement.trim() || "The statement appears here as you write it."}
           </div>
         </div>
-        <CanonCandidates checked={candidates.checked} candidates={candidates.candidates} />
+        {!phone && <CanonCandidates checked={candidates.checked} candidates={candidates.candidates} />}
         <div style={{ flex: 1, minHeight: 16 }} />
-        <div style={{ display: "grid", gap: 8 }}>
+        <HeldBar className="fy-new-canon-actions">
           <Button
             variant="primary"
             disabled={!worldId || title.trim().length === 0 || statement.trim().length === 0}
@@ -3938,9 +3988,9 @@ export function NewCanonScreen() {
           </Button>
           <SingleActFeedback result={creation.result} undoLabel="Retire entry" onUndo={creation.undo} />
           <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/canon`)}>
-            Discard · nothing saved
+            {phone ? "Discard" : "Discard · nothing saved"}
           </Button>
-        </div>
+        </HeldBar>
       </div>
     </div>
   );
