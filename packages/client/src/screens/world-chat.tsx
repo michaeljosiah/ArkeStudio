@@ -862,7 +862,7 @@ export function WorldChatScreen() {
               {row && <IconButton label="Conversation options" onClick={() => setMenu({ id: row.id, x: 0, y: 0, confirming: false })}><More size={20} /></IconButton>}
             </div>
             <div className="fy-chat__phonesub">
-              {row?.entryContext && row.entryContext.kind !== "world" && <div className="fy-chat__about">{aboutLabel(row.entryContext, world)}</div>}
+              {row?.entryContext && row.entryContext.kind !== "world" && <div className="fy-chat__about">{aboutLabel(row.entryContext, world)}<ChevronDown size={14} /></div>}
               {loaded && conversationId && worldId && <details className="fy-chat__mode">
                 <summary>{loaded.initiative === "assist" ? "Assist" : loaded.initiative === "develop" ? "Develop" : "Collaborate"}<ChevronDown size={14} /></summary>
                 <div role="group" aria-label="How eagerly the studio proposes">
