@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { ownedChildHooks } from "../../../src/harness/owned-child.ts";
-import { platformProbe } from "../../../src/child-ledger.ts";
+import { probeProcesses } from "../../../src/child-ledger.ts";
 
 const mode = process.argv[2];
 const child = spawn(process.execPath, ["-e", `
@@ -30,7 +30,10 @@ if (mode === "during-spawn") {
 } else {
   const pids = await ready;
   if (mode === "orphan") {
-    const info = (await platformProbe([pids.helper])).get(pids.helper);
+    // Setup, not what is under test: the identity the exit path will kill by. On a loaded
+    // Windows runner this one query has taken longer than the app's 30 seconds, and the host
+    // then died with exit 1 before the regression it exists for ever ran.
+    const info = (await probeProcesses([pids.helper], { timeoutMs: 90_000 })).get(pids.helper);
     if (!info) throw new Error("Fixture helper exited before ownership was recorded.");
     rows = [{ ...info, parentPid: child.pid }];
   }
