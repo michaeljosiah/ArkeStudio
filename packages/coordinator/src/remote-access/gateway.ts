@@ -4,12 +4,21 @@ import { createReadStream } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import WebSocket, { WebSocketServer } from "ws";
+import { ClientMessageSchema, type ClientMessage } from "@arke-studio/contracts";
 import { RemoteDevices } from "./devices.js";
 
 const deviceCookie = "__Host-arke-device";
 const pairingCookie = "__Host-arke-pair";
 // Match ws's default used by Transport; dictation and large world snapshots are frames too.
 const frameLimit = 100 * 1024 * 1024;
+// These paths are supplied by the isolated desktop preload after a native selection or
+// spool write. Pairing grants Studio access, not arbitrary access to the host filesystem.
+// Keep the record exhaustive for every command with these host-path fields.
+type HostFileCommand = Extract<ClientMessage, { sourcePath?: string } | { sourcePaths?: (string | null)[] }>;
+const hostFileCommands: Record<HostFileCommand["kind"], true> = {
+  "world-chat-attach": true, "stage-playblast": true, "conversation-action-stage-playblast-complete": true,
+  "upload-artifacts": true, "file-artifact": true, "genesis-attach": true, "import-folder": true,
+};
 function cookie(req: IncomingMessage, name: string): string | undefined {
   const values = (req.headers.cookie ?? "").split(";").map(part => part.trim()).filter(part => part.startsWith(name + "="));
   return values.length === 1 ? values[0]!.slice(name.length + 1) : undefined;
@@ -159,10 +168,15 @@ export class RemoteGateway {
     });
     client.on("message", raw => {
       if (!check()) { refuse(); return; }
-      let input: { kind?: unknown };
+      let input: unknown;
       try { input = JSON.parse(raw.toString()); } catch { client.close(1002); return; }
-      if (input?.kind === "hello") return;
-      const message = raw.toString();
+      const parsed = ClientMessageSchema.safeParse(input);
+      if (!parsed.success) { client.close(1008, "invalid Studio command"); return; }
+      if (Object.hasOwn(hostFileCommands, parsed.data.kind)) {
+        client.close(1008, "host file access requires the desktop app"); return;
+      }
+      if (parsed.data.kind === "hello") return;
+      const message = JSON.stringify(parsed.data);
       if (upstream.readyState === WebSocket.OPEN) upstream.send(message);
       else if (pending.length < 32 && (pendingBytes += Buffer.byteLength(message)) <= frameLimit) pending.push(message);
       else client.close(1008, "too many pending commands");

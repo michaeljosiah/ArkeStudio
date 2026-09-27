@@ -74,7 +74,7 @@ import {
   type SidecarHealth,
 } from "@arke-studio/voice";
 import { BackgroundNotificationController } from "./background-notifications.js";
-import { isBackgroundLogin, launchDesktop, StartupController, StartupWindowPresentation, type StartupState } from "./startup.js";
+import { drainDesktop, isBackgroundLogin, launchDesktop, StartupController, StartupWindowPresentation, type StartupState } from "./startup.js";
 import { boundaryFrameOptions, takePosterOptions, takeQcOptions } from "./take-qc.js";
 import { createExportFfmpegRunner } from "./export-ffmpeg.js";
 import { saveMediaHandler } from "./save-media.js";
@@ -227,8 +227,8 @@ let performanceSpool: ReturnType<typeof createPerformanceSpool>;
 
 async function closeProviderTransport(): Promise<void> {
   const transport = providerTransport;
-  providerTransport = null;
   await transport?.close();
+  providerTransport = null;
 }
 
 function showWindowWhenThemed(): void {
@@ -498,7 +498,7 @@ function registerHostIpc(): void {
     showWindowWhenThemed();
   });
   ipcMain.on("arke:retry-startup", (event) => {
-    if (!window || event.sender !== window.webContents) return;
+    if (!window || event.sender !== window.webContents || shuttingDown) return;
     void startupController?.run();
   });
   ipcMain.on("arke:open-data-folder", (event) => {
@@ -1550,25 +1550,16 @@ async function shutdownConfirmed(): Promise<void> {
   if (shuttingDown) throw new Error("shutdown is already in progress");
   shuttingDown = true;
   backgroundNotifications.stop();
-  const stop = (async () => {
-    try {
-      await remoteAccess?.stop();
-      await publicationHost?.stop();
-      await (studioServer?.stop() ?? startupProvider?.close() ?? Promise.resolve());
-    } finally {
-      await closeProviderTransport();
-    }
-  })();
-  let timer: ReturnType<typeof setTimeout> | null = null;
   try {
-    await Promise.race([
-      stop,
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error("local shutdown did not finish safely")), 15_000);
-      }),
-    ]);
+    await drainDesktop(async () => { await remoteAccess?.stop(); }, async () => {
+      try {
+        await publicationHost?.stop();
+        await (studioServer?.stop() ?? startupProvider?.close() ?? Promise.resolve());
+      } finally {
+        await closeProviderTransport();
+      }
+    });
   } finally {
-    if (timer) clearTimeout(timer);
     shuttingDown = false;
   }
 }
@@ -1591,6 +1582,12 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
+  app.on("activate", () => {
+    if (!window || window.isDestroyed()) return;
+    if (window.isMinimized()) window.restore();
+    revealWindow();
+    window.focus();
+  });
   app.on("second-instance", () => {
     if (window) {
       if (window.isMinimized()) window.restore();
@@ -1612,15 +1609,16 @@ if (!gotLock) {
         updateRemoteTray();
         const started = studioServer;
         const provider = startupProvider;
-        coordinator = null;
-        studioServer = null;
-        startupProvider = null;
         try {
           if (started) await started.stop();
           else await provider?.close();
         } finally {
           await closeProviderTransport();
         }
+        coordinator = null;
+        studioServer = null;
+        startupProvider = null;
+        transportSession = null;
       },
       publish: publishStartup,
       report: (error) => {

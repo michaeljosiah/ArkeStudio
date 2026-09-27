@@ -152,6 +152,58 @@ it("a damaged device registry cannot be overwritten by enabling or pairing", asy
     assert.equal(await readFile(join(root, "remote/devices.json"), "utf8"), "broken");
   } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
 });
+it("a damaged registry withdraws stale HTTPS before reporting recovery, and Disable preserves its records", async () => {
+  const root = await mkdtemp(join(tmpdir(), "arke-remote-stale-registry-"));
+  await mkdir(join(root, "remote"));
+  await writeFile(join(root, "remote/settings.json"), JSON.stringify({ enabled: true, startOnLogin: false, origin }));
+  await writeFile(join(root, "remote/devices.json"), "broken");
+  const fake = tailscale(); await fake.client.enable(origin, 8793, false);
+  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+    startupSupported: false, setStartOnLogin: () => {}, tailscale: fake.client });
+  try {
+    await host.initialize();
+    assert.match(host.status().reason!, /records could not be read/);
+    assert.ok(fake.commands.some(args => args.includes("off")), "registry damage cannot strand a published origin");
+    await assert.rejects(host.command({ kind: "enable" }), /records could not be read/);
+    assert.equal((await host.command({ kind: "disable" })).status.enabled, false);
+    assert.equal(await readFile(join(root, "remote/devices.json"), "utf8"), "broken");
+  } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
+});
+it("failed stale-mapping cleanup reserves an inert port until Disable can safely release it", async () => {
+  const root = await mkdtemp(join(tmpdir(), "arke-remote-stale-removal-"));
+  await mkdir(join(root, "remote"));
+  await writeFile(join(root, "remote/settings.json"), JSON.stringify({ enabled: true, startOnLogin: false, origin }));
+  await writeFile(join(root, "remote/devices.json"), "broken");
+  const fake = tailscale(); await fake.client.enable(origin, 8793, false);
+  const disable = fake.client.disable.bind(fake.client);
+  let failRemoval = true;
+  fake.client.disable = async (...args) => { if (failRemoval) throw new Error("Tailscale unavailable"); await disable(...args); };
+  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+    startupSupported: false, setStartOnLogin: () => {}, tailscale: fake.client });
+  const probe = createServer();
+  try {
+    await host.initialize();
+    assert.match(host.status().reason!, /Tailscale unavailable/);
+    assert.equal(host.status().running, false);
+    await assert.rejects(new Promise<void>((resolve, reject) => {
+      probe.once("error", reject); probe.listen(8793, "127.0.0.1", resolve);
+    }), { code: "EADDRINUSE" });
+    const response = await fetch("http://127.0.0.1:8793/");
+    assert.equal(response.status, 503); await response.text();
+    assert.match((await host.command({ kind: "disable" })).status.reason!, /Tailscale unavailable/);
+    failRemoval = false;
+    assert.equal((await host.command({ kind: "disable" })).status.enabled, false);
+    await new Promise<void>((resolve, reject) => {
+      probe.once("error", reject); probe.listen(8793, "127.0.0.1", () => probe.close(() => resolve()));
+    });
+    assert.ok(fake.commands.some(args => args.includes("off")));
+    assert.equal(await readFile(join(root, "remote/devices.json"), "utf8"), "broken");
+  } finally {
+    failRemoval = false; await host.stop();
+    if (probe.listening) await new Promise<void>(resolve => probe.close(() => resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+});
 it("Disable and Quit drain automatic startup before returning, without resurrecting the gateway", async () => {
   for (const action of ["disable", "stop"] as const) {
     const root = await mkdtemp(join(tmpdir(), "arke-remote-startup-race-"));

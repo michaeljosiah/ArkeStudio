@@ -16,6 +16,7 @@ export class StartupController {
   private running: Promise<void> | null = null;
   private ready = false;
   private retryRequested = false;
+  private needsCleanup = false;
 
   constructor(private readonly opts: StartupControllerOptions) {}
 
@@ -37,14 +38,30 @@ export class StartupController {
   }
 
   private async attempt(): Promise<void> {
+    // A failed cleanup may still own a coordinator, world lock or published gateway.
+    // Retry must drain that same host before initialize can construct its replacement.
+    if (this.needsCleanup && !await this.cleanup()) return;
     try {
       const { port } = await this.opts.initialize();
       this.ready = true;
       this.opts.publish({ status: "ready", port });
     } catch (error) {
+      this.needsCleanup = true;
       this.opts.report(error);
       this.opts.publish({ status: "failed", detail: FAILURE_DETAIL });
-      await this.opts.cleanup().catch((cleanupError: unknown) => this.opts.report(cleanupError));
+      await this.cleanup();
+    }
+  }
+
+  private async cleanup(): Promise<boolean> {
+    try {
+      await this.opts.cleanup();
+      this.needsCleanup = false;
+      return true;
+    } catch (error) {
+      this.opts.report(error);
+      this.opts.publish({ status: "failed", detail: "Studio could not finish cleaning up the previous start. Restore Tailscale if unavailable, then retry. A new session will wait until cleanup succeeds." });
+      return false;
     }
   }
 }
@@ -70,4 +87,21 @@ export async function launchDesktop(
 ): Promise<void> {
   await createWindow();
   void controller.run();
+}
+
+/** Remote unpublication has its own bounded operations. It must finish before the core
+ * shutdown deadline begins, so a slow Serve call cannot abandon a still-running stop chain. */
+export async function drainDesktop(stopRemote: () => Promise<void>, stopCore: () => Promise<void>, deadlineMs = 15_000): Promise<void> {
+  await stopRemote();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      stopCore(),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("local shutdown did not finish safely")), deadlineMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }

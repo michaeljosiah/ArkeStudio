@@ -75,8 +75,9 @@ export class RemoteDevices {
   }
   poll(proof: string): "pending" | "approved" | "expired" {
     this.expire();
+    if (this.authenticate(proof)) return "approved";
     const request = this.requests.get(proof);
-    return request ? request.approved && this.authenticate(proof) ? "approved" : "pending" : "expired";
+    return request && !request.approved ? "pending" : "expired";
   }
   approve(id: string): Promise<void> {
     return this.serial(async () => {

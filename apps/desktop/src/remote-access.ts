@@ -1,4 +1,6 @@
 import { readFile } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
+import { once } from "node:events";
 import { join } from "node:path";
 import { z } from "zod";
 import { RemoteAccessCommandSchema, type RemoteAccessReply, type RemoteAccessStatus } from "@arke-studio/contracts";
@@ -15,11 +17,13 @@ export class DesktopRemoteAccess {
   private reason: string | null = null;
   private gateway: RemoteGateway | null = null;
   private gatewayOrigin: string | null = null;
+  private reservation: Server | null = null;
   private running = false;
   private devices: RemoteDevices;
   private tail: Promise<unknown> = Promise.resolve();
   private closing = false;
   private loaded = false;
+  private settingsLoaded = false;
   private path: string;
   constructor(private readonly options: { root: string; clientDirectory: string; session: { port: number; token: string };
     startupSupported: boolean; setStartOnLogin: (enabled: boolean) => void; tailscale?: TailscaleServe }) {
@@ -31,22 +35,42 @@ export class DesktopRemoteAccess {
     // the same drain as owner commands so Disable/Quit cannot be overtaken by a late start.
     const work = this.tail.then(async () => {
       if (this.closing) return;
+      let readingRecords = true;
       try {
         try { this.config = Config.parse(JSON.parse(await readFile(this.path, "utf8"))); }
         catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+        this.settingsLoaded = true;
+        readingRecords = false;
+        if (this.config.enabled && this.config.origin) await this.withdrawStaleMapping(this.config.origin);
+        readingRecords = true;
         await this.devices.load();
+        readingRecords = false;
         this.loaded = true;
         if (this.config.enabled) await this.start();
       } catch (error) {
-        this.reason = this.loaded
-          ? `${error instanceof Error ? error.message : "Remote access could not start."} Disable and enable remote access to retry.`
-          : "Remote access records could not be read. Restore the remote settings and device records from a backup before changing access.";
+        this.reason = readingRecords
+          ? "Remote access records could not be read. Restore the remote settings and device records from a backup before changing access."
+          : `${error instanceof Error ? error.message : "Remote access could not start."} Disable and enable remote access to retry.`;
       }
     });
     this.tail = work;
     return work;
   }
   private tailscale() { return this.options.tailscale ?? new TailscaleServe(); }
+  private async withdrawStaleMapping(origin: string): Promise<void> {
+    // An interrupted host may have left HTTPS forwarding. Claim an inert listener before
+    // reading the device registry, so damaged records or failed Serve cleanup cannot leave
+    // the cookie-bearing origin pointing at a port another process is free to claim.
+    this.gatewayOrigin = origin;
+    this.reservation = createServer((_req, res) => res.writeHead(503).end("Remote access needs attention on the host."));
+    this.reservation.on("upgrade", (_req, socket) => socket.destroy());
+    this.reservation.listen(port, "127.0.0.1");
+    let bindError: unknown;
+    try { await once(this.reservation, "listening"); } catch (error) { bindError = error; }
+    // Even an occupied port must not prevent withdrawing our recorded mapping.
+    await this.stopGateway();
+    if (bindError) throw bindError;
+  }
   private async save(config: Settings): Promise<void> { await writeRemotePrivate(this.path, config); this.config = config; }
   private async start(): Promise<void> {
     if (this.running) return;
@@ -82,6 +106,13 @@ export class DesktopRemoteAccess {
     // fail shutdown, so the owner can retry without creating that impersonation window.
     if (origin) await this.tailscale().disable(origin, port);
     await this.gateway?.stop();
+    if (this.reservation?.listening) {
+      const reservation = this.reservation;
+      const closed = new Promise<void>((resolve, reject) => reservation.close(error => error ? reject(error) : resolve()));
+      reservation.closeAllConnections();
+      await closed;
+    }
+    this.reservation = null;
     this.gateway = null; this.gatewayOrigin = null; this.running = false;
   }
   status(): RemoteAccessStatus {
@@ -93,9 +124,11 @@ export class DesktopRemoteAccess {
     const work = this.tail.then(async () => {
       if (this.closing) throw new Error("Studio is shutting down.");
       const command = RemoteAccessCommandSchema.parse(input);
-      if (!this.loaded && command.kind !== "status") throw new Error("Remote access records could not be read. Restore them before changing access.");
+      if (!this.loaded && command.kind !== "status" && !(command.kind === "disable" && this.settingsLoaded)) {
+        throw new Error("Remote access records could not be read. Restore them before changing access.");
+      }
       let pairing: RemoteAccessReply["pairing"];
-      if (command.kind !== "status") this.reason = null;
+      if (command.kind !== "status" && this.loaded) this.reason = null;
       try {
         switch (command.kind) {
           case "enable": await this.start(); break;

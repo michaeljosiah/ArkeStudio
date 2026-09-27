@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import WebSocket, { WebSocketServer } from "ws";
+import { ClientMessageSchema } from "@arke-studio/contracts";
 import { RemoteDevices } from "../src/remote-access/devices.js";
 import { RemoteGateway, remotePage } from "../src/remote-access/gateway.js";
 
@@ -29,9 +30,13 @@ it("remembered devices persist only hashes, survive restart, and expire or revok
     assert.ok(!String(await readFile(path)).includes(phone.proof));
     const restored = new RemoteDevices(path, () => now); await restored.load();
     assert.equal(restored.authenticate(phone.proof), phone.id);
+    assert.equal(restored.poll(phone.proof), "approved", "approval can promote its pending cookie after a host restart");
+    now += 300_001;
+    assert.equal(devices.poll(phone.proof), "approved", "durable approval outlives the transient request");
     assert.equal(restored.authenticate("wrong"), null);
     await restored.revoke(phone.id);
     assert.equal(restored.authenticate(phone.proof), null);
+    assert.equal(restored.poll(phone.proof), "expired");
     assert.equal(restored.authenticate(laptop.proof), laptop.id);
     now += 91 * 86400_000;
     assert.equal(restored.authenticate(laptop.proof), null);
@@ -152,7 +157,32 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
     const snapshot = await once(phone, "message"); assert.match(snapshot[0].toString(), /snapshot/);
     const dictation = JSON.stringify({ kind: "transcribe-dictation", requestId: "recording", contentType: "audio/webm", audioBase64: "a".repeat(2 * 1024 * 1024) });
     const echoed = once(phone, "message"); phone.send(dictation);
-    assert.equal((await echoed)[0].toString(), dictation, "remote transport retains large-frame support in both directions");
+    assert.deepEqual(JSON.parse((await echoed)[0].toString()), JSON.parse(dictation), "remote transport retains large-frame support in both directions");
+    const worldId = "01ARZ3NDEKTSV4RRFFQ69G5FAV", conversationId = "cv_" + worldId;
+    const sourcePath = join(root, "private.txt");
+    const playblast = { worldId, productionId: "pilot", sceneFile: "sc-one.md", sceneId: "sc_one", shotId: "sh_one",
+      baseVersion: 1, stagingVersion: 1, durationSec: 1, aspect: "16:9", sourcePath, openingFrameSourcePath: sourcePath,
+      referenceFrames: [{ kind: "last", at: 1, sourcePath }, { kind: "overview", at: 0, sourcePath }] };
+    const hostCommands = [
+      { kind: "file-artifact", worldId, sourcePath },
+      { kind: "genesis-attach", genesisId: "new-world", sourcePath },
+      { kind: "world-chat-attach", worldId, conversationId, sourcePath },
+      { kind: "import-folder", worldId, sourcePath },
+      { kind: "upload-artifacts", worldId, requestId: worldId, sourcePaths: [sourcePath] },
+      { kind: "upload-artifacts", worldId, requestId: worldId },
+      { kind: "stage-playblast", ...playblast },
+      { kind: "conversation-action-stage-playblast-complete", ...playblast, conversationId, actionId: "act_" + worldId, status: "completed" },
+    ];
+    for (const [index, command] of hostCommands.entries()) {
+      ClientMessageSchema.parse(command); // Each attack is a valid host command, not just malformed input.
+      const remote = connect(port, proof); sockets.push(remote);
+      await once(remote, index % 2 ? "message" : "open");
+      const closed = once(remote, "close"); remote.send(JSON.stringify(command));
+      const [code, reason] = await closed;
+      assert.equal(code, 1008); assert.match(reason.toString(), /host file access/);
+    }
+    assert.deepEqual(received.filter((message: any) => message.kind !== "hello"), [JSON.parse(dictation)],
+      "host file commands reach neither a connecting nor an established upstream session");
     const laptopDevice = await paired(devices, "Laptop");
     const laptop = connect(port, laptopDevice.proof); sockets.push(laptop); await once(laptop, "message");
     assert.deepEqual(received[0], { kind: "hello", token });

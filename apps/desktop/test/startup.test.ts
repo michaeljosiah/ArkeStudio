@@ -1,8 +1,24 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { isBackgroundLogin, launchDesktop, StartupController, StartupWindowPresentation, type StartupState } from "../src/startup.js";
+import { drainDesktop, isBackgroundLogin, launchDesktop, StartupController, StartupWindowPresentation, type StartupState } from "../src/startup.js";
 
 describe("desktop startup", () => {
+  it("keeps slow remote cleanup in the shutdown promise before starting the core deadline", async t => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let release!: () => void, stoppedCore = false, settled = false;
+    const remote = new Promise<void>(resolve => { release = resolve; });
+    const shutdown = drainDesktop(() => remote, async () => { stoppedCore = true; }).finally(() => { settled = true; });
+    t.mock.timers.tick(45_000);
+    await Promise.resolve();
+    assert.equal(settled, false); assert.equal(stoppedCore, false);
+    release(); await shutdown;
+    assert.equal(stoppedCore, true);
+  });
+  it("does not close the core or its providers when remote unpublication fails", async () => {
+    let stoppedCore = false;
+    await assert.rejects(drainDesktop(async () => { throw new Error("mapping retained"); }, async () => { stoppedCore = true; }), /mapping retained/);
+    assert.equal(stoppedCore, false);
+  });
   it("detects Windows login arguments and macOS login state without hiding ordinary launches", () => {
     assert.equal(isBackgroundLogin("win32", ["--remote-background"]), true);
     assert.equal(isBackgroundLogin("darwin", [], { wasOpenedAtLogin: true }), true);
@@ -128,5 +144,33 @@ describe("desktop startup", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(attempts, 2);
     assert.deepEqual(states.at(-1), { status: "ready", port: 43125 });
+  });
+
+  it("retries cleanup without constructing another host until the first host is drained", async () => {
+    const states: StartupState[] = [];
+    let attempts = 0, hosts = 0, cleanups = 0, failCleanup = true;
+    const controller = new StartupController({
+      initialize: async () => {
+        assert.equal(hosts, 0, "the previous coordinator must be gone before creating a replacement");
+        hosts++; attempts++;
+        if (attempts === 1) throw new Error("spool sweep failed after gateway startup");
+        return { port: 43126 };
+      },
+      cleanup: async () => {
+        cleanups++;
+        if (failCleanup) throw new Error("Serve removal failed; gateway must retain its port");
+        hosts--;
+      },
+      publish: state => states.push(state), report: () => {},
+    });
+    await controller.run();
+    assert.equal(attempts, 1); assert.equal(hosts, 1);
+    await controller.run();
+    assert.equal(attempts, 1); assert.equal(cleanups, 2);
+    assert.equal(states.at(-1)?.status, "failed");
+    failCleanup = false;
+    await controller.run();
+    assert.equal(attempts, 2); assert.equal(hosts, 1); assert.equal(cleanups, 3);
+    assert.deepEqual(states.at(-1), { status: "ready", port: 43126 });
   });
 });

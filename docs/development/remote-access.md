@@ -33,6 +33,8 @@ Desktop and phone operate the same coordinator and world session. A paired devic
 owner's ordinary Studio access; pairing management is available only on the PC. Revoke a device
 in Settings to stop its active connections and future access. The remote gateway uses a secure,
 HttpOnly, same-site cookie; the private process capability never reaches the browser.
+Native file selection, dropped host files and desktop-rendered playblasts require the desktop
+app. The gateway rejects their host-file commands, including manually supplied filesystem paths.
 
 **Disable remote access** stops hosting, removes only its matching Serve mapping and turns off
 automatic startup. Ordinary Quit removes the mapping before releasing the local hosting port;
@@ -40,6 +42,10 @@ the next app start recreates it at the same bookmarked address. If Tailscale can
 mapping, Studio keeps the port reserved and reports that shutdown failed; restore Tailscale
 and retry Quit. The built desktop page keeps its existing loopback
 policy; only the copy served to the phone gets the remote same-origin policy.
+On startup, a stale mapping is withdrawn before the device registry is loaded. If that cleanup
+fails, an inert listener reserves the port until Disable or Quit can remove the mapping. Damaged
+device records remain untouched. A failed desktop startup also drains the previous host before
+Retry can construct a replacement.
 
 If the PC or Tailscale is offline, an already open page retries. A new tab may show the browser's
 own network error because no page can be served. Resume the PC and connect Tailscale, then reload.
