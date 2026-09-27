@@ -1,4 +1,5 @@
-import { billableCharacters, CLONED_VOICE_MODEL, estimateMicroUsd, imageOutputFor, normalizeSpeechText, productionShape, voiceFormatForModel,
+import { estimateSpeechMicroUsd } from "@arke-studio/contracts";
+import { CLONED_VOICE_MODEL, estimateMicroUsd, imageOutputFor, normalizeSpeechText, productionShape, voiceFormatForModel,
   type ManifestModel, type SizeTier } from "@arke-studio/contracts";
 import type { EngineContext, EngineMutation, EnginePolicy, EngineQueue, EngineResource, EngineWorldRepository } from "./contracts.js";
 import { proseChapterRead, proseId } from "./prose-contracts.js";
@@ -115,7 +116,7 @@ export class StoryMediaApplicationService {
       return [{worldId, productionId, target: {kind: "story-chapter-narration", id: `${productionId}/${chapterId}/${key}`},
         capability: "voice-tts", provider: input.model.provider, model: input.model.id,
         params: {voiceId: input.voiceId, text, audioFormat: format, purpose: "story-chapter", productionId, chapterId},
-        estimatedMicroUsd: estimateMicroUsd(input.model, {characters: billableCharacters(input.model, text)}),
+        estimatedMicroUsd: estimateSpeechMicroUsd(input.model, text),
         landing: {dir: `productions/${productionId}/media/${chapterId}/${key}`, name: `narration-${key}.${format}`}}];
     })();
     return this.generation.generateFor(context, resource, input, async () => requests);

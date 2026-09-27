@@ -1,9 +1,9 @@
+import { estimateSpeechMicroUsd } from "@arke-studio/contracts";
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  GenesisVoicesSchema, GenesisVoicePlanSchema, estimateMicroUsd, billableCharacters,
-  normalizeSpeechText, voiceFormatForModel, voiceTargetKey, genesisSheetIds,
+  GenesisVoicesSchema, GenesisVoicePlanSchema, normalizeSpeechText, voiceFormatForModel, voiceTargetKey, genesisSheetIds,
   type GenesisBlueprint, type GenesisVoiceCandidate, type GenesisVoicePlan, type GenesisVoices,
   type Job, type ManifestModel, type VoiceCandidate,
 } from "@arke-studio/contracts";
@@ -80,7 +80,7 @@ export async function reviewGenesisVoices(dir: string, blueprint: GenesisBluepri
         const text = normalizeSpeechText(intent.text);
         if (!text.trim()) throw new Error("The audition needs spoken text.");
         const plan = { intent, title: character.name, voice, text, format: local ? "wav" as const : voiceFormatForModel(model!),
-          estimatedMicroUsd: local ? 0 : estimateMicroUsd(model!, { characters: billableCharacters(model!, text) }),
+          estimatedMicroUsd: local ? 0 : estimateSpeechMicroUsd(model!, text),
           transfer: voice.local ? "Runs on this device." : `The audition text is sent to ${voice.provider}. No recording is uploaded.` };
         state.plans.push({ ...plan, digest: conversationActionDigest(plan) });
       } catch (error) { state.problems.push(error instanceof Error ? error.message : "The voice proposal needs revision."); }
