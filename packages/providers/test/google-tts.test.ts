@@ -36,6 +36,22 @@ it("uses exact pinned model ids, separate style metadata, stateless unary WAV an
   }
 });
 
+it("accepts witnessed stateless interactions without a server id and keeps their usage", async () => {
+  const body = { ...responseBody(), id: undefined, object: "interaction" };
+  const client = new GoogleClient(async () => Response.json(body));
+  const first = await client.submit("test", request);
+  const second = await client.submit("test", request);
+  assert.match(first.remoteId, /^google-inline:[0-9a-f-]{36}$/);
+  assert.notEqual(first.remoteId, second.remoteId);
+  assert.deepEqual(first.artifacts?.[0]?.data, wav());
+  assert.deepEqual(first.speechUsage, { inputTextTokens: 8, outputAudioTokens: 50 });
+  const incomplete = await new GoogleClient(async () => Response.json({ ...body, status: "incomplete" })).submit("test", request);
+  assert.ok(incomplete.error);
+  assert.equal(incomplete.artifacts, undefined);
+  assert.deepEqual(incomplete.speechUsage, first.speechUsage);
+  await assert.rejects(new GoogleClient(async () => Response.json({ ...body, object: "unexpected" })).submit("test", request), /outcome is uncertain/);
+});
+
 it("keeps reported usage on incomplete, missing, duplicate and malformed audio without returning an artifact", async () => {
   const complete = responseBody();
   for (const body of [

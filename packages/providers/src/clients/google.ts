@@ -1,4 +1,5 @@
 import type { CapabilityProbe, ClientDeclarations, SpeechUsage } from "@arke-studio/contracts";
+import { randomUUID } from "node:crypto";
 import { ProviderAuthError, ProviderBusyError, ProviderRequestRejectedError,
   type FetchLike, type PollResult, type SubmitRequest, type SubmitResult, type VoiceCatalogueClient } from "../types.js";
 
@@ -151,8 +152,12 @@ export class GoogleClient implements VoiceCatalogueClient {
     });
     await this.checkStatus(response);
     const body = record(await response.json());
-    if (typeof body.id !== "string" || body.id.length === 0) throw new Error("Google returned no interaction identity; the outcome is uncertain");
-    const result = { remoteId: body.id, acceptedAt: new Date().toISOString(), speechUsage: geminiSpeechUsage(body.usage) };
+    // Live store:false responses omit the server id. This local receipt identifies the inline
+    // result in the journal; it is never offered as a remotely pollable or recoverable resource.
+    const remoteId = typeof body.id === "string" && body.id.length > 0 ? body.id
+      : body.id === undefined && body.object === "interaction" ? `google-inline:${randomUUID()}` : null;
+    if (remoteId === null) throw new Error("Google returned no interaction identity; the outcome is uncertain");
+    const result = { remoteId, acceptedAt: new Date().toISOString(), speechUsage: geminiSpeechUsage(body.usage) };
     if (body.model !== request.model) return { ...result, error: "Google returned a different or unidentified model; this read was not kept" };
     if (body.status !== "completed") return { ...result, error: "Google did not complete this read; partial audio was not kept" };
     const audio = (Array.isArray(body.steps) ? body.steps : []).flatMap(step => {
