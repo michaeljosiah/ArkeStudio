@@ -347,6 +347,7 @@ function landedName(job: Job, artifact: DispatchArtifact, index: number): string
 export class JobQueue {
   private readonly journal: JobStateStore;
   private readonly jobs = new Map<string, Job>();
+  private readonly usageWrites = new Map<string, Promise<boolean>>();
   private readonly lanes = new Map<string, Lane>();
   private readonly clock: () => string;
   private readonly rng: () => number;
@@ -446,6 +447,14 @@ export class JobQueue {
     this.jobs.set(job.id, job);
     this.opts.emit({ at: this.clock(), type: "job.updated", job });
     return true;
+  }
+
+  /** Cancellation must retain a response whose usage is already being made durable. */
+  private async persistUsage(job: Job): Promise<void> {
+    const pending = this.transition(job);
+    this.usageWrites.set(job.id, pending);
+    try { await pending; }
+    finally { if (this.usageWrites.get(job.id) === pending) this.usageWrites.delete(job.id); }
   }
 
   /**
@@ -1129,11 +1138,13 @@ export class JobQueue {
       // the durable queued row for the replacement process.
       if (this.cancelling.has(job.id) || !this.stillSubmitting(submitting)) return;
       const usage = SpeechUsageSchema.safeParse(accepted.speechUsage);
+      const reported = typeof accepted.costMicroUsd === "number" && Number.isFinite(accepted.costMicroUsd) && accepted.costMicroUsd >= 0
+        && Number.isSafeInteger(Math.round(accepted.costMicroUsd)) ? Math.round(accepted.costMicroUsd) : undefined;
       const completedSubmission: Job = { ...submitting, providerJobId: accepted.remoteId,
         ...(usage.success ? { speechUsage: usage.data } : {}),
-        ...(Number.isSafeInteger(accepted.costMicroUsd) && accepted.costMicroUsd! >= 0 ? { providerCostMicroUsd: accepted.costMicroUsd } : {}) };
+        ...(client.declarations.reportsCost && reported !== undefined ? { providerCostMicroUsd: reported } : {}) };
       // Usage must survive artifact landing failure and restart, just as the audio does.
-      if (usage.success || completedSubmission.providerCostMicroUsd !== undefined) await this.transition(completedSubmission);
+      if (usage.success || completedSubmission.providerCostMicroUsd !== undefined) await this.persistUsage(completedSubmission);
       if (this.disposed || this.cancelling.has(job.id) || !this.stillSubmitting(completedSubmission)) return;
       if (accepted.artifacts) {
         try {
@@ -1304,7 +1315,7 @@ export class JobQueue {
         const merged = { ...current.speechUsage, ...Object.fromEntries(Object.entries(usage.data).filter(([, value]) => value !== undefined)) };
         if (merged.inputTextTokens !== current.speechUsage?.inputTextTokens || merged.outputAudioTokens !== current.speechUsage?.outputAudioTokens) {
           current = { ...current, speechUsage: merged };
-          await this.transition(current);
+          await this.persistUsage(current);
           if (this.disposed || this.cancelling.has(job.id) || !this.stillPolling(current)) return;
         }
       }
@@ -1672,7 +1683,7 @@ export class JobQueue {
       // A held attempt is archived before resubmission, but the attempt number advances only
       // at provider I/O. Refusing that queued retry must not invent another unmeasured charge.
       const alreadyArchived = job.speechAttempts?.some(attempt => attempt.attempt === job.attempt) === true;
-      const reported = client?.declarations.reportsCost && costMicroUsd !== undefined ? Math.round(costMicroUsd) : undefined;
+      const reported = job.providerCostMicroUsd ?? (client?.declarations.reportsCost && costMicroUsd !== undefined ? Math.round(costMicroUsd) : undefined);
       let hasReported = !alreadyArchived && reported !== undefined;
       let hasUsage = !alreadyArchived && reported === undefined;
       actualMicroUsd = alreadyArchived ? 0 : reported ?? (job.speechUsage ? speechUsageCost(job.speechQuote, job.speechUsage) : null);
@@ -1733,6 +1744,9 @@ export class JobQueue {
     // Claimed before the abort, not after: the rejection it causes races this method, and the
     // submit's error path has to be able to tell a cancellation from a transport failure.
     this.cancelling.add(jobId);
+    await this.usageWrites.get(jobId);
+    const accepted = this.jobs.get(jobId);
+    if (accepted?.attempt === job.attempt) job = accepted;
     // A recovered running job may already be executing in its engine. Keep its pending
     // reservation alive until the engine acknowledges cancellation.
     if (!recoveringGpu) {
@@ -1777,7 +1791,7 @@ export class JobQueue {
       : null;
     // A cancelled job still writes a ledger entry (R-15, D10).
     const latest = this.jobs.get(job.id);
-    const withUsage = latest?.attempt === job.attempt ? { ...job, speechUsage: latest.speechUsage } : job;
+    const withUsage = latest?.attempt === job.attempt ? { ...job, speechUsage: latest.speechUsage, providerCostMicroUsd: latest.providerCostMicroUsd, providerJobId: latest.providerJobId } : job;
     await this.terminalize({...withUsage, cancellationUncertain: outcomeMayBeRemote}, "cancelled", reason);
     this.emitQueueStatus(job.provider);
   }
@@ -2282,7 +2296,7 @@ export class JobQueue {
       if (decision === "resubmit") {
         const priorSpeech = job.speechQuote?.unit === "token" && job.attempt > 0
           ? { speechAttempts: [...job.speechAttempts ?? [], { attempt: job.attempt, quote: job.speechQuote, usage: job.speechUsage ?? {},
-                ...(this.opts.clients[job.provider]?.declarations.reportsCost && job.providerCostMicroUsd !== undefined ? { providerCostMicroUsd: job.providerCostMicroUsd } : {}) }],
+                ...(job.providerCostMicroUsd !== undefined ? { providerCostMicroUsd: job.providerCostMicroUsd } : {}) }],
             speechUsage: undefined, providerCostMicroUsd: undefined }
           : {};
         await this.transition({ ...job, ...priorSpeech, status: "queued", error: null, updatedAt: this.clock() });

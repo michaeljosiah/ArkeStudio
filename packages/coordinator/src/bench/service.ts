@@ -1,4 +1,4 @@
-import { estimateSpeechMicroUsd } from "@arke-studio/contracts";
+import { quoteSpeech } from "@arke-studio/contracts";
 import { stageArtifactProblem } from "../productions/stage-playblast.js";
 import { planSubjectCharacterAudio, characterAudioInstructions, referencePrompt, referenceInputProblem, type FrozenPerformanceAudio } from "@arke-studio/contracts";
 import { readdir } from "node:fs/promises";
@@ -642,6 +642,8 @@ export function planBenchDispatch(
     worldId: string;
     requestId: string;
     at: string;
+    /** Present on a dispatch press; absent for a read-only planning request. */
+    speechAuthorisation?: { maximumMicroUsd?: number };
     /** Re-run: dispatch this take's immutable snapshot instead of the live composer. */
     fromTake?: BenchTake | undefined;
     /** The scene cast's reads, resolved by the caller (SPEC-044 R-29): the plan card and the Bench say the same. */
@@ -1135,7 +1137,7 @@ export function planBenchDispatch(
           // No container control: the concrete model declares its format and every downstream
           // layer consumes that same value.
         },
-        estimatedMicroUsd: estimateSpeechMicroUsd(model, composer.brief, voiceSettings !== null ? params.delivery : undefined, voiceSource.kind === "cloned" ? voiceSource.voice.language : undefined),
+        estimatedMicroUsd: quoteSpeech(model, composer.brief, { at: options.at, delivery: voiceSettings !== null ? params.delivery : undefined, language: voiceSource.kind === "cloned" ? voiceSource.voice.language : undefined }).authorisedMicroUsd,
         landing: { dir: sessionMediaDir(session.id, takeId) },
         ...(voiceSource.kind === "cloned" ? { voiceReference: true } : {}),
       });
@@ -1165,6 +1167,12 @@ export function planBenchDispatch(
         estimatedMicroUsd: estimateMicroUsd(model, { durationSec: MUSIC_DURATION_SEC }),
         landing: { dir: sessionMediaDir(session.id, takeId) },
       });
+    }
+  }
+  if (model.capability === "voice-tts" && model.pricing.kind === "perToken" && options.speechAuthorisation !== undefined) {
+    const maximum = options.speechAuthorisation.maximumMicroUsd;
+    if (maximum === undefined || inputs.reduce((sum, input) => sum + input.estimatedMicroUsd, 0) > maximum) {
+      return { ok: false, reason: "The speech price needs confirmation. Review the current price in the composer and press Generate." };
     }
   }
   return { ok: true, reserved, inputs: adapterRecipe ? inputs.map(input => ({ ...input, recipe: adapterRecipe })) : inputs };

@@ -5923,10 +5923,12 @@ export function sendBenchDispatch(
   sessionId: string,
   composer: Extract<ClientMessage, { kind: "bench-dispatch" }>["composer"],
   voiceUploadConfirmedFor?: string,
+  confirmedSpeechMicroUsd?: number,
 ): string {
   const requestId = queueRequest("bench-dispatch");
   send({
     kind: "bench-dispatch",
+    ...(confirmedSpeechMicroUsd !== undefined ? { confirmedSpeechMicroUsd } : {}),
     worldId,
     sessionId,
     requestId,

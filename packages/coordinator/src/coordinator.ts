@@ -11706,6 +11706,7 @@ export class Coordinator {
           return;
         }
         const plan = planBenchDispatch(bench.session, store.getBundle(), this.opts.manifest ?? null, {
+          speechAuthorisation: { maximumMicroUsd: msg.kind === "bench-dispatch" ? msg.confirmedSpeechMicroUsd : undefined },
           worldId: msg.worldId,
           requestId: msg.requestId,
           performanceReferences: castVoices.references,

@@ -1426,6 +1426,29 @@ describe("reading a line on the bench (design 70)", () => {
     }
   });
 
+  it("refuses a token dispatch whose displayed authorisation is absent or below the current total", async () => {
+    const { dir, store } = await open();
+    const opened = await freshBench(dir);
+    const model: ManifestModel = { ...VOICE, pricing: { kind: "perToken", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000,
+      speech: { tier: "standard", maxInputTokens: 8192, maxOutputTokens: 16384, audioTokensPerSecond: 25, rates: [
+        { version: "intro", effectiveFrom: "2026-09-01T00:00:00Z", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000 },
+        { version: "standard", effectiveFrom: "2027-01-01T00:00:00Z", microUsdPerMillionInput: 1000000, microUsdPerMillionOutput: 18000000 },
+      ] } } };
+    await opened.store.append({ type: "composer-set", mode: "voice", provider: model.provider, model: model.id,
+      params: { kind: "voice", count: 2, voiceId: "vale", voiceProvider: model.provider, voiceModel: model.id, voiceLabel: "Vale" }, brief: LINE }, { at: CLOCK() });
+    const session = (await opened.store.fold())!;
+    const plan = (at: string, maximumMicroUsd?: number) => planBenchDispatch(session, store.getBundle(), { ...MANIFEST_3, models: [model] },
+      { worldId: store.worldId, requestId: "token-consent", at, speechAuthorisation: { maximumMicroUsd } });
+    assert.equal(plan("2026-12-31T23:59:59Z").ok, false);
+    assert.equal(plan("2026-12-31T23:59:59Z", 151552).ok, false, "one request cannot authorise two takes");
+    const accepted = plan("2026-12-31T23:59:59Z", 303104);
+    assert.ok(accepted.ok, accepted.ok ? undefined : accepted.reason);
+    assert.equal(accepted.inputs.reduce((sum, input) => sum + input.estimatedMicroUsd, 0), 303104);
+    const expired = plan("2027-01-01T00:00:00Z", 303104);
+    assert.equal(expired.ok, false);
+    if (!expired.ok) assert.match(expired.reason, /price needs confirmation/);
+  });
+
   it("refuses a voice target from a sibling model behind the same provider", async () => {
     const plan = await planVoice(VOICE, {
       voiceId: "vale",

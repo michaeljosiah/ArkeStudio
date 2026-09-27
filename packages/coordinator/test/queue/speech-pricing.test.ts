@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { quoteSpeech, type Job, type LedgerEntry, type ManifestModel, type SpeechUsage } from "@arke-studio/contracts";
 import { JobQueue, type DispatchClient, type EnqueueInput } from "../../src/queue/dispatcher.js";
+import { JobJournal } from "../../src/queue/journal.js";
 import { tempDir } from "../tmp.js";
 import { until } from "../wait.js";
 
@@ -19,7 +20,7 @@ const input: EnqueueInput = { worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", target: { k
   capability: "voice-tts", provider: model.provider, model: model.id, params: { text: "Hello" },
   estimatedMicroUsd: quoteSpeech(model, "Hello", { at: initial }).authorisedMicroUsd };
 
-async function harness(usage?: SpeechUsage, state: "succeeded" | "failed" = "succeeded", inline = false) {
+async function harness(usage?: SpeechUsage, state: "succeeded" | "failed" = "succeeded", inline = false, afterAppend?: (job: Job) => Promise<void>) {
   const dir = await tempDir("arke-speech-price-");
   const ledger: LedgerEntry[] = [];
   let now = initial;
@@ -30,7 +31,9 @@ async function harness(usage?: SpeechUsage, state: "succeeded" | "failed" = "suc
     submit: async () => { submissions++; return { remoteId: "remote-1", ...(inline ? { artifacts: [], speechUsage: usage } : {}) }; },
     poll: async () => ({ state, speechUsage: usage }), fetchArtifacts: async () => [], cancel: async () => {},
   };
+  const journal = new JobJournal(join(dir, "jobs.jsonl"));
   const create = () => new JobQueue({ journalPath: join(dir, "jobs.jsonl"), clients: { elevenlabs: client }, getKey: async () => "test",
+    ...(afterAppend ? { journal: { append: async (job: Job) => { await journal.append(job); await afterAppend(job); }, readHistory: () => journal.readHistory(), drain: () => journal.drain() } } : {}),
     emit: () => {}, speechModel: () => model, clock: () => now,
     beforeSubmit: async () => { if (expire) now = "2027-01-01T00:00:00.000Z"; },
     ledger: { readJobIds: async () => new Set(ledger.map(e => e.jobId)), has: async id => ledger.some(e => e.jobId === id), append: async entry => { ledger.push(entry); } },
@@ -230,4 +233,54 @@ it("aggregates archived provider charges with reported or usage-derived retry co
       } finally { restored.dispose(); }
     } finally { h.queue.dispose(); }
   }
+});
+
+it("cancellation waits for accepted usage to finish flushing and keeps the reported cost", async () => {
+  let release: (() => void) | undefined;
+  let reached = false;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const h = await harness(undefined, "succeeded", true, async job => {
+    if (job.status === "submitting" && job.speechUsage !== undefined) { reached = true; await gate; }
+  });
+  h.client.declarations.reportsCost = true;
+  h.client.submit = async () => ({ remoteId: "accepted", artifacts: [], costMicroUsd: 1234.6, speechUsage: { inputTextTokens: 3, outputAudioTokens: 250 } });
+  const cancelledIds: string[] = [];
+  h.client.cancel = async (_key, id) => { cancelledIds.push(id); };
+  try {
+    const job = await h.queue.enqueue(input);
+    await until(() => reached, "usage flushing", 30000);
+    let finished = false;
+    const cancellation = h.queue.cancel(job.id).then(() => { finished = true; });
+    await Promise.resolve();
+    assert.equal(finished, false);
+    release!();
+    await cancellation;
+    assert.deepEqual(cancelledIds, ["accepted"]);
+    assert.equal(h.ledger[0]!.actualMicroUsd, 1235);
+    assert.equal(h.ledger[0]!.actualSource, "provider-reported");
+    assert.deepEqual(h.ledger[0]!.speechUsage, { inputTextTokens: 3, outputAudioTokens: 250 });
+    const rows = (await readFile(join(h.dir, "jobs.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line) as Job);
+    assert.equal(rows.at(-1)!.status, "cancelled");
+    assert.equal(rows.at(-1)!.providerCostMicroUsd, 1235);
+  } finally { release?.(); h.queue.dispose(); }
+});
+
+it("ledger recovery trusts a persisted charge after the provider declaration changes", async () => {
+  const h = await harness(undefined, "succeeded", true);
+  h.client.declarations.reportsCost = true;
+  h.client.submit = async () => ({ remoteId: "reported", artifacts: [], costMicroUsd: 1234.6 });
+  try {
+    await h.queue.enqueue(input);
+    await until(() => h.ledger.length === 1, "first ledger", 30000);
+    assert.equal(h.ledger[0]!.actualMicroUsd, 1235);
+    h.queue.dispose();
+    h.ledger.length = 0;
+    h.client.declarations.reportsCost = false;
+    const restored = h.create();
+    try {
+      await restored.start();
+      assert.equal(h.ledger[0]!.actualMicroUsd, 1235);
+      assert.equal(h.ledger[0]!.actualSource, "provider-reported");
+    } finally { restored.dispose(); }
+  } finally { h.queue.dispose(); }
 });
