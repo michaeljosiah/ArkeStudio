@@ -102,6 +102,7 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
   wss.on("connection", socket => socket.on("message", raw => {
     const msg = JSON.parse(raw.toString()); received.push(msg);
     if (msg.kind === "hello") socket.send(JSON.stringify({ kind: "snapshot", seq: 1 }));
+    else socket.send(raw.toString());
   }));
   upstream.listen(0, "127.0.0.1"); await once(upstream, "listening");
   const upstreamPort = (upstream.address() as import("node:net").AddressInfo).port;
@@ -149,6 +150,9 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
     await new Promise<void>(resolve => foreign.once("error", () => resolve()));
     const phone = connect(port, proof); sockets.push(phone);
     const snapshot = await once(phone, "message"); assert.match(snapshot[0].toString(), /snapshot/);
+    const dictation = JSON.stringify({ kind: "transcribe-dictation", requestId: "recording", contentType: "audio/webm", audioBase64: "a".repeat(2 * 1024 * 1024) });
+    const echoed = once(phone, "message"); phone.send(dictation);
+    assert.equal((await echoed)[0].toString(), dictation, "remote transport retains large-frame support in both directions");
     const laptopDevice = await paired(devices, "Laptop");
     const laptop = connect(port, laptopDevice.proof); sockets.push(laptop); await once(laptop, "message");
     assert.deepEqual(received[0], { kind: "hello", token });

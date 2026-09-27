@@ -8,6 +8,8 @@ import { RemoteDevices } from "./devices.js";
 
 const deviceCookie = "__Host-arke-device";
 const pairingCookie = "__Host-arke-pair";
+// Match ws's default used by Transport; dictation and large world snapshots are frames too.
+const frameLimit = 100 * 1024 * 1024;
 function cookie(req: IncomingMessage, name: string): string | undefined {
   const values = (req.headers.cookie ?? "").split(";").map(part => part.trim()).filter(part => part.startsWith(name + "="));
   return values.length === 1 ? values[0]!.slice(name.length + 1) : undefined;
@@ -31,7 +33,7 @@ export class RemoteGateway {
   private server = createServer((req, res) => { void this.handle(req, res).catch(() => {
     if (!res.headersSent) res.writeHead(500).end("Remote access is temporarily unavailable."); else res.destroy();
   }); });
-  private wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
+  private wss = new WebSocketServer({ noServer: true, maxPayload: frameLimit });
   private clients = new Map<WebSocket, { proof: string; upstream: WebSocket }>();
   private transfers = new Map<ServerResponse, { proof: string; cancel: () => void }>();
   private sweep: ReturnType<typeof setInterval> | undefined;
@@ -144,7 +146,7 @@ export class RemoteGateway {
     else { const stream = createReadStream(path); stream.on("error", () => res.destroy()); res.on("close", () => stream.destroy()); stream.pipe(res); }
   }
   private connect(client: WebSocket, proof: string): void {
-    const upstream = new WebSocket(`ws://127.0.0.1:${this.options.session.port}`, { maxPayload: 32 * 1024 * 1024, handshakeTimeout: 10_000 });
+    const upstream = new WebSocket(`ws://127.0.0.1:${this.options.session.port}`, { maxPayload: frameLimit, handshakeTimeout: 10_000 });
     this.clients.set(client, { proof, upstream });
     const pending: string[] = [];
     let pendingBytes = 0;
@@ -162,13 +164,13 @@ export class RemoteGateway {
       if (input?.kind === "hello") return;
       const message = raw.toString();
       if (upstream.readyState === WebSocket.OPEN) upstream.send(message);
-      else if (pending.length < 32 && (pendingBytes += Buffer.byteLength(message)) <= 1024 * 1024) pending.push(message);
+      else if (pending.length < 32 && (pendingBytes += Buffer.byteLength(message)) <= frameLimit) pending.push(message);
       else client.close(1008, "too many pending commands");
     });
     upstream.on("message", raw => {
       if (!check()) { refuse(); return; }
       if (client.readyState === WebSocket.OPEN) {
-        if (client.bufferedAmount > 32 * 1024 * 1024) { client.terminate(); return; }
+        if (client.bufferedAmount > frameLimit) { client.terminate(); return; }
         client.send(raw.toString());
       }
     });
