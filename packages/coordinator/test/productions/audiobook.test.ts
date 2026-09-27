@@ -1779,7 +1779,6 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
         if (directed) await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p0.1", direction: { delivery: "measured", speed: 1, cues: [] } });
         const made = await prepareChapter(store, LEDGER, "neap", room, () => "2026-09-27T12:00:00Z", ["p0.1"]);
         assert.equal(made.kind, "ready");
-        if (made.kind !== "ready") throw new Error(made.kind);
         const block = made.prepared.speaking[0]!;
         assert.equal(block.refusal, undefined);
         assert.equal(block.parts.join(" "), normalizeSpeechText(SPAN));
