@@ -111,6 +111,8 @@ export interface PreparedAudioSource {
 }
 
 export interface SubmitResult {
+  /** A witnessed terminal result, with any reported usage, that produced no usable artifact. */
+  error?: string;
   /** Reported quantities, not a provider-reported charge (SPEC-049 R-8). */
   speechUsage?: SpeechUsage;
   costMicroUsd?: number;

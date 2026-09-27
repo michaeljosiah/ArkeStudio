@@ -63,6 +63,7 @@ export const ProviderIdSchema = z.enum([
   "openai",
   "anthropic",
   "elevenlabs",
+  "google",
   "mistral",
   "breezeblue",
   "fishaudio",
@@ -137,6 +138,12 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
   elevenlabs: {
     displayName: "ElevenLabs",
     capabilities: ["voice-tts", "voice-clone", "voice-conversion"],
+    local: false,
+    credential: "in-app",
+  },
+  google: {
+    displayName: "Google",
+    capabilities: ["voice-tts"],
     local: false,
     credential: "in-app",
   },

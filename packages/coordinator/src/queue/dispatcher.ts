@@ -103,7 +103,7 @@ export interface DispatchClient {
       recipe?: RecipeIdentity;
     },
     context?: { jobId?: string; attempt?: number; model?: string },
-  ): Promise<{ remoteId: string; artifacts?: DispatchArtifact[]; speechUsage?: SpeechUsage; costMicroUsd?: number }>;
+  ): Promise<{ remoteId: string; artifacts?: DispatchArtifact[]; speechUsage?: SpeechUsage; costMicroUsd?: number; error?: string }>;
   poll(
     key: string,
     remoteId: string,
@@ -1135,6 +1135,10 @@ export class JobQueue {
       // Usage must survive artifact landing failure and restart, just as the audio does.
       if (usage.success || completedSubmission.providerCostMicroUsd !== undefined) await this.transition(completedSubmission);
       if (this.disposed || !this.stillSubmitting(completedSubmission)) return;
+      if (accepted.error !== undefined) {
+        await this.terminalize(completedSubmission, "failed", accepted.error, accepted.costMicroUsd, "terminal");
+        return;
+      }
       if (accepted.artifacts) {
         try {
           await this.persistInlineArtifacts(job.id, accepted.remoteId, accepted.artifacts);
