@@ -17,6 +17,8 @@ const PAD_X = 24;
 const PAD_TOP = 72;
 const PORT_DY = 65;
 const TRAY_GAP = 36;
+/** How far each further choice between the same two scenes sits from the one before it. */
+const FAN = 34;
 
 export interface PlacedNode {
   id: string;
@@ -41,6 +43,8 @@ export interface MapGeometry {
   /** Scenes on no route: unreachable ones and excluded ones the layout does not place. */
   tray: string[];
   trayY: number;
+  /** Where the tray's cards sit, in a row under the map. */
+  trayNodes: PlacedNode[];
   width: number;
   height: number;
 }
@@ -62,27 +66,30 @@ export function edgePath(
   from: PlacedNode,
   to: PlacedNode,
   layerOf: ReadonlyMap<string, number>,
+  fan = 0,
 ): { d: string; lx: number; ly: number } {
   const o = outPort(from);
   const i = inPort(to);
   const span = (layerOf.get(to.id) ?? 0) - (layerOf.get(from.id) ?? 0);
-  if (span === 1) {
-    const bend = Math.max(40, (i.x - o.x) / 2);
+  // A tray card has no layer: its choice is drawn straight across to where it goes, since no
+  // layer order says what it would be arcing over.
+  if (span === 1 || !layerOf.has(from.id) || !layerOf.has(to.id)) {
+    const bend = Math.max(40, Math.abs(i.x - o.x) / 2);
     return {
-      d: `M${o.x},${o.y} C${o.x + bend},${o.y} ${i.x - bend},${i.y} ${i.x - 6},${i.y}`,
+      d: `M${o.x},${o.y} C${o.x + bend},${o.y + fan} ${i.x - bend},${i.y + fan} ${i.x - 6},${i.y}`,
       lx: (o.x + i.x) / 2,
-      ly: (o.y + i.y) / 2,
+      ly: (o.y + i.y) / 2 + fan,
     };
   }
   if (span > 1) {
-    const top = Math.min(o.y, i.y) - 150;
+    const top = Math.min(o.y, i.y) - 150 + fan;
     return {
       d: `M${o.x},${o.y} C${o.x + 110},${top} ${i.x - 110},${top} ${i.x - 6},${i.y}`,
       lx: (o.x + i.x) / 2,
       ly: 0.125 * (o.y + i.y) + 0.75 * top,
     };
   }
-  const bottom = Math.max(o.y, i.y) + 150;
+  const bottom = Math.max(o.y, i.y) + 150 + fan;
   return {
     d: `M${o.x},${o.y} C${o.x + 110},${bottom} ${i.x - 110},${bottom} ${i.x - 6},${i.y}`,
     lx: (o.x + i.x) / 2,
@@ -103,29 +110,56 @@ export function mapGeometry(routing: Routing, scenes: ReadonlyArray<{ id: string
     });
   });
   const at = new Map(nodes.map((node) => [node.id, node]));
-  const edges: DrawnEdge[] = [];
-  for (const choice of routing.choices) {
-    const from = at.get(choice.from);
-    const to = at.get(choice.to);
-    // A choice from a scene no route reaches, or to one that does not exist, has nowhere to be
-    // drawn; the card's meta counts it and the findings name it.
-    if (from === undefined || to === undefined) continue;
-    edges.push({ id: choice.id, from: choice.from, to: choice.to, label: choice.label, ...edgePath(from, to, layerOf) });
-  }
   const placed = new Set(at.keys());
   const known = new Set(scenes.map((scene) => scene.id));
   const excludedOff = routing.excluded.map((entry) => entry.sceneId).filter((id) => known.has(id) && !placed.has(id));
   const tray = [...layout.unplaced, ...excludedOff.filter((id) => !layout.unplaced.includes(id))];
+  const onTray = new Set(tray);
+
+  // Two choices between the same two scenes are different choices, walked and counted apart;
+  // drawn on one curve, the second label covered the first. Each further one fans out by FAN.
+  const seen = new Map<string, number>();
+  const draw = (choice: Routing["choices"][number], from: PlacedNode, to: PlacedNode): DrawnEdge => {
+    const pair = `${choice.from}\u0000${choice.to}`;
+    const nth = seen.get(pair) ?? 0;
+    seen.set(pair, nth + 1);
+    return { id: choice.id, from: choice.from, to: choice.to, label: choice.label, ...edgePath(from, to, layerOf, nth * FAN) };
+  };
+  const bottomOf = (list: DrawnEdge[]) => Math.max(0, ...list.map((edge) => edge.ly + 24));
+  const rightOf = (list: DrawnEdge[]) =>
+    Math.max(0, ...list.map((edge) => Math.max(edge.lx + 64, ...[...edge.d.matchAll(/(-?[\d.]+),/g)].map((m) => Number(m[1]) + PAD_X))));
+
+  // Choices between cards on the canvas first: the tray sits under their curves.
+  const edges: DrawnEdge[] = [];
+  for (const choice of routing.choices) {
+    const from = at.get(choice.from);
+    const to = at.get(choice.to);
+    if (from !== undefined && to !== undefined) edges.push(draw(choice, from, to));
+  }
   const layers = Math.max(1, layout.layers.length);
   // The bounds hold the curves as well as the cards: a loop back to an earlier layer bows about
   // 150px under its cards and past the rightmost one, and a fit to the cards alone clipped it.
   const cardsBottom = PAD_TOP + Math.max(1, rows) * (NODE_H + ROW_GAP) - ROW_GAP;
-  const edgesBottom = Math.max(0, ...edges.map((edge) => edge.ly + 24));
-  const edgesRight = Math.max(0, ...edges.map((edge) => Math.max(edge.lx + 64, ...[...edge.d.matchAll(/(-?[\d.]+),/g)].map((m) => Number(m[1]) + PAD_X))));
-  const trayY = Math.max(cardsBottom, edgesBottom) + TRAY_GAP;
-  const width = Math.max(PAD_X * 2 + layers * NODE_W + (layers - 1) * LAYER_GAP, edgesRight);
-  const height = tray.length > 0 ? trayY + NODE_H + 84 : trayY;
-  return { nodes, edges, tray, trayY, width: Math.max(width, PAD_X * 2 + 2 * NODE_W + LAYER_GAP), height };
+  const trayY = Math.max(cardsBottom, bottomOf(edges)) + TRAY_GAP;
+  const trayNodes: PlacedNode[] = tray.map((id, index) => ({ id, x: 40 + index * (NODE_W + 20), y: trayY + 56 }));
+
+  // Then a choice from or to a tray card — one the Inspector let the author draw from a scene no
+  // route reaches yet. It is persisted, so it is drawn and walkable like any other. A choice to
+  // a scene that does not exist has nowhere to go; the findings name it.
+  const trayAt = new Map(trayNodes.map((node) => [node.id, node]));
+  const trayEdges: DrawnEdge[] = [];
+  for (const choice of routing.choices) {
+    if (!onTray.has(choice.from) && !onTray.has(choice.to)) continue;
+    const from = at.get(choice.from) ?? trayAt.get(choice.from);
+    const to = at.get(choice.to) ?? trayAt.get(choice.to);
+    if (from !== undefined && to !== undefined) trayEdges.push(draw(choice, from, to));
+  }
+  edges.push(...trayEdges);
+
+  const trayRight = tray.length > 0 ? 40 + tray.length * (NODE_W + 20) + PAD_X : 0;
+  const width = Math.max(PAD_X * 2 + layers * NODE_W + (layers - 1) * LAYER_GAP, rightOf(edges), trayRight);
+  const height = tray.length > 0 ? Math.max(trayY + NODE_H + 84, bottomOf(trayEdges)) : trayY;
+  return { nodes, edges, tray, trayY, trayNodes, width: Math.max(width, PAD_X * 2 + 2 * NODE_W + LAYER_GAP), height };
 }
 
 /** Choices nobody has walked in preview at their current ends, read off the served findings. */

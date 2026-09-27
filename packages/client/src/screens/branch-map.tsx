@@ -23,7 +23,6 @@ import {
   findingRows,
   fitScale,
   mapGeometry,
-  NODE_W,
   outPort,
   inPort,
   removalConsequences,
@@ -355,10 +354,10 @@ export function BranchMapScreen() {
   const twoWaysIn = new Set(findings.filter((finding) => finding.kind === "reconvergence").flatMap((finding) => finding.sceneIds));
   const unreachable = new Set(findings.filter((finding) => finding.kind === "unreachable").flatMap((finding) => finding.sceneIds));
 
-  // The tray under the map: scenes on no route, placed in a row after the canvas's cards.
-  const trayNodes: PlacedNode[] = geometry.tray.map((id, index) => ({ id, x: 40 + index * (NODE_W + 20), y: geometry.trayY + 56 }));
-  const stageWidth = Math.max(geometry.width, 40 + trayNodes.length * (NODE_W + 20) + 24);
-  const at = new Map([...geometry.nodes, ...trayNodes].map((node) => [node.id, node]));
+  // The tray under the map: scenes on no route, placed by the geometry in a row under the cards,
+  // so its width is in the map's bounds and a fit holds it.
+  const stageWidth = geometry.width;
+  const at = new Map([...geometry.nodes, ...geometry.trayNodes].map((node) => [node.id, node]));
 
   /*
    * The map in one flat order: layers left to right, each layer top to bottom, the tray last —
@@ -1051,10 +1050,19 @@ function FindingCard({ row, lit, onPick, actions }: { row: FindingRow; lit: bool
 /** A text field that writes when it is left or Enter is pressed, and only if it changed. */
 function CommitField({ label, value, onCommit }: { label: string; value: string; onCommit: (next: string) => void }) {
   const [draft, setDraft] = useState(value);
+  // What the field last wrote, until the routing comes back with it. Enter then a click away
+  // otherwise compared the draft with the old value twice and sent the same edit twice.
+  const sent = useRef(value);
+  useEffect(() => {
+    sent.current = value;
+  }, [value]);
   const commit = () => {
     const next = draft.trim();
-    if (next !== "" && next !== value) onCommit(next);
-    else setDraft(value);
+    if (next === "") setDraft(value);
+    else if (next !== sent.current) {
+      sent.current = next;
+      onCommit(next);
+    } else if (next !== draft) setDraft(next);
   };
   return (
     <label className="bm-field">

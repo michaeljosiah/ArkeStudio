@@ -196,6 +196,30 @@ export function applyRoutingCommand(current: Routing | null, command: RoutingCom
   return RoutingSchema.parse({ ...next, version: current.version + 1 });
 }
 
+/**
+ * The scenes a command puts into the routing. Only these are checked against the production: a
+ * removal names what is already there, and must stay possible when that scene has since gone —
+ * it is how the invalid-destination finding is repaired.
+ */
+function scenesNamedBy(command: RoutingCommand): string[] {
+  switch (command.operation) {
+    case "set-start":
+    case "set-ending":
+    case "exclude-scene":
+      return [command.sceneId];
+    case "add-choice":
+      return [command.choice.from, command.choice.to];
+    case "edit-choice":
+      return [command.changes.from, command.changes.to].filter((id): id is string => id !== undefined);
+    case "add-group":
+      return command.group.scenes;
+    case "edit-group":
+      return command.changes.scenes ?? [];
+    default:
+      return [];
+  }
+}
+
 /** One queue per open world: a routing command reads the file, applies, and commits before the next reads. */
 const routingEdits = new WeakMap<WorldStore, Promise<unknown>>();
 
@@ -226,6 +250,14 @@ export function applyRoutingCommandOnDisk(
     // The map derives a new choice's id from its label against the routing it last saw; two quick
     // adds with one label derive the same id, and the second would be refused as a duplicate. The
     // id is the map's own coinage, so it is made unique here, against the file it applies to.
+    // The map sends what it last saw; a scene deleted since then must not be written into the
+    // routing, where it would stand as a route to nothing. Checked against the production as it
+    // is now, inside the queue.
+    const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+    if (!production) throw new Error("That production is no longer in this world.");
+    const known = new Set(production.scenes.map((scene) => scene.id));
+    const missing = scenesNamedBy(command).find((sceneId) => !known.has(sceneId));
+    if (missing !== undefined) throw new Error(`Scene ${missing} is no longer in this production.`);
     let applied = command;
     if (command.operation === "add-choice" && current !== null) {
       const taken = new Set(current.choices.map((choice) => choice.id));

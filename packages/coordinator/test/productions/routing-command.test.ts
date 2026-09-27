@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { RoutingSchema, type ClientMessage, type DomainEvent, type RoutingCommand } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
@@ -115,6 +115,27 @@ describe("the branch map's routing commands", () => {
     await send({ operation: "remove-choice", choiceId: "ch_missing" });
     await send({ operation: "clear-ending", sceneId: "sc_04" });
     assert.deepEqual(await routing(), before, "a refused edit leaves the file as it was");
+  });
+
+  it("refuses a command that names a scene the production no longer has, but still lets a removal through", async () => {
+    const { send, routing, worldDir } = await harness();
+    await send({ operation: "set-start", sceneId: "sc_02" });
+    await send({ operation: "add-choice", choice: { id: "ch_on", from: "sc_02", label: "Go on", to: "sc_04" } });
+    const before = await routing();
+    // The map's copy was stale: sc_99 was deleted (or never here) by the time the edit landed.
+    await send({ operation: "add-choice", choice: { id: "ch_gone", from: "sc_02", label: "Gone", to: "sc_99" } });
+    await send({ operation: "edit-choice", choiceId: "ch_on", changes: { to: "sc_99" } });
+    await send({ operation: "set-ending", sceneId: "sc_99", title: "Nowhere" });
+    await send({ operation: "add-group", group: { id: "grp_x", title: "X", scenes: ["sc_02", "sc_99"] } });
+    assert.deepEqual(await routing(), before, "nothing that names a missing scene is written");
+
+    // A file that already routes to a missing scene (written before the scene went) can still be
+    // repaired by removing the choice. A version of its own, as a save would have given it.
+    const path = join(worldDir, "productions", PRODUCTION, "routing.json");
+    const stale = { ...before, version: before.version + 1, choices: [...before.choices, { id: "ch_old", from: "sc_02", label: "Old", to: "sc_99" }] };
+    await writeFile(path, JSON.stringify(stale));
+    await send({ operation: "remove-choice", choiceId: "ch_old" });
+    assert.deepEqual((await routing()).choices.map((choice) => choice.id), ["ch_on"]);
   });
 
   it("never lands in a world other than the one the frame names", async () => {

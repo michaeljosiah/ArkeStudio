@@ -104,6 +104,33 @@ describe("where the map puts things", () => {
     assert.ok(small.height >= loop.ly + 12, "and the map's height holds its label");
   });
 
+  it("draws a choice from a tray scene, and holds the whole tray in the map's width", () => {
+    // Drawn from the undertow while no route reaches it (the Inspector offers "Draw a choice from here").
+    const fromTray: Routing = { ...ROUTING, choices: [...ROUTING.choices, { id: "ch_drift", from: "sc_f", label: "Drift in", to: "sc_e" }] };
+    const g = mapGeometry(fromTray, scenes, layoutRouting(fromTray, scenes));
+    assert.deepEqual(g.tray, ["sc_f"]);
+    const drift = g.edges.find((edge) => edge.id === "ch_drift");
+    assert.ok(drift, "the choice is drawn, so it can be seen, walked and removed");
+    assert.ok(drift.d.startsWith(`M${g.trayNodes[0]!.x + NODE_W},`), "out of the tray card's port");
+
+    const many = Array.from({ length: 9 }, (_, n) => ({ id: `sc_t${n}` }));
+    const wide = mapGeometry(ROUTING, [...scenes, ...many], layoutRouting(ROUTING, [...scenes, ...many]));
+    const last = wide.trayNodes[wide.trayNodes.length - 1]!;
+    assert.equal(wide.trayNodes.length, 10);
+    assert.ok(wide.width >= last.x + NODE_W, "a fit to the map's width holds the last tray card");
+  });
+
+  it("fans out two choices between the same two scenes, so neither label hides the other", () => {
+    const twice: Routing = { ...ROUTING, choices: [...ROUTING.choices, { id: "ch_run", from: "sc_a", label: "Run for the causeway", to: "sc_b" }] };
+    const g = mapGeometry(twice, scenes, layoutRouting(twice, scenes));
+    const first = g.edges.find((edge) => edge.id === "ch_follow")!;
+    const second = g.edges.find((edge) => edge.id === "ch_run")!;
+    assert.notEqual(first.d, second.d);
+    assert.ok(Math.abs(second.ly - first.ly) >= 30, "a label's height apart");
+    const alone = mapGeometry(ROUTING, scenes, layoutRouting(ROUTING, scenes)).edges.find((edge) => edge.id === "ch_follow")!;
+    assert.deepEqual(first, alone, "the first of them is drawn where it always was");
+  });
+
   it("fits the map to the window and never enlarges it past actual size", () => {
     assert.equal(fitScale(800, 600, 4000, 3000), 1);
     assert.ok(fitScale(2000, 600, 1000, 800) < 0.5);

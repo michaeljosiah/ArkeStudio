@@ -237,6 +237,17 @@ export function mountInteractivePlayer(root, options) {
     }
     loadClip(0, state.positionSec);
     render();
+    holdFocus();
+  }
+
+  /**
+   * A re-render replaces the button that was pressed — a choice, Replay, Continue — and focus
+   * went with it, out of the player: its keys stopped working, and in the app's modal preview
+   * the next Tab reached the map behind it. Focus comes back to the player itself.
+   */
+  function holdFocus() {
+    const at = doc.activeElement;
+    if (!at || at === doc.body || !root.contains(at)) root.focus();
   }
 
   /** Load one of the scene's clips and seek into it: to `at` seconds, or to `ratio` of its length once known. */
@@ -245,8 +256,12 @@ export function mountInteractivePlayer(root, options) {
     clipIndex = Math.max(0, Math.min(index, clips.length - 1));
     video.setAttribute("src", clips[clipIndex]);
     const seek = () => {
-      const target = ratio !== undefined && video.duration ? Math.max(0, Math.min(video.duration - 0.05, ratio * video.duration)) : at;
-      if (target > 0 && target < (video.duration || Infinity)) video.currentTime = target;
+      const d = video.duration;
+      const wanted = ratio !== undefined && d ? ratio * d : at;
+      // Clamped, not refused: a place saved against a longer take (a re-export keeps the key
+      // while the routing is unchanged) resumes near this take's end rather than at its start.
+      const target = d ? Math.max(0, Math.min(d - 0.05, wanted)) : wanted;
+      if (target > 0) video.currentTime = target;
       video.removeEventListener("loadedmetadata", seek);
     };
     video.addEventListener("loadedmetadata", seek);
@@ -418,6 +433,11 @@ export function mountInteractivePlayer(root, options) {
     if (clipIndex < clips.length - 1) loadClip(clipIndex + 1, 0);
     else finishScene();
   };
+  // A clip that will not load or decode never ends; it is passed over as if it had, so the
+  // scene still reaches its choices — the author's walk and the viewer's route go on.
+  const onError = () => {
+    if (mode === "playing") onEnded();
+  };
   const onPlayState = () => renderBar();
 
   function toggle() {
@@ -519,6 +539,7 @@ export function mountInteractivePlayer(root, options) {
   video.addEventListener("timeupdate", onTime);
   video.addEventListener("loadedmetadata", onMeta);
   video.addEventListener("ended", onEnded);
+  video.addEventListener("error", onError);
   video.addEventListener("play", onPlayState);
   video.addEventListener("pause", onPlayState);
   root.addEventListener("click", onClick);
@@ -537,13 +558,21 @@ export function mountInteractivePlayer(root, options) {
   return {
     setUnwalked(ids) {
       unwalked = new Set(ids);
+      // The choices are redrawn with their chips; the one that had focus keeps it.
+      const focused = doc.activeElement && root.contains(doc.activeElement) ? doc.activeElement.getAttribute("data-choice") : null;
       renderStrip();
       renderChoices();
+      if (focused !== null) {
+        const again = [...choicesEl.querySelectorAll("[data-choice]")].find((b) => b.getAttribute("data-choice") === focused);
+        if (again) again.focus();
+        else holdFocus();
+      }
     },
     destroy() {
       video.removeEventListener("timeupdate", onTime);
       video.removeEventListener("loadedmetadata", onMeta);
       video.removeEventListener("ended", onEnded);
+      video.removeEventListener("error", onError);
       video.removeEventListener("play", onPlayState);
       video.removeEventListener("pause", onPlayState);
       root.removeEventListener("click", onClick);

@@ -159,6 +159,15 @@ async function key(el: HTMLElement | undefined, name: string) {
     props?.onKeyDown?.({ key: name, preventDefault() {}, currentTarget: el, target: el });
   });
 }
+/** A field left: React's own blur handler, called as the browser would. */
+async function blur(el: HTMLElement | undefined) {
+  assert.ok(el);
+  await act(async () => {
+    const k = Object.keys(el).find((candidate) => candidate.startsWith("__reactProps$"));
+    const props = k === undefined ? undefined : (el as unknown as Record<string, { onBlur?: (event: unknown) => void }>)[k];
+    props?.onBlur?.({ currentTarget: el, target: el });
+  });
+}
 const commands = (item: Mounted): RoutingCommand[] =>
   item.sent.flatMap((message) => (message.kind === "routing-command" ? [message.command] : []));
 const card = (item: Mounted, id: string) => all(item, `[role="option"][data-scene="${id}"]`)[0];
@@ -195,6 +204,9 @@ describe("the branch map canvas (design turn 157)", () => {
     await change(field, "Keep to the boat");
     await key(field, "Enter");
     assert.deepEqual(commands(item), [{ operation: "edit-choice", choiceId: "ch_stay", changes: { label: "Keep to the boat" } }]);
+    // A click away before the new routing arrives is the same edit, not a second one.
+    await blur(field);
+    assert.equal(commands(item).length, 1, "Enter then leaving the field sends the rename once");
   });
 
   it("names what a removal breaks before it sends anything, then sends one command", async () => {

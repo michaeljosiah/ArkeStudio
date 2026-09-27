@@ -18,7 +18,15 @@ Object.assign(dom.window, {
     removeItem: (key: string) => void store.delete(key),
   },
 });
-Object.assign(dom.HTMLElement.prototype, { focus() {} });
+// linkedom keeps no focus; this does, so the tests can ask where it went.
+const focusLog: unknown[] = [];
+Object.assign(dom.HTMLElement.prototype, {
+  focus(this: unknown) {
+    focusLog.push(this);
+  },
+});
+const focused = () => focusLog[focusLog.length - 1] ?? null;
+Object.defineProperty(dom.document, "activeElement", { get: focused, configurable: true });
 
 const OPTIONS: InteractivePlayerOptions = {
   title: "Low Water",
@@ -132,6 +140,25 @@ describe("the player, as the author previews it (156g)", () => {
     assert.equal(p.video().currentTime, 30, "three quarters of the way in, where the click was");
   });
 
+  it("keeps focus in the player when a choice replaces the button that had it", () => {
+    const p = mount({ author: { unwalked: [] } });
+    p.ended();
+    const pressed = p.all(".aip-choice")[1]!;
+    pressed.focus();
+    p.click(pressed);
+    assert.ok(!p.root.contains(pressed as unknown as Node), "the pressed choice is gone with the scene it was offered at");
+    assert.equal(focused(), p.root, "focus comes back to the player, so its keys still work and Tab stays inside");
+  });
+
+  it("passes over a clip that will not load, so the scene still reaches its choices", () => {
+    const p = mount({ from: "sc_towers", author: { unwalked: [] } });
+    const failed = () => p.video().dispatchEvent(new dom.Event("error") as unknown as Event);
+    failed();
+    assert.equal(p.video().getAttribute("src"), "media/sh_2.mp4", "on to the next shot");
+    failed();
+    assert.equal(p.root.getAttribute("data-mode"), "choice", "then the choices, not a player stuck playing");
+  });
+
   it("takes new walk evidence while it runs", () => {
     const p = mount({ author: { unwalked: ["ch_stay", "ch_cross"] } });
     p.handle.setUnwalked(["ch_cross"]);
@@ -165,6 +192,15 @@ describe("the player, as a viewer meets the package (156a–156f)", () => {
     assert.equal(p.video().getAttribute("src"), "media/sc_pier.mp4");
     const kept = JSON.parse(store.get("arke-iv-low-water-v12")!) as Record<string, unknown>;
     assert.deepEqual(Object.keys(kept).sort(), ["positionSec", "route", "sceneId", "updatedAt"], "the viewer's place and nothing else");
+  });
+
+  it("resumes near the end of a take shorter than the one the place was saved against", () => {
+    store.set("arke-iv-low-water-v12", JSON.stringify({ sceneId: "sc_pier", positionSec: 31, route: ["ch_stay", "ch_sleep"], updatedAt: "2026-09-27T10:00:00Z" }));
+    const p = mount({ storageKey: "arke-iv-low-water-v12" });
+    p.click(p.button("Continue"));
+    Object.defineProperty(p.video(), "duration", { value: 20, configurable: true });
+    p.video().dispatchEvent(new dom.Event("loadedmetadata") as unknown as Event);
+    assert.ok(p.video().currentTime > 19 && p.video().currentTime < 20, "held just short of the end, not sent back to the start");
   });
 
   it("returns to the choice it was left at, not the start of the scene before it", () => {
