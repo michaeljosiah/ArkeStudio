@@ -111,7 +111,7 @@ it("merges separately reported input and output counts across polls", async () =
   let polls = 0;
   h.client.poll = async () => ++polls === 1
     ? { state: "running", speechUsage: { inputTextTokens: 3 } }
-    : { state: "succeeded", speechUsage: { outputAudioTokens: 250 } };
+    : { state: "succeeded", speechUsage: { inputTextTokens: undefined, outputAudioTokens: 250 } };
   try {
     await h.queue.enqueue(input);
     await until(() => h.ledger.length === 1, "partial usage", 30000);

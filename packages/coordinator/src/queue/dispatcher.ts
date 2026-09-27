@@ -1305,7 +1305,7 @@ export class JobQueue {
       if (this.cancelling.has(job.id) || !this.stillPolling(current)) return;
       const usage = SpeechUsageSchema.safeParse(poll.speechUsage);
       if (usage.success) {
-        current = { ...current, speechUsage: { ...current.speechUsage, ...usage.data } };
+        current = { ...current, speechUsage: { ...current.speechUsage, ...Object.fromEntries(Object.entries(usage.data).filter(([, value]) => value !== undefined)) } };
         await this.transition(current);
         if (this.disposed || this.cancelling.has(job.id) || !this.stillPolling(current)) return;
       }
