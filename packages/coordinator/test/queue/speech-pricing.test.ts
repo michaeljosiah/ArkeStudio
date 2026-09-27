@@ -135,6 +135,45 @@ it("settles a witnessed unary failure with reported usage without polling or ret
   } finally { h.queue.dispose(); }
 });
 
+it("does not flush empty or unchanged usage snapshots on every poll", async () => {
+  const h = await harness();
+  const rows: number[] = [];
+  h.client.poll = async () => {
+    rows.push((await readFile(join(h.dir, "jobs.jsonl"), "utf8")).trim().split("\n").length);
+    return rows.length < 5
+      ? { state: "running", speechUsage: rows.length < 3 ? {} : { inputTextTokens: 3 } }
+      : { state: "succeeded", speechUsage: { outputAudioTokens: 250 } };
+  };
+  try {
+    await h.queue.enqueue(input);
+    await until(() => h.ledger.length === 1, "unchanged usage", 30000);
+    assert.deepEqual(rows.map(n => n - rows[0]!), [0, 0, 0, 1, 1]);
+    assert.equal(h.ledger[0]!.actualMicroUsd, 2252);
+  } finally { h.queue.dispose(); }
+});
+
+it("retains known earlier cost when a resubmission expires before provider I/O", async () => {
+  const h = await harness({ inputTextTokens: 3, outputAudioTokens: 250 }, "succeeded", true);
+  try {
+    await h.queue.enqueue(input);
+    await until(() => h.ledger.length === 1, "first result", 30000);
+    h.queue.dispose();
+    const job = h.queue.listJobs()[0]!;
+    await writeFile(join(h.dir, "jobs.jsonl"), JSON.stringify({ ...job, status: "needs-reconciliation", providerJobId: null, finalization: undefined }) + "\n");
+    h.ledger.length = 0;
+    const restored = h.create();
+    try {
+      await restored.start();
+      h.expire();
+      await restored.resolveHeld(job.id, "resubmit");
+      await until(() => h.ledger.length === 1, "expired retry", 30000);
+      assert.equal(h.submissions(), 1);
+      assert.equal(h.ledger[0]!.actualMicroUsd, 2252);
+      assert.equal(h.ledger[0]!.actualSource, "usage-derived");
+    } finally { restored.dispose(); }
+  } finally { h.queue.dispose(); }
+});
+
 it("a poll returning usage during cancellation cannot resurrect the job", async () => {
   const h = await harness();
   let answer: ((result: Awaited<ReturnType<DispatchClient["poll"]>>) => void) | undefined;

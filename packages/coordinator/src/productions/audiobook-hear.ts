@@ -1,4 +1,4 @@
-import { estimateSpeechMicroUsd } from "@arke-studio/contracts";
+import { quoteSpeech } from "@arke-studio/contracts";
 import { readFile, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { type Job } from "@arke-studio/contracts";
@@ -9,6 +9,7 @@ import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { audiobookLanding } from "./audiobook.js";
 import { prepareChapter, type ReadingRoom } from "./audiobook-run.js";
+import { speechConsentToken } from "../voice/quote.js";
 
 /**
  * A block heard as it would be read (design turn 155g/h, SPEC-047 R-45, R-46): prepared exactly
@@ -20,12 +21,13 @@ import { prepareChapter, type ReadingRoom } from "./audiobook-run.js";
  */
 export interface HearDeps {
   worldId: string;
+  quoteToken?: string;
   local: (voiceId: string, text: string, settings: Record<string, number>) => Promise<{ audio: Uint8Array; parts: number }>;
   enqueue: (input: EnqueueInput) => Promise<string>;
   waitForJob: (jobId: string) => Promise<Job>;
 }
 
-export async function hearAudiobookLine(store: WorldStore, productionId: string, chapterFile: string, block: string, room: ReadingRoom, deps: HearDeps): Promise<{ file: string; cached: boolean }> {
+export async function hearAudiobookLine(store: WorldStore, productionId: string, chapterFile: string, block: string, room: ReadingRoom, deps: HearDeps): Promise<{ file: string; cached: boolean } | { quote: { token: string; authorisedMicroUsd: number; parts: number } }> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   const chapter = production?.chapters.find((c) => c.file === chapterFile || c.id === chapterFile);
   if (chapter === undefined) throw new Error("that chapter is no longer in this production");
@@ -45,6 +47,13 @@ export async function hearAudiobookLine(store: WorldStore, productionId: string,
   });
   const cachePath = join(store.dir, fromPortable(cacheFile));
   if (await stat(toExtendedLength(cachePath)).then((s) => s.isFile(), () => false)) return { file: cacheFile, cached: true };
+  const quotes = speaking.parts.map(part => quoteSpeech(speaking.model, part, { at: store.now() }));
+  const token = speechConsentToken(JSON.stringify([deps.worldId, productionId, chapter.file, block, cacheFile]), quotes);
+  // Preparation owns the actual request split and direction. A displayed single-request
+  // estimate cannot authorise an arbitrary number of token-priced calls.
+  if (quotes.some(quote => quote.unit === "token") && deps.quoteToken !== token) {
+    return { quote: { token, authorisedMicroUsd: quotes.reduce((sum, quote) => sum + quote.authorisedMicroUsd, 0), parts: quotes.length } };
+  }
   const pieces: Uint8Array[] = [];
   if (speaking.local) {
     for (const [index, part] of speaking.parts.entries()) pieces.push((await deps.local(speaking.reader.voiceId, part, settings[index]?.voiceSettings ?? {})).audio);
@@ -69,7 +78,7 @@ export async function hearAudiobookLine(store: WorldStore, productionId: string,
           ...(perPart !== undefined && Object.keys(perPart.voiceSettings).length > 0 ? { voiceSettings: perPart.voiceSettings } : {}),
           ...(perPart?.instructions !== undefined ? { instructions: perPart.instructions } : {}),
         },
-        estimatedMicroUsd: estimateSpeechMicroUsd(speaking.model, part),
+        estimatedMicroUsd: quotes[index]!.authorisedMicroUsd,
         landing: { dir: landingDir, name: `hear-${block.replace(/[^a-z0-9]+/gi, "-")}-${index}.${speaking.format}` },
       });
       const job = await deps.waitForJob(jobId);

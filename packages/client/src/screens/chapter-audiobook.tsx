@@ -1392,7 +1392,8 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
     void playClip({ id: `hear-${hearId}`, url: mediaUrl(slug, heard.file), title: name, sub: note ?? "plain" });
   }, [heard?.state]);
   const sent = line?.sentAs?.join(" ") ?? (line === null ? null : normalizeSpeechText(line.block.text));
-  const price = model === null || sent === null ? 0 : estimateSpeechMicroUsd(model, sent);
+  const tokenPriced = model?.pricing.kind === "perToken";
+  const price = model === null || sent === null || tokenPriced ? 0 : estimateSpeechMicroUsd(model, sent);
   return (
     <li className={`fy-ab__performer${focused ? " fy-ab__performer--focused" : ""}`} onFocus={onFocus} onClick={onFocus} data-testid="performed-speaker">
       <div className="fy-ch__who-head">
@@ -1426,11 +1427,11 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
             type="button"
             className="fy-ch__derive"
             disabled={heard?.state === "working"}
-            onClick={() => setHearId(hearAudiobookLine(worldId, productionId, chapterFile, line.block.key))}
+            onClick={() => setHearId(hearAudiobookLine(worldId, productionId, chapterFile, line.block.key, undefined, heard?.state === "priced" ? heard.token : undefined))}
             data-testid="performed-hear"
           >
             Hear {name}
-            {price > 0 ? ` · ${formatMicroUsd(price)}` : ""}
+            {heard?.state === "priced" ? ` · up to ${formatMicroUsd(heard.authorisedMicroUsd)} · ${heard.parts} part${heard.parts === 1 ? "" : "s"}` : tokenPriced ? " · get price" : price > 0 ? ` · ${formatMicroUsd(price)}` : ""}
           </button>
           {heard?.state === "refused" && <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">{heard.refused}</span>}
           {sent !== null && <span className="fy-ab__sent fy-mono" data-testid="performed-sent-as">{sent}</span>}

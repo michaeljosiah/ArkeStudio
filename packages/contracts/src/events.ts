@@ -702,6 +702,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       cloudPreviewMicroUsd: z.number().int().min(0).nullable(),
       /** Exact preflight price by concrete provider/model/voice target. */
       previewMicroUsdByVoice: z.record(z.string(), z.number().int().min(0)).default({}),
+      previewQuoteByVoice: z.record(z.string(), z.string().min(1)).optional(),
       /**
        * What a first read through a reader adds, by the same key (SPEC-046 R-14, R-34): a
        * slot-keeping reader's clone charge, said on the row before the preview that would incur it.
@@ -1215,6 +1216,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       requestId: UlidSchema,
       file: z.string().min(1).optional(),
       cached: z.boolean().optional(),
+      quote: z.object({ token: z.string().min(1), authorisedMicroUsd: z.number().int().nonnegative().safe(), parts: z.number().int().positive() }).strict().optional(),
       refused: z.string().min(1).optional(),
     })
     .strict(),

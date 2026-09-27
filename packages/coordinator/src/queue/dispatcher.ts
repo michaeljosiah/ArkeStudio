@@ -1305,9 +1305,12 @@ export class JobQueue {
       if (this.cancelling.has(job.id) || !this.stillPolling(current)) return;
       const usage = SpeechUsageSchema.safeParse(poll.speechUsage);
       if (usage.success) {
-        current = { ...current, speechUsage: { ...current.speechUsage, ...Object.fromEntries(Object.entries(usage.data).filter(([, value]) => value !== undefined)) } };
-        await this.transition(current);
-        if (this.disposed || this.cancelling.has(job.id) || !this.stillPolling(current)) return;
+        const merged = { ...current.speechUsage, ...Object.fromEntries(Object.entries(usage.data).filter(([, value]) => value !== undefined)) };
+        if (merged.inputTextTokens !== current.speechUsage?.inputTextTokens || merged.outputAudioTokens !== current.speechUsage?.outputAudioTokens) {
+          current = { ...current, speechUsage: merged };
+          await this.transition(current);
+          if (this.disposed || this.cancelling.has(job.id) || !this.stillPolling(current)) return;
+        }
       }
       if (poll.state === "succeeded") {
         await this.landAndSucceed(current, client, key, poll.costMicroUsd);
@@ -1673,7 +1676,10 @@ export class JobQueue {
       actualMicroUsd = Math.round(costMicroUsd);
       actualSource = "provider-reported";
     } else if (job.speechQuote?.unit === "token") {
-      actualMicroUsd = job.speechUsage ? speechUsageCost(job.speechQuote, job.speechUsage) : null;
+      // A held attempt is archived before resubmission, but the attempt number advances only
+      // at provider I/O. Refusing that queued retry must not invent another unmeasured charge.
+      const alreadyArchived = job.speechAttempts?.some(attempt => attempt.attempt === job.attempt) === true;
+      actualMicroUsd = alreadyArchived ? 0 : job.speechUsage ? speechUsageCost(job.speechQuote, job.speechUsage) : null;
       for (const attempt of job.speechAttempts ?? []) {
         const prior = speechUsageCost(attempt.quote, attempt.usage);
         actualMicroUsd = actualMicroUsd === null || prior === null ? null : actualMicroUsd + prior;

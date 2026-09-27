@@ -1834,6 +1834,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("voice-preview"),
+      quoteToken: z.string().min(1).max(256).optional(),
       requestId: UlidSchema,
       worldId: UlidSchema,
       sheetId: SlugSchema,
@@ -3062,6 +3063,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("hear-audiobook-line"),
+      quoteToken: z.string().min(1).max(256).optional(),
       worldId: UlidSchema,
       productionId: SlugSchema,
       requestId: UlidSchema,

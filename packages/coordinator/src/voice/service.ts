@@ -1,4 +1,4 @@
-import { estimateSpeechMicroUsd } from "@arke-studio/contracts";
+import { estimateSpeechMicroUsd, quoteSpeech } from "@arke-studio/contracts";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -33,6 +33,7 @@ import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 import { flacProblem, mp3AudioSpan, verifyArtifact } from "../queue/verify.js";
+import { speechConsentToken } from "./quote.js";
 
 /**
  * The voice service (SPEC-011): a unified catalogue over local presets and cloud voices
@@ -554,6 +555,7 @@ export class VoiceService {
     const extracted = extractVoiceAttributes(written);
     const ranked = rankVoices(extracted, await this.catalogue(bundle.clonedVoices, clonedAvailability));
     const line = previewLineFor(sheet, bundle.productions);
+    const previewQuoteByVoice: Record<string, string> = {};
     const previewMicroUsdByVoice = Object.fromEntries(
       ranked.flatMap(({ candidate }): Array<[string, number]> => {
         const model = manifest?.models.find(
@@ -562,9 +564,12 @@ export class VoiceService {
             entry.id === candidate.model &&
             entry.capability === "voice-tts",
         );
-        return model
-          ? [[voiceTargetKey(candidate), estimateSpeechMicroUsd(model, line.text)]]
-          : [];
+        if (model === undefined) return [];
+        const text = normalizeSpeechText(line.text);
+        const quote = quoteSpeech(model, text, { at: this.now() });
+        const target = voiceTargetKey(candidate);
+        previewQuoteByVoice[target] = speechConsentToken(JSON.stringify([target, text]), [quote]);
+        return [[target, quote.authorisedMicroUsd]];
       }),
     );
     // What a first read through a slot-keeping reader adds, on the row before the circle that
@@ -593,6 +598,7 @@ export class VoiceService {
         return prices.length === 1 ? prices[0]! : null;
       })(),
       previewMicroUsdByVoice,
+      previewQuoteByVoice,
     });
   }
 
@@ -765,6 +771,7 @@ export class VoiceService {
     voiceId: string;
     line: PreviewLine;
     model: ManifestModel;
+    quoteToken?: string;
     /**
      * Marks a voice whose identity is a world clip. The queue resolves and confines its bytes
      * immediately before provider I/O; no absolute path enters this request.
@@ -787,6 +794,10 @@ export class VoiceService {
       voiceUploadConfirmedFor,
     } = input;
     const normalized = normalizeSpeechText(line.text);
+    const quote = quoteSpeech(model, normalized, { at: this.now() });
+    if (quote.unit === "token" && input.quoteToken !== speechConsentToken(JSON.stringify([voiceTargetKey({ provider, model: model.id, voiceId }), normalized]), [quote])) {
+      throw new Error("The preview price changed. Reopen the voice picker to review its current price.");
+    }
     // The format the provider actually returns, not a guess: ComfyUI's SaveAudio writes FLAC, and
     // keying an mp3 path for it would cache a hit that never matches the bytes on disk.
     const format = voiceFormatForModel(model);
@@ -812,7 +823,7 @@ export class VoiceService {
         ...(voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor } : {}),
         // Unmetered rows estimate at zero, so a local preview states no price where a cloud one
         // states an exact figure (turn 70). No branch needed — the manifest already says which.
-        estimatedMicroUsd: estimateSpeechMicroUsd(model, normalized),
+        estimatedMicroUsd: quote.authorisedMicroUsd,
         // Landed under its cache key, so reopening the picker replays without a call (R-10).
         landing: { dir: PREVIEW_CACHE_DIR, name },
       },
