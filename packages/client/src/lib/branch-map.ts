@@ -68,10 +68,12 @@ export function edgePath(
   from: PlacedNode,
   to: PlacedNode,
   layerOf: ReadonlyMap<string, number>,
-  fan = 0,
+  nth = 0,
 ): { d: string; lx: number; ly: number } {
   const o = outPort(from);
   const i = inPort(to);
+  // The nth of several choices between the same two scenes is drawn apart from the ones before it.
+  const fan = nth * FAN;
   const span = (layerOf.get(to.id) ?? 0) - (layerOf.get(from.id) ?? 0);
   // A tray card has no layer: its choice is drawn straight across to where it goes, since no
   // layer order says what it would be arcing over.
@@ -86,7 +88,10 @@ export function edgePath(
   if (span > 1) {
     // Over the cards between, but never above the map: from the first row the full 150px put
     // the curve's top and its label above y=0, where a fitted view clipped them.
-    const top = Math.max(Math.min(o.y, i.y) - 150, (ARC_LABEL_MIN - 0.125 * (o.y + i.y)) / 0.75) + fan;
+    // Several choices over the same cards stack their arcs upward, where there is only more room;
+    // moved down, or along the arc, a third one landed on a card the arc exists to clear. Above
+    // the map's top is room too: mapGeometry moves the whole picture down until the highest fits.
+    const top = Math.min(o.y, i.y) - 150 - fan;
     return {
       d: `M${o.x},${o.y} C${o.x + 110},${top} ${i.x - 110},${top} ${i.x - 6},${i.y}`,
       lx: (o.x + i.x) / 2,
@@ -103,6 +108,14 @@ export function edgePath(
 
 /** Cards on the canvas from the layout, the curves between them, and the tray below. */
 export function mapGeometry(routing: Routing, scenes: ReadonlyArray<{ id: string }>, layout: RoutingLayout): MapGeometry {
+  // The picture starts at y=0 and a fitted view clips above it, so an arc over the first row — the
+  // full 150px, or stacked above another — moves everything down until its label is inside.
+  const first = mapGeometryAt(routing, scenes, layout, PAD_TOP);
+  const highest = Math.min(Infinity, ...first.edges.map((edge) => edge.ly));
+  return highest >= ARC_LABEL_MIN ? first : mapGeometryAt(routing, scenes, layout, PAD_TOP + Math.ceil(ARC_LABEL_MIN - highest));
+}
+
+function mapGeometryAt(routing: Routing, scenes: ReadonlyArray<{ id: string }>, layout: RoutingLayout, padTop: number): MapGeometry {
   const layerOf = new Map<string, number>();
   const nodes: PlacedNode[] = [];
   let rows = 0;
@@ -110,7 +123,7 @@ export function mapGeometry(routing: Routing, scenes: ReadonlyArray<{ id: string
     rows = Math.max(rows, layer.length);
     layer.forEach((id, row) => {
       layerOf.set(id, index);
-      nodes.push({ id, x: PAD_X + index * (NODE_W + LAYER_GAP), y: PAD_TOP + row * (NODE_H + ROW_GAP) });
+      nodes.push({ id, x: PAD_X + index * (NODE_W + LAYER_GAP), y: padTop + row * (NODE_H + ROW_GAP) });
     });
   });
   const at = new Map(nodes.map((node) => [node.id, node]));
@@ -127,7 +140,7 @@ export function mapGeometry(routing: Routing, scenes: ReadonlyArray<{ id: string
     const pair = `${choice.from}\u0000${choice.to}`;
     const nth = seen.get(pair) ?? 0;
     seen.set(pair, nth + 1);
-    return { id: choice.id, from: choice.from, to: choice.to, label: choice.label, ...edgePath(from, to, layerOf, nth * FAN) };
+    return { id: choice.id, from: choice.from, to: choice.to, label: choice.label, ...edgePath(from, to, layerOf, nth) };
   };
   const bottomOf = (list: DrawnEdge[]) => Math.max(0, ...list.map((edge) => edge.ly + 24));
   const rightOf = (list: DrawnEdge[]) =>
@@ -143,7 +156,7 @@ export function mapGeometry(routing: Routing, scenes: ReadonlyArray<{ id: string
   const layers = Math.max(1, layout.layers.length);
   // The bounds hold the curves as well as the cards: a loop back to an earlier layer bows about
   // 150px under its cards and past the rightmost one, and a fit to the cards alone clipped it.
-  const cardsBottom = PAD_TOP + Math.max(1, rows) * (NODE_H + ROW_GAP) - ROW_GAP;
+  const cardsBottom = padTop + Math.max(1, rows) * (NODE_H + ROW_GAP) - ROW_GAP;
   const trayY = Math.max(cardsBottom, bottomOf(edges)) + TRAY_GAP;
   const trayNodes: PlacedNode[] = tray.map((id, index) => ({ id, x: 40 + index * (NODE_W + 20), y: trayY + 56 }));
 

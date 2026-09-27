@@ -102,7 +102,9 @@ export function sceneClips(
   cut: ReadonlyMap<string, CutEntry>,
 ): InteractivePlayerClip[] {
   const clips: InteractivePlayerClip[] = [];
-  let whole: string | null = null;
+  // A covering pass plays once in the scene, even when a replacement sits between shots it still
+  // covers: a second time replayed everything, the superseded footage included.
+  const whole = new Set<string>();
   for (const shot of safeShots(scene)) {
     const entry = cut.get(shot.id);
     if (entry?.media) {
@@ -110,14 +112,13 @@ export function sceneClips(
       const slot = entry.durationSec > 0 ? from + entry.durationSec : Infinity;
       const to = Math.min(entry.media.outSec ?? Infinity, slot);
       clips.push({ src: mediaUrl(slug, entry.media.path), from, ...(Number.isFinite(to) ? { to } : {}) });
-      whole = null;
       continue;
     }
     const takeId = production.selections[shot.id]?.acceptedTakeId ?? null;
     const take = takeId === null ? undefined : production.takes.find((candidate) => candidate.id === takeId);
     const media = take === undefined ? null : mediaTakeFor(production, take);
-    if (media === null || media.kind !== "clip" || media.id === whole) continue;
-    whole = media.id;
+    if (media === null || media.kind !== "clip" || whole.has(media.id)) continue;
+    whole.add(media.id);
     clips.push({ src: mediaUrl(slug, `productions/${production.meta.id}/takes/${media.id}/${media.media}`) });
   }
   return clips;
@@ -144,6 +145,8 @@ export function BranchMapScreen() {
   const viewportRef = useRef<HTMLDivElement>(null);
   const fittedRef = useRef(false);
   const panRef = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
+  /** The grab cursor, as state: read off the ref, it stayed after a drag until something else rendered. */
+  const [panning, setPanning] = useState(false);
 
   useEffect(() => {
     if (!worldId || !prodId) return;
@@ -332,7 +335,7 @@ export function BranchMapScreen() {
   if (scenes.length === 0 || routing === null || geometry === null || layout === null) {
     const picked = scenes.find((scene) => scene.id === startPick) ?? scenes[0];
     return (
-      <div className="fy-arkewrap bm" data-screen="branch-map">
+      <div className="fy-arkewrap bm" data-screen="branch-map" data-narrow={narrow ? "true" : undefined}>
         <div className="bm-main">
           {header}
           <div className="bm-viewport bm-viewport--empty">
@@ -466,6 +469,7 @@ export function BranchMapScreen() {
     const target = event.target as HTMLElement;
     if (target.closest("[data-scene], .bm-label, .bm-zoom, button, input, select")) return;
     panRef.current = { x: event.clientX, y: event.clientY, vx: view.x, vy: view.y };
+    setPanning(true);
     event.currentTarget.setPointerCapture(event.pointerId);
   };
   const onViewportPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -476,6 +480,7 @@ export function BranchMapScreen() {
   const onViewportPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
     const pan = panRef.current;
     panRef.current = null;
+    setPanning(false);
     // A press on the empty canvas that did not move is a click on nothing: the selection goes.
     if (pan && Math.abs(event.clientX - pan.x) < 3 && Math.abs(event.clientY - pan.y) < 3) {
       setSelection(null);
@@ -697,7 +702,7 @@ export function BranchMapScreen() {
 
   const canvas = (
     <div
-      className={cx("bm-viewport", panRef.current && "bm-viewport--panning")}
+      className={cx("bm-viewport", panning && "bm-viewport--panning")}
       ref={viewportRef}
       onPointerDown={onViewportPointerDown}
       onPointerMove={onViewportPointerMove}

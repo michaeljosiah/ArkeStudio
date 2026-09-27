@@ -9937,15 +9937,24 @@ export class Coordinator {
           // Applied to the routing on disk, not a copy the map held: two edits in flight each
           // land on the other's result (design turn 157).
           await applyRoutingCommandOnDisk(store, msg.productionId, msg.command);
-          await this.refreshWorldSnapshot(msg.worldId);
+          // Only the world the edit landed in, and only while it is still the open one: a world
+          // opened while the edit was in flight must not be closed to reload the edited one.
+          if (!this.stillOpen(store)) return;
+          this.refreshIfStillOpen(store);
           await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
         } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
           void this.appLog?.append({
             kind: "routing.refused",
-            reason: err instanceof Error ? err.message : String(err),
+            reason,
             detail: { productionId: msg.productionId, operation: msg.command.operation },
           });
-          this.transport.broadcastSnapshot();
+          // The map closes its editor as it sends; a refusal logged and nothing else read as the
+          // edit silently vanishing. The author is told why, in the toast every refusal uses.
+          if (this.stillOpen(store)) {
+            this.emit({ type: "command.failed", at: new Date().toISOString(), command: msg.kind, requestId: null, reason });
+            this.transport.broadcastSnapshot();
+          }
         }
         return;
       }

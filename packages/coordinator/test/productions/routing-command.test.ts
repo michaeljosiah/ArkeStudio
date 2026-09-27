@@ -20,6 +20,14 @@ async function harness(t: TestContext) {
   const { root, worldDir } = await makeTempRoot();
   const provider = new FsWorldProvider(root, { clock: () => "2026-09-27T12:00:00.000Z" });
   await provider.loadWorld(WORLD_ID);
+  // Counted from here: a routing edit that reloads the world would, with another world opened
+  // while it was in flight, close that world to reopen this one.
+  let loads = 0;
+  const load = provider.loadWorld.bind(provider);
+  provider.loadWorld = (...args: Parameters<typeof provider.loadWorld>) => {
+    loads += 1;
+    return load(...args);
+  };
   const events: DomainEvent[] = [];
   const coordinator = new Coordinator({
     provider,
@@ -43,7 +51,7 @@ async function harness(t: TestContext) {
     });
   const routing = async () =>
     RoutingSchema.parse(JSON.parse(await readFile(join(worldDir, "productions", PRODUCTION, "routing.json"), "utf8")));
-  return { events, send, routing, worldDir, store: () => provider.openStore()! };
+  return { events, send, routing, worldDir, store: () => provider.openStore()!, loads: () => loads };
 }
 
 describe("the branch map's routing commands", () => {
@@ -65,6 +73,15 @@ describe("the branch map's routing commands", () => {
       events.some((event) => event.type === "production.routing-findings" && event.productionId === PRODUCTION),
       "the findings are re-served after the edit, so the map's count follows it",
     );
+  });
+
+  it("refreshes the open world's snapshot without reloading any world", async (t) => {
+    const { send, routing, loads, events } = await harness(t);
+    await send({ operation: "set-start", sceneId: "sc_02" });
+    await send({ operation: "add-choice", choice: { id: "ch_on", from: "sc_02", label: "Go on", to: "sc_04" } });
+    assert.equal((await routing()).choices.length, 1);
+    assert.equal(loads(), 0, "no loadWorld: that is what closed a world opened mid-edit");
+    assert.ok(events.some((event) => event.type === "production.routing-findings"), "the findings still follow the edit");
   });
 
   it("applies each command to what is on disk, so two edits in flight both land", async (t) => {
@@ -136,13 +153,19 @@ describe("the branch map's routing commands", () => {
     assert.deepEqual(await routing(), excluded, "no command routes into an excluded scene");
   });
 
-  it("refuses a command that does not apply, and writes nothing", async (t) => {
-    const { send, routing } = await harness(t);
+  it("refuses a command that does not apply, writes nothing, and tells the author why", async (t) => {
+    const { send, routing, events } = await harness(t);
     await send({ operation: "set-start", sceneId: "sc_02" });
     const before = await routing();
     await send({ operation: "remove-choice", choiceId: "ch_missing" });
     await send({ operation: "clear-ending", sceneId: "sc_04" });
     assert.deepEqual(await routing(), before, "a refused edit leaves the file as it was");
+    const refusals = events.filter((event) => event.type === "command.failed" && event.command === "routing-command");
+    assert.deepEqual(
+      refusals.map((event) => event.type === "command.failed" && event.reason),
+      ["Choice ch_missing does not exist.", "sc_04 is not designated as an ending."],
+      "a refusal is a notice with its reason, not an edit that silently vanishes",
+    );
   });
 
   it("refuses a command that names a scene the production no longer has, but still lets a removal through", async (t) => {

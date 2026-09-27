@@ -176,6 +176,31 @@ describe("the player, as the author previews it (156g)", () => {
     assert.equal(p.video().currentTime, 12);
   });
 
+  it("carries a long step across as many cuts as it covers", () => {
+    const p = mount({
+      from: "sc_towers",
+      author: { unwalked: [] },
+      scenes: {
+        ...OPTIONS.scenes,
+        sc_towers: {
+          title: "The bell towers",
+          clips: [{ src: "media/a.mp4", to: 8 }, { src: "media/b.mp4", to: 6 }, { src: "media/c.mp4", to: 6 }, { src: "media/d.mp4", to: 20 }],
+        },
+      },
+    });
+    const scrub = p.q("[data-ref=scrub]")!;
+    Object.defineProperty(p.video(), "duration", { value: 60, configurable: true });
+    p.video().dispatchEvent(new dom.Event("loadedmetadata") as unknown as Event);
+    p.video().currentTime = 2;
+    const event = new dom.Event("keydown", { bubbles: true }) as unknown as KeyboardEvent;
+    Object.assign(event, { key: "PageUp" });
+    scrub.dispatchEvent(event);
+    // 2s into an 8s shot, 30s on: past the rest of it (6), the next two (6 and 6), 12s into the fourth.
+    assert.equal(p.video().getAttribute("src"), "media/d.mp4", "three cuts crossed, not one");
+    p.video().dispatchEvent(new dom.Event("loadedmetadata") as unknown as Event);
+    assert.equal(p.video().currentTime, 12);
+  });
+
   it("keeps focus in the player when the Route panel is closed from its own button", () => {
     const p = mount({ author: { unwalked: [] } });
     p.key("r");

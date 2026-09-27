@@ -427,6 +427,38 @@ describe("the branch map canvas (design turn 157)", () => {
     assert.equal(focused(), player, "Tab from the last control that shows wraps to the player, not the map behind it");
   });
 
+  it("lays day one out narrow too, below 900 wide", async () => {
+    narrowWindow = true;
+    try {
+      const item = await mount(null);
+      assert.equal(all(item, '.bm[data-narrow="true"]').length, 1, "the start picker is not squeezed beside the Arke column");
+    } finally {
+      narrowWindow = false;
+    }
+  });
+
+  it("drops the grab cursor when a drag across the canvas ends", async () => {
+    const item = await mount();
+    const viewport = all(item, ".bm-viewport")[0]!;
+    await pointer(viewport, "onPointerDown");
+    assert.ok(viewport.classList.contains("bm-viewport--panning"));
+    await pointer(viewport, "onPointerUp");
+    assert.ok(!viewport.classList.contains("bm-viewport--panning"), "cleared at once, not at the next unrelated render");
+  });
+
+  it("plays a covering pass once, even with a replacement between shots it covers", () => {
+    const shot = (id: string) => ({ id, number: 1, title: id }) as never;
+    const scn = { ...scene("sc_x", 9, "X"), shots: [shot("sh_1"), shot("sh_2"), shot("sh_3")] } as never;
+    const production = {
+      meta: { id: "saltlight" },
+      selections: { sh_1: { acceptedTakeId: "tk_pass" }, sh_3: { acceptedTakeId: "tk_pass" } },
+      takes: [{ id: "tk_pass", kind: "clip", media: "pass.mp4", coversShots: ["sh_1", "sh_2", "sh_3"] }],
+    } as never;
+    const cut = new Map([["sh_2", { media: { path: "productions/saltlight/takes/tk_new/new.mp4" }, durationSec: 4 } as never]]);
+    const clips = sceneClips(production, "the-undersong", scn, cut);
+    assert.deepEqual(clips.map((clip) => clip.src.replace(/^.*\/takes\//, "")), ["tk_pass/pass.mp4", "tk_new/new.mp4"]);
+  });
+
   it("day one picks the start from the scenes and writes a start and nothing else", async () => {
     const item = await mount(null);
     assert.match(text(item.container), /Draw the first choice from the start scene/);

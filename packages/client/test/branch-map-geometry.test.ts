@@ -126,6 +126,28 @@ describe("where the map puts things", () => {
     assert.ok(wide.width >= last.x + NODE_W, "a fit to the map's width holds the last tray card");
   });
 
+  it("stacks several choices over the same skipped layer above it, clear of every card and inside the map", () => {
+    const thrice: Routing = {
+      ...ROUTING,
+      choices: [
+        ...ROUTING.choices,
+        { id: "ch_row", from: "sc_a", label: "Row across", to: "sc_c" },
+        { id: "ch_swim", from: "sc_a", label: "Swim for it", to: "sc_c" },
+      ],
+    };
+    const g = mapGeometry(thrice, scenes, layoutRouting(thrice, scenes));
+    const arcs = ["ch_stay", "ch_row", "ch_swim"].map((id) => g.edges.find((edge) => edge.id === id)!);
+    // A label pill is at most 112 wide and about 24 tall, centred on its point.
+    const overlaps = (lx: number, ly: number) =>
+      g.nodes.some((node) => lx + 56 > node.x && lx - 56 < node.x + NODE_W && ly + 12 > node.y && ly - 12 < node.y + NODE_H);
+    for (const arc of arcs) {
+      assert.ok(arc.ly >= 28, `${arc.label} sits inside the top of the map`);
+      assert.ok(!overlaps(arc.lx, arc.ly), `${arc.label} is on no card`);
+    }
+    const ys = arcs.map((arc) => arc.ly).sort((a, b) => a - b);
+    assert.ok(ys[1]! - ys[0]! >= 24 && ys[2]! - ys[1]! >= 24, "a label's height apart, so none covers another");
+  });
+
   it("fans out two choices between the same two scenes, so neither label hides the other", () => {
     const twice: Routing = { ...ROUTING, choices: [...ROUTING.choices, { id: "ch_run", from: "sc_a", label: "Run for the causeway", to: "sc_b" }] };
     const g = mapGeometry(twice, scenes, layoutRouting(twice, scenes));

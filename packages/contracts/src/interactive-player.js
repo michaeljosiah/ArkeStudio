@@ -491,23 +491,50 @@ export function mountInteractivePlayer(root, options) {
       if (p && p.catch) p.catch(() => undefined);
     } else video.pause();
   }
-  /** Move by `sec` through the scene, across a cut into the shot before or after where it runs out. */
+  /** A shot's length, when it is known: played already, or a window with both ends. */
+  function lengthOf(index) {
+    if (durations[index]) return durations[index];
+    const c = (media[state.sceneId] || [])[index];
+    return c && c.to !== null ? Math.max(0, c.to - c.from) : undefined;
+  }
+  /**
+   * Move by `sec` through the scene, across as many cuts as the step covers: Page Up's 30 seconds
+   * over three short shots lands in the fourth, not at the end of the second. A shot whose length
+   * is not known yet stops the walk there — entered going on, at its end going back — since
+   * nothing says how far it runs.
+   */
   function nudge(sec) {
     const { from, length } = span();
     if (mode !== "playing" || !length) return;
     const last = (media[state.sceneId] || []).length - 1;
-    const to = into() + sec;
-    if (to < 0 && clipIndex > 0) {
-      const before = durations[clipIndex - 1];
-      if (before) loadClip(clipIndex - 1, Math.max(0, before + to));
-      else loadClip(clipIndex - 1, 0, 1);
+    let index = clipIndex;
+    let at = into() + sec;
+    let len = length;
+    while (at >= len && index < last) {
+      at -= len;
+      index += 1;
+      const next = lengthOf(index);
+      // Not known yet: the step lands in it, and its load clamps what is left to its length.
+      if (next === undefined) break;
+      len = next;
+    }
+    while (at < 0 && index > 0) {
+      index -= 1;
+      const before = lengthOf(index);
+      if (before === undefined) {
+        loadClip(index, 0, 1);
+        renderBar();
+        return;
+      }
+      at += before;
+      len = before;
+    }
+    if (index !== clipIndex) {
+      loadClip(index, Math.max(0, at));
+      renderBar();
       return;
     }
-    if (to >= length && clipIndex < last) {
-      loadClip(clipIndex + 1, to - length);
-      return;
-    }
-    video.currentTime = from + Math.max(0, Math.min(length - 0.05, to));
+    video.currentTime = from + Math.max(0, Math.min(length - 0.05, at));
   }
   /** The scene's first frame, or its last: its first shot or its last, not the loaded one's. */
   function seekScene(toEnd) {
