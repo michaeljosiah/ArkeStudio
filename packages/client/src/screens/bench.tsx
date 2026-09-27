@@ -699,7 +699,7 @@ function BenchWorkspace({
   const [refusal, setRefusal] = useState<{ reason: string; requestId: string | null } | null>(null);
   const pendingDispatch = useRef<string | null>(null);
   const pendingDispatchAction = useRef<
-    { kind: "dispatch"; composer: typeof draft } | { kind: "rerun"; takeId: string } | null
+    { kind: "dispatch"; composer: typeof draft; confirmedSpeechMicroUsd?: number } | { kind: "rerun"; takeId: string } | null
   >(null);
   const [uploadConfirmation, setUploadConfirmation] = useState<{
     destinationLabel: string;
@@ -759,9 +759,9 @@ function BenchWorkspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [composedFor]);
 
-  const dispatchBench = (composer: typeof draft, voiceUploadConfirmedFor?: string) => {
-    pendingDispatchAction.current = { kind: "dispatch", composer };
-    pendingDispatch.current = sendBenchDispatch(worldId, session.id, composer, voiceUploadConfirmedFor);
+  const dispatchBench = (composer: typeof draft, voiceUploadConfirmedFor?: string, confirmedSpeechMicroUsd?: number) => {
+    pendingDispatchAction.current = { kind: "dispatch", composer, confirmedSpeechMicroUsd };
+    pendingDispatch.current = sendBenchDispatch(worldId, session.id, composer, voiceUploadConfirmedFor, confirmedSpeechMicroUsd);
   };
   const rerunBench = (takeId: string, voiceUploadConfirmedFor?: string) => {
     pendingDispatchAction.current = { kind: "rerun", takeId };
@@ -884,8 +884,7 @@ function BenchWorkspace({
       return each * draft.params.count;
     }
     if (draft.params.kind === "voice") {
-      // Exact, not a ceiling: speech bills per character and the characters are already typed —
-      // counted as the row bills them, a delivery's tag included (SPEC-046 R-8).
+      // Character readers price the typed words; token readers show the authorised ceiling.
       return estimateSpeechMicroUsd(candidate, draft.brief, draft.params.delivery) * draft.params.count;
     }
     if (draft.params.kind === "music") {
@@ -911,7 +910,7 @@ function BenchWorkspace({
     estimate === null
       ? null
       : speaking
-        ? formatMicroUsd(estimate)
+        ? `${model?.pricing.kind === "perToken" ? "up to " : ""}${formatMicroUsd(estimate)}`
         : singing
           ? `up to ${formatMicroUsd(estimate)}`
           : `~${formatMicroUsd(estimate)}`;
@@ -2305,7 +2304,7 @@ function BenchWorkspace({
               onClick={() => {
                 clearRefusal();
                 if (pushTimer.current) clearTimeout(pushTimer.current);
-                dispatchBench(draft);
+                dispatchBench(draft, undefined, draft.params.kind === "voice" ? estimate ?? undefined : undefined);
               }}
             >
               {draft.params.kind === "image" && draft.params.count > 1 ? `Generate ${draft.params.count}` : "Generate"}
@@ -2876,7 +2875,7 @@ function BenchWorkspace({
               const token = uploadConfirmation.confirmationToken;
               setUploadConfirmation(null);
               if (action?.kind === "rerun") rerunBench(action.takeId, token);
-              else if (action?.kind === "dispatch") dispatchBench(action.composer, token);
+              else if (action?.kind === "dispatch") dispatchBench(action.composer, token, action.confirmedSpeechMicroUsd);
             }}
           />
         )}

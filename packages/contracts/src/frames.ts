@@ -3453,6 +3453,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("bench-dispatch"),
+      confirmedSpeechMicroUsd: z.number().int().nonnegative().safe().optional(),
       worldId: UlidSchema,
       sessionId: SessionIdSchema,
       requestId: UlidSchema,
