@@ -119,11 +119,19 @@ async function electronMain() {
   };
   await owner.loadFile(config.page, { hash: "/settings/remote-access" });
   await until(owner, "[...document.querySelectorAll('button')].some(b => b.textContent === 'Pair a device')");
+  await js(owner, "document.querySelector('.remote-access__share > svg').scrollIntoView({ block: 'center' })");
+  await js(owner, "document.fonts.ready.then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))");
+  // The hidden window's first capture can still be its blank startup surface. Prime that
+  // surface after layout settles, then decode the actual rendered QR on the next frame.
+  owner.webContents.invalidate();
+  await owner.webContents.capturePage();
+  await new Promise(resolve => setTimeout(resolve, 100));
   const qrRect = await js(owner, `(() => {
-    const qr = document.querySelector('.remote-access__share > svg'); qr.scrollIntoView({ block: 'center' });
+    const qr = document.querySelector('.remote-access__share > svg');
     const r = qr.getBoundingClientRect(); return { x: Math.floor(r.x), y: Math.floor(r.y), width: Math.ceil(r.width), height: Math.ceil(r.height) };
   })()`);
   const qrImage = await owner.webContents.capturePage(qrRect);
+  await writeFile(join(config.dir, "desktop-qr.png"), qrImage.toPNG());
   const bitmap = qrImage.toBitmap(), dimensions = qrImage.getSize();
   const rgba = new Uint8ClampedArray(bitmap.length);
   for (let pixel = 0; pixel < bitmap.length; pixel += 4) {
