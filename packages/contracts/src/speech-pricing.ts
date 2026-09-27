@@ -61,6 +61,27 @@ export const SpeechAttemptSchema = z.object({
 }).strict();
 export type SpeechAttempt = z.infer<typeof SpeechAttemptSchema>;
 
+/** Shared by durable settlement and terminal receipts; an authorisation is never an actual. */
+export function speechSettlement(job: {
+  attempt: number;
+  speechQuote?: SpeechQuote;
+  speechUsage?: SpeechUsage;
+  speechAttempts?: SpeechAttempt[];
+  providerCostMicroUsd?: number;
+}): { actualMicroUsd: number | null; actualSource?: "provider-reported" | "usage-derived" | "mixed-measured" } {
+  const archived = job.speechAttempts?.some(attempt => attempt.attempt === job.attempt) === true;
+  let hasReported = !archived && job.providerCostMicroUsd !== undefined;
+  let hasUsage = !archived && job.providerCostMicroUsd === undefined;
+  let actualMicroUsd = archived ? 0 : job.providerCostMicroUsd ?? (job.speechQuote && job.speechUsage ? speechUsageCost(job.speechQuote, job.speechUsage) : null);
+  for (const attempt of job.speechAttempts ?? []) {
+    const prior = attempt.providerCostMicroUsd ?? speechUsageCost(attempt.quote, attempt.usage);
+    hasReported ||= attempt.providerCostMicroUsd !== undefined;
+    hasUsage ||= attempt.providerCostMicroUsd === undefined;
+    actualMicroUsd = actualMicroUsd === null || prior === null ? null : actualMicroUsd + prior;
+  }
+  return actualMicroUsd === null ? { actualMicroUsd } : { actualMicroUsd, actualSource: hasReported ? hasUsage ? "mixed-measured" : "provider-reported" : "usage-derived" };
+}
+
 function tokenCost(input: number, output: number, rates: { input: number; output: number }): number {
   // BigInt prevents rounding down a fractional micro-dollar or overflowing an intermediate.
   const million = 1_000_000n;

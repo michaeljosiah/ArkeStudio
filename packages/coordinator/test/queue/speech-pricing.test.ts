@@ -299,3 +299,58 @@ it("ledger recovery trusts a persisted charge after the provider declaration cha
     } finally { restored.dispose(); }
   } finally { h.queue.dispose(); }
 });
+
+
+it("captures an accepted submit while cancellation is flushing without reviving the job", async () => {
+  let release: (() => void) | undefined;
+  let reached = false;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const h = await harness(undefined, "succeeded", true, async job => {
+    if (job.status === "cancelled" && !reached) { reached = true; await gate; }
+  });
+  let answer: ((result: Awaited<ReturnType<DispatchClient["submit"]>>) => void) | undefined;
+  h.client.submit = () => new Promise(resolve => { answer = resolve; });
+  const cancelledIds: string[] = [];
+  h.client.cancel = async (_key, id) => { cancelledIds.push(id); };
+  try {
+    const job = await h.queue.enqueue(input);
+    await until(() => answer !== undefined, "submit waiting", 30000);
+    const cancellation = h.queue.cancel(job.id);
+    await until(() => reached, "cancelled row flushing", 30000);
+    answer!({ remoteId: "accepted-during-cancel", artifacts: [], speechUsage: { inputTextTokens: 3, outputAudioTokens: 250 } });
+    await until(() => cancelledIds.includes("accepted-during-cancel"), "cancel accepted request", 30000);
+    release!();
+    await cancellation;
+    assert.equal(h.ledger.length, 1);
+    assert.equal(h.ledger[0]!.actualMicroUsd, 2252);
+    assert.equal(h.ledger[0]!.outcome, "cancelled");
+    const rows = (await readFile(join(h.dir, "jobs.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line) as Job);
+    assert.equal(rows.at(-1)!.status, "cancelled");
+    assert.equal(rows.at(-1)!.providerJobId, "accepted-during-cancel");
+    assert.deepEqual(rows.at(-1)!.speechUsage, { inputTextTokens: 3, outputAudioTokens: 250 });
+  } finally { release?.(); answer?.({ remoteId: "cleanup" }); h.queue.dispose(); }
+});
+
+for (const lookup of [false, true]) it(`recovers a persisted accepted id before lookup or resubmission (lookup: ${lookup})`, async () => {
+  const h = await harness({ inputTextTokens: 3, outputAudioTokens: 250 }, "succeeded", true);
+  try {
+    await h.queue.enqueue(input);
+    await until(() => h.ledger.length === 1, "first result", 30000);
+    h.queue.dispose();
+    const job = h.queue.listJobs()[0]!;
+    await writeFile(join(h.dir, "jobs.jsonl"), JSON.stringify({ ...job, status: "submitting", finalization: undefined }) + "\n");
+    h.ledger.length = 0;
+    let lookups = 0;
+    h.client.declarations.supportsIdempotencyKey = lookup;
+    h.client.declarations.supportsLookupByKey = lookup;
+    h.client.lookupByKey = async () => { lookups++; return null; };
+    const restored = h.create();
+    try {
+      await restored.start();
+      await until(() => h.ledger.length === 1, "recovered result", 30000);
+      assert.equal(h.submissions(), 1);
+      assert.equal(lookups, 0);
+      assert.equal(h.ledger[0]!.actualMicroUsd, 2252);
+    } finally { restored.dispose(); }
+  } finally { h.queue.dispose(); }
+});
