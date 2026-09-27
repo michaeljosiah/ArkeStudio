@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { agentForPurpose, effectiveHarnessEngine, ROSTER, skillFor, type HarnessAdapter } from "@arke-studio/contracts";
-import { createProviderClients, SHIPPED_MANIFEST } from "@arke-studio/providers";
+import { createProviderClients, cloudVoiceSources, SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { createStudioHost } from "./application/studio-host.js";
 import { AppSettingsFile } from "./app-settings.js";
 import { ChildLedger } from "./child-ledger.js";
@@ -60,6 +60,7 @@ export async function createNodeStudioHost(options: NodeStudioHostOptions) {
       changeLogPath: join(options.appRoot, "logs", "coordinator.jsonl"),
       jobsSeedPath: join(options.appRoot, "queue", "jobs.jsonl"), ledgerSeedPath: join(options.appRoot, "ledger.jsonl"),
       secretRegistry: secrets, providerCalls: calls, validators: clients, dispatchClients: clients, manifest: SHIPPED_MANIFEST,
+      voice: { sidecar: null, localPresets: [], cloudSources: cloudVoiceSources(clients) },
       setup: nodeSetupDeps(), authoring: { agentForPurpose, roster: ROSTER, skillFor },
       harnessLaunchEngine: chosen, relaunchHarness: wiring?.relaunchHarness,
       ...(wiring?.publishLocalModels ? { publishLocalHarnessModels: wiring.publishLocalModels } : {}),

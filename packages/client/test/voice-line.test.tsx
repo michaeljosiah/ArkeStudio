@@ -7,6 +7,7 @@ import { App } from "../src/App.js";
 import { __applyForTest, __handleFrameForTest, __setStateForTest, __stateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
+import { SHIPPED_MANIFEST } from "../../providers/src/manifest-data.js";
 import { legacySceneView, orderedShots, voiceTargetKey } from "@arke-studio/contracts";
 
 /**
@@ -406,6 +407,14 @@ describe("a character's voice", () => {
     assert.match(html, /\$0\.03 preview/);
     // The reader by its name, as the Reads lines row says it (SPEC-046 R-30), not the provider id.
     assert.match(html, /Kokoro · free/);
+  });
+
+  it("states Gemini preview prices as authorization ceilings", () => {
+    const state = structuredClone(FIXTURE_STATE);
+    state.app.manifest = SHIPPED_MANIFEST;
+    const voice = { ...candidate("Charon", "elevenlabs", false), candidate: { ...candidate("Charon", "elevenlabs", false).candidate, provider: "google", model: "gemini-3.8-flash-tts" } };
+    const html = render(`${page}?choose=1`, state, { voiceCandidates: { [sheetId]: { ...candidates[sheetId], ranked: [voice] } } });
+    assert.match(html, /up to \$0\.03 preview/);
   });
 
   it("keeps the current unready clone visible, and refuses to preview or assign it", () => {

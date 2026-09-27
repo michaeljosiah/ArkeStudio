@@ -1,7 +1,7 @@
 import type { CapabilityProbe, ClientDeclarations, SpeechUsage } from "@arke-studio/contracts";
 import { randomUUID } from "node:crypto";
 import { speechInputFits } from "@arke-studio/contracts";
-import { GEMINI_SPEECH_INPUT_BYTES } from "../gemini-tts-models.js";
+import { GEMINI_SPEECH_INPUT_BYTES, geminiSpeechModel } from "../gemini-tts-models.js";
 import { ProviderAuthError, ProviderBusyError, ProviderRequestRejectedError,
   type FetchLike, type PollResult, type SubmitRequest, type SubmitResult, type VoiceCatalogueClient } from "../types.js";
 
@@ -134,7 +134,10 @@ export class GoogleClient implements VoiceCatalogueClient {
     if (request.capability !== "voice-tts" || !GEMINI_TTS_MODELS.some(model => model === request.model)) throw new ProviderRequestRejectedError("Google: unsupported speech model");
     const text = request.params.text;
     const voice = request.params.voiceId;
-    const instructions = request.params.instructions;
+    const delivery = request.params.delivery;
+    const mappings = geminiSpeechModel("flash").cadence!.deliveryMappings;
+    if (delivery !== undefined && (typeof delivery !== "string" || !Object.hasOwn(mappings, delivery))) throw new ProviderRequestRejectedError("Google: unsupported speech delivery");
+    const instructions = request.params.instructions ?? (typeof delivery === "string" ? mappings[delivery]?.instruction : undefined);
     if (typeof text !== "string" || text.trim() === "") throw new ProviderRequestRejectedError("Google: no words to read");
     if (typeof voice !== "string" || !GEMINI_PRESETS.some(([id]) => id === voice)) throw new ProviderRequestRejectedError("Google: choose a supported preset voice; saved project voices need a verified binding");
     if (request.voiceReference !== undefined) throw new ProviderRequestRejectedError("Google: a reference recording requires a separately authorised replication operation");

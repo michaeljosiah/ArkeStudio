@@ -167,7 +167,7 @@ export function usePageRead(input: {
       run !== null && token !== undefined && confirmed !== run
         ? {
             characters: result?.characterCount ?? 0,
-            priced: formatMicroUsd(result?.estimatedMicroUsd ?? 0),
+            priced: `up to ${formatMicroUsd(result?.estimatedMicroUsd ?? 0)}`,
             voices: (result?.voices ?? []).map((voice) => `${voice.label} · ${voice.provider}`),
             confirm: () => {
               setConfirmed(run);

@@ -1,5 +1,6 @@
 import { BREEZE_DELIVERY, FISH_DELIVERY, ModelManifestSchema, type ModelManifest } from "@arke-studio/contracts";
 import { COMFYUI_MANIFEST_MODELS } from "./comfyui/recipes.js";
+import { geminiSpeechModel } from "./gemini-tts-models.js";
 import { FAL_MODELS, FAL_ENDPOINTS, FAL_EDIT_ENDPOINTS } from "./fal-catalogue.generated.js";
 
 /**
@@ -14,9 +15,9 @@ import { FAL_MODELS, FAL_ENDPOINTS, FAL_EDIT_ENDPOINTS } from "./fal-catalogue.g
  * Prices are integer micro-dollars (R-14).
  */
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 27,
+  manifestVersion: 28,
   dialogueGuidance: [],
-  generated: "2026-09-24",
+  generated: "2026-09-27",
   /**
    * Which local model to reach for first, per capability (SPEC-033 R-33). Authored, and about
    * the models rather than about any machine: the gate filters this order by what was measured
@@ -205,6 +206,9 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       accepts: { referenceImages: 0, startFrame: false, endFrame: false },
       limits: { maxDurationSec: 300, audioFormat: "mp3" }, pricing: { kind: "perSecond", microUsdPerSecond: 2000 },
     },
+    // New cloud creative choices start with Flash; saved routing and casting win first.
+    geminiSpeechModel("flash"),
+    geminiSpeechModel("lite"),
     {
       // Reviewed 2026-09-05: https://elevenlabs.io/pricing/api — $0.10/1,000 characters.
       id: "eleven_multilingual_v2",

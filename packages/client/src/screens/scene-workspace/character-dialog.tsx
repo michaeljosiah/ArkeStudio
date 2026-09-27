@@ -181,10 +181,10 @@ export function CharacterDialog({ world, production, scene, sheetId, locked = fa
   const assignedModel = sheet?.voice === undefined ? undefined
     : sheet.voice.model ?? legacyVoiceModel(sheet.voice.provider, sheet.voice.voiceId, world.clonedVoices ?? []);
   const voiceModel = sheet?.voice === undefined ? undefined
-    : state?.app.manifest?.models.find((model) => model.id === assignedModel && model.provider === sheet.voice?.provider && supportsPerformanceGeneration(model));
+    : state?.app.manifest?.models.find((model) => model.id === assignedModel && model.provider === sheet.voice?.provider && supportsPerformanceGeneration(model) && !state.app.models.disabled.includes(model.id));
   const firstLine = lines[0];
   const price = voiceModel !== undefined && firstLine !== undefined
-    ? formatMicroUsd(estimateSpeechMicroUsd(voiceModel, normalizeSpeechText(firstLine.text)))
+    ? `${voiceModel.pricing.kind === "perToken" ? "up to " : ""}${formatMicroUsd(estimateSpeechMicroUsd(voiceModel, normalizeSpeechText(firstLine.text)))}`
     : null;
   const voicePage = () => { onClose(); navigate(`/w/${worldId}/cast/${sheetId}/voice`); };
 

@@ -18,10 +18,10 @@ const responseBody = () => ({ id: "interaction-1", model: request.model, status:
   usage: { total_input_tokens: 8, output_tokens_by_modality: [{ modality: "audio", tokens: 50 }] },
   steps: [{ type: "model_output", content: [{ type: "audio", mime_type: "audio/wav", data: wav().toString("base64") }] }] });
 
-it("qualification rows compile all six deliveries into structured style without enabling catalogue rows", async () => {
+it("shipped rows compile all six deliveries into structured style", async () => {
   for (const variant of ["flash", "lite"] as const) {
     const row = ManifestModelSchema.parse(geminiSpeechModel(variant));
-    assert.equal(SHIPPED_MANIFEST.models.some(model => model.id === row.id), false);
+    assert.deepEqual(SHIPPED_MANIFEST.models.find(model => model.id === row.id), row);
     for (const delivery of row.cadence!.deliveries) {
       const hash = `sha256:${"a".repeat(64)}`;
       const mapped = mapCadence("Keep these exact words.", hash, { schemaVersion: 1, sourceTextHash: hash, delivery, speed: 1, phrase: "quietly confident", cues: [] }, row);
@@ -37,6 +37,23 @@ it("qualification rows compile all six deliveries into structured style without 
       assert.ok(result.artifacts?.length);
     }
   }
+});
+
+it("carries Bench and line delivery through structured style, while an explicit compiled style wins", async () => {
+  for (const delivery of ["measured", "whispered", "breaking", "cold", "warm", "urgent"] as const) {
+    const client = new GoogleClient(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      assert.equal(body.input[0].content[0].text, "Keep these exact words.");
+      assert.equal(body.input[0].content[0].annotations[0].style, geminiSpeechModel("flash").cadence!.deliveryMappings[delivery]!.instruction);
+      return Response.json(responseBody());
+    });
+    await client.submit("test", { ...request, params: { text: request.params.text, voiceId: "Charon", delivery, voiceSettings: {} } });
+  }
+  const client = new GoogleClient(async (_url, init) => {
+    assert.equal(JSON.parse(String(init?.body)).input[0].content[0].annotations[0].style, "Act this particular span.");
+    return Response.json(responseBody());
+  });
+  await client.submit("test", { ...request, params: { ...request.params, delivery: "warm", instructions: "Act this particular span." } });
 });
 
 it("uses exact pinned model ids, separate style metadata, stateless unary WAV and the full output ceiling", async () => {
