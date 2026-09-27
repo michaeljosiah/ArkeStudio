@@ -131,7 +131,7 @@
   .fy-chat__phonehead { display: flex; align-items: center; gap: 4px; padding: 6px 8px 0 4px; }
   .fy-chat__phonehead h1 { flex: 1; min-width: 0; margin: 0; font: 600 var(--text-lg)/1.25 var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .fy-chat__phonesub { display: flex; align-items: center; gap: 8px; padding: 0 20px 4px; border-bottom: 1px solid var(--border); min-height: 48px; }
-  .fy-chat__phonesub .fy-chat__about { padding: 0 10px; height: 32px; font: var(--type-ui); color: var(--foreground); flex: 0 1 auto; }
+  .fy-chat__phonesub .fy-chat__about { gap: 4px; padding: 0 10px; height: 32px; font: var(--type-ui); color: var(--foreground); flex: 0 1 auto; }
   .fy-chat__mode { position: relative; margin-left: auto; flex: none; }
   .fy-chat__mode summary { display: flex; align-items: center; gap: 4px; min-height: 44px; padding: 6px 10px; font: var(--type-ui); border-radius: 999px; cursor: pointer; list-style: none; background: linear-gradient(transparent 6px, var(--muted) 6px, var(--muted) calc(100% - 6px), transparent calc(100% - 6px)); }
   .fy-chat__mode summary::-webkit-details-marker { display: none; }
@@ -157,7 +157,7 @@
   .fy-page-sheet .fy-panel__point { font: 400 var(--text-sm)/1.5 var(--font-sans); margin-top: 10px; }
   .fy-page-sheet .fy-panel__pointacts { margin-top: 8px; flex-wrap: wrap; }
   .fy-chat__acceptrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  .fy-understood-sheet .fy-page-sheet__head { border: 0; padding-bottom: 0; }
+  .fy-understood-sheet .fy-page-sheet__head { border: 0; padding-bottom: 0; padding-right: 8px; }
   .fy-understood-sheet .fy-page-sheet__body { padding-top: 10px; }
   .fy-understood-sheet .fy-panel__count { color: var(--muted-foreground); }
   .fy-understood-sheet .fy-panel__group { margin: 0; }
@@ -201,7 +201,7 @@
   .fy-artview__foot > button:disabled { opacity: .35; cursor: default; }
   .fy-artview__foot > .fy-artview__details { width: auto; padding: 0 14px; border-radius: 999px; background: var(--neutral-800); font: var(--type-ui); }
   .fy-artview__sheet { top: min(84px, 15dvh); }
-  .fy-artview__sheet .fy-page-sheet__head { border: 0; padding-bottom: 0; }
+  .fy-artview__sheet .fy-page-sheet__head { border: 0; padding-bottom: 0; padding-right: 8px; }
   .fy-artview__sheet .fy-page-sheet__body { padding-top: 10px; }
   .fy-page-sheet .fy-artview__meta { padding: 0; border: 0; max-height: none; display: block; overflow: visible; }
   .fy-page-sheet .fy-artview__row { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 0; padding: 10px 0; border-bottom: 1px solid var(--border); }

@@ -4075,24 +4075,24 @@ export function ArtifactsScreen() {
   const menuArtifact = visible.find(item => item.id === menuId);
   const addFilesCard = (
     <button
-          key="add-files"
-          type="button"
-          aria-label="Add files"
-          onClick={() => upload()}
-          className={cx("fy-gridcard fy-gridcard--quiet fy-artifact-add", dropActive && "fy-artifact-add--over")}
+      key="add-files"
+      type="button"
+      aria-label="Add files"
+      onClick={() => upload()}
+      className={cx("fy-gridcard fy-gridcard--quiet fy-artifact-add", dropActive && "fy-artifact-add--over")}
+    >
+      <span className="fy-newprodcard__ring" style={{ width: 40, height: 40 }}>
+        {compact ? <Upload size={22} /> : <Plus size={18} />}
+      </span>
+      <div>
+        <div style={{ font: "600 14px var(--font-sans)" }}>{compact ? "Add files" : dropActive ? "Drop to add files" : "Drop files or click to add"}</div>
+        <div
+          style={{ font: "400 10.5px var(--font-mono)", color: "var(--muted-foreground)", marginTop: 4 }}
         >
-          <span className="fy-newprodcard__ring" style={{ width: 40, height: 40 }}>
-            {compact ? <Upload size={22} /> : <Plus size={18} />}
-          </span>
-          <div>
-            <div style={{ font: "600 14px var(--font-sans)" }}>{phone ? "Add files" : dropActive ? "Drop to add files" : "Drop files or click to add"}</div>
-            <div
-              style={{ font: "400 10.5px var(--font-mono)", color: "var(--muted-foreground)", marginTop: 4 }}
-            >
-              up to 16 files · audio · documents · images
-            </div>
-          </div>
-        </button>
+          up to 16 files · audio · documents · images
+        </div>
+      </div>
+    </button>
   );
   // Turn 164 keeps the picker in the fifth slot; later artifacts continue in shelf order.
   const cards = compact ? [...visible.slice(0, 4), null, ...visible.slice(4)] : [...visible, null];
