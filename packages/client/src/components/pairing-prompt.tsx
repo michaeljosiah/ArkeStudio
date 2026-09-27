@@ -33,7 +33,10 @@ export function PairingPrompt() {
     const refresh = async () => {
       if (pending) return;
       pending = true;
-      try { const reply = await bridge({ kind: "status" }); if (live) setStatus(reply.status); }
+      try {
+        const reply = await bridge({ kind: "status" });
+        if (live) { setNow(Date.now()); setStatus(reply.status); }
+      }
       catch { /* Studio still starting: the next poll asks again. */ }
       finally { pending = false; }
     };

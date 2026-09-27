@@ -14,4 +14,5 @@
 /* A phone asking to pair, asked on the PC over whatever it shows (design turn 158j). */
 .fy-pairask__phone { width: 56px; height: 56px; border-radius: 14px; display: grid; place-items: center; background: var(--muted); color: var(--foreground); }
 .fy-pairask .fy-upd__title { margin-top: 18px; }
+.fy-pairask .fy-upd__btn { font: var(--type-ui); }
 .fy-pairask__what { margin: 14px 0 0; font: var(--type-body); font-size: var(--text-sm); line-height: 1.5; color: var(--muted-foreground); text-align: center; }
