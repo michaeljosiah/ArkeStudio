@@ -331,7 +331,7 @@ export function providerName(provider: string): string {
 }
 
 /**
- * Where a reader runs, as the audiobook names it (design turn 162): the provider's name and its
+ * Where a reader runs, as the audiobook names it (design turn 165): the provider's name and its
  * place — `Kokoro · this machine`, `Mistral · cloud`. The build printed `mistral · voxtral-mini-tts`
  * in the narrator's list and on every take (issue 1324 §3); an id is not something a person
  * chose. `local` is the catalogue's word for this voice where there is one, since ComfyUI can be

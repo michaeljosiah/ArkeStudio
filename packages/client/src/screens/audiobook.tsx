@@ -150,7 +150,7 @@ function priceLineWords(line: AudiobookPriceLine): { who: string; how: string; c
     // voice — the vendor the speaker's words go to, named here as on every paid line (codex on PR 1187).
     return { who: line.speaker, how: `${line.substituted ?? "no voice"} · narrator${line.local ? "" : ` · ${readerPlace(line.provider, false)}`}`, cost, warn: true };
   }
-  // The provider as a name and a place, never its id (turn 162): `Kokoro · this machine`.
+  // The provider as a name and a place, never its id (turn 165): `Kokoro · this machine`.
   return { who: line.label, how: `${line.narrator === true ? "narrator · " : ""}${readerPlace(line.provider, line.local)}`, cost, warn: false };
 }
 

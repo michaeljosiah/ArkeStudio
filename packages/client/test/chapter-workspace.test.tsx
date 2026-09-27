@@ -2320,7 +2320,7 @@ describe("the voiced read (turn 130)", () => {
     assert.match(text(m), /Narration/);
     assert.match(text(m), /Maren Kest/);
     assert.match(text(m), /George · narrator/, "the narration in the narrator's voice");
-    assert.match(text(m), /Low tide · ElevenLabs · cloud/, "a sheet's assigned voice, by its label and where it reads (turn 162)");
+    assert.match(text(m), /Low tide · ElevenLabs · cloud/, "a sheet's assigned voice, by its label and where it reads (turn 165)");
     assert.match(text(m), /no sheet · narrator/, "a name the cast does not know reads in the narrator's");
     assert.match(text(m), /1 line/);
     assert.match(text(m), /cast · v4 · 2 lines · 2 speakers · every line is the chapter’s own words/);

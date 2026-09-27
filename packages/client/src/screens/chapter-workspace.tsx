@@ -1103,7 +1103,7 @@ export function ChapterWorkspace({
     if (opened === null || opened === "unreadable" || finishedAudiobook.updatedAt >= opened.updatedAt) return { record: finishedAudiobook, missing: [] };
     return { record: opened, missing };
   }, [record?.audiobook, record?.audiobookMissing, finishedAudiobook]);
-  // Below 700 the Audiobook view is one column and a block's panel is a sheet (turn 162l).
+  // Below 700 the Audiobook view is one column and a block's panel is a sheet (turn 165l).
   const phone = useMediaQuery("(max-width: 699px)");
   const audiobook = useChapterAudiobook({
     worldId,
@@ -1550,7 +1550,7 @@ export function ChapterWorkspace({
         ? "Saving…"
         : `Saved · v${record?.version ?? chapter.version} · ${words.toLocaleString()} words`;
 
-  // The block's panel, beside the blocks or, on a phone, in a sheet (turn 162): one set of props.
+  // The block's panel, beside the blocks or, on a phone, in a sheet (turn 165): one set of props.
   const blockPanel: Parameters<typeof AudiobookSide>[0] = {
     rows: audiobook.rows,
     selected: audiobook.selected,
@@ -1584,7 +1584,7 @@ export function ChapterWorkspace({
             <div className="fy-sw__actions">
               {/* Not while a draft stands in the prose's place: the read speaks the saved chapter,
                   and the words on screen are the draft's (codex, PR 879). */}
-              {/* In Audiobook the head's presses sit on the view row with the reading (turn 162a). */}
+              {/* In Audiobook the head's presses sit on the view row with the reading (turn 165a). */}
               {view === "audiobook" ? null : (
                 <>
                   {paragraphs.length > 0 && stagedDraft === undefined && !voicedRead.reading && <PageReadControl read={read} label="Read the chapter" />}
@@ -1649,7 +1649,7 @@ export function ChapterWorkspace({
             )}
           </div>
           {/* The view row (turn 146): the Chapters door's seg, Manuscript or Audiobook; in Audiobook
-              the reading and its narrator beside it, then Play and the priced read (turn 162a). */}
+              the reading and its narrator beside it, then Play and the priced read (turn 165a). */}
           <div className="fy-ch__viewline">
             <nav className="fy-seg fy-ch__viewrow" aria-label="Chapter view">
               <button type="button" className={cx("fy-seg__item", view === "manuscript" && "fy-seg__item--active")} onClick={() => chooseView("manuscript")}>
@@ -1920,7 +1920,7 @@ export function ChapterWorkspace({
 
           <aside className="fy-ch__side">
             {view === "audiobook" && !phone && <AudiobookSide {...blockPanel} />}
-            {/* On a phone the block's panel is a sheet raised by a press on a block (turn 162l): the
+            {/* On a phone the block's panel is a sheet raised by a press on a block (turn 165l): the
                 side would sit under every block, out of reach of the one pressed. A portal, because
                 the centre is a size container and a fixed sheet inside it would be pinned to it. */}
             {view === "audiobook" &&

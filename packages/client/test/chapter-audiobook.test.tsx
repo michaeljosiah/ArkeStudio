@@ -357,7 +357,7 @@ describe("the Audiobook view (turn 146)", () => {
     );
     const confirm = all(m, "button").find((button) => button.textContent?.startsWith("Confirm 120 characters"));
     assert.ok(confirm, "the price is one press, naming the voice");
-    assert.match(confirm.textContent ?? "", /Low tide · ElevenLabs · cloud/, "the provider by its name and place, never its id (turn 162)");
+    assert.match(confirm.textContent ?? "", /Low tide · ElevenLabs · cloud/, "the provider by its name and place, never its id (turn 165)");
     await act(async () => confirm.click());
     const answered = m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>;
     assert.equal(answered.confirmationToken, "tok", "the answer carries the token");
@@ -665,7 +665,7 @@ describe("the Audiobook view (turn 146)", () => {
     assert.ok(panel, "the block's direction sits between the block and its takes");
     const deliveries = [...panel.querySelectorAll('[aria-label="Delivery"] button')] as HTMLButtonElement[];
     assert.deepEqual(deliveries.map((b) => b.textContent), ["measured", "whispered", "breaking", "cold", "warm", "urgent"]);
-    // Pill chips in a radiogroup, not a seg that wrapped to two rows (turn 162, issue 1324 §3).
+    // Pill chips in a radiogroup, not a seg that wrapped to two rows (turn 165, issue 1324 §3).
     assert.equal(panel.querySelector('[aria-label="Delivery"]')?.getAttribute("role"), "radiogroup");
     assert.ok(deliveries.every((b) => b.getAttribute("role") === "radio" && b.className.includes("fy-ab__chip")));
     const whispered = deliveries.find((b) => b.textContent === "whispered")!;
@@ -939,7 +939,7 @@ describe("the Audiobook view (turn 146)", () => {
     assert.ok(marks[2] === "Maren Kest" || marks[2] === FIXTURE_STATE.world!.sheets.find((s) => s.id === "maren-kest")?.name, `the speaker, not the narrator: ${marks[2]}`);
   });
 
-  it("the head names the reading and its narrator, and its menu writes the book's reading or opens the narrator (design turn 162a, issue 1324 §3)", async () => {
+  it("the head names the reading and its narrator, and its menu writes the book's reading or opens the narrator (design turn 165a, issue 1324 §3)", async () => {
     const m = await mount(voiced(inkbound("performed")));
     await answerOpen(m, { audiobook: record(NARRATION_KEYS, { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." }) });
     const press = q(m, '[data-testid="audiobook-reading"]')!;
@@ -965,7 +965,7 @@ describe("the Audiobook view (turn 146)", () => {
     assert.ok(dom.document.querySelector('[data-testid="narrator-dialog"]'), "Narrator… opens the book's narrator");
   });
 
-  it("the block panel names the block and its reader in words, and its add buttons are one word each (design turn 162a, issue 1324 §3)", async () => {
+  it("the block panel names the block and its reader in words, and its add buttons are one word each (design turn 165a, issue 1324 §3)", async () => {
     const m = await mount(voiced(inkbound()));
     await answerOpen(m, { audiobook: record(NARRATION_KEYS, { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." }) });
     await act(async () => all(m, ".fy-ab__block")[1]!.click());
@@ -980,7 +980,7 @@ describe("the Audiobook view (turn 146)", () => {
   });
 });
 
-describe("the marker list's words (design turn 162, issue 1324 §3)", () => {
+describe("the marker list's words (design turn 165, issue 1324 §3)", () => {
   it("names a marker's words verbatim, never quoted a second time", () => {
     const text = "“Whoever cut the tenth key,” she said.";
     const span = { from: 0, to: 28, text: "“Whoever cut the tenth key,”" };

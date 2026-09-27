@@ -156,7 +156,7 @@ export interface BlockRow {
   sentAs: string[] | null;
   /** The speaker's note the line is played with under `performed` (R-44). */
   note?: string;
-  /** The narrator reads it (turn 162's `read by … · narrator`): narration, a line under `narrator` or `performed`, or a stand-in. */
+  /** The narrator reads it (turn 165's `read by … · narrator`): narration, a line under `narrator` or `performed`, or a stand-in. */
   byNarrator: boolean;
 }
 
@@ -667,7 +667,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   };
 }
 
-/** The three readings as the head's menu offers them, each with its data (turn 162a). */
+/** The three readings as the head's menu offers them, each with its data (turn 165a). */
 const READINGS: ReadonlyArray<{ reading: AudiobookReading; label: string; data: string }> = [
   { reading: "narrator", label: "Narrator", data: "one voice" },
   { reading: "performed", label: "Performed", data: "notes" },
@@ -675,7 +675,7 @@ const READINGS: ReadonlyArray<{ reading: AudiobookReading; label: string; data: 
 ];
 
 /**
- * The reading in the chapter's head (design turn 162a): `Performed · Charon`, a menu of the three
+ * The reading in the chapter's head (design turn 165a): `Performed · Charon`, a menu of the three
  * readings — the book's, written as the door's seg writes it — and `Narrator…`. The build had no
  * reading on the chapter and no way into `Performed` from it (issue 1324 §3).
  */
@@ -1287,7 +1287,7 @@ const SPEEDS = [0.9, 1, 1.1] as const;
 
 /**
  * A cue in the panel's words: `pause · long · after works,`. The words are the block's, verbatim
- * (turn 162): a line's own quotation marks are already in them, so wrapping them in ours printed
+ * (turn 165): a line's own quotation marks are already in them, so wrapping them in ours printed
  * `““Whoever cut the tenth key,””` (issue 1324 §3). The plate beside it says what the marker is.
  */
 export function cueLabel(text: string, cue: CadencePlan["cues"][number]): string {
@@ -1494,7 +1494,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
         artifact.retiredAt === undefined,
     )
     .sort((a, b) => (a.created < b.created ? 1 : -1));
-  // Who reads it, in words (turn 162): the voice and its role, never the provider's id — the
+  // Who reads it, in words (turn 165): the voice and its role, never the provider's id — the
   // reader's provider and model are the Voices panel's to say, and the takes'.
   const readBy = [
     `read by ${row.speaker.label ?? row.speaker.voiceId}`,
@@ -1549,7 +1549,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
       send(rest);
     } else write({ phrase: trimmed.slice(0, 60) });
   };
-  // Delivery is six chips, the chosen one filled (turn 162, 155e): a grey seg of six words wrapped
+  // Delivery is six chips, the chosen one filled (turn 165, 155e): a grey seg of six words wrapped
   // to two rows in the side's 250 (issue 1324 §3). One or none is chosen, so a radiogroup whose
   // chosen chip, pressed again, returns the block to no direction.
   const chips = (name: string, items: readonly { key: string; label: string; active: boolean; off: boolean; title: string; press: () => void }[]) => (
@@ -1590,7 +1590,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
   return (
     <>
       <section className="fy-bible__panel" data-testid="audiobook-block">
-        {/* Turn 162: the block and who speaks it in sentence case, the reader under it in words —
+        {/* Turn 165: the block and who speaks it in sentence case, the reader under it in words —
             not two columns of letter-spaced capitals (issue 1324 §3). */}
         <h2 className="fy-ab__blocktitle" data-testid="audiobook-block-title">
           {row.block.key === AUDIOBOOK_TITLE_KEY ? "Title" : `Block ${rows.indexOf(row) + 1}`} · {row.speakerKey === null ? (row.block.key === AUDIOBOOK_TITLE_KEY ? chapterTitle : "Narration") : row.mark}

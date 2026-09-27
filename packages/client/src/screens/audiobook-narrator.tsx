@@ -12,7 +12,7 @@ const same = (a: AudiobookReader | null | undefined, b: AudiobookReader | null |
 const readerOf = (voice: ReadingVoice): AudiobookReader => ({ provider: voice.provider, model: voice.model, voiceId: voice.voiceId, label: voice.label });
 
 /**
- * Where a voice sits in the list (design turn 162, 162c): this machine first, the world's saved
+ * Where a voice sits in the list (design turn 165, 165c): this machine first, the world's saved
  * voices next, the cloud last. The build listed 340 voices in the catalogue's order, the free
  * local ones after hundreds of paid ones (issue 1324 §3), so the voice a person most often wants
  * was the one they could not find.
@@ -33,7 +33,7 @@ function matches(voice: ReadingVoice, row: ManifestModel | undefined, words: rea
 }
 
 /**
- * The book's narrator (design turns 155h and 162c, SPEC-047 R-46): the app's, followed as it
+ * The book's narrator (design turns 155h and 165c, SPEC-047 R-46): the app's, followed as it
  * changes, or a voice for this book, found by search among every voice the catalogue has.
  * Before the press the dialog states what the switch does, as data — the blocks that go stale,
  * the direction the new reader holds, the price of reading the book again, the takes kept —
@@ -77,7 +77,7 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
   const shown = where === "all" ? found : found.filter((voice) => whereOf(voice) === where);
   const count = (w: Where) => found.filter((voice) => whereOf(voice) === w).length;
   // A group with nothing in it is not offered: the saved voices arrive with the voice library
-  // (issue 1331), and a chip that filters to nothing is a control with no function (turn 162).
+  // (issue 1331), and a chip that filters to nothing is a control with no function (turn 165).
   const groups = GROUPS.filter((g) => voices.some((voice) => whereOf(voice) === g.where));
   const target = mode === "app" ? null : picked;
   // What the switch would do, asked again whenever the choice changes (R-46).
@@ -110,7 +110,7 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
     const perK = estimateMicroUsd(model, { characters: 1000 });
     return perK === 0 ? "free" : `${formatMicroUsd(perK)} / 1k`;
   };
-  // The search takes focus when the list is what the dialog is for (turn 162: the book's seg).
+  // The search takes focus when the list is what the dialog is for (turn 165: the book's seg).
   const searchBox = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -283,7 +283,7 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
             Cancel
           </Button>
           <Button
-            // The press waits for what the switch costs (turn 162): a person sees the stale
+            // The press waits for what the switch costs (turn 165): a person sees the stale
             // blocks and the price before choosing, never after.
             disabled={unchanged || (mode === "book" && picked === null) || quote?.state !== "done"}
             onClick={() => {

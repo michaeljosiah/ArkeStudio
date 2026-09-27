@@ -685,7 +685,7 @@ describe("how the Voice page names a reader and its price (SPEC-046 R-30)", () =
     assert.equal(readerName({ provider: "acme", model: "acme-tts" }, { displayName: "Acme Reader" }), "Acme Reader");
     assert.equal(readerName({ provider: "acme", model: null }), "acme");
   });
-  it("names where a reader runs by the provider's name, never its id (design turn 162)", () => {
+  it("names where a reader runs by the provider's name, never its id (design turn 165)", () => {
     assert.equal(readerPlace("kokoro"), "Kokoro · this machine");
     assert.equal(readerPlace("mistral"), "Mistral · cloud");
     assert.equal(readerPlace("elevenlabs"), "ElevenLabs · cloud");

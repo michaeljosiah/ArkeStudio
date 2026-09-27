@@ -249,7 +249,7 @@ describe("the Audiobook door (turn 146)", () => {
     assert.ok((dialog.querySelector('[data-testid="narrator-use"]') as HTMLButtonElement).disabled, "no voice chosen yet");
   });
 
-  it("the narrator is found by search: the voices on this machine first, providers named, and the press waits for what the switch costs (design turn 162c)", async () => {
+  it("the narrator is found by search: the voices on this machine first, providers named, and the press waits for what the switch costs (design turn 165c)", async () => {
     const m = await mount(inkbound());
     await answerDoor(m, door("narrator"));
     await act(async () => all(m, '[data-testid="audiobook-voice"]')[0]!.click());

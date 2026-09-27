@@ -51,6 +51,8 @@ export function RemoteEntry({ children }: { children: ReactNode }) {
   // Whether this browser has asked and is waiting: a pairing check that then answers anything but
   // "pending" or "approved" means the PC said no, or the request ran out.
   const asked = useRef(false);
+  const posting = useRef(false);
+  const revision = useRef(0);
 
   useEffect(() => { void deviceModel().then(model => { if (model) setName(model); }); }, []);
 
@@ -59,29 +61,34 @@ export function RemoteEntry({ children }: { children: ReactNode }) {
     let checking = false;
     const controller = new AbortController();
     const check = async () => {
-      if (checking) return;
+      if (checking || posting.current) return;
       checking = true;
+      const checkedRevision = revision.current;
+      const current = () => active && checkedRevision === revision.current;
       try {
         const session = await fetch("/remote/session", { signal: controller.signal });
-        if (!active) return;
+        if (!current()) return;
         if (session.status === 204) { initStore(); setState("ready"); }
         else if (session.status === 401) {
           const pairing = await fetch("/remote/pair", { signal: controller.signal });
-          if (!active) return;
+          if (!current()) return;
           if (pairing.status === 204) {
             initStore();
             setState("ready");
             // Just approved: they did the work, so this once they go straight in (158i).
-            if (asked.current) navigate("/starting", { replace: true });
+            navigate("/starting", { replace: true });
             asked.current = false;
-          } else if (pairing.status === 202) setState("pending");
+          } else if (pairing.status === 202) {
+            asked.current = true;
+            setState("pending");
+          }
           else {
             if (asked.current) setError({ title: "Not approved", line: "Get a new code on your PC." });
             asked.current = false;
             setState("pair");
           }
         } else setState("offline");
-      } catch { if (active) setState("offline"); }
+      } catch { if (current()) setState("offline"); }
       finally { checking = false; }
     };
     void check();
@@ -91,6 +98,10 @@ export function RemoteEntry({ children }: { children: ReactNode }) {
   }, [attempt, navigate]);
 
   const pair = async () => {
+    if (posting.current) return;
+    // A check begun before this request must not replace its pending state with an old 410.
+    posting.current = true;
+    revision.current++;
     setBusy(true); setError(null);
     try {
       const response = await fetch("/remote/pair", {
@@ -103,7 +114,7 @@ export function RemoteEntry({ children }: { children: ReactNode }) {
         ? { title: "Too many tries", line: "Wait a minute." }
         : { title: "That code didn’t work", line: "Get a new code on your PC." });
     } catch { setState("offline"); }
-    finally { setBusy(false); }
+    finally { posting.current = false; setBusy(false); }
   };
 
   if (state === "ready") return <>{children}</>;
@@ -121,19 +132,24 @@ export function RemoteEntry({ children }: { children: ReactNode }) {
       >
         <label className="fy-launch__field">
           <span>Pairing code</span>
-          <input
-            className="fy-launch__code"
-            value={code}
-            placeholder="XXXX-XXXX"
-            inputMode="text"
-            autoComplete="one-time-code"
-            autoCapitalize="characters"
-            autoCorrect="off"
-            spellCheck={false}
-            maxLength={9}
-            onChange={event => setCode(formatPairingCode(event.target.value))}
-            required
-          />
+          <span className="fy-launch__code-field">
+            <span className="fy-launch__code-entered">
+              <span className="fy-launch__code-size" aria-hidden>{code}</span>
+              <input
+                className="fy-launch__code"
+                value={code}
+                inputMode="text"
+                autoComplete="one-time-code"
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
+                maxLength={9}
+                onChange={event => setCode(formatPairingCode(event.target.value))}
+                required
+              />
+            </span>
+            <span className="fy-launch__code-rest" aria-hidden>{"XXXX-XXXX".slice(code.length)}</span>
+          </span>
         </label>
         {error && (
           <div className="fy-launch__note" role="alert">

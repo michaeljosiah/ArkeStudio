@@ -168,6 +168,7 @@ export const Sparkle = icon(
   <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />,
 );
 export const Play = icon(<polygon points="6 3 20 12 6 21 6 3" />);
+export const Pause = icon(<><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></>);
 export const Speaker = icon(
   <>
     <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
