@@ -314,7 +314,7 @@ export function GenerationDialog({
     <dialog
       ref={dialog}
       className={previews === undefined ? "fy-gendialog" : "fy-gendialog fy-gendialog--wide"}
-      data-character-dialog={characterDialog || undefined}
+      data-character-dialog={characterDialog ? workflow : undefined}
       aria-labelledby={titleId}
       onClose={() => {
         returnFocus?.current?.focus();

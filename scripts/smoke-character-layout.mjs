@@ -160,6 +160,16 @@ try {
       const m=await js("window.measureCharacter()");records.push({name,overlay:dialog,...m});await capture(name+"-"+dialog);
       if(!baseline){assert.ok(m.dialog,name+" "+dialog+" opens");assert.equal(m.dialog.position,"fixed");if(width<1100)assert.equal(m.dialog.overflow,false,name+" "+dialog+" overflow");assert.deepEqual(m.sideways,[],name+" "+dialog+" scrolling body overflow");assert.ok(m.dialog.rect.x>=0 && m.dialog.rect.x+m.dialog.rect.width<=width+1,name+" "+dialog+" within viewport");if(width<600){assert.equal(m.dialog.rect.y,193);assert.ok(m.dialog.foot.y+m.dialog.foot.height<=height+1,name+" "+dialog+" footer");}}
       if(dialog === "sample") {await js("window.reviewSample();window.settleCharacter()");assert.equal(await js('!!document.querySelector("[data-testid=voice-review]")'),true);await capture(name+"-review");}
+      if(!baseline && width<600 && ["choose","clone","sample"].includes(dialog)) {
+        assert.equal(await js('document.elementFromPoint(200,78)?.matches(".fy-voicescrim,.fy-bench__scrim")'),true,"the sheet intercepts taps on the undimmed world chrome");
+        await cdp("Input.dispatchMouseEvent",{type:"mousePressed",x:200,y:78,button:"left",clickCount:1});
+        await cdp("Input.dispatchMouseEvent",{type:"mouseReleased",x:200,y:78,button:"left",clickCount:1});
+        await js("window.settleCharacter()");
+        assert.deepEqual((await js("window.measureCharacter()")).active,["Voice"],"a chrome tap dismisses the sheet without navigating");
+      }
+      if(!baseline && width<600 && dialog==="photo") {
+        assert.equal(await js('(()=>{const e=document.querySelector(".fy-gendialog__previews-grid img");return Math.abs(e.getBoundingClientRect().width/e.getBoundingClientRect().height-e.naturalWidth/e.naturalHeight)<0.01})()'),true,"main-photo candidates preserve the returned image aspect");
+      }
     }
     if(!baseline && width < 600) {
       if(!process.argv.includes("--pages-only")) {
