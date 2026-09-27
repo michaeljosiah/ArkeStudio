@@ -25,7 +25,7 @@ import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { audiobookBookPath, audiobookPath, checkDirection, directionPlan, legacyAudiobookPath, renderParts } from "../../src/productions/audiobook.js";
 import { verifyDirections, type DirectionDeriver, type DirectableBlock } from "../../src/productions/audiobook-direction.js";
 import { bookPriceLines } from "../../src/productions/audiobook-book.js";
-import { prepareChapter, priorPartJob, type PartIdentity } from "../../src/productions/audiobook-run.js";
+import { chapterPriceToken, prepareChapter, priorPartJob, type PartIdentity } from "../../src/productions/audiobook-run.js";
 import { hearAudiobookLine } from "../../src/productions/audiobook-hear.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { fileGeneratedArtifact } from "../../src/artifacts/filing.js";
@@ -1773,6 +1773,17 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
         ] },
       } };
       const room = { narrator: LOW_TIDE, models: [model], catalogue: [LOW_TIDE] };
+      if (model.pricing.kind !== "perToken") throw new Error("fixture");
+      model.pricing.speech!.rates.push({ version: "standard", effectiveFrom: "2027-01-01T00:00:00Z", microUsdPerMillionInput: 1000000, microUsdPerMillionOutput: 18000000 });
+      const before = await prepareChapter(store, LEDGER, "neap", room, () => "2026-12-31T23:59:59Z", ["title"]);
+      const after = await prepareChapter(store, LEDGER, "neap", room, () => "2027-01-01T00:00:00Z", ["title"]);
+      assert.ok(before.kind === "ready" && after.kind === "ready");
+      const tokenOf = (prepared: typeof before.prepared) => chapterPriceToken(WORLD_ID, LEDGER, "neap", prepared.plan.chapter, prepared.misses);
+      assert.equal(after.prepared.estimate, before.prepared.estimate * 2);
+      assert.notEqual(tokenOf(before.prepared), tokenOf(after.prepared), "each token must encode its own displayed price, regardless of the wall clock when it is hashed");
+      for (const prepared of [before.prepared, after.prepared]) {
+        assert.equal(prepared.estimate, prepared.misses.flatMap(block => block.quotes).reduce((sum, quote) => sum + quote.authorisedMicroUsd, 0));
+      }
       const queued: EnqueueInput[] = [];
       const deps = { worldId: WORLD_ID, local: async () => { throw new Error("cloud only"); },
         enqueue: async (input: EnqueueInput) => { queued.push(input); return "job"; },

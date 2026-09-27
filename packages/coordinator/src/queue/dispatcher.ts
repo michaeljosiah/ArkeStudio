@@ -1668,19 +1668,24 @@ export class JobQueue {
     if (local) {
       actualMicroUsd = 0;
       actualSource = "local-zero"; // unmetered (SPEC-008 R-18)
-    } else if (client?.declarations.reportsCost && costMicroUsd !== undefined) {
-      actualMicroUsd = Math.round(costMicroUsd);
-      actualSource = "provider-reported";
     } else if (job.speechQuote?.unit === "token") {
       // A held attempt is archived before resubmission, but the attempt number advances only
       // at provider I/O. Refusing that queued retry must not invent another unmeasured charge.
       const alreadyArchived = job.speechAttempts?.some(attempt => attempt.attempt === job.attempt) === true;
-      actualMicroUsd = alreadyArchived ? 0 : job.speechUsage ? speechUsageCost(job.speechQuote, job.speechUsage) : null;
+      const reported = client?.declarations.reportsCost && costMicroUsd !== undefined ? Math.round(costMicroUsd) : undefined;
+      let hasReported = !alreadyArchived && reported !== undefined;
+      let hasUsage = !alreadyArchived && reported === undefined;
+      actualMicroUsd = alreadyArchived ? 0 : reported ?? (job.speechUsage ? speechUsageCost(job.speechQuote, job.speechUsage) : null);
       for (const attempt of job.speechAttempts ?? []) {
-        const prior = speechUsageCost(attempt.quote, attempt.usage);
+        const prior = attempt.providerCostMicroUsd ?? speechUsageCost(attempt.quote, attempt.usage);
+        hasReported ||= attempt.providerCostMicroUsd !== undefined;
+        hasUsage ||= attempt.providerCostMicroUsd === undefined;
         actualMicroUsd = actualMicroUsd === null || prior === null ? null : actualMicroUsd + prior;
       }
-      actualSource = actualMicroUsd === null ? undefined : "usage-derived";
+      actualSource = actualMicroUsd === null ? undefined : hasReported ? hasUsage ? "mixed-measured" : "provider-reported" : "usage-derived";
+    } else if (client?.declarations.reportsCost && costMicroUsd !== undefined) {
+      actualMicroUsd = Math.round(costMicroUsd);
+      actualSource = "provider-reported";
     } else if (outcome === "succeeded") {
       actualMicroUsd = job.estimatedMicroUsd;
       actualSource = "manifest-derived"; // derived, not measured (SPEC-008 R-17)
@@ -2276,7 +2281,8 @@ export class JobQueue {
       if (!job || job.status !== "needs-reconciliation") return;
       if (decision === "resubmit") {
         const priorSpeech = job.speechQuote?.unit === "token" && job.attempt > 0
-          ? { speechAttempts: [...job.speechAttempts ?? [], { attempt: job.attempt, quote: job.speechQuote, usage: job.speechUsage ?? {} }],
+          ? { speechAttempts: [...job.speechAttempts ?? [], { attempt: job.attempt, quote: job.speechQuote, usage: job.speechUsage ?? {},
+                ...(this.opts.clients[job.provider]?.declarations.reportsCost && job.providerCostMicroUsd !== undefined ? { providerCostMicroUsd: job.providerCostMicroUsd } : {}) }],
             speechUsage: undefined, providerCostMicroUsd: undefined }
           : {};
         await this.transition({ ...job, ...priorSpeech, status: "queued", error: null, updatedAt: this.clock() });

@@ -19,7 +19,7 @@ export const SpeechTokenPricingSchema = z.object({
   audioTokensPerSecond: z.number().positive().finite(),
 }).strict().superRefine((value, ctx) => {
   for (let i = 1; i < value.rates.length; i++) {
-    if (value.rates[i]!.effectiveFrom <= value.rates[i - 1]!.effectiveFrom) {
+    if (Date.parse(value.rates[i]!.effectiveFrom) <= Date.parse(value.rates[i - 1]!.effectiveFrom)) {
       ctx.addIssue({ code: "custom", message: "Speech rates must have unique, increasing effective dates" });
     }
   }
@@ -57,6 +57,7 @@ export const SpeechAttemptSchema = z.object({
   attempt: Quantity.positive(),
   quote: SpeechQuoteSchema,
   usage: SpeechUsageSchema,
+  providerCostMicroUsd: Quantity.optional(),
 }).strict();
 export type SpeechAttempt = z.infer<typeof SpeechAttemptSchema>;
 

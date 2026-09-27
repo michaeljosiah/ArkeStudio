@@ -1707,7 +1707,8 @@ export class Coordinator {
     const toMake = (index: number) => pieces[index]!.map((piece, at) => ({ piece, at })).filter(({ at }) => !have.get(index)?.has(at));
     // Priced by the piece, as each request will be billed (SPEC-046 R-8), and summed: the read
     // is quoted once, whole, never per piece or again part-way through.
-    const priceOf = (piece: string) => estimateSpeechMicroUsd(model, piece);
+    const piecePrices = new Map(misses.flatMap(index => toMake(index).map(({ piece }) => [piece, estimateSpeechMicroUsd(model, piece)] as const)));
+    const priceOf = (piece: string) => piecePrices.get(piece)!;
     const estimate = misses.reduce((sum, index) => sum + toMake(index).reduce((total, { piece }) => total + priceOf(piece), 0), 0);
     const token = createHash("sha256")
       .update([subject.id, String(subject.version), String(estimate), ...misses.flatMap((index) => toMake(index).map(({ piece }) => pieceFile(piece)))].join("\n"))
@@ -2033,7 +2034,8 @@ export class Coordinator {
           return;
       }
       // Priced by the piece, as each request will be billed (SPEC-046 R-8), and summed once.
-      const priceOf = (index: number, text: string) => estimateSpeechMicroUsd(cloud[index]!.model, text);
+      const piecePrices = new Map(misses.map(index => [index, new Map(toMake(index).map(piece => [piece.text, estimateSpeechMicroUsd(cloud[index]!.model, piece.text)] as const))]));
+      const priceOf = (index: number, text: string) => piecePrices.get(index)!.get(text)!;
       const estimate = misses.reduce((sum, index) => sum + toMake(index).reduce((total, piece) => total + priceOf(index, piece.text), 0), 0);
       const token = createHash("sha256")
         .update(["voiced", subject.id, String(subject.version), String(estimate), ...misses.flatMap((index) => toMake(index).map((piece) => piece.file))].join("\n"))
