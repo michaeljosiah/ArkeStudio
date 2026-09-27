@@ -1766,7 +1766,7 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
 
   it("quotes every prepared token request before Hear spends, and rejects stale consent", () =>
     withHarness({}, async ({ store, worldDir }) => {
-      const model: ManifestModel = { ...ELEVEN, limits: { maxPromptChars: 30, audioFormat: "wav" }, pricing: {
+      const model: ManifestModel = { ...ELEVEN, limits: { maxPromptChars: 10, audioFormat: "wav" }, pricing: {
         kind: "perToken", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000,
         speech: { tier: "standard", maxInputTokens: 8192, maxOutputTokens: 16384, audioTokensPerSecond: 25, rates: [
           { version: "intro", effectiveFrom: "2026-09-01T00:00:00.000Z", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000 },
@@ -1777,7 +1777,7 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
       const deps = { worldId: WORLD_ID, local: async () => { throw new Error("cloud only"); },
         enqueue: async (input: EnqueueInput) => { queued.push(input); return "job"; },
         waitForJob: async () => { await writeFile(join(worldDir, "hear-part.wav"), wav()); return { status: "succeeded", landedFiles: ["hear-part.wav"] } as Job; } };
-      const hear = (quoteToken?: string) => hearAudiobookLine(store, LEDGER, "01-neap", "p0.0", room, { ...deps, quoteToken });
+      const hear = (quoteToken?: string) => hearAudiobookLine(store, LEDGER, "01-neap", "title", room, { ...deps, quoteToken });
       const initial = await hear();
       assert.ok("quote" in initial);
       assert.ok(initial.quote.parts > 1);
