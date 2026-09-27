@@ -11,7 +11,6 @@ import { SettingsModelsScreen } from "./screens/settings-models.js";
 import { SettingsProvidersScreen } from "./screens/settings-providers.js";
 import {
   FirstRunScreen,
-  StartupScreen,
   SessionRefusal,
   NewWorldScreen,
   SettingsAboutScreen,
@@ -25,6 +24,7 @@ import {
   ShellChrome,
   WorldPickerScreen,
 } from "./screens/shell.js";
+import { StartupScreen } from "./screens/launch.js";
 import { BuildingScreen } from "./screens/building.js";
 
 import { ArtDirectionProposalScreen, ArtDirectionScreen } from "./screens/art-direction.js";

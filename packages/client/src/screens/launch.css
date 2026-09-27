@@ -1,0 +1,509 @@
+/* ------------------------------------------------------------------
+   The launch surface (design master turn 158).
+
+   Every start opens here, and the start-up routine runs behind it. The
+   one screen that does not theme: every colour resolves through
+   theme/tokens/launch.css, which is built on the neutral ramp because
+   `.dark` leaves the ramp alone. Nothing here may reach for --foreground.
+
+   Two shapes, chosen by the viewport rather than the device:
+     · stacked (the default) — the loop is a band across the top and the
+       column runs under it. Phones, and a Galaxy Z Fold7 unfolded, which
+       is near-square in either orientation.
+     · split — the loop takes 49% on the left. Only at 900 wide and
+       properly landscape (w/h ≥ 1.2), which every desktop window is.
+   The ways in are tiles when the column's content box is 600 wide, rows
+   below that — a container query, because the 1024×640 desktop minimum
+   and a phone both have a narrow column for different reasons.
+   ------------------------------------------------------------------ */
+
+.fy-launch {
+  position: relative;
+  height: 100%;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--launch-column);
+  color: var(--launch-ink);
+  font: var(--type-body);
+  -webkit-font-smoothing: antialiased;
+}
+.fy-launch *,
+.fy-launch *::before,
+.fy-launch *::after { box-sizing: border-box; }
+
+/* ---- the loop ---------------------------------------------------- */
+
+.fy-launch__art {
+  position: relative;
+  flex: none;
+  height: clamp(280px, 36dvh, 440px);
+  overflow: hidden;
+  background: var(--launch-plate);
+}
+.fy-launch__media {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* Keeps the lighthouse in frame from a 390 band to a 49% panel. */
+  object-position: 78% 30%;
+  display: block;
+}
+/* Stacked: the band's lower half fades into the column's own colour, so no seam shows. */
+.fy-launch__art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    var(--launch-column-top) 0%,
+    var(--launch-column-clear) 18%,
+    var(--launch-column-clear) 48%,
+    var(--launch-column-veil) 80%,
+    var(--launch-column) 100%
+  );
+}
+.fy-launch__tag {
+  position: absolute;
+  z-index: 1;
+  left: 24px;
+  bottom: 34px;
+  max-width: calc(100% - 48px);
+}
+.fy-launch__tagline {
+  margin: 0;
+  font-family: var(--font-wordmark);
+  font-weight: 300;
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  letter-spacing: 0.46em;
+  text-transform: uppercase;
+  color: var(--launch-ink);
+}
+.fy-launch__tagline span { display: block; white-space: nowrap; }
+.fy-launch__line { display: none; margin: 14px 0 0; color: var(--launch-ink-soft); }
+.fy-launch__version { display: none; }
+
+/* ---- the column --------------------------------------------------- */
+
+.fy-launch__column {
+  container-type: inline-size;
+  position: relative;
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  padding: 14px 20px calc(env(safe-area-inset-bottom, 0px) + 24px);
+}
+.fy-launch__column > * { width: 100%; }
+
+.fy-launch__mark {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  width: auto;
+  padding-bottom: 12px;
+  --launch-sun: 52px;
+}
+.fy-launch__wordmark {
+  position: relative;
+  margin: 0;
+  font-family: var(--font-wordmark);
+  font-weight: 200;
+  font-size: var(--text-2xl);
+  line-height: 1;
+  letter-spacing: 0.52em;
+  text-indent: 0.52em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--launch-ink);
+}
+.fy-launch__bar {
+  position: absolute;
+  left: -48px;
+  right: -48px;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--launch-bar-soft) 16%,
+    var(--launch-bar-mid) 52%,
+    var(--launch-bar-warm) 85%,
+    var(--launch-bar-warm-soft) 94%,
+    transparent 100%
+  );
+}
+.fy-launch__streak,
+.fy-launch__flare {
+  position: absolute;
+  left: 85%;
+  bottom: 0;
+  pointer-events: none;
+  transform: translate(-50%, 50%);
+}
+.fy-launch__streak {
+  width: 46%;
+  height: 12px;
+  background: radial-gradient(closest-side, var(--launch-streak-core), var(--launch-streak-edge));
+}
+.fy-launch__flare {
+  width: var(--launch-sun);
+  height: var(--launch-sun);
+  background: radial-gradient(
+    closest-side,
+    var(--launch-flare-bright),
+    var(--launch-flare-glow) 20%,
+    var(--launch-flare-far) 46%,
+    var(--launch-flare-edge) 72%
+  );
+}
+
+.fy-launch__hello { margin-top: 28px; text-align: center; }
+.fy-launch__hello h1 {
+  margin: 0;
+  font: 400 var(--text-xl)/1.25 var(--font-sans);
+  letter-spacing: var(--tracking-tight);
+  color: var(--launch-ink);
+}
+.fy-launch__hello p { margin: 6px 0 0; font-size: var(--text-sm); color: var(--launch-ink-dim); }
+
+/* ---- the ways in: rows by default -------------------------------- */
+
+.fy-launch__ways {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 20px;
+}
+.fy-launch__way {
+  position: relative;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 40px 1fr auto;
+  column-gap: 14px;
+  align-items: center;
+  padding: 16px;
+  border: 1px solid var(--launch-way-line);
+  border-radius: 14px;
+  background: var(--launch-way-bg);
+  text-align: left;
+}
+.fy-launch__way--local {
+  border-color: var(--launch-local-line);
+  background: linear-gradient(180deg, var(--launch-local-top) 0%, var(--launch-local-bottom) 100%);
+  box-shadow: inset 0 1px 0 var(--launch-local-lift), 0 24px 60px -28px var(--launch-local-shadow);
+}
+.fy-launch__icon { grid-row: 1 / 3; line-height: 0; color: var(--launch-ink); opacity: 0.92; }
+.fy-launch__icon svg { width: 36px; height: 36px; }
+.fy-launch__title {
+  margin: 0;
+  font: 500 var(--text-lg)/1.25 var(--font-sans);
+  letter-spacing: var(--tracking-tight);
+  color: var(--launch-ink);
+}
+.fy-launch__body {
+  grid-column: 2 / 4;
+  text-wrap: balance;
+  margin: 3px 0 0;
+  font: 400 var(--text-sm)/1.5 var(--font-sans);
+  color: var(--launch-ink-dim);
+}
+.fy-launch__body--long { display: none; }
+.fy-launch__host { font: var(--type-mono); font-size: var(--text-xs); color: var(--launch-ink-dim); }
+.fy-launch__soon {
+  font: var(--type-label);
+  letter-spacing: var(--tracking-wide);
+  padding: 5px 9px;
+  border-radius: 99px;
+  border: 1px solid var(--launch-chip-line);
+  color: var(--launch-ink-rest);
+}
+.fy-launch__way--soon .fy-launch__icon,
+.fy-launch__way--soon .fy-launch__title { opacity: 0.55; }
+.fy-launch__way--soon .fy-launch__body { color: var(--launch-ink-quiet); }
+/* Rows name Cloud with the chip; the tile's full-width "Coming soon" is the tile's. */
+.fy-launch__way--soon .fy-launch__action { display: none; }
+.fy-launch__way > .fy-launch__action,
+.fy-launch__way > .fy-launch__note,
+.fy-launch__way > .fy-launch__aside { grid-column: 1 / -1; }
+
+.fy-launch__action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  height: 52px;
+  margin-top: 16px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--launch-action-bg);
+  color: var(--launch-action-fg);
+  font: 500 var(--text-md)/1 var(--font-sans);
+  cursor: pointer;
+  transition: var(--transition-control);
+  -webkit-tap-highlight-color: transparent;
+}
+.fy-launch__action:hover { box-shadow: 0 0 0 4px var(--launch-action-ring); }
+.fy-launch__action:focus-visible { outline: 2px solid var(--launch-ink); outline-offset: 3px; }
+.fy-launch__action--busy,
+.fy-launch__action--busy:hover { background: var(--launch-action-busy); box-shadow: none; cursor: progress; }
+.fy-launch__action--off,
+.fy-launch__action--off:hover {
+  background: var(--launch-action-off-bg);
+  border: 1px solid var(--launch-action-off-line);
+  color: var(--launch-action-off-fg);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+.fy-launch__action--line {
+  background: transparent;
+  border: 1px solid var(--launch-line-action);
+  color: var(--launch-ink);
+}
+.fy-launch__action--line:disabled { color: var(--launch-ink-off); cursor: progress; box-shadow: none; }
+.fy-launch__spin {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--launch-spin-track);
+  border-top-color: var(--launch-action-fg);
+  animation: fy-launch-spin 0.8s linear infinite;
+}
+@keyframes fy-launch-spin { to { transform: rotate(360deg); } }
+
+.fy-launch__note {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--launch-note-bg);
+  border: 1px solid var(--launch-note-line);
+  font: 400 var(--text-sm)/1.5 var(--font-sans);
+  color: var(--launch-ink-note);
+  text-align: left;
+}
+.fy-launch__note svg { flex: none; margin-top: 2px; color: var(--launch-note-mark); }
+.fy-launch__note b { display: block; font-weight: 500; color: var(--launch-ink); }
+.fy-launch__note + .fy-launch__action { margin-top: 12px; }
+.fy-launch__aside {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+}
+.fy-launch__aside button {
+  min-height: 40px;
+  padding: 0 10px;
+  border: 0;
+  background: none;
+  font: 400 var(--text-sm)/1 var(--font-sans);
+  color: var(--launch-ink-dim);
+  cursor: pointer;
+}
+.fy-launch__aside button:hover { color: var(--launch-ink); }
+.fy-launch__aside i { width: 1px; height: 12px; background: var(--launch-divider); }
+
+.fy-launch__foot {
+  margin-top: auto;
+  padding-top: 28px;
+  text-align: center;
+  font: 400 var(--text-sm)/1.4 var(--font-sans);
+  color: var(--launch-ink-quiet);
+}
+.fy-launch__foot span { margin-left: 6px; font-weight: 500; color: var(--launch-ink-dim); }
+
+/* ---- first-start setup (76b and 15a on this surface) -------------- */
+
+.fy-launch__setup { margin-top: 36px; text-align: left; }
+.fy-launch__setuphead { display: flex; align-items: center; gap: 12px; }
+.fy-launch__setuphead h1 {
+  flex: 1;
+  margin: 0;
+  font: 400 var(--text-xl)/1.2 var(--font-sans);
+  letter-spacing: var(--tracking-tight);
+  color: var(--launch-ink);
+}
+.fy-launch__pct { font: var(--type-mono); color: var(--launch-ink-note); }
+.fy-launch__transfer .fy-set__link,
+.fy-launch__transfer .fy-set__state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--launch-chip-line);
+  background: none;
+  font: var(--type-label);
+  color: var(--launch-ink-note);
+}
+.fy-launch__track { height: 6px; margin-top: 16px; border-radius: 99px; background: var(--launch-track); overflow: hidden; }
+.fy-launch__fill { height: 100%; border-radius: 99px; background: var(--launch-ink); transition: width 0.45s var(--ease-out); }
+.fy-launch__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 4px;
+  margin-top: 12px;
+  font: var(--type-mono);
+  font-size: var(--text-xs);
+  color: var(--launch-ink-rest);
+}
+.fy-launch__meta b { font-weight: 400; color: var(--launch-ink-soft); }
+.fy-launch__meta i { flex: 1; }
+.fy-launch__steps { margin: 26px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--launch-rule); }
+.fy-launch__steps li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  border-bottom: 1px solid var(--launch-rule);
+  font: 400 var(--text-sm)/1.3 var(--font-sans);
+  color: var(--launch-ink-soft);
+}
+.fy-launch__steps li > span {
+  margin-left: auto;
+  font: var(--type-mono);
+  font-size: var(--text-xs);
+  color: var(--launch-ink-faint);
+  text-align: right;
+}
+.fy-launch__dot {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 2px solid var(--launch-step-off);
+}
+.fy-launch__dot--ok { border: 0; background: var(--launch-step-on); color: var(--launch-action-fg); }
+.fy-launch__dot--run {
+  border-color: var(--launch-track);
+  border-top-color: var(--launch-ink);
+  border-right-color: var(--launch-ink);
+  animation: fy-launch-spin 1.1s linear infinite;
+}
+.fy-launch__once {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px 16px;
+  margin-top: auto;
+  padding-top: 28px;
+}
+.fy-launch__once span { flex: 1; min-width: 12ch; font: 400 var(--text-sm)/1.5 var(--font-sans); color: var(--launch-ink-faint); }
+.fy-launch__once .fy-launch__action { width: auto; height: 48px; margin: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .fy-launch__spin,
+  .fy-launch__dot--run { animation: none; }
+}
+
+/* ---- a wider column: rows grow, then turn into tiles --------------- */
+
+@container (min-width: 440px) {
+  .fy-launch__mark { --launch-sun: 56px; }
+  .fy-launch__wordmark { font-size: var(--text-3xl); }
+  .fy-launch__hello { margin-top: 46px; }
+  .fy-launch__hello h1 { font-size: var(--text-2xl); }
+  .fy-launch__ways { margin-top: 28px; }
+  .fy-launch__setuphead h1 { font-size: var(--text-2xl); }
+}
+@container (min-width: 600px) {
+  .fy-launch__mark { --launch-sun: 72px; padding-bottom: 14px; }
+  .fy-launch__wordmark { font-size: var(--text-4xl); }
+  .fy-launch__hello { margin-top: clamp(40px, 7dvh, 84px); }
+  .fy-launch__hello p { margin-top: 10px; font-size: var(--text-md); }
+  .fy-launch__ways { flex-direction: row; gap: 18px; max-width: 640px; margin: 38px auto 0; }
+  .fy-launch__way {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    min-height: 300px;
+    padding: 36px 20px 20px;
+    text-align: center;
+  }
+  .fy-launch__icon svg { width: 52px; height: 52px; }
+  .fy-launch__title { margin-top: 20px; font: 400 var(--text-2xl)/1.2 var(--font-sans); }
+  .fy-launch__body { margin: 12px 0 0; line-height: 1.65; color: var(--launch-ink-body); }
+  .fy-launch__body--long { display: block; }
+  .fy-launch__body--short { display: none; }
+  .fy-launch__soon { display: none; }
+  .fy-launch__way--soon .fy-launch__action { display: flex; }
+  .fy-launch__action { margin-top: auto; }
+  .fy-launch__note { margin-top: 18px; }
+  .fy-launch__note + .fy-launch__action { margin-top: 18px; }
+  .fy-launch__foot { font-size: var(--text-md); }
+  .fy-launch__setup { max-width: 620px; margin: 60px auto 0; }
+  .fy-launch__once { width: 100%; max-width: 620px; margin-left: auto; margin-right: auto; }
+}
+
+/* ---- the band grows on a wide, stacked screen (Fold7 unfolded) ---- */
+
+@media (min-width: 600px) {
+  .fy-launch__tag { left: 40px; bottom: 58px; }
+  .fy-launch__tagline { font-size: var(--text-xl); letter-spacing: 0.42em; }
+  .fy-launch__line { display: block; max-width: 520px; font-size: var(--text-sm); line-height: 1.6; }
+  .fy-launch__column { padding: 22px 48px calc(env(safe-area-inset-bottom, 0px) + 32px); }
+}
+
+/* ---- split: a landscape window at least 900 wide ------------------- */
+
+@media (min-width: 900px) and (min-aspect-ratio: 6/5) {
+  .fy-launch { flex-direction: row; overflow: hidden; }
+  .fy-launch__art {
+    width: 49%;
+    height: 100%;
+    border-right: 1px solid var(--launch-seam);
+  }
+  .fy-launch__art::after {
+    background: linear-gradient(
+      180deg,
+      var(--launch-art-clear) 50%,
+      var(--launch-art-shade) 74%,
+      var(--launch-art-shade-deep) 100%
+    );
+  }
+  .fy-launch__tag { left: clamp(40px, 4.4vw, 60px); bottom: clamp(48px, 10dvh, 86px); }
+  .fy-launch__tagline { font-size: var(--text-2xl); }
+  .fy-launch__line { margin-top: 22px; max-width: 340px; font-size: var(--text-md); line-height: 1.7; }
+  .fy-launch__version {
+    display: block;
+    position: absolute;
+    z-index: 1;
+    right: 20px;
+    bottom: 16px;
+    font: var(--type-meta);
+    color: var(--launch-ink-meta);
+  }
+  .fy-launch__column {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    overflow-y: auto;
+    padding: clamp(56px, 15dvh, 128px) 38px clamp(28px, 7dvh, 64px);
+    background:
+      radial-gradient(90% 60% at 50% 0%, var(--launch-column-glow), var(--launch-column-glow-edge) 70%),
+      var(--launch-column);
+  }
+}
+/* The desktop minimum is 640 tall: the lockup and the tagline give way before the ways in do. */
+@media (min-width: 900px) and (min-aspect-ratio: 6/5) and (max-height: 720px) {
+  .fy-launch__tagline { font-size: var(--text-xl); }
+  .fy-launch__line { margin-top: 14px; font-size: var(--text-sm); }
+}

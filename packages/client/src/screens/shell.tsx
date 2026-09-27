@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { NavLink, Outlet, useNavigate, useSearchParams } from "react-router";
+import { NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "react-router";
+import { remoteStudio } from "./launch.js";
 import { Button, Callout, IconButton, Input, Select, Textarea, cx } from "../components/ui.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { settingsReturnPath } from "../lib/settings-return.js";
-import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import { renderInlineMarkdown } from "../components/inline-markdown.js";
 import { GenesisContentCards } from "../components/genesis-review.js";
 import { GenesisImageCards } from "../components/genesis-images.js";
@@ -33,7 +33,6 @@ import { FactRow } from "./settings-providers.js";
 import { eligibilityInputs, strandReason } from "../components/dispatch-bar.js";
 import { ModelsCard, WORLD_MODEL_CAPABILITIES, modelFacts, withModelChoice } from "../components/models-card.js";
 import { AppChrome } from "../components/chrome.js";
-import type { StartupState } from "../arke-bridge.js";
 import { Working } from "../components/working.js";
 import { Portrait } from "../components/portrait.js";
 import { Composer } from "../components/composer.js";
@@ -93,7 +92,6 @@ import {
   useDiagnosticsBundle,
   useEnvCheck,
   useGenesis,
-  useSetup,
   useStore,
   useUpdateStatus,
   setNarrator,
@@ -135,74 +133,31 @@ export function ShellChrome() {
   );
 }
 
-// ---- Launch ----------------------------------------------------------------
+// ---- Connection ------------------------------------------------------------
 
 /**
- * What setup actually does, in the order it happens. A step is "settled" once its outcome is
- * known — and "not configured" is a settled outcome, not a failure: the app is usable in every
- * one of them (R-6). Progress counts settled steps, so the bar never stalls on an absent
- * optional runtime.
- */
-function setupSteps(
-  connection: string,
-  state: ReturnType<typeof useStore>["state"],
-  envChecked: boolean,
-): Array<{ label: string; state: string; settled: boolean }> {
-  const outcome = (health: ComponentHealth | undefined): { state: string; settled: boolean } => {
-    if (!health || health.status === "starting") return { state: "starting…", settled: false };
-    if (health.status === "healthy") return { state: "ready", settled: true };
-    return { state: health.reason ?? health.status, settled: true };
-  };
-  return [
-    {
-      label: "Studio core",
-      ...(connection === "open" && state !== null
-        ? { state: "ready", settled: true }
-        : { state: (connection === "closed" || connection === "auth-refused") ? "retrying…" : "starting…", settled: false }),
-    },
-    {
-      label: "Your data folder",
-      ...(envChecked ? { state: "checked", settled: true } : { state: "checking…", settled: false }),
-    },
-    { label: "Authoring (OpenCode)", ...outcome(state?.app.health.harness) },
-    { label: "Local voice (Voxa)", ...outcome(state?.app.health.voice) },
-  ];
-}
-
-function mb(bytes: number): string {
-  const m = bytes / (1024 * 1024);
-  return m >= 1024 ? `${(m / 1024).toFixed(1)} GB` : `${Math.round(m)} MB`;
-}
-
-/**
- * The setup reel. Kept in public/ rather than imported, so it stays a plain file the bundler
- * copies as-is — and so the route tests, which render every screen through node's loader, do
- * not have to know how to load an mp4. Relative, because the packaged app opens over file://.
- */
-const SETUP_REEL = "./setup-reel.mp4";
-
-/** Has this machine asked for less movement? Server-rendered tests have no matchMedia. */
-function stillPreferred(): boolean {
-  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
-}
-
-/**
- * The one line shown wherever a screen is waiting on a coordinator that is not there.
- *
- * Three screens had reason to say it — the setup reel, the same reel with nothing to download,
- * and the settings pane, whose rows draw `—` from an absent snapshot exactly as they draw `—`
- * from an unconfigured provider (issue 599). Three copies of one sentence drift; one does not.
- * Browser recovery distinguishes an expired capability from an offline host without assuming
- * which Studio launcher the author chose.
+ * An expired browser capability, said once for every screen past the launch surface. The
+ * surface itself says it on its local way instead (design turn 158).
  */
 export function SessionRefusal() {
   const { connection } = useStore();
-  if (connection !== "auth-refused") return null;
+  const { pathname } = useLocation();
+  // The launch surface says it on its own local way (design turn 158), where it belongs.
+  if (connection !== "auth-refused" || pathname === "/" || pathname === "/starting") return null;
+  // Reached from another device, the developer's instruction is not something a phone can do.
+  if (remoteStudio() !== null) return <div role="alert" className="fy-session-refusal">
+    <Callout tone="warning" title="This link has expired">Open a new one from Arke Studio on your computer.</Callout>
+  </div>;
   return <div role="alert" className="fy-session-refusal">
     <Callout tone="warning" title="Session link is out of date">Restart the frontend and open the new Arke session link from its terminal. If it still fails, check that the server allows this browser address.</Callout>
   </div>;
 }
 
+/**
+ * The one line shown wherever a Settings pane is waiting on a coordinator that is not there:
+ * its rows draw `—` from an absent snapshot exactly as they draw `—` from an unconfigured
+ * provider (issue 599). The launch surface says the same thing on its local way.
+ */
 function WaitingForCoordinator() {
   const { connection } = useStore();
   if (typeof window !== "undefined" && window.arke) {
@@ -214,189 +169,6 @@ function WaitingForCoordinator() {
       The app keeps retrying on its own. Check that your Studio server is running.
     </Callout>
   );
-}
-
-export function StartupScreen() {
-  const { connection, state } = useStore();
-  const navigate = useNavigate();
-  const env = useEnvCheck();
-  const setup = useSetup();
-  const downloading = setup?.running === true;
-  const paused = setup?.components.some((component) => component.state === "paused") === true;
-  const [startup, setStartup] = useState<StartupState | null>(() =>
-    typeof window === "undefined" ? null : window.arke?.startupState?.() ?? null,
-  );
-  useEffect(() => window.arke?.onStartupState?.(setStartup), []);
-
-  // Setup never walks off on its own — the user continues when they're ready (no worlds →
-  // first run; otherwise the picker, R-8).
-  const ready = connection === "open" && state !== null;
-  // Nothing left to fetch and somewhere to go: the only state where this screen is finished
-  // rather than working.
-  const settled = ready && !downloading && !paused;
-  const steps = setupSteps(connection, state, env !== null);
-  const components = setup?.components ?? [];
-
-  // One bar over the whole job. A check counts 1 once settled; a component counts its own
-  // fraction of bytes — and counts as done when it is skipped, blocked or failed, because
-  // those are settled outcomes too and the bar must not stall on something never coming.
-  const parts = steps.length + components.length;
-  const doneParts =
-    steps.filter((s) => s.settled).length +
-    components.reduce(
-      (sum, c) =>
-        sum +
-        (c.state === "downloading" || c.state === "paused" || c.state === "installing"
-          ? c.bytesTotal > 0
-            ? Math.min(1, c.bytesDone / c.bytesTotal)
-            : 0
-          : c.state === "queued"
-            ? 0
-            : 1),
-      0,
-    );
-  const percent = parts === 0 ? 0 : Math.round((doneParts / parts) * 100);
-
-  // What is happening right now, in the product's words — one line, never a list.
-  const active =
-    components.find((c) => c.state === "downloading" || c.state === "installing") ??
-    components.find((c) => c.state === "paused");
-  const outstanding = steps.find((s) => !s.settled);
-  const activity = active
-    ? `${active.state === "installing" ? "installing" : active.state === "paused" ? "paused" : "downloading"} ${active.displayName.toLowerCase()}`
-    : outstanding
-      ? `checking ${outstanding.label.toLowerCase()}`
-      : "everything ready";
-
-  // Bytes and time remaining, only while there is something to measure.
-  const totalBytes = components.reduce((sum, c) => sum + c.bytesTotal, 0);
-  const doneBytes = components.reduce((sum, c) => sum + (c.state === "queued" ? 0 : c.state === "downloading" || c.state === "paused" || c.state === "installing" ? c.bytesDone : c.bytesTotal), 0);
-  const speed = active?.bytesPerSecond ?? null;
-  const remaining = speed !== null && speed > 0 ? Math.round((totalBytes - doneBytes) / speed) : null;
-
-  // Setup happens once. Every launch after it detects the runtimes already on this machine,
-  // fetches nothing, and waits only for the coordinator to open — a few seconds with no
-  // progress worth reporting. A bar creeping under "Setting up your studio" is then a lie
-  // about what is happening and about how often it happens, so that panel is kept for the
-  // launch that is actually doing the work: something queued, downloading or installing.
-  const fetching = components.some(
-    (c) => c.state === "queued" || c.state === "downloading" || c.state === "paused" || c.state === "installing",
-  );
-  const setupRun = downloading || fetching;
-
-  // The snapshot's version once there is a snapshot; the host's before that, so the one line
-  // this screen keeps is not an empty "v" for the length of the wait.
-  const version =
-    state?.app.version ?? (typeof window === "undefined" ? null : window.arke?.appVersion ?? null);
-  const enter = () => {
-    if (!settled || !state) return;
-    // A run cut off by closing the app returns to the building screen, continuing (SPEC-031
-    // R-33) — before the library, because the author left mid-build and is coming back to it.
-    const midBuild = state.app.builds.find((build) => build.status === "running");
-    if (midBuild) {
-      navigate(`/building/${midBuild.worldId}`, { replace: true });
-      return;
-    }
-    navigate(state.worlds.length === 0 ? "/first-run" : "/worlds", { replace: true });
-  };
-
-  return (
-    <div className="fy-app" data-screen="startup">
-      {/* The one screen without the two controls: there is no world open to act on yet, and
-          nothing has happened here that a control could take you back to. */}
-      <AppChrome controls={false} divided={false} />
-      <div className="fy-startup">
-        <div className="fy-startup__reel">
-          {/* The reel plays while the runtimes come down — the wait is the only time this
-              screen is ever seen. Muted and silent by design; a setup screen does not get to
-              make noise. Someone who has asked for less motion gets the still first frame. */}
-          <video
-            className="fy-startup__video"
-            src={SETUP_REEL}
-            autoPlay={!stillPreferred()}
-            loop
-            muted
-            playsInline
-            preload="auto"
-          />
-        </div>
-        <div className="fy-startup__panel">
-          {startup?.status === "failed" ? (
-            <Callout tone="danger" title="The studio could not start">
-              <div>{startup.detail}</div>
-              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                <Button variant="primary" onClick={() => window.arke?.retryStartup?.()}>Retry</Button>
-                <Button variant="secondary" onClick={() => window.arke?.openDataFolder?.()}>Open data folder</Button>
-                <Button variant="ghost" onClick={() => window.arke?.quit?.()}>Quit</Button>
-              </div>
-            </Callout>
-          ) : setupRun && !settled ? (
-            <>
-          <div className="fy-startup__row">
-            <span className="fy-startup__title">Setting up your studio.</span>
-          </div>
-          <div className="fy-startup__row" style={{ marginTop: 10 }}>
-            <span className="fy-mono">{activity}</span>
-            <span style={{ flex: 1 }} />
-            {speed !== null && speed > 0 && <span className="fy-mono">{mb(speed)}/s</span>}
-            {active !== undefined && <SetupTransferControl component={active} />}
-          </div>
-          <div className="fy-setupbar">
-            <div className="fy-setupbar__fill" style={{ width: `${percent}%` }} />
-          </div>
-          <div className="fy-startup__row" style={{ marginTop: 8 }}>
-            <span className="fy-mono">{totalBytes > 0 ? `${mb(doneBytes)} of ${mb(totalBytes)}` : ""}</span>
-            <span style={{ flex: 1 }} />
-            <span className="fy-mono">{remaining !== null ? aboutLeft(remaining) : ""}</span>
-          </div>
-          {(connection === "closed" || connection === "auth-refused") && startup?.status !== "initializing" && <WaitingForCoordinator />}
-          <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 14, justifyContent: "center" }}>
-            <span style={{ font: "400 11.5px var(--font-sans)", color: "var(--muted-foreground)" }}>
-              One-time setup. After this, Arke runs on your machine. Your worlds never leave it.
-            </span>
-            <Button
-              variant="primary"
-              disabled={!ready}
-              title={ready ? undefined : "Waiting for the studio to finish setting up"}
-              onClick={() => navigate(state!.worlds.length === 0 ? "/first-run" : "/worlds", { replace: true })}
-            >
-              {ready ? "Continue in the background →" : "Setting up…"}
-            </Button>
-          </div>
-            </>
-          ) : (
-            /*
-              Nothing to fetch: one control and a version number, and the same control the whole
-              way through. The title, the step line, the bar and the byte counts all answered
-              "what is it doing" — on a launch that only waits for the coordinator, the honest
-              answer is "opening", which a button that says so already gives.
-            */
-            <>
-              {(connection === "closed" || connection === "auth-refused") && startup?.status !== "initializing" && <WaitingForCoordinator />}
-              <div className="fy-startup__done">
-                <Button
-                  variant="primary"
-                  disabled={!settled}
-                  title={settled ? undefined : "Waiting for the studio to open"}
-                  onClick={enter}
-                >
-                  {settled ? "Continue" : "Loading…"}
-                </Button>
-                <span className="fy-startup__version">{version === null ? "" : `v${version}`}</span>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** "about 3 min left" — rounded, because a precise wrong number is worse than a vague right one. */
-function aboutLeft(seconds: number): string {
-  if (seconds < 45) return "under a minute left";
-  const mins = Math.round(seconds / 60);
-  return mins <= 1 ? "about a minute left" : `about ${mins} min left`;
 }
 
 // ---- First run -------------------------------------------------------------

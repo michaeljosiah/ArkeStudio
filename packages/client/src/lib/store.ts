@@ -2365,6 +2365,19 @@ function handleStatus(status: ConnectionStatus): void {
   }
 }
 
+/**
+ * Try the connection again now rather than at the next backoff step. The launch surface's
+ * "Try again" (design turn 158): someone on a phone who has just woken their computer should not
+ * sit out a ten-second backoff to find out it worked.
+ */
+export function reconnectNow(): void {
+  if (current.connection === "open" || current.connection === "connecting") return;
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  reconnectAttempts = 0;
+  bridge?.connect();
+}
+
 /** Dev fallback: the same bridge surface over a plain WebSocket to the dev coordinator. */
 export function devBridge(url: string): ArkeBridge {
   let socket: WebSocket | null = null;
