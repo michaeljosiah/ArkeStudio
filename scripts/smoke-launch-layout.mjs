@@ -80,7 +80,7 @@ window.measureLaunch = () => {
   return { viewport: [innerWidth, innerHeight], className: document.querySelector(".fy-launch").className,
     active: document.activeElement?.tagName, art: bounds(".fy-launch__art"), mark: bounds(".fy-launch__mark"),
     hello: bounds(".fy-launch__hello"), ways: bounds(".fy-launch__ways"), setup: bounds(".fy-launch__setup"),
-    foot: bounds(".fy-launch__foot"), direction: getComputedStyle(document.querySelector(".fy-launch__ways") ?? document.querySelector(".fy-launch")).flexDirection,
+    foot: bounds(".fy-launch__foot"), dialog: bounds(".fy-pairask"), direction: getComputedStyle(document.querySelector(".fy-launch__ways") ?? document.querySelector(".fy-launch")).flexDirection,
     overflow: document.documentElement.scrollWidth > innerWidth,
     targets: [...document.querySelectorAll(".fy-launch button:not(:disabled), .fy-launch input")].filter(e => e.getBoundingClientRect().width).map(e => ({
       text: e.textContent || e.placeholder, height: Math.max(e.getBoundingClientRect().height, parseFloat(getComputedStyle(e, "::after").height) || 0)
@@ -170,23 +170,34 @@ async function electronMain() {
     await writeFile(join(__dirname, name + ".png"), screenshot);
   }
   await writeFile(join(__dirname, "measurements.json"), JSON.stringify(records, null, 2));
-  for (const [suffix, width, height] of [["a",1360,850],["b",984,1092],["c",390,844],["d",1024,640],["e",1360,850],["f",984,1092],
-    ["g1",390,844],["g2",390,844],["g3",390,844],["h",1360,850],["i1",390,844],["i2",390,844],["i3",390,844],["j",1360,850]]) {
+  for (const [suffix, width, height, name] of [
+    ["a",1360,850,"158a-desktop"], ["b",984,1092,"158b-fold7"], ["c",390,844,"158c-phone"],
+    ["d",1024,640,"158d-smallest-window"], ["e",1360,850,"158e-setup-desktop"], ["f",984,1092,"158f-setup-fold7"],
+    ["g1",390,844,"158g-connecting"], ["g2",390,844,"158g-offline"], ["g3",390,844,"158g-expired"],
+    ["h",1360,850,"158h-studio-failed"], ["i1",390,844,"158i-pair"], ["i2",390,844,"158i-typing"],
+    ["i3",390,844,"158i-pending"], ["j",1360,850,"158j-approval"],
+  ]) {
     window.setContentSize(width, height);
     await window.loadURL("https://michael-desktop.test/master-" + suffix + ".html");
     await window.webContents.executeJavaScript("document.fonts.ready.then(() => new Promise(resolve => setTimeout(resolve, 100)))");
     await writeFile(join(__dirname, "master-" + suffix + ".png"), (await window.webContents.capturePage()).toPNG());
-    const bounds = await window.webContents.executeJavaScript(`Object.fromEntries(["art","pane","wm","hello","ways","way","setup","once","foot"].map(c => { const e=document.querySelector("."+c);const b=e?.getBoundingClientRect();return [c, b && {x:b.x,y:b.y,width:b.width,height:b.height,font:getComputedStyle(e).font}]; }))`);
+    const bounds = await window.webContents.executeJavaScript(`Object.fromEntries(["art","pane","wm","hello","ways","way","setup","once","foot","dialog"].map(c => { const e=document.querySelector("."+c);const b=e?.getBoundingClientRect();return [c, b && {x:b.x,y:b.y,width:b.width,height:b.height,font:getComputedStyle(e).font}]; }))`);
     await writeFile(join(__dirname, "master-" + suffix + ".json"), JSON.stringify(bounds, null, 2));
-    const actual = records.find(record => record.name.startsWith("158" + suffix + "-"));
-    if (actual) {
-      // dvh gives fractional pixels where the canvas rounds the band to an integer.
-      for (const [implementation, reference] of [["art", "art"], ["mark", "wm"], ["ways", "ways"], ["setup", "setup"]]) {
-        if (!actual[implementation] || !bounds[reference]) continue;
-        for (const dimension of ["x", "y", "width", "height"]) {
-          assert.ok(Math.abs(actual[implementation][dimension] - bounds[reference][dimension]) <= 1,
-            suffix + " " + implementation + "." + dimension + ": " + actual[implementation][dimension] + " vs master " + bounds[reference][dimension]);
-        }
+    const actual = records.find(record => record.name === name);
+    assert.ok(actual, "missing implementation frame for master " + suffix + ": " + name);
+    // The typing master draws 300px of system keyboard below the app's visible viewport.
+    assert.deepEqual(actual.viewport, [width, suffix === "i2" ? height - 300 : height], name + " viewport");
+    const geometry = suffix === "j" ? [["dialog", "dialog"]] : [
+      ["mark", "wm"], [suffix === "e" || suffix === "f" ? "setup" : "ways", suffix === "e" || suffix === "f" ? "setup" : "ways"],
+      ...(suffix === "i2" ? [] : [["art", "art"]]),
+    ];
+    if (suffix === "i2") assert.equal(actual.art.height, 0, "the band gives way to typing");
+    // dvh gives fractional pixels where the canvas rounds the band to an integer.
+    for (const [implementation, reference] of geometry) {
+      assert.ok(actual[implementation] && bounds[reference], name + " missing " + implementation + "/" + reference);
+      for (const dimension of ["x", "y", "width", "height"]) {
+        assert.ok(Math.abs(actual[implementation][dimension] - bounds[reference][dimension]) <= 1,
+          suffix + " " + implementation + "." + dimension + ": " + actual[implementation][dimension] + " vs master " + bounds[reference][dimension]);
       }
     }
   }

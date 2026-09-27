@@ -193,7 +193,10 @@ Chromium at turn 158's desktop, minimum-window, phone and Fold7 sizes. It keeps 
 and layout measurements in the reported temporary directory, alongside frames extracted from
 the design master. Mobile safe-area inputs are simulated in the fixture CSS; device status
 bars, the home indicator and the canvas-only Loop mark are excluded from the comparison.
-Check the images as well as the overflow and touch-target assertions.
+Every master variant is explicitly mapped to an implementation frame, with geometry checked
+within one CSS pixel for fractional `dvh` rounding. The typing frame subtracts the master's
+drawn keyboard from the app viewport. Check the images as well as these geometry, overflow
+and touch-target assertions.
 
 After building, `node --import tsx apps/desktop/scripts/smoke-remote-access.mjs --tailscale`
 checks the served client over actual Tailscale TLS with disposable world data and profiles.
