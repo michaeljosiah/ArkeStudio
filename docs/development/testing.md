@@ -124,6 +124,9 @@ approval persistence, origin/host confinement, revocation, and preserving other 
 Duration coverage includes all four choices, legacy 90-day defaults, settings persistence while
 off and across restart, approval-time selection without rewriting existing devices, fixed cookie
 deadlines, renewable Never cookies, revocation, and failed writes without preference changes.
+Link-sharing tests cover native clipboard success/failure, host-owned address selection,
+and hiding the local QR/Copy link controls while hosting is stopped. The live smoke decodes
+the rendered QR pixels with an independent decoder and checks the actual native clipboard.
 They also check host-file command rejection over live sockets, approved-cookie promotion after
 restart, stale forwarding with damaged or missing settings and a damaged registry, port retention
 when cleanup fails, preservation of damaged records, and first launch without Tailscale.

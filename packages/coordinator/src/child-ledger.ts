@@ -95,7 +95,7 @@ export function windowsProcessPreamble(includeManagement = false): string {
 }
 
 /** One CIM query for the whole batch; name and creation time back the pid-reuse guards. */
-async function probeWin32(pids: number[]): Promise<Map<number, ProcessInfo>> {
+async function probeWin32(pids: number[], timeoutMs?: number): Promise<Map<number, ProcessInfo>> {
   const filter = pids.map((p) => `ProcessId=${p}`).join(" OR ");
   const script = [
     windowsProcessPreamble(),
@@ -107,6 +107,7 @@ async function probeWin32(pids: number[]): Promise<Map<number, ProcessInfo>> {
   const stdout = await runCollect(
     powershellPath(),
     ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
+    timeoutMs !== undefined ? { timeoutMs } : {},
   );
   const rows = JSON.parse(stdout.trim() === "" ? "[]" : stdout) as { p: number; n: string; s: number | null }[];
   return new Map(rows.map((r) => [r.p, { pid: r.p, image: r.n.toLowerCase(), startedAt: r.s ?? null }]));
@@ -189,11 +190,19 @@ export function runCollect(
   });
 }
 
-export const platformProbe: ProcessProbe = async (pids) => {
+export const platformProbe: ProcessProbe = (pids) => probeProcesses(pids);
+
+/**
+ * The probe with its own patience. Only the Windows query can be slow — PowerShell starting and
+ * a CIM answer — and the default suits the app. A caller with nothing to lose by waiting longer
+ * (a regression fixture recording the identity it will later kill by, on a loaded CI runner
+ * where that query has taken more than 30 seconds) can say so.
+ */
+export async function probeProcesses(pids: number[], opts: { timeoutMs?: number } = {}): Promise<Map<number, ProcessInfo>> {
   const valid = validPids(pids);
   if (valid.length === 0) return new Map();
-  return process.platform === "win32" ? probeWin32(valid) : probePosix(valid);
-};
+  return process.platform === "win32" ? probeWin32(valid, opts.timeoutMs) : probePosix(valid);
+}
 
 export interface DescendantInfo extends ProcessInfo {
   parentPid: number;
