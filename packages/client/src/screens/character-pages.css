@@ -202,7 +202,8 @@
   .fy-gendialog[data-character-dialog] .fy-gendialog__previews-empty { min-height: 130px; }
   .fy-gendialog[data-character-dialog] .fy-gendialog__previews-grid button:not(.fy-imgdl) { aspect-ratio: auto; padding: 6px 6px 10px; text-align: left; }
   .fy-gendialog[data-character-dialog] .fy-gendialog__previews-grid .fy-portrait { aspect-ratio: auto; height: auto; border-radius: 8px; object-fit: contain; }
-  .fy-gendialog[data-character-dialog="character-sheet"] .fy-gendialog__previews-grid .fy-portrait { aspect-ratio: 16 / 10; }
+  .fy-gendialog[data-character-dialog] .fy-gendialog__previews-grid .fy-portrait--fallback { aspect-ratio: 4 / 5; height: auto; border-radius: 8px; }
+  .fy-gendialog[data-character-dialog="character-sheet"] .fy-gendialog__previews-grid :is(.fy-portrait, .fy-portrait--fallback) { aspect-ratio: 16 / 10; }
   .fy-gendialog[data-character-dialog] .fy-gendialog__previews-grid .fy-gendialog__preview-index { display: none; }
   .fy-gendialog[data-character-dialog] .fy-gendialog__previews-grid .fy-gendialog__preview-name { display: block; position: static; margin: 8px 4px 0; padding: 0; background: none; color: var(--foreground); font: 500 var(--text-sm)/1.2 var(--font-sans); letter-spacing: 0; }
   .fy-gendialog[data-character-dialog] .fy-gendialog__actions { position: absolute; z-index: 1; left: 0; right: 0; bottom: 0; margin: 0; padding: 12px 20px calc(14px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border); background: var(--background); gap: 10px; }

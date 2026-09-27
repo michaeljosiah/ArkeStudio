@@ -54,6 +54,7 @@ window.mountCharacter = async (route = "kit", mode = "normal") => {
   kit.looks = ["Oilskin, storm light", "Hood down, dusk", "On the Vigil stair", "After the crossing", "Council coat"].map((prompt,i)=>({id:"look-"+i,file:"looks/look-"+i+".png",kind:"costume",prompt,acceptedAt:"2026-09-27T10:0"+(5-i)+":00Z"}));
   kit.designatedVoiceSample = {file:"voice-sample.wav",source:"voice-take",designatedAt:"2026-09-27T10:00:00Z"};
   world.referenceCandidates[sheet.id]=["references/maren-kest/candidates/photo-a.png","references/maren-kest/candidates/photo-b.png"];
+  if(mode === "missing") world.referenceCandidates[sheet.id]=["references/maren-kest/candidates/missing-candidate.png"];
   if(mode === "pending") world.referenceTakes = ["sheet","look"].map((kind,i)=>({id:"tk_01J8F00000000000000000000"+i,coversShots:[],kind,reference:{sheetId:sheet.id},provider:"openai",model:"gpt-image-2",provenance:{canonRevision:42,sheets:{[sheet.id]:4}},prompt:"A new "+kind,references:[],params:{},cost:{estimatedMicroUsd:40000,actualMicroUsd:40000},dispatchedAt:"2026-09-27T12:00:00Z",completedAt:"2026-09-27T12:01:00Z",media:kind+".png"}));
   const voices={ [sheet.id]: {extracted:[],ranked:["Harbour glass","Low tide","Brine and bell","Kokoro · af_sky"].map((label,i)=>({candidate:{provider:i===3?"kokoro":"elevenlabs",model:i===3?"kokoro-82m":"eleven_multilingual_v2",voiceId:i===0?sheet.voice.voiceId:"voice-"+i,label,attributes:["warm","measured"],local:i===3,canClone:false},matched:[],overlap:0})),previewLine:{text:"The verse, under the water.",source:"own-line"},cloudPreviewMicroUsd:30000,previewMicroUsdByVoice:{},notices:{}} };
   window.commands = [];
@@ -109,6 +110,7 @@ await access(chrome);
 const server=createServer(async (req,res) => {
   try {
     const path=decodeURIComponent(new URL(req.url,"http://localhost").pathname);
+    if(path.startsWith("/media/") && path.includes("missing-candidate")) {res.writeHead(404);res.end();return;}
     const file=path.startsWith("/media/") ? join(root,"design-system/assets",path.includes("sheet") || path.includes("compilation") ? "maren-sheet-pitchboard.png" : path.includes("look-0") ? "art-direction-cinematic.png" : path.includes("look-2") ? "art-direction-world.png" : "char-maren.png") : path.startsWith("/design/") ? join(root,"design-system",path.slice(8)) : join(dir,path === "/" ? "index.html" : path.slice(1));
     assert.ok([dir,join(root,"design-system")].some(base=>{const rel=relative(base,file);return !rel.startsWith("..") && !isAbsolute(rel);}));
     res.setHeader("Content-Type",file.endsWith(".css")?"text/css":file.endsWith(".js")?"text/javascript":file.endsWith(".html")?"text/html":"application/octet-stream"); res.end(await readFile(file));
@@ -173,6 +175,10 @@ try {
     }
     if(!baseline && width < 600) {
       if(!process.argv.includes("--pages-only")) {
+        await js('window.mountCharacter("kit","missing")');
+        await js('window.go(window.characterPath+"main-photo");window.settleCharacter()');
+        assert.equal(await js('(()=>{const e=document.querySelector(".fy-gendialog__previews-grid .fy-portrait--fallback");const b=e?.getBoundingClientRect();return !!b && Math.abs(b.width/b.height-0.8)<0.01})()'),true,"failed candidate retains its portrait frame");
+        await capture(name+"-photo-missing");
         await js('window.mountCharacter("voice")');
         await js('document.querySelector(".fy-voicehero__clear").click();window.settleCharacter()');
         assert.equal(await js('document.querySelector(".fy-voicehero__clear").disabled'),true);
