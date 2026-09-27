@@ -5,6 +5,8 @@ import { join } from "node:path";
 type ServeConfig = { TCP?: Record<string, { HTTPS?: boolean; TCPForward?: string; TerminateTLS?: string }>;
   Web?: Record<string, { Handlers?: Record<string, { Proxy?: string }> }>; AllowFunnel?: Record<string, boolean> };
 export type TailscaleRun = (args: string[]) => Promise<string>;
+/** The caller must retain its bound gateway until mapping cleanup succeeds. */
+export class ServeCleanupRequired extends Error {}
 const run: TailscaleRun = args => new Promise((resolve, reject) => {
   const windows = join(process.env.ProgramFiles ?? "C:/Program Files", "Tailscale", "tailscale.exe");
   const binary = process.platform === "win32" && existsSync(windows) ? windows : "tailscale";
@@ -48,7 +50,8 @@ export class TailscaleServe {
     } catch (error) {
       // A timed-out CLI may already have published. Roll back only a verified matching
       // mapping, so a failed setup does not strand port 443 or remove somebody else's site.
-      await this.disable(origin, port).catch(() => {});
+      try { await this.disable(origin, port); }
+      catch { throw new ServeCleanupRequired("Tailscale setup failed and its mapping could not be removed. Retry disabling remote access before quitting.", { cause: error }); }
       throw error;
     }
     return true;

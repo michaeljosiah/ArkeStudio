@@ -136,6 +136,11 @@ process capability, and revocation. Inspect the
 screenshots in its printed temporary directory. This host-local check does not replace actual
 phone/second-computer testing or an installed-app sign-in/reboot check; record those separately.
 
+After building, `node apps/desktop/scripts/smoke-background-startup.mjs` uses the sandboxed
+file page and built preload to verify hidden first paint, readiness fallback, host startup,
+and visible failure recovery. It exercises Windows and macOS login inputs on the current
+machine; it does not claim an actual macOS or OS sign-in test.
+
 ## Desktop appearance
 
 For appearance bootstrap or reload changes, run `node apps/desktop/scripts/smoke-theme.mjs`.

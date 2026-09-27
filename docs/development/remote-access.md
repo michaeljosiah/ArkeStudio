@@ -35,8 +35,10 @@ in Settings to stop its active connections and future access. The remote gateway
 HttpOnly, same-site cookie; the private process capability never reaches the browser.
 
 **Disable remote access** stops hosting, removes only its matching Serve mapping and turns off
-automatic startup. Ordinary Quit leaves the mapping ready for the next app start, with its
-upstream closed while Studio is stopped. The built desktop page keeps its existing loopback
+automatic startup. Ordinary Quit removes the mapping before releasing the local hosting port;
+the next app start recreates it at the same bookmarked address. If Tailscale cannot remove the
+mapping, Studio keeps the port reserved and reports that shutdown failed; restore Tailscale
+and retry Quit. The built desktop page keeps its existing loopback
 policy; only the copy served to the phone gets the remote same-origin policy.
 
 If the PC or Tailscale is offline, an already open page retries. A new tab may show the browser's

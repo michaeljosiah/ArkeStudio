@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { RemoteAccessCommandSchema, type RemoteAccessReply, type RemoteAccessStatus } from "@arke-studio/contracts";
 import { RemoteDevices, RemoteGateway, writeRemotePrivate } from "@arke-studio/coordinator";
-import { TailscaleServe } from "./tailscale-serve.js";
+import { ServeCleanupRequired, TailscaleServe } from "./tailscale-serve.js";
 
 const Config = z.object({ enabled: z.boolean(), startOnLogin: z.boolean(), origin: z.string().url().nullable() });
 type Settings = z.infer<typeof Config>;
@@ -14,6 +14,8 @@ export class DesktopRemoteAccess {
   private config: Settings = { enabled: false, startOnLogin: false, origin: null };
   private reason: string | null = null;
   private gateway: RemoteGateway | null = null;
+  private gatewayOrigin: string | null = null;
+  private running = false;
   private devices: RemoteDevices;
   private tail: Promise<unknown> = Promise.resolve();
   private closing = false;
@@ -47,24 +49,44 @@ export class DesktopRemoteAccess {
   private tailscale() { return this.options.tailscale ?? new TailscaleServe(); }
   private async save(config: Settings): Promise<void> { await writeRemotePrivate(this.path, config); this.config = config; }
   private async start(): Promise<void> {
-    if (this.gateway) return;
+    if (this.running) return;
+    if (this.gateway) await this.stopGateway();
     const origin = await this.tailscale().origin();
     if (this.config.origin && this.config.origin !== origin) throw new Error("The tailnet address changed. Disable remote access before setting up its new address.");
     const gateway = new RemoteGateway({ origin, clientDirectory: this.options.clientDirectory, devices: this.devices, session: this.options.session });
     let published = false;
     try {
+      // Also withdraw a matching mapping left by an interrupted older host before trying
+      // to claim its port; a failed bind must not leave HTTPS pointing at that occupant.
+      if (this.config.enabled) await this.tailscale().disable(origin, port);
       await gateway.start(port);
-      published = await this.tailscale().enable(origin, port, this.config.enabled && this.config.origin === origin);
+      await this.tailscale().enable(origin, port, this.config.enabled && this.config.origin === origin);
+      published = true;
       await this.save({ ...this.config, enabled: true, origin });
       this.gateway = gateway;
+      this.gatewayOrigin = origin;
+      this.running = true;
     } catch (error) {
-      await gateway.stop();
-      if (published) await this.tailscale().disable(origin, port);
+      if (published || error instanceof ServeCleanupRequired) {
+        this.gateway = gateway;
+        this.gatewayOrigin = origin;
+        await this.stopGateway();
+      } else await gateway.stop();
       throw error;
     }
   }
+  private async stopGateway(): Promise<void> {
+    const origin = this.gatewayOrigin ?? (this.config.enabled ? this.config.origin : null);
+    // Withdraw HTTPS before releasing the port: a replacement local listener must never
+    // receive a paired browser's cookie. On cleanup failure retain the bound gateway and
+    // fail shutdown, so the owner can retry without creating that impersonation window.
+    if (origin) await this.tailscale().disable(origin, port);
+    await this.gateway?.stop();
+    this.gateway = null; this.gatewayOrigin = null; this.running = false;
+  }
   status(): RemoteAccessStatus {
-    return { ...this.config, running: !!this.gateway, startupSupported: this.options.startupSupported,
+    return { ...this.config, enabled: this.config.enabled || this.gatewayOrigin !== null,
+      running: this.running, startupSupported: this.options.startupSupported,
       url: this.config.origin, reason: this.reason, devices: this.devices.list(), pending: this.devices.pending() };
   }
   command(input: unknown): Promise<RemoteAccessReply> {
@@ -78,19 +100,18 @@ export class DesktopRemoteAccess {
         switch (command.kind) {
           case "enable": await this.start(); break;
           case "disable":
-            await this.gateway?.stop(); this.gateway = null;
-            if (this.config.origin && this.config.enabled) await this.tailscale().disable(this.config.origin, port);
-            this.options.setStartOnLogin(false);
+            await this.stopGateway();
+            if (this.options.startupSupported) this.options.setStartOnLogin(false);
             await this.devices.stop();
             await this.save({ enabled: false, startOnLogin: false, origin: null }); break;
           case "startup":
-            if (!this.options.startupSupported || !this.gateway) throw new Error("Enable remote access in the installed desktop app first.");
+            if (!this.options.startupSupported || !this.running) throw new Error("Enable remote access in the installed desktop app first.");
             this.options.setStartOnLogin(command.enabled);
             try { await this.save({ ...this.config, startOnLogin: command.enabled }); }
             catch (error) { this.options.setStartOnLogin(this.config.startOnLogin); throw error; }
             break;
           case "pair":
-            if (!this.gateway) throw new Error("Enable remote access first.");
+            if (!this.running) throw new Error("Enable remote access first.");
             pairing = this.devices.createCode(); break;
           case "approve": await this.devices.approve(command.id); break;
           case "reject": this.devices.reject(command.id); break;
@@ -105,8 +126,7 @@ export class DesktopRemoteAccess {
   async stop(): Promise<void> {
     this.closing = true;
     await this.tail;
-    await this.gateway?.stop(); this.gateway = null;
+    await this.stopGateway();
     await this.devices.stop();
-    // Keep the owned Serve mapping for the next desktop start; its upstream stays closed.
   }
 }

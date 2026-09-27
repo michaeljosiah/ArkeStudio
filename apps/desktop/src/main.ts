@@ -74,7 +74,7 @@ import {
   type SidecarHealth,
 } from "@arke-studio/voice";
 import { BackgroundNotificationController } from "./background-notifications.js";
-import { launchDesktop, StartupController, type StartupState } from "./startup.js";
+import { isBackgroundLogin, launchDesktop, StartupController, StartupWindowPresentation, type StartupState } from "./startup.js";
 import { boundaryFrameOptions, takePosterOptions, takeQcOptions } from "./take-qc.js";
 import { createExportFfmpegRunner } from "./export-ffmpeg.js";
 import { saveMediaHandler } from "./save-media.js";
@@ -214,6 +214,8 @@ let resolvedTheme: ResolvedTheme = "light";
 let rendererThemeReady = false;
 let windowReady = false;
 let windowShowFallback: ReturnType<typeof setTimeout> | null = null;
+let backgroundLogin = false;
+let windowPresentation: StartupWindowPresentation | null = null;
 let startupController: StartupController | null = null;
 let startupProvider: FsWorldProvider | null = null;
 let providerTransport: CloudProviderTransport | null = null;
@@ -233,9 +235,11 @@ function showWindowWhenThemed(): void {
   if (!windowReady || !rendererThemeReady || !window || window.isDestroyed()) return;
   if (windowShowFallback) clearTimeout(windowShowFallback);
   windowShowFallback = null;
-  traceDesktop("window.shown", { reason: "themed" });
-  window.show();
+  traceDesktop(backgroundLogin ? "window.ready-in-background" : "window.shown", { reason: "themed" });
+  windowPresentation?.present();
 }
+
+function revealWindow(): void { backgroundLogin = false; windowPresentation?.reveal(); }
 
 /*
  * The launch screen is always the dark plate, whatever the appearance preference — so the
@@ -289,7 +293,7 @@ const backgroundNotifications = new BackgroundNotificationController({
           isMinimized: () => window?.isMinimized() ?? false,
           isVisible: () => window?.isVisible() ?? false,
           restore: () => window?.restore(),
-          show: () => window?.show(),
+          show: () => revealWindow(),
           focus: () => window?.focus(),
           activateActivity: activateActivity,
         }
@@ -322,6 +326,7 @@ function publishStartup(state: StartupState): void {
         : {},
   );
   if (window && !window.isDestroyed()) window.webContents.send("arke:startup-state", startupPayload(state));
+  if (state.status === "failed") revealWindow();
 }
 
 function registerHostIpc(): void {
@@ -543,6 +548,9 @@ async function createWindow(): Promise<void> {
       ],
     },
   });
+  windowPresentation = new StartupWindowPresentation(backgroundLogin, () => {
+    if (window && !window.isDestroyed()) window.show();
+  });
   const rendererUrl = process.env.ARKE_DEV_SERVER_URL ?? pathToFileURL(clientIndex).href;
   window.webContents.session.setPermissionCheckHandler((contents, permission, _origin, details) => microphoneAllowed({
     permission, sameWebContents: contents === window?.webContents, isMainFrame: details.isMainFrame,
@@ -561,14 +569,14 @@ async function createWindow(): Promise<void> {
   traceDesktop("window.created", { themePreference, resolvedTheme });
   windowShowFallback = setTimeout(() => {
     if (!window || window.isDestroyed()) return;
-    traceDesktop("window.shown", {
+    traceDesktop(backgroundLogin ? "window.ready-in-background" : "window.shown", {
       reason: "readiness-timeout",
       windowReady,
       rendererThemeReady,
       loading: window.webContents.isLoading(),
       visible: window.isVisible(),
     });
-    window.show();
+    windowPresentation?.present();
   }, 5_000);
   window.once("ready-to-show", () => {
     windowReady = true;
@@ -632,7 +640,7 @@ async function createWindow(): Promise<void> {
   const devServer = process.env.ARKE_DEV_SERVER_URL;
   if (devServer) await window.loadURL(devServer);
   else await window.loadFile(clientIndex);
-  if (!window.isVisible()) await new Promise<void>((resolve) => window?.once("show", resolve));
+  await windowPresentation.ready;
 }
 
 async function initialize(): Promise<{ port: number }> {
@@ -1519,11 +1527,12 @@ async function initialize(): Promise<{ port: number }> {
   transportSession = { port, token: transportToken };
   remoteAccess = new DesktopRemoteAccess({ root: appRoot, clientDirectory: dirname(clientIndex), session: transportSession,
     startupSupported: app.isPackaged && (process.platform === "win32" || process.platform === "darwin"),
-    setStartOnLogin: enabled => app.setLoginItemSettings({ openAtLogin: enabled, args: ["--remote-background"] }),
+    setStartOnLogin: enabled => app.setLoginItemSettings({ openAtLogin: enabled,
+      ...(process.platform === "win32" ? { args: ["--remote-background"] } : {}) }),
   });
   await remoteAccess.initialize();
   updateRemoteTray();
-  if (process.argv.includes("--remote-background") && remoteAccess.status().running) window?.hide();
+  if (backgroundLogin && !remoteAccess.status().running) revealWindow();
   void updateController.initialize();
   backgroundNotifications.arm(coordinator.getState());
   applyHostTheme(coordinator.getState().app.appearance.theme, false);
@@ -1569,10 +1578,10 @@ function updateRemoteTray(): void {
   if (!remoteTray) {
     remoteTray = new Tray(appIcon);
     remoteTray.setToolTip("Arke Studio — remote access");
-    remoteTray.on("double-click", () => { window?.show(); window?.focus(); });
+    remoteTray.on("double-click", () => { revealWindow(); window?.focus(); });
   }
   remoteTray.setContextMenu(Menu.buildFromTemplate([
-    { label: "Open Arke Studio", click: () => { window?.show(); window?.focus(); } },
+    { label: "Open Arke Studio", click: () => { revealWindow(); window?.focus(); } },
     { label: remoteAccess.status().running ? "Remote access is running" : "Remote access needs attention", enabled: false },
     { label: "Quit Arke Studio", click: () => app.quit() },
   ]));
@@ -1585,12 +1594,14 @@ if (!gotLock) {
   app.on("second-instance", () => {
     if (window) {
       if (window.isMinimized()) window.restore();
-      window.show();
+      revealWindow();
       window.focus();
     }
   });
 
   app.whenReady().then(async () => {
+    backgroundLogin = isBackgroundLogin(process.platform, process.argv,
+      process.platform === "darwin" ? app.getLoginItemSettings() : undefined);
     if (process.platform === "win32") app.setAppUserModelId("studio.arke.app");
     registerHostIpc();
     startupController = new StartupController({

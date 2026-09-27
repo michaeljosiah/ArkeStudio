@@ -49,7 +49,21 @@ export class StartupController {
   }
 }
 
-/** Window creation resolves on first show, so startup work cannot compete with first paint. */
+export function isBackgroundLogin(platform: string, args: readonly string[], login?: { wasOpenedAtLogin: boolean }): boolean {
+  return platform === "win32" ? args.includes("--remote-background") : platform === "darwin" && login?.wasOpenedAtLogin === true;
+}
+
+/** A login launch reaches first paint without ever showing. Explicit Open and startup
+ * failures reveal it; neither themed readiness nor the fallback timer may do so first. */
+export class StartupWindowPresentation {
+  private finish!: () => void;
+  readonly ready = new Promise<void>(resolve => { this.finish = resolve; });
+  constructor(private background: boolean, private readonly show: () => void) {}
+  present(): void { if (!this.background) this.show(); this.finish(); }
+  reveal(): void { this.background = false; this.present(); }
+}
+
+/** Window creation resolves at first paint (first show for ordinary foreground launches). */
 export async function launchDesktop(
   createWindow: () => Promise<void>,
   controller: StartupController,

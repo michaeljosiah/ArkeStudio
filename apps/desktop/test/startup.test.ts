@@ -1,8 +1,43 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { launchDesktop, StartupController, type StartupState } from "../src/startup.js";
+import { isBackgroundLogin, launchDesktop, StartupController, StartupWindowPresentation, type StartupState } from "../src/startup.js";
 
 describe("desktop startup", () => {
+  it("detects Windows login arguments and macOS login state without hiding ordinary launches", () => {
+    assert.equal(isBackgroundLogin("win32", ["--remote-background"]), true);
+    assert.equal(isBackgroundLogin("darwin", [], { wasOpenedAtLogin: true }), true);
+    assert.equal(isBackgroundLogin("win32", [], { wasOpenedAtLogin: true }), false);
+    assert.equal(isBackgroundLogin("darwin", ["--remote-background"], { wasOpenedAtLogin: false }), false);
+    assert.equal(isBackgroundLogin("linux", ["--remote-background"]), false);
+  });
+  it("starts the host after hidden first paint without either readiness path showing the window", async () => {
+    let shown = 0, initialized = false;
+    const presentation = new StartupWindowPresentation(true, () => { shown++; });
+    const controller = new StartupController({
+      initialize: async () => { initialized = true; return { port: 43122 }; },
+      cleanup: async () => {}, publish: () => {}, report: error => assert.fail(String(error)),
+    });
+    const launching = launchDesktop(() => presentation.ready, controller);
+    assert.equal(initialized, false);
+    presentation.present();
+    await launching;
+    assert.equal(initialized, true);
+    presentation.present();
+    assert.equal(shown, 0, "the themed and fallback readiness paths both keep login launches hidden");
+    presentation.reveal();
+    assert.equal(shown, 1, "an explicit Open can reveal the window");
+  });
+  it("reveals a failed background launch so the owner can recover", async () => {
+    let shown = 0;
+    const presentation = new StartupWindowPresentation(true, () => { shown++; });
+    presentation.present();
+    const controller = new StartupController({
+      initialize: async () => { throw new Error("startup failed"); }, cleanup: async () => {},
+      publish: state => { if (state.status === "failed") presentation.reveal(); }, report: () => {},
+    });
+    await controller.run();
+    assert.equal(shown, 1);
+  });
   it("does not initialize the core until the launch window is shown", async () => {
     let show!: () => void;
     let initialized = false;

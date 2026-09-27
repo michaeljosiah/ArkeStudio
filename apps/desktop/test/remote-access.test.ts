@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createServer } from "node:net";
 import { it } from "node:test";
 import { DesktopRemoteAccess } from "../src/remote-access.js";
-import { TailscaleServe, type TailscaleRun } from "../src/tailscale-serve.js";
+import { ServeCleanupRequired, TailscaleServe, type TailscaleRun } from "../src/tailscale-serve.js";
 
 const origin = "https://studio.example.ts.net";
 function tailscale() {
@@ -66,8 +67,11 @@ it("desktop hosting persists opt-in, restarts on the same coordinator, and disab
     assert.deepEqual(login, [true]);
     assert.ok((await host.command({ kind: "pair" })).pairing?.code);
     await host.stop(); assert.equal(host.status().running, false);
+    assert.ok(fake.commands.some(args => args.includes("off")), "Quit withdraws the HTTPS mapping");
+    const publications = fake.commands.filter(args => args.includes("--bg")).length;
     host = new DesktopRemoteAccess(options); await host.initialize();
     assert.equal(host.status().running, true); assert.equal(host.status().startOnLogin, true);
+    assert.equal(fake.commands.filter(args => args.includes("--bg")).length, publications + 1, "restart recreates the mapping");
     assert.deepEqual(host.status().pending, []);
     await host.command({ kind: "disable" });
     assert.equal(host.status().running, false); assert.equal(host.status().enabled, false);
@@ -75,6 +79,60 @@ it("desktop hosting persists opt-in, restarts on the same coordinator, and disab
     assert.equal(JSON.parse(await readFile(join(root, "remote/settings.json"), "utf8")).enabled, false);
     assert.ok(fake.commands.some(args => args.includes("off")));
   } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
+});
+it("Quit keeps its port bound if mapping removal fails, then permits a safe retry", async () => {
+  const root = await mkdtemp(join(tmpdir(), "arke-remote-stop-"));
+  await writeFile(join(root, "index.html"), "<head></head>");
+  const fake = tailscale();
+  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+    startupSupported: false, setStartOnLogin: () => {}, tailscale: fake.client });
+  const probePort = () => new Promise<void>((resolve, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(8793, "127.0.0.1", () => server.close(() => resolve()));
+  });
+  const disable = fake.client.disable.bind(fake.client);
+  let failRemoval = true;
+  fake.client.disable = async (...args) => {
+    if (host.status().running) await assert.rejects(probePort(), { code: "EADDRINUSE" }, "remove mapping before releasing the port");
+    if (failRemoval) throw new Error("Serve could not remove the mapping");
+    await disable(...args);
+  };
+  try {
+    await host.initialize(); await host.command({ kind: "enable" });
+    await assert.rejects(host.stop(), /could not remove/);
+    await assert.rejects(probePort(), { code: "EADDRINUSE" }, "failed shutdown cannot expose the cookie to a replacement listener");
+    failRemoval = false;
+    await host.stop();
+    await probePort();
+    assert.equal(host.status().running, false);
+  } finally { failRemoval = false; await host.stop(); await rm(root, { recursive: true, force: true }); }
+});
+it("an uncertain failed publication retains its listener until the owner can disable it", async () => {
+  const root = await mkdtemp(join(tmpdir(), "arke-remote-publish-"));
+  await writeFile(join(root, "index.html"), "<head></head>");
+  const fake = tailscale();
+  fake.client.enable = async () => { throw new ServeCleanupRequired("publication could not be rolled back"); };
+  let failRemoval = true;
+  fake.client.disable = async () => { if (failRemoval) throw new Error("mapping cleanup unavailable"); };
+  const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+    startupSupported: false, setStartOnLogin: () => {}, tailscale: fake.client });
+  const replacement = createServer();
+  try {
+    await host.initialize();
+    const reply = await host.command({ kind: "enable" });
+    assert.equal(reply.status.running, false);
+    assert.equal(reply.status.enabled, true, "show the Disable control while cleanup is outstanding");
+    await assert.rejects(new Promise<void>((resolve, reject) => {
+      replacement.once("error", reject); replacement.listen(8793, "127.0.0.1", resolve);
+    }), { code: "EADDRINUSE" });
+    failRemoval = false;
+    assert.equal((await host.command({ kind: "disable" })).status.enabled, false);
+  } finally {
+    failRemoval = false;
+    if (replacement.listening) await new Promise<void>(resolve => replacement.close(() => resolve()));
+    await host.stop(); await rm(root, { recursive: true, force: true });
+  }
 });
 it("a damaged device registry cannot be overwritten by enabling or pairing", async () => {
   const root = await mkdtemp(join(tmpdir(), "arke-remote-corrupt-"));
