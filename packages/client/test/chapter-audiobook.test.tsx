@@ -783,6 +783,35 @@ describe("the Audiobook view (turn 146)", () => {
     assert.deepEqual({ speaker: note.speaker, note: note.note }, { speaker: "maren-kest", note: "flat, far off" });
   });
 
+  it("shows a prepared multipart token price and sends consent only on the second press", async () => {
+    const state = voiced(inkbound("performed"));
+    const reader = { provider: "elevenlabs", model: "eleven-v3", voiceId: "test", label: "Test" };
+    state.world = { ...state.world!, productions: state.world!.productions.map(p => p.meta.id === "inkbound" ? { ...p, audiobook: { schemaVersion: 1, reading: "performed", narrator: reader } } : p) };
+    state.app.manifest = { ...state.app.manifest!, models: state.app.manifest!.models.map(model => model.id !== reader.model ? model : {
+      ...model, pricing: { kind: "perToken", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000,
+        speech: { tier: "standard", maxInputTokens: 8192, maxOutputTokens: 16384, audioTokensPerSecond: 25, rates: [
+          { version: "intro", effectiveFrom: "2026-09-01T00:00:00.000Z", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000 },
+        ] } },
+    }) };
+    const m = await mount(state);
+    await answerOpen(m, { voices: CAST });
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...reader, attributes: [], local: false, canClone: false, usedBy: [] }] }));
+    await act(async () => q(m, '[data-testid="performed-speaker"]')!.click());
+    const hear = () => q(m, '[data-testid="performed-hear"]')!;
+    assert.match(hear().textContent!, /get price/);
+    await act(async () => hear().click());
+    const first = m.sent.findLast(message => message.kind === "hear-audiobook-line") as Extract<ClientMessage, { kind: "hear-audiobook-line" }>;
+    assert.equal(first.quoteToken, undefined);
+    await act(async () => __applyEventForTest({ type: "audiobook.heard", at: AT, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", requestId: first.requestId,
+      quote: { token: "prepared-three-parts", authorisedMicroUsd: 454656, parts: 3 } }));
+    assert.match(hear().textContent!, /up to \$0\.45.*3 parts/);
+    assert.equal(m.sent.filter(message => message.kind === "hear-audiobook-line").length, 1, "receiving a quote does not authorise a call");
+    await act(async () => hear().click());
+    const confirmed = m.sent.findLast(message => message.kind === "hear-audiobook-line") as Extract<ClientMessage, { kind: "hear-audiobook-line" }>;
+    assert.equal(confirmed.quoteToken, "prepared-three-parts");
+    assert.equal(confirmed.block, first.block);
+  });
+
   it("a direction written for earlier words shows carried to the words now, with what could not be carried counted (SPEC-047 R-43)", async () => {
     const m = await mount(voiced(inkbound()));
     const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." };

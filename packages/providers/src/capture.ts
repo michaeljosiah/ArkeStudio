@@ -123,10 +123,13 @@ async function requestBody(body: RequestInit["body"]): Promise<unknown> {
 function summarizeMedia(value: unknown, key = ""): unknown {
   if (Array.isArray(value)) return value.slice(0, 100).map((item) => summarizeMedia(item, key));
   if (value !== null && typeof value === "object") {
+    const media = value as Record<string, unknown>;
+    const mediaKind = typeof media.type === "string" && ["audio", "image", "video"].includes(media.type)
+      ? media.type : typeof media.mime_type === "string" ? media.mime_type.split("/")[0] : undefined;
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
         .slice(0, 100)
-        .map(([name, item]) => [name, summarizeMedia(item, name)]),
+        .map(([name, item]) => [name, summarizeMedia(item, name === "data" && mediaKind ? `${mediaKind}_base64` : name)]),
     );
   }
   if (typeof value === "string") {

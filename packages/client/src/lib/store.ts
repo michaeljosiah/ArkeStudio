@@ -130,7 +130,7 @@ export type NarratorQuote =
   | { state: "refused"; refused: string }
   | { state: "done"; stale: number; held: number; directed: number; estimatedMicroUsd: number; kept: number };
 
-export type HeardLine = { state: "working" } | { state: "done"; file: string } | { state: "refused"; refused: string };
+export type HeardLine = { state: "working" } | { state: "done"; file: string } | { state: "priced"; token: string; authorisedMicroUsd: number; parts: number } | { state: "refused"; refused: string };
 
 /** A script out, or returned files matched and checked, for a recorded speaker (design turn 155d, SPEC-047 R-39). */
 export interface SpeakerLinesState {
@@ -524,6 +524,7 @@ export interface VoiceCandidatesState {
   previewLine: { text: string; source: "own-line" | "drafted" | "stock" };
   cloudPreviewMicroUsd: number | null;
   previewMicroUsdByVoice: Record<string, number>;
+  previewQuoteByVoice?: Record<string, string>;
   /** What a first read through a reader adds, by target key (SPEC-046 R-14): said on the row before the preview. */
   notices: Record<string, string>;
 }
@@ -1879,7 +1880,7 @@ function handleFrame(json: string): void {
       }
     } else if (event.type === "audiobook.heard") {
       if (heardLines[event.requestId] !== undefined) {
-        heardLines = { ...heardLines, [event.requestId]: event.file !== undefined ? { state: "done", file: event.file } : { state: "refused", refused: event.refused ?? "could not hear it" } };
+        heardLines = { ...heardLines, [event.requestId]: event.file !== undefined ? { state: "done", file: event.file } : event.quote !== undefined ? { state: "priced", ...event.quote } : { state: "refused", refused: event.refused ?? "could not hear it" } };
       }
     } else if (event.type === "audiobook.lines-kept") {
       const held = speakerLines[event.requestId];
@@ -2086,6 +2087,7 @@ function handleFrame(json: string): void {
           previewLine: event.previewLine,
           cloudPreviewMicroUsd: event.cloudPreviewMicroUsd,
           previewMicroUsdByVoice: event.previewMicroUsdByVoice,
+          previewQuoteByVoice: event.previewQuoteByVoice,
           notices: event.notices,
         },
       };
@@ -3801,6 +3803,7 @@ export function requestVoiceCatalogue(worldId?: string): void {
  * their sheet at dispatch, so a retake keeps it by construction.
  */
 export function requestVoiceLine(input: {
+  confirmedSpeechMicroUsd?: number;
   worldId: string;
   productionId: string;
   shotId: string;
@@ -3811,6 +3814,7 @@ export function requestVoiceLine(input: {
   const requestId = queueRequest("voice-line");
   send({
     kind: "voice-line",
+    ...(input.confirmedSpeechMicroUsd !== undefined ? { confirmedSpeechMicroUsd: input.confirmedSpeechMicroUsd } : {}),
     requestId,
     worldId: input.worldId,
     productionId: input.productionId,
@@ -3839,8 +3843,10 @@ export function requestVoicePreview(
   voiceUploadConfirmedFor?: string,
 ): string {
   const requestId = queueRequest("voice-preview");
+  const quoteToken = current.voiceCandidates[sheetId]?.previewQuoteByVoice?.[voiceTargetKey({ provider, model, voiceId })];
   send({
     kind: "voice-preview",
+    ...(quoteToken !== undefined ? { quoteToken } : {}),
     worldId,
     sheetId,
     provider,
@@ -4871,9 +4877,9 @@ export function quoteAudiobookNarrator(worldId: string, productionId: string, vo
 }
 
 /** A block heard as it would be read, in the narrator's voice or the one given (R-45, R-46). */
-export function hearAudiobookLine(worldId: string, productionId: string, chapterFile: string, block: string, voice?: AudiobookReader): string | null {
+export function hearAudiobookLine(worldId: string, productionId: string, chapterFile: string, block: string, voice?: AudiobookReader, quoteToken?: string): string | null {
   const requestId = ulid();
-  if (!send({ kind: "hear-audiobook-line", worldId, productionId, requestId, chapterFile, block, ...(voice !== undefined ? { voice } : {}) })) return null;
+  if (!send({ kind: "hear-audiobook-line", worldId, productionId, requestId, chapterFile, block, ...(voice !== undefined ? { voice } : {}), ...(quoteToken !== undefined ? { quoteToken } : {}) })) return null;
   emitChange({ ...current, heardLines: { ...current.heardLines, [requestId]: { state: "working" } } });
   return requestId;
 }
@@ -5927,10 +5933,12 @@ export function sendBenchDispatch(
   sessionId: string,
   composer: Extract<ClientMessage, { kind: "bench-dispatch" }>["composer"],
   voiceUploadConfirmedFor?: string,
+  confirmedSpeechMicroUsd?: number,
 ): string {
   const requestId = queueRequest("bench-dispatch");
   send({
     kind: "bench-dispatch",
+    ...(confirmedSpeechMicroUsd !== undefined ? { confirmedSpeechMicroUsd } : {}),
     worldId,
     sessionId,
     requestId,

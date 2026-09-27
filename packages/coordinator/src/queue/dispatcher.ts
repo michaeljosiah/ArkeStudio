@@ -2,6 +2,12 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, extname, join } from "node:path";
 import {
   canDeleteJob,
+  quoteSpeech,
+  speechQuoteIsCurrent,
+  speechSettlement,
+  SpeechUsageSchema,
+  type SpeechUsage,
+  type ManifestModel,
   credentialKindOf,
   formatMicroUsd,
   PROVIDERS,
@@ -97,7 +103,7 @@ export interface DispatchClient {
       recipe?: RecipeIdentity;
     },
     context?: { jobId?: string; attempt?: number; model?: string },
-  ): Promise<{ remoteId: string; artifacts?: DispatchArtifact[] }>;
+  ): Promise<{ remoteId: string; artifacts?: DispatchArtifact[]; speechUsage?: SpeechUsage; costMicroUsd?: number; error?: string }>;
   poll(
     key: string,
     remoteId: string,
@@ -105,6 +111,7 @@ export interface DispatchClient {
   ): Promise<{
     state: "queued" | "running" | "succeeded" | "failed" | "cancelled";
     costMicroUsd?: number;
+    speechUsage?: SpeechUsage;
     error?: string;
     /** What the engine is counting, where it counts anything (SPEC-021 D16). */
     step?: { stage: string; done: number; total: number };
@@ -147,6 +154,8 @@ export interface EnqueueInput {
 }
 
 export interface JobQueueOptions {
+  /** Resolve qualified speech pricing at admission and immediately before paid I/O. */
+  speechModel?: (provider: string, model: string) => ManifestModel | undefined;
   /** Recheck host authorization after preparation and before the durable submission boundary. */
   beforeSubmit?: (job: Job) => Promise<void>;
   /** The host owns durability; journalPath still locates disposable inline-artifact staging. */
@@ -338,6 +347,8 @@ function landedName(job: Job, artifact: DispatchArtifact, index: number): string
 export class JobQueue {
   private readonly journal: JobStateStore;
   private readonly jobs = new Map<string, Job>();
+  private readonly usageWrites = new Map<string, Promise<boolean>>();
+  private readonly acceptedSubmissions = new Map<string, Job>();
   private readonly lanes = new Map<string, Lane>();
   private readonly clock: () => string;
   private readonly rng: () => number;
@@ -437,6 +448,22 @@ export class JobQueue {
     this.jobs.set(job.id, job);
     this.opts.emit({ at: this.clock(), type: "job.updated", job });
     return true;
+  }
+
+  /** Cancellation must retain a response whose usage is already being made durable. */
+  private async persistUsage(job: Job): Promise<void> {
+    const pending = this.transition(job);
+    this.usageWrites.set(job.id, pending);
+    try { await pending; }
+    finally { if (this.usageWrites.get(job.id) === pending) this.usageWrites.delete(job.id); }
+  }
+
+  private withAcceptedSpeech(job: Job): Job {
+    const accepted = this.acceptedSubmissions.get(job.id);
+    if (accepted?.attempt !== job.attempt) return job;
+    return { ...job, providerJobId: accepted.providerJobId,
+      speechUsage: accepted.speechUsage ?? job.speechUsage,
+      providerCostMicroUsd: accepted.providerCostMicroUsd ?? job.providerCostMicroUsd };
   }
 
   /**
@@ -585,6 +612,12 @@ export class JobQueue {
     // never mint and return an id after that boundary without a durable journal row behind it.
     this.requireAccepting();
     const now = this.clock();
+    const model = input.capability === "voice-tts" ? this.opts.speechModel?.(input.provider, input.model) : undefined;
+    const speechQuote = model?.pricing.kind === "perToken"
+      ? quoteSpeech(model, String(input.params.text ?? ""), { at: now }) : undefined;
+    if (speechQuote && speechQuote.authorisedMicroUsd > input.estimatedMicroUsd) {
+      throw new Error("Speech pricing changed. Review the new quote before reading.");
+    }
     const job: Job = {
       id: `jb_${["performance-conversion", "performance-generation"].includes(input.target.kind) ? UlidSchema.parse(input.idempotencyKey) : ulid()}`,
       idempotencyKey: input.idempotencyKey ?? ulid(), // persisted before submission (R-2)
@@ -596,6 +629,7 @@ export class JobQueue {
       model: input.model,
       params: durableParams,
       estimatedMicroUsd: input.estimatedMicroUsd,
+      ...(speechQuote ? { speechQuote } : {}),
       // Identity frozen before the journal line exists (SPEC-021 §2.11): what this job IS can
       // never depend on what the catalogue or Settings hold by the time it runs.
       ...(input.recipe !== undefined ? { recipe: input.recipe } : {}),
@@ -1041,7 +1075,19 @@ export class JobQueue {
 
     if (this.disposed || !this.stillQueued(job) || this.opts.runtimeReady?.(job) === false) return;
 
-    try { await this.opts.beforeSubmit?.(job); }
+    try {
+      await this.opts.beforeSubmit?.(job);
+      const pricedModel = job.capability === "voice-tts" ? this.opts.speechModel?.(job.provider, job.model) : undefined;
+      if (pricedModel?.pricing.kind === "perToken" && !job.speechQuote) throw new Error("Speech needs a fresh token quote before reading.");
+      if (job.speechQuote) {
+        const model = this.opts.speechModel?.(job.provider, job.model);
+        if (!model || !speechQuoteIsCurrent(job.speechQuote, this.clock())) throw new Error("Speech quote expired. Review the new price before reading.");
+        const current = quoteSpeech(model, String(job.params.text ?? ""), { at: this.clock() });
+        if (current.rateVersion !== job.speechQuote.rateVersion || current.authorisedMicroUsd > job.speechQuote.authorisedMicroUsd) {
+          throw new Error("Speech pricing changed. Review the new quote before reading.");
+        }
+      }
+    }
     catch (error) {
       if (this.stillQueued(job)) await this.terminalize(job, "failed", error instanceof Error ? error.message : "Dispatch authorization failed.");
       return;
@@ -1054,6 +1100,7 @@ export class JobQueue {
       status: "submitting",
       attempt: job.attempt + 1,
       submissionRejected: undefined,
+      providerResultKind: undefined,
       updatedAt: this.clock(),
     };
     await this.transition(submitting);
@@ -1100,19 +1147,40 @@ export class JobQueue {
       // belongs to the retired process; never let its late response resurrect the old run over
       // the durable queued row for the replacement process.
       if (!this.stillSubmitting(submitting)) return;
+      const usage = SpeechUsageSchema.safeParse(accepted.speechUsage);
+      const reported = typeof accepted.costMicroUsd === "number" && Number.isFinite(accepted.costMicroUsd) && accepted.costMicroUsd >= 0
+        && Number.isSafeInteger(Math.round(accepted.costMicroUsd)) ? Math.round(accepted.costMicroUsd) : undefined;
+      const completedSubmission: Job = { ...submitting, providerJobId: accepted.remoteId,
+        providerResultKind: accepted.artifacts !== undefined ? "inline" : "remote",
+        ...(usage.success ? { speechUsage: usage.data } : {}),
+        ...(client.declarations.reportsCost && reported !== undefined ? { providerCostMicroUsd: reported } : {}) };
+      // Capture the accepted facts before cancellation can discard the response. Cancellation
+      // owns the terminal row and merges these facts without reviving the job.
+      this.acceptedSubmissions.set(job.id, completedSubmission);
+      if (this.cancelling.has(job.id)) {
+        await client.cancel(key, accepted.remoteId, { jobId: job.id, attempt: submitting.attempt, model: job.model }).catch(() => {});
+        return;
+      }
+      // Usage must survive artifact landing failure and restart, just as the audio does.
+      if (usage.success || completedSubmission.providerCostMicroUsd !== undefined || completedSubmission.providerResultKind === "inline") await this.persistUsage(completedSubmission);
+      if (this.disposed || this.cancelling.has(job.id) || !this.stillSubmitting(completedSubmission)) return;
+      if (accepted.error !== undefined) {
+        await this.terminalize(completedSubmission, "failed", accepted.error, accepted.costMicroUsd, "terminal");
+        return;
+      }
       if (accepted.artifacts) {
         try {
           await this.persistInlineArtifacts(job.id, accepted.remoteId, accepted.artifacts);
         } catch (error) {
           await this.terminalize(
-            submitting,
+            completedSubmission,
             "failed",
             `the provider completed, but its artifact could not be made durable: ${describeCoordinatorError(error)}`,
           );
           return;
         }
         await this.landDurableInline(
-          { ...submitting, providerJobId: accepted.remoteId },
+          completedSubmission,
           client,
           key,
           accepted.artifacts,
@@ -1120,8 +1188,9 @@ export class JobQueue {
         return;
       }
       // ④ the uncertainty closes.
-      const running: Job = { ...submitting, status: "running", providerJobId: accepted.remoteId, updatedAt: this.clock() };
+      const running: Job = { ...completedSubmission, status: "running", updatedAt: this.clock() };
       await this.transition(running);
+      this.acceptedSubmissions.delete(job.id);
       this.noteSuccess(job.provider);
       await this.pollToTerminal(running, client, key, true);
     } catch (err) {
@@ -1132,6 +1201,7 @@ export class JobQueue {
       if (!this.stillSubmitting(submitting)) return;
       await this.handleSubmitError(submitting, client, err);
     } finally {
+      if (!this.cancelling.has(job.id)) this.acceptedSubmissions.delete(job.id);
       if (this.submitAborts.get(job.id) === submitAbort) this.submitAborts.delete(job.id);
     }
   }
@@ -1263,7 +1333,16 @@ export class JobQueue {
         continue;
       }
       if (this.disposed) return;
-      if (!this.stillPolling(current)) return;
+      if (this.cancelling.has(job.id) || !this.stillPolling(current)) return;
+      const usage = SpeechUsageSchema.safeParse(poll.speechUsage);
+      if (usage.success) {
+        const merged = { ...current.speechUsage, ...Object.fromEntries(Object.entries(usage.data).filter(([, value]) => value !== undefined)) };
+        if (merged.inputTextTokens !== current.speechUsage?.inputTextTokens || merged.outputAudioTokens !== current.speechUsage?.outputAudioTokens) {
+          current = { ...current, speechUsage: merged };
+          await this.persistUsage(current);
+          if (this.disposed || this.cancelling.has(job.id) || !this.stillPolling(current)) return;
+        }
+      }
       if (poll.state === "succeeded") {
         await this.landAndSucceed(current, client, key, poll.costMicroUsd);
         return;
@@ -1398,7 +1477,7 @@ export class JobQueue {
     key: string,
     artifacts: DispatchArtifact[],
   ): Promise<void> {
-    await this.landAndSucceed(job, client, key, undefined, artifacts);
+    await this.landAndSucceed(job, client, key, job.providerCostMicroUsd, artifacts);
     const settled = this.jobs.get(job.id);
     if (settled && TERMINAL.has(settled.status)) {
       await rm(toExtendedLength(this.inlineArtifactDir(job.id)), { recursive: true, force: true }).catch(() => {});
@@ -1555,8 +1634,8 @@ export class JobQueue {
     // Every failed row carries the decision the retry surfaces consume. Centralising it here
     // covers provider verdicts, local preparation, recovery, verification and exhausted retries;
     // a caller cannot add a new terminal failure path and accidentally leave the class transient.
-    const terminal: Job = {
-      ...job,
+    let terminal: Job = {
+      ...(outcome === "cancelled" ? this.withAcceptedSpeech(job) : job),
       status: outcome,
       error,
       failureClass: outcome === "failed" ? (failureClass ?? classifyError(error ?? "terminal failure")) : null,
@@ -1564,6 +1643,15 @@ export class JobQueue {
       updatedAt: this.clock(),
     };
     await this.transition(terminal);
+    if (outcome === "cancelled") {
+      // A submit can answer while the cancelled row is flushing. Make its now-known facts
+      // durable in another cancelled row before the single ledger settlement.
+      const accepted = this.withAcceptedSpeech(terminal);
+      if (accepted.providerJobId !== terminal.providerJobId || accepted.speechUsage !== terminal.speechUsage || accepted.providerCostMicroUsd !== terminal.providerCostMicroUsd) {
+        terminal = accepted;
+        await this.transition(terminal);
+      }
+    }
     this.releaseGpu(job);
     if (this.disposed) return;
     // An append that landed this pass is proof enough; asking the file again could only be
@@ -1624,6 +1712,9 @@ export class JobQueue {
     if (local) {
       actualMicroUsd = 0;
       actualSource = "local-zero"; // unmetered (SPEC-008 R-18)
+    } else if (job.speechQuote?.unit === "token") {
+      const reported = job.providerCostMicroUsd ?? (client?.declarations.reportsCost && costMicroUsd !== undefined ? Math.round(costMicroUsd) : undefined);
+      ({ actualMicroUsd, actualSource } = speechSettlement({ ...job, providerCostMicroUsd: reported }));
     } else if (client?.declarations.reportsCost && costMicroUsd !== undefined) {
       actualMicroUsd = Math.round(costMicroUsd);
       actualSource = "provider-reported";
@@ -1645,6 +1736,9 @@ export class JobQueue {
       outcome,
       estimatedMicroUsd: job.estimatedMicroUsd,
       actualMicroUsd,
+      ...(job.speechQuote ? { speechQuote: job.speechQuote } : {}),
+      ...(job.speechUsage ? { speechUsage: job.speechUsage } : {}),
+      ...(job.speechAttempts ? { speechAttempts: job.speechAttempts } : {}),
       ...(actualSource !== undefined ? { actualSource } : {}),
     });
   }
@@ -1658,6 +1752,7 @@ export class JobQueue {
       await this.cancelInner(jobId, job);
     } finally {
       this.cancelling.delete(jobId);
+      this.acceptedSubmissions.delete(jobId);
     }
   }
 
@@ -1671,6 +1766,9 @@ export class JobQueue {
     // Claimed before the abort, not after: the rejection it causes races this method, and the
     // submit's error path has to be able to tell a cancellation from a transport failure.
     this.cancelling.add(jobId);
+    await this.usageWrites.get(jobId);
+    const accepted = this.jobs.get(jobId);
+    if (accepted?.attempt === job.attempt) job = accepted;
     // A recovered running job may already be executing in its engine. Keep its pending
     // reservation alive until the engine acknowledges cancellation.
     if (!recoveringGpu) {
@@ -1714,7 +1812,9 @@ export class JobQueue {
       ? "Cancelled in Arke. The provider may still complete or charge for this request."
       : null;
     // A cancelled job still writes a ledger entry (R-15, D10).
-    await this.terminalize({...job, cancellationUncertain: outcomeMayBeRemote}, "cancelled", reason);
+    const latest = this.jobs.get(job.id);
+    const withUsage = latest?.attempt === job.attempt ? { ...job, speechUsage: latest.speechUsage, providerCostMicroUsd: latest.providerCostMicroUsd, providerJobId: latest.providerJobId } : job;
+    await this.terminalize({...withUsage, cancellationUncertain: outcomeMayBeRemote}, "cancelled", reason);
     this.emitQueueStatus(job.provider);
   }
 
@@ -1956,11 +2056,22 @@ export class JobQueue {
 
   /** The unwitnessed-submission window (§2.4 rows ②→③ and ④): observe, never guess (D2). */
   private async reconcileSubmitting(job: Job): Promise<ReconcileAction> {
+    // The durable-artifact recovery above has already tried the local response. An id from
+    // an inline-only response cannot recover audio that was never saved.
+    if (job.providerResultKind === "inline") return this.holdForUser(job);
     const client = this.opts.clients[job.provider];
     const key = client ? await this.keyFor(job) : null;
     if (!client || key === null) {
       this.pauseLane(job.provider, "credential", "no credential stored for this provider");
       return { jobId: job.id, action: "held-for-user", detail: "no credential to reconcile with" };
+    }
+
+    // A durable accepted identity is stronger evidence than a later lookup/list absence.
+    if (job.providerJobId !== null) {
+      const running: Job = { ...job, status: "running", updatedAt: this.clock() };
+      await this.transition(running);
+      this.trackRun(this.pollToTerminal(running, client, key));
+      return { jobId: job.id, action: "adopted", detail: job.providerJobId };
     }
 
     // Strategy A — definite in both directions.
@@ -2043,7 +2154,9 @@ export class JobQueue {
       ...job,
       status: "needs-reconciliation",
       ...(failureClass !== undefined ? { failureClass } : {}),
-      error: local
+      error: job.providerResultKind === "inline"
+        ? `The provider accepted this request, but its inline result was not saved before restart. No automatic retry was made. Resubmitting ${duplicateCost}.`
+        : local
         ? `Arke did not witness the submission result — the engine kept running while Arke restarted, and cannot confirm what happened. No automatic retry was made. Resubmitting ${duplicateCost}.`
         : `Arke did not witness the submission result. ${job.provider} may have accepted and charged it, and cannot confirm what happened. No automatic retry was made. Resubmitting ${duplicateCost}; the prior actual cost is unknown.`,
       updatedAt: this.clock(),
@@ -2216,7 +2329,12 @@ export class JobQueue {
       const job = this.jobs.get(jobId);
       if (!job || job.status !== "needs-reconciliation") return;
       if (decision === "resubmit") {
-        await this.transition({ ...job, status: "queued", error: null, updatedAt: this.clock() });
+        const priorSpeech = job.speechQuote?.unit === "token" && job.attempt > 0
+          ? { speechAttempts: [...job.speechAttempts ?? [], { attempt: job.attempt, quote: job.speechQuote, usage: job.speechUsage ?? {},
+                ...(job.providerCostMicroUsd !== undefined ? { providerCostMicroUsd: job.providerCostMicroUsd } : {}) }],
+            speechUsage: undefined, providerCostMicroUsd: undefined }
+          : {};
+        await this.transition({ ...job, ...priorSpeech, status: "queued", error: null, updatedAt: this.clock() });
         this.lane(job.provider).fifo.push(job.id);
         this.emitQueueStatus(job.provider);
         this.pump(job.provider);

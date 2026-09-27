@@ -4,6 +4,8 @@
  * declarations) lives in @arke-studio/contracts so the renderer shares it.
  */
 export { AnthropicClient } from "./clients/anthropic.js";
+export { GoogleClient, GEMINI_TTS_MODELS, GEMINI_PRESETS } from "./clients/google.js";
+export { geminiSpeechModel } from "./gemini-tts-models.js";
 export {
   ComfyUiClient,
   COMFYUI_VERSION_FLOOR,

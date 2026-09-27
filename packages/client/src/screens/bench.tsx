@@ -1,3 +1,4 @@
+import { estimateSpeechMicroUsd } from "@arke-studio/contracts";
 import { castVoiceSummary, planSubjectCharacterAudio } from "@arke-studio/contracts";
 import { AdapterPicker } from "../components/adapter-picker.js";
 import { hasAdultAdapter } from "@arke-studio/contracts";
@@ -11,7 +12,6 @@ import {
   deriveCapabilityAvailability,
   dispatchDuration,
   durationLimitsFor,
-  billableCharacters,
   estimateMicroUsd,
   formatMicroUsd,
   frameTaskModes,
@@ -698,8 +698,9 @@ function BenchWorkspace({
    */
   const [refusal, setRefusal] = useState<{ reason: string; requestId: string | null } | null>(null);
   const pendingDispatch = useRef<string | null>(null);
+  const composerRef = useRef<HTMLDivElement | null>(null);
   const pendingDispatchAction = useRef<
-    { kind: "dispatch"; composer: typeof draft } | { kind: "rerun"; takeId: string } | null
+    { kind: "dispatch"; composer: typeof draft; confirmedSpeechMicroUsd?: number } | { kind: "rerun"; takeId: string } | null
   >(null);
   const [uploadConfirmation, setUploadConfirmation] = useState<{
     destinationLabel: string;
@@ -759,9 +760,9 @@ function BenchWorkspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [composedFor]);
 
-  const dispatchBench = (composer: typeof draft, voiceUploadConfirmedFor?: string) => {
-    pendingDispatchAction.current = { kind: "dispatch", composer };
-    pendingDispatch.current = sendBenchDispatch(worldId, session.id, composer, voiceUploadConfirmedFor);
+  const dispatchBench = (composer: typeof draft, voiceUploadConfirmedFor?: string, confirmedSpeechMicroUsd?: number) => {
+    pendingDispatchAction.current = { kind: "dispatch", composer, confirmedSpeechMicroUsd };
+    pendingDispatch.current = sendBenchDispatch(worldId, session.id, composer, voiceUploadConfirmedFor, confirmedSpeechMicroUsd);
   };
   const rerunBench = (takeId: string, voiceUploadConfirmedFor?: string) => {
     pendingDispatchAction.current = { kind: "rerun", takeId };
@@ -771,6 +772,9 @@ function BenchWorkspace({
   // ---- selection ----
   const latest = session.takes[session.takes.length - 1] ?? null;
   const selected: BenchTake | null = session.takes.find((t) => t.id === session.selectedTakeId) ?? latest;
+  const rerunNeedsPrice = selected?.request.params.kind === "voice" && state?.app.manifest?.models.some(
+    (model) => model.provider === selected.request.provider && model.id === selected.request.model && model.pricing.kind === "perToken",
+  ) === true;
   const [pendingAccept, setPendingAccept] = useState<{ requestId: string; takeId: string } | null>(null);
   const pendingAcceptRef = useRef<{ requestId: string; takeId: string } | null>(null);
   const [acceptNote, setAcceptNote] = useState<string | null>(null);
@@ -884,9 +888,8 @@ function BenchWorkspace({
       return each * draft.params.count;
     }
     if (draft.params.kind === "voice") {
-      // Exact, not a ceiling: speech bills per character and the characters are already typed —
-      // counted as the row bills them, a delivery's tag included (SPEC-046 R-8).
-      return estimateMicroUsd(candidate, { characters: billableCharacters(candidate, draft.brief, draft.params.delivery) }) * draft.params.count;
+      // Character readers price the typed words; token readers show the authorised ceiling.
+      return estimateSpeechMicroUsd(candidate, draft.brief, draft.params.delivery) * draft.params.count;
     }
     if (draft.params.kind === "music") {
       // A ceiling, and the only honest kind of number here: the route calls its length an upper
@@ -911,7 +914,7 @@ function BenchWorkspace({
     estimate === null
       ? null
       : speaking
-        ? formatMicroUsd(estimate)
+        ? `${model?.pricing.kind === "perToken" ? "up to " : ""}${formatMicroUsd(estimate)}`
         : singing
           ? `up to ${formatMicroUsd(estimate)}`
           : `~${formatMicroUsd(estimate)}`;
@@ -1420,7 +1423,7 @@ function BenchWorkspace({
         </nav>
 
         {/* ---- composer -------------------------------------------------- */}
-        <div className="fy-bench__composer">
+        <div className="fy-bench__composer" ref={composerRef} tabIndex={-1}>
           <div className="fy-bench__composerbar">
             {subject !== undefined ? (
               /* The same pill of icon tabs as the world bench (design 142a), holding only the
@@ -2305,7 +2308,7 @@ function BenchWorkspace({
               onClick={() => {
                 clearRefusal();
                 if (pushTimer.current) clearTimeout(pushTimer.current);
-                dispatchBench(draft);
+                dispatchBench(draft, undefined, draft.params.kind === "voice" ? estimate ?? undefined : undefined);
               }}
             >
               {draft.params.kind === "image" && draft.params.count > 1 ? `Generate ${draft.params.count}` : "Generate"}
@@ -2366,9 +2369,14 @@ function BenchWorkspace({
               <button
                 type="button"
                 className="fy-bench__rowicon"
-                title="Run it again — a new take from this snapshot"
-                aria-label="Run it again"
-                onClick={() => rerunBench(selected.id)}
+                title={rerunNeedsPrice ? "Review the current price in the composer, then Generate" : "Run it again — a new take from this snapshot"}
+                aria-label={rerunNeedsPrice ? "Review price to run again" : "Run it again"}
+                onClick={() => {
+                  if (!rerunNeedsPrice) { rerunBench(selected.id); return; }
+                  restore(selected);
+                  composerRef.current?.scrollIntoView({ block: "start" });
+                  composerRef.current?.focus({ preventScroll: true });
+                }}
               >
                 <RefreshCw size={14} />
               </button>
@@ -2876,7 +2884,7 @@ function BenchWorkspace({
               const token = uploadConfirmation.confirmationToken;
               setUploadConfirmation(null);
               if (action?.kind === "rerun") rerunBench(action.takeId, token);
-              else if (action?.kind === "dispatch") dispatchBench(action.composer, token);
+              else if (action?.kind === "dispatch") dispatchBench(action.composer, token, action.confirmedSpeechMicroUsd);
             }}
           />
         )}

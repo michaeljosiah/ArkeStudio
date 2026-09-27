@@ -12,6 +12,9 @@ import {
   audiobookTextHash,
   billableCharacters,
   normalizeSpeechText,
+  quoteSpeech,
+  speechInputFits,
+  type Job,
   type ChapterVoices,
   type ClientMessage,
   type DomainEvent,
@@ -19,11 +22,14 @@ import {
   type VoiceCandidate,
 } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
+import { geminiSpeechModel } from "@arke-studio/providers";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { audiobookBookPath, audiobookPath, checkDirection, directionPlan, legacyAudiobookPath, renderParts } from "../../src/productions/audiobook.js";
 import { verifyDirections, type DirectionDeriver, type DirectableBlock } from "../../src/productions/audiobook-direction.js";
 import { bookPriceLines } from "../../src/productions/audiobook-book.js";
-import { prepareChapter, priorPartJob, type PartIdentity } from "../../src/productions/audiobook-run.js";
+import { chapterPriceToken, prepareChapter, priorPartJob, type PartIdentity } from "../../src/productions/audiobook-run.js";
+import { hearAudiobookLine } from "../../src/productions/audiobook-hear.js";
+import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { fileGeneratedArtifact } from "../../src/artifacts/filing.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import type { WorldStore } from "../../src/world/store.js";
@@ -274,6 +280,18 @@ describe("a part already in the queue (codex on PR 1180)", () => {
     const found = priorPartJob([job("j1", "failed"), job("j2", "running")], identity, 0);
     assert.equal(found?.kind, "running");
     assert.equal(found?.job.id, "j2");
+  });
+
+  it("adopts bounded speech only under the same compiled words, style and part boundaries", () => {
+    const compiled = { ...identity, compiledSpeechHash: "sha256:new" };
+    const old = job("old", "succeeded", { landedFiles: ["old.wav"] }, { compiledSpeechHash: "sha256:old" });
+    const legacy = job("legacy", "succeeded", { landedFiles: ["legacy.wav"] });
+    assert.equal(priorPartJob([old, legacy], compiled, 0), null);
+    const same = job("same", "succeeded", { landedFiles: ["same.wav"] }, { compiledSpeechHash: "sha256:new" });
+    assert.equal(priorPartJob([old, same], compiled, 0)?.job.id, "same");
+    const uncertain = job("uncertain", "submitting", {}, { compiledSpeechHash: "sha256:new" });
+    assert.equal(priorPartJob([uncertain], compiled, 0)?.kind, "running", "an ambiguous matching request is held, not repeated");
+    assert.equal(priorPartJob([legacy], identity, 0)?.kind, "landed", "legacy readers retain their existing recovery identity");
   });
 
   it("nothing usable: a failed job, another part, other words, another voice or another chapter", () => {
@@ -1758,5 +1776,86 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
       assert.equal(second.cached, true, "the same line heard again is the cached file");
       assert.equal(second.file, first.file);
       assert.equal(existsSync(recordPath(worldDir)), false, "nothing on the record");
+    }));
+
+  it("reserves a performed note's UTF-8 bytes before directed Gemini parts are quoted", () =>
+    withHarness({}, async ({ store, send }) => {
+      await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "performed" });
+      const note = "穏やかに、低く";
+      await send({ kind: "set-audiobook-note", worldId: WORLD_ID, productionId: LEDGER, speaker: "maren-kest", note });
+      const model = geminiSpeechModel("flash");
+      model.limits.maxSpeechUtf8Bytes = 82;
+      const narrator = { provider: "google", model: model.id, voiceId: "Charon", label: "Charon" };
+      const room = { narrator, models: [model], catalogue: [{ ...narrator, attributes: [], local: false, canClone: false }] };
+      for (const directed of [false, true]) {
+        if (directed) await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p0.1", direction: { delivery: "measured", speed: 1, cues: [] } });
+        const made = await prepareChapter(store, LEDGER, "neap", room, () => "2026-09-27T12:00:00Z", ["p0.1"]);
+        assert.equal(made.kind, "ready");
+        const block = made.prepared.speaking[0]!;
+        assert.equal(block.refusal, undefined);
+        assert.equal(block.parts.join(" "), normalizeSpeechText(SPAN));
+        assert.ok(block.parts.every((part, index) => speechInputFits(part, model.limits, block.direction?.perPart[index]?.instructions)));
+        assert.ok(block.direction?.perPart.every(part => part.instructions?.startsWith(note)));
+        if (directed) {
+          assert.ok(block.parts.length > 1);
+          assert.ok(block.direction?.perPart.every(part => part.instructions?.includes("Read calmly")));
+          const token = chapterPriceToken(WORLD_ID, LEDGER, "neap", made.prepared.plan.chapter, made.prepared.misses);
+          model.cadence!.deliveryMappings.measured!.instruction = "Read softly and evenly, at a steady pace.";
+          const changed = await prepareChapter(store, LEDGER, "neap", room, () => "2026-09-27T12:00:00Z", ["p0.1"]);
+          assert.equal(changed.kind, "ready");
+          assert.equal(changed.prepared.speaking[0]!.parts.length, block.parts.length);
+          assert.equal(changed.prepared.estimate, made.prepared.estimate);
+          assert.notEqual(changed.prepared.speaking[0]!.compiledSpeechHash, block.compiledSpeechHash);
+          assert.notEqual(chapterPriceToken(WORLD_ID, LEDGER, "neap", changed.prepared.plan.chapter, changed.prepared.misses), token, "a same-price change of compiled style still needs a new quote");
+        }
+        assert.equal(made.prepared.estimate, block.parts.length * 151552);
+      }
+      model.limits.maxSpeechUtf8Bytes = 8;
+      const refused = await prepareChapter(store, LEDGER, "neap", room, () => "2026-09-27T12:00:00Z", ["p0.1"]);
+      assert.equal(refused.kind, "ready");
+      if (refused.kind === "ready") {
+        assert.ok(refused.prepared.speaking[0]?.refusal);
+        assert.equal(refused.prepared.estimate, 0, "impossible direction is not offered as paid work");
+      }
+    }));
+
+  it("quotes every prepared token request before Hear spends, and rejects stale consent", () =>
+    withHarness({}, async ({ store, worldDir }) => {
+      const model: ManifestModel = { ...ELEVEN, limits: { maxPromptChars: 10, audioFormat: "wav" }, pricing: {
+        kind: "perToken", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000,
+        speech: { tier: "standard", maxInputTokens: 8192, maxOutputTokens: 16384, audioTokensPerSecond: 25, rates: [
+          { version: "intro", effectiveFrom: "2026-09-01T00:00:00.000Z", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000 },
+        ] },
+      } };
+      const room = { narrator: LOW_TIDE, models: [model], catalogue: [LOW_TIDE] };
+      if (model.pricing.kind !== "perToken") throw new Error("fixture");
+      model.pricing.speech!.rates.push({ version: "standard", effectiveFrom: "2027-01-01T00:00:00Z", microUsdPerMillionInput: 1000000, microUsdPerMillionOutput: 18000000 });
+      const before = await prepareChapter(store, LEDGER, "neap", room, () => "2026-12-31T23:59:59Z", ["title"]);
+      const after = await prepareChapter(store, LEDGER, "neap", room, () => "2027-01-01T00:00:00Z", ["title"]);
+      assert.ok(before.kind === "ready" && after.kind === "ready");
+      const tokenOf = (prepared: typeof before.prepared) => chapterPriceToken(WORLD_ID, LEDGER, "neap", prepared.plan.chapter, prepared.misses);
+      assert.equal(after.prepared.estimate, before.prepared.estimate * 2);
+      assert.notEqual(tokenOf(before.prepared), tokenOf(after.prepared), "each token must encode its own displayed price, regardless of the wall clock when it is hashed");
+      for (const prepared of [before.prepared, after.prepared]) {
+        assert.equal(prepared.estimate, prepared.misses.flatMap(block => block.quotes).reduce((sum, quote) => sum + quote.authorisedMicroUsd, 0));
+      }
+      const queued: EnqueueInput[] = [];
+      const deps = { worldId: WORLD_ID, local: async () => { throw new Error("cloud only"); },
+        enqueue: async (input: EnqueueInput) => { queued.push(input); return "job"; },
+        waitForJob: async () => { await writeFile(join(worldDir, "hear-part.wav"), wav()); return { status: "succeeded", landedFiles: ["hear-part.wav"] } as Job; } };
+      const hear = (quoteToken?: string) => hearAudiobookLine(store, LEDGER, "01-neap", "title", room, { ...deps, quoteToken });
+      const initial = await hear();
+      assert.ok("quote" in initial);
+      assert.ok(initial.quote.parts > 1);
+      assert.equal(initial.quote.authorisedMicroUsd, initial.quote.parts * quoteSpeech(model, "", { at: CLOCK }).authorisedMicroUsd);
+      assert.equal(queued.length, 0);
+      assert.ok("quote" in await hear("stale"));
+      assert.equal(queued.length, 0);
+      const result = await hear(initial.quote.token);
+      assert.ok("file" in result);
+      assert.equal(queued.length, initial.quote.parts);
+      assert.equal(queued.reduce((sum, job) => sum + job.estimatedMicroUsd, 0), initial.quote.authorisedMicroUsd);
+      assert.ok("file" in await hear(), "a cache hit needs no new paid consent");
+      assert.equal(queued.length, initial.quote.parts);
     }));
 });

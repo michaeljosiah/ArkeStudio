@@ -2,6 +2,7 @@ import { promptHash } from "@arke-studio/contracts";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { captureProviderClient } from "../src/capture.js";
+import { GoogleClient } from "../src/clients/google.js";
 import { ProviderTransportError } from "../src/transport.js";
 import type {
   CommandRunner,
@@ -42,6 +43,22 @@ function recorder() {
   };
   return { capture, started, responded, finished, failed, drain: () => Promise.allSettled(tracked) };
 }
+
+it("redacts Gemini keys and nested audio bytes while preserving reported usage", async () => {
+  const log = recorder();
+  const encoded = Buffer.alloc(96, 42).toString("base64");
+  const google = captureProviderClient("google", fetch => new GoogleClient(fetch), async () => Response.json({
+    id: "interaction-1", model: "gemini-3.8-flash-tts", status: "completed", usage: { total_input_tokens: 7, total_output_tokens: 10 },
+    steps: [{ type: "model_output", content: [{ type: "audio", mime_type: "audio/wav", data: encoded }] }],
+  }), log.capture);
+  await google.submit("never-log-this-key", { model: "gemini-3.8-flash-tts", capability: "voice-tts", params: { voiceId: "Kore", text: "Hello" } });
+  await log.drain();
+  const saved = JSON.stringify({ started: log.started, finished: log.finished });
+  assert.equal(saved.includes("never-log-this-key"), false);
+  assert.equal(saved.includes(encoded), false);
+  assert.ok(saved.includes('"total_output_tokens":10'));
+  assert.ok(saved.includes('"sizeBytes":96'));
+});
 
 function client(fetchImpl: typeof fetch): ProviderClient {
   return {

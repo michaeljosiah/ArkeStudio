@@ -439,22 +439,16 @@ describe("the understanding panel", () => {
 });
 
 describe("the wrap-up action", () => {
-  it("sits at the rail's foot as a large primary button with a caption beneath", () => {
+  it("sits at the rail's foot as a large primary button without a caption (turn 164)", () => {
     const rail = railHtml(renderConversation());
     assert.match(rail, /ui-btn--primary[^"]*ui-btn--lg|ui-btn--lg[^"]*ui-btn--primary/);
     assert.ok(rail.includes("Accept all"));
-    const caption = rail.indexOf("fy-panel__caption");
-    const button = rail.indexOf("Accept all");
-    assert.ok(caption > button, "the caption sits beneath the action, as it does in Genesis");
+    assert.ok(!rail.includes("fy-panel__caption"), "turn 137 removes captions beneath controls");
   });
 
-  it("says what pressing it would actually do", () => {
+  it("names the ready count on the action", () => {
     const rail = railHtml(renderConversation());
-    assert.ok(rail.includes("closes this conversation"), "accept-all ends the conversation, and says so");
-    assert.ok(
-      rail.includes("Writes the 2 ready to the world"),
-      "and that this one writes, rather than staging for a screen that no longer stands between",
-    );
+    assert.ok(rail.includes("Accept all · 2"));
   });
 });
 

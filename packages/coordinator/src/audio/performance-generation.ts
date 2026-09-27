@@ -1,7 +1,8 @@
+import { estimateSpeechMicroUsd, speechInputFits } from "@arke-studio/contracts";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { PerformanceGenerationQuoteSchema, PerformanceRecordSchema, PerformanceIdSchema, AudioAssetProvenanceSchema,
-  billableCharacters, estimateMicroUsd, legacyVoiceModel, mapCadence, normalizeSpeechText, supportsPerformanceGeneration, voiceFormatForModel, voiceSourceFor,
+  legacyVoiceModel, mapCadence, normalizeSpeechText, supportsPerformanceGeneration, voiceFormatForModel, voiceSourceFor,
   type AudioAssetProvenance, type ClientMessage, type ManifestModel, type PerformanceGenerationQuote, type Job, type TakeCost, type VoiceAudioFormat } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { atomicWriteFile } from "../world/atomic.js";
@@ -32,9 +33,10 @@ export async function preparePerformanceGeneration(store: WorldStore, model: Man
   const mapped = mapCadence(text, audioHash(Buffer.from(normalizeSpeechText(text))), request.cadencePlan, model, language);
   if (mapped.controls.some(c => c.status === "unsupported")) throw new Error("Remove unsupported cadence controls or choose a compatible model.");
   if (model.limits.maxPromptChars !== undefined && mapped.providerText.length > model.limits.maxPromptChars) throw new Error("The decorated line exceeds this model's character limit.");
+  if (!speechInputFits(mapped.providerText, model.limits, mapped.instructions)) throw new Error("The line and its direction exceed this model's request limit.");
   const quote = PerformanceGenerationQuoteSchema.parse({ operationId: randomUUID(), target, authoredText: text, voiceAssignment: sheet.voice,
     cadencePlan: request.cadencePlan, cadencePlanHash: digest(request.cadencePlan), mapping: { ...mapped, providerTextHash: audioHash(Buffer.from(mapped.providerText)) },
-    modelHash: digest(model), estimatedMicroUsd: estimateMicroUsd(model, { characters: billableCharacters(model, mapped.providerText) }), local: model.provider === "kokoro",
+    modelHash: digest(model), estimatedMicroUsd: estimateSpeechMicroUsd(model, mapped.providerText), local: model.provider === "kokoro",
     audioFormat: voiceFormatForModel(model), ...(language !== undefined ? { language } : {}), createdAt: store.now() });
   await store.ownedWrite(async () => atomicWriteFile(await audioWorldPath(store.dir, `.staging/performances/${quote.operationId}/quote.json`, true), JSON.stringify(quote)));
   return quote;
