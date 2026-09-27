@@ -16961,6 +16961,9 @@ export class Coordinator {
     const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
     if (!production) return;
     const findings = await interactiveFindings(store, production).catch(() => []);
+    // The fold reads the evidence file, and another world can open meanwhile: its map, listening
+    // by production id, would take this world's blockers as its own.
+    if (!this.stillOpen(store)) return;
     this.emit({
       at: new Date().toISOString(),
       type: "production.routing-findings",

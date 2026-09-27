@@ -174,7 +174,10 @@ export function mountInteractivePlayer(root, options) {
 .aip-choice{width:100%;height:58px;border-radius:14px}
 .aip-hero{left:24px;right:24px;bottom:48px;max-height:calc(100% - 88px)}
 .aip-hero-title{font-size:32px}
-.aip-strip .aip-muted{display:none}
+.aip-strip .aip-muted,.aip-strip .t,.aip-strip .aip-kbd{display:none}
+.aip-strip{gap:8px;padding:0 10px 0 14px}
+.aip-strip>span:not(.aip-spacer){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.aip-strip .aip-btn{flex:none}
 }
 `;
 
@@ -254,7 +257,7 @@ export function mountInteractivePlayer(root, options) {
       finishScene();
       return;
     }
-    loadClip(0, state.positionSec);
+    loadClip(0, state.positionSec, undefined, undefined, true);
     render();
     holdFocus();
   }
@@ -270,12 +273,24 @@ export function mountInteractivePlayer(root, options) {
   }
 
   /** Load one of the scene's clips and seek into it: to `at` seconds, or to `ratio` of its length once known. */
-  function loadClip(index, at, ratio, autoplay) {
+  function loadClip(index, at, ratio, autoplay, carry) {
     const clips = media[state.sceneId] || [];
     clipIndex = Math.max(0, Math.min(index, clips.length - 1));
+    // A place saved across a scene (`carry`) that runs past this shot goes on into the next —
+    // without looking, when the shot's length is already known, else once it loads.
+    const known = lengthOf(clipIndex);
+    if (carry && ratio === undefined && known !== undefined && at >= known && clipIndex < clips.length - 1) {
+      loadClip(clipIndex + 1, at - known, undefined, autoplay, true);
+      return;
+    }
     video.setAttribute("src", clips[clipIndex].src);
     const seek = () => {
       const { from, length } = span();
+      if (carry && ratio === undefined && length && at >= length && clipIndex < clips.length - 1) {
+        video.removeEventListener("loadedmetadata", seek);
+        loadClip(clipIndex + 1, at - length, undefined, autoplay, true);
+        return;
+      }
       const wanted = ratio !== undefined && length ? ratio * length : at;
       // Clamped, not refused: a place saved against a longer take (a re-export keeps the key
       // while the routing is unchanged) resumes near this take's end rather than at its start.
@@ -407,8 +422,8 @@ export function mountInteractivePlayer(root, options) {
     el.strip.innerHTML =
       "<b>Preview</b><span class=\"aip-muted\">from " + esc(titleOf(origin)) + '</span><span class="aip-spacer"></span>' +
       (unwalked.size > 0 ? "<span>" + unwalked.size + " choice" + (unwalked.size === 1 ? "" : "s") + " not walked</span>" : '<span class="aip-muted">every choice walked</span>') +
-      (author.onBranchMap ? '<button type="button" class="aip-btn small" data-act="map">' + icon(I.map, 15) + "Branch map</button>" : "") +
-      (author.onClose ? '<button type="button" class="aip-btn small" data-act="close">Close preview <span class="aip-kbd">Esc</span></button>' : "");
+      (author.onBranchMap ? '<button type="button" class="aip-btn small" data-act="map" aria-label="Branch map">' + icon(I.map, 15) + '<span class="t">Branch map</span></button>' : "") +
+      (author.onClose ? '<button type="button" class="aip-btn small" data-act="close" aria-label="Close preview">' + icon(I.x, 15) + '<span class="t">Close preview</span> <span class="aip-kbd">Esc</span></button>' : "");
   }
 
   function renderBar() {
@@ -459,7 +474,11 @@ export function mountInteractivePlayer(root, options) {
       onEnded();
       return;
     }
-    state.positionSec = into();
+    // The place in the scene, not in this shot: saved as the shot's offset, a return visit put it
+    // that far into the first shot instead. Shots before this one have played, so their lengths are known.
+    let before = 0;
+    for (let i = 0; i < clipIndex; i++) before += lengthOf(i) || 0;
+    state.positionSec = before + into();
     save();
     renderBar();
   };

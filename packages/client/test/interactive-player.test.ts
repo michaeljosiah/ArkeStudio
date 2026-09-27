@@ -255,6 +255,37 @@ describe("the player, as a viewer meets the package (156a–156f)", () => {
     assert.ok(p.video().currentTime > 19 && p.video().currentTime < 20, "held just short of the end, not sent back to the start");
   });
 
+  it("saves a place in the scene, not in the shot, and resumes in the shot it was in", () => {
+    const scenes = { ...OPTIONS.scenes, sc_towers: { title: "The bell towers", clips: [{ src: "media/sh_1.mp4", to: 8 }, { src: "media/sh_2.mp4", to: 10 }] } };
+    const first = mount({ storageKey: "arke-iv-towers", from: "sc_towers", autoplay: true, scenes });
+    Object.defineProperty(first.video(), "duration", { value: 30, configurable: true });
+    first.video().dispatchEvent(new dom.Event("loadedmetadata") as unknown as Event);
+    first.ended();
+    first.video().dispatchEvent(new dom.Event("loadedmetadata") as unknown as Event);
+    first.video().currentTime = 4;
+    first.video().dispatchEvent(new dom.Event("timeupdate") as unknown as Event);
+    const kept = JSON.parse(store.get("arke-iv-towers")!) as { sceneId: string; positionSec: number };
+    assert.deepEqual([kept.sceneId, kept.positionSec], ["sc_towers", 12], "8s of the first shot and 4s into the second");
+    first.handle.destroy();
+    mounted.splice(mounted.indexOf(first.handle), 1);
+
+    const again = mount({ storageKey: "arke-iv-towers", scenes });
+    again.click(again.button("Continue"));
+    assert.equal(again.video().getAttribute("src"), "media/sh_2.mp4", "back in the second shot, not 12s into the first");
+    Object.defineProperty(again.video(), "duration", { value: 30, configurable: true });
+    again.video().dispatchEvent(new dom.Event("loadedmetadata") as unknown as Event);
+    assert.equal(again.video().currentTime, 4);
+  });
+
+  it("keeps the preview's way out on a phone: the strip's buttons fold to their icons", () => {
+    const p = mount({ author: { unwalked: ["ch_stay"], onClose() {}, onBranchMap() {} } });
+    const css = p.q("style")?.textContent ?? "";
+    assert.match(css, /@media \(max-width:640px\)\{[^@]*\.aip-strip \.t[^}]*display:none/, "labels hidden below 640, icons kept");
+    const close = p.all("[data-act=close]")[0]!;
+    assert.equal(close.getAttribute("aria-label"), "Close preview", "still named when only its icon shows");
+    assert.ok(close.querySelector("svg"), "an icon to press");
+  });
+
   it("returns to the choice it was left at, not the start of the scene before it", () => {
     const p = mount({ storageKey: "arke-iv-low-water-v12", autoplay: true });
     p.ended();

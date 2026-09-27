@@ -230,6 +230,25 @@ describe("interactive video through the coordinator (epic 401)", () => {
     assert.match(player, /m\.windows\.map\(\(w\) => \(\{ src: m\.file, from: w\.from, to: w\.to \}\)\)/, "the page hands the windows to the player");
   });
 
+  it("refuses a scene whose cut leaves nothing to play, rather than shipping the whole pass", async () => {
+    const { dir, store, bundle } = await open();
+    const base = await interactiveProduction(dir, bundle.productions[0]!, ROUTING);
+    // sc_i1 accepts a 2s segment of a pass, trimmed 3s in: past the segment's end, nothing plays.
+    const pass = { ...take("tk_01J8E0000000000000000000P1", "sh_i1"), media: "pass.mp4" };
+    const segment: Take = { ...take("tk_01J8E0000000000000000000S1", "sh_i1"), segment: { passTakeId: pass.id, inSec: 0, outSec: 2 } };
+    delete (segment as { media?: string }).media;
+    await mkdir(join(dir, "productions", base.meta.id, "takes", pass.id), { recursive: true });
+    await writeFile(join(dir, "productions", base.meta.id, "takes", pass.id, "pass.mp4"), Buffer.from("the-pass"));
+    const production = {
+      ...base,
+      takes: [...base.takes, pass, segment],
+      selections: { ...base.selections, sh_i1: { acceptedTakeId: segment.id, trimInSec: 3 } },
+    };
+    const result = await exportInteractive(store, production, CLOCK);
+    assert.equal(result.ok, false);
+    assert.ok(!result.ok && result.blockers.some((line) => /sc_i1's cut leaves nothing to play/.test(line)), !result.ok ? result.blockers.join("; ") : "");
+  });
+
   it("refuses a take whose media names a file outside its own folder, and copies nothing", async () => {
     const { dir, store, bundle } = await open();
     const base = await interactiveProduction(dir, bundle.productions[0]!, ROUTING);

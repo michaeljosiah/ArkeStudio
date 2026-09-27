@@ -679,6 +679,17 @@ export async function exportInteractive(
       const played = entry?.media?.path === path ? playbackWindow(entry) : null;
       return played ? [played] : [];
     });
+    // No window at all is either a whole pass the scene accepted as itself — no cut entries of
+    // its own, so it plays whole — or a cut that leaves nothing, every shot trimmed past its end.
+    // Read as the first, the second shipped the whole file, the footage the trims discarded too.
+    const wholePass =
+      covering.segment === undefined &&
+      covering.coversShots.length > 1 &&
+      shots.every((shot) => production.selections[shot.id]?.acceptedTakeId === covering.id);
+    if (windows.length === 0 && !wholePass) {
+      blockers.push(`${scene.id}'s cut leaves nothing to play — its trims run past the end of every shot`);
+      continue;
+    }
     media.push({
       sceneId: scene.id,
       source: join(store.dir, "productions", production.meta.id, "takes", covering.id, covering.media),
