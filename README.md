@@ -305,7 +305,11 @@ operation creates, replaces, appends, moves or removes.
 Install Node 22.12 or newer, then run `npm ci` from the repository root.
 For the desktop app, run `npm start`.
 
-To run Studio without Electron, start the server in one terminal:
+For everyday phone access, enable **Settings → Remote access** in the desktop app and pair the
+phone once. Its clean HTTPS address can be bookmarked; optional startup at sign-in keeps the
+host available in the background. See [Opening Studio from another device](docs/development/remote-access.md).
+
+To run Studio without Electron for development, start the server in one terminal:
 
 ```powershell
 npm run server -- --root C:\ArkeData

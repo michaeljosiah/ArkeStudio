@@ -1,4 +1,5 @@
 import { devMediaUrl } from "./dev-session.js";
+import { isRemoteSession } from "./remote-session.js";
 import { hasAdultAdapter, type ClientState } from "@arke-studio/contracts";
 
 let readState: () => ClientState | null = () => null;
@@ -30,6 +31,7 @@ export function adapterPreviewHidden(state: ClientState | null, slug: string, pa
  */
 
 function httpBase(): string {
+  if (isRemoteSession()) return window.location.origin;
   const fromBridge = typeof window === "undefined" ? undefined : window.arke?.coordinatorHttpBase?.();
   if (fromBridge) return fromBridge;
   const devUrl = (import.meta.env?.VITE_ARKE_WS as string | undefined) ?? "ws://127.0.0.1:8791";

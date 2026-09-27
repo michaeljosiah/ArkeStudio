@@ -116,6 +116,38 @@ retains screenshots in its printed disposable directory for visual inspection.
 Set `ARKE_SMOKE_CATALOG_DELAY_MS=1500` to also exercise model selection and saving while
 catalog refreshes temporarily disable those controls.
 
+## Remembered remote access
+
+Run coordinator and desktop `test/remote-access.test.ts`, client `test/remote-access.test.tsx`
+and the transport/preload regressions above. The focused suites cover code expiry/replay,
+approval persistence, origin/host confinement, revocation, and preserving other Serve mappings.
+They also check host-file command rejection over live sockets, approved-cookie promotion after
+restart, stale forwarding with damaged or missing settings and a damaged registry, port retention
+when cleanup fails, preservation of damaged records, and first launch without Tailscale.
+Publication tests verify that ownership is committed before Serve runs, both initially and
+after Disable, and that a failed ownership write prevents publication.
+Desktop `test/startup.test.ts` covers cleanup retries without a second host and slow remote
+unpublication before the core shutdown deadline.
+After building, an opt-in real HTTPS check is:
+
+```powershell
+node --import tsx apps/desktop/scripts/smoke-remote-access.mjs --tailscale
+```
+
+This requires a desktop display, connected Tailscale with HTTPS certificates enabled, and an
+unused HTTPS port 8444. It temporarily maps only that port and removes its own mapping on exit.
+It uses copied fixtures and a disposable profile, with no generation. It exercises the built
+sandboxed Electron file page, phone-sized browser pairing and desktop approval, HttpOnly cookies,
+authenticated WSS and media, browser reopen, coordinator/gateway/registry restart with a fresh
+process capability, and revocation. Inspect the
+screenshots in its printed temporary directory. This host-local check does not replace actual
+phone/second-computer testing or an installed-app sign-in/reboot check; record those separately.
+
+After building, `node apps/desktop/scripts/smoke-background-startup.mjs` uses the sandboxed
+file page and built preload to verify hidden first paint, readiness fallback, host startup,
+and visible failure recovery. It exercises Windows and macOS login inputs on the current
+machine; it does not claim an actual macOS or OS sign-in test.
+
 ## Desktop appearance
 
 For appearance bootstrap or reload changes, run `node apps/desktop/scripts/smoke-theme.mjs`.
