@@ -87,3 +87,29 @@ it("a damaged device registry cannot be overwritten by enabling or pairing", asy
     assert.equal(await readFile(join(root, "remote/devices.json"), "utf8"), "broken");
   } finally { await host.stop(); await rm(root, { recursive: true, force: true }); }
 });
+it("Disable and Quit drain automatic startup before returning, without resurrecting the gateway", async () => {
+  for (const action of ["disable", "stop"] as const) {
+    const root = await mkdtemp(join(tmpdir(), "arke-remote-startup-race-"));
+    await mkdir(join(root, "remote"));
+    await writeFile(join(root, "remote/settings.json"), JSON.stringify({ enabled: true, startOnLogin: false, origin }));
+    await writeFile(join(root, "index.html"), "<head></head>");
+    const fake = tailscale();
+    let release!: () => void, entered!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const starting = new Promise<void>(resolve => { entered = resolve; });
+    const resolveOrigin = fake.client.origin.bind(fake.client);
+    fake.client.origin = async () => { entered(); await held; return resolveOrigin(); };
+    const host = new DesktopRemoteAccess({ root, clientDirectory: root, session: { port: 9999, token: "a".repeat(64) },
+      startupSupported: false, setStartOnLogin: () => {}, tailscale: fake.client });
+    try {
+      const initialized = host.initialize(); await starting;
+      let settled = false;
+      const stopped = (action === "stop" ? host.stop() : host.command({ kind: "disable" })).then(() => { settled = true; });
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(settled, false, "stopping waits for the outstanding automatic start");
+      release(); await initialized; await stopped;
+      assert.equal(host.status().running, false);
+      assert.equal(host.status().enabled, action === "stop", "Quit retains opt-in; Disable removes it");
+    } finally { release(); await host.stop(); await rm(root, { recursive: true, force: true }); }
+  }
+});

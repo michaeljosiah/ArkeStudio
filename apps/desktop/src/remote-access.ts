@@ -24,18 +24,25 @@ export class DesktopRemoteAccess {
     this.path = join(options.root, "remote", "settings.json");
     this.devices = new RemoteDevices(join(options.root, "remote", "devices.json"));
   }
-  async initialize(): Promise<void> {
-    try {
-      try { this.config = Config.parse(JSON.parse(await readFile(this.path, "utf8"))); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-      await this.devices.load();
-      this.loaded = true;
-      if (this.config.enabled) await this.start();
-    } catch (error) {
-      this.reason = this.loaded
-        ? `${error instanceof Error ? error.message : "Remote access could not start."} Disable and enable remote access to retry.`
-        : "Remote access records could not be read. Restore the remote settings and device records from a backup before changing access.";
-    }
+  initialize(): Promise<void> {
+    // Settings IPC is already reachable during desktop startup. Enrol automatic startup in
+    // the same drain as owner commands so Disable/Quit cannot be overtaken by a late start.
+    const work = this.tail.then(async () => {
+      if (this.closing) return;
+      try {
+        try { this.config = Config.parse(JSON.parse(await readFile(this.path, "utf8"))); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+        await this.devices.load();
+        this.loaded = true;
+        if (this.config.enabled) await this.start();
+      } catch (error) {
+        this.reason = this.loaded
+          ? `${error instanceof Error ? error.message : "Remote access could not start."} Disable and enable remote access to retry.`
+          : "Remote access records could not be read. Restore the remote settings and device records from a backup before changing access.";
+      }
+    });
+    this.tail = work;
+    return work;
   }
   private tailscale() { return this.options.tailscale ?? new TailscaleServe(); }
   private async save(config: Settings): Promise<void> { await writeRemotePrivate(this.path, config); this.config = config; }
