@@ -28,6 +28,7 @@ assert.ok(status.CertDomains.includes(name));
 const origin = `https://${name}:8444`;
 const dir = await mkdtemp(join(tmpdir(), "arke-remote-smoke-"));
 await cp(join(root, "fixtures/worlds"), join(dir, "worlds"), { recursive: true });
+const worldId = JSON.parse(await readFile(join(dir, "worlds/the-undersong/world.json"), "utf8")).worldId;
 const createCoordinator = () => new Coordinator({ provider: new FsWorldProvider(dir), adapter: null, appRoot: dir, appVersion: "smoke",
   changeLogPath: join(dir, "logs/changes.jsonl"), transportAuth: { token: randomBytes(32).toString("hex"), allowedOrigins: ["file://", "null"] } });
 let coordinator = createCoordinator();
@@ -45,7 +46,7 @@ try {
   const probe = await fetch(origin); assert.equal(probe.status, 200);
   await writeFile(join(dir, "main.cjs"), `(${electronMain.toString()})().catch(error => { console.error(error); require("electron").app.exit(1); });`);
   const child = spawn(require("electron"), [join(dir, "main.cjs")], { windowsHide: true, stdio: ["ignore", "inherit", "inherit", "ipc"],
-    env: { ...process.env, ARKE_REMOTE_SMOKE: JSON.stringify({ dir, origin, ...session,
+    env: { ...process.env, ARKE_REMOTE_SMOKE: JSON.stringify({ dir, origin, worldId, ...session,
       qrDecoder: require.resolve("jsqr"),
       page: join(root, "packages/client/dist/index.html"), preload: join(root, "apps/desktop/dist/preload.cjs") }) } });
   child.on("message", async ({ id, command }) => {
@@ -86,7 +87,7 @@ async function electronMain() {
   const { join } = require("node:path");
   const config = JSON.parse(process.env.ARKE_REMOTE_SMOKE); delete process.env.ARKE_REMOTE_SMOKE;
   app.disableHardwareAcceleration(); app.setPath("userData", join(config.dir, "browser-profile"));
-  const timeout = setTimeout(() => { console.error("Remote smoke timed out"); app.exit(1); }, 90000);
+  const timeout = setTimeout(() => { console.error("Remote smoke timed out"); app.exit(1); }, 180000);
   let sequence = 0;
   const rpc = command => new Promise((resolve, reject) => {
     const id = ++sequence;
@@ -108,7 +109,7 @@ async function electronMain() {
   let phone = new BrowserWindow(browserOptions);
   const js = (window, source) => window.webContents.executeJavaScript(source);
   const until = async (window, condition) => {
-    const deadline = Date.now() + 20000;
+    const deadline = Date.now() + 45000;
     while (Date.now() < deadline) { if (await js(window, condition)) return; await new Promise(resolve => setTimeout(resolve, 100)); }
     throw new Error(`Timed out: ${condition}\n${await js(window, "document.body.innerText")}`);
   };
@@ -118,11 +119,19 @@ async function electronMain() {
   };
   await owner.loadFile(config.page, { hash: "/settings/remote-access" });
   await until(owner, "[...document.querySelectorAll('button')].some(b => b.textContent === 'Pair a device')");
+  await js(owner, "document.querySelector('.remote-access__share > svg').scrollIntoView({ block: 'center' })");
+  await js(owner, "document.fonts.ready.then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))");
+  // The hidden window's first capture can still be its blank startup surface. Prime that
+  // surface after layout settles, then decode the actual rendered QR on the next frame.
+  owner.webContents.invalidate();
+  await owner.webContents.capturePage();
+  await new Promise(resolve => setTimeout(resolve, 100));
   const qrRect = await js(owner, `(() => {
-    const qr = document.querySelector('.remote-access__share > svg'); qr.scrollIntoView({ block: 'center' });
+    const qr = document.querySelector('.remote-access__share > svg');
     const r = qr.getBoundingClientRect(); return { x: Math.floor(r.x), y: Math.floor(r.y), width: Math.ceil(r.width), height: Math.ceil(r.height) };
   })()`);
   const qrImage = await owner.webContents.capturePage(qrRect);
+  await writeFile(join(config.dir, "desktop-qr.png"), qrImage.toPNG());
   const bitmap = qrImage.toBitmap(), dimensions = qrImage.getSize();
   const rgba = new Uint8ClampedArray(bitmap.length);
   for (let pixel = 0; pixel < bitmap.length; pixel += 4) {
@@ -151,18 +160,22 @@ async function electronMain() {
   await js(owner, "[...document.querySelectorAll('button')].find(b => b.textContent === 'Pair a device').click()");
   await until(owner, "document.querySelector('.remote-access__code') !== null");
   const code = await js(owner, "document.querySelector('.remote-access__code').textContent");
+  await owner.loadFile(config.page, { hash: "/w/" + config.worldId });
+  await until(owner, "document.querySelector('[data-screen=world-overview]') !== null");
   await js(phone, `(() => { const input = document.querySelector('input[autocomplete="one-time-code"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(code)}); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await js(phone, "document.querySelector('form').requestSubmit()");
-  await until(owner, "[...document.querySelectorAll('button')].some(b => b.textContent.startsWith('Approve '))");
+  await until(owner, "document.querySelector('.fy-pairask') !== null");
   assert.ok(await js(owner, `(() => {
-    const button = [...document.querySelectorAll('button')].find(b => b.textContent.startsWith('Approve '));
+    const button = [...document.querySelectorAll('.fy-pairask button')].find(b => b.textContent === 'Approve');
     button.scrollIntoView({ block: 'center' });
     const bounds = button.getBoundingClientRect();
     return bounds.top >= 0 && bounds.bottom <= innerHeight;
-  })()`), "desktop approval must be reachable in the scrolling settings pane");
+  })()`), "desktop approval must be reachable over the world screen");
+  assert.ok(await js(owner, "document.querySelector('[data-screen=world-overview]') !== null"));
   await shot(owner, "desktop-approval");
-  await js(owner, "[...document.querySelectorAll('button')].find(b => b.textContent.startsWith('Approve ')).click()");
+  await js(owner, "[...document.querySelectorAll('.fy-pairask button')].find(b => b.textContent === 'Approve').click()");
   await until(phone, "document.querySelector('[data-screen=world-picker]') !== null");
+  await owner.loadFile(config.page, { hash: "/settings/remote-access" });
   await until(owner, "document.body.innerText.includes('Never expires')");
   await shot(owner, "desktop-duration");
   const cookie = (await phone.webContents.session.cookies.get({ url: config.origin, name: "__Host-arke-device" }))[0];

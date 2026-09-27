@@ -94,9 +94,9 @@ function setupSteps(
   ];
 }
 
-function mb(bytes: number): string {
+function mb(bytes: number, precision = 0): string {
   const m = bytes / (1024 * 1024);
-  return m >= 1024 ? `${(m / 1024).toFixed(1)} GB` : `${Math.round(m)} MB`;
+  return m >= 1024 ? `${(m / 1024).toFixed(1)} GB` : `${m.toFixed(precision)} MB`;
 }
 
 /** "about 3 min left" — rounded, because a precise wrong number is worse than a vague right one. */
@@ -179,7 +179,7 @@ export function CloudWay() {
       <h2 className="fy-launch__title">Cloud Login</h2>
       <span className="fy-launch__soon">Soon</span>
       <p className="fy-launch__body">
-        <span className="fy-launch__body--long">Sign in to Arke Studio Cloud to access your worlds anywhere.</span>
+        <span className="fy-launch__body--long">Sign in to Arke Studio Cloud<br />to access your worlds anywhere.</span>
         <span className="fy-launch__body--short">Your worlds, anywhere.</span>
       </p>
       <button type="button" className="fy-launch__action fy-launch__action--off" disabled>Coming soon</button>
@@ -194,8 +194,10 @@ export function StartupScreen() {
   const pressed = pathname === "/starting";
   const env = useEnvCheck();
   const setup = useSetup();
-  const downloading = setup?.running === true;
-  const paused = setup?.components.some((component) => component.state === "paused") === true;
+  const fetching = setup?.components.some((component) =>
+    component.state === "queued" || component.state === "downloading" ||
+    component.state === "paused" || component.state === "installing",
+  ) === true;
   const [startup, setStartup] = useState<StartupState | null>(() =>
     typeof window === "undefined" ? null : window.arke?.startupState?.() ?? null,
   );
@@ -221,7 +223,7 @@ export function StartupScreen() {
 
   const ready = connection === "open" && state !== null;
   // Nothing left to fetch and somewhere to go: the only state where the press goes straight in.
-  const settled = ready && !downloading && !paused;
+  const settled = ready && !fetching;
   const steps = setupSteps(connection, state, env !== null);
   const components = setup?.components ?? [];
 
@@ -265,10 +267,7 @@ export function StartupScreen() {
   // Setup happens once. Every start after it detects the runtimes already on this machine and
   // fetches nothing, so the setup panel is kept for the start that is actually doing the work:
   // something queued, downloading, paused or installing.
-  const fetching = components.some(
-    (c) => c.state === "queued" || c.state === "downloading" || c.state === "paused" || c.state === "installing",
-  );
-  const setupRun = downloading || fetching;
+  const setupRun = fetching;
 
   const destination = (): string | null => {
     if (!state) return null;
@@ -306,7 +305,7 @@ export function StartupScreen() {
       <>
         <div className="fy-launch__note" role="alert">
           <CircleAlert size={16} />
-          <div><b>The studio could not start</b>{startup?.detail}</div>
+          <div><b>The studio could not start</b><span className="fy-launch__host">{startup?.detail}</span></div>
         </div>
         <button type="button" className="fy-launch__action" onClick={() => window.arke?.retryStartup?.()}>Retry</button>
         <div className="fy-launch__aside">
@@ -362,7 +361,7 @@ export function StartupScreen() {
                 <h1>Setting up your studio</h1>
                 <span className="fy-launch__pct">{percent}%</span>
                 {active !== undefined && (
-                  <span className="fy-launch__transfer"><SetupTransferControl component={active} /></span>
+                  <span className="fy-launch__transfer"><SetupTransferControl component={active} showIcon /></span>
                 )}
               </div>
               <div className="fy-launch__track">
@@ -370,7 +369,7 @@ export function StartupScreen() {
               </div>
               <div className="fy-launch__meta">
                 <b>{activity}</b>
-                {speed !== null && speed > 0 && <span>{mb(speed)}/s</span>}
+                {speed !== null && speed > 0 && <span>{mb(speed, 1)}/s</span>}
                 <i />
                 <span>
                   {totalBytes > 0 ? `${mb(doneBytes)} of ${mb(totalBytes)}` : ""}
@@ -414,16 +413,16 @@ export function StartupScreen() {
               <section className="fy-launch__way fy-launch__way--local">
                 <span className="fy-launch__icon" aria-hidden><Laptop size={52} stroke={1.25} /></span>
                 <h2 className="fy-launch__title">{remote !== null ? "Your studio" : "Local Login"}</h2>
-                <p className="fy-launch__body">
+                {!failed && <p className="fy-launch__body">
                   {remote !== null ? (
                     <span className="fy-launch__host">{remote}</span>
                   ) : (
                     <>
-                      <span className="fy-launch__body--long">Access your local Arke Studio installation on this device.</span>
+                      <span className="fy-launch__body--long">Access your local Arke Studio<br />installation on this device.</span>
                       <span className="fy-launch__body--short">Your Arke Studio on this device.</span>
                     </>
                   )}
-                </p>
+                </p>}
                 {action}
               </section>
               <CloudWay />
