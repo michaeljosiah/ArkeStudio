@@ -1,8 +1,9 @@
 # Gemini speech integration
 
 The Google unary speech client is implemented and covered by protocol fixtures. It is exported
-from `@arke-studio/providers` for qualification; it is not yet registered in the production
-provider factory or shipped model catalogue. No application default changes in this stage.
+from `@arke-studio/providers` for qualification and registered in the provider factory, with
+host-owned credential setup. No Gemini models are yet in the shipped model catalogue, and no
+application default changes in this stage.
 
 The client targets the exact `gemini-3.8-flash-tts` and `gemini-3.8-flash-lite-tts` IDs through
 `POST /v1beta/interactions`. Spoken text and `speech_metadata.style` remain separate. Requests
