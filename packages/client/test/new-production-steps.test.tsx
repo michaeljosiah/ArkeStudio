@@ -10,6 +10,8 @@ import {
   DOOR_CHOICES,
   EPISODE_LENGTH_CHOICES,
   FRAME_RATE_CHOICES,
+  INTERACTIVE_KIND_CHOICES,
+  KINDS_BY_DOOR,
   KIND_PLATES,
   VIDEO_KIND_CHOICES,
   parseEpisodeLength,
@@ -142,6 +144,35 @@ describe("what the door writes (turn 113a)", () => {
         !carriedByADoor.includes(kind.id),
         `${kind.id} is offered by a card and by the kind row`,
       );
+    }
+  });
+});
+
+describe("CHOOSE asks which interactive (design turn 172)", () => {
+  it("offers an interactive movie and a visual novel, named for what the viewer does", () => {
+    assert.deepEqual(
+      INTERACTIVE_KIND_CHOICES.map((k) => [k.id, k.label]),
+      [
+        ["interactive", "Interactive movie"],
+        ["visual-novel", "Visual novel"],
+      ],
+    );
+    assert.equal(KINDS_BY_DOOR.choose, INTERACTIVE_KIND_CHOICES);
+    // "Illustrated" already names an art direction; a label that says the technique rather than
+    // what the viewer does is what the turn replaced.
+    for (const k of INTERACTIVE_KIND_CHOICES) assert.doesNotMatch(k.label, /Illustrated|Moving pictures/);
+  });
+
+  it("the card's own kind is the row's first answer, so an untouched step writes what it always did", () => {
+    const choose = DOOR_CHOICES.find((d) => d.id === "choose")!;
+    assert.equal("productionKind" in choose && choose.productionKind, INTERACTIVE_KIND_CHOICES[0]!.id);
+  });
+
+  it("both interactive kinds have their plate on disk", () => {
+    const plates = fileURLToPath(new URL("../public/video-kinds/", import.meta.url));
+    for (const kind of INTERACTIVE_KIND_CHOICES) {
+      assert.ok(KIND_PLATES.has(kind.id), `${kind.id} asks for a plate`);
+      assert.ok(existsSync(`${plates}${kind.id}.webp`), `${kind.id}.webp is shipped`);
     }
   });
 });

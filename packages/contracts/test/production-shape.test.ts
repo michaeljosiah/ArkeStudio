@@ -54,6 +54,15 @@ describe("productionShape resolves the legacy discriminator", () => {
       episodic: false,
       label: "Interactive video",
     },
+    {
+      // Turn 172: the second interactive kind. It branches, and its pictures are image takes.
+      meta: { format: "video", medium: "video", kind: "visual-novel" },
+      medium: "video",
+      kind: "visual-novel",
+      capability: "image",
+      episodic: false,
+      label: "Visual novel",
+    },
   ];
 
   for (const row of table) {
@@ -66,7 +75,8 @@ describe("productionShape resolves the legacy discriminator", () => {
       assert.equal(shape.displayLabel, row.label);
       assert.equal(shape.hasChapters, row.medium === "story");
       assert.equal(shape.hasScenes, row.medium !== "story");
-      assert.equal(shape.isBranching, row.kind === "interactive");
+      assert.equal(shape.isBranching, row.kind === "interactive" || row.kind === "visual-novel");
+      assert.equal(shape.playsAsBeats, row.kind === "visual-novel");
     });
   }
 

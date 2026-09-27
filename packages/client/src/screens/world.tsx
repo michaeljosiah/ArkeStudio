@@ -4549,18 +4549,42 @@ export const VIDEO_KIND_CHOICES = [
 ] as const;
 
 /**
+ * What `CHOOSE` asks (turn 172): which of the two interactive kinds. Each is named for what the
+ * viewer does — watch, or read — because the first names drawn for them ("Moving pictures",
+ * "Illustrated") said neither, and "Illustrated" already names an art direction an interactive
+ * movie can wear. Both write the video medium and route by choice; a visual novel reads its
+ * scenes as beats of picture, text and voice instead of playing them as clips.
+ */
+export const INTERACTIVE_KIND_CHOICES = [
+  {
+    id: "interactive",
+    label: "Interactive movie",
+    body: "Scenes play as video. Choose at the end of each.",
+    aspect: "16:9",
+  },
+  {
+    id: "visual-novel",
+    label: "Visual novel",
+    body: "Pictures, text and voices. Read at your own pace, then choose.",
+    aspect: "16:9",
+  },
+] as const;
+
+type KindChoice = { id: string; label: string; body: string; aspect: string };
+
+/**
  * The kinds that write themselves down. The rest are the medium's plain default (SPEC-023 R-2).
  * `interactive` is still one of them and still reads back the same way — it just arrives from
  * the door now rather than from the kind row (turn 113a).
  */
-const STORED_KINDS = new Set(["microdrama", "music-video", "interactive"]);
+const STORED_KINDS = new Set(["microdrama", "music-video", "interactive", "visual-novel"]);
 
 /*
  * The kinds with a plate in `public/video-kinds`. Other is deliberately absent: an image of
  * "nothing assumed" would be a picture of something, and the empty box saying so is the truer
  * one. A kind added without a plate falls back to that same empty box rather than breaking.
  */
-export const KIND_PLATES = new Set(["microdrama", "film", "music-video"]);
+export const KIND_PLATES = new Set(["microdrama", "film", "music-video", "interactive", "visual-novel"]);
 
 /** The episode-length ranges step two offers, and the seconds each one means (turn 53). */
 export const EPISODE_LENGTH_CHOICES = [
@@ -4581,18 +4605,30 @@ export function parseEpisodeLength(value: string): { min: number; max: number } 
   return { min: min!, max: max! };
 }
 
-type VideoKind = (typeof VIDEO_KIND_CHOICES)[number]["id"];
-
 /**
  * What each card has left to ask. Step two always renders now (turn 113): it is the screen that
  * holds the name, so a card with nothing else to ask shows the name alone rather than sending
- * the person through a dialog the other cards do not get. `choose` is empty until branching has
- * kinds of its own — its card already names three — and `write` until a story does.
+ * the person through a dialog the other cards do not get. `choose` has had kinds of its own since
+ * turn 172 — an interactive movie or a visual novel — and `write` is empty until a story does.
  */
-const KINDS_BY_DOOR: Record<DoorId, readonly (typeof VIDEO_KIND_CHOICES)[number][]> = {
+export const KINDS_BY_DOOR: Record<DoorId, readonly KindChoice[]> = {
   write: [],
   watch: VIDEO_KIND_CHOICES,
-  choose: [],
+  choose: INTERACTIVE_KIND_CHOICES,
+};
+
+/** The kind each door's row starts on, and so what an untouched step two creates. */
+const DEFAULT_KIND_BY_DOOR: Record<DoorId, string> = {
+  write: "",
+  watch: "film",
+  choose: "interactive",
+};
+
+/** The question step two asks above a door's kind row. */
+const KIND_QUESTION: Record<DoorId, string> = {
+  write: "",
+  watch: "What kind of video?",
+  choose: "What kind of interactive?",
 };
 
 export const FRAME_RATE_CHOICES = [24, 25, 30] as const satisfies readonly FrameRate[];
@@ -4605,7 +4641,8 @@ export function NewProductionScreen() {
   // of what step one produces. There is no default — a preselected card would answer the
   // question the screen is asking.
   const [door, setDoor] = useState<DoorId | null>(null);
-  const [videoKind, setVideoKind] = useState<VideoKind>("film");
+  // The kind the row has selected, for whichever door was pressed; seeded from the door.
+  const [videoKind, setVideoKind] = useState<string>("film");
   const [title, setTitle] = useState("");
   // Seeded from the kind and re-seeded whenever the kind changes: a default the kind can answer
   // is the kind's to answer (turn 99), and a film that silently kept a micro drama's 9:16 would
@@ -4646,15 +4683,15 @@ export function NewProductionScreen() {
         title: title.trim(),
         medium: chosen.medium,
         /*
-         * The card's own kind wins where it has one — `CHOOSE` writes `interactive` without ever
-         * showing a kind row (turn 113a) — and otherwise the kind row answers for it. The two
-         * cannot both apply: a card that carries a kind has no kinds left to offer.
+         * The kind row answers where the card has one — `CHOOSE` has offered an interactive movie
+         * or a visual novel since turn 172 — and a card's own kind stands in where it has no row,
+         * which is how `CHOOSE` wrote `interactive` from turn 113a until then.
          */
-        ..."productionKind" in chosen
-          ? { productionKind: chosen.productionKind }
-          : chosen.medium === "video" && STORED_KINDS.has(videoKind)
-            ? { productionKind: videoKind }
-            : {},
+        ...(kinds.length > 0 && chosen.medium === "video" && STORED_KINDS.has(videoKind)
+          ? { productionKind: videoKind }
+          : "productionKind" in chosen
+            ? { productionKind: chosen.productionKind }
+            : {}),
         // The frame a video delivers in is answerable for every kind, so it travels for every
         // kind (turn 99): before this, a film could not be made vertical until after it existed.
         ...(chosen.medium === "video" ? { aspect } : {}),
@@ -4698,7 +4735,7 @@ export function NewProductionScreen() {
           <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
             {kinds.length > 0 ? (
               <div style={{ font: "650 22px var(--font-sans)", letterSpacing: "-0.02em" }}>
-                What kind of video?
+                {KIND_QUESTION[chosen.id]}
               </div>
             ) : (
               // The eyebrow names the card that was pressed. Without a kind row there is nothing
@@ -4804,15 +4841,19 @@ export function NewProductionScreen() {
                 <option value="9:16">9:16 vertical</option>
                 <option value="16:9">16:9 landscape</option>
               </DefaultSelect>
-              <DefaultSelect
-                label="RATE"
-                value={String(frameRate)}
-                onChange={(value) => setFrameRate(Number(value) as FrameRate)}
-              >
-                {FRAME_RATE_CHOICES.map((rate) => (
-                  <option key={rate} value={String(rate)}>{rate} fps</option>
-                ))}
-              </DefaultSelect>
+              {/* A visual novel plays pictures, not frames: a rate would be a setting nothing
+                  reads. It still travels at its default, so an export to film has one. */}
+              {videoKind !== "visual-novel" && (
+                <DefaultSelect
+                  label="RATE"
+                  value={String(frameRate)}
+                  onChange={(value) => setFrameRate(Number(value) as FrameRate)}
+                >
+                  {FRAME_RATE_CHOICES.map((rate) => (
+                    <option key={rate} value={String(rate)}>{rate} fps</option>
+                  ))}
+                </DefaultSelect>
+              )}
               {isMicrodrama && (
                 <>
                   {/* The range a season is written to, and the reason a Microdrama is a
@@ -4921,14 +4962,13 @@ export function NewProductionScreen() {
                   return;
                 }
                 setDoor(d.id);
-                // A card that carries no kind still delivers in a frame, and the kind row it is
-                // about to see (or not see) is what would otherwise have seeded this.
+                // The row starts on the door's first kind, and the frame is that kind's: a card
+                // that carries no kind still delivers in a frame, and the kind row it is about to
+                // see (or not see) is what would otherwise have seeded this.
+                const startKind = DEFAULT_KIND_BY_DOOR[d.id];
+                setVideoKind(startKind);
                 if (d.medium === "video") {
-                  setAspect(
-                    "productionKind" in d
-                      ? "16:9"
-                      : (VIDEO_KIND_CHOICES.find((k) => k.id === videoKind)?.aspect ?? "16:9"),
-                  );
+                  setAspect(KINDS_BY_DOOR[d.id].find((k) => k.id === startKind)?.aspect ?? "16:9");
                 }
               }}
             >

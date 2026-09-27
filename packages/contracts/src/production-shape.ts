@@ -13,8 +13,13 @@ export interface ProductionShape {
   isEpisodic: boolean;
   hasChapters: boolean;
   hasScenes: boolean;
-  /** Branching belongs to the interactive kind (turn 100; was a medium of its own, turn 84). */
+  /** Branching belongs to the interactive kinds (turn 100; was a medium of its own, turn 84). */
   isBranching: boolean;
+  /**
+   * A visual novel's scenes are read as beats — a picture and one line each — rather than played
+   * as clips (turn 172). Everything else about it is an interactive production's.
+   */
+  playsAsBeats: boolean;
   /** What the dispatch dialog resolves models against (legacy stills → image). */
   dispatchCapability: "image" | "video";
   mediumLabel: string;
@@ -50,6 +55,15 @@ const EPISODIC_KINDS = new Set(["microdrama", "series"]);
  */
 const BRANCHING_KIND = "interactive";
 
+/**
+ * The second interactive kind (turn 172): the same scenes, routing and branch map, told in
+ * pictures, text and voices instead of video. Its pictures are the accepted image takes, so it
+ * dispatches images the way legacy stills did, and nothing about routing needs to know which of
+ * the two it is looking at.
+ */
+export const VISUAL_NOVEL_KIND = "visual-novel";
+const BRANCHING_KINDS = new Set([BRANCHING_KIND, VISUAL_NOVEL_KIND]);
+
 const KIND_LABEL: Record<string, string> = {
   book: "Book",
   script: "Script",
@@ -64,6 +78,7 @@ const KIND_LABEL: Record<string, string> = {
   // Reads as the whole name wherever a badge prints it; step two's card says just "Interactive",
   // because the question above it already said video.
   interactive: "Interactive video",
+  "visual-novel": "Visual novel",
 };
 
 export function resolveMedium(meta: { format: ProductionFormat; medium?: ProductionMedium }): ProductionMedium {
@@ -100,8 +115,9 @@ export function productionShape(meta: {
     isEpisodic,
     hasChapters: medium === "story",
     hasScenes: medium !== "story",
-    isBranching: kind === BRANCHING_KIND,
-    dispatchCapability: kind === "stills" ? "image" : "video",
+    isBranching: BRANCHING_KINDS.has(kind),
+    playsAsBeats: kind === VISUAL_NOVEL_KIND,
+    dispatchCapability: kind === "stills" || kind === VISUAL_NOVEL_KIND ? "image" : "video",
     mediumLabel,
     kindLabel,
     displayLabel: kind === DEFAULT_KIND[medium] ? mediumLabel : kindLabel,
