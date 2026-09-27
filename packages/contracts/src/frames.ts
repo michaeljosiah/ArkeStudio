@@ -19,6 +19,7 @@ import { CADENCE_PHRASE_MAX, CadencePlanSchema } from "./cadence.js";
 import { PerformanceIdSchema } from "./performance.js";
 import { VoiceSampleSourceSchema } from "./voice-sample.js";
 import { z } from "zod";
+import { RoutingCommandSchema } from "./world-chat-actions.js";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
 import { BIBLE_HELPER_BOUNDS, BibleHelperKindSchema } from "./bible.js";
 import { ClientStateSchema } from "./client-state.js";
@@ -1815,6 +1816,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("voice-line"),
+      confirmedSpeechMicroUsd: z.number().int().nonnegative().safe().optional(),
       requestId: UlidSchema,
       worldId: UlidSchema,
       productionId: SlugSchema,
@@ -2402,6 +2404,19 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       productionId: SlugSchema,
       routing: z.unknown(),
+    })
+    .strict(),
+  /**
+   * The branch map's hand edits (design turn 157): one closed routing command, the same set world
+   * chat's production-routing action applies, applied to the file on disk rather than a whole
+   * routing composed from the copy the map last saw — two quick edits both land.
+   */
+  z
+    .object({
+      kind: z.literal("routing-command"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      command: RoutingCommandSchema,
     })
     .strict(),
   /** Epic 401 (brief §4/§5): one preview traversal, appended durably. */

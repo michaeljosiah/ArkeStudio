@@ -855,3 +855,20 @@ describe("the Library's audio rows report what exists", () => {
     assert.match(empty, />Generate</);
   });
 });
+
+
+it("shows the token-priced line ceiling on the Generate press", () => {
+  const state = structuredClone(FIXTURE_STATE);
+  const prod = state.world!.productions[0]!;
+  const shot = prod.scenes.flatMap(orderedShots).find(s => s.audio?.line && s.audio.speaker)!;
+  const speaker = state.world!.sheets.find(s => s.id === shot.audio!.speaker)!;
+  speaker.voice = { provider: "elevenlabs", model: "token-reader", voiceId: "test", assignedAtVersion: speaker.version };
+  prod.meta.models = { ...prod.meta.models, "voice-tts": "token-reader" };
+  state.app.manifest!.models.push({ id: "token-reader", provider: "elevenlabs", capability: "voice-tts", displayName: "Token reader",
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: {},
+    pricing: { kind: "perToken", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000,
+      speech: { tier: "standard", maxInputTokens: 8192, maxOutputTokens: 16384, audioTokensPerSecond: 25,
+        rates: [{ version: "test", effectiveFrom: "2020-01-01T00:00:00.000Z", microUsdPerMillionInput: 500000, microUsdPerMillionOutput: 9000000 }] } } });
+  const html = render(`/w/${FIXTURE_WORLD_ID}/p/${prod.meta.id}/generate/voice-line?shot=${shot.id}`, state);
+  assert.match(html, /Generate line.*up to \$0\.1516/);
+});

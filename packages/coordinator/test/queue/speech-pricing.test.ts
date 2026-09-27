@@ -332,7 +332,7 @@ it("captures an accepted submit while cancellation is flushing without reviving 
 });
 
 for (const lookup of [false, true]) it(`recovers a persisted accepted id before lookup or resubmission (lookup: ${lookup})`, async () => {
-  const h = await harness({ inputTextTokens: 3, outputAudioTokens: 250 }, "succeeded", true);
+  const h = await harness({ inputTextTokens: 3, outputAudioTokens: 250 }, "succeeded", false);
   try {
     await h.queue.enqueue(input);
     await until(() => h.ledger.length === 1, "first result", 30000);
@@ -351,6 +351,31 @@ for (const lookup of [false, true]) it(`recovers a persisted accepted id before 
       assert.equal(h.submissions(), 1);
       assert.equal(lookups, 0);
       assert.equal(h.ledger[0]!.actualMicroUsd, 2252);
+    } finally { restored.dispose(); }
+  } finally { h.queue.dispose(); }
+});
+
+
+it("holds a lost inline result without polling or repeating a paid submission", async () => {
+  const h = await harness({ inputTextTokens: 3, outputAudioTokens: 250 }, "succeeded", true);
+  try {
+    await h.queue.enqueue(input);
+    await until(() => h.ledger.length === 1, "first inline result", 30000);
+    h.queue.dispose();
+    const job = h.queue.listJobs()[0]!;
+    assert.equal(job.providerResultKind, "inline");
+    await writeFile(join(h.dir, "jobs.jsonl"), JSON.stringify({ ...job, status: "submitting", finalization: undefined }) + "\n");
+    h.ledger.length = 0;
+    let polls = 0;
+    h.client.poll = async () => { polls++; return { state: "failed", error: "inline only" }; };
+    const restored = h.create();
+    try {
+      await restored.start();
+      assert.equal(restored.listJobs()[0]!.status, "needs-reconciliation");
+      assert.match(restored.listJobs()[0]!.error!, /inline result was not saved/);
+      assert.equal(polls, 0);
+      assert.equal(h.submissions(), 1);
+      assert.equal(h.ledger.length, 0);
     } finally { restored.dispose(); }
   } finally { h.queue.dispose(); }
 });
