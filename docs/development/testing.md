@@ -186,6 +186,22 @@ The focused domain suites are contracts `test/production-setup.test.ts`, coordin
 `test/production-setup.test.tsx`. The lifecycle suite injects actual commit journal failures;
 its recovery assertions must pass without dismissing external-edit warnings.
 
+## Launch surface and remote pairing
+
+`node scripts/smoke-launch-layout.mjs` renders the real launch components in sandboxed
+Chromium at turn 158's desktop, minimum-window, phone and Fold7 sizes. It keeps screenshots
+and layout measurements in the reported temporary directory, alongside frames extracted from
+the design master. Mobile safe-area inputs are simulated in the fixture CSS; device status
+bars, the home indicator and the canvas-only Loop mark are excluded from the comparison.
+Check the images as well as the overflow and touch-target assertions.
+
+After building, `node --import tsx apps/desktop/scripts/smoke-remote-access.mjs --tailscale`
+checks the served client over actual Tailscale TLS with disposable world data and profiles.
+It uses an unused HTTPS port 8444, restores its own mapping, and exercises approval over a
+world screen through the real sandboxed Electron file page/preload, persistent cookies,
+browser reopen, host restart and revocation. It requires an available Tailscale connection.
+Physical phone/Fold7 keyboard and bookmark testing is still a separate acceptance step.
+
 ## CI
 
 For publications, run coordinator `test/publications/`, desktop `test/publication-host.test.ts`

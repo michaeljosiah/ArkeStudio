@@ -115,6 +115,12 @@ and `test/routes.test.tsx` when changing these boundaries (all client paths).
 
 Every start opens on the launch surface (design turn 158): `/` is it at rest, with the two ways in, and `/starting` is the same surface after Continue, which goes on by itself once the studio is ready or shows first-start setup while runtime parts download. The connection, snapshot and setup checks run behind it from boot. `StartupScreen` in client `screens/launch.tsx` owns readiness, setup progress, recovery and the remote-session states; its layout (split on a wide landscape window, a stacked band on phones and an unfolded Fold) is `screens/launch.css`.
 
+Client `components/remote-entry.tsx` shares `LaunchFrame` for pairing, and
+`components/pairing-prompt.tsx` asks the owner over the current desktop screen through private
+IPC. Regressions: `test/launch-lifecycle.test.tsx`, `test/launch-remote.test.tsx` and
+`test/remote-pairing.test.tsx`. The [launch visual and remote smoke checks](testing.md#launch-surface-and-remote-pairing)
+cover actual Chromium layout and the sandboxed desktop/remote-browser journey.
+
 **Browser dev:** the coordinator workspace dev script runs `dev-preflight.ts` then [dev.ts](../../packages/coordinator/src/dev.ts). Dev seeds an empty `.dev/root` from fixtures (overridable by `ARKE_STUDIO_ROOT`), constructs FsWorldProvider and integrations, and writes a private transport handoff. Vite's [dev-session-plugin.ts](../../packages/client/dev-session-plugin.ts) verifies the saved handoff against authenticated `HEAD /session` (`X-Arke-Session`) on the live endpoint before printing the session link consumed by client `lib/dev-session.ts`. Client `lib/store.ts` preserves authentication refusal as `auth-refused`; the app-wide shell alert shows session recovery guidance rather than an offline-server message. Dev credentials use a per-run cipher; dev voice wiring is not identical to packaged Voxa. See [setup](../../CONTRIBUTING.md#getting-set-up) for ports and restart behavior.
 
 **Shutdown:** desktop `shutdownConfirmed()` and `before-quit`, or dev SIGINT/SIGTERM, call `Coordinator.stop()`. It closes admission, stops transport, awaits active handlers, cancels/disposes services, drains tracked work and the queue, stops supervisors and closes owned resources. Read the method for ordering before adding work; do not infer that closing a window safely drains everything. Startup failure also has a separate cleanup path in main.ts.

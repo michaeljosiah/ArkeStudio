@@ -98,6 +98,7 @@ it("says a refusal on the way, and the phone can try again", async () => {
     pairState = 410;
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 3100)); await flush(); });
     assert.ok(element.querySelector("form"), "a request that ran out returns to the field");
+    assert.ok(element.textContent?.includes("Not approved"), "a reloaded request still explains its refusal");
   } finally { await unmount(); }
 
   globalThis.fetch = (async () => { throw new TypeError("offline"); }) as typeof fetch;
@@ -106,6 +107,49 @@ it("says a refusal on the way, and the phone can try again", async () => {
     assert.ok(offline.element.textContent?.includes("Not answering"));
     assert.ok([...offline.element.querySelectorAll("button")].some(b => b.textContent === "Try again"));
   } finally { await offline.unmount(); }
+});
+
+it("goes straight in after a pending request survives a reload", async () => {
+  let pairing = 202;
+  globalThis.fetch = (async (input: RequestInfo | URL) => new Response(null, {
+    status: String(input) === "/remote/session" ? 401 : pairing,
+  })) as typeof fetch;
+  const { element, unmount } = await mount(<RemoteEntry><div>Private world</div></RemoteEntry>);
+  try {
+    assert.ok(element.textContent?.includes("Waiting for your PC"));
+    pairing = 204;
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 3100)); await flush(); });
+    assert.equal(where, "/starting");
+    assert.ok(element.textContent?.includes("Private world"));
+  } finally { await unmount(); }
+});
+
+it("does not let an older pairing check replace a newly submitted request", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  let reads = 0;
+  let release: ((response: Response) => void) | undefined;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) === "/remote/session") return new Response(null, { status: 401 });
+    if (init?.method === "POST") return new Response(null, { status: 202 });
+    if (++reads === 1) return new Response(null, { status: 410 });
+    return new Promise<Response>(resolve => { release = resolve; });
+  }) as typeof fetch;
+  const { element, unmount } = await mount(<RemoteEntry><div>Private world</div></RemoteEntry>);
+  try {
+    await act(async () => { t.mock.timers.tick(3000); await flush(); });
+    assert.ok(release, "a pre-submission check is awaiting its response");
+    const input = element.querySelector<HTMLInputElement>("input")!;
+    await act(async () => {
+      input.value = "7KQ4-M2XP";
+      const key = Object.keys(input).find(candidate => candidate.startsWith("__reactProps$"))!;
+      (input as unknown as Record<string, { onChange(event: { target: HTMLInputElement }): void }>)[key]!.onChange({ target: input });
+      await flush();
+    });
+    await act(async () => { element.querySelector("form")!.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true })); await flush(); });
+    assert.ok(element.textContent?.includes("Waiting for your PC"));
+    await act(async () => { release!(new Response(null, { status: 410 })); await flush(); });
+    assert.ok(element.textContent?.includes("Waiting for your PC"), "the old 410 cannot undo the successful POST");
+  } finally { await unmount(); }
 });
 
 let duration: RemoteAccessStatus["pairingDuration"] = 90;

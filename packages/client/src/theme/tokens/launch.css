@@ -26,8 +26,9 @@
   --launch-ink: var(--neutral-50);
   --launch-ink-dim: color-mix(in srgb, var(--neutral-50) 62%, transparent);
   --launch-ink-faint: color-mix(in srgb, var(--neutral-50) 50%, transparent);
-  --launch-ink-quiet: color-mix(in srgb, var(--neutral-50) 44%, transparent);
-  --launch-ink-off: color-mix(in srgb, var(--neutral-50) 34%, transparent);
+  --launch-ink-quiet: color-mix(in srgb, var(--neutral-50) 45%, transparent);
+  --launch-ink-cloud: color-mix(in srgb, var(--neutral-50) 42%, transparent);
+  --launch-ink-off: color-mix(in srgb, var(--neutral-50) 28%, transparent);
 
   /* ---- Plate and panels ------------------------------------- */
   /* Painted behind the image so a slow decode is never a white flash. */
@@ -41,17 +42,17 @@
   /* ---- Controls --------------------------------------------- */
   /* Exactly one filled action on the screen; everything else is outlined. */
   --launch-action-bg: var(--neutral-50);
-  --launch-action-fg: var(--neutral-900);
+  --launch-action-fg: var(--neutral-950);
   --launch-action-ring: color-mix(in srgb, var(--neutral-50) 14%, transparent);
   --launch-action-off-bg: color-mix(in srgb, var(--neutral-50) 3%, transparent);
   --launch-action-off-line: color-mix(in srgb, var(--neutral-50) 12%, transparent);
-  --launch-action-off-fg: color-mix(in srgb, var(--neutral-50) 40%, transparent);
+  --launch-action-off-fg: color-mix(in srgb, var(--neutral-50) 42%, transparent);
   --launch-divider: color-mix(in srgb, var(--neutral-50) 16%, transparent);
 
   /* ---- The lockup's light ----------------------------------- */
   /* The bar crosses the wordmark on its baseline and brightens into the O. */
   --launch-bar-quiet: color-mix(in srgb, var(--neutral-50) 16%, transparent);
-  --launch-bar-mid: color-mix(in srgb, var(--neutral-50) 42%, transparent);
+  --launch-bar-mid: color-mix(in srgb, var(--neutral-50) 40%, transparent);
   --launch-bar-warm: rgba(255, 201, 142, 0.95);
   --launch-bar-fade: color-mix(in srgb, var(--neutral-50) 28%, transparent);
   --launch-flare-core: rgba(255, 240, 215, 0.95);
@@ -75,6 +76,7 @@
   --launch-seam: color-mix(in srgb, var(--neutral-50) 7%, transparent);
   /* More ink steps than turn 76 needed: the tagline's sentence, the tile copy, the notes. */
   --launch-ink-soft: color-mix(in srgb, var(--neutral-50) 78%, transparent);
+  --launch-ink-active: color-mix(in srgb, var(--neutral-50) 82%, transparent);
   --launch-ink-body: color-mix(in srgb, var(--neutral-50) 66%, transparent);
   --launch-ink-note: color-mix(in srgb, var(--neutral-50) 72%, transparent);
   --launch-ink-rest: color-mix(in srgb, var(--neutral-50) 55%, transparent);
@@ -92,7 +94,7 @@
   --launch-note-line: color-mix(in srgb, var(--neutral-50) 10%, transparent);
   --launch-note-mark: rgba(255, 205, 160, 0.95);
   --launch-action-busy: color-mix(in srgb, var(--neutral-50) 86%, transparent);
-  --launch-spin-track: color-mix(in srgb, var(--neutral-900) 18%, transparent);
+  --launch-spin-track: color-mix(in srgb, var(--neutral-950) 18%, transparent);
   --launch-line-action: color-mix(in srgb, var(--neutral-50) 20%, transparent);
   --launch-track: color-mix(in srgb, var(--neutral-50) 14%, transparent);
   --launch-rule: color-mix(in srgb, var(--neutral-50) 8%, transparent);

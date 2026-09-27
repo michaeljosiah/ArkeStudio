@@ -85,7 +85,7 @@ async function electronMain() {
   const { join } = require("node:path");
   const config = JSON.parse(process.env.ARKE_REMOTE_SMOKE); delete process.env.ARKE_REMOTE_SMOKE;
   app.disableHardwareAcceleration(); app.setPath("userData", join(config.dir, "browser-profile"));
-  const timeout = setTimeout(() => { console.error("Remote smoke timed out"); app.exit(1); }, 90000);
+  const timeout = setTimeout(() => { console.error("Remote smoke timed out"); app.exit(1); }, 180000);
   let sequence = 0;
   const rpc = command => new Promise((resolve, reject) => {
     const id = ++sequence;
@@ -103,7 +103,7 @@ async function electronMain() {
   let phone = new BrowserWindow(browserOptions);
   const js = (window, source) => window.webContents.executeJavaScript(source);
   const until = async (window, condition) => {
-    const deadline = Date.now() + 20000;
+    const deadline = Date.now() + 45000;
     while (Date.now() < deadline) { if (await js(window, condition)) return; await new Promise(resolve => setTimeout(resolve, 100)); }
     throw new Error(`Timed out: ${condition}\n${await js(window, "document.body.innerText")}`);
   };
@@ -125,18 +125,22 @@ async function electronMain() {
   await js(owner, "[...document.querySelectorAll('button')].find(b => b.textContent === 'Pair a device').click()");
   await until(owner, "document.querySelector('.remote-access__code') !== null");
   const code = await js(owner, "document.querySelector('.remote-access__code').textContent");
+  await owner.loadFile(config.page, { hash: "/w/the-undersong" });
+  await until(owner, "document.querySelector('[data-screen=world-overview]') !== null");
   await js(phone, `(() => { const input = document.querySelector('input[autocomplete="one-time-code"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(code)}); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await js(phone, "document.querySelector('form').requestSubmit()");
-  await until(owner, "[...document.querySelectorAll('button')].some(b => b.textContent.startsWith('Approve '))");
+  await until(owner, "document.querySelector('.fy-pairask') !== null");
   assert.ok(await js(owner, `(() => {
-    const button = [...document.querySelectorAll('button')].find(b => b.textContent.startsWith('Approve '));
+    const button = [...document.querySelectorAll('.fy-pairask button')].find(b => b.textContent === 'Approve');
     button.scrollIntoView({ block: 'center' });
     const bounds = button.getBoundingClientRect();
     return bounds.top >= 0 && bounds.bottom <= innerHeight;
-  })()`), "desktop approval must be reachable in the scrolling settings pane");
+  })()`), "desktop approval must be reachable over the world screen");
+  assert.ok(await js(owner, "document.querySelector('[data-screen=world-overview]') !== null"));
   await shot(owner, "desktop-approval");
-  await js(owner, "[...document.querySelectorAll('button')].find(b => b.textContent.startsWith('Approve ')).click()");
+  await js(owner, "[...document.querySelectorAll('.fy-pairask button')].find(b => b.textContent === 'Approve').click()");
   await until(phone, "document.querySelector('[data-screen=world-picker]') !== null");
+  await owner.loadFile(config.page, { hash: "/settings/remote-access" });
   await until(owner, "document.body.innerText.includes('Never expires')");
   await shot(owner, "desktop-duration");
   const cookie = (await phone.webContents.session.cookies.get({ url: config.origin, name: "__Host-arke-device" }))[0];
