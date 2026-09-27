@@ -1201,8 +1201,9 @@ export class Coordinator {
     }
   }
 
-  private async requireSpeechInputsAvailable(inputs: readonly EnqueueInput[]): Promise<void> {
-    const checked = new Set<string>();
+  private readonly speechAdmissionChecks = new WeakMap<EnqueueInput, Map<string, Promise<void>>>();
+
+  private async requireSpeechInputsAvailable(inputs: readonly EnqueueInput[], checked = new Map<string, Promise<void>>()): Promise<void> {
     for (const input of inputs) {
       if (input.capability !== "voice-tts") continue;
       if (this.readModel.getState().app.models.disabled.includes(input.model)) throw new Error("That voice model is turned off in AI models.");
@@ -1210,11 +1211,28 @@ export class Coordinator {
       const model = this.opts.manifest?.models.find(row => row.id === input.model && row.provider === input.provider);
       if (!model) throw new Error("That Gemini voice model is unavailable.");
       const voiceId = typeof input.params.voiceId === "string" ? input.params.voiceId : "";
-      const identity = JSON.stringify([model.id, voiceId]);
-      if (checked.has(identity)) continue;
-      await this.requireEnabledSpeechReader(model, voiceId);
-      checked.add(identity);
+      const key = await this.credentials?.get("google") ?? null;
+      const credential = key === null ? null : createHash("sha256").update(key).digest("hex");
+      const identity = JSON.stringify([model.id, voiceId, credential]);
+      let checking = checked.get(identity);
+      if (!checking) {
+        checking = (async () => {
+          await this.requireEnabledSpeechReader(model, voiceId);
+          if ((await this.credentials?.get("google") ?? null) !== key) throw new Error("The Google key changed during voice validation. Try the read again.");
+        })();
+        checked.set(identity, checking);
+      }
+      await checking;
     }
+  }
+
+  /** Validation results live only for this batch, never in durable jobs or across key changes. */
+  private async enqueueWithSpeechChecks(input: EnqueueInput, checks: Map<string, Promise<void>>) {
+    if (!this.jobQueue) throw new Error("the job queue is unavailable");
+    const frozen = { ...this.freezeLocalIdentity(input) };
+    this.speechAdmissionChecks.set(frozen, checks);
+    try { return await this.jobQueue.enqueue(frozen); }
+    finally { this.speechAdmissionChecks.delete(frozen); }
   }
 
   /** The book's available reader, or the app's; reading still checks the host's local capability. */
@@ -2710,7 +2728,7 @@ export class Coordinator {
             // refused with the readiness reason before anything is journalled. `unknown`
             // dispatches (D15) — the floor could not be checked, which is not a refusal.
             admit: async (input) => {
-              try { await this.requireSpeechInputsAvailable([input]); }
+              try { await this.requireSpeechInputsAvailable([input], this.speechAdmissionChecks.get(input)); }
               catch (error) { return { ok: false, reason: describeCoordinatorError(error) }; }
               if (input.params.adapters !== undefined) {
                 if (input.provider !== "comfyui") return { ok: false, reason: "Adapters are supported only by local ComfyUI recipes." };
@@ -5462,13 +5480,14 @@ export class Coordinator {
       this.emitEnqueueResult(requestId, command, 0, [], [], true);
       return { accepted: true, jobIds: [] };
     }
+    const speechChecks = new Map<string, Promise<void>>();
     const outcome = await enqueueInputs(inputs, async input => {
       if (input.params.audioReferences !== undefined) {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== input.worldId) throw new Error("The owning world is unavailable.");
         await readCharacterAudioInputs(store, input, true);
       }
-      return this.jobQueue!.enqueue(this.freezeLocalIdentity(input));
+      return this.enqueueWithSpeechChecks(input, speechChecks);
     });
     this.emitEnqueueResult(
       requestId,
@@ -11867,10 +11886,11 @@ export class Coordinator {
           await this.refreshBench(msg.worldId, msg.sessionId);
           return;
         }
+        const speechChecks = new Map<string, Promise<void>>();
         const outcome = await enqueueInputs(plan.inputs, async (input) => {
           if (!this.jobQueue) throw new Error("the job queue is unavailable");
           if (input.params.audioReferences !== undefined) await readCharacterAudioInputs(store, input, true);
-          return this.jobQueue.enqueue(this.freezeLocalIdentity(input));
+          return this.enqueueWithSpeechChecks(input, speechChecks);
         });
         // Jobs join their reserved takes in order: a failure keeps its number and says why.
         const failed = new Map(outcome.failures.map((f) => [f.index, f.reason]));

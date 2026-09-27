@@ -16,7 +16,7 @@ import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { setProductionModel } from "../../src/productions/ops.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { FakeProvider } from "../queue/fake-provider.js";
-import type { JobQueue } from "../../src/queue/dispatcher.js";
+import type { EnqueueInput, JobQueue } from "../../src/queue/dispatcher.js";
 import { until } from "../wait.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
@@ -32,11 +32,13 @@ it("disabled Gemini models cannot be recommended, assigned or previewed through 
   const events: DomainEvent[] = [];
   const model = "gemini-3.8-flash-tts";
   const google = new FakeProvider();
+  let discoveries = 0;
   const coordinator = new Coordinator({ provider, adapter: null, appRoot: root, cipher: devCipher(),
     dispatchClients: { google },
     credentialsFileName: "credentials.dev.dat", changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test", manifest: SHIPPED_MANIFEST,
-    voice: { sidecar: null, localPresets: [], cloudSources: [{ provider: "google", list: async key =>
-      [{ provider: "google", model: key === "lite-only" ? "gemini-3.8-flash-lite-tts" : model, voiceId: "Charon", label: "Charon", attributes: [], local: false, canClone: false }] }] },
+    voice: { sidecar: null, localPresets: [], cloudSources: [{ provider: "google", list: async key => {
+      discoveries++;
+      return [{ provider: "google", model: key === "lite-only" ? "gemini-3.8-flash-lite-tts" : model, voiceId: "Charon", label: "Charon", attributes: [], local: false, canClone: false }]; } }] },
     observeEvent: event => events.push(event) });
   const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
   await coordinator.start(0);
@@ -108,6 +110,35 @@ it("disabled Gemini models cannot be recommended, assigned or previewed through 
     assert.deepEqual(queue.listJobs(), []);
     assert.equal(events.some(e => e.type === "job.updated"), false);
     assert.equal(google.submitCount, 0);
+    await send({ kind: "set-credential", provider: "google", key: "fixture-key" });
+    (queue as unknown as { pauseLane(provider: string, kind: string, reason: string): void }).pauseLane("google", "fault", "Test keeps admitted jobs queued.");
+    const admission = coordinator as unknown as { enqueueBatch(requestId: string, command: "voice-preview", inputs: readonly EnqueueInput[]): Promise<{ accepted: boolean; jobIds: string[] }> };
+    const inputs: EnqueueInput[] = Array.from({ length: 50 }, (_, index) => ({ worldId: WORLD_ID, target: { kind: "voice-preview", id: `batch-${index}` },
+      capability: "voice-tts", provider: "google", model, params: { text: `Line ${index}.`, voiceId: "Charon" }, estimatedMicroUsd: 1000000 }));
+    discoveries = 0;
+    const admitted = await admission.enqueueBatch(ulid(), "voice-preview", inputs);
+    assert.equal(admitted.jobIds.length, 50);
+    assert.equal(discoveries, 1, "one exact-reader discovery across 50 queued jobs");
+    await send({ kind: "set-credential", provider: "google", key: "lite-only" });
+    discoveries = 0;
+    const stale = await admission.enqueueBatch(ulid(), "voice-preview", inputs);
+    assert.equal(stale.accepted, false);
+    assert.equal(stale.jobIds.length, 0);
+    assert.equal(discoveries, 1, "a new batch discovers the changed key once, including a shared refusal");
+    assert.equal(queue.listJobs().length, 50);
+    assert.equal(google.submitCount, 0);
+    const scoped = coordinator as unknown as { enqueueWithSpeechChecks(input: EnqueueInput, checks: Map<string, Promise<void>>): Promise<unknown> };
+    const checks = new Map<string, Promise<void>>();
+    await send({ kind: "set-credential", provider: "google", key: "fixture-key" });
+    discoveries = 0;
+    await scoped.enqueueWithSpeechChecks(inputs[0]!, checks);
+    await send({ kind: "set-credential", provider: "google", key: "lite-only" });
+    await assert.rejects(scoped.enqueueWithSpeechChecks(inputs[1]!, checks), /current Google key/);
+    assert.equal(discoveries, 2, "key rotation invalidates even a live batch's successful validation");
+    await send({ kind: "set-credential", provider: "google", key: "fixture-key" });
+    await send({ kind: "set-model-enabled", modelId: model, enabled: false });
+    await assert.rejects(scoped.enqueueWithSpeechChecks(inputs[2]!, checks), /turned off/);
+    assert.equal(discoveries, 2, "disabled state is enforced before using any successful batch result");
   } finally { await coordinator.stop(); await provider.close(); }
 });
 const MODEL: ManifestModel = {
