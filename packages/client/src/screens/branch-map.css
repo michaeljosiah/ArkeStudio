@@ -154,6 +154,20 @@
 }
 .bm-node:hover .bm-port, .bm-port--on { opacity: 1; }
 
+/* The selected choice's arrowhead, as a handle that drags it to another scene (157d). */
+.bm-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 99px;
+  border: 2px solid var(--background);
+  background: var(--foreground);
+  cursor: grab;
+  z-index: 3;
+}
+.bm-handle:active { cursor: grabbing; }
+
 /* Scenes on no route. */
 .bm-tray {
   position: absolute;
@@ -293,3 +307,19 @@
 
 /* The preview (turn 156g): the shared player over the whole window, above the app's chrome. */
 .bm-player { position: fixed; inset: 0; z-index: 60; }
+
+/* The narrow map (157i): a list in the canvas's order, the Arke dock folded under it. */
+.bm[data-narrow="true"] { flex-direction: column; }
+.bm[data-narrow="true"] .bm-side { width: auto; max-height: 40%; border-left: 0; border-top: 1px solid var(--border); }
+.bm[data-narrow="true"] .bm-insp { max-height: 45%; }
+.bm-list { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 16px 24px; display: flex; flex-direction: column; gap: 16px; }
+.bm-list__layer { display: flex; flex-direction: column; gap: 8px; }
+.bm-list__scene { display: flex; flex-direction: column; gap: 4px; }
+.bm-row, .bm-goes { display: flex; align-items: center; gap: 8px; min-width: 0; width: 100%; text-align: left; font: var(--type-ui); color: var(--foreground); background: var(--background); border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+.bm-row { min-height: 44px; padding: 8px 12px; font-weight: var(--weight-semibold); }
+.bm-row__title, .bm-goes__label, .bm-goes__to { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bm-row__title { flex: 1; }
+.bm-goes { min-height: 40px; margin-left: 20px; width: calc(100% - 20px); padding: 6px 12px; }
+.bm-goes--unwalked { border-style: dashed; }
+.bm-row--selected, .bm-goes--selected { border-color: var(--foreground); box-shadow: 0 0 0 1px var(--foreground); }
+.bm-row:focus-visible, .bm-goes:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }

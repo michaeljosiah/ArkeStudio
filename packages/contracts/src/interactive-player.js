@@ -25,7 +25,25 @@ export function mountInteractivePlayer(root, options) {
   const choices = options.choices;
   const endings = Object.fromEntries(options.endings.map((e) => [e.sceneId, e.title]));
   /** Which clips each scene plays, in order; a scene with none plays as a slate. */
-  const media = Object.fromEntries(Object.keys(scenes).map((id) => [id, scenes[id].clips]));
+  // A clip is a file, or a window into one: the cut plays a shot's trimmed range, and a pass's
+  // segment, rather than the whole file it sits in (turn 156g: the preview plays the cut).
+  const media = Object.fromEntries(
+    Object.keys(scenes).map((id) => [
+      id,
+      scenes[id].clips.map((c) => (typeof c === "string" ? { src: c, from: 0, to: null } : { src: c.src, from: c.from || 0, to: c.to == null ? null : c.to })),
+    ]),
+  );
+  /** The loaded clip's window in its file: where it starts, and how long it runs once that is known. */
+  function span() {
+    const c = (media[state.sceneId] || [])[clipIndex];
+    const from = c ? c.from : 0;
+    const end = c && c.to !== null ? (video.duration ? Math.min(c.to, video.duration) : c.to) : video.duration || 0;
+    return { from, length: Math.max(0, end - from) };
+  }
+  /** Seconds into the loaded clip's window, not into its file. */
+  function into() {
+    return Math.max(0, (video.currentTime || 0) - span().from);
+  }
   const origin = options.from && scenes[options.from] ? options.from : options.start;
   let unwalked = new Set(author ? author.unwalked : []);
 
@@ -255,13 +273,13 @@ export function mountInteractivePlayer(root, options) {
   function loadClip(index, at, ratio, autoplay) {
     const clips = media[state.sceneId] || [];
     clipIndex = Math.max(0, Math.min(index, clips.length - 1));
-    video.setAttribute("src", clips[clipIndex]);
+    video.setAttribute("src", clips[clipIndex].src);
     const seek = () => {
-      const d = video.duration;
-      const wanted = ratio !== undefined && d ? ratio * d : at;
+      const { from, length } = span();
+      const wanted = ratio !== undefined && length ? ratio * length : at;
       // Clamped, not refused: a place saved against a longer take (a re-export keeps the key
       // while the routing is unchanged) resumes near this take's end rather than at its start.
-      const target = d ? Math.max(0, Math.min(d - 0.05, wanted)) : wanted;
+      const target = from + (length ? Math.max(0, Math.min(length - 0.05, wanted)) : wanted);
       if (target > 0) video.currentTime = target;
       video.removeEventListener("loadedmetadata", seek);
     };
@@ -361,7 +379,13 @@ export function mountInteractivePlayer(root, options) {
 
   function renderPanel() {
     el.panel.hidden = !routeOpen;
-    if (!routeOpen) return;
+    if (!routeOpen) {
+      // Closed from its own Close button (or a key pressed inside it), the panel hid the control
+      // that had focus, and focus left the player: its keys went dead and Tab escaped the preview.
+      const at = doc.activeElement;
+      if (at && el.panel.contains(at)) root.focus();
+      return;
+    }
     const trail = walked();
     let list = "";
     trail.forEach((id, i) => {
@@ -395,16 +419,17 @@ export function mountInteractivePlayer(root, options) {
     el.mute.innerHTML = icon(video.muted ? I.muted : I.volume);
     el.mute.setAttribute("aria-label", video.muted ? "Unmute" : "Mute");
     el.routeBtn.innerHTML = icon(I.route) + (state.route.length > 0 ? '<span class="n">' + (state.route.length + 1) + "</span>" : "");
-    const d = video.duration || 0;
-    const ratio = d > 0 ? Math.min(1, (video.currentTime || 0) / d) : 0;
+    const d = span().length;
+    const at = into();
+    const ratio = d > 0 ? Math.min(1, at / d) : 0;
     el.scrub.innerHTML =
       clips.map((_, i) => '<span class="aip-seg"><i style="width:' + (i < clipIndex ? 100 : i === clipIndex ? ratio * 100 : 0) + '%"></i></span>').join("") +
       (outOf(state.sceneId).length > 0 ? '<span class="aip-fork" title="Choices at the end">' + icon(I.route, 16) + "</span>" : "");
     // The slider is the whole scene, its shots in turn — not the one shot loaded, which read as
     // the scene starting over at every cut.
     el.scrub.setAttribute("aria-valuenow", String(Math.round((100 * (clipIndex + ratio)) / Math.max(1, clips.length))));
-    el.scrub.setAttribute("aria-valuetext", (clips.length > 1 ? "Shot " + (clipIndex + 1) + " of " + clips.length + ", " : "") + time(video.currentTime) + " of " + time(d));
-    el.time.textContent = (clips.length > 1 ? "Shot " + (clipIndex + 1) + " of " + clips.length + " · " : "") + time(video.currentTime) + " / " + time(d);
+    el.scrub.setAttribute("aria-valuetext", (clips.length > 1 ? "Shot " + (clipIndex + 1) + " of " + clips.length + ", " : "") + time(at) + " of " + time(d));
+    el.time.textContent = (clips.length > 1 ? "Shot " + (clipIndex + 1) + " of " + clips.length + " · " : "") + time(at) + " / " + time(d);
     if (paused) root.setAttribute("data-paused", "");
     else root.removeAttribute("data-paused");
   }
@@ -427,19 +452,30 @@ export function mountInteractivePlayer(root, options) {
   const onTime = () => {
     // Only playing moves the place: a seek to a held last frame must not overwrite "over".
     if (mode !== "playing") return;
-    state.positionSec = video.currentTime || 0;
+    // A window that ends before its file does ends here: a trimmed take, or one pass segment of
+    // several, would otherwise run on into footage the cut replaced.
+    const c = (media[state.sceneId] || [])[clipIndex];
+    if (c && c.to !== null && (video.currentTime || 0) >= c.to - 0.02) {
+      onEnded();
+      return;
+    }
+    state.positionSec = into();
     save();
     renderBar();
   };
   const onMeta = () => {
-    durations[clipIndex] = video.duration;
+    durations[clipIndex] = span().length;
     renderBar();
     if (mode === "poster") renderHero();
   };
   const onEnded = () => {
+    // Once per clip: a window's end is caught on timeupdate, and the file's own ended can follow.
+    if (mode !== "playing") return;
     const clips = media[state.sceneId] || [];
-    if (clipIndex < clips.length - 1) loadClip(clipIndex + 1, 0);
-    else finishScene();
+    if (clipIndex < clips.length - 1) {
+      loadClip(clipIndex + 1, 0);
+      renderBar();
+    } else finishScene();
   };
   // A clip that will not load or decode never ends; it is passed over as if it had, so the
   // scene still reaches its choices — the author's walk and the viewer's route go on.
@@ -457,27 +493,31 @@ export function mountInteractivePlayer(root, options) {
   }
   /** Move by `sec` through the scene, across a cut into the shot before or after where it runs out. */
   function nudge(sec) {
-    if (mode !== "playing" || !video.duration) return;
+    const { from, length } = span();
+    if (mode !== "playing" || !length) return;
     const last = (media[state.sceneId] || []).length - 1;
-    const to = (video.currentTime || 0) + sec;
+    const to = into() + sec;
     if (to < 0 && clipIndex > 0) {
       const before = durations[clipIndex - 1];
       if (before) loadClip(clipIndex - 1, Math.max(0, before + to));
       else loadClip(clipIndex - 1, 0, 1);
       return;
     }
-    if (to >= video.duration && clipIndex < last) {
-      loadClip(clipIndex + 1, to - video.duration);
+    if (to >= length && clipIndex < last) {
+      loadClip(clipIndex + 1, to - length);
       return;
     }
-    video.currentTime = Math.max(0, Math.min(video.duration - 0.05, to));
+    video.currentTime = from + Math.max(0, Math.min(length - 0.05, to));
   }
   /** The scene's first frame, or its last: its first shot or its last, not the loaded one's. */
   function seekScene(toEnd) {
     if (mode !== "playing") return;
     const last = (media[state.sceneId] || []).length - 1;
     if (toEnd ? clipIndex < last : clipIndex > 0) loadClip(toEnd ? last : 0, 0, toEnd ? 1 : 0);
-    else if (video.duration) video.currentTime = toEnd ? Math.max(0, video.duration - 0.05) : 0;
+    else {
+      const { from, length } = span();
+      if (length) video.currentTime = from + (toEnd ? Math.max(0, length - 0.05) : 0);
+    }
   }
   function full() {
     if (doc.fullscreenElement) doc.exitFullscreen && doc.exitFullscreen();
@@ -509,7 +549,8 @@ export function mountInteractivePlayer(root, options) {
       const ratio = rect.width > 0 ? Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) : 0;
       // A click in another shot's segment seeks to that point in that shot, not its start.
       if (index === clipIndex) {
-        if (video.duration) video.currentTime = ratio * video.duration;
+        const { from, length } = span();
+        if (length) video.currentTime = from + ratio * length;
       } else if (index >= 0) loadClip(index, 0, ratio);
       return;
     }
@@ -591,8 +632,7 @@ export function mountInteractivePlayer(root, options) {
   if (mode === "poster") {
     render();
     // The poster shows the saved scene's first frame, or the start's, without playing it.
-    const clips = media[state.sceneId] || [];
-    if (clips.length > 0) video.setAttribute("src", clips[0]);
+    if ((media[state.sceneId] || []).length > 0) loadClip(0, 0, undefined, false);
   } else play(state.sceneId, state.positionSec);
   wake();
   root.focus();

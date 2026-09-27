@@ -2,11 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent a
 import { Link, useParams } from "react-router";
 import {
   DEFAULT_SHOT_SEC,
+  deriveCut,
   layoutRouting,
   orderedShots,
   productionShape,
   routingFindings,
   type ArtifactSidecar,
+  type CutEntry,
+  type InteractivePlayerClip,
   type InteractivePlayerOptions,
   type ProductionBundle,
   type RoutingCommand,
@@ -14,6 +17,7 @@ import {
 } from "@arke-studio/contracts";
 import { ProductionConversation } from "../components/conversation.js";
 import { InteractivePlayerView } from "../components/interactive-player.js";
+import { useMediaQuery } from "../lib/media-query.js";
 import { Expand, EyeOff, Flag, Minus, Play, Plus, Trash, TriangleAlert, X } from "../components/icons.js";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Button, Input, Select, Switch, cx } from "../components/ui.js";
@@ -84,20 +88,37 @@ function sceneFrame(production: ProductionBundle, artifacts: readonly ArtifactSi
 }
 
 /**
- * A scene's cut for the preview: the accepted clip of each shot, in shot order, with a pass that
- * covers several shots played once. The export ships one covering clip per scene instead, and
- * refuses a scene without one; the preview plays what there is, and a scene with nothing is a slate.
+ * A scene's cut for the preview: each shot as the cut plays it — a pass segment's range, a trim's
+ * in-point, the shot's slot — rather than the whole file its take sits in, which started a trimmed
+ * take at zero and, for a pass with one shot replaced, played the replaced footage before the
+ * replacement. A shot the cut leaves without media but whose accepted take covers several shots
+ * whole (a pass without segments, which the export ships as the scene's one file) plays that file
+ * once. The preview plays what there is; a scene with nothing is a slate.
  */
-function sceneClips(production: ProductionBundle, slug: string, scene: ProductionBundle["scenes"][number]): string[] {
-  const clips: string[] = [];
-  let last: string | null = null;
+export function sceneClips(
+  production: ProductionBundle,
+  slug: string,
+  scene: ProductionBundle["scenes"][number],
+  cut: ReadonlyMap<string, CutEntry>,
+): InteractivePlayerClip[] {
+  const clips: InteractivePlayerClip[] = [];
+  let whole: string | null = null;
   for (const shot of safeShots(scene)) {
+    const entry = cut.get(shot.id);
+    if (entry?.media) {
+      const from = entry.media.inSec ?? 0;
+      const slot = entry.durationSec > 0 ? from + entry.durationSec : Infinity;
+      const to = Math.min(entry.media.outSec ?? Infinity, slot);
+      clips.push({ src: mediaUrl(slug, entry.media.path), from, ...(Number.isFinite(to) ? { to } : {}) });
+      whole = null;
+      continue;
+    }
     const takeId = production.selections[shot.id]?.acceptedTakeId ?? null;
     const take = takeId === null ? undefined : production.takes.find((candidate) => candidate.id === takeId);
     const media = take === undefined ? null : mediaTakeFor(production, take);
-    if (media === null || media.kind !== "clip" || media.id === last) continue;
-    last = media.id;
-    clips.push(mediaUrl(slug, `productions/${production.meta.id}/takes/${media.id}/${media.media}`));
+    if (media === null || media.kind !== "clip" || media.id === whole) continue;
+    whole = media.id;
+    clips.push({ src: mediaUrl(slug, `productions/${production.meta.id}/takes/${media.id}/${media.media}`) });
   }
   return clips;
 }
@@ -115,6 +136,10 @@ export function BranchMapScreen() {
   const [focused, setFocused] = useState<string | null>(null);
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 });
   const [drawing, setDrawing] = useState<{ from: string; x: number; y: number } | null>(null);
+  /** Below 900 wide the map is a list (157i): a canvas that narrow is a sliver to pan about in. */
+  const narrow = useMediaQuery("(max-width: 899px)");
+  /** A selected choice's arrowhead being dragged to another scene (157d). */
+  const [retarget, setRetarget] = useState<{ id: string; x: number; y: number } | null>(null);
   const [startPick, setStartPick] = useState<string | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const fittedRef = useRef(false);
@@ -414,6 +439,29 @@ export function BranchMapScreen() {
     if (target !== undefined && target !== from) setSelection({ kind: "new", from, to: target });
   };
 
+  // The selected choice's arrowhead is a handle (157d): dragged to another card, the choice goes
+  // there instead, as one edit-choice; dropped anywhere else, nothing changes. The Inspector's
+  // "Goes to" is the same edit without a pointer.
+  const startRetarget = (id: string) => (event: ReactPointerEvent<HTMLSpanElement>) => {
+    event.stopPropagation();
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setRetarget({ id, ...stagePoint(event.clientX, event.clientY) });
+  };
+  const moveRetarget = (event: ReactPointerEvent<HTMLSpanElement>) => {
+    if (!retarget) return;
+    setRetarget({ ...retarget, ...stagePoint(event.clientX, event.clientY) });
+  };
+  const endRetarget = (event: ReactPointerEvent<HTMLSpanElement>) => {
+    if (!retarget) return;
+    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-scene]")?.dataset["scene"];
+    const choice = routing?.choices.find((candidate) => candidate.id === retarget.id);
+    setRetarget(null);
+    if (choice && target !== undefined && target !== choice.to) {
+      command({ operation: "edit-choice", choiceId: choice.id, changes: { to: target } });
+    }
+  };
+
   const onViewportPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
     if (target.closest("[data-scene], .bm-label, .bm-zoom, button, input, select")) return;
@@ -595,6 +643,58 @@ export function BranchMapScreen() {
       ? { from: at.get(selection.from)!, to: at.get(selection.to)! }
       : null;
 
+  /*
+   * The narrow map (157i): the same data in the same order — layers top to bottom, each scene with
+   * its choices as "goes to" rows, dashed where nobody has walked them, then the scenes on no
+   * route — with nothing to scroll sideways. A row selects what it names, and the Inspector above
+   * the list edits it, the same as on the canvas.
+   */
+  const list = (
+    <div className="bm-list" aria-label="Branch map">
+      {[...layout.layers, geometry.tray].map((ids, index) =>
+        ids.length === 0 ? null : (
+          <section key={index} className="bm-list__layer">
+            <span className="bm-eyebrow">{index === layout.layers.length ? `Not on a route · ${ids.length}` : `Layer ${index + 1}`}</span>
+            {ids.map((id) => (
+              <div key={id} className="bm-list__scene">
+                <button
+                  type="button"
+                  className={cx("bm-row", selection?.kind === "scene" && selection.id === id && "bm-row--selected")}
+                  onClick={() => setSelection({ kind: "scene", id })}
+                >
+                  <span className="bm-row__title">{titleOf(id)}</span>
+                  {routing.start === id && <span className="bm-tag bm-tag--solid">start</span>}
+                  {endings.has(id) && <span className="bm-tag">ending</span>}
+                  {excluded.has(id) && <span className="bm-tag">excluded</span>}
+                  {unreachable.has(id) && !excluded.has(id) && <span className="bm-tag bm-tag--bad">unreachable</span>}
+                </button>
+                {routing.choices
+                  .filter((choice) => choice.from === id)
+                  .map((choice) => (
+                    <button
+                      key={choice.id}
+                      type="button"
+                      className={cx(
+                        "bm-goes",
+                        unwalked.has(choice.id) && "bm-goes--unwalked",
+                        selectedChoice?.id === choice.id && "bm-goes--selected",
+                      )}
+                      aria-label={`${choice.label}: goes to ${titleOf(choice.to)}${unwalked.has(choice.id) ? ", not walked" : ""}`}
+                      onClick={() => setSelection({ kind: "choice", id: choice.id })}
+                    >
+                      <span className="bm-goes__label">{choice.label}</span>
+                      <span className="bm-muted">goes to</span>
+                      <span className="bm-goes__to">{titleOf(choice.to)}</span>
+                    </button>
+                  ))}
+              </div>
+            ))}
+          </section>
+        ),
+      )}
+    </div>
+  );
+
   const canvas = (
     <div
       className={cx("bm-viewport", panRef.current && "bm-viewport--panning")}
@@ -650,6 +750,12 @@ export function BranchMapScreen() {
               d={`M${outPort(at.get(drawing.from)!).x},${outPort(at.get(drawing.from)!).y} L${drawing.x},${drawing.y}`}
             />
           )}
+          {retarget && selectedChoice && at.has(selectedChoice.from) && (
+            <path
+              className="bm-edge bm-edge--ghost"
+              d={`M${outPort(at.get(selectedChoice.from)!).x},${outPort(at.get(selectedChoice.from)!).y} L${retarget.x},${retarget.y}`}
+            />
+          )}
         </svg>
         {geometry.edges.map((edge) => (
           <button
@@ -674,6 +780,18 @@ export function BranchMapScreen() {
             {edge.label}
           </button>
         ))}
+        {selectedChoice && !(selection?.kind === "choice" && selection.removing) && at.has(selectedChoice.to) && (
+          <span
+            className="bm-handle"
+            aria-hidden
+            title="Drag to another scene to send this choice there"
+            style={{ left: inPort(at.get(selectedChoice.to)!).x - 6, top: inPort(at.get(selectedChoice.to)!).y }}
+            onPointerDown={startRetarget(selectedChoice.id)}
+            onPointerMove={moveRetarget}
+            onPointerUp={endRetarget}
+            onClick={(event) => event.stopPropagation()}
+          />
+        )}
         <div role="listbox" aria-label="Branch map" className="bm-nodes">
           {walkOrder.map((id) => {
             const node = at.get(id);
@@ -985,6 +1103,7 @@ export function BranchMapScreen() {
    * author's strip. It plays each scene's cut — its accepted clips in shot order — records walk
    * evidence as choices are pressed, and marks the choices nobody has walked.
    */
+  const previewCut = preview === null ? new Map<string, CutEntry>() : new Map(deriveCut(production).entries.map((entry) => [entry.shot.id, entry]));
   const previewOptions: InteractivePlayerOptions | null =
     preview === null
       ? null
@@ -995,7 +1114,7 @@ export function BranchMapScreen() {
           from: preview.from,
           autoplay: true,
           scenes: Object.fromEntries(
-            scenes.map((scene) => [scene.id, { title: scene.title, clips: sceneClips(production, world.meta.slug, scene) }]),
+            scenes.map((scene) => [scene.id, { title: scene.title, clips: sceneClips(production, world.meta.slug, scene, previewCut) }]),
           ),
           choices: routing.choices,
           endings: routing.endings,
@@ -1011,11 +1130,12 @@ export function BranchMapScreen() {
         };
 
   return (
-    <div className="fy-arkewrap bm" data-screen="branch-map">
+    <div className="fy-arkewrap bm" data-screen="branch-map" data-narrow={narrow ? "true" : undefined}>
       <div className="bm-main">
         {header}
         {exportNote !== null && <div className="bm-note">{exportNote}</div>}
-        {canvas}
+        {narrow && inspector}
+        {narrow ? list : canvas}
         {previewOptions !== null && preview !== null && (
           <InteractivePlayerView
             key={preview.at}
@@ -1027,7 +1147,7 @@ export function BranchMapScreen() {
         )}
       </div>
       <aside className="bm-side">
-        {inspector}
+        {!narrow && inspector}
         {arke}
       </aside>
     </div>

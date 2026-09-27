@@ -435,7 +435,10 @@ function fullHash(bytes: Uint8Array): string {
  * only what the package knows — the manifest, the key the viewer's place is kept under on this
  * device, and the titles to show — and calls the player once.
  */
-function playerHtml(manifest: InteractiveExportManifest, presentation: { title: string; eyebrow: string; titles: Record<string, string> }): string {
+function playerHtml(
+  manifest: InteractiveExportManifest,
+  presentation: { worldId: string; title: string; eyebrow: string; titles: Record<string, string> },
+): string {
   const json = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u003c");
   const player = INTERACTIVE_PLAYER_SOURCE.replace("export function mountInteractivePlayer", "function mountInteractivePlayer").replace(/<\/script/gi, "<\\/script");
   return `<!doctype html>
@@ -446,11 +449,12 @@ function playerHtml(manifest: InteractiveExportManifest, presentation: { title: 
 <div id="app"></div>
 <script>
 ${player}
-// Playback state only (brief §1/§5), kept with the viewer and keyed by production and routing
-// version, so a package from a re-cut graph never resumes into a scene it does not have.
+// Playback state only (brief §1/§5), kept with the viewer and keyed by world, production and
+// routing version: a package from a re-cut graph never resumes into a scene it does not have, and
+// two worlds' productions with one slug, served from one origin, never share a viewer's place.
 const manifest = ${json(manifest)};
 const titles = ${json(presentation.titles)};
-const KEY = "arke-iv-" + manifest.provenance.productionId + "-v" + manifest.provenance.routingVersion;
+const KEY = "arke-iv-" + ${json(presentation.worldId)} + "-" + manifest.provenance.productionId + "-v" + manifest.provenance.routingVersion;
 mountInteractivePlayer(document.getElementById("app"), {
   title: ${json(presentation.title)},
   eyebrow: ${json(presentation.eyebrow)},
@@ -674,6 +678,7 @@ export async function exportInteractive(
     await atomicWriteFile(
       join(outDir, "player.html"),
       playerHtml(manifest, {
+        worldId: store.worldId,
         title: production.meta.title,
         eyebrow: store.getBundle().meta.name,
         titles: Object.fromEntries(production.scenes.map((scene) => [scene.id, scene.title])),

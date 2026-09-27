@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { ClientMessage, ClientState, RoutingCommand, Routing, Scene } from "@arke-studio/contracts";
 import type { ArkeBridge } from "../src/arke-bridge.js";
-import { BranchMapScreen } from "../src/screens/branch-map.js";
+import { BranchMapScreen, sceneClips } from "../src/screens/branch-map.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -18,7 +18,11 @@ import { FIXTURE_STATE } from "./fixture-state.js";
  */
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
-Object.assign(dom.window, { matchMedia: (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }) });
+/** Set by a test that wants the narrow window (157i); every other test is wide. */
+let narrowWindow = false;
+Object.assign(dom.window, {
+  matchMedia: (query: string) => ({ matches: narrowWindow && query === "(max-width: 899px)", media: query, addEventListener() {}, removeEventListener() {} }),
+});
 // linkedom keeps no focus; this does, so a test can ask where it went.
 const focusLog: unknown[] = [];
 Object.assign(dom.HTMLElement.prototype, {
@@ -178,6 +182,15 @@ async function blur(el: HTMLElement | undefined) {
     props?.onBlur?.({ currentTarget: el, target: el });
   });
 }
+/** React's own pointer handler on `el`, called as a browser would at the end of a gesture. */
+async function pointer(el: Element | undefined, handler: "onPointerDown" | "onPointerMove" | "onPointerUp") {
+  assert.ok(el);
+  await act(async () => {
+    const k = Object.keys(el).find((candidate) => candidate.startsWith("__reactProps$"));
+    const props = k === undefined ? undefined : (el as unknown as Record<string, Record<string, ((event: unknown) => void) | undefined>>)[k];
+    props?.[handler]?.({ clientX: 0, clientY: 0, pointerId: 1, stopPropagation() {}, preventDefault() {}, currentTarget: el, target: el });
+  });
+}
 const commands = (item: Mounted): RoutingCommand[] =>
   item.sent.flatMap((message) => (message.kind === "routing-command" ? [message.command] : []));
 const card = (item: Mounted, id: string) => all(item, `[role="option"][data-scene="${id}"]`)[0];
@@ -258,6 +271,68 @@ describe("the branch map canvas (design turn 157)", () => {
     await click(cancel);
     assert.equal(all(item, '[role="alertdialog"]').length, 0);
     assert.equal(focused(), all(item, ".bm-label").find((el) => text(el) === "Wait for low water"), "and focus goes back to the choice");
+  });
+
+  it("retargets a selected choice by dragging its arrowhead to another scene (157d)", async () => {
+    const item = await mount();
+    await click(all(item, ".bm-label").find((el) => text(el) === "Wait for low water"));
+    const handle = all(item, ".bm-handle")[0];
+    assert.ok(handle, "the selected choice's arrowhead is a handle");
+    const doc = dom.document as unknown as { elementFromPoint?: (x: number, y: number) => Element | null };
+    const before = doc.elementFromPoint;
+    doc.elementFromPoint = () => card(item, "sc_towers") ?? null;
+    try {
+      await pointer(handle, "onPointerDown");
+      await pointer(handle, "onPointerUp");
+    } finally {
+      doc.elementFromPoint = before;
+    }
+    assert.deepEqual(commands(item), [{ operation: "edit-choice", choiceId: "ch_wait", changes: { to: "sc_towers" } }]);
+  });
+
+  it("lists the map below 900 wide: layers in order, each choice a goes-to row (157i)", async () => {
+    narrowWindow = true;
+    try {
+      const item = await mount();
+      assert.equal(all(item, ".bm-viewport").length, 0, "no canvas to pan about in");
+      const list = all(item, ".bm-list")[0]!;
+      assert.match(text(list), /^Layer 1\s*The drowned quarter\s*start\s*Follow the lantern\s*goes to\s*The causeway/);
+      assert.match(text(list), /Not on a route · 1\s*The undertow\s*unreachable/);
+      const rows = all(item, ".bm-goes");
+      assert.equal(rows.length, ROUTING.choices.length, "every choice, once");
+      assert.ok(rows.every((row) => row.classList.contains("bm-goes--unwalked")), "dashed: nobody has walked them");
+      await click(rows.find((row) => /Wait for low water/.test(text(row))));
+      const label = all(item, '.bm-insp input[aria-label="Label"]')[0] as unknown as HTMLInputElement | undefined;
+      assert.equal(label?.value, "Wait for low water", "a row selects what it names, and the Inspector edits it");
+    } finally {
+      narrowWindow = false;
+    }
+  });
+
+  it("previews the cut as it plays: a trimmed range, a pass segment, and a covering pass once", () => {
+    const shot = (id: string) => ({ id, number: 1, title: id }) as never;
+    const scn = { ...scene("sc_x", 9, "X"), shots: [shot("sh_1"), shot("sh_2"), shot("sh_3"), shot("sh_4")] } as never;
+    const production = {
+      meta: { id: "saltlight" },
+      selections: { sh_3: { acceptedTakeId: "tk_pass" }, sh_4: { acceptedTakeId: "tk_pass" } },
+      takes: [{ id: "tk_pass", kind: "clip", media: "pass.mp4", coversShots: ["sh_3", "sh_4"] }],
+    } as never;
+    const entry = (path: string, inSec: number | undefined, outSec: number | undefined, durationSec: number) =>
+      ({ media: { path, ...(inSec !== undefined ? { inSec } : {}), ...(outSec !== undefined ? { outSec } : {}) }, durationSec }) as never;
+    const cut = new Map([
+      ["sh_1", entry("productions/saltlight/takes/tk_a/a.mp4", 1.5, undefined, 4)],
+      ["sh_2", entry("productions/saltlight/takes/tk_p/p.mp4", 10, 13, 6)],
+    ]);
+    const clips = sceneClips(production, "the-undersong", scn, cut);
+    assert.deepEqual(
+      clips.map((clip) => [clip.src.replace(/^.*\/takes\//, ""), clip.from, clip.to]),
+      [
+        ["tk_a/a.mp4", 1.5, 5.5],
+        ["tk_p/p.mp4", 10, 13],
+        ["tk_pass/pass.mp4", undefined, undefined],
+      ],
+      "a trim starts late and the slot ends it; a segment keeps its range; a whole pass plays once, from its start",
+    );
   });
 
   it("keeps the scene unselected when a drag from its port ends in a click", async () => {

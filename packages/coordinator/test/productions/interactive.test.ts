@@ -13,7 +13,7 @@ import {
 } from "../../src/productions/interactive.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { WorldStore } from "../../src/world/store.js";
-import { makeTempWorld } from "../world/helpers.js";
+import { makeTempWorld, WORLD_ID } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
 /**
@@ -292,11 +292,12 @@ describe("interactive video through the coordinator (epic 401)", () => {
     const keys = [...initial[1]!.matchAll(/(\w+)\s*:/g)].map((m) => m[1]);
     assert.deepEqual(keys.sort(), ["positionSec", "route", "sceneId", "updatedAt"], "exactly the four");
 
-    // Viewer-local: the key is namespaced by production and routing version, so a re-cut graph
-    // never resumes into a scene the new package does not have.
+    // Viewer-local: the key is namespaced by world, production and routing version, so a re-cut
+    // graph never resumes into a scene the new package does not have, and another world's
+    // production with the same slug, served from the same origin, never shares a viewer's place.
     assert.match(player, /localStorage\.setItem\(KEY/, "saved with the viewer");
     assert.match(player, /localStorage\.getItem\(KEY/, "and read back on load");
-    assert.match(player, /KEY = "arke-iv-" \+ manifest\.provenance\.productionId \+ "-v" \+ manifest\.provenance\.routingVersion/);
+    assert.match(player, new RegExp(`KEY = "arke-iv-" \\+ "${WORLD_ID}" \\+ "-" \\+ manifest\\.provenance\\.productionId \\+ "-v" \\+ manifest\\.provenance\\.routingVersion`));
 
     // Resume: the last scene and the last position, not the start.
     assert.match(player, /play\(state\.sceneId, state\.positionSec\)/, "the player opens where it was left");

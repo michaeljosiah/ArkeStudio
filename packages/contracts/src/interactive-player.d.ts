@@ -7,7 +7,14 @@
 export interface InteractivePlayerScene {
   title: string;
   /** Played in order; none plays the scene as a slate (preview only — an export refuses it). */
-  clips: string[];
+  clips: Array<string | InteractivePlayerClip>;
+}
+
+/** A window into a file: from `from` seconds (default 0) to `to` (default the file's end). */
+export interface InteractivePlayerClip {
+  src: string;
+  from?: number;
+  to?: number;
 }
 
 export interface InteractivePlayerChoice {

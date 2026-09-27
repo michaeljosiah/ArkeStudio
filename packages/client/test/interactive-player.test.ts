@@ -159,6 +159,33 @@ describe("the player, as the author previews it (156g)", () => {
     assert.equal(p.root.getAttribute("data-mode"), "choice", "then the choices, not a player stuck playing");
   });
 
+  it("plays a clip's window, not its whole file: from its in-point, on at its out-point", () => {
+    const p = mount({
+      from: "sc_towers",
+      author: { unwalked: [] },
+      scenes: { ...OPTIONS.scenes, sc_towers: { title: "The bell towers", clips: [{ src: "media/pass.mp4", from: 4, to: 9 }, { src: "media/pass.mp4", from: 12, to: 15 }] } },
+    });
+    Object.defineProperty(p.video(), "duration", { value: 30, configurable: true });
+    p.video().dispatchEvent(new dom.Event("loadedmetadata") as unknown as Event);
+    assert.equal(p.video().currentTime, 4, "the window's in-point, not the file's start");
+    assert.match(p.text(".aip-time"), /0:00 \/ 0:05/, "the shot's own length, not the file's");
+    p.video().currentTime = 9;
+    p.video().dispatchEvent(new dom.Event("timeupdate") as unknown as Event);
+    assert.match(p.text(".aip-time"), /Shot 2 of 2/, "the out-point ends the shot; the footage after it is not played");
+    p.video().dispatchEvent(new dom.Event("loadedmetadata") as unknown as Event);
+    assert.equal(p.video().currentTime, 12);
+  });
+
+  it("keeps focus in the player when the Route panel is closed from its own button", () => {
+    const p = mount({ author: { unwalked: [] } });
+    p.key("r");
+    const close = p.q('[data-ref=panel] [data-act="route"]')!;
+    close.focus();
+    p.click(close);
+    assert.equal(p.q("[data-ref=panel]")!.hasAttribute("hidden"), true);
+    assert.equal(focused(), p.root, "focus comes back to the player, not out of it");
+  });
+
   it("takes new walk evidence while it runs", () => {
     const p = mount({ author: { unwalked: ["ch_stay", "ch_cross"] } });
     p.handle.setUnwalked(["ch_cross"]);
