@@ -1,4 +1,5 @@
 import { ReadAloudConfirmation } from "../components/read-aloud-confirmation.js";
+import { CharacterHeader } from "./character-reference.js";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import {
@@ -170,6 +171,7 @@ export function WorldLayout() {
     ["productions", "Productions"],
   ] as const;
   const onSheets = /\/(cast|locations|factions|props)(\/|$)/.test(path);
+  const characterGeneration = path.endsWith("/main-photo") || path.endsWith("/model-sheet");
   if (
     path.endsWith("/art-direction/propose") ||
     path.endsWith("/main-photo") ||
@@ -179,7 +181,16 @@ export function WorldLayout() {
     path.includes("/artifacts/bench")
   ) {
     return (
-      <div className="fy-app">
+      <div className={cx("fy-app", characterGeneration && "fy-worldapp fy-character-generation")}>
+        {characterGeneration && world && <div className="fy-character-generation__backdrop">
+          <AppChrome back={{ label: "Worlds", to: "/worlds" }} context={{ label: world.meta.name }} />
+          <WorldNavigation path={path}>
+            {nav.map(([slug, label]) => <Link key={slug} to={`/w/${worldId}${slug ? `/${slug}` : ""}`}
+              aria-current={slug === "cast" ? "page" : undefined}
+              className={cx("fy-pillnav__item", slug === "cast" && "fy-pillnav__item--active")}>{label}</Link>)}
+          </WorldNavigation>
+          <CharacterHeader active="reference" />
+        </div>}
         <div className="fy-content fy-content--fixed">
           {refusal ? (
             <WorldOpenRefusal worldId={worldId!} reason={refusal.reason} stranded />

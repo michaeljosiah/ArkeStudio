@@ -311,6 +311,7 @@ export function GenerationDialog({
     <dialog
       ref={dialog}
       className={previews === undefined ? "fy-gendialog" : "fy-gendialog fy-gendialog--wide"}
+      data-character-dialog={["character-sheet", "main-photo", "character-look"].includes(workflow) || undefined}
       aria-labelledby={titleId}
       onClose={() => {
         returnFocus?.current?.focus();
@@ -517,7 +518,8 @@ export function GenerationDialog({
                         label={preview.label ?? `Preview ${index + 1}`}
                         radius={10}
                       />
-                      <span>{selected === preview.key ? "SELECTED" : `0${index + 1}`}</span>
+                      <span className="fy-gendialog__preview-index">{selected === preview.key ? "SELECTED" : `0${index + 1}`}</span>
+                      <span className="fy-gendialog__preview-name">{preview.label ?? `Preview ${index + 1}`}</span>
                     </button>
                     <ImageDownload
                       worldSlug={worldSlug}
