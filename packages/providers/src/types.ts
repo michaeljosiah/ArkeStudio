@@ -1,5 +1,6 @@
 import type {
   PreparedAudioInput,
+  SpeechUsage,
   Capability,
   CapabilityProbe,
   ClientDeclarations,
@@ -110,6 +111,9 @@ export interface PreparedAudioSource {
 }
 
 export interface SubmitResult {
+  /** Reported quantities, not a provider-reported charge (SPEC-049 R-8). */
+  speechUsage?: SpeechUsage;
+  costMicroUsd?: number;
   remoteId: string;
   acceptedAt: string;
   /** Synchronous providers can return final artifacts without an in-memory poll cache. */
@@ -117,6 +121,7 @@ export interface SubmitResult {
 }
 
 export interface PollResult {
+  speechUsage?: SpeechUsage;
   state: "queued" | "running" | "succeeded" | "failed" | "cancelled";
   /** 0..1 where the provider reports one. */
   progress?: number;

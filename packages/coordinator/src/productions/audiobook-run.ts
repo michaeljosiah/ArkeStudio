@@ -1,3 +1,4 @@
+import { estimateSpeechMicroUsd, quoteSpeech } from "@arke-studio/contracts";
 import { createHash } from "node:crypto";
 import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -6,8 +7,6 @@ import {
   audiobookTakeDirectionHash,
   performanceNote,
   audiobookTextHash,
-  billableCharacters,
-  estimateMicroUsd,
   normalizeSpeechText,
   voiceFormatForModel,
   voiceSourceFor,
@@ -364,7 +363,8 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
   // readers that count so — `text.length` alone understates a Fish or Breeze block by up to 3×
   // (codex on PR 1180). The counts the card and the job show stay the prose's, as the page
   // read's do; only the money is the vendor's count.
-  const priceOf = (block: Speaking) => block.parts.reduce((sum, part) => sum + estimateMicroUsd(block.model, { characters: billableCharacters(block.model, part) }), 0);
+  const prices = new Map(misses.map(block => [block, block.parts.reduce((sum, part) => sum + estimateSpeechMicroUsd(block.model, part), 0)]));
+  const priceOf = (block: Speaking) => prices.get(block) ?? 0;
   const estimate = misses.reduce((sum, block) => sum + priceOf(block), 0);
   return { kind: "ready", prepared: { plan, record, toMake, speaking, misses, clones, priceOf, estimate } };
 }
@@ -388,7 +388,7 @@ export function chapterPriceToken(worldId: string, productionId: string, chapter
  * direction.
  */
 export function missIdentity(block: Speaking): string {
-  return `${block.block.key}:${audiobookTextHash(block.text)}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.takeHash ?? ""}`;
+  return `${block.block.key}:${audiobookTextHash(block.text)}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.takeHash ?? ""}:${JSON.stringify(block.parts.map(part => { const q = quoteSpeech(block.model, part); return [q.rateVersion, q.authorisedMicroUsd, q.tokenLimits]; }))}`;
 }
 
 /** The price's lines (R-17): every cloud voice the words would go to, once each, with its share. */
@@ -418,6 +418,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     return;
   }
   const { plan, toMake, speaking, misses, clones, priceOf, estimate } = preparation.prepared;
+  const partPrices = new Map(misses.map(block => [block, block.parts.map(part => estimateSpeechMicroUsd(block.model, part))]));
   let record = preparation.prepared.record;
   const chapterFile = plan.chapter.file;
   emit({ type: "started", toMake: toMake.length, blocks: plan.blocks.length });
@@ -683,7 +684,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
                     }
                   : {}),
               },
-              estimatedMicroUsd: estimateMicroUsd(block.model, { characters: billableCharacters(block.model, part) }),
+              estimatedMicroUsd: partPrices.get(block)![index]!,
               landing: { dir: landingDir, name: `${block.block.key.replace(/[^a-z0-9]+/gi, "-")}-${index}.${block.format}` },
               ...(block.clone !== null ? { voiceReference: true } : {}),
             };

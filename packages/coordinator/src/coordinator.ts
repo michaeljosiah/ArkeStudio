@@ -1,3 +1,4 @@
+import { estimateSpeechMicroUsd } from "@arke-studio/contracts";
 import { ProductionCreationService } from "./application/production-creation.js";
 import { AdapterLibrary, adapterSetupEntries, type AdapterComplianceClient } from "./local-ai/adapter-library.js";
 import { adapterMediaVisible } from "./local-ai/adapter-media.js";
@@ -89,8 +90,6 @@ import {
   productionFrameRate,
   designatedCompilation,
   comfyUiRecoveryDecision,
-  billableCharacters,
-  estimateMicroUsd,
   modelEligible,
   modelForCapability,
   harnessModelReference,
@@ -1708,10 +1707,10 @@ export class Coordinator {
     const toMake = (index: number) => pieces[index]!.map((piece, at) => ({ piece, at })).filter(({ at }) => !have.get(index)?.has(at));
     // Priced by the piece, as each request will be billed (SPEC-046 R-8), and summed: the read
     // is quoted once, whole, never per piece or again part-way through.
-    const priceOf = (piece: string) => estimateMicroUsd(model, { characters: billableCharacters(model, piece) });
+    const priceOf = (piece: string) => estimateSpeechMicroUsd(model, piece);
     const estimate = misses.reduce((sum, index) => sum + toMake(index).reduce((total, { piece }) => total + priceOf(piece), 0), 0);
     const token = createHash("sha256")
-      .update([subject.id, String(subject.version), ...misses.flatMap((index) => toMake(index).map(({ piece }) => pieceFile(piece)))].join("\n"))
+      .update([subject.id, String(subject.version), String(estimate), ...misses.flatMap((index) => toMake(index).map(({ piece }) => pieceFile(piece)))].join("\n"))
       .digest("hex");
     const enqueued: EnqueueInput[] = misses.flatMap((index) =>
       toMake(index).map(({ piece, at }) => ({
@@ -2034,10 +2033,10 @@ export class Coordinator {
           return;
       }
       // Priced by the piece, as each request will be billed (SPEC-046 R-8), and summed once.
-      const priceOf = (index: number, text: string) => estimateMicroUsd(cloud[index]!.model, { characters: billableCharacters(cloud[index]!.model, text) });
+      const priceOf = (index: number, text: string) => estimateSpeechMicroUsd(cloud[index]!.model, text);
       const estimate = misses.reduce((sum, index) => sum + toMake(index).reduce((total, piece) => total + priceOf(index, piece.text), 0), 0);
       const token = createHash("sha256")
-        .update(["voiced", subject.id, String(subject.version), ...misses.flatMap((index) => toMake(index).map((piece) => piece.file))].join("\n"))
+        .update(["voiced", subject.id, String(subject.version), String(estimate), ...misses.flatMap((index) => toMake(index).map((piece) => piece.file))].join("\n"))
         .digest("hex");
       queuedInputs = misses.flatMap((index) => {
         const entry = cloud[index]!;
@@ -2502,6 +2501,7 @@ export class Coordinator {
         ? new JobQueue({
             journalPath: join(opts.appRoot, "queue", "jobs.jsonl"),
             clients: opts.dispatchClients,
+            speechModel: (provider, id) => this.opts.manifest?.models.find(model => model.provider === provider && model.id === id),
             getKey: async (provider) =>
               this.credentials ? this.credentials.get(provider as ProviderId) : null,
             emit: (event) => {

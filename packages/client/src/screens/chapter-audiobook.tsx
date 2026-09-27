@@ -1,3 +1,4 @@
+import { estimateSpeechMicroUsd } from "@arke-studio/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import {
   AUDIOBOOK_DELIVERIES,
@@ -14,10 +15,8 @@ import {
   audiobookSpeakerColours,
   audiobookSpeakerKey,
   retailLevel,
-  billableCharacters,
   cadenceSupport,
   cueStart,
-  estimateMicroUsd,
   holdDirection,
   mapCadence,
   markerMode,
@@ -373,7 +372,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       rows.reduce((sum, row) => {
         if (row.state === "made" || row.state === "awaiting" || row.speaker.provider === "kokoro") return sum;
         const model = modelOf(row.speaker);
-        return model === null ? sum : sum + estimateMicroUsd(model, { characters: billableCharacters(model, row.block.text) });
+        return model === null ? sum : sum + estimateSpeechMicroUsd(model, row.block.text);
       }, 0),
     [rows, modelOf],
   );
@@ -1393,7 +1392,7 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
     void playClip({ id: `hear-${hearId}`, url: mediaUrl(slug, heard.file), title: name, sub: note ?? "plain" });
   }, [heard?.state]);
   const sent = line?.sentAs?.join(" ") ?? (line === null ? null : normalizeSpeechText(line.block.text));
-  const price = model === null || sent === null ? 0 : estimateMicroUsd(model, { characters: billableCharacters(model, sent) });
+  const price = model === null || sent === null ? 0 : estimateSpeechMicroUsd(model, sent);
   return (
     <li className={`fy-ab__performer${focused ? " fy-ab__performer--focused" : ""}`} onFocus={onFocus} onClick={onFocus} data-testid="performed-speaker">
       <div className="fy-ch__who-head">
@@ -1788,7 +1787,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
           {takes.length > 0 && (
             <Button variant="ghost" onClick={() => onMakeAgain(row.block.key)} data-testid="audiobook-make-again">
               Make again
-              {model !== null && row.speaker.provider !== "kokoro" ? ` · ${formatMicroUsd(estimateMicroUsd(model, { characters: billableCharacters(model, row.block.text) }))}` : ""}
+              {model !== null && row.speaker.provider !== "kokoro" ? ` · ${formatMicroUsd(estimateSpeechMicroUsd(model, row.block.text))}` : ""}
             </Button>
           )}
           {onUpload !== undefined && (

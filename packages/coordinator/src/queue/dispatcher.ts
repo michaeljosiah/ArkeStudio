@@ -2,6 +2,12 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, extname, join } from "node:path";
 import {
   canDeleteJob,
+  quoteSpeech,
+  speechQuoteIsCurrent,
+  speechUsageCost,
+  SpeechUsageSchema,
+  type SpeechUsage,
+  type ManifestModel,
   credentialKindOf,
   formatMicroUsd,
   PROVIDERS,
@@ -97,7 +103,7 @@ export interface DispatchClient {
       recipe?: RecipeIdentity;
     },
     context?: { jobId?: string; attempt?: number; model?: string },
-  ): Promise<{ remoteId: string; artifacts?: DispatchArtifact[] }>;
+  ): Promise<{ remoteId: string; artifacts?: DispatchArtifact[]; speechUsage?: SpeechUsage; costMicroUsd?: number }>;
   poll(
     key: string,
     remoteId: string,
@@ -105,6 +111,7 @@ export interface DispatchClient {
   ): Promise<{
     state: "queued" | "running" | "succeeded" | "failed" | "cancelled";
     costMicroUsd?: number;
+    speechUsage?: SpeechUsage;
     error?: string;
     /** What the engine is counting, where it counts anything (SPEC-021 D16). */
     step?: { stage: string; done: number; total: number };
@@ -147,6 +154,8 @@ export interface EnqueueInput {
 }
 
 export interface JobQueueOptions {
+  /** Resolve qualified speech pricing at admission and immediately before paid I/O. */
+  speechModel?: (provider: string, model: string) => ManifestModel | undefined;
   /** Recheck host authorization after preparation and before the durable submission boundary. */
   beforeSubmit?: (job: Job) => Promise<void>;
   /** The host owns durability; journalPath still locates disposable inline-artifact staging. */
@@ -585,6 +594,12 @@ export class JobQueue {
     // never mint and return an id after that boundary without a durable journal row behind it.
     this.requireAccepting();
     const now = this.clock();
+    const model = input.capability === "voice-tts" ? this.opts.speechModel?.(input.provider, input.model) : undefined;
+    const speechQuote = model?.pricing.kind === "perToken"
+      ? quoteSpeech(model, String(input.params.text ?? ""), { at: now }) : undefined;
+    if (speechQuote && speechQuote.authorisedMicroUsd > input.estimatedMicroUsd) {
+      throw new Error("Speech pricing changed. Review the new quote before reading.");
+    }
     const job: Job = {
       id: `jb_${["performance-conversion", "performance-generation"].includes(input.target.kind) ? UlidSchema.parse(input.idempotencyKey) : ulid()}`,
       idempotencyKey: input.idempotencyKey ?? ulid(), // persisted before submission (R-2)
@@ -596,6 +611,7 @@ export class JobQueue {
       model: input.model,
       params: durableParams,
       estimatedMicroUsd: input.estimatedMicroUsd,
+      ...(speechQuote ? { speechQuote } : {}),
       // Identity frozen before the journal line exists (SPEC-021 §2.11): what this job IS can
       // never depend on what the catalogue or Settings hold by the time it runs.
       ...(input.recipe !== undefined ? { recipe: input.recipe } : {}),
@@ -1041,7 +1057,19 @@ export class JobQueue {
 
     if (this.disposed || !this.stillQueued(job) || this.opts.runtimeReady?.(job) === false) return;
 
-    try { await this.opts.beforeSubmit?.(job); }
+    try {
+      await this.opts.beforeSubmit?.(job);
+      const pricedModel = job.capability === "voice-tts" ? this.opts.speechModel?.(job.provider, job.model) : undefined;
+      if (pricedModel?.pricing.kind === "perToken" && !job.speechQuote) throw new Error("Speech needs a fresh token quote before reading.");
+      if (job.speechQuote) {
+        const model = this.opts.speechModel?.(job.provider, job.model);
+        if (!model || !speechQuoteIsCurrent(job.speechQuote, this.clock())) throw new Error("Speech quote expired. Review the new price before reading.");
+        const current = quoteSpeech(model, String(job.params.text ?? ""), { at: this.clock() });
+        if (current.rateVersion !== job.speechQuote.rateVersion || current.authorisedMicroUsd > job.speechQuote.authorisedMicroUsd) {
+          throw new Error("Speech pricing changed. Review the new quote before reading.");
+        }
+      }
+    }
     catch (error) {
       if (this.stillQueued(job)) await this.terminalize(job, "failed", error instanceof Error ? error.message : "Dispatch authorization failed.");
       return;
@@ -1100,19 +1128,26 @@ export class JobQueue {
       // belongs to the retired process; never let its late response resurrect the old run over
       // the durable queued row for the replacement process.
       if (!this.stillSubmitting(submitting)) return;
+      const usage = SpeechUsageSchema.safeParse(accepted.speechUsage);
+      const completedSubmission: Job = { ...submitting, providerJobId: accepted.remoteId,
+        ...(usage.success ? { speechUsage: usage.data } : {}),
+        ...(Number.isSafeInteger(accepted.costMicroUsd) && accepted.costMicroUsd! >= 0 ? { providerCostMicroUsd: accepted.costMicroUsd } : {}) };
+      // Usage must survive artifact landing failure and restart, just as the audio does.
+      if (usage.success || completedSubmission.providerCostMicroUsd !== undefined) await this.transition(completedSubmission);
+      if (this.disposed || !this.stillSubmitting(completedSubmission)) return;
       if (accepted.artifacts) {
         try {
           await this.persistInlineArtifacts(job.id, accepted.remoteId, accepted.artifacts);
         } catch (error) {
           await this.terminalize(
-            submitting,
+            completedSubmission,
             "failed",
             `the provider completed, but its artifact could not be made durable: ${describeCoordinatorError(error)}`,
           );
           return;
         }
         await this.landDurableInline(
-          { ...submitting, providerJobId: accepted.remoteId },
+          completedSubmission,
           client,
           key,
           accepted.artifacts,
@@ -1120,7 +1155,7 @@ export class JobQueue {
         return;
       }
       // ④ the uncertainty closes.
-      const running: Job = { ...submitting, status: "running", providerJobId: accepted.remoteId, updatedAt: this.clock() };
+      const running: Job = { ...completedSubmission, status: "running", updatedAt: this.clock() };
       await this.transition(running);
       this.noteSuccess(job.provider);
       await this.pollToTerminal(running, client, key, true);
@@ -1264,6 +1299,12 @@ export class JobQueue {
       }
       if (this.disposed) return;
       if (!this.stillPolling(current)) return;
+      const usage = SpeechUsageSchema.safeParse(poll.speechUsage);
+      if (usage.success) {
+        current = { ...current, speechUsage: usage.data };
+        await this.transition(current);
+        if (this.disposed || !this.stillPolling(current)) return;
+      }
       if (poll.state === "succeeded") {
         await this.landAndSucceed(current, client, key, poll.costMicroUsd);
         return;
@@ -1398,7 +1439,7 @@ export class JobQueue {
     key: string,
     artifacts: DispatchArtifact[],
   ): Promise<void> {
-    await this.landAndSucceed(job, client, key, undefined, artifacts);
+    await this.landAndSucceed(job, client, key, job.providerCostMicroUsd, artifacts);
     const settled = this.jobs.get(job.id);
     if (settled && TERMINAL.has(settled.status)) {
       await rm(toExtendedLength(this.inlineArtifactDir(job.id)), { recursive: true, force: true }).catch(() => {});
@@ -1627,6 +1668,9 @@ export class JobQueue {
     } else if (client?.declarations.reportsCost && costMicroUsd !== undefined) {
       actualMicroUsd = Math.round(costMicroUsd);
       actualSource = "provider-reported";
+    } else if (job.speechQuote?.unit === "token") {
+      actualMicroUsd = job.speechUsage ? speechUsageCost(job.speechQuote, job.speechUsage) : null;
+      actualSource = actualMicroUsd === null ? undefined : "usage-derived";
     } else if (outcome === "succeeded") {
       actualMicroUsd = job.estimatedMicroUsd;
       actualSource = "manifest-derived"; // derived, not measured (SPEC-008 R-17)
@@ -1645,6 +1689,8 @@ export class JobQueue {
       outcome,
       estimatedMicroUsd: job.estimatedMicroUsd,
       actualMicroUsd,
+      ...(job.speechQuote ? { speechQuote: job.speechQuote } : {}),
+      ...(job.speechUsage ? { speechUsage: job.speechUsage } : {}),
       ...(actualSource !== undefined ? { actualSource } : {}),
     });
   }

@@ -125,3 +125,4 @@ export * from "./publication.js";
 export * from "./publication-video.js";
 export * from "./publication-host.js";
 export * from "./adapters.js";
+export * from "./speech-pricing.js";

@@ -1,3 +1,4 @@
+import { estimateSpeechMicroUsd } from "@arke-studio/contracts";
 import { castVoiceSummary, planSubjectCharacterAudio } from "@arke-studio/contracts";
 import { AdapterPicker } from "../components/adapter-picker.js";
 import { hasAdultAdapter } from "@arke-studio/contracts";
@@ -11,7 +12,6 @@ import {
   deriveCapabilityAvailability,
   dispatchDuration,
   durationLimitsFor,
-  billableCharacters,
   estimateMicroUsd,
   formatMicroUsd,
   frameTaskModes,
@@ -886,7 +886,7 @@ function BenchWorkspace({
     if (draft.params.kind === "voice") {
       // Exact, not a ceiling: speech bills per character and the characters are already typed —
       // counted as the row bills them, a delivery's tag included (SPEC-046 R-8).
-      return estimateMicroUsd(candidate, { characters: billableCharacters(candidate, draft.brief, draft.params.delivery) }) * draft.params.count;
+      return estimateSpeechMicroUsd(candidate, draft.brief, draft.params.delivery) * draft.params.count;
     }
     if (draft.params.kind === "music") {
       // A ceiling, and the only honest kind of number here: the route calls its length an upper

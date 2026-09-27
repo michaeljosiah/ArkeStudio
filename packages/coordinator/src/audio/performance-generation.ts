@@ -1,7 +1,8 @@
+import { estimateSpeechMicroUsd } from "@arke-studio/contracts";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { PerformanceGenerationQuoteSchema, PerformanceRecordSchema, PerformanceIdSchema, AudioAssetProvenanceSchema,
-  billableCharacters, estimateMicroUsd, legacyVoiceModel, mapCadence, normalizeSpeechText, supportsPerformanceGeneration, voiceFormatForModel, voiceSourceFor,
+  legacyVoiceModel, mapCadence, normalizeSpeechText, supportsPerformanceGeneration, voiceFormatForModel, voiceSourceFor,
   type AudioAssetProvenance, type ClientMessage, type ManifestModel, type PerformanceGenerationQuote, type Job, type TakeCost, type VoiceAudioFormat } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { atomicWriteFile } from "../world/atomic.js";
@@ -34,7 +35,7 @@ export async function preparePerformanceGeneration(store: WorldStore, model: Man
   if (model.limits.maxPromptChars !== undefined && mapped.providerText.length > model.limits.maxPromptChars) throw new Error("The decorated line exceeds this model's character limit.");
   const quote = PerformanceGenerationQuoteSchema.parse({ operationId: randomUUID(), target, authoredText: text, voiceAssignment: sheet.voice,
     cadencePlan: request.cadencePlan, cadencePlanHash: digest(request.cadencePlan), mapping: { ...mapped, providerTextHash: audioHash(Buffer.from(mapped.providerText)) },
-    modelHash: digest(model), estimatedMicroUsd: estimateMicroUsd(model, { characters: billableCharacters(model, mapped.providerText) }), local: model.provider === "kokoro",
+    modelHash: digest(model), estimatedMicroUsd: estimateSpeechMicroUsd(model, mapped.providerText), local: model.provider === "kokoro",
     audioFormat: voiceFormatForModel(model), ...(language !== undefined ? { language } : {}), createdAt: store.now() });
   await store.ownedWrite(async () => atomicWriteFile(await audioWorldPath(store.dir, `.staging/performances/${quote.operationId}/quote.json`, true), JSON.stringify(quote)));
   return quote;

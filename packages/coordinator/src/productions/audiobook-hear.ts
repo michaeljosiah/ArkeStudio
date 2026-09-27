@@ -1,6 +1,7 @@
+import { estimateSpeechMicroUsd } from "@arke-studio/contracts";
 import { readFile, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import { billableCharacters, estimateMicroUsd, type Job } from "@arke-studio/contracts";
+import { type Job } from "@arke-studio/contracts";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 import { joinSpeech, speechCacheFile } from "../voice/service.js";
 import { atomicWriteFile } from "../world/atomic.js";
@@ -68,7 +69,7 @@ export async function hearAudiobookLine(store: WorldStore, productionId: string,
           ...(perPart !== undefined && Object.keys(perPart.voiceSettings).length > 0 ? { voiceSettings: perPart.voiceSettings } : {}),
           ...(perPart?.instructions !== undefined ? { instructions: perPart.instructions } : {}),
         },
-        estimatedMicroUsd: estimateMicroUsd(speaking.model, { characters: billableCharacters(speaking.model, part) }),
+        estimatedMicroUsd: estimateSpeechMicroUsd(speaking.model, part),
         landing: { dir: landingDir, name: `hear-${block.replace(/[^a-z0-9]+/gi, "-")}-${index}.${speaking.format}` },
       });
       const job = await deps.waitForJob(jobId);

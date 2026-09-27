@@ -1,3 +1,4 @@
+import { estimateSpeechMicroUsd } from "@arke-studio/contracts";
 import { stageArtifactProblem } from "../productions/stage-playblast.js";
 import { planSubjectCharacterAudio, characterAudioInstructions, referencePrompt, referenceInputProblem, type FrozenPerformanceAudio } from "@arke-studio/contracts";
 import { readdir } from "node:fs/promises";
@@ -13,7 +14,6 @@ import {
   briefForProvider,
   dispatchDuration,
   durationLimitsFor,
-  billableCharacters,
   estimateMicroUsd,
   imageOutputFor,
   keyframeAddable,
@@ -1135,7 +1135,7 @@ export function planBenchDispatch(
           // No container control: the concrete model declares its format and every downstream
           // layer consumes that same value.
         },
-        estimatedMicroUsd: estimateMicroUsd(model, { characters: billableCharacters(model, composer.brief, voiceSettings !== null ? params.delivery : undefined, voiceSource.kind === "cloned" ? voiceSource.voice.language : undefined) }),
+        estimatedMicroUsd: estimateSpeechMicroUsd(model, composer.brief, voiceSettings !== null ? params.delivery : undefined, voiceSource.kind === "cloned" ? voiceSource.voice.language : undefined),
         landing: { dir: sessionMediaDir(session.id, takeId) },
         ...(voiceSource.kind === "cloned" ? { voiceReference: true } : {}),
       });

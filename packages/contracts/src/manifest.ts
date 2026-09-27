@@ -1,5 +1,6 @@
 import { ModelDialogueGuidanceSchema } from "./provider-guidance.js";
 import { CadenceCapabilitiesSchema } from "./cadence.js";
+import { quoteSpeech, SpeechTokenPricingSchema } from "./speech-pricing.js";
 import { z } from "zod";
 import { IsoDateSchema } from "./ids.js";
 import { formatMicroUsd } from "./money.js";
@@ -53,6 +54,8 @@ export const PricingSchema = z.discriminatedUnion("kind", [
       kind: z.literal("perToken"),
       microUsdPerMillionInput: z.number().int().min(0),
       microUsdPerMillionOutput: z.number().int().min(0),
+      /** Speech has dated rates and separate text/audio limits (SPEC-049 R-5). */
+      speech: SpeechTokenPricingSchema.optional(),
     })
     .strict(),
   /**
@@ -507,28 +510,7 @@ export interface EstimateInput {
  * fractional intermediate (megapixels, token millionths) rounds once, up, at its own edge —
  * an estimate that errs low teaches the user not to trust it.
  */
-const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu;
-
-/**
- * The characters a vendor will bill for this text, by the row's unit — what `estimateMicroUsd`
- * wants in `characters`, never `text.length` alone for a row that counts differently (SPEC-046
- * R-8; codex on PR 1153 found the CJK half-estimate). A row with no unit, or no per-character
- * pricing, counts characters. A delivery the row carries as a tag in the text — `(whispers) `,
- * `[voice breaking, through tears] ` — is billed as text too, so a caller that knows the
- * delivery names it and the tag's characters are counted before the line is priced — but only
- * when the tag will actually go: a paren-syntax vendor's English tag goes into a line stated to
- * be English and no other (SPEC-046 R-23), so the estimate follows the same rule (codex on PR
- * 1153). A bracket-syntax tag is a phrase the vendor reads in any language and always goes.
- */
-export function billableCharacters(model: Pick<ManifestModel, "pricing"> & Partial<Pick<ManifestModel, "cadence">>, text: string, delivery?: string, language?: string): number {
-  const paren = model.cadence?.tagSyntax === "paren";
-  const tag = delivery !== undefined && (!paren || language === "en") ? model.cadence?.deliveryMappings[delivery]?.tag : undefined;
-  const counted = tag !== undefined ? `${paren ? `(${tag})` : `[${tag}]`} ${text}` : text;
-  const unit = model.pricing.kind === "perCharacter" ? model.pricing.unit : undefined;
-  if (unit === "utf8-byte") return new TextEncoder().encode(counted).length;
-  if (unit === "cjk-double") return counted.length + (counted.match(CJK)?.length ?? 0);
-  return counted.length;
-}
+export { billableCharacters } from "./speech-units.js";
 
 export function estimateMicroUsd(model: ManifestModel, input: EstimateInput): number {
   const p = model.pricing;
@@ -549,6 +531,7 @@ export function estimateMicroUsd(model: ManifestModel, input: EstimateInput): nu
     case "perCharacter":
       return (input.characters ?? 0) * p.microUsdPerCharacter;
     case "perToken": {
+      if (p.speech !== undefined) throw new Error("Use quoteSpeech for token-priced speech");
       const inCost = Math.ceil(((input.tokensIn ?? 0) * p.microUsdPerMillionInput) / 1_000_000);
       const outCost = Math.ceil(((input.tokensOut ?? 0) * p.microUsdPerMillionOutput) / 1_000_000);
       return inCost + outCost;
@@ -1134,6 +1117,10 @@ export function modelPriceCopy(model: ManifestModel): string {
           : `${perMillion} / M characters`;
     }
     case "perToken":
+      if (pricing.speech !== undefined) {
+        const quote = quoteSpeech(model, "");
+        return `${formatMicroUsd(quote.tokenRates!.input)} / M text tokens · ${formatMicroUsd(quote.tokenRates!.output)} / M audio tokens${quote.validUntil ? ` · before ${quote.validUntil.slice(0, 10)}` : ""}`;
+      }
       return `${formatMicroUsd(pricing.microUsdPerMillionInput)} / ${formatMicroUsd(
         pricing.microUsdPerMillionOutput,
       )} per M tokens`;

@@ -1,3 +1,4 @@
+import { estimateSpeechMicroUsd } from "@arke-studio/contracts";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -7,8 +8,6 @@ import {
   firstReadNotice,
   normalizeSpeechText,
   KOKORO_VOICE_MODEL,
-  billableCharacters,
-  estimateMicroUsd,
   extractVoiceAttributes,
   previewLineFor,
   rankVoices,
@@ -564,7 +563,7 @@ export class VoiceService {
             entry.capability === "voice-tts",
         );
         return model
-          ? [[voiceTargetKey(candidate), estimateMicroUsd(model, { characters: billableCharacters(model, line.text) })]]
+          ? [[voiceTargetKey(candidate), estimateSpeechMicroUsd(model, line.text)]]
           : [];
       }),
     );
@@ -813,7 +812,7 @@ export class VoiceService {
         ...(voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor } : {}),
         // Unmetered rows estimate at zero, so a local preview states no price where a cloud one
         // states an exact figure (turn 70). No branch needed — the manifest already says which.
-        estimatedMicroUsd: estimateMicroUsd(model, { characters: billableCharacters(model, normalized) }),
+        estimatedMicroUsd: estimateSpeechMicroUsd(model, normalized),
         // Landed under its cache key, so reopening the picker replays without a call (R-10).
         landing: { dir: PREVIEW_CACHE_DIR, name },
       },
@@ -896,7 +895,7 @@ export function voiceLineRequest(input: {
       ...(input.deliveryParams !== null ? { voiceSettings: input.deliveryParams } : {}),
       ...(input.deliveryNotice !== null ? { deliveryNotice: input.deliveryNotice } : {}),
     },
-    estimatedMicroUsd: estimateMicroUsd(input.model, { characters: billableCharacters(input.model, input.text, input.delivery, input.language) }),
+    estimatedMicroUsd: estimateSpeechMicroUsd(input.model, input.text, input.delivery, input.language),
     landing: { dir: `productions/${input.productionId}/audio` },
     ...(input.voiceReference === true ? { voiceReference: true } : {}),
     ...(input.voiceUploadConfirmedFor !== undefined
