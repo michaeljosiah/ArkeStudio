@@ -5,6 +5,7 @@ import {
   deriveCut,
   layoutRouting,
   orderedShots,
+  playbackWindow,
   productionShape,
   routingFindings,
   type ArtifactSidecar,
@@ -107,11 +108,9 @@ export function sceneClips(
   const whole = new Set<string>();
   for (const shot of safeShots(scene)) {
     const entry = cut.get(shot.id);
-    if (entry?.media) {
-      const from = entry.media.inSec ?? 0;
-      const slot = entry.durationSec > 0 ? from + entry.durationSec : Infinity;
-      const to = Math.min(entry.media.outSec ?? Infinity, slot);
-      clips.push({ src: mediaUrl(slug, entry.media.path), from, ...(Number.isFinite(to) ? { to } : {}) });
+    const played = entry ? playbackWindow(entry) : null;
+    if (entry?.media && played) {
+      clips.push({ src: mediaUrl(slug, entry.media.path), ...played });
       continue;
     }
     const takeId = production.selections[shot.id]?.acceptedTakeId ?? null;
@@ -212,11 +211,13 @@ export function BranchMapScreen() {
   }, [geometry]);
 
   // Opens fitted to the window (turn 157), once per production; after that the view is the person's.
+  // Only once there is a canvas to fit: opened narrow, the list shows and nothing is fitted, and a
+  // window widened afterwards found the map at actual size, mostly off screen.
   useEffect(() => {
-    if (fittedRef.current || !geometry) return;
+    if (fittedRef.current || !geometry || narrow || !viewportRef.current) return;
     fittedRef.current = true;
     fit();
-  }, [geometry, fit]);
+  }, [geometry, fit, narrow]);
 
   const zoomBy = useCallback((factor: number, about?: { x: number; y: number }) => {
     setView((v) => {
@@ -1073,6 +1074,17 @@ export function BranchMapScreen() {
     );
 
     function findingActions(row: FindingRow) {
+      // A choice naming a scene that is gone is drawn nowhere — not on the canvas, not in the
+      // list — so the finding is the only place it can be reached, and removal is its repair.
+      if (row.kind === "invalid-destination") {
+        const id = row.choiceIds[0];
+        return id !== undefined && routing!.choices.some((choice) => choice.id === id) ? (
+          <Button size="sm" variant="ghost" className="bm-danger" onClick={() => command({ operation: "remove-choice", choiceId: id })}>
+            <Trash size={13} />
+            Remove choice
+          </Button>
+        ) : null;
+      }
       if (row.kind === "unreachable") {
         const id = row.sceneIds[0]!;
         return (

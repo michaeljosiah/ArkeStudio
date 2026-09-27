@@ -427,6 +427,28 @@ describe("the branch map canvas (design turn 157)", () => {
     assert.equal(focused(), player, "Tab from the last control that shows wraps to the player, not the map behind it");
   });
 
+  it("fits the canvas when a window opened narrow is widened", async () => {
+    narrowWindow = true;
+    const item = await mount();
+    narrowWindow = false;
+    await act(async () => {
+      __setStateForTest(state(ROUTING));
+    });
+    const stage = all(item, ".bm-stage")[0];
+    assert.ok(stage, "the canvas is back");
+    assert.doesNotMatch(stage.getAttribute("style") ?? "", /translate\(0px, 0px\) scale\(1\)/, "fitted, not left at actual size from the corner");
+  });
+
+  it("offers to remove a choice whose scene is gone, from its finding", async () => {
+    const broken: Routing = { ...ROUTING, choices: [...ROUTING.choices, { id: "ch_ghost", from: "sc_gone", label: "Into the dark", to: "sc_pier" }] };
+    const item = await mount(broken);
+    await click(all(item, "button").find((el) => /block/.test(text(el)) && el.closest(".bm-head") !== null));
+    const card = all(item, ".bm-find").find((el) => /Into the dark/.test(text(el)));
+    assert.ok(card, "the finding names the choice");
+    await click([...card.querySelectorAll("button")].find((el) => text(el as unknown as HTMLElement) === "Remove choice") as unknown as HTMLElement);
+    assert.deepEqual(commands(item), [{ operation: "remove-choice", choiceId: "ch_ghost" }], "drawn nowhere else, the finding is where it is removed");
+  });
+
   it("lays day one out narrow too, below 900 wide", async () => {
     narrowWindow = true;
     try {

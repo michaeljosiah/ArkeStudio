@@ -9,6 +9,8 @@ import { copyFile, mkdir, open as openFile, readFile, readdir } from "node:fs/pr
 import { join } from "node:path";
 import {
   ConversationActionSemanticIdSchema,
+  deriveCut,
+  playbackWindow,
   publicationBlockers,
   routingFindings,
   RoutingSchema,
@@ -459,7 +461,10 @@ mountInteractivePlayer(document.getElementById("app"), {
   title: ${json(presentation.title)},
   eyebrow: ${json(presentation.eyebrow)},
   start: manifest.routing.start,
-  scenes: Object.fromEntries(manifest.media.map((m) => [m.sceneId, { title: titles[m.sceneId] || m.sceneId, clips: [m.file] }])),
+  scenes: Object.fromEntries(manifest.media.map((m) => [m.sceneId, {
+    title: titles[m.sceneId] || m.sceneId,
+    clips: m.windows && m.windows.length > 0 ? m.windows.map((w) => ({ src: m.file, from: w.from, to: w.to })) : [m.file],
+  }])),
   choices: manifest.routing.choices,
   endings: manifest.routing.endings,
   storageKey: KEY,
@@ -468,9 +473,12 @@ mountInteractivePlayer(document.getElementById("app"), {
 `;
 }
 
+type PlaybackWindow = { from: number; to?: number };
+
 interface InteractiveExportManifest {
   readonly routing: Routing;
-  readonly media: ReadonlyArray<{ sceneId: string; file: string; hash: string }>;
+  /** `windows`: the parts of `file` the scene plays, in order; absent, the whole file plays. */
+  readonly media: ReadonlyArray<{ sceneId: string; file: string; hash: string; windows?: PlaybackWindow[] }>;
   readonly provenance: {
     readonly productionId: string;
     readonly routingVersion: number;
@@ -500,12 +508,27 @@ function parseInteractiveManifest(value: unknown): InteractiveExportManifest | n
   const parsedMedia = media.flatMap((entry) => {
     if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return [];
     const mediaRecord = entry as Record<string, unknown>;
+    const windows = mediaRecord["windows"];
+    const windowsOk =
+      windows === undefined ||
+      (Array.isArray(windows) &&
+        windows.every((w: unknown) => {
+          if (typeof w !== "object" || w === null || Array.isArray(w)) return false;
+          const { from, to } = w as Record<string, unknown>;
+          return typeof from === "number" && from >= 0 && (to === undefined || (typeof to === "number" && to > from));
+        }));
     return typeof mediaRecord["sceneId"] === "string" &&
       typeof mediaRecord["file"] === "string" &&
       /^media\/[^/\\]+$/.test(mediaRecord["file"]) &&
       typeof mediaRecord["hash"] === "string" &&
-      /^sha256:[0-9a-f]{16}$/.test(mediaRecord["hash"])
-      ? [{ sceneId: mediaRecord["sceneId"], file: mediaRecord["file"], hash: mediaRecord["hash"] }]
+      /^sha256:[0-9a-f]{16}$/.test(mediaRecord["hash"]) &&
+      windowsOk
+      ? [{
+          sceneId: mediaRecord["sceneId"],
+          file: mediaRecord["file"],
+          hash: mediaRecord["hash"],
+          ...(windows !== undefined ? { windows: windows as PlaybackWindow[] } : {}),
+        }]
       : [];
   });
   if (parsedMedia.length !== media.length) return null;
@@ -594,7 +617,8 @@ export async function exportInteractive(
   // name — silently shipping the first shot's clip was a package missing most of its scene.
   const excluded = new Set(routing.excluded.map((entry) => entry.sceneId));
   const shipped = production.scenes.filter((scene) => !excluded.has(scene.id));
-  const media: Array<{ sceneId: string; source: string; file: string }> = [];
+  const media: Array<{ sceneId: string; source: string; file: string; windows: PlaybackWindow[] }> = [];
+  const cut = new Map(deriveCut(production).entries.map((entry) => [entry.shot.id, entry]));
   for (const scene of shipped) {
     const shots = orderedShots(scene);
     const acceptedIds = new Set(
@@ -638,30 +662,49 @@ export async function exportInteractive(
       );
       continue;
     }
+    // `media` is an unrestricted string in the take schema, and a hand-edited or imported take
+    // can name `../../..`; joined onto the take's folder, the export copied a host file into a
+    // portable package. A take's media is a plain filename in its own folder, as the scanner holds.
+    if (!/^[^/\\]+$/.test(covering.media) || covering.media === "." || covering.media === "..") {
+      blockers.push(`${scene.id}'s accepted take names media outside its own folder`);
+      continue;
+    }
+    // The parts of the file the cut plays, shot by shot — a trim's in-point, a segment's range,
+    // the slot's end — so the package plays the scene the preview plays, not the whole file with
+    // its discarded head and tail. An unsegmented pass covering several shots has no cut entries
+    // of its own and plays whole, which is what it is.
+    const path = `productions/${production.meta.id}/takes/${covering.id}/${covering.media}`;
+    const windows = shots.flatMap((shot) => {
+      const entry = cut.get(shot.id);
+      const played = entry?.media?.path === path ? playbackWindow(entry) : null;
+      return played ? [played] : [];
+    });
     media.push({
       sceneId: scene.id,
       source: join(store.dir, "productions", production.meta.id, "takes", covering.id, covering.media),
       file: `media/${scene.id}${covering.media.slice(covering.media.lastIndexOf("."))}`,
+      windows,
     });
   }
   if (blockers.length > 0) return { ok: false, blockers };
 
   return store.gateOp(async () => {
-    const stamp = clock().replace(/[-:TZ.]/g, "").slice(0, 14);
     const exportId = options.exportId ?? `iv_${ulid()}`;
     if (!/^iv_[0-9A-HJKMNP-TV-Z]{26}$/.test(exportId)) throw new Error("invalid interactive export id");
-    const outName = options.exportId
-      ? `interactive-${production.meta.id}-${options.exportId}`
-      : `interactive-${production.meta.id}-${stamp}`;
+    // Named by the export's own id, always: named by the second when none was given, two exports
+    // in one second shared a folder, and the second wrote over the first's files and left its
+    // stale media behind. The id is a ULID, so the folders still sort by when they were made.
+    const outName = `interactive-${production.meta.id}-${exportId}`;
     const outDir = join(store.dir, "exports", outName);
     await mkdir(toExtendedLength(join(outDir, "media")), { recursive: true });
-    const manifestMedia: Array<{ sceneId: string; file: string; hash: string }> = [];
+    const manifestMedia: InteractiveExportManifest["media"][number][] = [];
     for (const entry of media) {
       await copyFile(toExtendedLength(entry.source), toExtendedLength(join(outDir, entry.file)));
       manifestMedia.push({
         sceneId: entry.sceneId,
         file: entry.file,
         hash: fullHash(await readFile(toExtendedLength(join(outDir, entry.file)))),
+        ...(entry.windows.length > 0 ? { windows: entry.windows } : {}),
       });
     }
     const manifest = {

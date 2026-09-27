@@ -213,6 +213,43 @@ describe("interactive video through the coordinator (epic 401)", () => {
     assert.equal(await interactiveExportCompleted(store, production.meta.id, exportId), false, "a partial package is not recovered as completed");
   });
 
+  it("the package plays each scene's cut window, not its whole file: a trim's in-point, the slot's end", async () => {
+    const { dir, store, bundle } = await open();
+    const base = await interactiveProduction(dir, bundle.productions[0]!, ROUTING);
+    const production = { ...base, selections: { ...base.selections, sh_i1: { ...base.selections["sh_i1"]!, trimInSec: 1.5 } } };
+    await appendTraversal(store, production.meta.id, { ts: CLOCK(), routingVersion: 1, choiceId: "ch_on", from: "sc_i1", to: "sc_i2", route: ["sc_i1"] });
+    const result = await exportInteractive(store, production, CLOCK, { exportId: "iv_01J8F3K2QW9VZX4N7M0RTYB6HD" });
+    assert.ok(result.ok, result.ok ? "" : result.blockers.join("; "));
+    const manifest = JSON.parse(await readFile(join(dir, result.dir, "manifest.json"), "utf8")) as {
+      media: Array<{ sceneId: string; windows?: Array<{ from: number; to?: number }> }>;
+    };
+    const windows = Object.fromEntries(manifest.media.map((entry) => [entry.sceneId, entry.windows]));
+    assert.deepEqual(windows["sc_i1"], [{ from: 1.5, to: 6.5 }], "trimmed 1.5s in, and the 5s slot after it");
+    assert.deepEqual(windows["sc_i2"], [{ from: 0, to: 5 }], "untrimmed, still ended at its slot");
+    const player = await readFile(join(dir, result.dir, "player.html"), "utf8");
+    assert.match(player, /m\.windows\.map\(\(w\) => \(\{ src: m\.file, from: w\.from, to: w\.to \}\)\)/, "the page hands the windows to the player");
+  });
+
+  it("refuses a take whose media names a file outside its own folder, and copies nothing", async () => {
+    const { dir, store, bundle } = await open();
+    const base = await interactiveProduction(dir, bundle.productions[0]!, ROUTING);
+    const production = { ...base, takes: base.takes.map((t, i) => (i === 0 ? { ...t, media: "../../../../outside.txt" } : t)) };
+    const result = await exportInteractive(store, production, CLOCK);
+    assert.equal(result.ok, false);
+    assert.ok(!result.ok && result.blockers.some((line) => /sc_i1's accepted take names media outside its own folder/.test(line)));
+  });
+
+  it("gives two exports in the same second folders of their own", async () => {
+    const { dir, store, bundle } = await open();
+    const production = await interactiveProduction(dir, bundle.productions[0]!, ROUTING);
+    await appendTraversal(store, production.meta.id, { ts: CLOCK(), routingVersion: 1, choiceId: "ch_on", from: "sc_i1", to: "sc_i2", route: ["sc_i1"] });
+    const first = await exportInteractive(store, production, CLOCK);
+    const second = await exportInteractive(store, production, CLOCK);
+    assert.ok(first.ok && second.ok);
+    assert.notEqual(first.dir, second.dir, "the second does not write over the first");
+    assert.equal(await interactiveExportCompleted(store, production.meta.id, first.id), true, "and the first is still whole");
+  });
+
   it("T-13: Interactive export ships equivalent media for legacy and permuted migrated scenes", async () => {
     const { dir, store, bundle } = await open();
     const legacy = await interactiveProduction(dir, bundle.productions[0]!, ROUTING);

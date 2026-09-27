@@ -42,6 +42,8 @@ async function harness(t: TestContext) {
     await coordinator.stop();
     await provider.close();
   });
+  const message = (msg: ClientMessage) =>
+    (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage(msg);
   const send = (command: RoutingCommand, worldId = WORLD_ID) =>
     (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage({
       kind: "routing-command",
@@ -51,7 +53,7 @@ async function harness(t: TestContext) {
     });
   const routing = async () =>
     RoutingSchema.parse(JSON.parse(await readFile(join(worldDir, "productions", PRODUCTION, "routing.json"), "utf8")));
-  return { events, send, routing, worldDir, store: () => provider.openStore()!, loads: () => loads };
+  return { events, send, routing, worldDir, store: () => provider.openStore()!, loads: () => loads, message };
 }
 
 describe("the branch map's routing commands", () => {
@@ -194,6 +196,19 @@ describe("the branch map's routing commands", () => {
     // Sent for another world while this one is open — it holds a production with the same slug.
     await send({ operation: "set-start", sceneId: "sc_02" }, "01J8F3K2QW9VZX4N7M0RTYB6ZZ");
     await assert.rejects(readFile(join(worldDir, "productions", PRODUCTION, "routing.json"), "utf8"), /ENOENT/);
+  });
+
+  it("records a walk only in the world the frame names", async (t) => {
+    const { send, worldDir, message } = await harness(t);
+    await send({ operation: "set-start", sceneId: "sc_02" });
+    await send({ operation: "add-choice", choice: { id: "ch_on", from: "sc_02", label: "Go on", to: "sc_04" } });
+    const walk = (worldId: string) =>
+      message({ kind: "record-traversal", worldId, productionId: PRODUCTION, choiceId: "ch_on", from: "sc_02", to: "sc_04", route: ["sc_02"] });
+    // Sent from a world switched away from, into one that shares the production and its ids.
+    await walk("01J8F3K2QW9VZX4N7M0RTYB6ZZ");
+    await assert.rejects(readFile(join(worldDir, "productions", PRODUCTION, "routing-evidence.jsonl"), "utf8"), /ENOENT/);
+    await walk(WORLD_ID);
+    assert.match(await readFile(join(worldDir, "productions", PRODUCTION, "routing-evidence.jsonl"), "utf8"), /"choiceId":"ch_on"/);
   });
 
   it("a first edit that is not a start is refused, and no routing file appears", async (t) => {

@@ -9960,7 +9960,9 @@ export class Coordinator {
       }
       case "record-traversal": {
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
+        // Evidence is durable and clears export blockers: a walk from a world that has since been
+        // switched away from must not land in another world that happens to share the ids.
+        if (!store || store.worldId !== msg.worldId) return;
         const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
         if (!production || production.routing === null) return;
         await appendTraversal(store, msg.productionId, {
@@ -9971,12 +9973,13 @@ export class Coordinator {
           to: msg.to,
           route: msg.route,
         }).catch(() => {});
+        if (!this.stillOpen(store)) return;
         await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
         return;
       }
       case "list-routing-findings": {
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
+        if (!store || store.worldId !== msg.worldId) return;
         await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
         return;
       }
