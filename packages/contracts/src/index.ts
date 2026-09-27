@@ -7,6 +7,7 @@ export * from "./scene-findings.js";
 export * from "./season-findings.js";
 export * from "./bible.js";
 export * from "./scene.js";
+export * from "./beats.js";
 export * from "./scene-flow.js";
 export * from "./scene-operations.js";
 export * from "./staging.js";

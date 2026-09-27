@@ -40,7 +40,9 @@ export function activityJobLabels(
     ?? (production && !shot && typeof job.params.sectionHeading === "string" ? job.params.sectionHeading : undefined) : undefined;
   const bible = job.target.kind === "voice-preview" && job.params.purpose === "bible-section";
   const chapterName = prose && targetParts[1] === "chapters" ? production?.chapters.find((chapter) => chapter.id === targetParts[2]?.split("#")[0])?.title : undefined;
-  const subject = [speaker?.name, chapterName ?? proseName ?? (bible ? `Bible${typeof job.params.sectionHeading === "string" ? ` · ${job.params.sectionHeading}` : ""}` : undefined)
+  // A visual novel's narration has no sheet; its table read job is the narrator's (turn 172).
+  const narrator = tableRead && job.params.tableReadNarration === true ? "Narrator" : undefined;
+  const subject = [speaker?.name ?? narrator, chapterName ?? proseName ?? (bible ? `Bible${typeof job.params.sectionHeading === "string" ? ` · ${job.params.sectionHeading}` : ""}` : undefined)
     ?? sheet?.name ?? bench?.title ?? (sceneWide ? scene?.title : shot ? `Shot ${shot.number} · ${shot.title}` : scene?.title)].filter(Boolean).join(" · ");
   const target = [subject ? `${subject} · ${kind}` : kind[0]!.toUpperCase() + kind.slice(1), production?.meta.title, worldName, scene && (shot || sceneId) ? `Scene ${scene.number}` : null].filter(Boolean).join(" · ");
   const model = state?.app.manifest?.models.find((candidate) => candidate.id === job.model && candidate.provider === job.provider)?.displayName ?? job.model;

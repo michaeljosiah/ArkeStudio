@@ -349,6 +349,24 @@ export const ShotSchema = z
       .array(z.object({ blockId: z.string().min(1), textDigest: Sha256Schema }).strict())
       .optional(),
     /**
+     * How the shot plays as a visual novel's beat (turn 172): how it moves on, how its picture
+     * moves, and whether it keeps the picture before it instead of showing its own. Read only
+     * where the production plays as beats; a film ignores it. Every field is optional, so a
+     * beat nobody has touched plays on the defaults (`BEAT_DEFAULTS`).
+     */
+    beat: z
+      .object({
+        /** `voice`: when its voice ends; `tap`: when the reader moves on; `hold`: after `holdSec`. */
+        advance: z.enum(["voice", "tap", "hold"]).optional(),
+        holdSec: z.number().positive().max(60).optional(),
+        /** A slow push into the picture, a drift across it, or a still picture. */
+        motion: z.enum(["push", "drift", "none"]).optional(),
+        /** Show the picture of the beat before; this shot's own picture, if any, is not shown. */
+        samePicture: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
+    /**
      * An edited prompt, stored as an override, never a replacement (SPEC-012 R-15, D6): the
      * assembled form stays derivable, Reset stays possible, and the recorded sheet versions
      * are what make override staleness computable (R-16, D7).

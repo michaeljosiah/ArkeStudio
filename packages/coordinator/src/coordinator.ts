@@ -28,7 +28,7 @@ import { proposeShotVisualFacts } from "./productions/visual-facts.js";
 import { KeyArtPromptReviews, keyArtReviewContext } from "./references/prompt-review.js";
 import { reviewPrompt } from "@arke-studio/contracts";
 import { placeSelectedPerformance, validatePlacedPerformanceBytes, proposePerformanceDuration } from "./audio/performance-placement.js";
-import { planTableRead, prepareLocalTableRead, finalizeTableReadCache } from "./audio/table-read.js";
+import { planTableRead, prepareLocalTableRead, finalizeTableReadCache, type TableReadNarrator } from "./audio/table-read.js";
 import { saveRehearsalNote } from "./audio/rehearsal-notes.js";
 import { writePerformanceBible } from "./audio/performance-bible.js";
 import { preparePerformanceGeneration, readPerformanceGenerationQuote, validatePerformanceGeneration, performanceGenerationJob,
@@ -1191,6 +1191,18 @@ export class Coordinator {
    * which the run asks about every other reader. One rule for the run, the block panel's
    * writes and the derivation, so a fallback is the same voice wherever it is judged.
    */
+  /**
+   * The narrator a visual novel's table read voices narration in (turn 172): the app's narrator,
+   * resolved as the audiobook resolves it. Null for any production that does not play as beats,
+   * so a film's table read never pays for a voice catalogue it will not read.
+   */
+  private async tableReadNarrator(store: WorldStore, productionId: string): Promise<TableReadNarrator | null> {
+    const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+    if (!production || !productionShape(production.meta).playsAsBeats) return null;
+    const { narrator } = await this.audiobookNarrator(store, this.voiceService ?? null);
+    return narrator;
+  }
+
   /**
    * The narrator an audiobook reads in (SPEC-047 R-11, R-46): the book's own when it has one and
    * that voice can speak now, the app's otherwise — followed as it changes. Every read outside
@@ -15911,7 +15923,8 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         try {
           if (!store || store.worldId !== msg.worldId || !this.opts.manifest) throw new Error("Open this rehearsal world first.");
-          const prepared = await planTableRead(store, msg.productionId, msg.sceneId, this.opts.manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers);
+          const narrator = await this.tableReadNarrator(store, msg.productionId);
+          const prepared = await planTableRead(store, msg.productionId, msg.sceneId, this.opts.manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers, narrator);
           if (msg.kind === "prepare-table-read") {
             if (prepared.plan.confirmationToken !== msg.confirmationToken || prepared.plan.totalEstimatedMicroUsd !== msg.confirmedMicroUsd) {
               this.emit({ type: "rehearsal.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId, status: "planned", plan: prepared.plan,
@@ -15919,7 +15932,12 @@ export class Coordinator {
             }
             const failures = this.voiceService ? await prepareLocalTableRead(store, this.voiceService, prepared.local) : prepared.local.map(() => "Local synthesis is unavailable.");
             const scene = store.getBundle().productions.find(p => p.meta.id === msg.productionId)?.scenes.find(s => s.id === msg.sceneId);
-            if (scene?.version !== prepared.plan.sceneVersion || prepared.cloud.some(input => JSON.stringify(store.getBundle().sheets.find(s => s.id === input.params.tableReadSpeakerSheetId)?.voice) !== JSON.stringify(input.params.tableReadVoiceAssignment))) throw new Error("Preparation changed while local lines were being synthesized.");
+            // Narration is checked against the narrator as it is now, a character's line against
+            // its sheet: either voice changing under the synthesis means the quote is stale.
+            const narratorNow = prepared.cloud.some(input => input.params.tableReadNarration === true) ? await this.tableReadNarrator(store, msg.productionId) : null;
+            if (scene?.version !== prepared.plan.sceneVersion || prepared.cloud.some(input => JSON.stringify(input.params.tableReadNarration === true
+              ? narratorNow ?? undefined
+              : store.getBundle().sheets.find(s => s.id === input.params.tableReadSpeakerSheetId)?.voice) !== JSON.stringify(input.params.tableReadVoiceAssignment))) throw new Error("Preparation changed while local lines were being synthesized.");
             // What the queue would not take is said here (codex round 3): the enqueue result goes
             // out under this request too, but the page reads the rehearsal result, and one that
             // said "planned" over a refused batch cleared the words and offered the same press.
@@ -15929,7 +15947,7 @@ export class Coordinator {
                 reason: `The cloud lines were not queued: ${queued.reason ?? "the queue refused them."}` });
               return;
             }
-            const refreshed = await planTableRead(store, msg.productionId, msg.sceneId, this.opts.manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers);
+            const refreshed = await planTableRead(store, msg.productionId, msg.sceneId, this.opts.manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers, narrator);
             const notices = [
               failures.length ? `${failures.length} local lines could not be prepared.` : null,
               queued?.reason !== undefined ? `Some cloud lines were not queued: ${queued.reason}` : null,

@@ -4,6 +4,7 @@ import { FullSha256Schema } from "./audio.js";
 import { orderedShots, type SceneRecord } from "./scene-flow.js";
 import { resolvePerformanceLine, performanceLineKey } from "./performance.js";
 import type { Sheet } from "./world.js";
+import { sceneBeats } from "./beats.js";
 
 export const RehearsalIdSchema = prefixedIdSchema("rh");
 export const RehearsalSessionSchema = z.object({ id: RehearsalIdSchema, sceneId: SceneIdSchema,
@@ -11,9 +12,18 @@ export const RehearsalSessionSchema = z.object({ id: RehearsalIdSchema, sceneId:
     authoredTextHash: FullSha256Schema, body: z.string().trim().min(1).max(4000),
   }).strict()).default({}), createdAt: IsoDateTimeSchema, updatedAt: IsoDateTimeSchema }).strict();
 export type RehearsalSession = z.infer<typeof RehearsalSessionSchema>;
-export interface RehearsalLine { id: string; shotId: string; blockId?: string; speakerSheetId?: string; text: string; reason?: string }
-/** Authored shot order, then covered script order. A block covered by multiple shots is read once. */
-export function deriveRehearsalLines(scene: SceneRecord, sheets: readonly Pick<Sheet, "id" | "type" | "retired">[]): RehearsalLine[] {
+export interface RehearsalLine { id: string; shotId: string; blockId?: string; speakerSheetId?: string; text: string; reason?: string;
+  /** Read by the narrator rather than a character (turn 172); only when asked for with `narration`. */
+  narration?: true }
+/**
+ * Authored shot order, then covered script order. A block covered by multiple shots is read once.
+ *
+ * `narration` adds what the narrator reads — action blocks, and an authored voice-over with no
+ * speaker — in the same order, which is what a visual novel voices (turn 172). Without it the
+ * lines are the characters' alone, as a film's table read has always been.
+ */
+export function deriveRehearsalLines(scene: SceneRecord, sheets: readonly Pick<Sheet, "id" | "type" | "retired">[],
+  options: { narration?: boolean } = {}): RehearsalLine[] {
   const lines: RehearsalLine[] = [], seen = new Set<string>();
   for (const shot of orderedShots(scene)) {
     const blocks = shot.covers?.length ? scene.script?.blocks.filter(b => b.kind === "dialogue" && shot.covers?.some(c => c.blockId === b.id)) ?? [] : [];
@@ -31,7 +41,20 @@ export function deriveRehearsalLines(scene: SceneRecord, sheets: readonly Pick<S
         ...(!speaker ? { reason: "This line has no available character speaker." } : {}) });
     }
   }
-  return lines;
+  if (!options.narration) return lines;
+  // The beats walk the same order; a line they read as narration is the narrator's even where
+  // the character walk refused it for having no speaker.
+  const byId = new Map(lines.map(line => [line.id, line]));
+  const ordered: RehearsalLine[] = [];
+  for (const beat of sceneBeats(scene)) {
+    if (beat.lineId === undefined) continue;
+    const existing = byId.get(beat.lineId);
+    byId.delete(beat.lineId);
+    if (beat.kind === "narration") {
+      ordered.push({ id: beat.lineId, shotId: beat.shot.id, ...(beat.blockId ? { blockId: beat.blockId } : {}), text: beat.text, narration: true });
+    } else if (existing) ordered.push(existing);
+  }
+  return [...ordered, ...byId.values()];
 }
 
 export const TableReadPlanSchema = z.object({ productionId: z.string().min(1), sceneId: SceneIdSchema, sceneVersion: z.number().int().positive(),
@@ -39,6 +62,8 @@ export const TableReadPlanSchema = z.object({ productionId: z.string().min(1), s
   items: z.array(z.object({ lineId: z.string().min(1), shotId: z.string().min(1), blockId: z.string().optional(), speakerSheetId: z.string().optional(),
     route: z.enum(["existing", "cached", "local", "cloud", "generating", "unavailable"]), file: z.string().optional(),
     textHash: FullSha256Schema.optional(), performanceId: z.string().optional(), sourceHash: FullSha256Schema.optional(), provider: z.string().optional(), model: z.string().optional(),
-    voiceId: z.string().optional(), estimatedMicroUsd: z.number().int().nonnegative(), reason: z.string().optional() }).strict()),
+    voiceId: z.string().optional(), estimatedMicroUsd: z.number().int().nonnegative(), reason: z.string().optional(),
+    /** Read by the narrator (turn 172). */
+    narration: z.boolean().optional() }).strict()),
 }).strict();
 export type TableReadPlan = z.infer<typeof TableReadPlanSchema>;
