@@ -50,7 +50,7 @@
 .fy-production-switch-row__copy span { display: block; font: var(--type-meta); color: var(--muted-foreground); }
 .fy-production-switch-row > svg { margin-left: auto; flex: none; }
 .fy-production-switch-sheet { top: min(252px, 40dvh); border: 0; box-shadow: var(--shadow-xl); }
-.fy-production-switch-sheet::backdrop { background: linear-gradient(to bottom, transparent 168px, color-mix(in srgb, var(--neutral-950) 28%, transparent) 168px); }
+.fy-production-switch-sheet::backdrop { background: linear-gradient(to bottom, transparent 168px, color-mix(in srgb, var(--neutral-950) 40%, transparent) 168px); }
 .fy-production-switch-sheet .fy-page-sheet__grab { width: 40px; height: 5px; margin-top: 10px; }
 .fy-production-switch-sheet .fy-page-sheet__head { gap: 8px; padding: 6px 8px 6px 20px; border: 0; }
 .fy-production-switch-sheet .fy-page-sheet__head h2 { font: var(--type-h3); }
@@ -204,7 +204,7 @@
   .fy-production-mobile-nav .fy-prodrail__switchmark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; flex: none; background: var(--primary); color: var(--primary-foreground); }
   .fy-production-mobile-nav .fy-prodrail__switchname { font: 600 var(--text-md)/1.25 var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .fy-production-mobile-nav .fy-prodrail__switchcopy { font: 400 var(--text-sm)/1.6 var(--font-sans); }
-  .fy-production-mobile-nav .fy-prodrail__switchsub { display: block; font: var(--type-meta); line-height: calc(var(--text-sm) * 1.6); margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fy-production-mobile-nav .fy-prodrail__switchsub { display: block; font: var(--type-meta); line-height: calc(var(--text-base) * 1.6); margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .fy-production-pages { position: relative; border-bottom: 1px solid var(--border); }
   .fy-production-pages::after { content: ""; position: absolute; inset: 0 0 0 auto; width: 36px; pointer-events: none; background: linear-gradient(90deg, transparent, var(--background)); }
   .fy-production-pages nav { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; padding: 8px 12px; scroll-padding-inline: 12px; }
