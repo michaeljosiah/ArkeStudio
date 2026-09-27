@@ -16,6 +16,7 @@ import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { setProductionModel } from "../../src/productions/ops.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { FakeProvider } from "../queue/fake-provider.js";
+import type { JobQueue } from "../../src/queue/dispatcher.js";
 import { until } from "../wait.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
@@ -30,7 +31,9 @@ it("disabled Gemini models cannot be recommended, assigned or previewed through 
   await provider.loadWorld(WORLD_ID);
   const events: DomainEvent[] = [];
   const model = "gemini-3.8-flash-tts";
+  const google = new FakeProvider();
   const coordinator = new Coordinator({ provider, adapter: null, appRoot: root, cipher: devCipher(),
+    dispatchClients: { google },
     credentialsFileName: "credentials.dev.dat", changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test", manifest: SHIPPED_MANIFEST,
     voice: { sidecar: null, localPresets: [], cloudSources: [{ provider: "google", list: async key =>
       [{ provider: "google", model: key === "lite-only" ? "gemini-3.8-flash-lite-tts" : model, voiceId: "Charon", label: "Charon", attributes: [], local: false, canClone: false }] }] },
@@ -85,6 +88,26 @@ it("disabled Gemini models cannot be recommended, assigned or previewed through 
     await send({ kind: "generate-performance", requestId: ulid(), worldId: WORLD_ID, operationId: quote.operationId, confirmedMicroUsd: quote.estimatedMicroUsd });
     assert.equal(events.filter(e => e.type === "queue.enqueue-result").at(-1)!.disposition, "rejected");
     assert.equal(events.some(e => e.type === "job.updated"), false);
+    const sessionId = "sess_01J8F3K2QW9VZX4N7M0RTYB6HD";
+    const bench = new BenchStore(sessionDir(worldDir, sessionId));
+    await bench.create(sessionId, "2026-09-27T12:00:00.000Z");
+    const composer = { mode: "voice" as const, provider: "google", model,
+      params: { kind: "voice" as const, count: 1, voiceId: "Charon", voiceProvider: "google", voiceModel: model, voiceLabel: "Charon" },
+      brief: "A saved Bench line." };
+    await bench.append({ type: "composer-set", ...composer });
+    const requestId = ulid();
+    await send({ kind: "bench-dispatch", worldId: WORLD_ID, sessionId, requestId, composer, confirmedSpeechMicroUsd: 1000000 });
+    const refused = events.find(e => e.type === "queue.enqueue-result" && e.requestId === requestId);
+    assert.ok(refused && refused.type === "queue.enqueue-result");
+    assert.equal(refused.disposition, "rejected");
+    assert.match(JSON.stringify(refused), /current Google key/);
+    assert.equal((await readFile(bench.eventsPath, "utf8")).includes("takes-reserved"), false);
+    const queue = (coordinator as unknown as { jobQueue: JobQueue }).jobQueue;
+    await assert.rejects(queue.enqueue({ worldId: WORLD_ID, target: { kind: "voice-preview", id: "saved-flash" },
+      capability: "voice-tts", provider: "google", model, params: { text: "A saved read.", voiceId: "Charon" }, estimatedMicroUsd: 1000 }), /current Google key/);
+    assert.deepEqual(queue.listJobs(), []);
+    assert.equal(events.some(e => e.type === "job.updated"), false);
+    assert.equal(google.submitCount, 0);
   } finally { await coordinator.stop(); await provider.close(); }
 });
 const MODEL: ManifestModel = {

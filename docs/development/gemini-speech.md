@@ -14,7 +14,9 @@ first in narrator pickers. Setup and browsing do not synthesize speech or switch
 Models disabled in Settings are omitted from the shared catalogue and both narrator pickers
 before recommendation. Character assignment and preview commands also enforce that setting.
 Performance preparation, confirmation and speech queue admission likewise refuse disabled
-models. Saved Gemini shot/performance choices are checked against the current key's catalogue.
+models. Saved Gemini shot/performance and Bench choices are checked against the current key's
+catalogue before quotes or take reservation; shared speech queue admission checks again before
+journalling a job. These checks discover only Google's presets and do not synthesize speech.
 A standalone host without a local speech service needs an explicitly selected cloud narrator;
 book, chapter and audition commands refuse an unavailable local reader before synthesis.
 

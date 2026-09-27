@@ -544,9 +544,14 @@ export class VoiceService {
   }
 
   /** The keyed cloud catalogues, which are unaffected by whatever the local engine is doing. */
-  private async cloudVoices(): Promise<VoiceCandidate[]> {
+  async cloudCatalogue(provider: string): Promise<VoiceCandidate[]> {
+    return (await this.cloudVoices(provider)).filter(voice => this.deps.modelEnabled?.(voice.model) !== false);
+  }
+
+  private async cloudVoices(provider?: string): Promise<VoiceCandidate[]> {
     const cloud: VoiceCandidate[] = [];
     for (const source of this.deps.cloudSources) {
+      if (provider !== undefined && source.provider !== provider) continue;
       const key = await this.deps.getKey(source.provider);
       if (key === null) continue; // unkeyed providers simply contribute nothing
       cloud.push(...(await source.list(key).catch(() => [])));

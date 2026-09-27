@@ -1194,10 +1194,26 @@ export class Coordinator {
   private async requireEnabledSpeechReader(model: import("@arke-studio/contracts").ManifestModel, voiceId: string): Promise<void> {
     if (this.readModel.getState().app.models.disabled.includes(model.id)) throw new Error(`${model.displayName} is turned off in AI models.`);
     if (model.provider === "google") {
-      const catalogue = await this.voiceService?.catalogue();
+      const catalogue = await this.voiceService?.cloudCatalogue("google");
       if (!catalogue?.some(voice => voice.provider === model.provider && voice.model === model.id && voice.voiceId === voiceId)) {
         throw new Error("That Gemini voice is not available with the current Google key. Choose an available voice or update the key.");
       }
+    }
+  }
+
+  private async requireSpeechInputsAvailable(inputs: readonly EnqueueInput[]): Promise<void> {
+    const checked = new Set<string>();
+    for (const input of inputs) {
+      if (input.capability !== "voice-tts") continue;
+      if (this.readModel.getState().app.models.disabled.includes(input.model)) throw new Error("That voice model is turned off in AI models.");
+      if (input.provider !== "google") continue;
+      const model = this.opts.manifest?.models.find(row => row.id === input.model && row.provider === input.provider);
+      if (!model) throw new Error("That Gemini voice model is unavailable.");
+      const voiceId = typeof input.params.voiceId === "string" ? input.params.voiceId : "";
+      const identity = JSON.stringify([model.id, voiceId]);
+      if (checked.has(identity)) continue;
+      await this.requireEnabledSpeechReader(model, voiceId);
+      checked.add(identity);
     }
   }
 
@@ -2686,9 +2702,8 @@ export class Coordinator {
             // refused with the readiness reason before anything is journalled. `unknown`
             // dispatches (D15) — the floor could not be checked, which is not a refusal.
             admit: async (input) => {
-              if (input.capability === "voice-tts" && this.readModel.getState().app.models.disabled.includes(input.model)) {
-                return { ok: false, reason: "That voice model is turned off in AI models." };
-              }
+              try { await this.requireSpeechInputsAvailable([input]); }
+              catch (error) { return { ok: false, reason: describeCoordinatorError(error) }; }
               if (input.params.adapters !== undefined) {
                 if (input.provider !== "comfyui") return { ok: false, reason: "Adapters are supported only by local ComfyUI recipes." };
                 try { await this.guardAdapters(input.model, input.params.adapters); }
@@ -11776,6 +11791,11 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, plan.reason);
           return;
         }
+        try { await this.requireSpeechInputsAvailable(plan.inputs); }
+        catch (error) {
+          this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error));
+          return;
+        }
         const hasClonedVoice = plan.inputs.some(
           (input) => input.provider === "comfyui" && input.voiceReference === true,
         );
@@ -17717,6 +17737,7 @@ export class Coordinator {
       adapterRecipeFor: (modelId, selections) => this.adapterRecipeIdentity(modelId, selections),
     });
     if (!plan.ok) throw new Error(plan.reason);
+    await this.requireSpeechInputsAvailable(plan.inputs);
     const estimatedMicroUsd = plan.inputs.reduce((total, input) => total + input.estimatedMicroUsd, 0);
     const snapshot = plan.reserved[0]!.request;
     const references = [...snapshot.references, ...snapshot.keyframes]
