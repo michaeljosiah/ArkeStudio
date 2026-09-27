@@ -5,7 +5,8 @@
  */
 
 function icon(paths: React.ReactNode) {
-  return function Icon({ size = 14 }: { size?: number }) {
+  // `stroke` exists for the launch surface's 52px marks, where the house 1.75 reads as bold.
+  return function Icon({ size = 14, stroke = 1.75 }: { size?: number; stroke?: number }) {
     return (
       <svg
         width={size}
@@ -13,7 +14,7 @@ function icon(paths: React.ReactNode) {
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
-        strokeWidth="1.75"
+        strokeWidth={stroke}
         strokeLinecap="round"
         strokeLinejoin="round"
         aria-hidden
@@ -451,6 +452,31 @@ export const Monitor = icon(
   </>,
 );
 export const Cloud = icon(<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />);
+export const Laptop = icon(<path d="M20 16V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9m16 0H4m16 0 1.28 2.55a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45L4 16" />);
+export const ArrowRight = icon(<><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></>);
+/** A studio that does not answer: the plug pulled apart. */
+export const Unplug = icon(
+  <>
+    <path d="m19 5 3-3" />
+    <path d="m2 22 3-3" />
+    <path d="M6.3 20.3a2.4 2.4 0 0 0 3.4 0L12 18l-6-6-2.3 2.3a2.4 2.4 0 0 0 0 3.4Z" />
+    <path d="M7.5 13.5 10 11" />
+    <path d="M10.5 16.5 13 14" />
+    <path d="m12 6 6 6 2.3-2.3a2.4 2.4 0 0 0 0-3.4l-2.6-2.6a2.4 2.4 0 0 0-3.4 0Z" />
+  </>,
+);
+/** A link that no longer opens anything. */
+export const LinkOff = icon(
+  <>
+    <path d="M9 17H7A5 5 0 0 1 7 7" />
+    <path d="M15 7h2a5 5 0 0 1 4 8" />
+    <path d="M8 12h4" />
+    <path d="m2 2 20 20" />
+  </>,
+);
+/** A phone asking to pair (design turn 158j). */
+export const Smartphone = icon(<><rect width="14" height="20" x="5" y="2" rx="2" ry="2" /><path d="M12 18h.01" /></>);
+export const CircleAlert = icon(<><circle cx="12" cy="12" r="10" /><path d="M12 8v4" /><path d="M12 16h.01" /></>);
 
 /** Runs on this device — the shield is the claim, the tick is that it holds. */
 export const Shield = icon(

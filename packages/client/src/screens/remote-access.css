@@ -1,8 +1,5 @@
-.remote-entry { min-height: 100vh; display: grid; place-items: center; padding: var(--space-6); background: var(--background); color: var(--foreground); }
-.remote-entry__card { width: min(100%, 440px); display: grid; gap: var(--space-4); }
-.remote-entry form, .remote-entry label, .remote-access { display: grid; gap: var(--space-3); }
+.remote-access { display: grid; gap: var(--space-3); }
 .remote-access { max-width: 780px; }
-.remote-entry h1 { font: var(--type-title); }
 .remote-access h2 { font: var(--type-h3); }
 .remote-access a { text-decoration: underline; overflow-wrap: anywhere; }
 .remote-access > button { justify-self: start; }
@@ -10,3 +7,7 @@
 .remote-access__row { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; }
 .remote-access__row > span { flex: 1; }
 .remote-access__code { font-size: var(--text-xl); letter-spacing: 0.15em; }
+/* A phone asking to pair, asked on the PC over whatever it shows (design turn 158j). */
+.fy-pairask__phone { width: 56px; height: 56px; border-radius: 14px; display: grid; place-items: center; background: var(--muted); color: var(--foreground); }
+.fy-pairask .fy-upd__title { margin-top: 18px; }
+.fy-pairask__what { margin: 14px 0 0; font: var(--type-body); font-size: var(--text-sm); line-height: 1.5; color: var(--muted-foreground); text-align: center; }

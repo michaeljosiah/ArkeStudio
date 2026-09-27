@@ -1,5 +1,5 @@
 /* ============================================================
-   Launch screen tokens — design master turn 76.
+   Launch screen tokens — design master turns 76 and 158.
 
    The launch screen is the one surface in the app that does NOT theme. It is
    always the dark plate, whatever the user's appearance preference, so every
@@ -60,6 +60,54 @@
   --launch-flare-edge: rgba(255, 180, 120, 0);
   --launch-streak: rgba(255, 222, 180, 0.75);
   --launch-streak-edge: rgba(255, 196, 140, 0);
+
+  /* ---- The split surface (turn 158) -------------------------- */
+  /* The column beside the loop, and the band's fade into it: one value, so no seam shows. */
+  --launch-column: #0B0D10;
+  --launch-column-clear: rgba(11, 13, 16, 0);
+  --launch-column-veil: rgba(11, 13, 16, 0.7);
+  --launch-column-top: rgba(11, 13, 16, 0.35);
+  --launch-column-glow: rgba(255, 255, 255, 0.035);
+  --launch-column-glow-edge: rgba(255, 255, 255, 0);
+  --launch-art-shade: rgba(7, 9, 11, 0.55);
+  --launch-art-shade-deep: rgba(7, 9, 11, 0.9);
+  --launch-art-clear: rgba(7, 9, 11, 0);
+  --launch-seam: color-mix(in srgb, var(--neutral-50) 7%, transparent);
+  /* More ink steps than turn 76 needed: the tagline's sentence, the tile copy, the notes. */
+  --launch-ink-soft: color-mix(in srgb, var(--neutral-50) 78%, transparent);
+  --launch-ink-body: color-mix(in srgb, var(--neutral-50) 66%, transparent);
+  --launch-ink-note: color-mix(in srgb, var(--neutral-50) 72%, transparent);
+  --launch-ink-rest: color-mix(in srgb, var(--neutral-50) 55%, transparent);
+  --launch-ink-meta: color-mix(in srgb, var(--neutral-50) 38%, transparent);
+  /* The local way: the one tint on the column, a cool edge over a faint depth. */
+  --launch-local-line: rgba(168, 198, 226, 0.46);
+  --launch-local-top: rgba(38, 58, 78, 0.5);
+  --launch-local-bottom: rgba(16, 22, 29, 0.55);
+  --launch-local-lift: rgba(255, 255, 255, 0.05);
+  --launch-local-shadow: rgba(0, 0, 0, 0.8);
+  --launch-way-bg: rgba(255, 255, 255, 0.018);
+  --launch-way-line: color-mix(in srgb, var(--neutral-50) 12%, transparent);
+  --launch-chip-line: color-mix(in srgb, var(--neutral-50) 16%, transparent);
+  --launch-note-bg: color-mix(in srgb, var(--neutral-50) 5%, transparent);
+  --launch-note-line: color-mix(in srgb, var(--neutral-50) 10%, transparent);
+  --launch-note-mark: rgba(255, 205, 160, 0.95);
+  --launch-action-busy: color-mix(in srgb, var(--neutral-50) 86%, transparent);
+  --launch-spin-track: color-mix(in srgb, var(--neutral-900) 18%, transparent);
+  --launch-line-action: color-mix(in srgb, var(--neutral-50) 20%, transparent);
+  --launch-track: color-mix(in srgb, var(--neutral-50) 14%, transparent);
+  --launch-rule: color-mix(in srgb, var(--neutral-50) 8%, transparent);
+  --launch-step-off: color-mix(in srgb, var(--neutral-50) 25%, transparent);
+  --launch-step-on: color-mix(in srgb, var(--neutral-50) 90%, transparent);
+  --launch-bar-soft: color-mix(in srgb, var(--neutral-50) 14%, transparent);
+  --launch-bar-warm-soft: color-mix(in srgb, var(--neutral-50) 22%, transparent);
+  --launch-streak-core: rgba(255, 222, 180, 0.7);
+  --launch-flare-bright: rgba(255, 244, 225, 0.95);
+  --launch-flare-glow: rgba(255, 205, 150, 0.38);
+  --launch-flare-far: rgba(255, 190, 130, 0.08);
+  /* The pairing field (turn 158i): recessed into the local way, ringed in its cool edge on focus. */
+  --launch-input-bg: rgba(0, 0, 0, 0.28);
+  --launch-focus-line: rgba(168, 198, 226, 0.75);
+  --launch-focus-ring: rgba(168, 198, 226, 0.18);
 
   /*
    * The wordmark's face, and the only thing in the app that uses it: Jost is the geometric

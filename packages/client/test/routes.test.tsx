@@ -81,36 +81,44 @@ describe("screen inventory", () => {
     }
   });
 
-  for (const path of ["/", "/starting"]) it(`opens the video loading screen at ${path}`, () => {
-    const html = renderAt(path);
-    assert.ok(!html.includes("Launch Arke Studio"), "startup needs no launch click");
-    assert.ok(!html.includes("Arke Studio Cloud"), "startup has no hosting choice");
-    // The screen that waits, by what it is rather than by a wordmark: the reel, and — with nothing
-    // left to fetch — a door and a version number. The progress line, the byte counts and the
-    // note about where worlds live all answered "what is it doing", which nobody is asking
-    // once it is done.
-    assert.ok(html.includes('data-screen="startup"'), `${path} mounts the screen that waits`);
-    assert.ok(html.includes("setup-reel.mp4"), "the reel plays while the runtimes come down");
-    assert.ok(html.includes("Continue"), "and when it is ready, the way in");
-    assert.ok(html.includes("fy-startup__version"), "with the version under it");
-    for (const chatter of ["Setting up your studio.", "One-time setup", "everything ready"]) {
-      assert.ok(!html.includes(chatter), `"${chatter}" is not shown once there is nothing to wait for`);
+  it("opens every start on the launch surface, two ways in (design turn 158)", () => {
+    const html = renderAt("/");
+    assert.ok(html.includes('data-screen="startup"'), "/ mounts the launch surface");
+    assert.ok(html.includes("launch-harbour.webp"), "the loop's still is up from the first frame");
+    assert.ok(html.includes("Welcome back"));
+    assert.ok(html.includes("Continue Locally"), "the local way is live at once");
+    assert.ok(html.includes("Cloud Login") && html.includes("Coming soon"), "cloud is named, not offered");
+    assert.match(html, /<button[^>]*disabled[^>]*>Coming soon<\/button>/, "and cannot be pressed");
+    assert.ok(html.includes("fy-launch__version"), "with the version on the loop");
+    for (const chatter of ["Setting up your studio", "One-time setup", "everything ready"]) {
+      assert.ok(!html.includes(chatter), `"${chatter}" belongs to the start that is actually setting up`);
     }
   });
 
-  it("waits behind one control on a launch with nothing to fetch", () => {
-    // Setup runs once. Every launch after it only waits for the coordinator to open, and the
-    // panel says so with the same control the whole way through — no title, no step line, no
-    // bar creeping under a sentence about a one-time download that already happened.
+  it("holds the pressed way busy until the studio is ready", () => {
+    // The press is the route: /starting is the same surface after it, going on by itself once
+    // the studio opens. Before then the local way says so rather than doing nothing.
     __connectionStatusForTest("connecting");
     try {
       const html = renderAt("/starting");
-      assert.ok(html.includes("Loading…"), "the door is there from the first frame, and says it is opening");
-      assert.ok(html.includes("fy-startup__version"), "with the version still under it");
-      assert.ok(!html.includes("fy-setupbar"), "nothing is being fetched, so there is no bar");
-      for (const chatter of ["Setting up your studio.", "One-time setup", "checking studio core"]) {
-        assert.ok(!html.includes(chatter), `"${chatter}" belongs to the launch that is actually setting up`);
-      }
+      assert.ok(html.includes('data-screen="startup"'));
+      assert.ok(html.includes("Connecting"), "a browser says it is connecting");
+      assert.ok(html.includes('aria-busy="true"'));
+      assert.ok(!html.includes("fy-launch__track"), "nothing is being fetched, so there is no bar");
+      const rest = renderAt("/");
+      assert.ok(rest.includes("Continue Locally"), "before the press the way in is live, not busy");
+    } finally {
+      __connectionStatusForTest("open");
+    }
+  });
+
+  it("says an expired link on the local way, with nothing to press", () => {
+    __connectionStatusForTest("auth-refused");
+    try {
+      const html = renderAt("/");
+      assert.ok(html.includes("Session link is out of date"), "on the studio's own machine, the developer's instruction");
+      assert.ok(!html.includes("Continue Locally"), "the state replaces the button");
+      assert.equal(html.split("Session link is out of date").length - 1, 1, "said once: the global callout stays off this surface");
     } finally {
       __connectionStatusForTest("open");
     }
@@ -144,10 +152,12 @@ describe("screen inventory", () => {
     });
     try {
       const html = renderAt("/starting");
-      assert.ok(html.includes("Setting up your studio."), "a real download still says what it is");
-      assert.ok(html.includes("fy-setupbar"), "and still shows how far along it is");
+      assert.ok(html.includes("Setting up your studio"), "a real download still says what it is");
+      assert.ok(html.includes("fy-launch__track"), "and still shows how far along it is");
       assert.ok(html.includes("downloading kokoro voice"), "in the product's words, one line");
       assert.ok(html.includes("One-time setup"), "with the promise that this happens once");
+      assert.ok(html.includes("Continue in the background"), "and the way past it");
+      assert.ok(renderAt("/").includes("Continue Locally"), "setup waits for the press: at rest the surface offers the ways in");
     } finally {
       __setStateForTest(FIXTURE_STATE);
     }
@@ -184,7 +194,7 @@ describe("screen inventory", () => {
       assert.match(html, /paused kokoro voice/);
       assert.match(html, />Resume<\/button>/);
       assert.match(html, /44 MB of (?:<!-- -->)?88 MB/);
-      assert.match(html, /fy-setupbar__fill/);
+      assert.match(html, /fy-launch__fill/);
     } finally {
       __setStateForTest(FIXTURE_STATE);
     }
@@ -205,6 +215,7 @@ describe("screen inventory", () => {
       assert.ok(html.includes("The studio could not start"));
       assert.ok(html.includes("Startup failed safely."));
       for (const action of ["Retry", "Open data folder", "Quit"]) assert.ok(html.includes(action));
+      assert.ok(!html.includes("Starting</button>"), "a failed start is not a busy one");
     } finally {
       if (previous === undefined) delete (globalThis as { window?: Window }).window;
       else Object.defineProperty(globalThis, "window", { configurable: true, value: previous });

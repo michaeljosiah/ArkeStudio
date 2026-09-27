@@ -373,7 +373,9 @@ describe("world picker cards are fixed height (SPEC-001 R-12)", () => {
       assert.equal((html.match(/Create a world/g) ?? []).length, 1);
       assert.doesNotMatch(html, /Name it\. We/);
       if (count > 0) {
-        assert.ok(html.indexOf("Create a world") < html.indexOf("World 0"));
+        // Within the grid: a phone's feature card names the last world opened above it (turn 159).
+        const grid = html.slice(html.indexOf('class="fy-home-cards"'));
+        assert.ok(grid.indexOf("Create a world") < grid.indexOf("World 0"));
         assert.match(html, /No key art yet\./);
       }
     }

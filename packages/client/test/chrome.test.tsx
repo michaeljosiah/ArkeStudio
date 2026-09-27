@@ -38,15 +38,18 @@ function proposalControl(html: string): string {
 }
 
 /**
- * Startup is the single exception, and it is written down here rather than merely being true:
- * nothing is configured yet and the only thing that has happened is the download the screen is
- * already showing, so it carries the wordmark and no controls.
+ * A screen that carries the wordmark and no controls. None does today: startup did, until the
+ * launch surface took its place with a lockup of its own (below). Kept, because the exception
+ * should be written down here the day one comes back rather than merely being true.
  */
-const WITHOUT_CONTROLS = new Set(["startup"]);
+const WITHOUT_CONTROLS = new Set<string>();
 /**
- * Full-frame accept gates draw themselves without app chrome.
+ * Full-frame compositions that draw themselves exactly as approved: the accept gates, and the
+ * launch surface ahead of everything, which carries its own lockup over the loop and no chrome
+ * of any kind (design master turn 158).
  */
 const WITHOUT_CHROME = new Set([
+  "startup",
 
   "art-direction-proposal",
   "replace-main-photo",
