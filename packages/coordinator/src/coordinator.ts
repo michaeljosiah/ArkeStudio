@@ -1190,11 +1190,18 @@ export class Coordinator {
    * which the run asks about every other reader. One rule for the run, the block panel's
    * writes and the derivation, so a fallback is the same voice wherever it is judged.
    */
-  /**
-   * The narrator an audiobook reads in (SPEC-047 R-11, R-46): the book's own when it has one and
-   * that voice can speak now, the app's otherwise — followed as it changes. Every read outside
-   * the audiobook keeps the app's.
-   */
+  /** Saved Gemini choices are revalidated against the current key before a quote or new job. */
+  private async requireEnabledSpeechReader(model: import("@arke-studio/contracts").ManifestModel, voiceId: string): Promise<void> {
+    if (this.readModel.getState().app.models.disabled.includes(model.id)) throw new Error(`${model.displayName} is turned off in AI models.`);
+    if (model.provider === "google") {
+      const catalogue = await this.voiceService?.catalogue();
+      if (!catalogue?.some(voice => voice.provider === model.provider && voice.model === model.id && voice.voiceId === voiceId)) {
+        throw new Error("That Gemini voice is not available with the current Google key. Choose an available voice or update the key.");
+      }
+    }
+  }
+
+  /** The book's available reader, or the app's; reading still checks the host's local capability. */
   private async audiobookNarrator(store: WorldStore, voice: VoiceService | null, productionId?: string): Promise<{ narrator: AudiobookReader; catalogue: VoiceCandidate[] }> {
     const narratorSettings = this.appSettings ? await this.appSettings.load() : null;
     const clonedVoices = store.getBundle().clonedVoices ?? [];
@@ -1224,6 +1231,11 @@ export class Coordinator {
   ): Promise<{ outcome: "read" | "stopped" | "unavailable" | "failed" | "refused"; made: number; flagged: number; reason?: string }> {
     const at = () => new Date().toISOString();
     let ending: { outcome: "read" | "stopped" | "unavailable" | "failed" | "refused"; made: number; flagged: number; reason?: string } = { outcome: "failed", made: 0, flagged: 0, reason: "the run ended without a word" };
+    if (room.narrator.provider === "kokoro" && !voice.localSpeechConfigured) {
+      ending = { outcome: "unavailable", made: 0, flagged: 0, reason: "Local narration is unavailable on this host. Choose a configured cloud narrator." };
+      this.emit({ at: at(), type: "audiobook.finished", ...ids, ...ending });
+      return ending;
+    }
     await runAudiobookChapter({
       store,
       worldId: ids.worldId,
@@ -2674,6 +2686,9 @@ export class Coordinator {
             // refused with the readiness reason before anything is journalled. `unknown`
             // dispatches (D15) — the floor could not be checked, which is not a refusal.
             admit: async (input) => {
+              if (input.capability === "voice-tts" && this.readModel.getState().app.models.disabled.includes(input.model)) {
+                return { ok: false, reason: "That voice model is turned off in AI models." };
+              }
               if (input.params.adapters !== undefined) {
                 if (input.provider !== "comfyui") return { ok: false, reason: "Adapters are supported only by local ComfyUI recipes." };
                 try { await this.guardAdapters(input.model, input.params.adapters); }
@@ -13574,6 +13589,7 @@ export class Coordinator {
         if (voice === null) return refuse("no voice service");
         try {
           const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId)), models: this.opts.manifest?.models ?? [] };
+          if ((msg.voice ?? room.narrator).provider === "kokoro" && !voice.localSpeechConfigured) return refuse("Local narration is unavailable on this host. Choose a configured cloud narrator.");
           const heard = await hearAudiobookLine(store, msg.productionId, msg.chapterFile, msg.block, msg.voice === undefined ? room : { ...room, narrator: msg.voice }, {
             quoteToken: msg.quoteToken,
             local: (voiceId, text, settings) => voice.synthesizeDirected(voiceId, text, settings, new AbortController().signal),
@@ -13690,6 +13706,12 @@ export class Coordinator {
         let ended = false;
         try {
           const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId)), models: this.opts.manifest?.models ?? [] };
+          if (room.narrator.provider === "kokoro" && !voice.localSpeechConfigured) {
+            this.emit({ at: at(), type: "audiobook.book-finished", ...ids, outcome: "unavailable", chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0,
+              reason: "Local narration is unavailable on this host. Choose a configured cloud narrator." });
+            ended = true;
+            return;
+          }
           await runAudiobookBook({
             store,
             worldId: msg.worldId,
@@ -13925,8 +13947,9 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, `No ${voice.provider} voice model is available.`);
           return;
         }
-        if (this.readModel.getState().app.models.disabled.includes(model.id)) {
-          this.rejectEnqueue(msg.requestId, msg.kind, `${model.displayName} is turned off in AI models.`);
+        try { await this.requireEnabledSpeechReader(model, voice.voiceId); }
+        catch (error) {
+          this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error));
           return;
         }
         const source = voiceSourceFor(bundle.clonedVoices, voice.provider, model.id, voice.voiceId);
@@ -16006,12 +16029,13 @@ export class Coordinator {
         try {
           const model = this.opts.manifest?.models.find(m => m.id === msg.modelId);
           if (!store || store.worldId !== msg.worldId || !model) throw new Error("Open this world and choose a TTS model.");
+          await this.requireEnabledSpeechReader(model, msg.expectedVoiceId);
           const quote = await preparePerformanceGeneration(store, model, msg);
           this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
             productionId: msg.productionId, status: "prepared", quote });
-        } catch {
+        } catch (error) {
           this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
-            productionId: msg.productionId, status: "refused", reason: "Cannot prepare this performance. Check the current line, voice, model and every cadence control." });
+            productionId: msg.productionId, status: "refused", reason: describeCoordinatorError(error) });
         }
         return;
       }
@@ -16032,6 +16056,7 @@ export class Coordinator {
           const quote = await readPerformanceGenerationQuote(store, msg.operationId);
           const model = this.opts.manifest?.models.find(m => m.id === quote.mapping.model);
           if (!model) throw new Error("The quoted model is unavailable.");
+          await this.requireEnabledSpeechReader(model, quote.voiceAssignment.voiceId);
           validatePerformanceGeneration(store, model, quote, msg.confirmedMicroUsd);
           if (quote.local) {
             if (!this.voiceService) throw new Error("Local synthesis is unavailable.");
@@ -16066,7 +16091,7 @@ export class Coordinator {
               return;
             await this.enqueueBatch(msg.requestId, msg.kind, [performanceGenerationJob(store, quote, msg.requestId, { voiceReference: source.kind === "cloned" })]);
           }
-        } catch { this.rejectEnqueue(msg.requestId, msg.kind, "Performance generation did not complete. Check the quote, current line and voice, engine readiness and cancellation. Existing and paid outputs are retained."); }
+        } catch (error) { this.rejectEnqueue(msg.requestId, msg.kind, `Performance generation did not complete: ${describeCoordinatorError(error)} Existing and paid outputs are retained.`); }
         finally { this.performanceGenerations.delete(operationKey); }
         return;
       }

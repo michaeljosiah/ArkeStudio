@@ -464,6 +464,7 @@ export function previewCacheFile(
 }
 
 export class VoiceService {
+  get localSpeechConfigured(): boolean { return this.deps.sidecar !== null; }
   constructor(private readonly deps: VoiceServiceDeps) {}
 
   private now(): string {

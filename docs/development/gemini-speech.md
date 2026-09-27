@@ -13,6 +13,10 @@ book narrators are unchanged. Kokoro remains the app's default narrator, and loc
 first in narrator pickers. Setup and browsing do not synthesize speech or switch a narrator.
 Models disabled in Settings are omitted from the shared catalogue and both narrator pickers
 before recommendation. Character assignment and preview commands also enforce that setting.
+Performance preparation, confirmation and speech queue admission likewise refuse disabled
+models. Saved Gemini shot/performance choices are checked against the current key's catalogue.
+A standalone host without a local speech service needs an explicitly selected cloud narrator;
+book, chapter and audition commands refuse an unavailable local reader before synthesis.
 
 The client targets the exact `gemini-3.8-flash-tts` and `gemini-3.8-flash-lite-tts` IDs through
 `POST /v1beta/interactions`. Spoken text and `speech_metadata.style` remain separate. Requests

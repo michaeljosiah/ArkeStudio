@@ -19,6 +19,8 @@ import { FakeProvider } from "../queue/fake-provider.js";
 import { until } from "../wait.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
+import { normalizeSpeechText, orderedShots, resolvePerformanceLine, ulid } from "@arke-studio/contracts";
+import { audioHash } from "../../src/audio/qc.js";
 
 const REQUEST = "01J8F3K2QW9VZX4N7M0RTYB6HD";
 
@@ -30,8 +32,8 @@ it("disabled Gemini models cannot be recommended, assigned or previewed through 
   const model = "gemini-3.8-flash-tts";
   const coordinator = new Coordinator({ provider, adapter: null, appRoot: root, cipher: devCipher(),
     credentialsFileName: "credentials.dev.dat", changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test", manifest: SHIPPED_MANIFEST,
-    voice: { sidecar: null, localPresets: [], cloudSources: [{ provider: "google", list: async () =>
-      [{ provider: "google", model, voiceId: "Charon", label: "Charon", attributes: [], local: false, canClone: false }] }] },
+    voice: { sidecar: null, localPresets: [], cloudSources: [{ provider: "google", list: async key =>
+      [{ provider: "google", model: key === "lite-only" ? "gemini-3.8-flash-lite-tts" : model, voiceId: "Charon", label: "Charon", attributes: [], local: false, canClone: false }] }] },
     observeEvent: event => events.push(event) });
   const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
   await coordinator.start(0);
@@ -54,6 +56,35 @@ it("disabled Gemini models cannot be recommended, assigned or previewed through 
     await send({ kind: "set-model-enabled", modelId: model, enabled: true });
     await send({ kind: "voice-candidates", worldId: WORLD_ID, sheetId: "maren-kest" });
     assert.equal(events.filter(e => e.type === "voice.candidates").at(-1)!.ranked[0]!.candidate.model, model);
+    await send({ kind: "assign-voice", requestId: ulid(), worldId: WORLD_ID, path: "characters/maren-kest.md", voice: { provider: "google", model, voiceId: "Charon" } });
+    const bundle = provider.openStore()!.getBundle();
+    const hasLine = (scene: typeof bundle.productions[number]["scenes"][number]) => orderedShots(scene).some(shot => shot.audio?.speaker === "maren-kest" && shot.audio.line);
+    const production = bundle.productions.find(p => p.scenes.some(hasLine))!;
+    const scene = production.scenes.find(hasLine)!;
+    const shot = orderedShots(scene).find(shot => shot.audio?.speaker === "maren-kest" && shot.audio.line)!;
+    const line = resolvePerformanceLine(scene, shot.id); assert.ok(line.ok);
+    const prepare = { kind: "prepare-performance-generation" as const, requestId: ulid(), worldId: WORLD_ID,
+      productionId: production.meta.id, sceneId: scene.id, shotId: shot.id, expectedSceneVersion: scene.version, expectedVoiceId: "Charon", modelId: model,
+      cadencePlan: { schemaVersion: 1 as const, sourceTextHash: audioHash(Buffer.from(normalizeSpeechText(line.text))), delivery: "warm" as const, speed: 1, cues: [] } };
+    await send(prepare);
+    const quote = events.filter(e => e.type === "performance.result").at(-1)!.quote;
+    assert.ok(quote, "an enabled current reader can be quoted");
+    await send({ kind: "set-model-enabled", modelId: model, enabled: false });
+    await send({ ...prepare, requestId: ulid() });
+    assert.equal(events.filter(e => e.type === "performance.result").at(-1)!.status, "refused");
+    await send({ kind: "generate-performance", requestId: ulid(), worldId: WORLD_ID, operationId: quote.operationId, confirmedMicroUsd: quote.estimatedMicroUsd });
+    assert.equal(events.filter(e => e.type === "queue.enqueue-result").at(-1)!.disposition, "rejected");
+    await send({ kind: "set-model-enabled", modelId: model, enabled: true });
+    await send({ kind: "set-credential", provider: "google", key: "lite-only" });
+    await send({ kind: "voice-line", requestId: ulid(), worldId: WORLD_ID, productionId: production.meta.id, shotId: shot.id, confirmedSpeechMicroUsd: 1000000 });
+    const unavailable = events.filter(e => e.type === "queue.enqueue-result").at(-1)!;
+    assert.equal(unavailable.disposition, "rejected");
+    assert.match(JSON.stringify(unavailable), /current Google key/);
+    await send({ ...prepare, requestId: ulid() });
+    assert.equal(events.filter(e => e.type === "performance.result").at(-1)!.status, "refused");
+    await send({ kind: "generate-performance", requestId: ulid(), worldId: WORLD_ID, operationId: quote.operationId, confirmedMicroUsd: quote.estimatedMicroUsd });
+    assert.equal(events.filter(e => e.type === "queue.enqueue-result").at(-1)!.disposition, "rejected");
+    assert.equal(events.some(e => e.type === "job.updated"), false);
   } finally { await coordinator.stop(); await provider.close(); }
 });
 const MODEL: ManifestModel = {

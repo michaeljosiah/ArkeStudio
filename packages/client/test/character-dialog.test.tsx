@@ -206,6 +206,11 @@ describe("the character dialog (SPEC-044 R-11..R-16)", () => {
     assert.match(card(eleven.container, cards(eleven.container, "Voice").at(-1)![0]!).getAttribute("aria-label") ?? "", /^Generate a line · \$/, "priced: the path can generate with it");
     const voxtral = await mount(withVoice("mistral", "voxtral-mini-tts"));
     assert.match(card(voxtral.container, cards(voxtral.container, "Voice").at(-1)![0]!).getAttribute("aria-label") ?? "", /^Generate a line · \$/, "a hosted reader generates through the same door");
+    const disabled = withVoice("google", "gemini-3.8-flash-tts");
+    disabled.app.manifest!.models.push(row("gemini-3.8-flash-tts", "google") as never);
+    disabled.app.models.disabled.push("gemini-3.8-flash-tts");
+    const gemini = await mount(disabled);
+    assert.equal(cards(gemini.container, "Voice").at(-1)?.[0], "Generate a line · Voice page", "a disabled reader cannot open the paid generation door");
     const withOther = withVoice("comfyui", "comfyui-cloned-voice");
     withOther.app.manifest!.models.push(row("comfyui-cloned-voice", "comfyui") as never);
     const recipe = await mount(withOther);
