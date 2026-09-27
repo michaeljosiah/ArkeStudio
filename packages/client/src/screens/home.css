@@ -59,9 +59,15 @@
   .fy-createcard:hover { transform: none; box-shadow: none; }
 }
 
-/* A finger needs 44 around a glyph that stays its size. */
+/* A finger needs 44, and a glyph it can see at arm's length: on touch the bar's controls are the
+   phone's at every width, while the lockup keeps its place (design turn 159). */
 @media (pointer: coarse) {
-  .fy-titlebar .fy-iconbtn:not(.fy-iconbtn--wide) { min-width: 44px; min-height: 44px; }
+  .fy-titlebar { height: 52px; }
+  .fy-titlebar .fy-iconbtn:not(.fy-iconbtn--wide) { width: 44px; height: 44px; border-radius: 10px; }
+  .fy-titlebar .fy-iconbtn:not(.fy-iconbtn--wide) > svg { width: 20px; height: 20px; }
+  .fy-titlebar .fy-iconbtn__dot { top: 11px; right: 11px; width: 7px; height: 7px; border: 2px solid var(--background); }
+  .fy-titlebar .fy-account__mark .ui-avatar { width: 22px; height: 22px; }
+  .fy-account__menu { top: 50px; }
 }
 
 /* ---- 600 to 1099: the desktop grid, gutters taken in ----------------- */
