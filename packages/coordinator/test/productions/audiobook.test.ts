@@ -282,6 +282,18 @@ describe("a part already in the queue (codex on PR 1180)", () => {
     assert.equal(found?.job.id, "j2");
   });
 
+  it("adopts bounded speech only under the same compiled words, style and part boundaries", () => {
+    const compiled = { ...identity, compiledSpeechHash: "sha256:new" };
+    const old = job("old", "succeeded", { landedFiles: ["old.wav"] }, { compiledSpeechHash: "sha256:old" });
+    const legacy = job("legacy", "succeeded", { landedFiles: ["legacy.wav"] });
+    assert.equal(priorPartJob([old, legacy], compiled, 0), null);
+    const same = job("same", "succeeded", { landedFiles: ["same.wav"] }, { compiledSpeechHash: "sha256:new" });
+    assert.equal(priorPartJob([old, same], compiled, 0)?.job.id, "same");
+    const uncertain = job("uncertain", "submitting", {}, { compiledSpeechHash: "sha256:new" });
+    assert.equal(priorPartJob([uncertain], compiled, 0)?.kind, "running", "an ambiguous matching request is held, not repeated");
+    assert.equal(priorPartJob([legacy], identity, 0)?.kind, "landed", "legacy readers retain their existing recovery identity");
+  });
+
   it("nothing usable: a failed job, another part, other words, another voice or another chapter", () => {
     assert.equal(priorPartJob([job("j1", "failed")], identity, 0), null);
     assert.equal(priorPartJob([job("j1", "succeeded", { landedFiles: ["a"] }, { part: 1 })], identity, 0), null);
@@ -1787,6 +1799,14 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
         if (directed) {
           assert.ok(block.parts.length > 1);
           assert.ok(block.direction?.perPart.every(part => part.instructions?.includes("Read calmly")));
+          const token = chapterPriceToken(WORLD_ID, LEDGER, "neap", made.prepared.plan.chapter, made.prepared.misses);
+          model.cadence!.deliveryMappings.measured!.instruction = "Read softly and evenly, at a steady pace.";
+          const changed = await prepareChapter(store, LEDGER, "neap", room, () => "2026-09-27T12:00:00Z", ["p0.1"]);
+          assert.equal(changed.kind, "ready");
+          assert.equal(changed.prepared.speaking[0]!.parts.length, block.parts.length);
+          assert.equal(changed.prepared.estimate, made.prepared.estimate);
+          assert.notEqual(changed.prepared.speaking[0]!.compiledSpeechHash, block.compiledSpeechHash);
+          assert.notEqual(chapterPriceToken(WORLD_ID, LEDGER, "neap", changed.prepared.plan.chapter, changed.prepared.misses), token, "a same-price change of compiled style still needs a new quote");
         }
         assert.equal(made.prepared.estimate, block.parts.length * 151552);
       }

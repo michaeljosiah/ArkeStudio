@@ -150,6 +150,8 @@ export interface Speaking extends PlannedBlock {
    * for the reading, and the take goes beside the kept one rather than in its place (R-4).
    */
   remake: boolean;
+  /** Exact byte-bounded compilation, shared by consent and durable part adoption (SPEC-049 R-25). */
+  compiledSpeechHash?: string;
 }
 
 /** The record could not be written: the world's claim is gone, or it closed under the run. Nothing more can be kept. */
@@ -168,6 +170,7 @@ export interface PartIdentity {
   parts: number;
   /** The direction's name, or null for a block made with none — a job under another direction is not this part (R-14). */
   directionHash: string | null;
+  compiledSpeechHash?: string;
 }
 
 /**
@@ -192,6 +195,7 @@ export function priorPartJob(jobs: readonly Job[], identity: PartIdentity, part:
       job.params["voiceId"] === identity.voiceId &&
       job.params["part"] === part &&
       job.params["parts"] === identity.parts &&
+      (identity.compiledSpeechHash === undefined || job.params["compiledSpeechHash"] === identity.compiledSpeechHash) &&
       (job.params["directionHash"] ?? null) === identity.directionHash,
   );
   for (const job of [...matching].reverse()) {
@@ -331,6 +335,12 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
     // An explicit `Make again`, whatever the block's state (codex on PR 1193): with its kept
     // take retired, the older take of the same words must not be the answer either.
     const remake = only !== undefined;
+    const compiledSpeechHash = byteCap === undefined ? undefined : audioHash(Buffer.from(JSON.stringify({
+      compiler: "speech-input-v1", model: model.providerModelId ?? model.id, format,
+      parts: parts.map((part, index) => ({ text: part,
+        voiceSettings: direction?.perPart[index]?.voiceSettings ?? direction?.voiceSettings ?? {},
+        instructions: direction?.perPart[index]?.instructions ?? direction?.instructions ?? null })),
+    })));
     speaking.push({
       ...planned,
       ...(substitutedNow !== undefined ? { substitutedNow } : {}),
@@ -347,6 +357,7 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
       quotes: parts.map(part => quoteSpeech(model, part, { at: quotedAt })),
       format,
       remake,
+      ...(compiledSpeechHash !== undefined ? { compiledSpeechHash } : {}),
       // A whole block already in the cache is adopted without a call (R-19); parts are never
       // cached as a block, so a block over the cap is always made, the cache holds no
       // direction, so a directed block never comes from it, and a block made again unchanged
@@ -410,7 +421,7 @@ export function chapterPriceToken(worldId: string, productionId: string, chapter
  * direction.
  */
 export function missIdentity(block: Speaking): string {
-  return `${block.block.key}:${audiobookTextHash(block.text)}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.takeHash ?? ""}:${JSON.stringify(block.quotes.map(q => [q.rateVersion, q.authorisedMicroUsd, q.tokenLimits]))}`;
+  return `${block.block.key}:${audiobookTextHash(block.text)}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.takeHash ?? ""}:${JSON.stringify(block.quotes.map(q => [q.rateVersion, q.authorisedMicroUsd, q.tokenLimits]))}${block.compiledSpeechHash !== undefined ? `:${block.compiledSpeechHash}` : ""}`;
 }
 
 /** The price's lines (R-17): every cloud voice the words would go to, once each, with its share. */
@@ -651,6 +662,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           voiceId: block.reader.voiceId,
           parts: block.parts.length,
           directionHash: block.takeHash ?? null,
+          ...(block.compiledSpeechHash !== undefined ? { compiledSpeechHash: block.compiledSpeechHash } : {}),
         };
         for (const [index, part] of block.parts.entries()) {
           if (signal.aborted) break;
@@ -691,6 +703,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
                 textHash,
                 part: index,
                 parts: block.parts.length,
+                ...(block.compiledSpeechHash !== undefined ? { compiledSpeechHash: block.compiledSpeechHash } : {}),
                 characterCount: part.length,
                 sheetVersion: plan.chapter.version,
                 // The direction rides as the performance path's does (R-8): the words already

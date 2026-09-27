@@ -41,6 +41,9 @@ impossible style or a marked span that cannot survive a split is refused before 
 The audiobook reserves room for the performed note before rendering, then validates the final
 words and instructions together. Each prepared part retains the existing full-service output
 authorisation, job, usage and recovery paths; byte packing does not lower its reserved token cost.
+The compiled request fingerprint binds those parts' words, style, settings, format and compiler
+version to the quote and durable job. A changed compilation cannot adopt old parts merely because
+the block text and number of parts stayed the same. Existing readers retain their legacy identity.
 
 Credentials travel in the host's `x-goog-api-key` header and do not enter prompts or harness
 environments. Transport capture redacts the key and summarises nested audio data as its size
