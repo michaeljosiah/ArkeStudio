@@ -30,7 +30,7 @@ import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { ClipPlayButton } from "../components/player.js";
 import { Button, Callout, cx } from "../components/ui.js";
 import { Loading } from "../components/loading.js";
-import { Cloud, Mic, Monitor, Upload, VideoMark, Waveform } from "../components/icons.js";
+import { Cloud, Mic, Monitor, Upload, VideoMark, Waveform, X } from "../components/icons.js";
 import { mediaUrl } from "../lib/media.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
 import {
@@ -409,6 +409,8 @@ export function CharacterVoiceScreen() {
               </div>
               {sheet.voice && (
                 <Button
+                  className="fy-voicehero__clear"
+                  aria-label="Clear voice"
                   variant="ghost"
                   disabled={clearing}
                   onClick={() => {
@@ -422,7 +424,7 @@ export function CharacterVoiceScreen() {
                     }
                   }}
                 >
-                  {clearing ? <Loading inline label="Clearing…" /> : "Clear voice"}
+                  {clearing ? <Loading inline label="Clearing…" /> : <><span className="fy-voicehero__clear-label">Clear voice</span><span className="fy-voicehero__clear-icon"><X size={18} /></span></>}
                 </Button>
               )}
             </div>
@@ -719,7 +721,9 @@ function ChooseVoiceDialog({
             <strong>{`Choose ${sheet.name.split(" ")[0]}'s voice`}</strong>
             <span className="fy-mono">ranked against their written voice</span>
           </div>
+          <button className="fy-character-sheet-close" type="button" aria-label="Close voice catalogue" onClick={onClose}><X size={18} /></button>
         </header>
+        <div className="fy-character-sheet-body">
         <div className="fy-voicesheet__filters">
           <div className="fy-seg">
             {TABS.map((tab) => (
@@ -895,7 +899,9 @@ function ChooseVoiceDialog({
             );
           })}
         </div>
+        </div>
         <footer className="fy-voicesheet__foot">
+          <span className="fy-mono fy-character-sheet-selection">{chosen?.label ?? "Choose a voice"}</span>
           <span className="fy-voicesheet__push" />
           <Button variant="ghost" onClick={onClose}>
             Cancel

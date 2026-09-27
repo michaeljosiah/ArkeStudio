@@ -226,6 +226,30 @@ world screen through the real sandboxed Electron file page/preload, persistent c
 browser reopen, host restart and revocation. It requires an available Tailscale connection.
 Physical phone/Fold7 keyboard and bookmark testing is still a separate acceptance step.
 
+## Character pages and phone sheets
+
+Run `node scripts/smoke-character-layout.mjs` from the repository root for design turn 162.
+It bundles the real screens and the complete client cascade against disposable fixtures, opens
+headless Chrome, and saves screenshots and measurements beside the temporary path it prints.
+Set `ARKE_CHROME` if Chrome is installed somewhere other than the platform default. The server
+binds only to loopback and serves the disposable bundle and committed design assets.
+
+The check covers 360, 375 and 390px phones, a 600px window, Fold7 and 1360×850 desktop,
+including dialogs opened after scrolling, the sample review, long names and pending candidates.
+Inspect the paired `ch162*` master frames and application screenshots; the phone status bar
+and Fold7 status bar are excluded from both app crops. The fixture simulates a 20px bottom safe
+area. `--baseline <revision>` captures the desktop before the change; `--viewport phone375`
+and `--pages-only` help iterate on a bounded visual failure.
+
+The master's sheet starts 84px below the page area's top, after the 52px bar and 57px pill strip
+(193px in the app viewport). Character generation routes retain that phone backdrop while
+remaining full-frame dialogs on desktop. Shared page geometry is compared within one CSS pixel.
+
+Fixture copy, provider availability and the master’s illustrative content are separate from
+layout: a pending look offers acceptance, an accepted look offers attachment/promotion, and
+generation previews show actual returned candidates. No screenshot check dispatches a provider
+call or assigns a real voice.
+
 ## CI
 
 For Gemini preset activation, run providers `test/gemini-activation.test.ts` and

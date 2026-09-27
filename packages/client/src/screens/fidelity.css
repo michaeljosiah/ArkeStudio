@@ -4119,10 +4119,6 @@ select.fy-set__pill { padding-right: 26px; }
 @media (max-width: 900px) {
   .fy-wardrobe { padding-inline: 22px; }
   .fy-wardrobe__row { flex-wrap: wrap; }
-  .fy-character-head { padding-inline: 22px; flex-wrap: wrap; }
-  .fy-reference-grid,
-  .fy-looks-grid { padding-inline: 22px; grid-template-columns: 1fr; height: auto; }
-  .fy-reference-card { min-height: 520px; }
 }
 .fy-voicerow__icon {
   width: 34px;
@@ -5648,7 +5644,7 @@ select.fy-set__pill { padding-right: 26px; }
 /* Making a voice from a clip (design 74c, 74d). Shares the voice dialog's shell and footer —
    this is the same surface at a different moment, not a second kind of dialog. */
 .fy-clone {
-  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 40;
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 40;
   width: 520px; max-width: calc(100% - 48px); display: flex; flex-direction: column;
   border: 1px solid var(--border); border-radius: 15px; background: var(--background);
   box-shadow: var(--shadow-lg); overflow: hidden;
@@ -5685,7 +5681,7 @@ select.fy-set__pill { padding-right: 26px; }
 /* Choosing a voice to read with (design 70). Not the character-voice picker: nothing here is
    ranked against anybody, and nothing here assigns. */
 .fy-voices {
-  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 40;
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 40;
   width: 720px; max-width: calc(100% - 48px); display: flex; flex-direction: column;
   border: 1px solid var(--border); border-radius: 15px; background: var(--background);
   box-shadow: var(--shadow-lg); overflow: hidden;
@@ -8465,14 +8461,6 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-vsrights { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .fy-vsrights__label { font: 500 11px var(--font-sans); color: var(--muted-foreground); }
 .fy-vsnotice { padding: 0 22px 12px; font: 400 11.5px var(--font-sans); color: var(--muted-foreground); }
-
-@media (max-width: 1100px) {
-  .fy-voicepage { padding-inline: 22px; }
-  .fy-voicehero { grid-template-columns: 1fr; }
-  .fy-voicehero__art { height: 220px; }
-  .fy-voiceways { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .fy-vsgen { flex-wrap: wrap; }
-}
 
 /* ---- the founding build's completion notice (SPEC-031 §1.9; issue 1007) ----
    One row, on Overview. It was a callout with a paragraph and a button bar in it, drawn on

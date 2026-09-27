@@ -96,12 +96,12 @@ export function CharacterHeader({ active }: { active: "reference" | "looks" | "v
           radius={99}
         />
       </span>
-      <div>
+      <div className="fy-character-head__name">
         <h1>{sheet?.name ?? "Character"}</h1>
         <p>{sheet?.role ?? "Character"} · identity reference set</p>
       </div>
       <span className="fy-character-head__push" />
-      <nav className="fy-seg fy-character-tabs">
+      <nav className="fy-seg fy-character-tabs" aria-label="Character pages">
         <button
           type="button"
           className="fy-seg__item"
@@ -112,6 +112,7 @@ export function CharacterHeader({ active }: { active: "reference" | "looks" | "v
         <button
           type="button"
           className={cx("fy-seg__item", active === "reference" && "fy-seg__item--active")}
+          aria-current={active === "reference" ? "page" : undefined}
           onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/kit`)}
         >
           Reference
@@ -119,6 +120,7 @@ export function CharacterHeader({ active }: { active: "reference" | "looks" | "v
         <button
           type="button"
           className={cx("fy-seg__item", active === "looks" && "fy-seg__item--active")}
+          aria-current={active === "looks" ? "page" : undefined}
           onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/looks`)}
         >
           More looks
@@ -126,6 +128,7 @@ export function CharacterHeader({ active }: { active: "reference" | "looks" | "v
         <button
           type="button"
           className={cx("fy-seg__item", active === "voice" && "fy-seg__item--active")}
+          aria-current={active === "voice" ? "page" : undefined}
           onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/voice`)}
         >
           Voice
@@ -286,7 +289,7 @@ export function CharacterReferenceScreen() {
               download
               downloadName={`${sheet.name} main photo`}
             />
-            <span className="fy-reference-card__status">
+            <span className="fy-reference-card__status" data-accepted={photo ? true : undefined}>
               {photo ? "ACCEPTED · IDENTITY ANCHOR" : "OUTSTANDING"}
             </span>
           </div>
@@ -325,7 +328,7 @@ export function CharacterReferenceScreen() {
             ) : (
               <Portrait worldSlug={world.meta.slug} path="" label="Character sheet outstanding" radius={0} />
             )}
-            <span className={cx("fy-reference-card__status", stale && !showTake && "fy-reference-card__status--warn")}>
+            <span className={cx("fy-reference-card__status", stale && !showTake && "fy-reference-card__status--warn")} data-accepted={!runningSheet && !showTake && !stale && compilation ? true : undefined}>
               {runningSheet
                 ? "GENERATING"
                 : showTake
@@ -374,7 +377,7 @@ export function CharacterReferenceScreen() {
             <div className="fy-reference-candidates">
               <span>{pendingSheetTakes.length} new composite{pendingSheetTakes.length === 1 ? " is" : "s are"} ready for review.</span>
               {pendingSheetTakes.map((take) => (
-                <div key={take.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <div key={take.id} className="fy-reference-candidate">
                   <span className="fy-mono">{take.id} · {new Date(take.completedAt ?? take.dispatchedAt).toLocaleString()}</span>
                   <Button variant="primary" onClick={() => acceptCharacterSheet(world.meta.worldId, sheetId, take.id)}>
                     Accept this sheet
@@ -531,6 +534,7 @@ export function GenerateCharacterSheetScreen() {
   return (
     <div data-screen="model-sheet-generate">
       <GenerationDialog
+        characterDialog
         open
         onClose={back}
         title="Generate character sheet"
@@ -798,6 +802,7 @@ export function ReplaceMainPhotoScreen() {
   return (
     <div data-screen="replace-main-photo">
       <GenerationDialog
+        characterDialog
         open
         onClose={back}
         title="Replace main photo"
@@ -1014,10 +1019,12 @@ export function CharacterLooksScreen() {
           <Button ref={exploreRef} variant="primary" onClick={() => setExploring(true)}>
             Explore more looks
           </Button>
+          <p className="fy-looks-composer__mobile-note">Starts from the main photo. Looks never carry to a production by default.</p>
           {/* Only the refusal. What the anchor does for a look is the rule's to say. */}
           {!photo && <p className="fy-looks-composer__note">{sheet.name} has no accepted main photo yet</p>}
         </section>
         <GenerationDialog
+          characterDialog
           open={exploring}
           onClose={() => setExploring(false)}
           returnFocus={exploreRef}
@@ -1103,6 +1110,9 @@ export function CharacterLooksScreen() {
           }}
         />
         <section className="fy-looks-results">
+          <div className="fy-looks-results__heading">
+            <span>Recent explorations · {images.length}</span>
+          </div>
           {images.length === 0 ? (
             <div className="fy-mainphoto-dialog__empty">
               <strong>Explore to promote a result</strong>
@@ -1146,7 +1156,8 @@ export function CharacterLooksScreen() {
               )}
             </>
           )}
-          <footer>
+          <footer className={cx("fy-looks-footer", selectedImage && "fy-looks-footer--chosen")}>
+            <div className="fy-looks-footer__notice">
             {pendingCount > 0 ? (
               /* A control, not an announcement: pressing it selects the freshest arrival —
                  enlarging it and surfacing its Accept — instead of leaving the reader to
@@ -1165,8 +1176,10 @@ export function CharacterLooksScreen() {
             ) : (
               <span>Looks never carry by default</span>
             )}
+            </div>
+            <div className="fy-looks-footer__actions">
             {selectedTake && (
-              <Button onClick={() => acceptCharacterLook(world.meta.worldId, sheetId, selectedTake.id)}>
+              <Button className="fy-looks-accept" onClick={() => acceptCharacterLook(world.meta.worldId, sheetId, selectedTake.id)}>
                 Accept look
               </Button>
             )}
@@ -1238,6 +1251,7 @@ export function CharacterLooksScreen() {
                 </Button>
               </>
             )}
+            </div>
           </footer>
         </section>
       </main>
