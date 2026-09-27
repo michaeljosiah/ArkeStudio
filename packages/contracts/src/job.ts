@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { SpeechQuoteSchema, SpeechUsageSchema } from "./speech-pricing.js";
+import { SpeechAttemptSchema, SpeechQuoteSchema, SpeechUsageSchema } from "./speech-pricing.js";
 import { JobEngineIdentitySchema, RecipeIdentitySchema } from "./comfyui.js";
 import { GenesisIdSchema, IsoDateTimeSchema, JobIdSchema, ShotIdSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { CapabilitySchema } from "./provider.js";
@@ -124,6 +124,7 @@ export const JobSchema = z
     estimatedMicroUsd: z.number().int().min(0),
     speechQuote: SpeechQuoteSchema.optional(),
     speechUsage: SpeechUsageSchema.optional(),
+    speechAttempts: z.array(SpeechAttemptSchema).optional(),
     /**
      * Which recipe, exactly, a local-recipe job was dispatched as (SPEC-021 §2.11, R-15).
      * Frozen at enqueue: a job that outlives an app update executes and is recorded as what it
@@ -278,6 +279,7 @@ export const LedgerEntrySchema = z
     actualSource: z.enum(["provider-reported", "usage-derived", "manifest-derived", "local-zero"]).optional(),
     speechQuote: SpeechQuoteSchema.optional(),
     speechUsage: SpeechUsageSchema.optional(),
+    speechAttempts: z.array(SpeechAttemptSchema).optional(),
   })
   .strict();
 export type LedgerEntry = z.infer<typeof LedgerEntrySchema>;

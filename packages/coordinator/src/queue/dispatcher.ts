@@ -1127,14 +1127,14 @@ export class JobQueue {
       // A lifecycle replacement can requeue this job while submit is in flight. The accepted id
       // belongs to the retired process; never let its late response resurrect the old run over
       // the durable queued row for the replacement process.
-      if (!this.stillSubmitting(submitting)) return;
+      if (this.cancelling.has(job.id) || !this.stillSubmitting(submitting)) return;
       const usage = SpeechUsageSchema.safeParse(accepted.speechUsage);
       const completedSubmission: Job = { ...submitting, providerJobId: accepted.remoteId,
         ...(usage.success ? { speechUsage: usage.data } : {}),
         ...(Number.isSafeInteger(accepted.costMicroUsd) && accepted.costMicroUsd! >= 0 ? { providerCostMicroUsd: accepted.costMicroUsd } : {}) };
       // Usage must survive artifact landing failure and restart, just as the audio does.
       if (usage.success || completedSubmission.providerCostMicroUsd !== undefined) await this.transition(completedSubmission);
-      if (this.disposed || !this.stillSubmitting(completedSubmission)) return;
+      if (this.disposed || this.cancelling.has(job.id) || !this.stillSubmitting(completedSubmission)) return;
       if (accepted.artifacts) {
         try {
           await this.persistInlineArtifacts(job.id, accepted.remoteId, accepted.artifacts);
@@ -1298,12 +1298,12 @@ export class JobQueue {
         continue;
       }
       if (this.disposed) return;
-      if (!this.stillPolling(current)) return;
+      if (this.cancelling.has(job.id) || !this.stillPolling(current)) return;
       const usage = SpeechUsageSchema.safeParse(poll.speechUsage);
       if (usage.success) {
-        current = { ...current, speechUsage: usage.data };
+        current = { ...current, speechUsage: { ...current.speechUsage, ...usage.data } };
         await this.transition(current);
-        if (this.disposed || !this.stillPolling(current)) return;
+        if (this.disposed || this.cancelling.has(job.id) || !this.stillPolling(current)) return;
       }
       if (poll.state === "succeeded") {
         await this.landAndSucceed(current, client, key, poll.costMicroUsd);
@@ -1670,6 +1670,10 @@ export class JobQueue {
       actualSource = "provider-reported";
     } else if (job.speechQuote?.unit === "token") {
       actualMicroUsd = job.speechUsage ? speechUsageCost(job.speechQuote, job.speechUsage) : null;
+      for (const attempt of job.speechAttempts ?? []) {
+        const prior = speechUsageCost(attempt.quote, attempt.usage);
+        actualMicroUsd = actualMicroUsd === null || prior === null ? null : actualMicroUsd + prior;
+      }
       actualSource = actualMicroUsd === null ? undefined : "usage-derived";
     } else if (outcome === "succeeded") {
       actualMicroUsd = job.estimatedMicroUsd;
@@ -1691,6 +1695,7 @@ export class JobQueue {
       actualMicroUsd,
       ...(job.speechQuote ? { speechQuote: job.speechQuote } : {}),
       ...(job.speechUsage ? { speechUsage: job.speechUsage } : {}),
+      ...(job.speechAttempts ? { speechAttempts: job.speechAttempts } : {}),
       ...(actualSource !== undefined ? { actualSource } : {}),
     });
   }
@@ -1760,7 +1765,9 @@ export class JobQueue {
       ? "Cancelled in Arke. The provider may still complete or charge for this request."
       : null;
     // A cancelled job still writes a ledger entry (R-15, D10).
-    await this.terminalize({...job, cancellationUncertain: outcomeMayBeRemote}, "cancelled", reason);
+    const latest = this.jobs.get(job.id);
+    const withUsage = latest?.attempt === job.attempt ? { ...job, speechUsage: latest.speechUsage } : job;
+    await this.terminalize({...withUsage, cancellationUncertain: outcomeMayBeRemote}, "cancelled", reason);
     this.emitQueueStatus(job.provider);
   }
 
@@ -2262,7 +2269,11 @@ export class JobQueue {
       const job = this.jobs.get(jobId);
       if (!job || job.status !== "needs-reconciliation") return;
       if (decision === "resubmit") {
-        await this.transition({ ...job, status: "queued", error: null, updatedAt: this.clock() });
+        const priorSpeech = job.speechQuote?.unit === "token" && job.attempt > 0
+          ? { speechAttempts: [...job.speechAttempts ?? [], { attempt: job.attempt, quote: job.speechQuote, usage: job.speechUsage ?? {} }],
+            speechUsage: undefined, providerCostMicroUsd: undefined }
+          : {};
+        await this.transition({ ...job, ...priorSpeech, status: "queued", error: null, updatedAt: this.clock() });
         this.lane(job.provider).fifo.push(job.id);
         this.emitQueueStatus(job.provider);
         this.pump(job.provider);

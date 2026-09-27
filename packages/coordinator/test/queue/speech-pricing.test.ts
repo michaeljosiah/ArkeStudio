@@ -37,7 +37,7 @@ async function harness(usage?: SpeechUsage, state: "succeeded" | "failed" = "suc
     landInWorld: async (_id, fn) => { await fn(dir); return true; }, baseIntervalMs: 1, pollIntervalMs: 1 });
   const queue = create();
   await queue.start();
-  return { queue, create, ledger, dir, submissions: () => submissions, expire: () => { expire = true; } };
+  return { queue, create, client, ledger, dir, submissions: () => submissions, expire: () => { expire = true; } };
 }
 
 it("refuses under-authorised token speech and rechecks rates after asynchronous preparation", async () => {
@@ -104,4 +104,63 @@ it("holds an uncertain result with its durable usage without submitting again", 
       assert.equal(h.submissions(), 1);
     } finally { restored.dispose(); }
   } finally { h.queue.dispose(); }
+});
+
+it("merges separately reported input and output counts across polls", async () => {
+  const h = await harness();
+  let polls = 0;
+  h.client.poll = async () => ++polls === 1
+    ? { state: "running", speechUsage: { inputTextTokens: 3 } }
+    : { state: "succeeded", speechUsage: { outputAudioTokens: 250 } };
+  try {
+    await h.queue.enqueue(input);
+    await until(() => h.ledger.length === 1, "partial usage", 30000);
+    assert.equal(h.ledger[0]!.actualMicroUsd, 2252);
+    assert.deepEqual(h.ledger[0]!.speechUsage, { inputTextTokens: 3, outputAudioTokens: 250 });
+  } finally { h.queue.dispose(); }
+});
+
+it("a poll returning usage during cancellation cannot resurrect the job", async () => {
+  const h = await harness();
+  let answer: ((result: Awaited<ReturnType<DispatchClient["poll"]>>) => void) | undefined;
+  let cancelled: (() => void) | undefined;
+  h.client.poll = () => new Promise(resolve => { answer = resolve; });
+  h.client.cancel = () => new Promise(resolve => { cancelled = resolve; });
+  try {
+    const job = await h.queue.enqueue(input);
+    await until(() => answer !== undefined, "poll waiting", 30000);
+    const stopping = h.queue.cancel(job.id);
+    await until(() => cancelled !== undefined, "remote cancel waiting", 30000);
+    answer!({ state: "succeeded", speechUsage: { inputTextTokens: 3, outputAudioTokens: 250 } });
+    cancelled!();
+    await stopping;
+    assert.equal(h.queue.listJobs()[0]!.status, "cancelled");
+    assert.equal(h.ledger.length, 1);
+    assert.equal(h.ledger[0]!.outcome, "cancelled");
+    const rows = (await readFile(join(h.dir, "jobs.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line) as Job);
+    assert.equal(rows.at(-1)!.status, "cancelled");
+  } finally { answer?.({ state: "cancelled" }); cancelled?.(); h.queue.dispose(); }
+});
+
+it("explicit resubmission preserves earlier charges and keeps any unmeasured attempt unknown", async () => {
+  for (const earlier of [{ inputTextTokens: 3, outputAudioTokens: 250 }, {}]) {
+    const h = await harness({ inputTextTokens: 3, outputAudioTokens: 250 }, "succeeded", true);
+    try {
+      const made = await h.queue.enqueue(input);
+      await until(() => h.ledger.length === 1, "first result", 30000);
+      h.queue.dispose();
+      const job = h.queue.listJobs().find(j => j.id === made.id)!;
+      await writeFile(join(h.dir, "jobs.jsonl"), JSON.stringify({ ...job, speechUsage: earlier, status: "needs-reconciliation", providerJobId: null, finalization: undefined }) + "\n");
+      h.ledger.length = 0;
+      const restored = h.create();
+      try {
+        await restored.start();
+        await restored.resolveHeld(job.id, "resubmit");
+        await until(() => h.ledger.length === 1, "second paid attempt", 30000);
+        assert.equal(h.submissions(), 2);
+        assert.equal(h.ledger[0]!.actualMicroUsd, "inputTextTokens" in earlier ? 4504 : null);
+        assert.deepEqual(h.ledger[0]!.speechAttempts?.[0]?.usage, earlier);
+      } finally { restored.dispose(); }
+    } finally { h.queue.dispose(); }
+  }
 });
