@@ -52,6 +52,14 @@ export const SpeechQuoteSchema = z.object({
 }).strict();
 export type SpeechQuote = z.infer<typeof SpeechQuoteSchema>;
 
+/** A deliberate retry may pay twice. Each earlier attempt keeps its own rate and quantities. */
+export const SpeechAttemptSchema = z.object({
+  attempt: Quantity.positive(),
+  quote: SpeechQuoteSchema,
+  usage: SpeechUsageSchema,
+}).strict();
+export type SpeechAttempt = z.infer<typeof SpeechAttemptSchema>;
+
 function tokenCost(input: number, output: number, rates: { input: number; output: number }): number {
   // BigInt prevents rounding down a fractional micro-dollar or overflowing an intermediate.
   const million = 1_000_000n;
