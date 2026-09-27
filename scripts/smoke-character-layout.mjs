@@ -65,6 +65,11 @@ window.mountCharacter = async (route = "kit", mode = "normal") => {
   await window.settleCharacter();
 };
 window.settleCharacter = async () => { await new Promise(r => setTimeout(r, 850)); await document.fonts.ready; await Promise.all([...document.images].map(i => i.decode().catch(() => {}))); };
+window.fillReferencePicker = () => {
+  const request=window.commands.findLast(c=>c.kind==="browse-reference-images");
+  __applyEventForTest({type:"reference.images",at:"2026-09-27T12:01:00Z",requestId:request.requestId,slug:request.slug,
+    images:Array.from({length:24},(_,i)=>({file:"references/ref-"+i+".png",name:"Reference "+(i+1),role:"identity",group:["Cast","Places","This world","Takes and stills","Uploads"][i%5]}))});
+};
 window.reviewSample = () => {
   [...document.querySelectorAll('.fy-vssource button')].find(b=>b.textContent==='Review').click();
   const command=window.commands.findLast(c=>c.kind==='prepare-character-voice-sample');
@@ -157,6 +162,24 @@ try {
       if(dialog === "sample") {await js("window.reviewSample();window.settleCharacter()");assert.equal(await js('!!document.querySelector("[data-testid=voice-review]")'),true);await capture(name+"-review");}
     }
     if(!baseline && width < 600) {
+      if(!process.argv.includes("--pages-only")) {
+        await js('window.mountCharacter("voice")');
+        await js('document.querySelector(".fy-voicehero__clear").click();window.settleCharacter()');
+        assert.equal(await js('document.querySelector(".fy-voicehero__clear").disabled'),true);
+        assert.equal(await js('(()=>{const e=document.querySelector(".fy-voicehero__clear");return e.scrollWidth<=e.clientWidth})()'),true,"pending clear fits its touch target");
+        await capture(name+"-clearing");
+        await js('window.mountCharacter("kit")');
+        await js('window.go(window.characterPath+"main-photo");window.settleCharacter()');
+        await js('document.querySelector(".fy-gendialog__slot").click();window.settleCharacter()');
+        await js('window.fillReferencePicker();window.settleCharacter()');
+        assert.equal(await js('document.querySelectorAll(".fy-refpicker__tile").length'),24);
+        assert.equal(await js('(()=>{const e=document.querySelector(".fy-gendialog__panel--picker");return e.scrollWidth<=e.clientWidth && e.scrollHeight>e.clientHeight && getComputedStyle(e).overflowY==="auto"})()'),true,"the populated picker scrolls vertically without sideways overflow");
+        await capture(name+"-picker");
+        await js('[...document.querySelectorAll(".fy-refpicker__tile")].at(-1).scrollIntoView({block:"center"})');
+        await capture(name+"-picker-scrolled");
+        await js('[...document.querySelectorAll(".fy-refpicker__tile")].at(-1).click();window.settleCharacter()');
+        assert.equal(await js('!!document.querySelector("[data-testid=reference-picker]")'),false,"the last reference can be chosen");
+      }
       for(const route of ["kit","looks","voice"]){await js('window.mountCharacter('+JSON.stringify(route)+',"long")');assert.equal((await js("window.measureCharacter()")).overflow,false,name+" "+route+" long names");}
       await js('window.mountCharacter("kit","pending")');await js('document.querySelector(".fy-reference-candidates").scrollIntoView({block:"center"})');await capture(name+"-candidate");
       assert.equal(await js('getComputedStyle(document.querySelector(".fy-reference-candidate")).flexWrap'),"wrap");

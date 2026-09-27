@@ -534,6 +534,7 @@ export function GenerateCharacterSheetScreen() {
   return (
     <div data-screen="model-sheet-generate">
       <GenerationDialog
+        characterDialog
         open
         onClose={back}
         title="Generate character sheet"
@@ -801,6 +802,7 @@ export function ReplaceMainPhotoScreen() {
   return (
     <div data-screen="replace-main-photo">
       <GenerationDialog
+        characterDialog
         open
         onClose={back}
         title="Replace main photo"
@@ -1022,6 +1024,7 @@ export function CharacterLooksScreen() {
           {!photo && <p className="fy-looks-composer__note">{sheet.name} has no accepted main photo yet</p>}
         </section>
         <GenerationDialog
+          characterDialog
           open={exploring}
           onClose={() => setExploring(false)}
           returnFocus={exploreRef}
