@@ -57,6 +57,24 @@ export class TailscaleServe {
     return true;
   }
   async disable(origin: string, port: number): Promise<void> {
-    if (this.ours(await this.configuration(), origin, port)) await this.execute(["serve", "--https=443", "off"]);
+    let config = await this.configuration();
+    if (this.ours(config, origin, port)) {
+      await this.execute(["serve", "--https=443", "off"]);
+      config = await this.configuration();
+    }
+    // A changed handler or Funnel setting is no longer ours to delete, but it must not
+    // keep forwarding to a port we are about to release. Require owner recovery instead.
+    const targets = [
+      ...Object.values(config.Web ?? {}).flatMap(site => Object.values(site.Handlers ?? {}).map(handler => handler.Proxy)),
+      ...Object.values(config.TCP ?? {}).map(tcp => tcp.TCPForward ? "http://" + tcp.TCPForward : undefined),
+    ];
+    for (const address of targets) {
+      if (!address) continue;
+      let target: URL;
+      try { target = new URL(address); } catch { continue; }
+      if (["127.0.0.1", "localhost", "[::1]"].includes(target.hostname) && target.port === String(port)) {
+        throw new Error("A Tailscale mapping still forwards to Studio's local port. Remove that mapping before disabling remote access or quitting.");
+      }
+    }
   }
 }

@@ -36,7 +36,14 @@ it("Serve refuses occupied ports and Funnel, and removes only Studio's exact map
   assert.equal(await fake.client.enable(origin, 8793, true), false);
   await assert.rejects(fake.client.enable(origin, 8793, false), /already in use/);
   await fake.client.disable(origin, 8793);
-  assert.deepEqual(fake.commands.at(-1), ["serve", "--https=443", "off"]);
+  assert.deepEqual(fake.commands.at(-2), ["serve", "--https=443", "off"]);
+  const removed = fake.commands.filter(args => args.includes("off")).length;
+  fake.set({ TCP: { "443": { HTTPS: true } }, AllowFunnel: { "studio.example.ts.net:443": true },
+    Web: { "studio.example.ts.net:443": { Handlers: { "/": { Proxy: "http://127.0.0.1:8793" } } } } });
+  await assert.rejects(fake.client.disable(origin, 8793), /still forwards/);
+  fake.set({ TCP: { "443": { TCPForward: "127.0.0.1:8793", TerminateTLS: "studio.example.ts.net" } } });
+  await assert.rejects(fake.client.disable(origin, 8793), /still forwards/);
+  assert.equal(fake.commands.filter(args => args.includes("off")).length, removed, "a changed mapping is left for its owner, while shutdown fails closed");
   assert.ok(!fake.commands.some(args => args.includes("reset")));
 });
 it("a CLI failure after publication rolls back only the verified new mapping", async () => {
