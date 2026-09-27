@@ -8,6 +8,8 @@ import {
   performanceNote,
   audiobookTextHash,
   normalizeSpeechText,
+  speechInputFits,
+  speechUtf8Bytes,
   voiceFormatForModel,
   voiceSourceFor,
   type ArtifactAudiobookGeneration,
@@ -24,7 +26,8 @@ import {
 import { fileGeneratedArtifact } from "../artifacts/filing.js";
 import type { MediaProbe } from "../media/probe.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
-import { cachedVoiceAudioLooksRight, joinSpeech, speechCacheFile, splitForSpeech } from "../voice/service.js";
+import { cachedVoiceAudioLooksRight, joinSpeech, speechCacheFile } from "../voice/service.js";
+import { piecesFor } from "../voice/pieces.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
@@ -147,6 +150,8 @@ export interface Speaking extends PlannedBlock {
    * for the reading, and the take goes beside the kept one rather than in its place (R-4).
    */
   remake: boolean;
+  /** Exact byte-bounded compilation, shared by consent and durable part adoption (SPEC-049 R-25). */
+  compiledSpeechHash?: string;
 }
 
 /** The record could not be written: the world's claim is gone, or it closed under the run. Nothing more can be kept. */
@@ -165,6 +170,7 @@ export interface PartIdentity {
   parts: number;
   /** The direction's name, or null for a block made with none — a job under another direction is not this part (R-14). */
   directionHash: string | null;
+  compiledSpeechHash?: string;
 }
 
 /**
@@ -189,6 +195,7 @@ export function priorPartJob(jobs: readonly Job[], identity: PartIdentity, part:
       job.params["voiceId"] === identity.voiceId &&
       job.params["part"] === part &&
       job.params["parts"] === identity.parts &&
+      (identity.compiledSpeechHash === undefined || job.params["compiledSpeechHash"] === identity.compiledSpeechHash) &&
       (job.params["directionHash"] ?? null) === identity.directionHash,
   );
   for (const job of [...matching].reverse()) {
@@ -268,51 +275,72 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
     const playing = note === undefined ? null : performanceNote(note, model, language);
     const noteHeld = playing?.mode === "unsupported";
     const capLeft = note !== undefined && !noteHeld && cap !== undefined ? Math.max(1, cap - note.length - 3) : cap;
+    // The performed note is prepended after cadence compilation. Reserve its bytes (and
+    // separator) before packing, just as tag readers reserve their character prefix.
+    const byteCap = model.limits.maxSpeechUtf8Bytes;
+    const byteCapLeft = byteCap === undefined ? undefined : byteCap - (playing?.mode === "instruction" ? speechUtf8Bytes(note!) + 1 : playing?.mode === "tag" ? speechUtf8Bytes(playing.tag) + 1 : 0);
+    const packingModel = { ...model, limits: { ...model.limits,
+      ...(capLeft !== undefined ? { maxPromptChars: capLeft } : {}),
+      ...(byteCapLeft !== undefined ? { maxSpeechUtf8Bytes: byteCapLeft } : {}) } };
     const lead = (part: RenderedPart): RenderedPart =>
       playing?.mode === "tag"
         ? { ...part, text: `${playing.tag} ${part.text}` }
         : playing?.mode === "instruction"
           ? { ...part, instructions: part.instructions === undefined ? note! : `${note!} ${part.instructions}` }
           : part;
-    if (held !== null) {
-      // What this reader cannot express is held (R-47): left out of what it is sent, kept on
-      // the record, and never a reason to flag the block. Only a direction wrong for its words
-      // is refused.
-      const check = checkDirection(planned.block.text, held.plan, { ...model, limits: { ...model.limits, ...(capLeft !== undefined ? { maxPromptChars: capLeft } : {}) } }, language, "hold");
-      if (check.ok) {
-        const rendered = check.parts.map(lead);
+    try {
+      if (held !== null) {
+        // What this reader cannot express is held (R-47): left out of what it is sent, kept on
+        // the record, and never a reason to flag the block. Only a direction wrong for its words
+        // is refused.
+        const check = checkDirection(planned.block.text, held.plan, packingModel, language, "hold");
+        if (check.ok) {
+          const rendered = check.parts.map(lead);
+          direction = {
+            hash: audiobookTakeDirectionHash(held.plan, note)!,
+            delivery: held.plan.delivery,
+            rendered: rendered.map((part) => part.text).join(" "),
+            voiceSettings: rendered[0]?.voiceSettings ?? check.mapped.voiceSettings,
+            ...(rendered[0]?.instructions !== undefined ? { instructions: rendered[0].instructions } : {}),
+            perPart: rendered.map((part) => ({ voiceSettings: part.voiceSettings, ...(part.instructions !== undefined ? { instructions: part.instructions } : {}) })),
+          };
+          parts = rendered.map((part) => part.text);
+        } else {
+          refusal = check.reason;
+          parts = [text];
+        }
+      } else if (note !== undefined) {
+        // A line directed by its note alone: the words as they are, the note ahead, no settings.
+        const words = piecesFor(text, packingModel, voiceFormatForModel(model));
+        const rendered = words.map((words) => lead({ text: words, voiceSettings: {} }));
         direction = {
-          hash: audiobookTakeDirectionHash(held.plan, note)!,
-          delivery: held.plan.delivery,
+          hash: audiobookTakeDirectionHash(null, note)!,
           rendered: rendered.map((part) => part.text).join(" "),
-          voiceSettings: rendered[0]?.voiceSettings ?? check.mapped.voiceSettings,
+          voiceSettings: {},
           ...(rendered[0]?.instructions !== undefined ? { instructions: rendered[0].instructions } : {}),
           perPart: rendered.map((part) => ({ voiceSettings: part.voiceSettings, ...(part.instructions !== undefined ? { instructions: part.instructions } : {}) })),
         };
         parts = rendered.map((part) => part.text);
-      } else {
-        refusal = check.reason;
-        parts = [text];
+      } else parts = piecesFor(text, model, voiceFormatForModel(model));
+      if (parts.some((part, index) => !speechInputFits(part, model.limits, direction?.perPart[index]?.instructions))) {
+        throw new Error("The words and direction exceed this reader's request limit.");
       }
-    } else if (note !== undefined) {
-      // A line directed by its note alone: the words as they are, the note ahead, no settings.
-      const words = capLeft !== undefined && text.length > capLeft ? splitForSpeech(text, capLeft) : [text];
-      const rendered = words.map((words) => lead({ text: words, voiceSettings: {} }));
-      direction = {
-        hash: audiobookTakeDirectionHash(null, note)!,
-        rendered: rendered.map((part) => part.text).join(" "),
-        voiceSettings: {},
-        ...(rendered[0]?.instructions !== undefined ? { instructions: rendered[0].instructions } : {}),
-        perPart: rendered.map((part) => ({ voiceSettings: part.voiceSettings, ...(part.instructions !== undefined ? { instructions: part.instructions } : {}) })),
-      };
-      parts = rendered.map((part) => part.text);
-    } else parts = cap !== undefined && text.length > cap ? splitForSpeech(text, cap) : [text];
+    } catch (error) {
+      refusal = error instanceof Error ? error.message : String(error);
+      parts = [text];
+    }
     const local = reader.provider === "kokoro";
     const format = voiceFormatForModel(model);
     const source = voiceSourceFor(clonedVoices, reader.provider, reader.model, reader.voiceId);
     // An explicit `Make again`, whatever the block's state (codex on PR 1193): with its kept
     // take retired, the older take of the same words must not be the answer either.
     const remake = only !== undefined;
+    const compiledSpeechHash = byteCap === undefined ? undefined : audioHash(Buffer.from(JSON.stringify({
+      compiler: "speech-input-v1", model: model.providerModelId ?? model.id, format,
+      parts: parts.map((part, index) => ({ text: part,
+        voiceSettings: direction?.perPart[index]?.voiceSettings ?? direction?.voiceSettings ?? {},
+        instructions: direction?.perPart[index]?.instructions ?? direction?.instructions ?? null })),
+    })));
     speaking.push({
       ...planned,
       ...(substitutedNow !== undefined ? { substitutedNow } : {}),
@@ -329,6 +357,7 @@ export async function prepareChapter(store: WorldStore, productionId: string, ch
       quotes: parts.map(part => quoteSpeech(model, part, { at: quotedAt })),
       format,
       remake,
+      ...(compiledSpeechHash !== undefined ? { compiledSpeechHash } : {}),
       // A whole block already in the cache is adopted without a call (R-19); parts are never
       // cached as a block, so a block over the cap is always made, the cache holds no
       // direction, so a directed block never comes from it, and a block made again unchanged
@@ -392,7 +421,7 @@ export function chapterPriceToken(worldId: string, productionId: string, chapter
  * direction.
  */
 export function missIdentity(block: Speaking): string {
-  return `${block.block.key}:${audiobookTextHash(block.text)}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.takeHash ?? ""}:${JSON.stringify(block.quotes.map(q => [q.rateVersion, q.authorisedMicroUsd, q.tokenLimits]))}`;
+  return `${block.block.key}:${audiobookTextHash(block.text)}:${block.reader.provider}/${block.reader.model}/${block.reader.voiceId}:${block.takeHash ?? ""}:${JSON.stringify(block.quotes.map(q => [q.rateVersion, q.authorisedMicroUsd, q.tokenLimits]))}${block.compiledSpeechHash !== undefined ? `:${block.compiledSpeechHash}` : ""}`;
 }
 
 /** The price's lines (R-17): every cloud voice the words would go to, once each, with its share. */
@@ -633,6 +662,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           voiceId: block.reader.voiceId,
           parts: block.parts.length,
           directionHash: block.takeHash ?? null,
+          ...(block.compiledSpeechHash !== undefined ? { compiledSpeechHash: block.compiledSpeechHash } : {}),
         };
         for (const [index, part] of block.parts.entries()) {
           if (signal.aborted) break;
@@ -673,6 +703,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
                 textHash,
                 part: index,
                 parts: block.parts.length,
+                ...(block.compiledSpeechHash !== undefined ? { compiledSpeechHash: block.compiledSpeechHash } : {}),
                 characterCount: part.length,
                 sheetVersion: plan.chapter.version,
                 // The direction rides as the performance path's does (R-8): the words already

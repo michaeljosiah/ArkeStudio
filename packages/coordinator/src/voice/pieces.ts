@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Job, ManifestModel, VoiceAudioFormat } from "@arke-studio/contracts";
+import { speechInputFits, splitSpeechInput } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
@@ -27,6 +28,10 @@ import { cachedVoiceAudioLooksRight, joinSpeech, splitForSpeech } from "./servic
  * — the audiobook flags the same block for the same reason.
  */
 export function piecesFor(text: string, model: Pick<ManifestModel, "limits">, format: VoiceAudioFormat): string[] {
+  if (model.limits.maxSpeechUtf8Bytes !== undefined) {
+    if (format === "flac" && !speechInputFits(text, model.limits)) throw new Error("This reader's long audio cannot be joined.");
+    return splitSpeechInput(text, model.limits).map(part => part.text);
+  }
   const cap = model.limits.maxPromptChars;
   if (cap === undefined || text.length <= cap || format === "flac") return [text];
   return splitForSpeech(text, cap);
