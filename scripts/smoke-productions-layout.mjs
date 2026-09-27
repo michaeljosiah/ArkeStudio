@@ -39,7 +39,13 @@ import { productionsLayoutFixture, episodicLayoutFixture } from "../test/product
 ${styles}
 let renderer;
 function Navigation() { window.go = useNavigate(); return null; }
-window.settleLayout = async () => { await new Promise(r => setTimeout(r, 700)); await document.fonts.ready; };
+window.settleLayout = async () => { await new Promise(r => setTimeout(r, 700)); await document.fonts.ready;
+  // Compare settled frames even when headless Chrome defers its first animation frame.
+  for(const animation of document.getAnimations()) {
+    if(Number.isFinite(animation.effect?.getComputedTiming().endTime))animation.finish();
+    else {animation.pause();animation.currentTime=0;}
+  }
+};
 window.mountLayout = async (route="productions", mode="normal") => {
   renderer?.unmount();
   const state=mode==="episodic"?episodicLayoutFixture():productionsLayoutFixture(), world=state.world;
