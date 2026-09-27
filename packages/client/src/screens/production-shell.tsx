@@ -16,6 +16,7 @@ import { AppChrome } from "../components/chrome.js";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
 import {
   Book,
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -23,6 +24,7 @@ import {
   Film,
   Folder,
   Home,
+  Grid2x2,
   ListOrdered,
   Message,
   PanelLeft,
@@ -34,12 +36,15 @@ import {
   VideoMark,
 } from "../components/icons.js";
 import { Loading } from "../components/loading.js";
+import { PageSheet } from "../components/page-sheet.js";
+import { useMediaQuery } from "../lib/media-query.js";
+import { Button } from "../components/ui.js";
 import { cx } from "../components/ui.js";
 import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
 import { productionShelf } from "../lib/artifact-view.js";
 import { editorTimeline } from "../lib/editor-timeline.js";
 import { runtimeSeconds } from "../lib/format.js";
-import { defaultEpisodeFor } from "../lib/production-navigation.js";
+import { defaultEpisodeFor, productionPages } from "../lib/production-navigation.js";
 import { useRailCollapsed } from "../lib/rail-collapsed.js";
 import { nextEpisodeOrder, useProduction } from "../lib/selectors.js";
 import { createEpisode, openAudiobook, useAudiobookDoors, useStore } from "../lib/store.js";
@@ -48,6 +53,7 @@ import { exportViewFor } from "./editor-export.js";
 import { NewChapterContext, NewSceneContext, useNewChapter, useNewScene } from "./production-story.js";
 
 const SWITCH_MENU_WIDTH_PX = 268;
+type SwitcherAt = { x: number; y: number };
 
 /**
  * The production switcher, as a menu that actually switches.
@@ -66,21 +72,26 @@ function ProductionSwitcher({
   sub,
   folded,
   chevron,
+  menuState,
 }: {
-  world: { productions: readonly ProductionBundle[] } | null;
+  world: { meta: { name: string }; productions: readonly ProductionBundle[] } | null;
   production: ProductionBundle | null;
   sub: string;
   folded: boolean;
   chevron: ReactNode;
+  menuState: [SwitcherAt | null, (next: SwitcherAt | null) => void];
 }) {
   const navigate = useNavigate();
   const { worldId } = useParams();
+  const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useMediaQuery("(max-width: 1099px)");
   const button = useRef<HTMLButtonElement>(null);
-  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const [at, setAt] = menuState;
   const others = world?.productions ?? [];
 
   useEffect(() => {
-    if (at === null) return;
+    if (at === null || phone) return;
     const close = () => setAt(null);
     // Capture-phase, matching the editor's clip menu: a press elsewhere closes even when that
     // element stops propagation, but a press inside the menu is the menu being used.
@@ -97,18 +108,24 @@ function ProductionSwitcher({
     };
     window.addEventListener("pointerdown", closeOutside, { capture: true });
     window.addEventListener("keydown", onKey);
-    window.addEventListener("resize", close);
+    // Folding the device should move a live menu into bounds, not dismiss the choice.
+    const reposition = () => {
+      const rect = button.current?.getBoundingClientRect();
+      if (rect) setAt({ x: rect.left, y: Math.min(rect.bottom + 6, window.innerHeight - 80) });
+    };
+    window.addEventListener("resize", reposition);
     return () => {
       window.removeEventListener("pointerdown", closeOutside, { capture: true });
       window.removeEventListener("keydown", onKey);
-      window.removeEventListener("resize", close);
+      window.removeEventListener("resize", reposition);
     };
-  }, [at]);
+  }, [at, phone]);
+  useEffect(() => { if (compact) menu.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus(); }, [at === null, phone, compact]);
 
   const open = () => {
     const rect = button.current?.getBoundingClientRect();
     if (rect === undefined) return;
-    setAt({ x: rect.left, y: rect.bottom + 6 });
+    setAt({ x: rect.left, y: Math.min(rect.bottom + 6, window.innerHeight - 80) });
   };
   const go = (id: string) => {
     setAt(null);
@@ -122,13 +139,13 @@ function ProductionSwitcher({
         type="button"
         className="fy-prodrail__switch"
         aria-label={`Switch production. Current production: ${production?.meta.title ?? "loading"}`}
-        aria-haspopup="menu"
+        aria-haspopup={phone ? "dialog" : "menu"}
         aria-expanded={at !== null}
         title={folded ? `Switch production · ${production?.meta.title ?? "loading"}` : undefined}
         onClick={() => (at === null ? open() : setAt(null))}
       >
         <span className="fy-prodrail__switchmark" aria-hidden>
-          {(production?.meta.title ?? "P").trim().charAt(0).toUpperCase() || "P"}
+          {compact ? production && productionShape(production.meta).hasChapters ? <Book size={20} /> : <Film size={20} /> : (production?.meta.title ?? "P").trim().charAt(0).toUpperCase() || "P"}
         </span>
         <div className="fy-prodrail__switchcopy">
           <div className="fy-prodrail__switchname">{production?.meta.title ?? "…"}</div>
@@ -136,15 +153,17 @@ function ProductionSwitcher({
         </div>
         <span className="fy-prodrail__switchchevron">{chevron}</span>
       </button>
-      {at !== null && (
+      {at !== null && !phone && (
         <div
           className="fy-switchmenu"
           role="menu"
           aria-label="Productions in this world"
-          ref={(node) => node?.querySelector<HTMLElement>("[role='menuitem']")?.focus()}
+          ref={menu}
           style={{
             left: Math.min(at.x, Math.max(0, window.innerWidth - SWITCH_MENU_WIDTH_PX - 8)),
             top: at.y,
+            maxHeight: Math.max(64, window.innerHeight - at.y - 8),
+            overflowY: "auto",
           }}
           // `role="menu"` promises the arrows work, so they do. Without this the role is a
           // claim the widget does not honour, which is worse than plain buttons would have been.
@@ -201,6 +220,19 @@ function ProductionSwitcher({
           </button>
         </div>
       )}
+      <PageSheet open={phone && at !== null} title="Productions" className="fy-production-switch-sheet" onClose={() => setAt(null)}
+        footer={<Button variant="secondary" onClick={() => { setAt(null); navigate(`/w/${worldId}/productions/new`); }}><Plus size={16} />New production</Button>}>
+        {others.map(candidate => {
+          const shape = productionShape(candidate.meta);
+          const current = candidate.meta.id === production?.meta.id;
+          return <button key={candidate.meta.id} type="button" className="fy-production-switch-row" aria-current={current ? "true" : undefined} onClick={() => go(candidate.meta.id)}>
+            <span className="fy-production-switch-row__mark">{shape.hasChapters ? <Book size={18} /> : <Film size={18} />}</span>
+            <span className="fy-production-switch-row__copy"><b>{candidate.meta.title}</b><span>{shape.displayLabel.toLowerCase()}{shape.hasChapters ? ` · ${candidate.chapters.filter(chapter => !chapter.retired).length} chapters` : ""}</span></span>
+            {current && <Check size={18} />}
+          </button>;
+        })}
+        <button type="button" className="fy-production-switch-row" onClick={() => { setAt(null); navigate(`/w/${worldId}/productions`); }}><span className="fy-production-switch-row__mark"><Grid2x2 size={18} /></span><span className="fy-production-switch-row__copy"><b>All productions</b><span>{world?.meta.name}</span></span><ChevronRight size={18} /></button>
+      </PageSheet>
     </>
   );
 }
@@ -212,6 +244,14 @@ export function ProductionLayout() {
   const { world, production } = useProduction(worldId, prodId);
   const refusal = useWorldOpenRefusal(worldId);
   const location = useLocation();
+  const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useMediaQuery("(max-width: 1099px)");
+  const coarse = useMediaQuery("(pointer: coarse)");
+  const pages = useRef<HTMLElement>(null);
+  const drawer = useRef<HTMLDialogElement>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  // The switcher changes parents at the phone breakpoint; its open choice survives that move.
+  const switchMenu = useState<SwitcherAt | null>(null);
   // The rail is the format's (design 54a): a surface the format cannot use is not present,
   // not greyed. A story production has nothing to dispatch, so its rail never says so.
   const shape = production ? productionShape(production.meta) : null;
@@ -300,7 +340,19 @@ export function ProductionLayout() {
   // shot's page (turn 145) is the scene's workspace one level down, and folds with it.
   const sceneDetailDefault =
     /\/scenes\/[^/]+(\/shots\/[^/]+)?\/?$/.test(location.pathname) || /\/story\/chapters\/[^/]+\/?$/.test(location.pathname);
-  const folded = railChoice ?? (location.pathname.endsWith("/cut") || sceneDetailDefault);
+  const wantsFold = railChoice ?? (location.pathname.endsWith("/cut") || sceneDetailDefault);
+  const drawerMode = !phone && wantsFold && (compact || coarse);
+  const folded = !phone && wantsFold && !drawerMode;
+  useEffect(() => { setDrawerOpen(false); }, [location.pathname, location.search]);
+  useEffect(() => {
+    const node = drawer.current;
+    if (!node || !drawerMode || !drawerOpen) return;
+    node.showModal?.();
+    return () => { node.close?.(); };
+  }, [drawerMode, drawerOpen]);
+  useEffect(() => {
+    if (phone) pages.current?.querySelector('[aria-current="page"]')?.scrollIntoView?.({ block: "nearest", inline: "center" });
+  }, [phone, location.pathname, location.search]);
   /*
    * A mark for every destination, without exception (turn 101). Folded, the label is the tooltip
    * and the mark is the whole item, so a rail entry with no mark is an entry that disappears —
@@ -389,7 +441,7 @@ export function ProductionLayout() {
       ? `series · ${production.episodes.length} episode${production.episodes.length === 1 ? "" : "s"} · ${production.scenes.length} scene${production.scenes.length === 1 ? "" : "s"}`
       : isStory
       ? `${shape!.displayLabel.toLowerCase()} · ${production.chapters.length} chapter${production.chapters.length === 1 ? "" : "s"}`
-      : `${shape!.displayLabel.toLowerCase()}${cut ? ` · ${cutFigure} cut` : ""}`
+      : `${shape!.displayLabel.toLowerCase()}${phone ? ` · ${production.scenes.length} scenes` : ""}${cut ? ` · ${cutFigure} cut` : ""}`
     : "";
   const currentEpisodeId =
     episodeId ?? production?.episodes.find((episode) => sceneId !== undefined && episode.scenes.includes(sceneId))?.id;
@@ -443,16 +495,7 @@ export function ProductionLayout() {
       <span className="fy-prodrail__label">New scene</span>
     </button>
   );
-  return (
-    <div className="fy-app">
-      <AppChrome
-        back={{ label: "World", to: `/w/${worldId}` }}
-        context={{
-          label: production && shape ? `${production.meta.title} · ${shape.displayLabel.toLowerCase()}` : "…",
-          to: `/w/${worldId}/productions`,
-        }}
-      />
-      <div className="fy-prod">
+  const rail = (
         <div
           className={cx(
             "fy-prodrail",
@@ -465,14 +508,15 @@ export function ProductionLayout() {
           <button
             type="button"
             className="fy-prodrail__collapse"
-            title={folded ? "Expand the rail" : "Collapse the rail"}
-            aria-label={folded ? "Expand the rail" : "Collapse the rail"}
+            title={drawerMode ? "Close production navigation" : folded ? "Expand the rail" : "Collapse the rail"}
+            aria-label={drawerMode ? "Close production navigation" : folded ? "Expand the rail" : "Collapse the rail"}
             aria-expanded={!folded}
-            onClick={() => setRailChoice(!folded)}
+            onClick={() => drawerMode ? setDrawerOpen(false) : setRailChoice(!folded)}
           >
             <PanelLeft size={14} />
           </button>
           <ProductionSwitcher
+            menuState={switchMenu}
             world={world}
             production={production}
             sub={switchSub}
@@ -661,6 +705,31 @@ export function ProductionLayout() {
             <span className="fy-prodrail__label">Part of {world?.meta.name ?? "the world"}</span>
           </NavLink>
         </div>
+  );
+  return (
+    <div className="fy-app fy-production-app">
+      <AppChrome
+        back={{ label: "World", to: `/w/${worldId}` }}
+        context={{
+          label: production && shape ? `${production.meta.title} · ${shape.displayLabel.toLowerCase()}` : "…",
+          to: `/w/${worldId}/productions`,
+        }}
+      />
+      {phone && <div className="fy-production-mobile-nav">
+        <ProductionSwitcher menuState={switchMenu} world={world} production={production} sub={switchSub} folded={false} chevron={<ChevronDown size={18} />} />
+        <div className="fy-production-pages"><nav ref={pages} aria-label="Production pages">
+          {productionPages(shape).map(([slug, label]) => {
+            const current = slug === "season" ? inSeason || inScene : slug === "scenes" ? inScene : false;
+            return <NavLink key={slug} to={`${base}${slug ? `/${slug}` : ""}`} end={slug === "" || slug === "story"}
+              aria-current={current ? "page" : undefined} className={({ isActive }) => cx("fy-production-page", (isActive || current) && "fy-production-page--active")}>{label}</NavLink>;
+          })}
+        </nav></div>
+      </div>}
+      <div className="fy-prod">
+        {!phone && (drawerMode ? <>
+          <button type="button" className="fy-production-drawer-toggle" aria-label="Open production navigation" aria-haspopup="dialog" aria-expanded={drawerOpen} onClick={() => setDrawerOpen(true)}><PanelLeft size={20} /><span>Pages</span></button>
+          <dialog ref={drawer} className="fy-production-drawer" aria-label="Production navigation" onCancel={event => { event.preventDefault(); setDrawerOpen(false); }} onClick={event => { if (event.target === event.currentTarget) setDrawerOpen(false); }}>{rail}</dialog>
+        </> : rail)}
         <div className="fy-prodwrap">
           {/* The production tree is a sibling of the world tree, not a child of it (App.tsx), so
               the world-open refusal has to be stated here too — otherwise a reload or deep link

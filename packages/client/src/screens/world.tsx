@@ -4435,13 +4435,8 @@ export function ArtifactsScreen() {
 
 // ---- Productions -----------------------------------------------------------
 
-const PRODUCTION_TILT = [
-  { rotate: -1.6, top: 0, drift: "7.6s" },
-  { rotate: 1.2, top: -8, drift: "8.3s" },
-  { rotate: -1, top: 0, drift: "7.9s" },
-] as const;
-
 export function ProductionsScreen() {
+  const phone = useMediaQuery("(max-width: 599px)");
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
@@ -4457,14 +4452,13 @@ export function ProductionsScreen() {
   };
   return (
     <div data-screen="productions">
-      <div className="fy-hero">
-        <div className="fy-hero__eyebrow">{world?.meta.name} · shared cast, shared canon</div>
-        <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
-          Productions
-        </h1>
+      <div className="fy-hero fy-productions-head">
+        <div><div className="fy-hero__eyebrow">{world?.meta.name} · shared cast, shared canon</div>
+        <h1 className="fy-hero__title">Productions</h1></div>
+        {phone && <Button variant="primary" onClick={() => navigate(`/w/${worldId}/productions/new`)}><Plus size={16} />New</Button>}
       </div>
       {world?.conversations.some(conversation => conversation.entryContext?.kind === "production-setup") && (
-        <section aria-label="Production setups" style={{ padding: "0 40px 28px" }}>
+        <section aria-label="Production setups" className="fy-production-resumes">
           <h2 style={{ fontSize: 18 }}>In development</h2>
           {world.conversations.filter(conversation => conversation.entryContext?.kind === "production-setup").map(conversation => (
             <Button key={conversation.id} variant="ghost" onClick={() => navigate(`/w/${worldId}/productions/setup/${conversation.id}`)}>
@@ -4475,21 +4469,31 @@ export function ProductionsScreen() {
       )}
       <div className="fy-prodcards">
         {productions.map((p, i) => {
-          const tilt = PRODUCTION_TILT[i % PRODUCTION_TILT.length]!;
+          const chapters = p.chapters.filter(chapter => !chapter.retired);
+          const drafted = chapters.filter(chapter => (chapter.words ?? 0) > 0).length;
+          const story = phone && productionShape(p.meta).hasChapters;
           const shots = p.scenes.flatMap((s) => orderedShots(s));
           const covered = shots.filter((s) => p.selections[s.id]?.acceptedTakeId).length;
           const active = p.meta.status !== "complete" && shots.length > 0 && covered < shots.length;
+          const progress = (<div className="fy-progress">
+                    <div
+                      className="fy-progress__fill"
+                      style={{
+                        width: `${story ? (chapters.length ? Math.round(drafted / chapters.length * 100) : 0) : shots.length > 0 ? Math.round((covered / shots.length) * 100) : 0}%`,
+                      }}
+                    />
+                  </div>);
           return (
             <div
               key={p.meta.id}
-              style={{
-                animation: `fy-drift ${tilt.drift} ease-in-out infinite alternate`,
-                marginTop: tilt.top,
-              }}
+              className={`fy-prodcard-slot fy-prodcard-slot--${i % 3}`}
             >
               <div
                 className={cx("fy-prodcard", active && "fy-prodcard--active")}
-                style={{ transform: `rotate(${tilt.rotate}deg)` }}
+                role="link"
+                tabIndex={0}
+                aria-label={`Open ${p.meta.title}`}
+                onKeyDown={event => { if (event.target === event.currentTarget && event.key === "Enter") navigate(`/w/${worldId}/p/${p.meta.id}`); }}
                 onClick={() => navigate(`/w/${worldId}/p/${p.meta.id}`)}
               >
                 <div className="fy-prodcard__frame">
@@ -4505,23 +4509,17 @@ export function ProductionsScreen() {
                     <Badge tone="outline">{productionShape(p.meta).displayLabel}</Badge>
                     {active && <span className="fy-dot fy-dot--warn" />}
                     <span style={{ marginLeft: "auto" }} className="fy-mono">
-                      {shots.length > 0 ? `${covered} of ${shots.length} shots` : `${p.takes.length} takes`}
+                      {story ? `${drafted} of ${chapters.length} chapters` : shots.length > 0 ? `${covered} of ${shots.length} shots` : `${p.takes.length} takes`}
                     </span>
                   </div>
                   <div className="fy-prodcard__name">{p.meta.title}</div>
                   <div className="fy-prodcard__sub">{p.meta.logline ?? p.meta.status}</div>
-                  <div className="fy-progress">
-                    <div
-                      className="fy-progress__fill"
-                      style={{
-                        width: `${shots.length > 0 ? Math.round((covered / shots.length) * 100) : 0}%`,
-                      }}
-                    />
-                  </div>
-                  <div style={{ marginTop: 14 }}>
+                  {!phone && progress}
+                  {!phone && <div style={{ marginTop: 14 }}>
                     <Button variant={active ? "primary" : "secondary"}>Open the workspace</Button>
-                  </div>
+                  </div>}
                 </div>
+                {phone && progress}
               </div>
             </div>
           );
@@ -4660,6 +4658,8 @@ const KINDS_BY_DOOR: Record<DoorId, readonly (typeof VIDEO_KIND_CHOICES)[number]
 export const FRAME_RATE_CHOICES = [24, 25, 30] as const satisfies readonly FrameRate[];
 
 export function NewProductionScreen() {
+  const phone = useMediaQuery("(max-width: 599px)");
+  const Footer = phone ? HeldBar : "div";
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
@@ -4751,13 +4751,12 @@ export function NewProductionScreen() {
    */
   if (chosen) {
     return (
-      <div className="fy-dialogwrap" data-screen="new-production" style={{ position: "relative" }}>
+      <div className="fy-dialogwrap fy-production-step" data-screen="new-production">
         <ProductionDialogBackdrop world={world} />
         <div
-          className="fy-dialog"
-          style={{ maxWidth: kinds.length > 0 ? 980 : 560, position: "relative" }}
+          className={cx("fy-dialog fy-production-step__panel", kinds.length > 0 && "fy-production-step__panel--kinds")}
         >
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <div className="fy-production-step__head">
             {kinds.length > 0 ? (
               <div style={{ font: "650 22px var(--font-sans)", letterSpacing: "-0.02em" }}>
                 What kind of video?
@@ -4776,13 +4775,7 @@ export function NewProductionScreen() {
             </div>
           )}
           {kinds.length > 0 && (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: `repeat(${kinds.length}, minmax(0, 1fr))`,
-              gap: 12,
-            }}
-          >
+          <div className="fy-production-kinds">
             {kinds.map((k) => (
               <button
                 key={k.id}
@@ -4793,22 +4786,7 @@ export function NewProductionScreen() {
                   setAspect(k.aspect);
                 }}
               >
-                <div
-                  aria-hidden="true"
-                  style={{
-                    height: 98,
-                    borderRadius: 9,
-                    border: "1px solid var(--border)",
-                    background: "var(--muted)",
-                    marginBottom: 12,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    // The plate is drawn to the box's edges, so the radius has to clip it or the
-                    // four corners square off and the row stops looking like one set of cards.
-                    overflow: "hidden",
-                  }}
-                >
+                <div aria-hidden="true" className="fy-production-kind__plate">
                   {KIND_PLATES.has(k.id) ? (
                     // Relative, not absolute: the packaged app loads from file://, where a
                     // leading slash resolves to the filesystem root and every plate 404s (the
@@ -4844,7 +4822,10 @@ export function NewProductionScreen() {
             media on step one, and a micro drama was then asked for a SERIES name here as well —
             two fields for one thing, since the second already defaulted to the first.
           */}
+          {phone && <label className="fy-production-step__name" htmlFor="production-name">Name</label>}
           <Input
+            id="production-name"
+            aria-label="Name"
             placeholder="Name it · working titles are fine"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -4861,7 +4842,7 @@ export function NewProductionScreen() {
           <div style={{ display: "grid", gap: 8 }}>
             <div className="fy-mono">DEFAULTS · CHANGE LATER</div>
             {/* Four stable slots keep frame and rate compact while leaving room for episodic defaults. */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
+            <div className="fy-production-defaults">
               <DefaultSelect label="FRAME" value={aspect} onChange={setAspect}>
                 <option value="9:16">9:16 vertical</option>
                 <option value="16:9">16:9 landscape</option>
@@ -4898,13 +4879,13 @@ export function NewProductionScreen() {
           )}
           {/* The narrow screen has no room to run this beside the buttons — it wrapped to two
               lines and crowded them — so there it takes a row of its own. */}
-          {kinds.length === 0 && (
-            <span className="fy-mono">
-              joins {world?.meta.name ?? "the world"} · {characters} characters, every location, the whole canon
+          {(phone || kinds.length === 0) && (
+            <span className="fy-mono fy-production-step__joins">
+              joins {world?.meta.name ?? "the world"} · {phone ? "cast, locations, canon" : `${characters} characters, every location, the whole canon`}
             </span>
           )}
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            {kinds.length > 0 && (
+          <Footer className="fy-production-step__foot">
+            {!phone && kinds.length > 0 && (
               <span className="fy-mono">
                 joins {world?.meta.name ?? "the world"} · {characters} characters, every location, the whole canon
               </span>
@@ -4927,7 +4908,7 @@ export function NewProductionScreen() {
                     ? "Create and open day one"
                     : "Create and open it"}
             </Button>
-          </div>
+          </Footer>
         </div>
       </div>
     );
@@ -4948,10 +4929,10 @@ export function NewProductionScreen() {
      * blurred behind a panel — which on a full page read as a grey band that stopped partway
      * down instead of a backdrop. The blurred art belongs to step two, which is still a dialog.
      */
-    <div data-screen="new-production">
+    <div data-screen="new-production" className="fy-production-door">
       <div className="fy-hero">
         <div className="fy-hero__eyebrow">Create something new</div>
-        <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
+        <h1 className="fy-hero__title">
           What should this world become next?
         </h1>
         {/* Wide enough to hold the sentence on one line: broken over two it reads as a paragraph
@@ -4960,23 +4941,12 @@ export function NewProductionScreen() {
           Choose a card that feels closest. The format can become more specific afterwards.
         </p>
       </div>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3, minmax(0, 372px))",
-          justifyContent: "center",
-          gap: 30,
-          // The rhythm .fy-prodcards uses between a hero and the row under it.
-          padding: "40px 24px 0",
-        }}
-      >
+      <div className="fy-production-doors">
           {DOOR_CHOICES.map((d, i) => (
             <button
               key={d.id}
               type="button"
-              className="fy-door"
-              // Staggered so the row arrives as a row rather than three things appearing at once.
-              style={{ animationDelay: `${i * 0.06}s` }}
+              className={`fy-door fy-door--${i}`}
               onClick={() => {
                 if (d.id === "watch") {
                   navigate(`/w/${worldId}/productions/setup/${newId("cv")}`);
@@ -4999,7 +4969,7 @@ export function NewProductionScreen() {
                 keyframe ends on `transform: none`, which would flatten a rotation on the same
                 element the moment the entrance finished.
               */}
-              <span className="fy-door__print" style={{ transform: `rotate(${[-1.2, 0, 1][i]}deg)` }}>
+              <span className="fy-door__print">
                 {/* Relative, not absolute: the packaged app loads from file://, where a leading
                     slash resolves to the filesystem root and every card 404s. */}
                 <img src={`./doors/${d.id}.webp`} alt="" aria-hidden="true" />
