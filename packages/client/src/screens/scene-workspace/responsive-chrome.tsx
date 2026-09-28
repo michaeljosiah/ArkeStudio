@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useMediaQuery } from "../../lib/media-query.js";
 import { PageSheet } from "../../components/page-sheet.js";
 import { ChevronLeft, More, Pin, Sparkle } from "../../components/icons.js";
@@ -29,6 +30,14 @@ export function SceneDock({ open, onOpen, onClose, stage = false, children }: { 
   const compact = useMediaQuery("(max-width: 1099px)");
   const phone = useMediaQuery("(max-width: 599px)");
   const trigger = useRef<HTMLButtonElement>(null);
+  const inlineHost = useRef<HTMLDivElement>(null), sheetHost = useRef<HTMLDivElement>(null);
+  const [conversationHost] = useState(() => typeof document === "undefined" ? null : document.createElement("div"));
+  // Reparent one portal host, not the conversation: its unsent words and thread-opening
+  // request must survive both putting the dock away and moving it across a breakpoint.
+  useLayoutEffect(() => {
+    const parent = compact ? sheetHost.current : inlineHost.current;
+    if (parent && conversationHost) { conversationHost.className = "fy-scene-dock-content"; parent.appendChild(conversationHost); }
+  }, [compact, conversationHost]);
   useEffect(() => {
     if (!phone || stage) return;
     let frame = 0;
@@ -54,10 +63,11 @@ export function SceneDock({ open, onOpen, onClose, stage = false, children }: { 
   const rail = <button ref={trigger} type="button" className="fy-sw__rail" title="Open Arke" aria-haspopup={compact ? "dialog" : undefined} onClick={onOpen}>
     {phone ? <Sparkle size={16} /> : <span className="fy-sw__rail-dot" aria-hidden="true" />}<span className="fy-sw__rail-label">{phone ? "Arke" : "Ask Arke"}</span><span className="fy-sw__rail-pin"><Pin size={13} /></span>
   </button>;
-  if (!compact) return open ? children : rail;
   return <>
-    {phone && stage ? null : rail}
-    <PageSheet open={open} onClose={onClose} title="Arke" className="fy-scene-dock">{children}</PageSheet>
+    {compact ? phone && stage ? null : rail : open ? null : rail}
+    <div ref={inlineHost} className="fy-scene-dock-inline" hidden={compact || !open} />
+    <PageSheet open={compact && open} keepMounted onClose={onClose} title="Arke" className="fy-scene-dock"><div ref={sheetHost} className="fy-scene-dock-content" /></PageSheet>
+    {conversationHost ? createPortal(children, conversationHost) : children}
   </>;
 }
 
@@ -74,8 +84,11 @@ export function StageInspectorSheet({ sheet, children }: { sheet: boolean; child
 
 export function SceneRenameSheet({ title, value, locked, onClose, onCommit }: { title: string; value: string; locked: boolean; onClose: () => void; onCommit: (name: string) => boolean }) {
   const [name, setName] = useState(value);
-  const submit = () => { const next = name.trim(); if (next && !locked && (next === value || onCommit(next))) onClose(); };
-  return <PageSheet open title={title} onClose={onClose} className="fy-scene-rename" footer={<button type="button" className="ui-btn ui-btn--primary" disabled={locked || !name.trim()} onClick={submit}>Save name</button>}>
+  const openingValue = useRef(value);
+  const changed = openingValue.current !== value;
+  useEffect(() => { if (changed) onClose(); }, [changed, onClose]);
+  const submit = () => { const next = name.trim(); if (next && !locked && !changed && (next === value || onCommit(next))) onClose(); };
+  return <PageSheet open title={title} onClose={onClose} className="fy-scene-rename" footer={<button type="button" className="ui-btn ui-btn--primary" disabled={changed || locked || !name.trim()} onClick={submit}>Save name</button>}>
     <label>Name<input value={name} disabled={locked} onChange={event => setName(event.target.value)} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); submit(); } }} /></label>
   </PageSheet>;
 }

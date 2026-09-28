@@ -1018,6 +1018,12 @@ function Row({
       setScriptDraft(shot.description);
     }
   };
+  const previousPhone = useRef(phone);
+  useEffect(() => {
+    const becamePhone = phone && !previousPhone.current;
+    previousPhone.current = phone;
+    if (becamePhone && scriptFocused) { commitScript(); setScriptFocused(false); }
+  }, [phone]);
   const durationSec = shot.durationSec ?? DEFAULT_SHOT_SEC;
   // The title opens the page (turn 145); the pencil beside it is the editor.
   const titleControl = editingTitle ? (
@@ -1048,7 +1054,7 @@ function Row({
     </span>
   );
   const stateChip = compact || state === "needs attention" || state === "story"
-    ? <span className="fy-swchip" data-state={state}><span aria-hidden="true" />{state === "needs attention" ? "Needs attention" : hasFrame ? "Frame ready" : "Needs frame"}</span>
+    ? <span className="fy-swchip" data-state={state}><span aria-hidden="true" />{state === "needs attention" ? "Needs attention" : state === "rendered" ? "Rendered" : hasFrame ? "Frame ready" : "Needs frame"}</span>
     : null;
   const durationControl = editingDuration ? (
     <input
