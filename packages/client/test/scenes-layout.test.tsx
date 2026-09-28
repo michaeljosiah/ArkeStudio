@@ -210,3 +210,8 @@ it("offers shot ordering in a hover Fold window",async()=>{
   await click(textButton('Move down','.fy-frame-actions-sheet[open]'));
   assert.deepEqual(commands(),[{kind:'move-shot',shotId:'sh_12',to:{after:'sh_13'}}]);
 });
+it("retains reorder commands in the compact row menu used by same-picture beats",async()=>{
+  await mount('/sc_04',984); await click(find('.fy-swrow__actionline > .fy-swrow__more:not(.fy-swrow__chevron)'));
+  await click(textButton('Move down','.fy-swrow__menu'));
+  assert.deepEqual(commands(),[{kind:'move-shot',shotId:'sh_12',to:{after:'sh_13'}}]);
+});
