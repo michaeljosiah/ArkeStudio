@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { formatMicroUsd, routingFindings, type ProductionBundle, type RoutingFinding, type SceneBeat, type Sheet, type TableReadPlan, type WorldBundle } from "@arke-studio/contracts";
+import { formatMicroUsd, routingFindings, sceneBeats, type ProductionBundle, type RoutingFinding, type SceneBeat, type Sheet, type TableReadPlan, type WorldBundle } from "@arke-studio/contracts";
 import { InteractivePlayerView } from "../../components/interactive-player.js";
 import { unwalkedChoices } from "../../lib/branch-map.js";
 import { listRoutingFindings, recordTraversal, subscribeRoutingFindings } from "../../lib/store.js";
@@ -114,11 +114,14 @@ export function SceneBeatPreview({
   world,
   production,
   sceneId,
+  startShotId,
   onClose,
 }: {
   world: WorldBundle;
   production: ProductionBundle;
   sceneId: string;
+  /** "Play from here" on a shot: the preview opens on that shot's first beat. */
+  startShotId?: string;
   onClose: () => void;
 }) {
   const navigate = useNavigate();
@@ -138,6 +141,11 @@ export function SceneBeatPreview({
     if (served !== null) return [...unwalkedChoices(served)].sort();
     return production.routing ? [...unwalkedChoices(routingFindings(production.routing, production.scenes, []))].sort() : [];
   }, [served, production.routing, production.scenes]);
+  // The player's beats are the scene's beats in order, so a shot's first beat is its index there.
+  const at = useMemo(() => {
+    const scene = production.scenes.find((candidate) => candidate.id === sceneId);
+    return startShotId === undefined || scene === undefined ? -1 : sceneBeats(scene).findIndex((beat) => beat.shot.id === startShotId);
+  }, [production.scenes, sceneId, startShotId]);
   if (!voices.ready) return <p className="fy-swbeat__none" role="status">Gathering the voices…</p>;
   return (
     <InteractivePlayerView
@@ -149,6 +157,7 @@ export function SceneBeatPreview({
         production,
         voices: voices.files,
         from: sceneId,
+        ...(at > 0 ? { at } : {}),
         unwalked,
         onChoice: (choice, walked) => recordTraversal(worldId, productionId, choice.id, choice.from, choice.to, walked),
         ...(production.routing ? { onBranchMap: () => navigate(`/w/${worldId}/p/${productionId}/branch-map`) } : {}),

@@ -187,6 +187,30 @@ describe("a visual novel's scene reads as beats (turn 174)", () => {
     assert.equal(all(mounted, ".fy-sw__tab").find((tab) => tab.getAttribute("aria-checked") === "true")?.textContent, "Beats");
   });
 
+  it("Play from here opens the preview on that shot's first beat (codex round 7)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(visualNovel(), `${SCENE_PATH}?shot=sh_13&view=preview`);
+    await act(async () => { __connectionStatusForTest("closed"); });
+    const player = q(mounted, ".bm-player")!;
+    assert.ok(player, "the player opens");
+    assert.equal(player.querySelectorAll(".aip-ticks > i.done").length, 3, "sh_12's two beats behind it, on sh_13's");
+    assert.equal((player.querySelector(".aip-box") as HTMLElement | null)?.hidden, true, "sh_13 is the picture alone");
+  });
+
+  it("the lightbox's arrows onto a beat that keeps the picture before show that picture (codex round 7)", async () => {
+    const state = visualNovel();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    production.selections.sh_12 = { ...production.selections.sh_12!, acceptedTakeId: "tk_01J8A0000000000000000000A1" };
+    const mounted = await mountState(state, SCENE_PATH);
+    await click(q(mounted, '[data-testid="workspace-row-sh_12"] [aria-label="Expand image for shot 12"]')!);
+    const kept = q(mounted, ".fy-swlightbox img")?.getAttribute("src");
+    assert.ok(kept, "sh_12's picture");
+    await click(q(mounted, '.fy-swlightbox [aria-label="Next shot"]')!);
+    assert.match(q(mounted, ".fy-swlightbox")?.textContent ?? "", /shot 13/);
+    assert.equal(q(mounted, ".fy-swlightbox img")?.getAttribute("src"), kept, "sh_13 keeps sh_12's picture");
+  });
+
   it("a studio lost while the voices are asked for opens the preview as text, rather than waiting forever", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));

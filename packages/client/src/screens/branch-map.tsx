@@ -140,6 +140,7 @@ export function beatPreviewOptions({
   production,
   voices,
   from,
+  at,
   unwalked,
   onChoice,
   onBranchMap,
@@ -149,6 +150,8 @@ export function beatPreviewOptions({
   production: ProductionBundle;
   voices: ReadonlyMap<string, string>;
   from: string;
+  /** The beat of `from` to begin on; its first when absent. */
+  at?: number;
   unwalked: readonly string[];
   onChoice: NonNullable<NonNullable<InteractivePlayerOptions["author"]>["onChoice"]>;
   onBranchMap?: () => void;
@@ -161,6 +164,7 @@ export function beatPreviewOptions({
     // A production not yet routed still previews its scene: the scene is its own start.
     start: routing?.start ?? from,
     from,
+    ...(at !== undefined && at > 0 ? { at } : {}),
     autoplay: true,
     scenes: Object.fromEntries(
       production.scenes.map((scene) => [scene.id, { title: scene.title, beats: scenePlayerBeats(production, world.artifacts, world.sheets, world.meta.slug, scene, voices) }]),

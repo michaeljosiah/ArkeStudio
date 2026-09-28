@@ -57,7 +57,9 @@ export function mountInteractivePlayer(root, options) {
 
   // Playback state only (brief §1, §5): the scene, the position, the route, when. Nothing else
   // exists to persist, by construction.
-  let state = { sceneId: origin, positionSec: 0, route: [], updatedAt: new Date().toISOString() };
+  // "Play from here" names a place in the scene it starts from: a beat's index, or seconds.
+  const at = origin === options.from && typeof options.at === "number" && options.at > 0 ? options.at : 0;
+  let state = { sceneId: origin, positionSec: at, route: [], updatedAt: new Date().toISOString() };
   let saved = null;
   if (KEY) {
     try {

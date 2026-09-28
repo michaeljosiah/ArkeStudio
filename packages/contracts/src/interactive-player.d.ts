@@ -65,6 +65,8 @@ export interface InteractivePlayerOptions {
   storageKey?: string | null;
   /** Preview from here: the route starts at this scene instead of the start. */
   from?: string;
+  /** Where in `from` to begin: a beat scene's beat index, a clip scene's seconds. */
+  at?: number;
   /** Skip the poster and play at once. */
   autoplay?: boolean;
   /** Present in the app's preview only: the author's strip and the walk evidence. */

@@ -1,9 +1,11 @@
 import { useEffect, useRef } from "react";
 import {
+  beatPictureShotId,
   effectiveFraming,
   DEFAULT_SHOT_SEC,
   hasOwnFrame,
   orderedShots,
+  productionShape,
   type ArtifactSidecar,
   type ProductionBundle,
   type SceneRecord,
@@ -100,7 +102,10 @@ export function ShotLightbox({
     const next = shots[(index + delta + shots.length) % shots.length];
     if (next !== undefined) onSelectShot(next.id);
   };
-  const path = shotFramePath(production, artifacts, shot.id);
+  // A visual novel's beat that keeps the picture before shows that picture here too, as the page
+  // behind it does (turn 174): the arrows step onto such a beat without remounting (codex round 7).
+  const pictureShotId = productionShape(production.meta).playsAsBeats ? beatPictureShotId(shots, shot.id) : shot.id;
+  const path = shotFramePath(production, artifacts, pictureShotId);
   const src = path === null || worldSlug === undefined ? null : mediaUrl(worldSlug, path);
   const durationSec = shot.durationSec ?? DEFAULT_SHOT_SEC;
   // The lens the shot actually has, inherited from the scene when it sets none of its own.
@@ -127,7 +132,7 @@ export function ShotLightbox({
             <div className="fy-swlightbox__empty">
               <ImageMark size={22} />
               <span>no frame yet</span>
-              <button type="button" onClick={() => { onClose(); onOpenInGenerator(shot.id); }}>Generate frame</button>
+              <button type="button" onClick={() => { onClose(); onOpenInGenerator(pictureShotId); }}>Generate frame</button>
             </div>
           ) : (
             <img src={src} alt={shot.title} />

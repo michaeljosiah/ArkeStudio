@@ -715,6 +715,7 @@ export function SceneWorkspace({
               world={world}
               production={production}
               sceneId={scene.id}
+              {...(linkedShotId === null ? {} : { startShotId: linkedShotId })}
               onClose={() => setView("storyboard")}
             />
           ) : (
