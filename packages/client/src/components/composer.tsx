@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { ComposerMic } from "./dictation.js";
 import { cx } from "./ui.js";
+import { useMediaQuery } from "../lib/media-query.js";
+import { isRemoteSession } from "../lib/remote-session.js";
 
 /**
  * The composer: one input for every conversation in the studio.
@@ -125,15 +127,20 @@ export function Composer(props: ComposerProps) {
     onDismissRefusal,
   } = props;
   const editor = useRef<HTMLDivElement | null>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  const coarse = useMediaQuery("(pointer: coarse)");
+  const hover = useMediaQuery("(hover: hover)");
+  const remote = isRemoteSession();
   const off = disabledReason !== undefined;
   const locked = off || busy;
-  const canSend = !locked && value.trim().length > 0;
+
 
   // Drag state, counted rather than flagged: dragging over a child fires dragleave on the
   // parent, and a plain boolean makes the overlay flicker as the pointer crosses the chips.
   const [dragging, setDragging] = useState(false);
   const depth = useRef(0);
   const [taking, setTaking] = useState(0);
+  const canSend = !locked && taking === 0 && value.trim().length > 0;
   const [trouble, setTrouble] = useState<readonly Trouble[]>([]);
   // Dismissed by name-and-reason rather than by identity, so the × works on refusals the caller
   // owns as well as ones raised here. Without it the button is decoration on half the chips.
@@ -154,7 +161,7 @@ export function Composer(props: ComposerProps) {
   }
 
   const troubleKey = (t: Trouble) => `${t.name}\0${t.reason}`;
-  const shown = [...refusals, ...trouble].filter((t) => !waved.includes(troubleKey(t)));
+  const shown = [...new Map([...refusals, ...trouble].map(t => [troubleKey(t), t])).values()].filter((t) => !waved.includes(troubleKey(t)));
 
   // React does not own the contenteditable's children — writing them on every render would
   // fight the caret. Only correct the DOM when it has actually drifted from state (a send that
@@ -289,7 +296,7 @@ export function Composer(props: ComposerProps) {
           onKeyDown={(e) => {
             // Enter sends; Shift+Enter is a new line. Never while an IME is composing — that
             // key is the user choosing a candidate, not sending. Never on auto-repeat either.
-            if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
+            if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing || coarse) return;
             e.preventDefault();
             if (e.repeat || !canSend) return;
             onSubmit();
@@ -317,6 +324,11 @@ export function Composer(props: ComposerProps) {
       </div>
 
       <div className="fy-cx__bar">
+        {remote && onAttach && onAttachFiles && <input ref={picker} type="file" multiple hidden aria-label="Choose attachments from this device" onChange={event => {
+          const files = Array.from(event.currentTarget.files ?? []);
+          event.currentTarget.value = "";
+          if (files.length && !locked) void take(() => onAttachFiles ? onAttachFiles(files) : Promise.resolve(files.map(file => ({ name: file.name, reason: "Attachments are unavailable in this conversation." }))), files.length);
+        }} />}
         <div className="fy-cx__left">
           {onAttach && (
             <button
@@ -325,7 +337,7 @@ export function Composer(props: ComposerProps) {
               disabled={locked}
               aria-label="Attach images, documents and audio"
               title="Attach images, documents and audio"
-              onClick={onAttach}
+              onClick={() => { if (remote && onAttachFiles) picker.current?.click(); else onAttach?.(); }}
             >
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
                 <path className="fy-cx__attachplus" d="M12 5v14M5 12h14" />
@@ -349,7 +361,7 @@ export function Composer(props: ComposerProps) {
           className="fy-cx__send"
           disabled={!canSend}
           aria-label="Send"
-          title={canSend ? "Send  ↵" : undefined}
+          title={canSend && hover ? "Send  ↵" : undefined}
           onClick={onSubmit}
         >
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

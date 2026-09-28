@@ -5,6 +5,7 @@ import { isRemoteSession, remoteSocketUrl } from "./remote-session.js";
 import { useSyncExternalStore } from "react";
 import {
   FrameSchema,
+  BROWSER_ATTACHMENT_MAX_BYTES,
   type AccountPage,
   type AskCandidate,
   type AskResult,
@@ -702,6 +703,8 @@ export function borrowArtifacts(
   }
   return { requestId };
 }
+
+const browserUploadResults = new Map<string, (reason?: string) => void>();
 
 export type WorldChatMediaOpened = Extract<DomainEvent, { type: "world-chat.media-opened" }>;
 const worldChatMediaListeners = new Set<(answer: WorldChatMediaOpened) => void>();
@@ -2131,6 +2134,8 @@ function handleFrame(json: string): void {
     } else if (event.type === "world-chat.send-result") {
       sendResults = new Map([...sendResults, [event.requestId, event] as const].slice(-50));
       for (const listener of sendResultListeners) listener(event);
+    } else if (event.type === "world-chat.upload-result") {
+      browserUploadResults.get(event.requestId)?.(event.reason);
     } else if (event.type === "world-chat.attachment-refused") {
       // The last few only: a refusal is news for a moment, not a list to work through — the same
       // rule the composer applies to the ones it raises itself.
@@ -2489,6 +2494,9 @@ export function hostCanAttach(): boolean {
   return typeof bridge?.attachDropped === "function" && typeof bridge?.attachBytes === "function";
 }
 
+/** Conversations accept device bytes through the paired browser's authenticated connection. */
+export function canAttachConversationFiles(): boolean { return isRemoteSession() || hostCanAttach(); }
+
 /** An extension for bytes that arrived with none — from what the clipboard said they are. */
 const EXT_BY_TYPE: Record<string, string> = {
   "image/png": "png",
@@ -2515,6 +2523,31 @@ export async function attachHostFiles(
   target: AttachTarget,
   files: readonly File[],
 ): Promise<ReadonlyArray<{ name: string; reason: string }>> {
+  if (isRemoteSession()) {
+    const trouble: Array<{ name: string; reason: string }> = [];
+    for (const file of files) {
+      const name = nameFor(file);
+      if (target.kind !== "world-chat-attach") { trouble.push({ name, reason: "Attach this file in a conversation." }); continue; }
+      if (file.size === 0 || file.size > BROWSER_ATTACHMENT_MAX_BYTES || name.length > 255) {
+        trouble.push({ name, reason: "Choose a non-empty file up to 16 MB with a shorter name." }); continue;
+      }
+      try {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const chunks: string[] = [];
+        for (let offset = 0; offset < bytes.length; offset += 32768) chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 32768)));
+        const requestId = crypto.randomUUID();
+        const reason = await new Promise<string | undefined>(resolve => {
+          const finish = (reason?: string) => { clearTimeout(timeout); browserUploadResults.delete(requestId); resolve(reason); };
+          const timeout = setTimeout(() => finish("The upload was not confirmed. Check the connection before trying again."), 60_000);
+          browserUploadResults.set(requestId, finish);
+          if (!send({ kind: "world-chat-upload", requestId, worldId: target.worldId, conversationId: target.conversationId, name, data: btoa(chunks.join("")) }))
+            finish("The studio is disconnected. Attach the file again when it reconnects.");
+        });
+        if (reason) trouble.push({ name, reason });
+      } catch { trouble.push({ name, reason: "It could not be read." }); }
+    }
+    return trouble;
+  }
   const host = bridge;
   if (!host?.attachDropped || !host.attachBytes) {
     return files.map((f) => ({ name: nameFor(f), reason: "attaching needs the desktop app" }));
@@ -2545,6 +2578,7 @@ export async function attachHostText(
   text: string,
   name: string,
 ): Promise<ReadonlyArray<{ name: string; reason: string }>> {
+  if (isRemoteSession()) return attachHostFiles(target, [new File([text], name, { type: "text/plain" })]);
   const host = bridge;
   if (!host?.attachBytes) return [{ name, reason: "attaching needs the desktop app" }];
   try {

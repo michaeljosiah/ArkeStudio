@@ -227,6 +227,10 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
     const echoed = once(phone, "message"); phone.send(dictation);
     assert.deepEqual(JSON.parse((await echoed)[0].toString()), JSON.parse(dictation), "remote transport retains large-frame support in both directions");
     const worldId = "01ARZ3NDEKTSV4RRFFQ69G5FAV", conversationId = "cv_" + worldId;
+    const upload = { kind: "world-chat-upload", worldId, conversationId, name: "notes.txt", data: Buffer.from("Device-selected notes").toString("base64") };
+    ClientMessageSchema.parse(upload);
+    const uploaded = once(phone, "message"); phone.send(JSON.stringify(upload));
+    assert.deepEqual(JSON.parse((await uploaded)[0].toString()), upload, "paired device uploads use bytes rather than host paths");
     const sourcePath = join(root, "private.txt");
     const playblast = { worldId, productionId: "pilot", sceneFile: "sc-one.md", sceneId: "sc_one", shotId: "sh_one",
       baseVersion: 1, stagingVersion: 1, durationSec: 1, aspect: "16:9", sourcePath, openingFrameSourcePath: sourcePath,
@@ -249,7 +253,7 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
       const [code, reason] = await closed;
       assert.equal(code, 1008); assert.match(reason.toString(), /host file access/);
     }
-    assert.deepEqual(received.filter((message: any) => message.kind !== "hello"), [JSON.parse(dictation)],
+    assert.deepEqual(received.filter((message: any) => message.kind !== "hello"), [JSON.parse(dictation), upload],
       "host file commands reach neither a connecting nor an established upstream session");
     const laptopDevice = await paired(devices, "Laptop");
     const laptop = connect(port, laptopDevice.proof); sockets.push(laptop); await once(laptop, "message");

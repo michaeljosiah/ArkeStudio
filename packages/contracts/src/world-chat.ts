@@ -1,5 +1,8 @@
 import { valueSchema } from "./value-schema.js";
 import { z } from "zod";
+
+/** A browser upload stays below the authenticated websocket frame budget, including base64. */
+export const BROWSER_ATTACHMENT_MAX_BYTES = 16 * 1024 * 1024;
 import { GenesisBlueprintSchema } from "./genesis.js";
 import { GenesisDecisionSchema } from "./genesis-review.js";
 import { GenesisImageCandidateSchema, GenesisImageTargetSchema } from "./genesis-images.js";

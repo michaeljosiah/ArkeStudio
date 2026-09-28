@@ -234,6 +234,7 @@ const CLIENT_COMMAND_METADATA = {
   "world-chat-archive": humanOnly(HUMAN_DECISION),
   "world-chat-unarchive": humanOnly(HUMAN_DECISION),
   "world-chat-attach": humanOnly("Attaching private host material to a conversation is a human evidence-control gesture."),
+  "world-chat-upload": humanOnly("Uploading device-selected private evidence belongs to the person."),
   "world-chat-attach-files": humanOnly("Opening the private conversation attachment picker is a human evidence-control gesture."),
   "world-chat-promote-attachment": humanOnly("Only the person may file private conversation evidence into the world."),
   "draft-with-studio": humanOnly(RECURSIVE_AGENT),

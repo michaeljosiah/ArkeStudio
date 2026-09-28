@@ -40,6 +40,7 @@ import { DomainEventSchema } from "./events.js";
 import { ArtifactIdSchema, CandidateIdSchema, ChatAttachmentIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { PropIdSchema, PropStateIdSchema } from "./prop.js";
 import { ProseReadSourceSchema } from "./prose.js";
+import { BROWSER_ATTACHMENT_MAX_BYTES } from "./world-chat.js";
 import { SceneCommandSchema } from "./scene-operations.js";
 import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ModelChoicesSchema, ProviderIdSchema } from "./provider.js";
@@ -823,6 +824,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       sourcePath: z.string().min(1),
     })
     .strict(),
+  /** Device-selected bytes; a paired browser never supplies a host path (turn 171). */
+  z.object({
+    kind: z.literal("world-chat-upload"),
+    requestId: z.string().min(1).optional(),
+    worldId: UlidSchema,
+    conversationId: ConversationIdSchema,
+    name: z.string().min(1).max(255),
+    data: z.string().min(4).max(4 * Math.ceil(BROWSER_ATTACHMENT_MAX_BYTES / 3))
+      .regex(/^[A-Za-z0-9+/]*={0,2}$/).refine(value => value.length % 4 === 0 && value.length / 4 * 3 - (value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0) <= BROWSER_ATTACHMENT_MAX_BYTES),
+  }).strict(),
   /** #70 §13.1: the same gesture through the host's picker, for people who do not drag. */
   z
     .object({

@@ -7,6 +7,7 @@ import {
   isMediaOnly,
   pickableSheets,
   productionShape,
+  proposalDecisionOf,
   resolvePictureTimeline,
   sortScenes,
   type ProductionBundle,
@@ -790,15 +791,17 @@ export function ProductionChatScreen() {
    */
   const file = shape?.isEpisodic ? "season.json" : "story.json";
   // The style the book is written in is settled here too (turn 128), in its own file.
-  const staged =
-    (world?.proposals ?? []).find((sp) =>
+  const eligible = (world?.proposals ?? []).filter(sp => proposalDecisionOf(sp.proposal, world?.conversations ?? []).mode === "attended");
+  const candidate =
+    eligible.find((sp) =>
       sp.proposal.targets.some((t) => t.path === `productions/${prodId}/${file}`),
     ) ??
     (shape?.isEpisodic
       ? null
-      : (world?.proposals ?? []).find((sp) =>
+      : eligible.find((sp) =>
           sp.proposal.targets.some((t) => t.path === `productions/${prodId}/prose-style.json`),
         ) ?? null);
+  const staged = candidate && proposalDecisionOf(candidate.proposal, world?.conversations ?? []).mode === "attended" ? candidate : null;
   const stagedStyle = staged?.proposal.targets.some((t) => t.path.endsWith("/prose-style.json")) ?? false;
   return (
     <div className="fy-story" data-screen="production-chat">
@@ -806,6 +809,8 @@ export function ProductionChatScreen() {
         worldId={worldId}
         productionId={prodId}
         openingNote="Develop · opening…"
+        contextSummary={`${contextCount} ${contextUnit}${contextCount === 1 ? "" : "s"}, ${cast} cast${world?.meta.tone ? ", " + world.meta.tone : ""}`}
+        stagedTitle={staged ? `${stagedStyle ? "Style" : shape?.isEpisodic ? "Season" : "Story"} v${(staged.proposal.targets[0]?.baseVersion ?? 0) + 1} · waiting on you` : undefined}
         eyebrow={`DEVELOP · ${shape ? shape.displayLabel.toLowerCase() : ""}`}
         heading={shape?.isEpisodic ? "What is this season?" : "Find the spine together."}
         placeholder="Say what this is — what happens, who it costs, how it ends…"

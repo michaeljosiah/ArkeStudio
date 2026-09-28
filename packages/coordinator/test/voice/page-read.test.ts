@@ -146,6 +146,16 @@ describe("reading a sheet as a page", () => {
 });
 
 describe("reading a production overview as a page", () => {
+  it("reads only the act named by a Fold card and refuses a missing act",async()=>{
+    const h=await harness();
+    try {
+      await h.send({kind:"read-prose",worldId:WORLD_ID,requestId:"01J8F3K2QW9VZX4N7M0RTYB6P4",source:{of:"story",productionId:"saltlight",field:"acts",act:0}});
+      assert.ok(h.spoken.length>0);assert.ok(h.spoken.join(" ").startsWith("1."));assert.ok(!h.spoken.join(" ").includes("2."));
+      const before=h.spoken.length;
+      await h.send({kind:"read-prose",worldId:WORLD_ID,requestId:"01J8F3K2QW9VZX4N7M0RTYB6P5",source:{of:"story",productionId:"saltlight",field:"acts",act:999}});
+      assert.equal(h.spoken.length,before);assert.equal(reads(h.events).at(-1)!.status,"failed");
+    }finally{await h.provider.close();}
+  });
   it("reads the cards the screen declared, in that order, and drops one that has no record", async () => {
     const h = await harness();
     try {
