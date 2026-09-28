@@ -161,7 +161,7 @@ export function Composer(props: ComposerProps) {
   }
 
   const troubleKey = (t: Trouble) => `${t.name}\0${t.reason}`;
-  const shown = [...refusals, ...trouble].filter((t) => !waved.includes(troubleKey(t)));
+  const shown = [...new Map([...refusals, ...trouble].map(t => [troubleKey(t), t])).values()].filter((t) => !waved.includes(troubleKey(t)));
 
   // React does not own the contenteditable's children — writing them on every render would
   // fight the caret. Only correct the DOM when it has actually drifted from state (a send that

@@ -7,6 +7,7 @@ import { MemoryRouter } from "react-router";
 import { type ClientMessage } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { Composer } from "../src/components/composer.js";
+import { ProductionConversation } from "../src/components/conversation.js";
 import { attachHostText, worldChatAttachTarget } from "../src/lib/store.js";
 import { __applyEventForTest, __clearWorldChatHoldsForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -154,4 +155,31 @@ it('unattended Develop proposals show understood points instead of an empty deci
 it('replaced Overview acts cannot retain a reader for the former text',async()=>{
  await mount('p/ledger/overview',984);const before=find('.fy-overview-act [aria-label="Read aloud"]');const state=developLayoutFixture();state.world!.productions[1]!.story!.acts![0]!.summary='A different accepted act.';
  await act(async()=>__setStateForTest(state));assert.notEqual(find('.fy-overview-act [aria-label="Read aloud"]'),before);
+});
+it('returning a narrative edit to its baseline resumes authoritative updates',async()=>{
+ await mount('p/saltlight/narrative');const before=(find('.fy-narrative textarea') as HTMLTextAreaElement).value;
+ await act(async()=>props(find('.fy-narrative textarea')).onChange!({target:{value:'Temporary change'}} as never));
+ await act(async()=>props(find('.fy-narrative textarea')).onChange!({target:{value:before}} as never));
+ const state=developLayoutFixture();state.world!.productions[0]!.narrative!.question='Accepted elsewhere';state.world!.productions[0]!.narrative!.version=4;
+ await act(async()=>__setStateForTest(state));assert.equal((find('.fy-narrative textarea') as HTMLTextAreaElement).value,'Accepted elsewhere');assert.equal(find('[role="alert"]'),null);
+});
+it('an unattended story cannot hide the attended style decision',async()=>{
+ await mount(undefined,390,'staged');const state=developLayoutFixture('staged'),story=state.world!.proposals[0]!;
+ const style=structuredClone(story);style.proposal.id='pr_01J8H0000000000000000000Q8';style.proposal.targets[0]!.path='productions/saltlight/prose-style.json';
+ style.proposal.worldChatOrigins![0]!.targetPaths=['productions/saltlight/prose-style.json'];style.review!.targets[0]!.path='productions/saltlight/prose-style.json';story.proposal.decision={mode:'unattended'};state.world!.proposals.push(style);
+ await act(async()=>__setStateForTest(state));assert.match(find('.fy-thread-peek').textContent!,/Style/);await click(find('.fy-thread-peek'));assert.ok(find('.dom-proposal'));
+});
+it('one refused upload appears once when both acknowledgement channels report it',async()=>{
+ await mount(undefined,390,'normal',true);
+ await act(async()=>root!.render(<Composer value="" onChange={()=>{}} onSubmit={()=>{}} placeholder="Write" onAttach={()=>{}} refusals={[{name:'bad.bin',reason:'Cannot read it'}]} onAttachFiles={async()=>[{name:'bad.bin',reason:'Cannot read it'}]} />));
+ await act(async()=>props(find('input[type="file"]')).onChange!({currentTarget:{files:[new File(['bad'],'bad.bin')],value:'bad.bin'}} as never));
+ assert.equal([...document.querySelectorAll('.fy-cx__chip')].filter(e=>e.textContent?.includes('bad.bin')).length,1);
+});
+it('leaving a subject while its attachment waits for a thread releases the composer',async()=>{
+ await mount(undefined,390,'empty-thread',true);const worldId=developLayoutFixture().world!.meta.worldId;
+ const screen=(id:string)=><MemoryRouter><ProductionConversation worldId={worldId} productionId={id} entry={{kind:'production',productionId:id}} placeholder="Write" emptyLine="Nothing yet" /></MemoryRouter>;
+ await act(async()=>root!.render(screen('saltlight')));
+ await act(async()=>props(find('input[type="file"]')).onChange!({currentTarget:{files:[new File(['A fact'],'fact.txt')],value:'fact.txt'}} as never));
+ await act(async()=>root!.render(screen('ledger')));await draft('A new subject');
+ assert.equal(find('.fy-cx__send').hasAttribute('disabled'),false);assert.doesNotMatch(document.body.textContent!,/attaching/);
 });
