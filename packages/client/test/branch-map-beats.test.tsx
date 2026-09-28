@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ClientState } from "@arke-studio/contracts";
-import { scenePlayerBeats } from "../src/screens/branch-map.js";
+import { sceneFrame, scenePlayerBeats } from "../src/screens/branch-map.js";
 import { shotFramePath } from "../src/screens/scene-workspace/boards.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -42,5 +42,19 @@ describe("a visual novel's scene in the preview", () => {
     assert.equal(beats[2]!.text, undefined, "sh_13 covers nothing: the picture alone");
     assert.equal(beats[2]!.picture, beats[0]!.picture, "and keeps sh_12's picture");
     assert.deepEqual([beats[2]!.advance, beats[2]!.holdSec], ["hold", 6]);
+  });
+
+  it("a map card shows the picture the story shows, never a kept beat's unused frame (codex round 8)", () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const world = state.world!;
+    const production = world.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")! as unknown as { shots: Array<{ beat?: unknown }> };
+    scene.shots[1]!.beat = { samePicture: true };
+    // sh_12 has no picture yet; sh_13 keeps it, though a frame of its own sits accepted and unused.
+    production.selections = { sh_13: { acceptedTakeId: "tk_01J8A0000000000000000000A1", trimInSec: 0 } };
+    const sc04 = production.scenes.find((c) => c.id === "sc_04")!;
+    assert.ok(sceneFrame(production, world.artifacts, world.meta.slug, sc04), "a film's card shows sh_13's frame");
+    production.meta = { ...production.meta, medium: "video", kind: "visual-novel" };
+    assert.equal(sceneFrame(production, world.artifacts, world.meta.slug, sc04), null, "a visual novel's has no picture to show");
   });
 });

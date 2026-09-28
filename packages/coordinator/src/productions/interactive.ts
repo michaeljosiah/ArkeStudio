@@ -570,7 +570,8 @@ function parseInteractiveManifest(value: unknown): InteractiveExportManifest | n
         ["voice", "tap", "hold"].includes(b["advance"] as string) &&
         typeof b["holdSec"] === "number" && b["holdSec"] > 0 &&
         ["push", "drift", "none"].includes(b["motion"] as string) &&
-        (b["keep"] === undefined || b["keep"] === true);
+        (b["keep"] === undefined || b["keep"] === true) &&
+        (b["dialogue"] === undefined || b["dialogue"] === true);
     });
   }))) return null;
   const beats = beatsValue as Array<{ sceneId: string; beats: ManifestBeat[] }> | undefined;
@@ -665,7 +666,7 @@ export async function exportInteractive(
      * A visual novel's prepared voices, scene by scene: line id → world-relative file (the table
      * read's answer). Absent, every line reads as text — an unvoiced line never blocks.
      */
-    voices?: (sceneId: string) => Promise<ReadonlyMap<string, string>>;
+    voices?: BeatVoices;
   } = {},
 ): Promise<InteractiveExportResult> {
   const routing = production.routing;
@@ -837,6 +838,12 @@ function beatPicturePath(production: ProductionBundle, artifacts: readonly Artif
   return `productions/${production.meta.id}/takes/${take.id}/${take.media}`;
 }
 
+/**
+ * A scene's prepared voices as the table read planned them, with the scene version that plan was
+ * made for — the store's current scene, which may no longer be the snapshot being exported.
+ */
+export type BeatVoices = (sceneId: string) => Promise<{ sceneVersion: number; files: ReadonlyMap<string, string> }>;
+
 /** A voice the table read names, if it is a file inside the world rather than a way out of it. */
 function safeWorldFile(path: string): boolean {
   return path.split("/").every((part) => part !== "" && part !== "." && part !== "..") && !path.includes("\\");
@@ -854,7 +861,7 @@ async function exportBeats(
   routing: Routing,
   blockers: string[],
   clock: () => string,
-  options: { exportId?: string; precondition?: WorldStatePrecondition; voices?: (sceneId: string) => Promise<ReadonlyMap<string, string>> },
+  options: { exportId?: string; precondition?: WorldStatePrecondition; voices?: BeatVoices },
 ): Promise<InteractiveExportResult> {
   const artifacts = store.getBundle().artifacts;
   const sheets = store.getBundle().sheets;
@@ -868,7 +875,15 @@ async function exportBeats(
   };
   const scenes: Array<{ sceneId: string; beats: PlayerBeat[] }> = [];
   for (const scene of production.scenes.filter((candidate) => !excluded.has(candidate.id))) {
-    const voices = options.voices ? await options.voices(scene.id).catch(() => new Map<string, string>()) : new Map<string, string>();
+    const planned = options.voices ? await options.voices(scene.id).catch(() => null) : null;
+    // The plan reads the store's scene; the beats read the snapshot. A scene edited in between
+    // would ship its old lines beside voices for new ones, or without the ones it had, so the
+    // package is refused rather than mixed (codex round 8).
+    if (planned !== null && planned.sceneVersion !== scene.version) {
+      blockers.push(`${scene.id} changed while the package was made — export again`);
+      continue;
+    }
+    const voices = planned?.files ?? new Map<string, string>();
     let beats: PlayerBeat[];
     try {
       beats = playerBeats(scene, {

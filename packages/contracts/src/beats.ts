@@ -110,6 +110,8 @@ export interface PlayerBeat {
   motion: "push" | "drift" | "none";
   /** It keeps the beat before's picture (the same shot's, or one it asked to keep), still moving. */
   keep?: true;
+  /** Dialogue still missing its speaker: the player shows it as dialogue, never as narration. */
+  dialogue?: true;
 }
 
 /**
@@ -143,6 +145,7 @@ export function playerBeats(
       ...(keep && picture !== undefined ? { keep: true as const } : {}),
       ...(beat.text ? { text: beat.text } : {}),
       ...(beat.kind === "dialogue" && beat.speaker ? { speaker: resolve.speakerName(beat.speaker) } : {}),
+      ...(beat.kind === "dialogue" && !beat.speaker && beat.text ? { dialogue: true as const } : {}),
       ...(audio !== undefined ? { audio } : {}),
       ...beatPlayback(beat.shot),
     };

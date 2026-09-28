@@ -159,6 +159,19 @@ describe("a visual novel's scene reads as beats (turn 174)", () => {
     assert.equal(sent.filter((message) => message.kind === "plan-table-read").length, before + 1);
   });
 
+  it("asks the plan again when a speaker's voice changes, since their lines are read in it (codex round 8)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = visualNovel();
+    await mountState(state, SCENE_PATH);
+    const before = sent.filter((message) => message.kind === "plan-table-read").length;
+    const next = structuredClone(state) as ClientState;
+    const maren = next.world!.sheets.find((sheet) => sheet.id === "maren-kest")!;
+    maren.voice = { ...maren.voice!, voiceId: "v_9Lr3", label: "High water" };
+    await act(async () => { __setStateForTest(next); });
+    assert.equal(sent.filter((message) => message.kind === "plan-table-read").length, before + 1);
+  });
+
   it("Preview reads the scene in the beat player over the window, once its voices are in, and closes back to the beats", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));

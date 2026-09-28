@@ -605,6 +605,18 @@ describe("the player reading beats (turn 174)", () => {
     assert.equal(log.hidden, true, "Escape closes the log first");
   });
 
+  it("dialogue still waiting for its speaker reads as dialogue, never as narration (codex round 8)", () => {
+    const p = mount({
+      ...NOVEL,
+      autoplay: true,
+      scenes: { ...NOVEL.scenes, sc_quarter: { title: "Draft", beats: [{ picture: "media/quarter.png", text: "Who said this?", dialogue: true }] } },
+    });
+    assert.equal(p.q(".aip-box")?.getAttribute("data-kind"), "dialogue");
+    assert.equal(p.q(".aip-who")?.hidden, true, "no name to show on the tab");
+    p.key("l");
+    assert.equal(p.all(".aip-log-line.narration").length, 0, "nor as narration in the log");
+  });
+
   it("keeps the focus on the open log's control when the reader moves on beneath it", () => {
     const p = mount({ ...NOVEL, autoplay: true });
     p.key("ArrowRight"); p.key("ArrowRight");

@@ -523,7 +523,8 @@ export function mountInteractivePlayer(root, options) {
     const who = b.speaker ? String(b.speaker) : "";
     el.who.hidden = who === "";
     el.who.textContent = who;
-    el.box.setAttribute("data-kind", b.text ? (who ? "dialogue" : "narration") : "picture");
+    // A line with no speaker is narration, unless it is dialogue still waiting for its speaker.
+    el.box.setAttribute("data-kind", b.text ? (who || b.dialogue ? "dialogue" : "narration") : "picture");
     // A beat with no line is the picture alone: the box steps aside for it.
     el.box.hidden = !isBeats(state.sceneId) || !b.text;
     el.more.innerHTML = mode === "playing" && typed ? "tap " + icon(I.next, 14) : "";
@@ -548,7 +549,7 @@ export function mountInteractivePlayer(root, options) {
       '<div class="aip-panel-head"><span style="flex:1">Log</span><span class="aip-kbd">L</span><button type="button" class="aip-ib" data-act="log" aria-label="Close">' + icon(I.x) + "</button></div>" +
       '<div class="aip-panel-list">' +
       lines.map((x) =>
-        '<div class="aip-log-line' + (x.b.speaker ? "" : " narration") + (x.i === beatIndex ? " now" : "") + '">' +
+        '<div class="aip-log-line' + (x.b.speaker || x.b.dialogue ? "" : " narration") + (x.i === beatIndex ? " now" : "") + '">' +
         (x.b.speaker ? '<div class="w">' + esc(x.b.speaker) + "</div>" : "") + '<div class="t">' + esc(x.b.text) + "</div>" +
         (x.b.audio ? '<button type="button" data-line="' + x.i + '" aria-label="Play line">' + icon(I.play, 11) + "</button>" : "") + "</div>").join("") +
       "</div>";

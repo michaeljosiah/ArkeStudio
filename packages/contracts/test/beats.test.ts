@@ -67,6 +67,9 @@ describe("a scene read as beats", () => {
     const lines = deriveRehearsalLines(draft, [], { narration: true });
     assert.equal(lines.some((l) => l.narration), false);
     assert.ok(lines.every((l) => l.reason !== undefined), "each keeps its missing-speaker refusal");
+    const played = playerBeats(draft, { picture: () => undefined, audio: () => undefined, speakerName: (id) => id });
+    assert.deepEqual(played.map((b) => [b.speaker ?? null, b.dialogue ?? false]), [[null, true], [null, true]],
+      "the player is told it is dialogue, so it never reads as narration (codex round 8)");
   });
 
   it("a named line survives a sibling cover whose block is gone, planned as the line the beat reads", () => {

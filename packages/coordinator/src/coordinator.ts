@@ -243,6 +243,7 @@ import {
   interactiveFindings,
   proposeBranchCanon,
   saveRouting,
+  type BeatVoices,
   type InteractiveExportResult,
 } from "./productions/interactive.js";
 import { ProviderService, type KeyValidator } from "./providers/service.js";
@@ -1195,14 +1196,14 @@ export class Coordinator {
    * scene's plan, read as the scene page reads it, with the narrator resolved once per export.
    * Both ways to export — the branch map's and World Chat's — ship through this one resolver.
    */
-  private interactiveExportVoices(store: WorldStore, productionId: string): ((sceneId: string) => Promise<ReadonlyMap<string, string>>) | undefined {
+  private interactiveExportVoices(store: WorldStore, productionId: string): BeatVoices | undefined {
     const manifest = this.opts.manifest;
     if (manifest === undefined) return undefined;
     let narrator: Promise<TableReadNarrator | null> | null = null;
     return async (sceneId) => {
       narrator ??= this.tableReadNarrator(store, productionId);
       const { plan } = await planTableRead(store, productionId, sceneId, manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers, undefined, await narrator);
-      return new Map(plan.items.flatMap((item) => (item.file === undefined ? [] : [[item.lineId, item.file] as const])));
+      return { sceneVersion: plan.sceneVersion, files: new Map(plan.items.flatMap((item) => (item.file === undefined ? [] : [[item.lineId, item.file] as const]))) };
     };
   }
 

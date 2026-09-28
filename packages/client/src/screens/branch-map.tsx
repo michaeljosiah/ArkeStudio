@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent a
 import { Link, useParams } from "react-router";
 import {
   DEFAULT_SHOT_SEC,
+  beatPictureShotId,
   deriveCut,
   layoutRouting,
   orderedShots,
@@ -90,10 +91,16 @@ function sceneLength(scene: ProductionBundle["scenes"][number], beats = false): 
   return total > 0 ? `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}` : "";
 }
 
-/** The scene's own frame: the first shot that has one, as the rows and the Flow show it. */
-function sceneFrame(production: ProductionBundle, artifacts: readonly ArtifactSidecar[], slug: string, scene: ProductionBundle["scenes"][number]) {
-  for (const shot of safeShots(scene)) {
-    const { path } = shotFramePath(production, artifacts, shot.id);
+/**
+ * The scene's own frame: the first shot that has one, as the rows and the Flow show it. A visual
+ * novel's shot shows the picture its beat shows — a kept one is the shot's before, never its own
+ * unused frame, which would put art on the map the story never shows (codex round 8).
+ */
+export function sceneFrame(production: ProductionBundle, artifacts: readonly ArtifactSidecar[], slug: string, scene: ProductionBundle["scenes"][number]) {
+  const shots = safeShots(scene);
+  const beats = productionShape(production.meta).playsAsBeats;
+  for (const shot of shots) {
+    const { path } = shotFramePath(production, artifacts, beats ? beatPictureShotId(shots, shot.id) : shot.id);
     if (path !== null) return mediaUrl(slug, path);
   }
   return null;

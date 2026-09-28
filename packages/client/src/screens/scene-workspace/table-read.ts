@@ -49,9 +49,13 @@ export function useTableReadPlan({
   // Narration is read in the app's narrator (turn 174), so a narrator changed while the scene is
   // open is a new plan: the old one names another voice's cache and price.
   const narrator = lines.some((line) => line.narration) ? JSON.stringify(state?.app.narrator ?? null) : "";
+  // So is a speaker's voice assigned, cleared or replaced — by World Chat, say — while the lines
+  // stay as they were: the plan quoted and cached the voice they had (codex round 8).
+  const speakers = [...new Set(lines.flatMap((line) => (line.speakerSheetId === undefined ? [] : [line.speakerSheetId])))].sort();
+  const speakerVoices = JSON.stringify(speakers.map((id) => [id, state?.world?.sheets.find((sheet) => sheet.id === id)?.voice ?? null]));
   useEffect(() => {
     if (lines.length > 0 && connection === "open") requestPlan();
-  }, [lines.length, scene.version, production.performanceReview.reviewHash, production.performanceReview.selectionHash, cacheJobs, narrator, connection, requestPlan]);
+  }, [lines.length, scene.version, production.performanceReview.reviewHash, production.performanceReview.selectionHash, cacheJobs, narrator, speakerVoices, connection, requestPlan]);
   const prepare = useCallback(() => {
     if (plan === null) return;
     setNotice("");

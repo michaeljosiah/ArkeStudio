@@ -17,8 +17,10 @@ export interface InteractivePlayerBeat {
   picture?: string;
   /** The line; none is the picture alone. */
   text?: string;
-  /** Who says it, as shown on the tab; none is narration. */
+  /** Who says it, as shown on the tab; none is narration, unless `dialogue` says otherwise. */
   speaker?: string;
+  /** A line of dialogue still waiting for its speaker: shown as dialogue, never as narration. */
+  dialogue?: boolean;
   /** Its voice; none reads as text. */
   audio?: string;
   /** "voice": on after the voice; "tap": when the reader moves on (the default); "hold": after `holdSec`. */

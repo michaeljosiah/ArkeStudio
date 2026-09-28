@@ -175,6 +175,7 @@ import {
   interactiveFindings,
   proposeBranchCanon,
   saveRouting,
+  type BeatVoices,
 } from "../productions/interactive.js";
 import {
   createProductionFromPlan,
@@ -373,7 +374,7 @@ export interface WorldChatActionAdapterDeps {
    * A visual novel's prepared voices for its package (turn 174), scene by scene — the same resolver
    * the branch map's export uses, so the two exports cannot ship different packages.
    */
-  readonly interactiveExportVoices?: (productionId: string) => ((sceneId: string) => Promise<ReadonlyMap<string, string>>) | undefined;
+  readonly interactiveExportVoices?: (productionId: string) => BeatVoices | undefined;
 }
 
 function completeObservation(
