@@ -470,7 +470,7 @@ export function ShotFields({
               </label>
             );
           })}
-          {!compact || cameraExpanded ? <label className="fy-shot__field" data-own={shot.framing?.grade === undefined ? undefined : "true"}>
+          <label hidden={compact && !cameraExpanded} className="fy-shot__field" data-own={shot.framing?.grade === undefined ? undefined : "true"}>
             <span>grade{shot.framing?.grade === undefined ? null : <i className="fy-shot__dot" title="overrides the scene" aria-label="overrides the scene" />}</span>
             <input
               key={shot.framing?.grade ?? ""}
@@ -484,7 +484,7 @@ export function ShotFields({
                 framingSet("grade", next === "" ? undefined : next);
               }}
             />
-          </label> : null}
+          </label>
         </div>
       </Section>
 
