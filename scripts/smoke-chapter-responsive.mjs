@@ -45,7 +45,7 @@ window.mountLayout=async(route="cast",mode="normal")=>{
 
  const sheetRefs=Object.fromEntries(world.sheets.map(s=>[s.id,{tiles:6,productions:["saltlight","ledger"],artifacts:["a1","a2"],scenes:["s1","s2"],takesByVersion:{4:2},incomingLinks:[]}]));
  window.commands=[];const bridge={connect(){},send(raw){const m=JSON.parse(raw);window.commands.push(m);
- if(m.kind==='open-chapter')setTimeout(()=>__applyEventForTest({type:'chapter.open-result',at:'2026-09-28T14:00:00Z',requestId:m.requestId,worldId:m.worldId,productionId:m.productionId,chapterId:m.chapterId,disposition:'opened',body:CHAPTER_BODY,version:4,hash:CHAPTER_HASH,versions:[3,2],voices:{version:4,hash:CHAPTER_HASH,derivedAt:'2026-09-28T14:00:00Z',passes:1,dropped:0,omitted:0,lines:[]}}),5);
+ if(m.kind==='open-chapter')setTimeout(()=>__applyEventForTest({type:'chapter.open-result',at:'2026-09-28T14:00:00Z',requestId:m.requestId,worldId:m.worldId,productionId:m.productionId,chapterId:m.chapterId,disposition:'opened',body:mode==='source'?CHAPTER_BODY+"\\n\\n<br>":CHAPTER_BODY,version:4,hash:CHAPTER_HASH,versions:[3,2],voices:{version:4,hash:CHAPTER_HASH,derivedAt:'2026-09-28T14:00:00Z',passes:1,dropped:0,omitted:0,lines:[]}}),5);
  if(m.kind==='voice-catalogue')setTimeout(()=>__applyEventForTest({type:'voice.catalogue',at:'2026-09-28T14:00:00Z',worldId:m.worldId,voices:[{provider:'kokoro',model:'kokoro-82m',voiceId:'bm_george',label:'George',attributes:['British'],local:true,canClone:false,usedBy:[]},{provider:'kokoro',model:'kokoro-82m',voiceId:'af_bella',label:'Bella',attributes:[],local:true,canClone:false,usedBy:[]}]}),5);
  if(m.kind==='open-audiobook')setTimeout(()=>__applyEventForTest({type:'audiobook.door',at:'2026-09-28T14:00:00Z',requestId:m.requestId,worldId:m.worldId,productionId:m.productionId,door:chapterDoor()}),5);
 },subscribe(){return()=>{};},coordinatorHttpBase:()=>location.origin};window.arke=bridge;__setBridgeForTest(bridge);__setStateForTest(state,{sheetRefs});__connectionStatusForTest("open");
@@ -123,6 +123,10 @@ try {
         if(width<1100){await click('[aria-label="Notes"]');await check(name+'-notes');await escape();assert.equal(await js('!!document.querySelector(".fy-rme__doc")'),true);}
         await js('(()=>{const p=document.querySelector(".fy-rme__doc p:last-child"),t=p.firstChild,r=document.createRange();r.setStart(t,t.textContent.indexOf("Not the scrape"));r.setEnd(t,t.textContent.indexOf(", because the form"));const s=getSelection();s.removeAllRanges();s.addRange(r);document.dispatchEvent(new Event("selectionchange"));})()');await js('window.settleLayout()');await check(name+'-passage');
         if(!process.argv.includes('--hover')){assert.ok(await js('!!document.querySelector(".fy-passage-ask")'));if(width>=600)assert.ok(await js('document.querySelector(".fy-passage-ask").getBoundingClientRect().top>=document.querySelector(".fy-rme__doc p:last-child").getBoundingClientRect().bottom'));}
+      }
+      if(label==='chapter' && width>=600 && width<1100){
+        await js('window.mountLayout("p/ledger/story/chapters/neap","source")');await js('(()=>{const area=document.querySelector(".fy-ch__source");area.focus();area.setSelectionRange(0,31);document.dispatchEvent(new Event("selectionchange"));})()');await js('window.settleLayout()');await check(name+'-source-passage');
+        assert.ok(await js('document.querySelector(".fy-passage-anchor").getBoundingClientRect().top < document.querySelector(".fy-ch__source").getBoundingClientRect().bottom'));
       }
       if(label==='audiobook' && width<600){await click('[data-testid="audiobook-voice"]');await check(name+'-narrator');await click('[aria-label="Narrator"] button:last-child');await check(name+'-narrator-book');await escape();}
       if(label==='blocks'){

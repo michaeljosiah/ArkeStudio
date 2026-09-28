@@ -245,7 +245,7 @@ function ProductionSwitcher({
 // ---- the production shell (frames 11a/14a left rail) -----------------------
 
 export function ProductionLayout() {
-  const { worldId, prodId, episodeId, sceneId, shotId } = useParams();
+  const { worldId, prodId, episodeId, sceneId, shotId, chapterId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const refusal = useWorldOpenRefusal(worldId);
   const location = useLocation();
@@ -352,7 +352,7 @@ export function ProductionLayout() {
   const shotChrome = sceneChrome && orderedShots(sceneChrome).find(shot => shot.id === shotId);
   const episodeDeep = phone && !location.pathname.includes("/story/episodes/") && production?.episodes.some(episode => episode.id === episodeId);
   const chapterRoute = /\/story\/chapters\/[^/]+\/?$/.test(location.pathname);
-  const chapterDeep = phone && chapterRoute && production?.chapters.some(chapter => location.pathname.endsWith(`/chapters/${encodeURIComponent(chapter.id)}`));
+  const chapterDeep = phone && chapterRoute && production?.chapters.some(chapter => chapter.id === chapterId || chapter.file === chapterId);
   const sceneDeepPhone = !refusal && (chapterDeep || episodeDeep || phone && sceneChrome !== undefined && (shotId === undefined || shotChrome !== undefined) || cutPhone && production !== undefined && production !== null && !productionShape(production.meta).playsAsBeats);
   const wantsFold = compact && chapterRoute ? false : compact && (sceneRoute || cutRoute) || (railChoice ?? (cutRoute || sceneDetailDefault));
   const drawerMode = !phone && wantsFold && (compact || coarse);

@@ -90,6 +90,9 @@
   .fy-passage-decision .dom-review { display: none; }
 }
 @media (max-width: 599px) {
+  .fy-ch__compact-actions { gap: 4px; }
+  .fy-ch__compact-actions > button:has(svg) { width: 44px; padding-inline: 0; }
+  .fy-ch__viewrow .fy-seg__item { padding-inline: 10px; }
   [data-screen="chapter-tree"], [data-screen="audiobook"] { display: block; position: relative; padding: 14px 20px calc(var(--held-bar-height, 88px) + 16px); }
   .fy-chapters-count { display: block; margin: 0 0 2px; color: var(--muted-foreground); font: 600 12px var(--font-sans); letter-spacing: 1.2px; text-transform: uppercase; }
   [data-screen="chapter-tree"] .fy-h1row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 24px 8px; margin-bottom: 12px; }
@@ -269,3 +272,8 @@
   .fy-chapter-notes-sheet .fy-ch__draws > li { width: auto; }
   .fy-chapter-notes-sheet .fy-ch__draw-name { color: var(--muted-foreground); font-weight: 400; }
 }
+@media (min-width: 600px) and (max-width: 1099px) {
+  [data-screen="chapter-tree"] { padding-right: 74px; }
+  [data-screen="chapter-tree"] > .fy-season-arke-rail { position: fixed; top: calc(52px + env(safe-area-inset-top, 0px)); right: 0; bottom: 0; height: auto; z-index: 20; }
+}
+.fy-ch__plan-field .fy-sw__title-text, .fy-ch__plan-field .fy-sw__title-input { font: var(--type-ui); min-height: 44px; width: 100%; }
