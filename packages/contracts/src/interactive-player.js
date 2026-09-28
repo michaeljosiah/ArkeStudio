@@ -89,6 +89,11 @@ export function mountInteractivePlayer(root, options) {
   // Which play the failure belongs to: a start refused after the reader has moved on belongs to a
   // beat already gone, and must not mark the next beat's voice as lost.
   let voiceToken = 0;
+  // A voice the browser would not start without a gesture — the preview mounts after its voices
+  // are gathered, when the press that opened it may no longer count — waits for the reader's next
+  // tap rather than being read as text for good (codex round 12).
+  let voiceBlocked = false;
+  let voiceRetried = false;
   // Whether the running hold is Auto's, which turning Auto off takes back; an authored hold, or the
   // breath after a voice on an after-the-voice beat, stays.
   let holdByAuto = false;
@@ -427,13 +432,13 @@ export function mountInteractivePlayer(root, options) {
     else el.box.removeAttribute("data-typed");
     voice.pause && voice.pause();
     voiceFailed = false;
+    voiceBlocked = false;
+    voiceRetried = false;
     const token = ++voiceToken;
     if (b.audio && !quiet) {
       voiceDone = false;
       voice.setAttribute("src", b.audio);
-      const p = voice.play && voice.play();
-      // A voice the browser will not start (no gesture yet, a missing file) is read as text.
-      if (p && p.catch) p.catch(() => { if (token === voiceToken) voiceLost(); });
+      startVoice(token);
     } else {
       voiceDone = true;
       voice.removeAttribute("src");
@@ -484,6 +489,20 @@ export function mountInteractivePlayer(root, options) {
     voiceFailed = true;
     voiceEnded();
   }
+  /**
+   * Start this beat's voice. One the browser refuses for want of a gesture waits for the next tap;
+   * one that cannot play at all (a missing file) is read as text.
+   */
+  function startVoice(token) {
+    const p = voice.play && voice.play();
+    if (p && p.catch) {
+      p.catch((error) => {
+        if (token !== voiceToken) return;
+        if (error && error.name === "NotAllowedError" && !voiceRetried) voiceBlocked = true;
+        else voiceLost();
+      });
+    }
+  }
 
   /** Auto on moves beats on by themselves; off takes back only the holds Auto started. */
   function toggleAuto() {
@@ -493,8 +512,15 @@ export function mountInteractivePlayer(root, options) {
     else if (!auto && holdByAuto) stopHold();
   }
 
-  /** A tap, a key: the rest of the line if it is still typing on, else the next beat. */
+  /** A tap, a key: the voice the browser held back, else the rest of the line, else the next beat. */
   function advanceBeat() {
+    if (voiceBlocked && !voiceDone) {
+      // Inside the gesture now, once: a second refusal is a voice that will not play, read as text.
+      voiceBlocked = false;
+      voiceRetried = true;
+      startVoice(voiceToken);
+      return;
+    }
     if (!typed) {
       typed = true;
       el.box.setAttribute("data-typed", "");

@@ -543,6 +543,22 @@ describe("frame-run quote authorization", () => {
     assert.equal(sent.some((message) => message.kind === "timeline-assemble"), false, "no film cut is assembled");
   });
 
+  it("a visual novel's run packs the shots it quotes, never a kept picture (codex round 12)", async () => {
+    const sent: ClientMessage[] = [];
+    const state = stateWith();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    production.meta = { ...production.meta, medium: "video", kind: "visual-novel" };
+    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")! as unknown as { shots: Array<{ beat?: unknown; durationSec?: number }> };
+    scene.shots[1]!.beat = { samePicture: true };
+    // Two shots this long are two boards under the 15s clip limit; the one the run makes is one.
+    for (const shot of scene.shots) shot.durationSec = 10;
+    const item = await mount(state, sent);
+    await click(named(item, "Generate frames"));
+    const dialog = one(item, ".fy-swgen")!;
+    assert.match(dialog.textContent ?? "", /Packing.*1 shot → 1 board/, "sh_13 keeps sh_12's picture and is no board member");
+    assert.doesNotMatch(dialog.textContent ?? "", /shot undefined/);
+  });
+
   it("quotes and starts only the row whose Generate frame control was clicked", async () => {
     const sent: ClientMessage[] = [];
     const item = await mount(stateWith(), sent);

@@ -887,13 +887,17 @@ async function exportBeats(
   };
   /** Each picture the beats show, by the shot it is resolved from, to check again under the gate. */
   const pictures = new Map<string, string | null>();
-  // Whose voices the package speaks in, as they stand before anything is awaited: a sheet's voice
-  // changed between one scene's plan and the next moves no scene version, and would have one
-  // character change voice mid-story (codex round 10).
+  // Who speaks in the package, as they stand before anything is awaited: a voice recast between
+  // one scene's plan and the next would have one character change voice mid-story (codex round
+  // 10), and a rename would ship the old name on their tab (codex round 12). Neither moves a
+  // scene version, so the speakers' names and voices are read again under the gate.
   const speakers = [...new Set(production.scenes.filter((scene) => !excluded.has(scene.id)).flatMap((scene) => {
     try { return sceneBeats(scene).flatMap((beat) => (beat.speaker === undefined ? [] : [beat.speaker])); } catch { return []; }
   }))].sort();
-  const speakerVoices = () => JSON.stringify(speakers.map((id) => [id, store.getBundle().sheets.find((sheet) => sheet.id === id)?.voice ?? null]));
+  const speakerVoices = () => JSON.stringify(speakers.map((id) => {
+    const sheet = store.getBundle().sheets.find((candidate) => candidate.id === id);
+    return [id, sheet?.name ?? null, sheet?.voice ?? null];
+  }));
   const voicesBefore = speakerVoices();
   // The narrator too: it is no sheet's and moves no scene, and the plans read it once for the
   // whole package (codex round 11). A failure to read it is a narrator nobody can vouch for.
@@ -974,7 +978,7 @@ async function exportBeats(
           ...(reshaped && moved.length === 0 ? ["a scene was added or removed while the package was made — export again"] : []),
           ...(reframed && moved.length === 0 ? ["a picture changed while the package was made — export again"] : []),
           ...(rerouted ? ["the branch map changed while the package was made — export again"] : []),
-          ...(revoiced ? ["a voice changed while the package was made — export again"] : []),
+          ...(revoiced ? ["a voice or a speaker's name changed while the package was made — export again"] : []),
         ],
       };
     }

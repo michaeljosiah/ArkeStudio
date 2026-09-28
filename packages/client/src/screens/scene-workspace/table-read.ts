@@ -53,12 +53,20 @@ export function useTableReadPlan({
   // stay as they were: the plan quoted and cached the voice they had (codex round 8).
   const speakers = [...new Set(lines.flatMap((line) => (line.speakerSheetId === undefined ? [] : [line.speakerSheetId])))].sort();
   const speakerVoices = JSON.stringify(speakers.map((id) => [id, state?.world?.sheets.find((sheet) => sheet.id === id)?.voice ?? null]));
+  // And so is a voice provider made ready — validated, repaired, its speech probe answering — or
+  // a model turned on or off: a line the plan called unavailable may be preparable now (codex
+  // round 12). Only what the plan reads of a provider is watched, not when it was last checked.
+  const readiness = JSON.stringify([
+    (state?.app.providers ?? []).map((provider) => [provider.id, provider.configured, provider.validation, provider.fault,
+      provider.probes.some((probe) => probe.capability === "voice-tts" && probe.available)]),
+    state?.app.models.disabled ?? [],
+  ]);
   useEffect(() => {
     // The last line gone takes its plan with it: the plan names lines no longer there, and its
     // token would prepare them (codex round 10).
     if (lines.length === 0) { planRequest.current = null; setPlan(null); return; }
     if (connection === "open") requestPlan();
-  }, [lines.length, scene.version, production.performanceReview.reviewHash, production.performanceReview.selectionHash, cacheJobs, narrator, speakerVoices, connection, requestPlan]);
+  }, [lines.length, scene.version, production.performanceReview.reviewHash, production.performanceReview.selectionHash, cacheJobs, narrator, speakerVoices, readiness, connection, requestPlan]);
   const prepare = useCallback(() => {
     if (plan === null) return;
     setNotice("");

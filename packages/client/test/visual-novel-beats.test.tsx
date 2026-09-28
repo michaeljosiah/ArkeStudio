@@ -206,6 +206,19 @@ describe("a visual novel's scene reads as beats (turn 174)", () => {
     assert.equal(quote.shotId, "sh_12");
   });
 
+  it("asks the plan again when a voice provider is made ready, since a line it could not voice may be voiceable now (codex round 12)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = visualNovel();
+    state.app.providers = [{ id: "elevenlabs", configured: true, validation: "unvalidated", probes: [], fault: null }] as never;
+    await mountState(state, SCENE_PATH);
+    const before = sent.filter((message) => message.kind === "plan-table-read").length;
+    const next = structuredClone(state) as ClientState;
+    next.app.providers = [{ id: "elevenlabs", configured: true, validation: "valid", probes: [{ capability: "voice-tts", available: true }], fault: null }] as never;
+    await act(async () => { __setStateForTest(next); });
+    assert.equal(sent.filter((message) => message.kind === "plan-table-read").length, before + 1);
+  });
+
   it("Preview reads the scene in the beat player over the window, once its voices are in, and closes back to the beats", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));

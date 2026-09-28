@@ -204,6 +204,9 @@ function GenerateFramesDialogOpen({
     sheets: world.sheets,
     capSec: cap.seconds,
     ...(cap.panels !== undefined ? { panelCap: cap.panels } : {}),
+    // The preview packs the shots it shows and quotes, as the coordinator packs them: a kept
+    // picture is no board member (codex round 12).
+    ...(playsAsBeats && shotId === undefined ? { shots } : {}),
   });
   const [quote, setQuote] = useState<FrameRunQuote | null>(null);
   const [quotePending, setQuotePending] = useState(false);

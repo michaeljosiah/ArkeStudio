@@ -544,6 +544,36 @@ describe("the player reading beats (turn 174)", () => {
     assert.equal(p.q(".aip-hold")!.style.animation, "none", "off again, it waits for the reader");
   });
 
+  it("a voice the browser holds back for a gesture plays on the next tap, rather than being read as text (codex round 12)", async () => {
+    const audioProto = Object.getPrototypeOf(dom.document.createElement("audio")) as { play?: () => Promise<void> };
+    const had = Object.prototype.hasOwnProperty.call(audioProto, "play");
+    const before = audioProto.play;
+    let plays = 0;
+    audioProto.play = () => {
+      plays += 1;
+      // The first start comes with no gesture behind it; the tap's is allowed.
+      return plays === 1 ? Promise.reject(Object.assign(new Error("no gesture"), { name: "NotAllowedError" })) : Promise.resolve();
+    };
+    try {
+      const p = mount({
+        ...NOVEL,
+        autoplay: true,
+        scenes: { ...NOVEL.scenes, sc_quarter: { title: "Q", beats: [
+          { picture: "media/a.png", text: "One.", audio: "media/one.mp3", advance: "voice" as const },
+          { picture: "media/a.png", text: "Two." },
+        ] } },
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      p.key("ArrowRight");
+      assert.equal(plays, 2, "the tap starts the voice");
+      assert.equal(p.text(".aip-line"), "One.", "and does not move on past it");
+      p.q("audio")!.dispatchEvent(new dom.Event("ended") as unknown as Event);
+      assert.match(p.q(".aip-hold")!.style.animation, /aip-hold 1\.2s/, "heard, so it moves on after its breath");
+    } finally {
+      if (had) audioProto.play = before; else delete audioProto.play;
+    }
+  });
+
   it("a start refused after the reader moved on does not mark the next beat's voice lost", async () => {
     const audioProto = Object.getPrototypeOf(dom.document.createElement("audio")) as { play?: () => Promise<void> };
     const had = Object.prototype.hasOwnProperty.call(audioProto, "play");
